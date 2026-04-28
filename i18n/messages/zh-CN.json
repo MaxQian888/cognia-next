@@ -1,0 +1,23 @@
+{
+  "page": {
+    "title": "React 快速启动模板",
+    "subtitle": "Next.js 16 + Tauri 2.9 + Tailwind v4 + shadcn/ui",
+    "instructionEdit": "编辑开始",
+    "instructionSave": "保存即可立即看到变化。",
+    "deployNow": "立即部署",
+    "readDocs": "阅读文档"
+  },
+  "themeToggle": {
+    "label": "切换主题",
+    "switchToLight": "切换到浅色模式",
+    "switchToDark": "切换到深色模式"
+  },
+  "localeSwitcher": {
+    "label": "切换语言",
+    "en": "EN",
+    "zh-CN": "中"
+  },
+  "tauriDemo": {
+    "buttonLabel": "调用 Rust greet()"
+  }
+}

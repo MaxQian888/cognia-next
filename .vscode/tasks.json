@@ -1,0 +1,187 @@
+{
+  // See https://go.microsoft.com/fwlink/?LinkId=733558
+  // for the documentation about the tasks.json format
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ui:dev",
+      "type": "shell",
+      "isBackground": true,
+      "command": "pnpm",
+      "args": ["dev"],
+      "problemMatcher": {
+        "pattern": {
+          "regexp": ".",
+          "file": 1,
+          "location": 2,
+          "message": 3
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "(Local:|ready started server on)"
+        }
+      }
+    },
+    {
+      "label": "ui:dev-if-needed",
+      "type": "shell",
+      "isBackground": true,
+      // Default command won't be used due to per-OS overrides below
+      "command": "pnpm",
+      "args": ["dev"],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "if (Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue) { exit 0 } else { New-Item -ItemType File -Path \"${workspaceFolder}\\.vscode\\.ui-dev.lock\" -Force | Out-Null; pnpm dev }"
+        ]
+      },
+      "linux": {
+        "command": "bash",
+        "args": [
+          "-lc",
+          "lsof -ti :3000 >/dev/null 2>&1 && exit 0 || { mkdir -p \"${workspaceFolder}/.vscode\"; touch \"${workspaceFolder}/.vscode/.ui-dev.lock\"; pnpm dev; }"
+        ]
+      },
+      "osx": {
+        "command": "bash",
+        "args": [
+          "-lc",
+          "lsof -ti :3000 >/dev/null 2>&1 && exit 0 || { mkdir -p \"${workspaceFolder}/.vscode\"; touch \"${workspaceFolder}/.vscode/.ui-dev.lock\"; pnpm dev; }"
+        ]
+      },
+      "problemMatcher": {
+        "pattern": {
+          "regexp": ".",
+          "file": 1,
+          "location": 2,
+          "message": 3
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "(Local:|ready started server on)"
+        }
+      }
+    },
+    {
+      "label": "ui:build",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["build"]
+    },
+    {
+      "label": "typecheck",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["typecheck"],
+      "problemMatcher": "$tsc",
+      "group": "build",
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "lint",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["lint"],
+      "problemMatcher": "$eslint-stylish",
+      "group": "build",
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "lint:fix",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["lint:fix"],
+      "problemMatcher": "$eslint-stylish",
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "format:check",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["format:check"],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "test",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["test"],
+      "group": "test",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "test:watch",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["test:watch"],
+      "isBackground": true,
+      "group": "test",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "ui:stop",
+      "type": "shell",
+      "command": "",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "if (Test-Path \"${workspaceFolder}\\.vscode\\.ui-dev.lock\") { $pid = (Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess); if ($pid) { Stop-Process -Id $pid -Force }; Remove-Item -Force \"${workspaceFolder}\\.vscode\\.ui-dev.lock\" }"
+        ]
+      },
+      "linux": {
+        "command": "bash",
+        "args": [
+          "-lc",
+          "if [ -f \"${workspaceFolder}/.vscode/.ui-dev.lock\" ]; then lsof -ti :3000 | xargs -r kill -9 2>/dev/null; rm -f \"${workspaceFolder}/.vscode/.ui-dev.lock\"; fi"
+        ]
+      },
+      "osx": {
+        "command": "bash",
+        "args": [
+          "-lc",
+          "if [ -f \"${workspaceFolder}/.vscode/.ui-dev.lock\" ]; then lsof -ti :3000 | xargs kill -9 2>/dev/null || true; rm -f \"${workspaceFolder}/.vscode/.ui-dev.lock\"; fi"
+        ]
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "echo": false,
+        "reveal": "never",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": false
+      }
+    }
+  ]
+}

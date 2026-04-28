@@ -1,0 +1,27 @@
+[package]
+name = "react-quick-starter"
+version = "0.1.0"
+description = "React + Tauri 16/2.9 quick-starter desktop application"
+authors = ["AstroAir <astro_air@126.com>"]
+license = "MIT"
+repository = "https://github.com/AstroAir/react-quick-starter"
+edition = "2021"
+rust-version = "1.77.2"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.0", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.9.0", features = [] }
+tauri-plugin-log = "2"
+thiserror = "2"
+tauri-plugin-updater = "2"

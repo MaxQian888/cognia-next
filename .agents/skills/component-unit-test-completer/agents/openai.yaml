@@ -1,0 +1,14 @@
+interface:
+  display_name: "Component Test Completer"
+  short_description: "Enforce 1:1 component tests and 80%+ coverage"
+  default_prompt: "Use $component-unit-test-completer to fill missing component unit tests, enforce one-to-one mapping, and verify coverage is at least 80%."
+chains:
+  upstream:
+    - feature-optimization-planner
+    - guarded-component-i18n-fix
+  downstream:
+    - e2e-test-completer
+    - build-project-fixer
+  common_sequences:
+    - [guarded-component-i18n-fix, component-unit-test-completer, build-project-fixer]
+    - [feature-optimization-planner, component-unit-test-completer, e2e-test-completer]

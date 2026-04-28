@@ -1,0 +1,91 @@
+# Dependabot configuration file
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+
+version: 2
+updates:
+  # JavaScript/TypeScript dependencies (npm/pnpm)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "npm"
+    groups:
+      # Group minor and patch updates for production dependencies
+      production-dependencies:
+        patterns:
+          - "next"
+          - "react"
+          - "react-dom"
+          - "zustand"
+          - "lucide-react"
+          - "@radix-ui/*"
+          - "class-variance-authority"
+          - "clsx"
+          - "tailwind-merge"
+        update-types:
+          - "minor"
+          - "patch"
+      # Group all dev dependencies updates
+      dev-dependencies:
+        patterns:
+          - "@types/*"
+          - "eslint*"
+          - "typescript"
+          - "tailwindcss"
+          - "@tailwindcss/*"
+          - "jest*"
+          - "@testing-library/*"
+          - "ts-jest"
+          - "ts-node"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Rust dependencies (Cargo) for Tauri
+  - package-ecosystem: "cargo"
+    directory: "/src-tauri"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "rust"
+    groups:
+      tauri-dependencies:
+        patterns:
+          - "tauri*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci(deps)"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"

@@ -1,0 +1,23 @@
+{
+  "page": {
+    "title": "React Quick Starter",
+    "subtitle": "Next.js 16 + Tauri 2.9 + Tailwind v4 + shadcn/ui",
+    "instructionEdit": "Get started by editing",
+    "instructionSave": "Save and see your changes instantly.",
+    "deployNow": "Deploy now",
+    "readDocs": "Read our docs"
+  },
+  "themeToggle": {
+    "label": "Toggle theme",
+    "switchToLight": "Switch to light mode",
+    "switchToDark": "Switch to dark mode"
+  },
+  "localeSwitcher": {
+    "label": "Switch language",
+    "en": "EN",
+    "zh-CN": "中"
+  },
+  "tauriDemo": {
+    "buttonLabel": "Call Rust greet()"
+  }
+}

@@ -1,0 +1,74 @@
+name: Release
+
+# ============================================================================
+# GitHub Release Creation
+# ============================================================================
+# Creates a GitHub release when a version tag is pushed.
+# Triggers on tags matching v* (e.g., v1.0.0, v2.1.0-beta).
+#
+# This workflow:
+# 1. Runs quality checks and tests
+# 2. Builds Tauri desktop applications for all platforms
+# 3. Creates a draft GitHub release with all artifacts
+# ============================================================================
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Run quality checks first
+  quality:
+    name: Quality Check
+    uses: ./.github/workflows/quality.yml
+
+  # Run tests
+  test:
+    name: Test Suite
+    uses: ./.github/workflows/test.yml
+
+  # Build Tauri apps for all platforms
+  build-tauri:
+    name: Build Tauri
+    needs: [quality, test]
+    uses: ./.github/workflows/build-tauri.yml
+
+  # Create the GitHub release
+  create-release:
+    name: Create Release
+    needs: [quality, test, build-tauri]
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts/
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb
+            artifacts/**/*.msi
+            artifacts/**/*.exe
+            artifacts/**/*.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

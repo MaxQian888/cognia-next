@@ -1,0 +1,23 @@
+{
+  "skill_name": "component-unit-test-completer",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "My React project has low test coverage. Can you help me add missing component tests?",
+      "expected_output": "Runs component_test_map.py to discover gaps, scaffolds missing tests, fills behavior assertions, runs coverage, and enforces the 80% threshold.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I need to set up a coverage gate so my CI fails if component coverage drops below 80%.",
+      "expected_output": "Runs check_coverage_threshold.py with --threshold 80, identifies branch/function coverage gaps, and advises on CI integration.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Some of my components have multiple test files. Can you clean this up and merge them?",
+      "expected_output": "Discovers duplicate test mappings, merges assertions into one canonical file per component, deletes extra entry points, and verifies no behavior is lost.",
+      "files": []
+    }
+  ]
+}

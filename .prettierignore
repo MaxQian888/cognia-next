@@ -1,0 +1,11 @@
+node_modules
+.next
+out
+build
+coverage
+dist
+src-tauri/target
+src-tauri/gen
+pnpm-lock.yaml
+*.min.js
+*.min.css

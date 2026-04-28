@@ -1,0 +1,44 @@
+{
+  "skill_name": "configuring-commit-checks",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "This is a fresh Node.js project. It has a package.json with eslint and prettier set up, but no git hooks at all. I want something to run lint and format on staged files before each commit. Set it up for me.",
+      "expected_output": "Adds husky + lint-staged to the project, configures a pre-commit hook that runs eslint --fix and prettier --write on staged files, and verifies the setup works.",
+      "files": [],
+      "expectations": [
+        "Detects that no hook tool exists yet",
+        "Chooses husky + lint-staged as the default for a Node-only repo",
+        "Reuses existing eslint and prettier instead of inventing new commands",
+        "Runs the hook install command and verifies it passes",
+        "Does not add pre-commit or lefthook alongside husky"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I have a Python project that already has a .pre-commit-config.yaml with ruff hooks, but it's missing a mypy typecheck hook. Can you add mypy to the pre-commit config while keeping everything else the same?",
+      "expected_output": "Extends the existing .pre-commit-config.yaml by adding a mypy hook, preserves all existing ruff hooks, and verifies the updated config passes.",
+      "files": [],
+      "expectations": [
+        "Detects that pre-commit is already the primary tool",
+        "Preserves all existing hooks in .pre-commit-config.yaml",
+        "Adds mypy as a new hook rather than replacing anything",
+        "Does not add husky, lint-staged, or lefthook",
+        "Runs pre-commit run --all-files and reports the result"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "I have a mixed Node + Python project. There's already a .husky directory with a pre-commit hook, and package.json has some lint-staged config. But the hook doesn't run any Python checks. Can you add Python linting (ruff) and typechecking (mypy) to the commit flow without breaking the existing Node setup?",
+      "expected_output": "Keeps husky and lint-staged for Node checks, and wires Python checks (ruff, mypy) into the same pre-commit hook or through pre-commit as an orchestrator, without removing or replacing husky.",
+      "files": [],
+      "expectations": [
+        "Detects that husky is the existing primary tool",
+        "Preserves the existing .husky/ setup and lint-staged config",
+        "Adds Python checks in a way compatible with the existing Node flow",
+        "Does not replace husky with pre-commit or lefthook",
+        "Runs the hook tool's validation and both Node and Python checks"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Next.js: debug server-side",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "pnpm run dev"
+    },
+    {
+      "name": "Next.js: debug client-side (Chrome)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:3000",
+      "webRoot": "${workspaceFolder}",
+      "preLaunchTask": "ui:dev-if-needed",
+      "postDebugTask": "ui:stop",
+      "cascadeTerminateToConfigurations": ["ui:dev"]
+    },
+    {
+      "name": "Next.js: debug client-side (Edge)",
+      "type": "msedge",
+      "request": "launch",
+      "url": "http://localhost:3000",
+      "webRoot": "${workspaceFolder}",
+      "preLaunchTask": "ui:dev-if-needed",
+      "postDebugTask": "ui:stop",
+      "cascadeTerminateToConfigurations": ["ui:dev"]
+    },
+    {
+      "name": "Next.js: debug full stack",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/node_modules/next/dist/bin/next",
+      "runtimeArgs": ["--inspect"],
+      "skipFiles": ["<node_internals>/**"],
+      "serverReadyAction": {
+        "action": "debugWithEdge",
+        "killOnServerStop": true,
+        "pattern": "- Local:.+(https?://.+)",
+        "uriFormat": "%s",
+        "webRoot": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Jest: debug current file",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/node_modules/jest/bin/jest.js",
+      "args": ["--runInBand", "--no-coverage", "${fileBasename}"],
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Jest: debug all tests",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/node_modules/jest/bin/jest.js",
+      "args": ["--runInBand", "--no-coverage"],
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Tauri Development Debug",
+      "cargo": {
+        "args": ["build", "--manifest-path=./src-tauri/Cargo.toml", "--no-default-features"]
+      },
+      // task for the `beforeDevCommand` if used, must be configured in `.vscode/tasks.json`
+      "preLaunchTask": "ui:dev-if-needed",
+      "postDebugTask": "ui:stop"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Tauri Production Debug",
+      "cargo": {
+        "args": ["build", "--release", "--manifest-path=./src-tauri/Cargo.toml"]
+      },
+      // task for the `beforeBuildCommand` if used, must be configured in `.vscode/tasks.json`
+      "preLaunchTask": "ui:build"
+    }
+  ]
+}

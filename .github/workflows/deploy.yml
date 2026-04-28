@@ -1,0 +1,155 @@
+name: Deploy
+
+# ============================================================================
+# Deployment Workflows (DISABLED BY DEFAULT)
+# ============================================================================
+# This workflow handles preview and production deployments.
+#
+# ⚠️ DEPLOYMENTS ARE DISABLED BY DEFAULT ⚠️
+#
+# To enable Vercel deployments:
+# 1. Add the required secrets to your GitHub repository:
+#    - VERCEL_TOKEN: Your Vercel deployment token
+#    - VERCEL_ORG_ID: Your Vercel organization ID
+#    - VERCEL_PROJECT_ID: Your Vercel project ID
+# 2. Set DEPLOY_ENABLED to true in the workflow
+# 3. See CI_CD.md for detailed setup instructions
+#
+# For production deployments, also configure:
+# - GitHub Environment protection rules (Settings > Environments)
+# - Required reviewers for manual approval
+# - Deployment branch restrictions
+# ============================================================================
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Deployment environment (preview or production)"
+        required: true
+        type: string
+        default: "preview"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Deployment environment"
+        required: true
+        type: choice
+        options:
+          - preview
+          - production
+        default: "preview"
+
+env:
+  # Set to true to enable deployments (requires Vercel secrets)
+  DEPLOY_ENABLED: false
+
+jobs:
+  # Preview deployment for pull requests
+  deploy-preview:
+    name: Deploy Preview
+    runs-on: ubuntu-latest
+    if: ${{ inputs.environment == 'preview' }}
+
+    steps:
+      - name: Check deployment status
+        run: |
+          if [ "${{ env.DEPLOY_ENABLED }}" != "true" ]; then
+            echo "⚠️ Deployment is disabled. Set DEPLOY_ENABLED to true and configure Vercel secrets."
+            echo "See CI_CD.md for setup instructions."
+            exit 0
+          fi
+
+      - name: Checkout code
+        if: ${{ env.DEPLOY_ENABLED == 'true' }}
+        uses: actions/checkout@v6
+
+      - name: Download build artifacts
+        if: ${{ env.DEPLOY_ENABLED == 'true' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: nextjs-build
+          path: out/
+
+      # Uncomment the following steps when Vercel secrets are configured:
+      #
+      # - name: Deploy to Vercel Preview
+      #   uses: amondnet/vercel-action@v25
+      #   env:
+      #     VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      #     VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      #     VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      #   if: ${{ env.VERCEL_TOKEN != '' && env.VERCEL_ORG_ID != '' && env.VERCEL_PROJECT_ID != '' }}
+      #   with:
+      #     vercel-token: ${{ env.VERCEL_TOKEN }}
+      #     vercel-org-id: ${{ env.VERCEL_ORG_ID }}
+      #     vercel-project-id: ${{ env.VERCEL_PROJECT_ID }}
+      #     working-directory: ./
+      #   continue-on-error: true
+      #
+      # - name: Comment Preview URL
+      #   uses: actions/github-script@v7
+      #   with:
+      #     script: |
+      #       github.rest.issues.createComment({
+      #         issue_number: context.issue.number,
+      #         owner: context.repo.owner,
+      #         repo: context.repo.repo,
+      #         body: '🚀 Preview deployment is ready! Check the deployment status above.'
+      #       })
+      #   continue-on-error: true
+
+  # Production deployment (requires manual approval)
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    if: ${{ inputs.environment == 'production' }}
+
+    # Requires manual approval via GitHub Environments
+    # environment:
+    #   name: production
+    #   url: https://your-app-url.com
+
+    steps:
+      - name: Check deployment status
+        run: |
+          if [ "${{ env.DEPLOY_ENABLED }}" != "true" ]; then
+            echo "⚠️ Production deployment is disabled."
+            echo "To enable:"
+            echo "1. Set DEPLOY_ENABLED to true"
+            echo "2. Configure Vercel secrets"
+            echo "3. Set up GitHub Environment protection rules"
+            echo "See CI_CD.md for detailed instructions."
+            exit 0
+          fi
+
+      - name: Checkout code
+        if: ${{ env.DEPLOY_ENABLED == 'true' }}
+        uses: actions/checkout@v6
+
+      - name: Download build artifacts
+        if: ${{ env.DEPLOY_ENABLED == 'true' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: nextjs-build
+          path: out/
+
+      # Uncomment the following steps when Vercel secrets are configured:
+      #
+      # - name: Deploy to Vercel Production
+      #   uses: amondnet/vercel-action@v25
+      #   with:
+      #     vercel-token: ${{ secrets.VERCEL_TOKEN }}
+      #     vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+      #     vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+      #     vercel-args: '--prod'
+      #     working-directory: ./
+      #
+      # - name: Create deployment summary
+      #   run: |
+      #     echo "## 🚀 Production Deployment" >> $GITHUB_STEP_SUMMARY
+      #     echo "" >> $GITHUB_STEP_SUMMARY
+      #     echo "✅ Successfully deployed to production" >> $GITHUB_STEP_SUMMARY
+      #     echo "📅 Deployed at: $(date)" >> $GITHUB_STEP_SUMMARY
+      #     echo "🔗 Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+      #     echo "🌐 URL: https://your-app-url.com" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,49 @@
+name: CI/CD Pipeline
+
+# ============================================================================
+# CI/CD Pipeline Orchestrator
+# ============================================================================
+# This is the main CI/CD pipeline that orchestrates smaller, modular workflows.
+# Each workflow can also be run independently for better maintainability.
+#
+# Workflow Structure:
+# ├── quality.yml     - Code quality & security checks (ESLint, TypeScript, audit)
+# ├── test.yml        - Test suite with coverage & Next.js build
+# ├── build-tauri.yml - Tauri desktop app builds (Windows, macOS, Linux)
+# ├── deploy.yml      - Deployment workflows (optional, disabled by default)
+# └── release.yml     - GitHub release creation (triggered by version tags)
+#
+# This workflow works OUT-OF-THE-BOX without requiring any secrets.
+# See CI_CD.md for detailed setup instructions for optional features.
+# ============================================================================
+
+on:
+  push:
+    branches:
+      - master
+      - develop
+  pull_request:
+    branches:
+      - master
+      - develop
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Step 1: Code Quality Checks
+  quality:
+    name: Quality
+    uses: ./.github/workflows/quality.yml
+
+  # Step 2: Test Suite & Build
+  test:
+    name: Test
+    uses: ./.github/workflows/test.yml
+
+  # Step 3: Build Tauri Desktop Apps (after quality & test pass)
+  build-tauri:
+    name: Build Tauri
+    needs: [quality, test]
+    uses: ./.github/workflows/build-tauri.yml

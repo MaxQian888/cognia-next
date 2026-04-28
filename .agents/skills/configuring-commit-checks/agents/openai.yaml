@@ -1,0 +1,10 @@
+interface:
+  display_name: "Commit Checks Configurator"
+  short_description: "Inspect, preserve, or add the right commit-hook checks"
+  default_prompt: "Use $configuring-commit-checks to inspect this repository's existing commit-check tooling, keep compatible configuration when present, and add the most suitable husky or pre-commit setup only when the project has no commit checks yet."
+chains:
+  upstream: []
+  downstream:
+    - commit-quality-fixer
+  common_sequences:
+    - [configuring-commit-checks, commit-quality-fixer]

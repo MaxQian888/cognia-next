@@ -1,0 +1,68 @@
+# EditorConfig helps maintain consistent coding styles across editors
+# https://editorconfig.org
+
+root = true
+
+# Default settings for all files
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# JavaScript, TypeScript, JSX, TSX
+[*.{js,jsx,ts,tsx,mjs,cjs}]
+indent_size = 2
+
+# JSON files
+[*.json]
+indent_size = 2
+
+# YAML files
+[*.{yml,yaml}]
+indent_size = 2
+
+# Markdown files
+[*.md]
+trim_trailing_whitespace = false
+max_line_length = off
+
+# CSS, SCSS, Tailwind
+[*.{css,scss,sass}]
+indent_size = 2
+
+# HTML files
+[*.html]
+indent_size = 2
+
+# Rust files (Tauri)
+[*.rs]
+indent_size = 4
+
+# TOML files (Cargo.toml)
+[*.toml]
+indent_size = 2
+
+# Shell scripts
+[*.sh]
+indent_size = 2
+end_of_line = lf
+
+# Windows batch files
+[*.{cmd,bat}]
+end_of_line = crlf
+
+# Makefiles require tabs
+[Makefile]
+indent_style = tab
+
+# Git files
+[.git*]
+indent_size = 2
+
+# Lock files (don't modify)
+[{pnpm-lock.yaml,package-lock.json,yarn.lock,Cargo.lock}]
+indent_size = 2
+insert_final_newline = false

@@ -1,0 +1,92 @@
+{
+  "name": "react-quick-starter",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "pnpm@10.30.3",
+  "scripts": {
+    "prepare": "husky",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "docs:dev": "pnpm -F docs dev",
+    "docs:build": "pnpm -F docs build",
+    "docs:start": "pnpm -F docs start"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.4.1",
+    "@hookform/resolvers": "^5.2.2",
+    "@radix-ui/react-slot": "^1.2.4",
+    "@tauri-apps/api": "^2.10.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
+    "date-fns": "^4.1.0",
+    "embla-carousel-react": "^8.6.0",
+    "input-otp": "^1.4.2",
+    "lucide-react": "^1.11.0",
+    "next": "^16.2.4",
+    "next-intl": "^3.26.5",
+    "next-themes": "^0.4.6",
+    "radix-ui": "^1.4.3",
+    "react": "^19.2.5",
+    "react-day-picker": "^9.14.0",
+    "react-dom": "^19.2.5",
+    "react-hook-form": "^7.74.0",
+    "react-resizable-panels": "^4.10.0",
+    "recharts": "3.8.0",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "^3.5.0",
+    "vaul": "^1.1.2",
+    "zod": "^4.3.6",
+    "zustand": "^5.0.12"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,css,md,mdx}": [
+      "prettier --write"
+    ]
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.8.1",
+    "@commitlint/config-conventional": "^19.8.1",
+    "@tailwindcss/postcss": "^4.2.4",
+    "@tauri-apps/cli": "^2.10.1",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^22.19.17",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "16.0.0",
+    "eslint-config-prettier": "^10.1.8",
+    "husky": "^9.1.7",
+    "jest": "^30.3.0",
+    "jest-environment-jsdom": "^30.3.0",
+    "jest-junit": "^16.0.0",
+    "lint-staged": "^15.5.2",
+    "prettier": "^3.8.3",
+    "shadcn": "^4.5.0",
+    "tailwindcss": "^4.2.4",
+    "ts-jest": "^29.4.9",
+    "ts-node": "^10.9.2",
+    "tw-animate-css": "^1.4.0",
+    "typescript": "^5.9.3"
+  }
+}
