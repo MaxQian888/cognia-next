@@ -1,0 +1,113 @@
+"use client"
+
+import { Button } from "@/components/ui/button"
+import { isTauri } from "@/lib/tauri"
+import { cn } from "@/lib/utils"
+import { MaximizeIcon, MinimizeIcon, MinusIcon, XIcon } from "lucide-react"
+import { useEffect, useState } from "react"
+
+/**
+ * Custom title bar shown when `decorations: false` in tauri.conf.json.
+ *
+ * On macOS we leave 80px on the left clear for the traffic lights (the
+ * "Overlay" titleBarStyle in tauri.conf positions them inside our window).
+ * Linux/Windows render their own min/max/close buttons here.
+ */
+export function TitleBar() {
+  const [mounted, setMounted] = useState(false)
+  const [maximized, setMaximized] = useState(false)
+  const [platform, setPlatform] = useState<string>("")
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true)
+    if (!isTauri()) return
+
+    let unlisten: (() => void) | undefined
+    void (async () => {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window")
+        const win = getCurrentWindow()
+        setMaximized(await win.isMaximized())
+        // navigator.platform is deprecated but still populated by Webview2 /
+        // WebKit and is good enough for titlebar-button decisions.
+        if (typeof navigator !== "undefined") {
+          setPlatform(navigator.platform.toLowerCase())
+        }
+        unlisten = await win.onResized(async () => {
+          setMaximized(await win.isMaximized())
+        })
+      } catch (err) {
+        console.warn("title-bar window setup failed", err)
+      }
+    })()
+    return () => {
+      unlisten?.()
+    }
+  }, [])
+
+  if (!mounted || !isTauri()) return null
+
+  const isMac = platform.includes("mac")
+
+  const handleMin = async () => {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window")
+    await getCurrentWindow().minimize()
+  }
+  const handleMax = async () => {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window")
+    await getCurrentWindow().toggleMaximize()
+  }
+  const handleClose = async () => {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window")
+    await getCurrentWindow().close()
+  }
+
+  return (
+    <div
+      data-tauri-drag-region
+      className={cn(
+        "flex h-8 shrink-0 items-center justify-between border-b bg-muted/40 px-2 text-xs select-none",
+        isMac && "pl-20"
+      )}
+    >
+      <div data-tauri-drag-region className="flex flex-1 items-center gap-2 px-2">
+        <span data-tauri-drag-region className="font-medium tracking-tight">
+          Cognia
+        </span>
+      </div>
+      {!isMac && (
+        <div className="flex items-center">
+          <TitleBarButton onClick={handleMin} aria-label="Minimize">
+            <MinusIcon className="size-3.5" />
+          </TitleBarButton>
+          <TitleBarButton onClick={handleMax} aria-label="Maximize">
+            {maximized ? (
+              <MinimizeIcon className="size-3.5" />
+            ) : (
+              <MaximizeIcon className="size-3.5" />
+            )}
+          </TitleBarButton>
+          <TitleBarButton
+            onClick={handleClose}
+            aria-label="Close"
+            className="hover:bg-destructive hover:text-destructive-foreground"
+          >
+            <XIcon className="size-3.5" />
+          </TitleBarButton>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TitleBarButton({ className, ...props }: React.ComponentProps<typeof Button>) {
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className={cn("h-8 w-10 rounded-none", className)}
+      {...props}
+    />
+  )
+}

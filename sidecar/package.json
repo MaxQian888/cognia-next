@@ -1,0 +1,17 @@
+{
+  "name": "cognia-claude-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "main": "claude-host.mjs",
+  "scripts": {
+    "start": "node claude-host.mjs",
+    "smoke": "node claude-host.mjs --smoke"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "latest"
+  }
+}

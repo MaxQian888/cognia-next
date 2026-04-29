@@ -86,10 +86,12 @@ pnpm dlx shadcn@latest add <component-name>
 
 ## Testing Guidelines
 
-- No test runner is configured yet. Recommended: Vitest (unit) and Playwright (e2e).
-- Name tests `*.test.ts`/`*.test.tsx`; co-locate next to source or in `tests/`.
-- Prioritize `lib/` utilities and complex UI logic for coverage.
-- **Never add test files inside `components/ui/`** — those are vendored shadcn/ui files.
+- **Coverage requirement**: every source file must reach **≥90% test coverage** (lines, branches, functions). Run `pnpm test:coverage` to verify before opening a PR.
+- **TypeScript / TSX tests**: co-locate next to the source file as `xxx.test.ts` or `xxx.test.tsx` (e.g., `lib/avatar.ts` → `lib/avatar.test.ts`, `components/chat/message.tsx` → `components/chat/message.test.tsx`). Do **not** place unit tests in a separate `__tests__/` or `tests/` directory.
+- **Rust tests**: write unit tests inside the same `.rs` file using a `#[cfg(test)] mod tests { ... }` block. Integration tests may still live in `src-tauri/tests/`.
+- Test runner: Jest is configured (`pnpm test`, `pnpm test:watch`, `pnpm test:coverage`). For e2e, prefer Playwright.
+- Prioritize `lib/`, `hooks/`, `stores/`, and `src-tauri/src/` for full coverage.
+- **Never add test files inside `components/ui/` or `components/ai-elements/`** — those are vendored components (shadcn/ui and ai-elements respectively) and are excluded from coverage thresholds.
 
 ## Commit & Pull Request Guidelines
 

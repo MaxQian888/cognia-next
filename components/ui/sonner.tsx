@@ -38,3 +38,6 @@ const Toaster = ({ ...props }: ToasterProps) => {
 }
 
 export { Toaster }
+// Re-export sonner's `toast` so upstream code that does
+// `import { toast } from "@/components/ui/sonner"` keeps working.
+export { toast } from "sonner"

@@ -14,7 +14,48 @@ const eslintConfig = defineConfig([
     "coverage/**",
     "src-tauri/target/**",
     "next-env.d.ts",
+    "docs/.next/**",
+    "docs/.source/**",
+    "docs/next-env.d.ts",
+    ".agents/**",
+    ".claude/**",
+    "sidecar/**",
+    "node_modules/**",
   ]),
+  // Allow underscore-prefixed unused variables (standard convention for intentional-unused).
+  {
+    rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          destructuredArrayIgnorePattern: "^_",
+        },
+      ],
+    },
+  },
+  // Vendored components (ai-elements, shadcn/ui) — relaxed rules per CLAUDE.md
+  {
+    files: ["components/ai-elements/**/*.{ts,tsx}", "components/ui/**/*.{ts,tsx}"],
+    rules: {
+      "react-hooks/refs": "off",
+      "react-hooks/set-state-in-effect": "off",
+      "react-hooks/immutability": "off",
+      "react-hooks/static-components": "off",
+      "react-hooks/preserve-manual-memoization": "off",
+      "react-hooks/purity": "off",
+      "@typescript-eslint/no-unused-vars": "off",
+    },
+  },
+  // Jest CommonJS mock shims — runtime is Node CJS, require() is the correct call.
+  {
+    files: ["__mocks__/**/*.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
 ])
 
 export default eslintConfig

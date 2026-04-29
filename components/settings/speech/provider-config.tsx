@@ -1,0 +1,526 @@
+"use client"
+
+/**
+ * Per-provider configuration cards. Each component reads its sub-slice of
+ * AppSettings from the settings store and writes back via `save({...})`.
+ *
+ * Lives in a single file because each card is small and they share the same
+ * shadcn primitives — splitting would multiply boilerplate without benefit.
+ */
+
+import { useEffect, useState } from "react"
+
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Slider } from "@/components/ui/slider"
+import { Textarea } from "@/components/ui/textarea"
+import { useSettingsStore } from "@/stores/settings-store"
+import {
+  CARTESIA_TTS_MODELS,
+  CARTESIA_TTS_VOICES,
+  DEEPGRAM_TTS_VOICES,
+  EDGE_TTS_VOICES,
+  ELEVENLABS_TTS_MODELS,
+  ELEVENLABS_TTS_VOICES,
+  GEMINI_TTS_VOICES,
+  HUME_TTS_VOICES,
+  LMNT_TTS_VOICES,
+  OPENAI_TTS_MODELS,
+  OPENAI_TTS_VOICES,
+} from "@/lib/tts/types"
+import { ApiKeyInput } from "./api-key-input"
+
+// -- Generic helper for a labelled slider value ------------------------------
+
+function NumberSlider(props: {
+  label: string
+  value: number
+  min: number
+  max: number
+  step: number
+  onChange: (n: number) => void
+  format?: (n: number) => string
+}) {
+  const { label, value, min, max, step, onChange, format } = props
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <Label className="text-xs">{label}</Label>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {format ? format(value) : value.toFixed(2)}
+        </span>
+      </div>
+      <Slider
+        value={[value]}
+        min={min}
+        max={max}
+        step={step}
+        onValueChange={(v) => onChange(v[0])}
+      />
+    </div>
+  )
+}
+
+// -- System ------------------------------------------------------------------
+
+export function SystemConfig() {
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return
+    const load = () => setVoices(speechSynthesis.getVoices())
+    load()
+    speechSynthesis.onvoiceschanged = load
+    return () => {
+      speechSynthesis.onvoiceschanged = null
+    }
+  }, [])
+
+  const value = settings?.systemVoice ?? ""
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2">
+        <Label className="text-xs">Voice</Label>
+        <Select
+          value={value || "auto"}
+          onValueChange={(v) => void save({ systemVoice: v === "auto" ? "" : v })}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Auto-select for language" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">Auto-select for language</SelectItem>
+            {voices.map((v) => (
+              <SelectItem key={v.voiceURI} value={v.voiceURI}>
+                {v.name} ({v.lang})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {voices.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            Loading installed voices… (browser-provided)
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// -- OpenAI ------------------------------------------------------------------
+
+export function OpenAiConfig() {
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+  const voice = settings?.openaiVoice ?? "alloy"
+  const model = settings?.openaiModel ?? "gpt-4o-mini-tts"
+  const speed = settings?.openaiSpeed ?? 1.0
+  const instructions = settings?.openaiInstructions ?? ""
+
+  return (
+    <div className="space-y-3">
+      <ApiKeyInput provider="openai" label="OpenAI API key" placeholder="sk-…" />
+      <div className="space-y-2">
+        <Label className="text-xs">Voice</Label>
+        <Select value={voice} onValueChange={(v) => void save({ openaiVoice: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {OPENAI_TTS_VOICES.map((v) => (
+              <SelectItem key={v.id} value={v.id}>
+                {v.name} — {v.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-xs">Model</Label>
+        <Select value={model} onValueChange={(v) => void save({ openaiModel: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {OPENAI_TTS_MODELS.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {m.name} — {m.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <NumberSlider
+        label="Speed"
+        value={speed}
+        min={0.25}
+        max={4.0}
+        step={0.05}
+        onChange={(n) => void save({ openaiSpeed: n })}
+        format={(n) => `${n.toFixed(2)}x`}
+      />
+      {model === "gpt-4o-mini-tts" && (
+        <div className="space-y-2">
+          <Label className="text-xs">Voice instructions (gpt-4o-mini-tts only)</Label>
+          <Textarea
+            value={instructions}
+            onChange={(e) => void save({ openaiInstructions: e.target.value })}
+            placeholder="Speak in a cheerful, encouraging tone."
+            rows={3}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// -- Gemini ------------------------------------------------------------------
+
+export function GeminiConfig() {
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+  const voice = settings?.geminiVoice ?? "Kore"
+
+  return (
+    <div className="space-y-3">
+      <ApiKeyInput provider="google" label="Google AI Studio API key" placeholder="AIza…" />
+      <div className="space-y-2">
+        <Label className="text-xs">Voice</Label>
+        <Select value={voice} onValueChange={(v) => void save({ geminiVoice: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="max-h-72">
+            {GEMINI_TTS_VOICES.map((v) => (
+              <SelectItem key={v.id} value={v.id}>
+                {v.name} — {v.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  )
+}
+
+// -- Edge --------------------------------------------------------------------
+
+export function EdgeConfig() {
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+  const voice = settings?.edgeVoice ?? "en-US-JennyNeural"
+  const rate = settings?.edgeRate ?? "+0%"
+  const pitch = settings?.edgePitch ?? "+0Hz"
+  const sttLang = (settings?.sttLanguage ?? "en-US").split("-")[0]
+
+  // Filter by app language for usability; fall back to all if no match.
+  const filtered = EDGE_TTS_VOICES.filter((v) => v.language.startsWith(sttLang))
+  const list = filtered.length > 0 ? filtered : EDGE_TTS_VOICES
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Edge TTS is free and doesn&apos;t require an API key. Synthesis runs through the desktop
+        app&apos;s WebSocket bridge.
+      </p>
+      <div className="space-y-2">
+        <Label className="text-xs">Voice</Label>
+        <Select value={voice} onValueChange={(v) => void save({ edgeVoice: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="max-h-72">
+            {list.map((v) => (
+              <SelectItem key={v.id} value={v.id}>
+                {v.name} — {v.language} ({v.gender})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Rate</Label>
+          <Input
+            value={rate}
+            onChange={(e) => void save({ edgeRate: e.target.value })}
+            placeholder="+0%"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Pitch</Label>
+          <Input
+            value={pitch}
+            onChange={(e) => void save({ edgePitch: e.target.value })}
+            placeholder="+0Hz"
+          />
+        </div>
+      </div>
+      <p className="text-[10px] text-muted-foreground">
+        Rate accepts <code>+/-N%</code>; pitch accepts <code>+/-NHz</code>.
+      </p>
+    </div>
+  )
+}
+
+// -- ElevenLabs --------------------------------------------------------------
+
+export function ElevenLabsConfig() {
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+  const voice = settings?.elevenlabsVoice ?? "rachel"
+  const model = settings?.elevenlabsModel ?? "eleven_multilingual_v2"
+  const stability = settings?.elevenlabsStability ?? 0.5
+  const similarityBoost = settings?.elevenlabsSimilarityBoost ?? 0.75
+
+  return (
+    <div className="space-y-3">
+      <ApiKeyInput provider="elevenlabs" label="ElevenLabs API key" placeholder="sk_…" />
+      <div className="space-y-2">
+        <Label className="text-xs">Voice</Label>
+        <Select value={voice} onValueChange={(v) => void save({ elevenlabsVoice: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {ELEVENLABS_TTS_VOICES.map((v) => (
+              <SelectItem key={v.id} value={v.id}>
+                {v.name} — {v.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-xs">Model</Label>
+        <Select value={model} onValueChange={(v) => void save({ elevenlabsModel: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {ELEVENLABS_TTS_MODELS.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {m.name} — {m.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <NumberSlider
+        label="Stability"
+        value={stability}
+        min={0}
+        max={1}
+        step={0.05}
+        onChange={(n) => void save({ elevenlabsStability: n })}
+      />
+      <NumberSlider
+        label="Similarity boost"
+        value={similarityBoost}
+        min={0}
+        max={1}
+        step={0.05}
+        onChange={(n) => void save({ elevenlabsSimilarityBoost: n })}
+      />
+    </div>
+  )
+}
+
+// -- LMNT --------------------------------------------------------------------
+
+export function LmntConfig() {
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+  const voice = settings?.lmntVoice ?? "lily"
+  const speed = settings?.lmntSpeed ?? 1.0
+
+  return (
+    <div className="space-y-3">
+      <ApiKeyInput provider="lmnt" label="LMNT API key" />
+      <div className="space-y-2">
+        <Label className="text-xs">Voice</Label>
+        <Select value={voice} onValueChange={(v) => void save({ lmntVoice: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {LMNT_TTS_VOICES.map((v) => (
+              <SelectItem key={v.id} value={v.id}>
+                {v.name} — {v.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <NumberSlider
+        label="Speed"
+        value={speed}
+        min={0.5}
+        max={2.0}
+        step={0.05}
+        onChange={(n) => void save({ lmntSpeed: n })}
+        format={(n) => `${n.toFixed(2)}x`}
+      />
+    </div>
+  )
+}
+
+// -- Hume --------------------------------------------------------------------
+
+export function HumeConfig() {
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+  const voice = settings?.humeVoice ?? "kora"
+
+  return (
+    <div className="space-y-3">
+      <ApiKeyInput provider="hume" label="Hume AI API key" />
+      <div className="space-y-2">
+        <Label className="text-xs">Voice</Label>
+        <Select value={voice} onValueChange={(v) => void save({ humeVoice: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {HUME_TTS_VOICES.map((v) => (
+              <SelectItem key={v.id} value={v.id}>
+                {v.name} — {v.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  )
+}
+
+// -- Cartesia ----------------------------------------------------------------
+
+export function CartesiaConfig() {
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+  const voice = settings?.cartesiaVoice ?? "a0e99841-438c-4a64-b679-ae501e7d6091"
+  const model = settings?.cartesiaModel ?? "sonic-3"
+  const language = settings?.cartesiaLanguage ?? "en"
+  const speed = settings?.cartesiaSpeed ?? 0
+  const emotion = settings?.cartesiaEmotion ?? ""
+
+  return (
+    <div className="space-y-3">
+      <ApiKeyInput provider="cartesia" label="Cartesia API key" />
+      <div className="space-y-2">
+        <Label className="text-xs">Voice</Label>
+        <Select value={voice} onValueChange={(v) => void save({ cartesiaVoice: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {CARTESIA_TTS_VOICES.map((v) => (
+              <SelectItem key={v.id} value={v.id}>
+                {v.name} — {v.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-xs">Model</Label>
+        <Select value={model} onValueChange={(v) => void save({ cartesiaModel: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {CARTESIA_TTS_MODELS.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {m.name} — {m.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Language</Label>
+          <Input
+            value={language}
+            onChange={(e) => void save({ cartesiaLanguage: e.target.value })}
+            placeholder="en"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Emotion</Label>
+          <Input
+            value={emotion}
+            onChange={(e) => void save({ cartesiaEmotion: e.target.value })}
+            placeholder="positivity:high"
+          />
+        </div>
+      </div>
+      <NumberSlider
+        label="Speed"
+        value={speed}
+        min={-1.0}
+        max={1.0}
+        step={0.05}
+        onChange={(n) => void save({ cartesiaSpeed: n })}
+        format={(n) => n.toFixed(2)}
+      />
+    </div>
+  )
+}
+
+// -- Deepgram ----------------------------------------------------------------
+
+export function DeepgramConfig() {
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+  const voice = settings?.deepgramVoice ?? "aura-2-asteria-en"
+
+  return (
+    <div className="space-y-3">
+      <ApiKeyInput provider="deepgram" label="Deepgram API key" />
+      <div className="space-y-2">
+        <Label className="text-xs">Voice</Label>
+        <Select value={voice} onValueChange={(v) => void save({ deepgramVoice: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {DEEPGRAM_TTS_VOICES.map((v) => (
+              <SelectItem key={v.id} value={v.id}>
+                {v.name} — {v.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  )
+}
+
+// -- Mapping -----------------------------------------------------------------
+
+import type { TTSProvider } from "@/lib/tts/types"
+
+export const PROVIDER_CONFIG_COMPONENTS: Record<TTSProvider, () => React.ReactElement> = {
+  system: SystemConfig,
+  openai: OpenAiConfig,
+  gemini: GeminiConfig,
+  edge: EdgeConfig,
+  elevenlabs: ElevenLabsConfig,
+  lmnt: LmntConfig,
+  hume: HumeConfig,
+  cartesia: CartesiaConfig,
+  deepgram: DeepgramConfig,
+}

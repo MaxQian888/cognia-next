@@ -1,0 +1,123 @@
+"use client"
+
+/**
+ * Tiny dropdown that flips the active agent *runtime* — Claude SDK
+ * (cognia-next's bundled sidecar, the default) versus an External Agent
+ * (Codex / Claude Code CLI / Gemini CLI / Cursor / any custom command).
+ *
+ * Sits next to PermissionModeIndicator + WebSearchToggle in the composer
+ * toolbar. Pairs with `<AgentModeSelector>` (built-in/custom Agent Modes,
+ * orthogonal to runtime) and `<ExternalAgentSelector>` (which external
+ * agent record to dispatch to, only shown when runtime === "external").
+ */
+
+import { useTranslations } from "next-intl"
+import { BotIcon, ChevronDownIcon, PlugZapIcon } from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
+import { useAgentRuntimeStore, type AgentRuntime } from "@/stores/agent-runtime-store"
+import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
+
+interface Props {
+  className?: string
+}
+
+export function AgentRuntimeSelector({ className }: Props) {
+  const t = useTranslations("agentRuntime")
+  const runtime = useAgentRuntimeStore((s) => s.runtime)
+  const setRuntime = useAgentRuntimeStore((s) => s.setRuntime)
+  const externalAgentId = useAgentRuntimeStore((s) => s.externalAgentId)
+  const setExternalAgentId = useAgentRuntimeStore((s) => s.setExternalAgentId)
+  const externalAgents = useExternalAgentStore((s) => s.getAllAgents())
+
+  const Icon = runtime === "external" ? PlugZapIcon : BotIcon
+  const label =
+    runtime === "external"
+      ? (externalAgents.find((a) => a.id === externalAgentId)?.name ?? t("externalUnconfigured"))
+      : t("claudeSdk")
+
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger
+            className={cn(
+              "inline-flex h-6 items-center gap-1 rounded-md border border-transparent px-1.5 text-[11px] hover:border-border hover:bg-accent",
+              className
+            )}
+            aria-label={t("ariaLabel")}
+          >
+            <Icon className="size-3.5 shrink-0" />
+            <span className="max-w-[10rem] truncate font-mono">{label}</span>
+            <ChevronDownIcon className="size-3 opacity-60" />
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">{t("tooltip")}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="start" className="w-64">
+        <DropdownMenuLabel>{t("label")}</DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={runtime}
+          onValueChange={(value) => setRuntime(value as AgentRuntime)}
+        >
+          <DropdownMenuRadioItem value="claude-sdk">
+            <BotIcon className="mr-2 size-4" />
+            <div className="flex flex-col">
+              <span className="text-sm">{t("claudeSdk")}</span>
+              <span className="text-[10px] text-muted-foreground">{t("claudeSdkDesc")}</span>
+            </div>
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="external">
+            <PlugZapIcon className="mr-2 size-4" />
+            <div className="flex flex-col">
+              <span className="text-sm">{t("external")}</span>
+              <span className="text-[10px] text-muted-foreground">{t("externalDesc")}</span>
+            </div>
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+
+        {runtime === "external" && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs text-muted-foreground">
+              {t("externalAgentLabel")}
+            </DropdownMenuLabel>
+            {externalAgents.length === 0 ? (
+              <DropdownMenuItem disabled className="text-xs">
+                {t("externalEmpty")}
+              </DropdownMenuItem>
+            ) : (
+              externalAgents.map((agent) => (
+                <DropdownMenuItem
+                  key={agent.id}
+                  onSelect={() => setExternalAgentId(agent.id)}
+                  className={cn("text-sm", agent.id === externalAgentId && "bg-accent")}
+                >
+                  <PlugZapIcon className="mr-2 size-3.5" />
+                  <div className="flex flex-col">
+                    <span>{agent.name}</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {agent.protocol.toUpperCase()} · {agent.transport}
+                    </span>
+                  </div>
+                </DropdownMenuItem>
+              ))
+            )}
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+export default AgentRuntimeSelector

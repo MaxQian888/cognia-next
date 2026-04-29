@@ -1,0 +1,296 @@
+"use client"
+
+/**
+ * ExternalAgentSelector - Select and manage external agents in agent mode
+ * Integrates with the external agent store for configuration and connection management
+ */
+
+import { useState, useMemo, useCallback } from "react"
+import { useTranslations } from "next-intl"
+import {
+  ExternalLink,
+  Plug,
+  PlugZap,
+  Settings,
+  ChevronDown,
+  Check,
+  AlertCircle,
+  Loader2,
+  Power,
+} from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+} from "@/components/ui/dropdown-menu"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { cn } from "@/lib/utils"
+import { ExternalAgentManager } from "./external-agent-manager"
+import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
+import type { ExternalAgentConnectionStatus } from "@/types/agent/external-agent"
+import { getExternalAgentExecutionBlockReason } from "@/lib/ai/agent/external/config-normalizer"
+
+// =============================================================================
+// Types
+// =============================================================================
+
+interface ExternalAgentSelectorProps {
+  /** Currently selected external agent ID (null = use built-in agent) */
+  selectedAgentId: string | null
+  /** Callback when external agent selection changes */
+  onAgentChange: (agentId: string | null) => void
+  /** Callback to open settings */
+  onOpenSettings?: () => void
+  /** Whether the selector is disabled */
+  disabled?: boolean
+  /** Additional class name */
+  className?: string
+}
+
+// =============================================================================
+// Connection Status Indicator
+// =============================================================================
+
+function ConnectionStatusIcon({ status }: { status: ExternalAgentConnectionStatus }) {
+  switch (status) {
+    case "connected":
+      return <PlugZap className="h-3 w-3 text-green-500" />
+    case "connecting":
+    case "reconnecting":
+      return <Loader2 className="h-3 w-3 text-yellow-500 animate-spin" />
+    case "error":
+      return <AlertCircle className="h-3 w-3 text-destructive" />
+    default:
+      return <Plug className="h-3 w-3 text-muted-foreground" />
+  }
+}
+
+function ConnectionStatusBadge({
+  status,
+  t,
+}: {
+  status: ExternalAgentConnectionStatus
+  t: ReturnType<typeof useTranslations>
+}) {
+  const statusConfig: Record<
+    ExternalAgentConnectionStatus,
+    { labelKey: string; variant: "default" | "secondary" | "destructive" | "outline" }
+  > = {
+    disconnected: { labelKey: "statusDisconnected", variant: "outline" },
+    connecting: { labelKey: "statusConnecting", variant: "secondary" },
+    connected: { labelKey: "statusConnected", variant: "default" },
+    reconnecting: { labelKey: "statusReconnecting", variant: "secondary" },
+    error: { labelKey: "statusError", variant: "destructive" },
+  }
+
+  const config = statusConfig[status]
+  return (
+    <Badge variant={config.variant} className="text-[10px] h-4 px-1.5">
+      {t(config.labelKey)}
+    </Badge>
+  )
+}
+
+// =============================================================================
+// Main Component
+// =============================================================================
+
+export function ExternalAgentSelector({
+  selectedAgentId,
+  onAgentChange,
+  onOpenSettings,
+  disabled,
+  className,
+}: ExternalAgentSelectorProps) {
+  const t = useTranslations("externalAgent")
+  const [manageDialogOpen, setManageDialogOpen] = useState(false)
+
+  // Store
+  const {
+    getAllAgents,
+    getConnectionStatus,
+    enabled: externalAgentsEnabled,
+  } = useExternalAgentStore()
+
+  // Get all configured agents
+  const agents = useMemo(() => getAllAgents(), [getAllAgents])
+
+  // Find selected agent
+  const selectedAgent = useMemo(() => {
+    if (!selectedAgentId) return null
+    return agents.find((a) => a.id === selectedAgentId) || null
+  }, [selectedAgentId, agents])
+
+  // Handle agent selection
+  const handleAgentSelect = useCallback(
+    (agentId: string | null) => {
+      onAgentChange(agentId)
+    },
+    [onAgentChange]
+  )
+
+  // If external agents are disabled, show disabled state
+  if (!externalAgentsEnabled) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled
+            className={cn("gap-2 opacity-50", className)}
+          >
+            <ExternalLink className="h-4 w-4" />
+            <span className="hidden sm:inline">{t("disabled")}</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>{t("enableInSettings")}</p>
+        </TooltipContent>
+      </Tooltip>
+    )
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          className={cn("gap-2", selectedAgent && "border-primary/50", className)}
+        >
+          {selectedAgent ? (
+            <>
+              <ConnectionStatusIcon status={getConnectionStatus(selectedAgent.id)} />
+              <span className="hidden sm:inline max-w-[100px] truncate">{selectedAgent.name}</span>
+            </>
+          ) : (
+            <>
+              <ExternalLink className="h-4 w-4" />
+              <span className="hidden sm:inline">{t("builtIn")}</span>
+            </>
+          )}
+          <ChevronDown className="h-3 w-3 opacity-50" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="center" className="w-72">
+        <DropdownMenuLabel className="text-xs text-muted-foreground">
+          {t("selectAgent")}
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+
+        {/* Built-in Agent Option */}
+        <DropdownMenuItem
+          onClick={() => handleAgentSelect(null)}
+          className="flex items-center gap-3 p-3"
+        >
+          <div
+            className={cn(
+              "flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
+              !selectedAgentId ? "bg-primary text-primary-foreground" : "bg-muted"
+            )}
+          >
+            <Power className="h-4 w-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-sm">{t("builtInAgent")}</span>
+              {!selectedAgentId && <Check className="h-3 w-3 text-primary" />}
+            </div>
+            <p className="text-xs text-muted-foreground">{t("builtInAgentDesc")}</p>
+          </div>
+        </DropdownMenuItem>
+
+        {/* External Agents */}
+        {agents.length > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="text-xs text-muted-foreground">
+                {t("externalAgents")}
+              </DropdownMenuLabel>
+              <ScrollArea className="max-h-[240px]">
+                {agents.map((agent) => {
+                  const status = getConnectionStatus(agent.id)
+                  const isSelected = agent.id === selectedAgentId
+                  const executionBlockedReason = getExternalAgentExecutionBlockReason(agent)
+                  return (
+                    <DropdownMenuItem
+                      key={agent.id}
+                      onClick={() => handleAgentSelect(agent.id)}
+                      className="flex items-center gap-3 p-3"
+                      disabled={!!executionBlockedReason}
+                    >
+                      <div
+                        className={cn(
+                          "flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
+                          isSelected ? "bg-primary text-primary-foreground" : "bg-muted"
+                        )}
+                      >
+                        <ConnectionStatusIcon status={status} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">{agent.name}</span>
+                          {isSelected && <Check className="h-3 w-3 text-primary" />}
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <Badge variant="outline" className="text-[10px] h-4 px-1">
+                            {agent.protocol.toUpperCase()}
+                          </Badge>
+                          {executionBlockedReason && (
+                            <Badge variant="destructive" className="text-[10px] h-4 px-1">
+                              Coming Soon
+                            </Badge>
+                          )}
+                          <ConnectionStatusBadge status={status} t={t} />
+                        </div>
+                        {executionBlockedReason && (
+                          <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+                            {executionBlockedReason}
+                          </p>
+                        )}
+                      </div>
+                    </DropdownMenuItem>
+                  )
+                })}
+              </ScrollArea>
+            </DropdownMenuGroup>
+          </>
+        )}
+
+        {/* Actions */}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => setManageDialogOpen(true)} className="gap-2">
+          <Plug className="h-4 w-4" />
+          {t("manage")}
+        </DropdownMenuItem>
+        {onOpenSettings && (
+          <DropdownMenuItem onClick={onOpenSettings} className="gap-2">
+            <Settings className="h-4 w-4" />
+            {t("manageAgents")}
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+
+      {/* External Agent Manager Dialog */}
+      <Dialog open={manageDialogOpen} onOpenChange={setManageDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t("manageAgents")}</DialogTitle>
+          </DialogHeader>
+          <ExternalAgentManager />
+        </DialogContent>
+      </Dialog>
+    </DropdownMenu>
+  )
+}

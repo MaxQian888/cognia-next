@@ -106,6 +106,16 @@ const config: Config = {
 
     // Mock Tauri API for Jest (not available in jsdom)
     "^@tauri-apps/api/core$": "<rootDir>/__mocks__/tauri-api.js",
+    "^@tauri-apps/plugin-store$": "<rootDir>/__mocks__/tauri-plugin-store.js",
+
+    // nanoid ships ESM-only browser entry that Jest's CommonJS loader can't
+    // parse. Map to the CommonJS build under nanoid/non-secure for tests.
+    "^nanoid$": "<rootDir>/__mocks__/nanoid.js",
+
+    // @opencode-ai/sdk is pure ESM with subpath exports. Mock the client
+    // surface used by the agent manager so Jest can resolve the module graph.
+    "^@opencode-ai/sdk/client$": "<rootDir>/__mocks__/opencode-sdk-client.js",
+    "^@opencode-ai/sdk$": "<rootDir>/__mocks__/opencode-sdk-client.js",
   },
 
   // An array of regexp pattern strings, matched against all module paths before considered 'visible' to the module loader

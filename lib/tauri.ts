@@ -16,3 +16,8 @@ export function isTauri(): boolean {
 export async function greet(name: string): Promise<string> {
   return invoke<string>("greet", { name })
 }
+
+// Re-export every plugin wrapper as a named import surface. Consumers can do
+//   import { openExternal, notify, getOsInfo } from "@/lib/tauri"
+// without knowing which sub-module they live in.
+export * from "./tauri/index"

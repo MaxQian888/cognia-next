@@ -1,0 +1,512 @@
+"use client"
+
+/**
+ * LogEntry Components
+ *
+ * Extracted from log-panel.tsx — log entry rendering, highlighting, and trace group display.
+ */
+
+import { useState, useCallback, memo } from "react"
+import { useTranslations } from "next-intl"
+import {
+  ChevronDown,
+  ChevronRight,
+  AlertCircle,
+  AlertTriangle,
+  Info,
+  Bug,
+  XCircle,
+  Clock,
+  Copy,
+  Check,
+  Filter,
+  Bookmark,
+  BookmarkCheck,
+  Crosshair,
+  PanelRightOpen,
+} from "lucide-react"
+import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import { AGENT_TRACE_MODULE } from "@/lib/agent-trace/log-adapter"
+import { LIVE_TRACE_EVENT_ICONS, LIVE_TRACE_EVENT_COLORS } from "@/lib/agent"
+import type { StructuredLogEntry, LogLevel } from "@/lib/logger"
+import type { AgentTraceEventType } from "@/types/agent-trace"
+
+export const LEVEL_CONFIG: Record<
+  LogLevel,
+  { icon: React.ElementType; color: string; bgColor: string; gutterClass: string }
+> = {
+  trace: {
+    icon: Bug,
+    color: "text-gray-500",
+    bgColor: "bg-gray-100 dark:bg-gray-800",
+    gutterClass: "border-l-muted-foreground/40",
+  },
+  debug: {
+    icon: Bug,
+    color: "text-blue-500",
+    bgColor: "bg-blue-100 dark:bg-blue-900/30",
+    gutterClass: "border-l-blue-500/70",
+  },
+  info: {
+    icon: Info,
+    color: "text-green-500",
+    bgColor: "bg-green-100 dark:bg-green-900/30",
+    gutterClass: "border-l-emerald-500/70",
+  },
+  warn: {
+    icon: AlertTriangle,
+    color: "text-yellow-500",
+    bgColor: "bg-yellow-100 dark:bg-yellow-900/30",
+    gutterClass: "border-l-amber-500/80",
+  },
+  error: {
+    icon: AlertCircle,
+    color: "text-red-500",
+    bgColor: "bg-red-100 dark:bg-red-900/30",
+    gutterClass: "border-l-destructive/80",
+  },
+  fatal: {
+    icon: XCircle,
+    color: "text-red-700",
+    bgColor: "bg-red-200 dark:bg-red-900/50",
+    gutterClass: "border-l-destructive",
+  },
+}
+
+export const ALL_LEVELS: LogLevel[] = ["trace", "debug", "info", "warn", "error", "fatal"]
+
+/**
+ * Split text by search query into parts for highlighting.
+ * Returns null if query is invalid or empty.
+ */
+export function splitByQuery(
+  text: string,
+  query: string,
+  isRegex: boolean
+): { parts: string[]; regex: RegExp } | null {
+  if (!query) return null
+  try {
+    const regex = isRegex
+      ? new RegExp(`(${query})`, "gi")
+      : new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi")
+    return { parts: text.split(regex), regex }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Highlight search matches within text.
+ */
+export function HighlightedText({
+  text,
+  query,
+  useRegex,
+}: {
+  text: string
+  query: string
+  useRegex: boolean
+}) {
+  const result = splitByQuery(text, query, useRegex)
+  if (!result) return <>{text}</>
+
+  const { parts, regex } = result
+  return (
+    <>
+      {parts.map((part, i) => {
+        regex.lastIndex = 0
+        return regex.test(part) ? (
+          <mark key={i} className="bg-yellow-200 dark:bg-yellow-800 rounded px-0.5">
+            {part}
+          </mark>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      })}
+    </>
+  )
+}
+
+export interface LogEntryProps {
+  log: StructuredLogEntry
+  isExpanded: boolean
+  onToggle: () => void
+  onSelect?: () => void
+  onFocusTrace?: (traceId: string, log: StructuredLogEntry) => void
+  onFocusSession?: (sessionId: string, log: StructuredLogEntry) => void
+  searchQuery: string
+  useRegex: boolean
+  isBookmarked: boolean
+  onToggleBookmark?: (id: string) => void
+  t: ReturnType<typeof useTranslations>
+}
+
+export function LogEntry({
+  log,
+  isExpanded,
+  onToggle,
+  onSelect,
+  onFocusTrace,
+  onFocusSession,
+  searchQuery,
+  useRegex,
+  isBookmarked,
+  onToggleBookmark,
+  t,
+}: LogEntryProps) {
+  const [copied, setCopied] = useState(false)
+  const config = LEVEL_CONFIG[log.level]
+  const isTraceEntry = log.module === AGENT_TRACE_MODULE
+  const TraceIcon =
+    isTraceEntry && log.eventId
+      ? LIVE_TRACE_EVENT_ICONS[log.eventId as AgentTraceEventType]
+      : undefined
+  const traceColor =
+    isTraceEntry && log.eventId
+      ? LIVE_TRACE_EVENT_COLORS[log.eventId as AgentTraceEventType]
+      : undefined
+  const Icon = (TraceIcon ?? config.icon) as React.ComponentType<{ className?: string }>
+  const iconColor = traceColor ?? config.color
+
+  const handleCopy = useCallback(() => {
+    const text = JSON.stringify(log, null, 2)
+    navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }, [log])
+
+  const timestamp = new Date(log.timestamp)
+  const timeStr = timestamp.toLocaleTimeString("en-US", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    fractionalSecondDigits: 3,
+  })
+
+  const hasDetails = log.data || log.stack || log.source
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          data-testid="log-entry-row"
+          data-level={log.level}
+          tabIndex={0}
+          role="button"
+          aria-expanded={hasDetails ? isExpanded : undefined}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault()
+              onToggle()
+            }
+          }}
+          className={cn(
+            "group border-b border-border/50 border-l-[3px] transition-colors outline-none",
+            "hover:bg-muted/50 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/40",
+            isExpanded && config.bgColor,
+            config.gutterClass
+          )}
+        >
+          <div className="flex items-start gap-2 px-3 py-2 cursor-pointer" onClick={onToggle}>
+            {hasDetails ? (
+              isExpanded ? (
+                <ChevronDown className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
+              )
+            ) : (
+              <div className="w-4" />
+            )}
+
+            <Icon className={cn("h-4 w-4 mt-0.5 shrink-0", iconColor)} />
+
+            <span className="text-xs text-muted-foreground font-mono shrink-0">{timeStr}</span>
+
+            <Badge variant="outline" className="text-xs shrink-0 font-mono">
+              {log.module}
+            </Badge>
+
+            {log.traceId && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge variant="secondary" className="text-xs shrink-0 font-mono">
+                    {log.traceId.slice(0, 8)}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>
+                    {t("panel.traceId")}: {log.traceId}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+
+            <span className="text-sm flex-1 break-words">
+              <HighlightedText text={log.message} query={searchQuery} useRegex={useRegex} />
+            </span>
+
+            <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+              {onToggleBookmark && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={cn(
+                        "h-6 w-6",
+                        !isBookmarked && "opacity-0 group-hover:opacity-100 transition-opacity"
+                      )}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onToggleBookmark(log.id)
+                      }}
+                    >
+                      {isBookmarked ? (
+                        <BookmarkCheck className="h-3 w-3 text-yellow-500" />
+                      ) : (
+                        <Bookmark className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {isBookmarked ? t("panel.removeBookmark") : t("panel.addBookmark")}
+                  </TooltipContent>
+                </Tooltip>
+              )}
+
+              {onSelect && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      data-testid="log-entry-open-details"
+                      aria-label={t("panel.viewDetails")}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onSelect()
+                      }}
+                    >
+                      <PanelRightOpen className="h-3 w-3" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("panel.viewDetails")}</TooltipContent>
+                </Tooltip>
+              )}
+
+              {onFocusTrace && log.traceId && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      aria-label={t("panel.focusTrace")}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onFocusTrace(log.traceId!, log)
+                      }}
+                    >
+                      <Crosshair className="h-3 w-3" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("panel.focusTrace")}</TooltipContent>
+                </Tooltip>
+              )}
+
+              {onFocusSession && log.sessionId && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      aria-label={t("panel.focusSession")}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onFocusSession(log.sessionId!, log)
+                      }}
+                    >
+                      <Filter className="h-3 w-3" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("panel.focusSession")}</TooltipContent>
+                </Tooltip>
+              )}
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleCopy()
+                    }}
+                  >
+                    {copied ? (
+                      <Check className="h-3 w-3 text-green-500" />
+                    ) : (
+                      <Copy className="h-3 w-3" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("panel.copyEntry")}</TooltipContent>
+              </Tooltip>
+            </div>
+          </div>
+
+          {isExpanded && hasDetails && (
+            <div className="px-3 pb-3 pl-12 space-y-2">
+              {log.data && (
+                <div className="rounded bg-muted p-2">
+                  <div className="text-xs text-muted-foreground mb-1">{t("panel.data")}:</div>
+                  <pre className="text-xs font-mono overflow-x-auto">
+                    {JSON.stringify(log.data, null, 2)}
+                  </pre>
+                </div>
+              )}
+
+              {log.stack && (
+                <div className="rounded bg-red-50 dark:bg-red-900/20 p-2">
+                  <div className="text-xs text-muted-foreground mb-1">{t("panel.stackTrace")}:</div>
+                  <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap text-red-600 dark:text-red-400">
+                    {log.stack}
+                  </pre>
+                </div>
+              )}
+
+              {log.source && (
+                <div className="text-xs text-muted-foreground">
+                  {t("panel.source")}: {log.source.file}:{log.source.line}
+                  {log.source.function && ` (${log.source.function})`}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onClick={handleCopy}>
+          <Copy className="h-4 w-4 mr-2" /> {t("panel.copyLogEntry")}
+        </ContextMenuItem>
+        {onSelect && (
+          <ContextMenuItem onClick={() => onSelect()}>
+            <PanelRightOpen className="h-4 w-4 mr-2" /> {t("panel.viewDetailsMenu")}
+          </ContextMenuItem>
+        )}
+        {onFocusTrace && log.traceId && (
+          <ContextMenuItem onClick={() => onFocusTrace(log.traceId!, log)}>
+            <Crosshair className="h-4 w-4 mr-2" /> {t("panel.focusTraceMenu")}
+          </ContextMenuItem>
+        )}
+        {onFocusSession && log.sessionId && (
+          <ContextMenuItem onClick={() => onFocusSession(log.sessionId!, log)}>
+            <Filter className="h-4 w-4 mr-2" /> {t("panel.focusSessionMenu")}
+          </ContextMenuItem>
+        )}
+        <ContextMenuSeparator />
+        {onToggleBookmark && (
+          <ContextMenuItem onClick={() => onToggleBookmark(log.id)}>
+            {isBookmarked ? (
+              <>
+                <BookmarkCheck className="h-4 w-4 mr-2 text-yellow-500" />{" "}
+                {t("panel.removeBookmark")}
+              </>
+            ) : (
+              <>
+                <Bookmark className="h-4 w-4 mr-2" /> {t("panel.addBookmark")}
+              </>
+            )}
+          </ContextMenuItem>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
+  )
+}
+
+export const MemoizedLogEntry = memo(LogEntry)
+
+export interface TraceGroupProps {
+  traceId: string
+  logs: StructuredLogEntry[]
+  expandedIds: Set<string>
+  toggleExpanded: (id: string) => void
+  onFocusTrace?: (traceId: string, log: StructuredLogEntry) => void
+  onFocusSession?: (sessionId: string, log: StructuredLogEntry) => void
+  searchQuery: string
+  useRegex: boolean
+  bookmarkedIds: Set<string>
+  onToggleBookmark?: (id: string) => void
+  t: ReturnType<typeof useTranslations>
+}
+
+export function TraceGroup({
+  traceId,
+  logs,
+  expandedIds,
+  toggleExpanded,
+  onFocusTrace,
+  onFocusSession,
+  searchQuery,
+  useRegex,
+  bookmarkedIds,
+  onToggleBookmark,
+  t,
+}: TraceGroupProps) {
+  const [isOpen, setIsOpen] = useState(true)
+  const hasErrors = logs.some((l) => l.level === "error" || l.level === "fatal")
+  const hasWarnings = logs.some((l) => l.level === "warn")
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="border rounded-lg mb-2">
+      <CollapsibleTrigger className="flex items-center gap-2 w-full px-3 py-2 hover:bg-muted/50">
+        {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        <Clock className="h-4 w-4 text-muted-foreground" />
+        <span className="font-mono text-sm">
+          {traceId === "no-trace" ? t("panel.noTraceId") : traceId}
+        </span>
+        <Badge variant="outline" className="ml-auto">
+          {logs.length} {t("panel.logs")}
+        </Badge>
+        {hasErrors && <Badge variant="destructive">{t("panel.error")}</Badge>}
+        {hasWarnings && !hasErrors && (
+          <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
+            {t("panel.warning")}
+          </Badge>
+        )}
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        {logs.map((log) => (
+          <LogEntry
+            key={log.id}
+            log={log}
+            isExpanded={expandedIds.has(log.id)}
+            onToggle={() => toggleExpanded(log.id)}
+            onFocusTrace={onFocusTrace}
+            onFocusSession={onFocusSession}
+            searchQuery={searchQuery}
+            useRegex={useRegex}
+            isBookmarked={bookmarkedIds.has(log.id)}
+            onToggleBookmark={onToggleBookmark}
+            t={t}
+          />
+        ))}
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}

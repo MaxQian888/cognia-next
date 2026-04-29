@@ -1,15 +1,41 @@
 {
-  "version": 1,
+  "version": 2,
   "skills": {
+    "ai-elements": {
+      "source": "vercel/ai-elements",
+      "sourceType": "github",
+      "skillPath": "skills/ai-elements/SKILL.md",
+      "computedHash": "aee43f238ee8a8f0caa04286b4a803b87f429a5d38ec4f821456755cd4b69ff4",
+      "displayName": "AI Elements",
+      "description": "Build AI chat interfaces using Vercel ai-elements components — conversations, messages, tool displays, prompt inputs, and more.",
+      "category": "development",
+      "tags": ["ai", "chat", "ui", "vercel"],
+      "author": "Vercel",
+      "rawSkillUrl": "https://raw.githubusercontent.com/vercel/ai-elements/main/skills/ai-elements/SKILL.md"
+    },
     "next-best-practices": {
       "source": "vercel-labs/next-skills",
       "sourceType": "github",
-      "computedHash": "c31ddd68ba5798a79a516c619b1e1fc4408cc4876ad600fefa4f5add4425719d"
+      "skillPath": "skills/next-best-practices/SKILL.md",
+      "computedHash": "c31ddd68ba5798a79a516c619b1e1fc4408cc4876ad600fefa4f5add4425719d",
+      "displayName": "Next.js Best Practices",
+      "description": "Next.js best practices — file conventions, RSC boundaries, data patterns, async APIs, metadata, error handling, route handlers, image/font optimization, bundling.",
+      "category": "development",
+      "tags": ["nextjs", "react", "rsc", "best-practices"],
+      "author": "Vercel Labs",
+      "rawSkillUrl": "https://raw.githubusercontent.com/vercel-labs/next-skills/main/skills/next-best-practices/SKILL.md"
     },
     "shadcn": {
       "source": "shadcn/ui",
       "sourceType": "github",
-      "computedHash": "b1cc1defe03f0e8f78652b7d20e4d4e6421babc2b45835d4f361afe684dc47a2"
+      "skillPath": "skills/shadcn/SKILL.md",
+      "computedHash": "b1cc1defe03f0e8f78652b7d20e4d4e6421babc2b45835d4f361afe684dc47a2",
+      "displayName": "shadcn/ui",
+      "description": "Migrate custom React components to shadcn/ui equivalents in Next.js/TypeScript projects.",
+      "category": "development",
+      "tags": ["shadcn", "react", "ui", "tailwind"],
+      "author": "shadcn",
+      "rawSkillUrl": "https://raw.githubusercontent.com/shadcn-ui/ui/main/skills/shadcn/SKILL.md"
     }
   }
 }

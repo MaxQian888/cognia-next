@@ -127,6 +127,15 @@ if (isTauri()) {
 }
 ```
 
+## Testing Standards
+
+- **Coverage requirement**: every source file must reach **≥90% test coverage** (lines, branches, functions). Verify with `pnpm test:coverage`.
+- **TypeScript / TSX tests**: co-locate next to the source file as `xxx.test.ts` or `xxx.test.tsx` (e.g., `lib/avatar.ts` → `lib/avatar.test.ts`, `components/chat/message.tsx` → `components/chat/message.test.tsx`). Do **not** use a separate `__tests__/` or `tests/` directory.
+- **Rust tests**: write inside the same `.rs` file in a `#[cfg(test)] mod tests { ... }` block. Do not create separate test files for unit tests (integration tests in `src-tauri/tests/` are still allowed).
+- **Exceptions** (no tests, exclude from coverage thresholds):
+  - `components/ui/` — vendored shadcn/ui
+  - `components/ai-elements/` — vendored ai-elements components
+
 ## Critical Notes
 
 - **Always use pnpm** (lockfile present); run `pnpm install` from repo root to install all workspaces

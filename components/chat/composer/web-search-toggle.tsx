@@ -1,0 +1,71 @@
+"use client"
+
+// Per-message "use web search" toggle in the composer's bottom toolbar.
+// When enabled, the composer's submit handler runs the user's prompt through
+// the configured search provider before forwarding to the SDK, then injects
+// the formatted results as a prefix block in the outgoing message.
+
+import { useTranslations } from "next-intl"
+import { GlobeIcon } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useChatStore } from "@/stores/chat-store"
+import { useSettingsStore } from "@/stores/settings-store"
+import {
+  SEARCH_PROVIDERS,
+  isProviderConfigured,
+  DEFAULT_SEARCH_PROVIDER_SETTINGS,
+} from "@/lib/search/types"
+import { cn } from "@/lib/utils"
+
+export function WebSearchToggle() {
+  const t = useTranslations("webSearchToggle")
+
+  const on = useChatStore((s) => s.webSearchOnForNextSend)
+  const setOn = useChatStore((s) => s.setWebSearchOnForNextSend)
+
+  const settings = useSettingsStore((s) => s.settings)
+  const searchEnabled = settings?.searchEnabled ?? false
+  const providers = settings?.searchProviders ?? DEFAULT_SEARCH_PROVIDER_SETTINGS
+  const defaultProvider = settings?.defaultSearchProvider ?? "tavily"
+
+  const enabledProviders = Object.values(providers).filter(
+    (p) => p.enabled && isProviderConfigured(p.providerId, p)
+  )
+  const hasEnabledProvider = enabledProviders.length > 0
+  const disabled = !searchEnabled || !hasEnabledProvider
+
+  const activeProvider = providers[defaultProvider]?.enabled
+    ? defaultProvider
+    : (enabledProviders[0]?.providerId ?? defaultProvider)
+
+  const tooltip = disabled
+    ? t("tooltipDisabled")
+    : on
+      ? t("tooltipOn", { provider: SEARCH_PROVIDERS[activeProvider]?.name ?? activeProvider })
+      : t("tooltipOff")
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          size="sm"
+          variant={on ? "default" : "ghost"}
+          aria-label="Toggle web search"
+          aria-pressed={on}
+          disabled={disabled}
+          onClick={() => setOn(!on)}
+          className={cn(
+            "h-6 gap-1 px-1.5 text-[11px] font-normal",
+            on && "bg-primary/90 text-primary-foreground hover:bg-primary"
+          )}
+        >
+          <GlobeIcon className="size-3.5" />
+          <span className="hidden sm:inline">Web</span>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="top">{tooltip}</TooltipContent>
+    </Tooltip>
+  )
+}

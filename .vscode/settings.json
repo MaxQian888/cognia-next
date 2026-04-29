@@ -39,5 +39,6 @@
   },
   "[markdown]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode"
-  }
+  },
+  "cSpell.words": ["Tauri", "Tauri's", "Unlisten"]
 }

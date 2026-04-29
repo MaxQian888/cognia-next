@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "react-quick-starter",
+  "productName": "Cognia",
   "version": "0.1.0",
   "identifier": "com.reactquickstarter.desktop",
   "build": {
@@ -12,11 +12,18 @@
   "app": {
     "windows": [
       {
-        "title": "react-quick-starter",
-        "width": 800,
-        "height": 600,
+        "title": "Cognia",
+        "label": "main",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "decorations": false,
+        "transparent": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {
@@ -26,6 +33,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": [
+      "../sidecar/claude-host.mjs",
+      "../sidecar/package.json",
+      "../sidecar/node_modules/**/*"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -44,6 +56,29 @@
       "active": false,
       "endpoints": [],
       "pubkey": ""
+    },
+    "deep-link": {
+      "mobile": [],
+      "desktop": {
+        "schemes": ["cognia"]
+      }
+    },
+    "cli": {
+      "description": "Cognia desktop client for Claude Code",
+      "longDescription": "Run with no arguments to open the main window. Pass a path to open it as a workspace.",
+      "args": [
+        {
+          "name": "workspace",
+          "index": 1,
+          "takesValue": true,
+          "description": "Absolute path to a workspace directory to open on launch"
+        },
+        {
+          "name": "new-chat",
+          "short": "n",
+          "description": "Open a fresh chat after launch"
+        }
+      ]
     }
   }
 }

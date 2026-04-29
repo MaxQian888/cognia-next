@@ -1,0 +1,710 @@
+// Shared types between the Tauri sidecar (which speaks Claude Agent SDK) and
+// the React UI (which speaks AI SDK Elements / `ai` UIMessage parts).
+//
+// The shapes of `event` payloads from the sidecar mirror @anthropic-ai/claude-agent-sdk's
+// SDKMessage; we re-declare a *narrow* subset here so the UI layer doesn't take
+// a hard dependency on a Node-only package.
+
+import type { UIMessage } from "ai"
+import type {
+  SearchProviderType,
+  SearchProviderSettings,
+  SearchType,
+  SearchDepth,
+  SearchRecency,
+  SafeSearchLevel,
+  SourceVerificationSettings,
+  SearchUsageEntry,
+  CustomSearchSource,
+} from "@/lib/search/types"
+
+// ---- Outbound (UI → Tauri → sidecar) -------------------------------------
+
+export interface SendOptions {
+  cwd?: string
+  model?: string
+  fallbackModel?: string
+  /** Replaces the SDK's default system prompt entirely. Mutually exclusive with `appendSystemPrompt`. */
+  systemPrompt?: string
+  /** Appended to the SDK's default system prompt. Mutually exclusive with `systemPrompt`. */
+  appendSystemPrompt?: string
+  allowedTools?: string[]
+  disallowedTools?: string[]
+  additionalDirectories?: string[]
+  permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan"
+  env?: Record<string, string>
+  /** Per-name MCP server configs forwarded to the SDK. */
+  mcpServers?: Record<string, Record<string, unknown>>
+  /** Hard cap on agentic turns inside a single SDK invocation (1..=100). */
+  maxTurns?: number
+  /** Forward partial-message stream events (only meaningful in streaming mode). */
+  includePartialMessages?: boolean
+  /** Which on-disk settings the SDK loads — subset of "user" | "project" | "local". */
+  settingSources?: Array<"user" | "project" | "local">
+  /** Dynamic subagent definitions keyed by name. */
+  agents?: Record<string, Record<string, unknown>>
+  /** Only use mcpServers from this blob; ignore on-disk discoveries. */
+  strictMcpConfig?: boolean
+  /** SDK effort level. */
+  effort?: "low" | "medium" | "high" | "xhigh" | "max"
+  /** Resume an existing SDK session by id. Mutually exclusive with `forkFromSessionId`. */
+  resumeSessionId?: string
+  /** Fork a new branch from an existing SDK session id. */
+  forkFromSessionId?: string
+}
+
+/**
+ * A user-turn payload. Either a plain string (back-compat) or a list of
+ * content blocks for multimodal input (text + images).
+ */
+export type SendContentBlock =
+  | { type: "text"; text: string }
+  | {
+      type: "image"
+      source: {
+        type: "base64"
+        media_type: string
+        data: string
+      }
+    }
+
+export type SendContent = string | SendContentBlock[]
+
+export type ApprovalDecision = "allow" | "allow_always" | "deny"
+
+// ---- Inbound (sidecar → Tauri → UI) --------------------------------------
+
+export interface ReadyEvent {
+  type: "ready"
+}
+
+export interface SidecarExitedEvent {
+  type: "sidecar_exited"
+}
+
+export interface LogEvent {
+  type: "log"
+  level: "info" | "warn" | "error"
+  message: string
+}
+
+export interface SessionEndedEvent {
+  type: "session_ended"
+  sessionId: string
+  result?: SDKResultMessage
+  error?: string
+}
+
+/**
+ * Sidecar emits this once per session, on the first SDK message that carries a
+ * `session_id`. The frontend persists `sdkSessionId` on the matching ChatSession
+ * row so future sends can pass `resumeSessionId` and continue the conversation
+ * after a sidecar restart or app reload.
+ */
+export interface SdkSessionIdEvent {
+  type: "sdk_session_id"
+  sessionId: string
+  sdkSessionId: string
+}
+
+export interface PermissionRequestEvent {
+  type: "permission_request"
+  sessionId: string
+  requestId: string
+  toolUseID: string
+  toolName: string
+  input: Record<string, unknown>
+  title?: string
+  displayName?: string
+  description?: string
+  blockedPath?: string
+  decisionReason?: string
+  suggestions?: unknown[]
+}
+
+export interface SDKEventEnvelope {
+  type: "event"
+  sessionId: string
+  event: SDKMessage
+}
+
+export type ClaudeEvent =
+  | ReadyEvent
+  | SidecarExitedEvent
+  | LogEvent
+  | SessionEndedEvent
+  | SdkSessionIdEvent
+  | PermissionRequestEvent
+  | SDKEventEnvelope
+
+// ---- Narrow subset of SDKMessage we care about ---------------------------
+// Full type lives in @anthropic-ai/claude-agent-sdk. We mirror only the bits
+// we need for rendering. Anything else is `unknown`.
+
+export interface BetaTextBlock {
+  type: "text"
+  text: string
+  citations?: unknown
+}
+
+export interface BetaThinkingBlock {
+  type: "thinking"
+  thinking: string
+  signature?: string
+}
+
+export interface BetaToolUseBlock {
+  type: "tool_use"
+  id: string
+  name: string
+  input: Record<string, unknown>
+}
+
+export interface BetaToolResultBlock {
+  type: "tool_result"
+  tool_use_id: string
+  content: string | Array<{ type: "text"; text: string } | Record<string, unknown>>
+  is_error?: boolean
+}
+
+export type BetaContentBlock =
+  | BetaTextBlock
+  | BetaThinkingBlock
+  | BetaToolUseBlock
+  | BetaToolResultBlock
+  | { type: string; [k: string]: unknown }
+
+export interface BetaMessage {
+  id: string
+  role: "assistant" | "user"
+  content: BetaContentBlock[]
+  stop_reason?: string | null
+  model?: string
+  usage?: Record<string, unknown>
+}
+
+export interface SDKAssistantMessage {
+  type: "assistant"
+  message: BetaMessage
+  parent_tool_use_id: string | null
+  uuid: string
+  session_id: string
+  error?: string
+}
+
+export interface SDKUserMessage {
+  type: "user"
+  message: { role: "user"; content: BetaContentBlock[] | string }
+  parent_tool_use_id: string | null
+  uuid: string
+  session_id: string
+}
+
+export interface SDKResultMessage {
+  type: "result"
+  subtype: "success" | string
+  duration_ms: number
+  is_error: boolean
+  result?: string
+  total_cost_usd?: number
+  uuid: string
+  session_id: string
+}
+
+export interface SDKSystemMessage {
+  type: "system"
+  subtype: string
+  uuid: string
+  session_id: string
+  [k: string]: unknown
+}
+
+export interface SDKPartialAssistantMessage {
+  type: "stream_event"
+  event: {
+    type: string
+    index?: number
+    delta?: { type: string; text?: string; thinking?: string; partial_json?: string }
+    content_block?: BetaContentBlock
+    [k: string]: unknown
+  }
+  parent_tool_use_id: string | null
+  uuid: string
+  session_id: string
+}
+
+export type SDKMessage =
+  | SDKAssistantMessage
+  | SDKUserMessage
+  | SDKResultMessage
+  | SDKSystemMessage
+  | SDKPartialAssistantMessage
+  | { type: string; session_id: string; [k: string]: unknown }
+
+// ---- Persistence shapes --------------------------------------------------
+
+/** Distinguishes 1:1 character chats from multi-character team chats. */
+export type SessionKind = "direct" | "team"
+
+export interface ChatSession {
+  id: string
+  title: string
+  /** Missing means "direct" (back-compat with v2 sessions). */
+  kind?: SessionKind
+  /** Direct sessions: the persona driving replies. */
+  characterId?: string
+  /** Team sessions: the team whose members reply. */
+  teamId?: string
+  /** Skills the user has temporarily disabled for this session only. */
+  disabledSkillIds?: string[]
+  pinned?: boolean
+  /** Per-session overrides — take precedence over the character/app defaults. */
+  model?: string
+  systemPrompt?: string
+  workingDir?: string
+  /**
+   * Per-session override for the SDK permission mode. Toggled live via the
+   * composer's Shift+Tab cycle. Wins over both the character and app default.
+   */
+  permissionMode?: SendOptions["permissionMode"]
+  /** Free-form shared notes injected into every team member's transcript. */
+  scratchpad?: string
+  /**
+   * SDK-issued conversation id, captured on the first event that carries a
+   * `session_id`. Used to drive `SendOptions.resumeSessionId` so the
+   * conversation survives sidecar restarts and app reloads.
+   */
+  sdkSessionId?: string
+  /**
+   * When forking, the SDK session id this branch was created from. Stored only
+   * for diagnostics; not auto-applied to subsequent sends.
+   */
+  forkedFromSdkSessionId?: string
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * Where the message originated. User messages have no senderId. Assistant
+ * messages in team sessions carry the speaking character's id; in direct
+ * sessions senderId is undefined (the session's character is implicit).
+ */
+export type MessageSenderKind = "user" | "assistant" | "system"
+
+export interface StoredMessage {
+  id: string
+  sessionId: string
+  role: UIMessage["role"]
+  parts: UIMessage["parts"]
+  /** Character id for team-session assistant messages; undefined otherwise. */
+  senderId?: string
+  senderKind?: MessageSenderKind
+  /** Carries `usage` / `cost` info attached to the result-bearing assistant message. */
+  metadata?: Record<string, unknown>
+  createdAt: number
+}
+
+export type AppTheme = "light" | "dark" | "system"
+export type AppFontScale = "xs" | "sm" | "md" | "lg" | "xl"
+export type AppLanguage = "en" | "zh-CN"
+
+export interface AppSettings {
+  id: "singleton"
+  defaultModel?: string
+  defaultSystemPrompt?: string
+  defaultWorkingDir?: string
+  permissionMode?: SendOptions["permissionMode"]
+  // Tools the user has chosen to always allow for this app (per-tool name).
+  alwaysAllowTools: string[]
+  /**
+   * Anthropic API key. v1 stores the key in IndexedDB plaintext — the user is
+   * told this in the settings UI. Future iterations should migrate to an OS
+   * keyring via `tauri-plugin-stronghold` or similar.
+   */
+  apiKey?: string
+  /** Last time the auto-updater check ran (ms since epoch). Daily debounce. */
+  lastUpdateCheckAt?: number
+  /** UI theme; "system" follows OS preference. */
+  theme?: AppTheme
+  /** Base UI font size scale; maps to <html> font-size in px. */
+  fontScale?: AppFontScale
+  /** Active locale for translatable UI surfaces. */
+  language?: AppLanguage
+  /** Disable non-essential animations and transitions. */
+  reduceMotion?: boolean
+  /** Forward-compat opt-in for future telemetry; never wired in v1. */
+  telemetryEnabled?: boolean
+  /** BCP-47 language tag for the composer's voice-input controls. */
+  sttLanguage?: string
+  /** `MediaDeviceInfo.deviceId` of the user's last-picked microphone. */
+  selectedMicId?: string
+  /**
+   * Base URL for the SkillsMP skill marketplace API. Empty / unset disables
+   * the SkillsMP source in the Browse tab — the local registry remains
+   * available regardless. Trailing slash is stripped at read time.
+   */
+  skillsMpBaseUrl?: string
+
+  // ---- Text-to-Speech ----
+  // The active TTS provider. See `lib/tts/types.ts` for the union.
+  ttsProvider?:
+    | "system"
+    | "openai"
+    | "gemini"
+    | "edge"
+    | "elevenlabs"
+    | "lmnt"
+    | "hume"
+    | "cartesia"
+    | "deepgram"
+  /** Browser SpeechSynthesisVoice.voiceURI (system provider). */
+  systemVoice?: string
+
+  /** OpenAI TTS settings. */
+  openaiVoice?: string
+  openaiModel?: string
+  openaiSpeed?: number
+  openaiInstructions?: string
+
+  /** Gemini TTS settings. */
+  geminiVoice?: string
+
+  /** Edge TTS settings. */
+  edgeVoice?: string
+  edgeRate?: string
+  edgePitch?: string
+
+  /** ElevenLabs TTS settings. */
+  elevenlabsVoice?: string
+  elevenlabsModel?: string
+  elevenlabsStability?: number
+  elevenlabsSimilarityBoost?: number
+
+  /** LMNT TTS settings. */
+  lmntVoice?: string
+  lmntSpeed?: number
+
+  /** Hume TTS settings. */
+  humeVoice?: string
+
+  /** Cartesia TTS settings. */
+  cartesiaVoice?: string
+  cartesiaModel?: string
+  cartesiaLanguage?: string
+  cartesiaSpeed?: number
+  cartesiaEmotion?: string
+
+  /** Deepgram TTS settings. */
+  deepgramVoice?: string
+
+  /** Common TTS controls. */
+  ttsEnabled?: boolean
+  ttsRate?: number
+  ttsPitch?: number
+  ttsVolume?: number
+  ttsAutoPlay?: boolean
+  ttsCacheEnabled?: boolean
+  ttsStreamingEnabled?: boolean
+
+  // ---- Web search (multi-provider) ----
+  /** Master toggle. When false, the composer's web-search button is disabled. */
+  searchEnabled?: boolean
+  /** Default `maxResults` injected into search calls (1..50). */
+  searchMaxResults?: number
+  /** When true, retry next provider on failure. */
+  searchFallbackEnabled?: boolean
+  /** Active provider for new searches; falls back to first enabled provider. */
+  defaultSearchProvider?: SearchProviderType
+  /** Per-provider config (API key, enabled, priority, optional `cx` for Google). */
+  searchProviders?: Record<SearchProviderType, SearchProviderSettings>
+
+  /** Default search options applied when callers don't override. */
+  defaultSearchType?: SearchType
+  defaultSearchDepth?: SearchDepth
+  defaultSearchRecency?: SearchRecency
+  defaultSearchCountry?: string
+  defaultSearchLanguage?: string
+  defaultIncludeDomains?: string[]
+  defaultExcludeDomains?: string[]
+  defaultIncludeAnswer?: boolean
+  defaultIncludeRawContent?: boolean
+
+  /** LRU cache controls. */
+  searchCacheEnabled?: boolean
+  searchCacheTTL?: number
+  searchCacheMaxEntries?: number
+
+  /** Safe-search filter level. */
+  searchSafeSearchEnabled?: boolean
+  searchSafeSearchLevel?: SafeSearchLevel
+
+  /** Source-verification settings (credibility scoring + cross-validation). */
+  sourceVerificationSettings?: SourceVerificationSettings
+
+  /** Per-provider usage tracking (counts, latencies, errors). */
+  searchUsageStats?: Record<SearchProviderType, SearchUsageEntry>
+
+  /** User-defined research sources (rendered as toggle pills in Global). */
+  customSearchSources?: CustomSearchSource[]
+  /** Currently-selected research source ids. */
+  defaultSearchSources?: string[]
+}
+
+export interface SystemPromptPreset {
+  id: string
+  name: string
+  content: string
+  createdAt: number
+  updatedAt: number
+}
+
+export type McpTransport = "stdio" | "sse" | "http"
+
+/**
+ * Identifier for an external AI coding agent that cognia-next can read MCP
+ * server configs from and (for writable agents) project our managed servers
+ * into. User-scope only — workspace/project-scope files are out of scope.
+ *
+ * `cline` and `roo-code` are read-only because their config paths live inside
+ * VS Code's globalStorage and aren't stable across distributions.
+ */
+export type AgentId =
+  | "claude-code"
+  | "claude-desktop"
+  | "cursor"
+  | "vscode"
+  | "codex"
+  | "gemini"
+  | "windsurf"
+  | "cline"
+  | "roo-code"
+
+export interface McpServer {
+  id: string
+  name: string
+  transport: McpTransport
+  /**
+   * Free-form configuration object passed verbatim to the SDK as
+   * `options.mcpServers[name]`. Shape varies per transport:
+   *   stdio: { command: string, args?: string[], env?: Record<string,string> }
+   *   sse:   { url: string, headers?: Record<string,string> }
+   *   http:  { url: string, headers?: Record<string,string> }
+   */
+  config: Record<string, unknown>
+  /** Whether this server is exposed to Claude in cognia-next's own chats. */
+  enabled: boolean
+  /**
+   * Per-agent projection toggles. When an entry is `true`, this server is
+   * mirrored into that agent's user-scope MCP config file on every CRUD.
+   * Unset / false / read-only agents stay untouched.
+   *
+   * Orthogonal to `enabled`: a server can be "off in cognia-next, on in
+   * Cursor" or vice-versa.
+   */
+  appsEnabled?: Partial<Record<AgentId, boolean>>
+  createdAt: number
+  updatedAt: number
+}
+
+export interface PendingApproval {
+  sessionId: string
+  requestId: string
+  toolUseID: string
+  toolName: string
+  input: Record<string, unknown>
+  title?: string
+  displayName?: string
+  description?: string
+  blockedPath?: string
+  decisionReason?: string
+}
+
+// ---- Characters / Skills / Teams -----------------------------------------
+
+/**
+ * A reusable persona. When a session has `characterId`, the character's config
+ * supplies the system prompt, model, tool whitelist, MCP subset, and skills,
+ * unless the session has explicit overrides for those fields.
+ */
+export interface Character {
+  id: string
+  name: string
+  description?: string
+  /** CSS color token (e.g. "oklch(...)" or a hex) used for avatar fallback. */
+  avatarColor: string
+  /** Optional one-glyph icon shown inside the avatar. */
+  avatarEmoji?: string
+  systemPrompt: string
+  model?: string
+  permissionMode?: SendOptions["permissionMode"]
+  allowedTools?: string[]
+  disallowedTools?: string[]
+  /** Subset of MCP server ids; undefined means "all enabled servers". */
+  mcpServerIds?: string[]
+  /** Ordered list of skills appended to the system prompt at send time. */
+  skillIds?: string[]
+  workingDir?: string
+  /** Seeded built-ins are read-only (UI offers "Duplicate" instead of edit). */
+  isBuiltIn?: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * A reusable instruction blob appended to a character's system prompt at send
+ * time. Skills are pure markdown — no filesystem side effects in this version.
+ */
+export interface Skill {
+  id: string
+  name: string
+  description?: string
+  /** Markdown body, appended verbatim to the system prompt under `## <name>`. */
+  content: string
+  /** Tools this skill expects to call; unioned with the character's whitelist. */
+  allowedTools?: string[]
+  tags?: string[]
+  /**
+   * Seeded built-ins are read-only. Kept alongside `source` for back-compat;
+   * new code should prefer `source === "builtin"`.
+   */
+  isBuiltIn?: boolean
+  /** Where this skill came from. Defaults to "custom" for legacy rows. */
+  source?: SkillSource
+  /**
+   * Lifecycle state. Defaults to "enabled" for legacy rows. "disabled" means
+   * the skill is hidden from the system prompt at send time without deleting.
+   */
+  status?: SkillStatus
+  /** High-level category, drives the UI sidebar/icons. Defaults to "custom". */
+  category?: SkillCategory
+  version?: string
+  author?: string
+  license?: string
+  /** SemVer-style usage count, bumped each time the skill is sent. */
+  usageCount?: number
+  /** Last time the skill was appended to a system prompt. */
+  lastUsedAt?: number
+  /** Validation issues found by `lib/skills/validate.ts`. Non-fatal. */
+  validationErrors?: SkillValidationError[]
+  /**
+   * Stable cross-source identity (e.g., GitHub `owner/repo:path`). Used by
+   * the marketplace + native sync to detect that two rows are the same skill.
+   */
+  canonicalId?: string
+  /** Marketplace item id this skill was installed from. */
+  marketplaceSkillId?: string
+  /** Path of the matching `~/.claude/skills/<dir>/` if synced to disk. */
+  nativeDirectory?: string
+  /** Which source last wrote this record. */
+  syncOrigin?: SkillSyncOrigin
+  /** Hash of (frontmatter + body + resources) used to detect drift. */
+  syncFingerprint?: string
+  lastSyncedAt?: number
+  /** Most recent sync failure, cleared on successful sync. */
+  lastSyncError?: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * 8 high-level skill categories — same set Cognia uses, so SKILL.md frontmatter
+ * roundtrips between the two apps. Falls back to "custom" when unspecified.
+ */
+export type SkillCategory =
+  | "creative-design"
+  | "development"
+  | "enterprise"
+  | "productivity"
+  | "data-analysis"
+  | "communication"
+  | "meta"
+  | "custom"
+
+export type SkillSource = "builtin" | "custom" | "imported" | "generated" | "marketplace"
+
+export type SkillStatus = "enabled" | "disabled" | "error" | "loading"
+
+export type SkillSyncOrigin = "frontend" | "builtin" | "native" | "marketplace"
+
+export type SkillResourceKind = "script" | "reference" | "asset"
+
+/**
+ * A file bundled with a skill — script (executable), reference (markdown/text
+ * companion), or asset (image, json, anything else). The text content is
+ * stored inline in IndexedDB; binary assets store an opaque base64 payload.
+ */
+export interface SkillResource {
+  id: string
+  skillId: string
+  kind: SkillResourceKind
+  /** Display name shown in the resource manager. */
+  name: string
+  /** Relative path under the skill's native directory (`scripts/foo.sh`). */
+  path: string
+  /** Inline text or base64. Resource-manager UI treats binary by mimeType. */
+  content: string
+  /** Encoding used for `content`: utf-8 text by default. */
+  encoding?: "utf-8" | "base64"
+  mimeType?: string
+  size?: number
+  /** When true, body is inlined into the system prompt at send time. */
+  inline?: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface SkillValidationError {
+  code:
+    | "missing-name"
+    | "name-too-long"
+    | "name-format"
+    | "missing-content"
+    | "description-too-long"
+    | "duplicate-resource-path"
+    | "resource-path-traversal"
+    | "frontmatter-parse"
+    | "unknown"
+  message: string
+  /** Frontmatter field or resource id this error applies to. */
+  field?: string
+}
+
+/** Strategy for distributing user turns across a team's members. */
+export type TeamOrchestration = "mention_round_robin" | "round_robin" | "manual" | "supervisor"
+
+/**
+ * A character slot inside a team. The character supplies defaults; any
+ * non-empty override field replaces the corresponding character field for
+ * this team only (does not mutate the underlying Character).
+ */
+export interface TeamMember {
+  characterId: string
+  /** Free-text label, e.g. "Critic" or "Researcher". Display-only. */
+  role?: string
+  /** Replaces character.systemPrompt when set. Skills are still appended. */
+  systemPromptOverride?: string
+  /** Replaces character.model when set. */
+  modelOverride?: string
+  /** Fully replaces (does not union) character.allowedTools when set. */
+  allowedToolsOverride?: string[]
+  /** Fully replaces (does not union) character.mcpServerIds when set. */
+  mcpServerIdsOverride?: string[]
+}
+
+export interface Team {
+  id: string
+  name: string
+  description?: string
+  avatarColor: string
+  avatarEmoji?: string
+  /** Ordered member slots. The order determines round-robin reply order. */
+  members: TeamMember[]
+  orchestration: TeamOrchestration
+  /** When orchestration === "supervisor", which member acts as the leader. */
+  supervisorCharacterId?: string
+  /** Team-level MCP override applied to members without their own subset. */
+  mcpServerIds?: string[]
+  isBuiltIn?: boolean
+  createdAt: number
+  updatedAt: number
+}

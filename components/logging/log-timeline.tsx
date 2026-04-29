@@ -1,0 +1,331 @@
+"use client"
+
+/**
+ * LogTimeline
+ *
+ * Compact horizontal bar showing log density over time,
+ * color-coded by severity. Clickable regions to filter by time range.
+ * Supports brush selection (click-and-drag) for zooming.
+ * Includes level-specific mini-sparklines below the main bar.
+ */
+
+import { useMemo, useCallback, useState, useRef } from "react"
+import { useTranslations } from "next-intl"
+import { X } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
+import type { StructuredLogEntry } from "@/lib/logger"
+
+export interface LogTimelineProps {
+  logs: StructuredLogEntry[]
+  className?: string
+  /** Number of time buckets to divide the timeline into */
+  bucketCount?: number
+  /** Callback when a time range is selected (click or brush) */
+  onTimeRangeClick?: (start: Date, end: Date) => void
+  /** Currently selected bucket range (for highlighting) */
+  selectedRange?: { start: Date; end: Date } | null
+}
+
+interface TimelineBucket {
+  start: Date
+  end: Date
+  total: number
+  error: number
+  warn: number
+  info: number
+  other: number
+}
+
+function getBucketColor(bucket: TimelineBucket): string {
+  if (bucket.total === 0) return "bg-muted/30"
+  if (bucket.error > 0) return "bg-red-500"
+  if (bucket.warn > 0) return "bg-yellow-500"
+  if (bucket.info > 0) return "bg-green-500"
+  return "bg-blue-500"
+}
+
+function getBucketOpacity(bucket: TimelineBucket, maxCount: number): number {
+  if (bucket.total === 0 || maxCount === 0) return 0.15
+  return Math.max(0.2, Math.min(1, bucket.total / maxCount))
+}
+
+function isInRange(bucket: TimelineBucket, range: { start: Date; end: Date } | null): boolean {
+  if (!range) return false
+  return bucket.start >= range.start && bucket.end <= range.end
+}
+
+export function LogTimeline({
+  logs,
+  className,
+  bucketCount = 60,
+  onTimeRangeClick,
+  selectedRange = null,
+}: LogTimelineProps) {
+  const t = useTranslations("logging")
+  const [dragStartIdx, setDragStartIdx] = useState<number | null>(null)
+  const [dragCurrentIdx, setDragCurrentIdx] = useState<number | null>(null)
+  const isDragging = useRef(false)
+
+  const buckets = useMemo((): TimelineBucket[] => {
+    if (logs.length === 0) return []
+
+    let minTs = Infinity
+    let maxTs = -Infinity
+    for (const log of logs) {
+      const ts = new Date(log.timestamp).getTime()
+      if (ts < minTs) minTs = ts
+      if (ts > maxTs) maxTs = ts
+    }
+    const range = Math.max(maxTs - minTs, 1000)
+    const bucketMs = range / bucketCount
+
+    const result: TimelineBucket[] = Array.from({ length: bucketCount }, (_, i) => ({
+      start: new Date(minTs + i * bucketMs),
+      end: new Date(minTs + (i + 1) * bucketMs),
+      total: 0,
+      error: 0,
+      warn: 0,
+      info: 0,
+      other: 0,
+    }))
+
+    for (const log of logs) {
+      const ts = new Date(log.timestamp).getTime()
+      const idx = Math.min(Math.floor((ts - minTs) / bucketMs), bucketCount - 1)
+
+      result[idx].total++
+      if (log.level === "error" || log.level === "fatal") {
+        result[idx].error++
+      } else if (log.level === "warn") {
+        result[idx].warn++
+      } else if (log.level === "info") {
+        result[idx].info++
+      } else {
+        result[idx].other++
+      }
+    }
+
+    return result
+  }, [logs, bucketCount])
+
+  const maxCount = useMemo(() => {
+    let max = 1
+    for (const b of buckets) {
+      if (b.total > max) max = b.total
+    }
+    return max
+  }, [buckets])
+
+  // Max counts per level for mini-sparklines
+  const maxPerLevel = useMemo(() => {
+    let maxError = 1,
+      maxWarn = 1,
+      maxInfo = 1
+    for (const b of buckets) {
+      if (b.error > maxError) maxError = b.error
+      if (b.warn > maxWarn) maxWarn = b.warn
+      if (b.info > maxInfo) maxInfo = b.info
+    }
+    return { error: maxError, warn: maxWarn, info: maxInfo }
+  }, [buckets])
+
+  const handleBucketClick = useCallback(
+    (bucket: TimelineBucket) => {
+      onTimeRangeClick?.(bucket.start, bucket.end)
+    },
+    [onTimeRangeClick]
+  )
+
+  // Brush selection handlers
+  const handleMouseDown = useCallback((idx: number) => {
+    setDragStartIdx(idx)
+    setDragCurrentIdx(idx)
+    isDragging.current = true
+  }, [])
+
+  const handleMouseMove = useCallback((idx: number) => {
+    if (isDragging.current) {
+      setDragCurrentIdx(idx)
+    }
+  }, [])
+
+  const handleMouseUp = useCallback(() => {
+    if (isDragging.current && dragStartIdx !== null && dragCurrentIdx !== null) {
+      const startIdx = Math.min(dragStartIdx, dragCurrentIdx)
+      const endIdx = Math.max(dragStartIdx, dragCurrentIdx)
+
+      if (startIdx !== endIdx && buckets.length > 0) {
+        // Brush selection: range across multiple buckets
+        onTimeRangeClick?.(buckets[startIdx].start, buckets[endIdx].end)
+      } else {
+        // Single click
+        handleBucketClick(buckets[startIdx])
+      }
+    }
+    setDragStartIdx(null)
+    setDragCurrentIdx(null)
+    isDragging.current = false
+  }, [dragStartIdx, dragCurrentIdx, buckets, onTimeRangeClick, handleBucketClick])
+
+  const brushRange = useMemo(() => {
+    if (dragStartIdx === null || dragCurrentIdx === null) return null
+    return {
+      min: Math.min(dragStartIdx, dragCurrentIdx),
+      max: Math.max(dragStartIdx, dragCurrentIdx),
+    }
+  }, [dragStartIdx, dragCurrentIdx])
+
+  if (logs.length === 0) return null
+
+  const firstTime = buckets[0]?.start
+  const lastTime = buckets[buckets.length - 1]?.end
+  const hasErrors = buckets.some((b) => b.error > 0)
+  const hasWarns = buckets.some((b) => b.warn > 0)
+
+  return (
+    <div className={cn("px-3 py-2 border-b bg-muted/10", className)}>
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-[10px] text-muted-foreground font-medium">{t("timeline.title")}</span>
+        {selectedRange && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-4 px-1 text-[10px]"
+            onClick={() => onTimeRangeClick?.(new Date(0), new Date())}
+          >
+            <X className="h-2.5 w-2.5 mr-0.5" />
+            Clear
+          </Button>
+        )}
+        <div className="flex items-center gap-1.5 ml-auto">
+          <div className="flex items-center gap-1">
+            <div className="h-2 w-2 rounded-sm bg-green-500" />
+            <span className="text-[10px] text-muted-foreground">{t("levels.info")}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="h-2 w-2 rounded-sm bg-yellow-500" />
+            <span className="text-[10px] text-muted-foreground">{t("levels.warn")}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="h-2 w-2 rounded-sm bg-red-500" />
+            <span className="text-[10px] text-muted-foreground">{t("levels.error")}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Main density bar */}
+      <div
+        className="flex gap-px h-6 rounded overflow-hidden select-none"
+        onMouseLeave={handleMouseUp}
+        onMouseUp={handleMouseUp}
+      >
+        {buckets.map((bucket, i) => {
+          const color = getBucketColor(bucket)
+          const opacity = getBucketOpacity(bucket, maxCount)
+          const isSelected = isInRange(bucket, selectedRange)
+          const isInBrush = brushRange ? i >= brushRange.min && i <= brushRange.max : false
+
+          return (
+            <Tooltip key={i}>
+              <TooltipTrigger asChild>
+                <button
+                  className={cn(
+                    "flex-1 min-w-0 transition-all",
+                    color,
+                    onTimeRangeClick && "cursor-pointer",
+                    isSelected && "ring-2 ring-primary ring-inset",
+                    isInBrush && "ring-1 ring-primary/70 ring-inset brightness-125",
+                    !isSelected && !isInBrush && "hover:ring-1 hover:ring-primary/50"
+                  )}
+                  style={{ opacity: isSelected || isInBrush ? Math.max(opacity, 0.6) : opacity }}
+                  onMouseDown={() => handleMouseDown(i)}
+                  onMouseEnter={() => handleMouseMove(i)}
+                  onMouseUp={handleMouseUp}
+                  aria-label={`${bucket.total} logs`}
+                />
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                <div className="space-y-0.5">
+                  <p className="font-medium">
+                    {bucket.start.toLocaleTimeString("en-US", {
+                      hour12: false,
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    })}
+                  </p>
+                  <p>
+                    {t("timeline.total")}: {bucket.total}
+                  </p>
+                  {bucket.error > 0 && (
+                    <p className="text-red-400">
+                      {t("timeline.errors")}: {bucket.error}
+                    </p>
+                  )}
+                  {bucket.warn > 0 && (
+                    <p className="text-yellow-400">
+                      {t("timeline.warnings")}: {bucket.warn}
+                    </p>
+                  )}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          )
+        })}
+      </div>
+
+      {/* Level-specific mini-sparklines */}
+      <div className="mt-0.5 space-y-px">
+        {hasErrors && (
+          <div className="flex gap-px h-[3px] rounded overflow-hidden">
+            {buckets.map((bucket, i) => (
+              <div
+                key={i}
+                className="flex-1 min-w-0 bg-red-500 transition-opacity"
+                style={{
+                  opacity:
+                    bucket.error > 0 ? Math.max(0.3, bucket.error / maxPerLevel.error) : 0.05,
+                }}
+              />
+            ))}
+          </div>
+        )}
+        {hasWarns && (
+          <div className="flex gap-px h-[3px] rounded overflow-hidden">
+            {buckets.map((bucket, i) => (
+              <div
+                key={i}
+                className="flex-1 min-w-0 bg-yellow-500 transition-opacity"
+                style={{
+                  opacity: bucket.warn > 0 ? Math.max(0.3, bucket.warn / maxPerLevel.warn) : 0.05,
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Time labels */}
+      <div className="flex justify-between mt-0.5">
+        <span className="text-[10px] text-muted-foreground">
+          {firstTime?.toLocaleTimeString("en-US", {
+            hour12: false,
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </span>
+        <span className="text-[10px] text-muted-foreground">
+          {lastTime?.toLocaleTimeString("en-US", {
+            hour12: false,
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+export default LogTimeline

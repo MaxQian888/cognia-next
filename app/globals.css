@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "katex/dist/katex.min.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -119,4 +120,16 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* Honor the user's reduce-motion preference. SettingsSyncProvider toggles
+   the data attribute on the <html> root from the persisted setting. We use
+   `1ms` instead of `0` so existing transitionend listeners still fire. */
+html[data-reduce-motion="true"] *,
+html[data-reduce-motion="true"] *::before,
+html[data-reduce-motion="true"] *::after {
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 1ms !important;
+  scroll-behavior: auto !important;
 }
