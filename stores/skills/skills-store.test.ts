@@ -66,16 +66,16 @@ describe("useSkillsStore", () => {
 
     it("setQuery only changes the query", () => {
       const { result } = renderHook(() => useSkillsStore())
-      act(() => result.current.setFilters({ category: "code", sort: "usage" }))
+      act(() => result.current.setFilters({ category: "development", sort: "usage" }))
       act(() => result.current.setQuery("yaml"))
       expect(result.current.filters.query).toBe("yaml")
-      expect(result.current.filters.category).toBe("code")
+      expect(result.current.filters.category).toBe("development")
       expect(result.current.filters.sort).toBe("usage")
     })
 
     it("resetFilters returns to the documented defaults", () => {
       const { result } = renderHook(() => useSkillsStore())
-      act(() => result.current.setFilters({ query: "x", category: "code", sort: "usage" }))
+      act(() => result.current.setFilters({ query: "x", category: "development", sort: "usage" }))
       act(() => result.current.resetFilters())
       expect(result.current.filters).toEqual(DEFAULT_FILTERS)
     })

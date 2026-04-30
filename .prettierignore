@@ -9,3 +9,4 @@ src-tauri/gen
 pnpm-lock.yaml
 *.min.js
 *.min.css
+public/monaco

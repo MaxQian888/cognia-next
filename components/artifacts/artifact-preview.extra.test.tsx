@@ -31,7 +31,7 @@ jest.mock("./artifact-renderers", () => {
       return <div data-testid="plugin-host" />
     },
     resolveArtifactRenderPlan: (artifact: { type: string }) => {
-      const claimed = registry.resolveRegisteredArtifactRenderer(artifact)
+      const claimed = registry.resolveRegisteredArtifactRenderer(artifact as never)
       if (claimed) return { owner: "plugin" as const, pluginRenderer: claimed }
       if (artifact.type === "jupyter") return { owner: "jupyter" as const }
       if (

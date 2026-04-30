@@ -73,4 +73,38 @@ describe("conversational-task-intent", () => {
       })
     )
   })
+
+  it("falls through to the agent branch when both chat and agent hints fire", () => {
+    // 提醒 + 消息 (chat hints) AND agent (agent hint) → both intents true →
+    // falls past the chat-only and agent-only branches to the explicitAgentIntent
+    // fallback (line 82).
+    const draft = detectConversationalSchedulerDraft("每天提醒 agent 发送一条状态消息", {
+      mode: "chat",
+      sessionId: "session-1",
+    })
+    expect(draft).not.toBeNull()
+    expect(draft?.input.type).toBe("agent")
+  })
+
+  it("uses agent draft when mode is 'agent' and no explicit hint is present", () => {
+    // 每天 (scheduler intent) with no chat or agent keywords → mode === "agent"
+    // branch fires (line 91).
+    const draft = detectConversationalSchedulerDraft("每天分析昨天的运营数据", {
+      mode: "agent",
+      sessionId: "session-1",
+    })
+    expect(draft).not.toBeNull()
+    expect(draft?.input.type).toBe("agent")
+  })
+
+  it("falls back to a chat draft when mode is non-agent and no hints fire", () => {
+    // 每天 (scheduler intent) with no chat or agent keywords + non-agent mode →
+    // default chat draft branch (line 100).
+    const draft = detectConversationalSchedulerDraft("每天分析昨天的运营数据", {
+      mode: "research",
+      sessionId: "session-1",
+    })
+    expect(draft).not.toBeNull()
+    expect(draft?.input.type).toBe("chat")
+  })
 })

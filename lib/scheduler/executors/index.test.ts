@@ -11,7 +11,7 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: () => isTauriValue,
 }))
 
-const sendPromptMock = jest.fn(async () => undefined)
+const sendPromptMock = jest.fn(async (..._args: unknown[]) => undefined)
 const onClaudeMessageMock = jest.fn()
 jest.mock("@/lib/claude/ipc", () => ({
   sendPrompt: (sessionId: string, prompt: string) => sendPromptMock(sessionId, prompt),
@@ -31,12 +31,15 @@ jest.mock("../script-executor", () => ({
   executeScript: (action: unknown) => executeScriptMock(action),
 }))
 
-const executePluginTaskMock = jest.fn(async () => ({ success: false, error: "no runtime" }))
+const executePluginTaskMock = jest.fn(async (..._args: unknown[]) => ({
+  success: false,
+  error: "no runtime",
+}))
 jest.mock("./plugin-executor", () => ({
   executePluginTask: (...args: unknown[]) => executePluginTaskMock(...args),
 }))
 
-const executeBackupTaskMock = jest.fn(async () => ({ success: true }))
+const executeBackupTaskMock = jest.fn(async (..._args: unknown[]) => ({ success: true }))
 jest.mock("./backup-executor", () => ({
   executeBackupTask: (...args: unknown[]) => executeBackupTaskMock(...args),
 }))

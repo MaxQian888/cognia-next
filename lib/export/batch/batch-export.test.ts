@@ -22,7 +22,8 @@ jest.mock("@/lib/export/single", () => ({
   })),
 }))
 jest.mock("@/lib/db/schema", () => {
-  const msgs = {
+  type MsgsChain = { where: jest.Mock; equals: jest.Mock; sortBy: jest.Mock }
+  const msgs: MsgsChain = {
     where: jest.fn(() => msgs),
     equals: jest.fn(() => msgs),
     sortBy: jest.fn(),

@@ -98,7 +98,10 @@ function ChannelListBody({
   // Narrow once: this component is only ever rendered for the chat
   // (DM/team) guilds. The shell branches on `kind === "canvas"`
   // upstream and renders the CanvasDocumentRail instead.
-  const chatGuild = selectedGuild.kind === "canvas" ? ({ kind: "dm" } as const) : selectedGuild
+  const chatGuild = useMemo(
+    () => (selectedGuild.kind === "canvas" ? ({ kind: "dm" } as const) : selectedGuild),
+    [selectedGuild]
+  )
   const characters = useClientLiveQuery<Character[]>(() => listCharacters(), [], [])
   const characterById = useMemo(() => {
     const map = new Map<string, Character>()

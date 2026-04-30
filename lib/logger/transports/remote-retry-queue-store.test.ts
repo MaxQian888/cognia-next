@@ -292,9 +292,9 @@ describe("IndexedDBRemoteRetryQueueStore (with IndexedDB)", () => {
       })
       return req as unknown as IDBOpenDBRequest
     })
-    ;(window as unknown as { indexedDB: { open: typeof fakeOpen } }).indexedDB = {
+    ;(window as unknown as { indexedDB: unknown }).indexedDB = {
       open: fakeOpen,
-    } as unknown as IDBFactory
+    }
     const store = new IndexedDBRemoteRetryQueueStore({ dbName: "all-fail" })
     // Each call should reject because the inner request fires onerror.
     await expect(store.enqueueBatch([makeEntry("a")])).rejects.toThrow("add-fail")
@@ -326,9 +326,9 @@ describe("IndexedDBRemoteRetryQueueStore (with IndexedDB)", () => {
       })
       return req
     })
-    ;(window as unknown as { indexedDB: { open: typeof fakeOpen } }).indexedDB = {
+    ;(window as unknown as { indexedDB: unknown }).indexedDB = {
       open: fakeOpen,
-    } as unknown as IDBFactory
+    }
     const store = new IndexedDBRemoteRetryQueueStore({ dbName: "open-fail" })
     // Despite the failure, fallback should still let us enqueue.
     const result = await store.enqueueBatch([makeEntry("a")])

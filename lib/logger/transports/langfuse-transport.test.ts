@@ -17,9 +17,9 @@ const mockLangfuse = {
   flush: jest.fn(async () => undefined),
 }
 
-const mockGetLangfuse = jest.fn(async () => mockLangfuse)
-const mockCreateChatTrace = jest.fn(async () => mockTrace)
-const mockCreateSpan = jest.fn(() => mockSpan)
+const mockGetLangfuse = jest.fn(async (..._args: unknown[]) => mockLangfuse)
+const mockCreateChatTrace = jest.fn(async (..._args: unknown[]) => mockTrace)
+const mockCreateSpan = jest.fn((..._args: [unknown, Record<string, unknown>]) => mockSpan)
 
 let langfuseModuleAvailable = true
 
@@ -27,7 +27,8 @@ jest.mock("@/lib/ai/observability/langfuse-client", () => ({
   __esModule: true,
   getLangfuse: (...args: unknown[]) => mockGetLangfuse(...args),
   createChatTrace: (...args: unknown[]) => mockCreateChatTrace(...args),
-  createSpan: (...args: unknown[]) => mockCreateSpan(...args),
+  createSpan: (...args: unknown[]) =>
+    mockCreateSpan(...(args as [unknown, Record<string, unknown>])),
 }))
 
 beforeEach(() => {

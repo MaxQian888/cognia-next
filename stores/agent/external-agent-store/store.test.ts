@@ -40,16 +40,13 @@ beforeEach(() => {
  * the test API exposed by zustand's persist middleware. We pull it through
  * the persist options so we exercise the same code paths the runtime uses.
  */
-type StoreWithPersist = typeof useExternalAgentStore & {
-  persist: {
-    getOptions: () => {
-      migrate: (state: unknown, version: number) => unknown
-      partialize: (state: ExternalAgentStore) => unknown
-    }
-  }
+type PersistOpts = {
+  migrate: (state: unknown, version: number) => unknown
+  partialize: (state: ExternalAgentStore) => unknown
 }
+type StoreWithPersist = { persist: { getOptions: () => PersistOpts } }
 
-const persistOptions = (useExternalAgentStore as StoreWithPersist).persist.getOptions()
+const persistOptions = (useExternalAgentStore as unknown as StoreWithPersist).persist.getOptions()
 
 const baseAgent = (overrides: Partial<StoredExternalAgentConfig> = {}): StoredExternalAgentConfig =>
   ({

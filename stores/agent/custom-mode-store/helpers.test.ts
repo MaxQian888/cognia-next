@@ -157,7 +157,6 @@ describe("getRecommendedMcpToolsForMode", () => {
         name: "X",
         description: "find things",
         systemPrompt: "system",
-        // @ts-expect-error - intentionally pass a category not in the boost table
         category: "personal",
       }
     )

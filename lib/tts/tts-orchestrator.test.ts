@@ -109,7 +109,7 @@ interface MockSpeechSynth {
   voices: SpeechSynthesisVoice[]
 }
 
-let lastSynth: MockSpeechSynth | null = null
+let _lastSynth: MockSpeechSynth | null = null
 
 function setupSpeechSynth() {
   const state: MockSpeechSynth = {
@@ -165,16 +165,15 @@ function setupSpeechSynth() {
     window as unknown as { SpeechSynthesisUtterance: typeof MockUtterance }
   ).SpeechSynthesisUtterance = MockUtterance as unknown as typeof SpeechSynthesisUtterance
 
-  lastSynth = state
+  _lastSynth = state
   return state
 }
 
 beforeEach(() => {
   lastAudio = null
-  lastSynth = null
+  _lastSynth = null
   mockCache.mockReset()
-  ;(globalThis as unknown as { Audio: typeof MockAudioCtor }).Audio =
-    MockAudioCtor as unknown as typeof Audio
+  ;(globalThis as unknown as { Audio: unknown }).Audio = MockAudioCtor
   // jsdom's URL.createObjectURL/revokeObjectURL aren't real but exist in some
   // versions; install spies regardless so we control them.
   ;(URL as unknown as { createObjectURL: jest.Mock }).createObjectURL = jest
@@ -624,8 +623,7 @@ describe("audio element error path", () => {
         })
       }
     }
-    ;(globalThis as unknown as { Audio: typeof ErrAudio }).Audio =
-      ErrAudio as unknown as typeof Audio
+    ;(globalThis as unknown as { Audio: unknown }).Audio = ErrAudio
 
     mockCache.mockResolvedValueOnce({ audioData: new ArrayBuffer(2), mimeType: "audio/mpeg" })
     const o = new TTSOrchestrator()
@@ -670,8 +668,7 @@ describe("audio onpause emits paused state when not finished", () => {
         })
       }
     }
-    ;(globalThis as unknown as { Audio: typeof PauseAudio }).Audio =
-      PauseAudio as unknown as typeof Audio
+    ;(globalThis as unknown as { Audio: unknown }).Audio = PauseAudio
     mockCache.mockResolvedValueOnce({ audioData: new ArrayBuffer(2), mimeType: "audio/mpeg" })
     const o = new TTSOrchestrator()
     await o.speak("hi", {

@@ -213,15 +213,13 @@ describe("workspace filters", () => {
 
   it("getArtifactsForWorkspace honors limit", () => {
     for (let i = 0; i < 5; i++) {
-      useArtifactStore
-        .getState()
-        .createArtifact({
-          sessionId: "s",
-          messageId: "m",
-          type: "code",
-          title: `t${i}`,
-          content: "x",
-        })
+      useArtifactStore.getState().createArtifact({
+        sessionId: "s",
+        messageId: "m",
+        type: "code",
+        title: `t${i}`,
+        content: "x",
+      })
     }
     expect(
       useArtifactStore.getState().getArtifactsForWorkspace({ sessionId: "s", limit: 2 })
@@ -383,14 +381,12 @@ describe("canvas documents", () => {
   })
 
   it("canvas suggestions add / update / apply / clear", () => {
-    const id = useArtifactStore
-      .getState()
-      .createCanvasDocument({
-        title: "d",
-        content: "a\nb\nc",
-        language: "javascript",
-        type: "code",
-      })
+    const id = useArtifactStore.getState().createCanvasDocument({
+      title: "d",
+      content: "a\nb\nc",
+      language: "javascript",
+      type: "code",
+    })
     useArtifactStore.getState().addSuggestion(id, {
       type: "edit",
       range: { startLine: 1, endLine: 1 },
@@ -507,25 +503,21 @@ describe("getArtifact / getSessionArtifacts / search / filter / recent", () => {
   })
 
   it("searchArtifacts matches title/type/language", () => {
-    useArtifactStore
-      .getState()
-      .createArtifact({
-        sessionId: "s",
-        messageId: "m",
-        type: "code",
-        title: "Alpha",
-        content: "x",
-        language: "python",
-      })
-    useArtifactStore
-      .getState()
-      .createArtifact({
-        sessionId: "s",
-        messageId: "m",
-        type: "html",
-        title: "Beta",
-        content: "<html></html>",
-      })
+    useArtifactStore.getState().createArtifact({
+      sessionId: "s",
+      messageId: "m",
+      type: "code",
+      title: "Alpha",
+      content: "x",
+      language: "python",
+    })
+    useArtifactStore.getState().createArtifact({
+      sessionId: "s",
+      messageId: "m",
+      type: "html",
+      title: "Beta",
+      content: "<html></html>",
+    })
     expect(useArtifactStore.getState().searchArtifacts("alpha")).toHaveLength(1)
     expect(useArtifactStore.getState().searchArtifacts("html")).toHaveLength(1)
     expect(useArtifactStore.getState().searchArtifacts("python")).toHaveLength(1)
@@ -544,15 +536,13 @@ describe("getArtifact / getSessionArtifacts / search / filter / recent", () => {
 
   it("getRecentArtifacts respects limit", () => {
     for (let i = 0; i < 5; i++) {
-      useArtifactStore
-        .getState()
-        .createArtifact({
-          sessionId: "s",
-          messageId: "m",
-          type: "code",
-          title: `t${i}`,
-          content: "x",
-        })
+      useArtifactStore.getState().createArtifact({
+        sessionId: "s",
+        messageId: "m",
+        type: "code",
+        title: `t${i}`,
+        content: "x",
+      })
     }
     expect(useArtifactStore.getState().getRecentArtifacts(3)).toHaveLength(3)
   })
@@ -627,24 +617,20 @@ describe("rehydrateArtifactMetadata", () => {
 
 describe("artifact workspace filters - branch coverage", () => {
   it("typeFilter excludes mismatched artifact types", () => {
-    useArtifactStore
-      .getState()
-      .createArtifact({
-        sessionId: "s",
-        messageId: "m",
-        type: "code",
-        title: "code-1",
-        content: "x",
-      })
-    useArtifactStore
-      .getState()
-      .createArtifact({
-        sessionId: "s",
-        messageId: "m",
-        type: "html",
-        title: "html-1",
-        content: "<html></html>",
-      })
+    useArtifactStore.getState().createArtifact({
+      sessionId: "s",
+      messageId: "m",
+      type: "code",
+      title: "code-1",
+      content: "x",
+    })
+    useArtifactStore.getState().createArtifact({
+      sessionId: "s",
+      messageId: "m",
+      type: "html",
+      title: "html-1",
+      content: "<html></html>",
+    })
     useArtifactStore.getState().setArtifactWorkspaceFilters({ typeFilter: "html" })
     const list = useArtifactStore.getState().getArtifactsForWorkspace({ sessionId: "s" })
     expect(list).toHaveLength(1)

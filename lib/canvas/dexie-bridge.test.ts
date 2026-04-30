@@ -371,7 +371,7 @@ describe("startCanvasDexieBridge", () => {
     await new Promise((r) => setTimeout(r, 30))
     const comments = commentStore.getState().comments["doc-hyd"]
     expect(Array.isArray(comments)).toBe(true)
-    expect(comments?.[0]?.id).toBe("c-hyd")
+    expect((comments?.[0] as { id?: string } | undefined)?.id).toBe("c-hyd")
     dispose()
   })
 

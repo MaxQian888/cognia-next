@@ -5,6 +5,7 @@
 
 import type {
   Logger,
+  LoggerRedactionConfig,
   LogLevel,
   LogStats,
   StructuredLogEntry,
@@ -104,9 +105,13 @@ function cloneConfig(config: UnifiedLoggerConfig): UnifiedLoggerConfig {
   }
 }
 
+type UnifiedLoggerConfigUpdate = Omit<Partial<UnifiedLoggerConfig>, "redaction"> & {
+  redaction?: Partial<LoggerRedactionConfig>
+}
+
 function mergeConfig(
   current: UnifiedLoggerConfig,
-  updates?: Partial<UnifiedLoggerConfig>
+  updates?: UnifiedLoggerConfigUpdate
 ): UnifiedLoggerConfig {
   if (!updates) {
     return cloneConfig(current)
@@ -592,7 +597,7 @@ export function getTransportHealthSnapshot(): Record<string, TransportHealthSnap
  * Update global configuration.
  * Changes are immediately applied to all existing logger instances.
  */
-export function updateLoggerConfig(config: Partial<UnifiedLoggerConfig>): void {
+export function updateLoggerConfig(config: UnifiedLoggerConfigUpdate): void {
   ensureInitialized()
   runtimeState.config = mergeConfig(runtimeState.config, config)
   syncBuiltinTransports()

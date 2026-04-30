@@ -90,7 +90,7 @@ describe("handleStatus", () => {
       additionalDirectories: ["/d"],
       allowedTools: ["bash"],
     })
-    const ctx = makeCtx({ activeSessionId: "s", currentPermissionMode: "ask" })
+    const ctx = makeCtx({ activeSessionId: "s", currentPermissionMode: "plan" })
     await handleStatus(ctx)
     const md = ctx._pushed[0]
     expect(md).toContain("Demo")

@@ -29,7 +29,7 @@ describe("normalizeExternalAgentValiditySnapshot — defaults", () => {
     expect(out.canonicalReasonCode).toBe("ok")
     expect(out.branchOutcome).toBe("external")
     expect(out.lifecycleStage).toBe("config")
-    expect(out.capabilitySnapshot.protocol).toBe("acp")
+    expect(out.capabilitySnapshot!.protocol).toBe("acp")
     expect(out.recoveryHints).toEqual([])
   })
 
@@ -38,7 +38,7 @@ describe("normalizeExternalAgentValiditySnapshot — defaults", () => {
       {},
       { fallbackProtocol: "opencode", fallbackSource: "health" }
     )
-    expect(out.capabilitySnapshot.protocol).toBe("opencode")
+    expect(out.capabilitySnapshot!.protocol).toBe("opencode")
     expect(out.source).toBe("health")
     expect(out.lifecycleStage).toBe("connect")
   })
@@ -269,11 +269,15 @@ describe("normalizeExternalAgentValiditySnapshot — recovery hints map", () => 
 describe("normalizeExternalAgentValiditySnapshot — capability + correlation", () => {
   it("uses negotiation.protocol when present", () => {
     const out = normalizeExternalAgentValiditySnapshot({
-      negotiation: { protocol: "opencode", authRequired: true, agentCapabilities: { foo: true } },
+      negotiation: {
+        protocol: "opencode",
+        authRequired: true,
+        agentCapabilities: { loadSession: true },
+      },
     })
-    expect(out.capabilitySnapshot.protocol).toBe("opencode")
-    expect(out.capabilitySnapshot.authRequired).toBe(true)
-    expect(out.capabilitySnapshot.hasAgentCapabilities).toBe(true)
+    expect(out.capabilitySnapshot!.protocol).toBe("opencode")
+    expect(out.capabilitySnapshot!.authRequired).toBe(true)
+    expect(out.capabilitySnapshot!.hasAgentCapabilities).toBe(true)
   })
 
   it("respects explicit capabilitySnapshot", () => {

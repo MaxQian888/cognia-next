@@ -4,7 +4,7 @@
 
 import { act, renderHook } from "@testing-library/react"
 import { useSchedulerStore } from "./scheduler-store"
-import type { ScheduledTask } from "@/types/scheduler"
+import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 
 // Mock the scheduler modules. Variables prefixed with `mock` are allowed in
 // jest factories despite hoisting.
@@ -1060,7 +1060,9 @@ describe("useSchedulerStore", () => {
       const { result } = renderHook(() => useSchedulerStore())
       act(() => {
         useSchedulerStore.setState({
-          executions: [{ id: "old", taskId: "t", status: "completed", startedAt: new Date() }],
+          executions: [
+            { id: "old", taskId: "t", status: "completed", startedAt: new Date() } as TaskExecution,
+          ],
         })
       })
       await act(async () => {
@@ -1327,7 +1329,7 @@ describe("useSchedulerStore", () => {
       const cloned = sampleTask({ id: "cloned", name: "Original (Copy)" })
       mockScheduler.createTask.mockResolvedValueOnce(cloned)
       const { result } = renderHook(() => useSchedulerStore())
-      let res: ScheduledTask | null = null
+      let res = null as ScheduledTask | null
       await act(async () => {
         res = await result.current.cloneTask("src")
       })
@@ -1580,7 +1582,9 @@ describe("Scheduler selectors", () => {
     act(() => {
       useSchedulerStore.setState({
         tasks,
-        recentExecutions: [{ id: "r-1", taskId: "a", status: "completed", startedAt: new Date() }],
+        recentExecutions: [
+          { id: "r-1", taskId: "a", status: "completed", startedAt: new Date() } as TaskExecution,
+        ],
         schedulerStatus: "running",
         statistics: null,
       })

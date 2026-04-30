@@ -447,7 +447,7 @@ describe("result/token translators", () => {
         ],
         duration: 200,
         tokenUsage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
-        output: "out",
+        output: { text: "out" },
       },
       "sub-1"
     )

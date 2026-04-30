@@ -43,8 +43,7 @@ beforeEach(() => {
   stopLeaderElection()
   MockBroadcastChannel.instances = []
   MockBroadcastChannel.throwOnConstruct = false
-  ;(globalThis as { BroadcastChannel?: typeof MockBroadcastChannel }).BroadcastChannel =
-    MockBroadcastChannel as unknown as typeof MockBroadcastChannel
+  ;(globalThis as unknown as { BroadcastChannel?: unknown }).BroadcastChannel = MockBroadcastChannel
   // Make sure localStorage is clean.
   try {
     localStorage.clear()

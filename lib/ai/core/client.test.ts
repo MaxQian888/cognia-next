@@ -8,7 +8,7 @@ import { anthropic as mockAnthropic } from "@ai-sdk/anthropic"
 
 describe("getProviderModel", () => {
   beforeEach(() => {
-    ;(mockAnthropic as jest.Mock).mockClear()
+    ;(mockAnthropic as unknown as jest.Mock).mockClear()
     delete process.env.ANTHROPIC_API_KEY
   })
 

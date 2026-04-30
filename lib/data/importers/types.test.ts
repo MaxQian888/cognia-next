@@ -49,7 +49,7 @@ describe("lib/data/importers/types", () => {
       format: "unknown",
       detect: (data: unknown): data is Sample =>
         typeof data === "object" && data !== null && (data as { tag?: string }).tag === "sample",
-      parse: async (data, opts) => [
+      parse: async (data, _opts) => [
         {
           session: { id: `${data.value}` } as ImportedConversation["session"],
           messages: [],

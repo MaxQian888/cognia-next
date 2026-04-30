@@ -253,7 +253,7 @@ describe("incoming message handling", () => {
   })
 
   it("ignores remote operations from self", async () => {
-    const { p, crdt } = await connectFresh()
+    const { crdt } = await connectFresh()
     const apply = jest.spyOn(crdt, "applyRemoteUpdate").mockImplementation(() => {})
     lastMockSocket!.onmessage?.({
       data: JSON.stringify({
@@ -308,8 +308,8 @@ describe("incoming message handling", () => {
   })
 
   it("handles sync responses by deserializing CRDT state", async () => {
-    const { p, crdt } = await connectFresh()
-    const deserialize = jest.spyOn(crdt, "deserializeState").mockImplementation(() => {})
+    const { crdt } = await connectFresh()
+    const deserialize = jest.spyOn(crdt, "deserializeState").mockImplementation(() => null)
     lastMockSocket!.onmessage?.({
       data: JSON.stringify({
         type: "sync",

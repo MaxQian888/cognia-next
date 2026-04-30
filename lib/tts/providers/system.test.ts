@@ -178,7 +178,7 @@ describe("waitForVoices", () => {
     const promise = waitForVoices()
     // Populate then trigger the callback the way the engine would.
     state.voices = [{ name: "delayed" } as SpeechSynthesisVoice]
-    state.onvoiceschanged?.(new Event("voiceschanged"))
+    ;(state.onvoiceschanged as ((ev: Event) => void) | null)?.(new Event("voiceschanged"))
     await expect(promise).resolves.toHaveLength(1)
   })
 

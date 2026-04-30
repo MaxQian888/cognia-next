@@ -45,12 +45,12 @@ describe("getKatexOptions", () => {
 
   it("falls back to false when KATEX_BASE_OPTIONS.trust is undefined", () => {
     const original = KATEX_BASE_OPTIONS.trust
-    ;(KATEX_BASE_OPTIONS as { trust?: boolean }).trust = undefined
+    ;(KATEX_BASE_OPTIONS as { trust?: unknown }).trust = undefined
     try {
       const opts = getKatexOptions(true)
       expect(opts.trust).toBe(false)
     } finally {
-      ;(KATEX_BASE_OPTIONS as { trust?: boolean }).trust = original
+      ;(KATEX_BASE_OPTIONS as { trust?: unknown }).trust = original
     }
   })
 

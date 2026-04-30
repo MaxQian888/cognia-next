@@ -5,7 +5,7 @@
  * Main page for managing scheduled tasks — SidebarProvider Master-Detail layout.
  */
 
-import { useState, useCallback, useMemo, useEffect, useRef, useSyncExternalStore } from "react"
+import { useState, useCallback, useMemo, useEffect, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import { RefreshCw } from "lucide-react"
 import { useScheduler, useSystemScheduler } from "@/hooks/scheduler"

@@ -55,7 +55,7 @@ class MockAdapter {
     this._connectionStatus = "connected"
   })
   failConnect = false
-  cancelImpl: jest.Mock<Promise<void>, [string]> = jest.fn(async () => {})
+  cancelImpl: jest.Mock<Promise<void>, [string]> = jest.fn(async (_id: string) => {})
   listSessionsImpl?: jest.Mock<Promise<unknown>, []>
   forkSessionImpl?: jest.Mock<Promise<ExternalAgentSession>, [string]>
   resumeSessionImpl?: jest.Mock<Promise<ExternalAgentSession>, [string]>
@@ -319,7 +319,7 @@ describe("Capability helpers (unsupported / ok / error)", () => {
   it("getSessionModels returns ok with data when present", async () => {
     const m = freshManager()
     await m.addAgent(buildBaseConfig())
-    currentMock.getSessionModelsImpl = jest.fn(() => ({ models: [] }))
+    currentMock.getSessionModelsImpl = jest.fn((_id: string) => ({ models: [] }))
     const result = m.getSessionModels("agent-1", "s_1")
     expect(result.status).toBe("ok")
   })
@@ -327,7 +327,7 @@ describe("Capability helpers (unsupported / ok / error)", () => {
   it("getSessionModels returns error wrapper when adapter throws", async () => {
     const m = freshManager()
     await m.addAgent(buildBaseConfig())
-    currentMock.getSessionModelsImpl = jest.fn(() => {
+    currentMock.getSessionModelsImpl = jest.fn((_id: string) => {
       throw new Error("boom")
     })
     const result = m.getSessionModels("agent-1", "s_1")
@@ -347,7 +347,7 @@ describe("Capability helpers (unsupported / ok / error)", () => {
   it("setConfigOption / getConfigOptions reflect adapter support", async () => {
     const m = freshManager()
     await m.addAgent(buildBaseConfig())
-    currentMock.getConfigOptionsImpl = jest.fn(() => [{ id: "x", value: "y" }])
+    currentMock.getConfigOptionsImpl = jest.fn((_id: string) => [{ id: "x", value: "y" }])
     expect(m.getConfigOptions("agent-1", "s_1").status).toBe("ok")
     ;(currentMock as unknown as { setConfigOption: undefined }).setConfigOption = undefined
     await expect(m.setConfigOption("agent-1", "s_1", "k", "v")).rejects.toThrow()
@@ -405,7 +405,7 @@ describe("Session extensions: list/fork/resume", () => {
       messages: [],
       permissionMode: "default" as const,
     }
-    currentMock.forkSessionImpl = jest.fn(async () => forked)
+    currentMock.forkSessionImpl = jest.fn(async (_id: string) => forked)
     const out = await m.forkSession("agent-1", "s_1")
     expect(out.id).toBe("s_forked")
   })
@@ -429,7 +429,7 @@ describe("Session extensions: list/fork/resume", () => {
       messages: [],
       permissionMode: "default" as const,
     }
-    currentMock.resumeSessionImpl = jest.fn(async () => resumed)
+    currentMock.resumeSessionImpl = jest.fn(async (_id: string) => resumed)
     const out = await m.resumeSession("agent-1", "s_1")
     expect(out.id).toBe("s_resumed")
   })
