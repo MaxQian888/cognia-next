@@ -7,7 +7,7 @@
 
 import type { ToolState } from "@/types/core/message"
 import type { McpServerStatus } from "@/types/mcp"
-import type { AgentTraceEventType } from "@/types/agent-trace"
+import type { AgentTraceEventType } from "@/types/agent/agent-trace"
 import type { ExternalAgentProtocol, ExternalAgentTransport } from "@/types/agent/external-agent"
 
 // ============================================================================

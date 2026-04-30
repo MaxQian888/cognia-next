@@ -16,7 +16,7 @@ let settings: {
   }
 } = {}
 
-jest.mock("@/stores/settings-store", () => ({
+jest.mock("@/stores/settings", () => ({
   useSettingsStore: <T,>(
     selector: (s: {
       settings: typeof settings
@@ -31,6 +31,18 @@ jest.mock("@/stores/settings-store", () => ({
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+}))
+
+const mockLogInfo = jest.fn()
+jest.mock("@/lib/logger", () => ({
+  createLogger: () => ({
+    info: (...args: unknown[]) => mockLogInfo(...args),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn(),
+    trace: jest.fn(),
+    fatal: jest.fn(),
+  }),
 }))
 
 jest.mock("@/components/ui/slider", () => ({
@@ -93,6 +105,7 @@ function renderUI() {
 
 beforeEach(() => {
   setVerifMock.mockReset()
+  mockLogInfo.mockReset()
   settings = {}
 })
 
@@ -224,5 +237,43 @@ describe("SourceVerificationSettings", () => {
     expect(setVerifMock).toHaveBeenCalledWith(
       expect.objectContaining({ blockedDomains: ["bad.com"] })
     )
+  })
+
+  it("logs trusted_domain_added with sanitized domain", () => {
+    settings = {
+      sourceVerificationSettings: {
+        enabled: true,
+        mode: "ask",
+        minimumCredibilityScore: 0.3,
+        autoFilterLowCredibility: false,
+        showVerificationBadges: true,
+        trustedDomains: [],
+        blockedDomains: [],
+        enableCrossValidation: true,
+      },
+    }
+    renderUI()
+    const input = screen.getByPlaceholderText("trustedDomainPlaceholder")
+    fireEvent.change(input, { target: { value: "https://www.example.com" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(mockLogInfo).toHaveBeenCalledWith("trusted_domain_added", { domain: "example.com" })
+  })
+
+  it("logs verification_enabled_changed when toggled", () => {
+    settings = {
+      sourceVerificationSettings: {
+        enabled: false,
+        mode: "ask",
+        minimumCredibilityScore: 0.3,
+        autoFilterLowCredibility: false,
+        showVerificationBadges: true,
+        trustedDomains: [],
+        blockedDomains: [],
+        enableCrossValidation: true,
+      },
+    }
+    renderUI()
+    fireEvent.click(screen.getAllByRole("switch")[0])
+    expect(mockLogInfo).toHaveBeenCalledWith("verification_enabled_changed", { enabled: true })
   })
 })

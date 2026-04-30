@@ -5,12 +5,17 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
-import { avatarColor, avatarGlyph } from "@/lib/avatar"
+import { avatarColor } from "@/lib/ui/avatar"
 import { listTeams } from "@/lib/db/teams"
-import { useUIStore, type SelectedGuild } from "@/stores/ui-store"
+import { loggers } from "@/lib/logger"
+import { useClientLiveQuery } from "@/hooks/data"
+import { useUIStore } from "@/stores/ui"
 import type { Team } from "@/lib/claude/types"
-import { useLiveQuery } from "dexie-react-hooks"
-import { MailIcon, PlusIcon, SettingsIcon } from "lucide-react"
+import { MailIcon, PlusIcon, SettingsIcon, PencilRulerIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
+import { AvatarBadge } from "./avatar-badge"
+
+const log = loggers.ui
 
 interface Props {
   onCreateTeam: () => void
@@ -25,27 +30,55 @@ interface Props {
  * reloads and can be driven from the command palette.
  */
 export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
+  const t = useTranslations("desktop.guildRail")
   const selected = useUIStore((s) => s.selectedGuild)
   const setSelected = useUIStore((s) => s.setSelectedGuild)
-  const teams = useLiveQuery<Team[]>(
-    () => (typeof window === "undefined" ? Promise.resolve([]) : listTeams()),
-    []
-  )
+  const teams = useClientLiveQuery<Team[]>(() => listTeams(), [], [])
 
   const isDmActive = selected.kind === "dm"
+
+  const switchToDm = () => {
+    log.info("guild switch dm")
+    setSelected({ kind: "dm" })
+  }
+  const switchToCanvas = () => {
+    log.info("guild switch canvas")
+    setSelected({ kind: "canvas" })
+  }
+  const switchToTeam = (teamId: string) => {
+    log.info("guild switch team", { teamId })
+    setSelected({ kind: "team", teamId })
+  }
+  const handleCreateTeam = () => {
+    log.info("guild create team click")
+    onCreateTeam()
+  }
+  const handleOpenSettings = () => {
+    log.info("guild open settings")
+    onOpenSettings()
+  }
 
   return (
     <aside
       className="hidden h-full w-16 shrink-0 flex-col items-center border-r bg-muted/40 py-2 md:flex"
-      aria-label="Guild rail"
+      aria-label={t("label")}
     >
       <RailButton
         active={isDmActive}
-        ariaLabel="Direct Messages"
-        tooltip="Direct Messages"
-        onClick={() => setSelected({ kind: "dm" })}
+        ariaLabel={t("directMessages")}
+        tooltip={t("directMessages")}
+        onClick={switchToDm}
       >
         <MailIcon className="size-5" />
+      </RailButton>
+
+      <RailButton
+        active={selected.kind === "canvas"}
+        ariaLabel={t("canvas")}
+        tooltip={t("canvas")}
+        onClick={switchToCanvas}
+      >
+        <PencilRulerIcon className="size-5" />
       </RailButton>
 
       <Separator className="my-2 w-8" />
@@ -57,12 +90,16 @@ export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
               <TeamButton
                 team={team}
                 active={selected.kind === "team" && selected.teamId === team.id}
-                onSelect={() => setSelected({ kind: "team", teamId: team.id })}
+                onSelect={() => switchToTeam(team.id)}
               />
             </li>
           ))}
           <li>
-            <RailButton ariaLabel="Create team" tooltip="Create team" onClick={onCreateTeam}>
+            <RailButton
+              ariaLabel={t("createTeam")}
+              tooltip={t("createTeam")}
+              onClick={handleCreateTeam}
+            >
               <PlusIcon className="size-4" />
             </RailButton>
           </li>
@@ -71,7 +108,11 @@ export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
 
       <Separator className="my-2 w-8" />
 
-      <RailButton ariaLabel="Open settings" tooltip="Settings" onClick={onOpenSettings}>
+      <RailButton
+        ariaLabel={t("openSettings")}
+        tooltip={t("settings")}
+        onClick={handleOpenSettings}
+      >
         <SettingsIcon className="size-4" />
       </RailButton>
     </aside>
@@ -140,28 +181,7 @@ function TeamButton({
       className="text-base"
       style={active ? { boxShadow: `inset 0 0 0 2px ${avatarColor(team)}` } : undefined}
     >
-      <span
-        className="flex size-7 items-center justify-center rounded-full text-sm"
-        style={{
-          backgroundColor: avatarColor(team),
-          color: "white",
-        }}
-        aria-hidden
-      >
-        {avatarGlyph(team)}
-      </span>
+      <AvatarBadge subject={team} size={28} textClassName="text-sm" />
     </RailButton>
   )
-}
-
-/**
- * Helper used by `app/page.tsx` and other code that needs to derive a guild
- * filter from a session, e.g. to switch the rail when a session is opened
- * from the command palette.
- */
-export function guildForSession(session: { kind?: string; teamId?: string }): SelectedGuild {
-  if (session.kind === "team" && session.teamId) {
-    return { kind: "team", teamId: session.teamId }
-  }
-  return { kind: "dm" }
 }

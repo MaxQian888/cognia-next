@@ -6,10 +6,9 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { toast } from "sonner"
 import { deleteSkill, listSkillsByIds, setSkillStatus } from "@/lib/db/skills"
-import { useSkillsStore } from "@/stores/skills-store"
-import { saveFilesToDir } from "@/lib/file-bridge"
-import { pickDirectory } from "@/lib/file-bridge"
-import { serializeSkill, skillFilename } from "@/lib/claude/skills-io"
+import { useSkillsStore } from "@/stores/skills"
+import { exportSkillsToDirWithFeedback } from "@/lib/skills/export-toast"
+import { loggers } from "@/lib/logger"
 
 /**
  * Floating action bar shown when the user has selected one or more skills.
@@ -18,6 +17,7 @@ import { serializeSkill, skillFilename } from "@/lib/claude/skills-io"
 export function SkillBatchActionsBar() {
   const t = useTranslations("skills.card")
   const tCommon = useTranslations("skills")
+  const tToasts = useTranslations("skills.toasts")
   const selection = useSkillsStore((s) => s.selection)
   const clear = useSkillsStore((s) => s.clearSelection)
   const count = selection.size
@@ -26,52 +26,73 @@ export function SkillBatchActionsBar() {
   const ids = Array.from(selection)
 
   const handleEnable = async () => {
-    for (const id of ids) await setSkillStatus(id, "enabled")
-    toast.success(`Enabled ${count} skill(s).`)
+    let failed = 0
+    for (const id of ids) {
+      try {
+        await setSkillStatus(id, "enabled")
+      } catch (err) {
+        failed += 1
+        loggers.skills.error("batch enable failed", err, { id })
+      }
+    }
+    toast.success(tToasts("enabledCount", { count }))
+    loggers.skills.info("batch enable ok", { count, failed })
     clear()
   }
+
   const handleDisable = async () => {
-    for (const id of ids) await setSkillStatus(id, "disabled")
-    toast.success(`Disabled ${count} skill(s).`)
+    let failed = 0
+    for (const id of ids) {
+      try {
+        await setSkillStatus(id, "disabled")
+      } catch (err) {
+        failed += 1
+        loggers.skills.error("batch disable failed", err, { id })
+      }
+    }
+    toast.success(tToasts("disabledCount", { count }))
+    loggers.skills.info("batch disable ok", { count, failed })
     clear()
   }
+
   const handleDelete = async () => {
     let failed = 0
     for (const id of ids) {
       try {
         await deleteSkill(id)
-      } catch {
+      } catch (err) {
         failed += 1
+        loggers.skills.warn("batch delete skipped", { id, error: String(err) })
       }
     }
     if (failed > 0) {
-      toast.warning(`Deleted ${count - failed}/${count} (built-ins skipped).`)
+      toast.warning(tToasts("deletedPartial", { ok: count - failed, total: count }))
+      loggers.skills.info("batch delete partial", { ok: count - failed, total: count, failed })
     } else {
-      toast.success(`Deleted ${count} skill(s).`)
-    }
-    clear()
-  }
-  const handleExport = async () => {
-    const skills = await listSkillsByIds(ids)
-    const dir = await pickDirectory()
-    const files = skills.map((sk) => ({
-      name: skillFilename(sk.name),
-      content: serializeSkill(sk),
-    }))
-    const result = await saveFilesToDir(dir, files)
-    if (result.errored.length > 0) {
-      toast.warning(
-        `Exported ${result.writtenCount}/${files.length} (${result.errored.length} failed).`
-      )
-    } else {
-      toast.success(`Exported ${result.writtenCount} skill file(s).`)
+      toast.success(tToasts("deletedCount", { count }))
+      loggers.skills.info("batch delete ok", { count })
     }
     clear()
   }
 
+  const handleExport = async () => {
+    try {
+      const skills = await listSkillsByIds(ids)
+      await exportSkillsToDirWithFeedback(skills, tToasts, {
+        source: "batch",
+        requestedCount: ids.length,
+      })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+      loggers.skills.error("batch export failed", err, { count: ids.length })
+    } finally {
+      clear()
+    }
+  }
+
   return (
     <Card className="pointer-events-auto fixed bottom-4 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 px-3 py-2 shadow-lg">
-      <span className="text-xs font-medium">{count} selected</span>
+      <span className="text-xs font-medium">{tCommon("selectedCount", { count })}</span>
       <span className="h-4 w-px bg-border" />
       <Button size="sm" variant="ghost" onClick={() => void handleEnable()}>
         <PowerIcon className="mr-1.5 size-3.5" />

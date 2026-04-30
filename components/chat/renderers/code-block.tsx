@@ -1,12 +1,16 @@
 "use client"
 
 import { useState, memo, useCallback, useRef, useEffect } from "react"
+import { useTranslations } from "next-intl"
 import { codeToHtml, type BundledLanguage } from "shiki"
 import { Copy, Check, Download, Maximize2, WrapText, Hash } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useCopy } from "@/hooks/ui/use-copy"
+import { downloadFile } from "@/lib/files/download"
+import { loggers } from "@/lib/logger"
 
 interface CodeBlockProps {
   code: string
@@ -25,10 +29,11 @@ export const CodeBlock = memo(function CodeBlock({
   highlightLines = [],
   filename,
 }: CodeBlockProps) {
+  const t = useTranslations("chat.renderers.code")
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [wordWrap, setWordWrap] = useState(false)
   const [localShowLineNumbers, setLocalShowLineNumbers] = useState(showLineNumbers)
-  const [copied, setCopied] = useState(false)
+  const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
   const codeRef = useRef<HTMLPreElement>(null)
 
   const [highlightedHtml, setHighlightedHtml] = useState<string>("")
@@ -78,27 +83,13 @@ export const CodeBlock = memo(function CodeBlock({
   const lines = code.split("\n")
 
   const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(code)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch (err) {
-      console.error("clipboard write failed", err)
-    }
-  }, [code])
+    await copy(code)
+  }, [code, copy])
 
   const handleDownload = useCallback(() => {
     const extension = getExtensionFromLanguage(language)
     const name = filename || `code${extension}`
-    const blob = new Blob([code], { type: "text/plain;charset=utf-8" })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement("a")
-    link.href = url
-    link.download = name
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
+    downloadFile(name, code, "text/plain;charset=utf-8")
   }, [code, language, filename])
 
   const isLineHighlighted = useCallback(
@@ -107,6 +98,7 @@ export const CodeBlock = memo(function CodeBlock({
   )
 
   const hasHighlighting = Boolean(highlightedHtml && darkHighlightedHtml)
+  const langLabel = language || t("plainText")
 
   const renderCode = useCallback(
     (inFullscreen = false) => {
@@ -122,7 +114,7 @@ export const CodeBlock = memo(function CodeBlock({
               inFullscreen && "max-h-[70vh]"
             )}
             role="code"
-            aria-label={`Code in ${language || "plain text"}`}
+            aria-label={t("ariaInLanguage", { language: langLabel })}
           >
             <div className="dark:hidden" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
             <div
@@ -146,7 +138,7 @@ export const CodeBlock = memo(function CodeBlock({
           <code
             className={language ? `language-${language}` : undefined}
             role="code"
-            aria-label={`Code in ${language || "plain text"}`}
+            aria-label={t("ariaInLanguage", { language: langLabel })}
           >
             {localShowLineNumbers ? (
               <table className="border-collapse w-full" role="presentation">
@@ -181,6 +173,7 @@ export const CodeBlock = memo(function CodeBlock({
     [
       code,
       language,
+      langLabel,
       lines,
       localShowLineNumbers,
       wordWrap,
@@ -188,6 +181,7 @@ export const CodeBlock = memo(function CodeBlock({
       hasHighlighting,
       highlightedHtml,
       darkHighlightedHtml,
+      t,
     ]
   )
 
@@ -196,7 +190,7 @@ export const CodeBlock = memo(function CodeBlock({
       <div
         className={cn("group relative rounded-lg overflow-hidden my-3 border", className)}
         role="figure"
-        aria-label={`Code block${language ? ` in ${language}` : ""}`}
+        aria-label={language ? t("figureLabelWithLang", { language }) : t("figureLabel")}
       >
         <div className="flex items-center justify-between px-4 py-2 bg-muted/80 border-b text-xs">
           <div className="flex items-center gap-2 text-muted-foreground">
@@ -213,13 +207,15 @@ export const CodeBlock = memo(function CodeBlock({
                   size="icon"
                   className="h-6 w-6"
                   onClick={() => setLocalShowLineNumbers(!localShowLineNumbers)}
-                  aria-label={localShowLineNumbers ? "Hide line numbers" : "Show line numbers"}
+                  aria-label={localShowLineNumbers ? t("hideLinesAria") : t("showLinesAria")}
                   aria-pressed={localShowLineNumbers}
                 >
                   <Hash className="h-3 w-3" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>{localShowLineNumbers ? "Hide lines" : "Show lines"}</TooltipContent>
+              <TooltipContent>
+                {localShowLineNumbers ? t("hideLines") : t("showLines")}
+              </TooltipContent>
             </Tooltip>
 
             <Tooltip>
@@ -229,13 +225,13 @@ export const CodeBlock = memo(function CodeBlock({
                   size="icon"
                   className="h-6 w-6"
                   onClick={() => setWordWrap(!wordWrap)}
-                  aria-label={wordWrap ? "Disable word wrap" : "Enable word wrap"}
+                  aria-label={wordWrap ? t("unwrapAria") : t("wrapAria")}
                   aria-pressed={wordWrap}
                 >
                   <WrapText className="h-3 w-3" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>{wordWrap ? "Unwrap" : "Wrap"}</TooltipContent>
+              <TooltipContent>{wordWrap ? t("unwrap") : t("wrap")}</TooltipContent>
             </Tooltip>
 
             <Tooltip>
@@ -245,12 +241,12 @@ export const CodeBlock = memo(function CodeBlock({
                   size="icon"
                   className="h-6 w-6"
                   onClick={handleCopy}
-                  aria-label="Copy code"
+                  aria-label={t("copyAria")}
                 >
                   {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Copy</TooltipContent>
+              <TooltipContent>{t("copy")}</TooltipContent>
             </Tooltip>
 
             <Tooltip>
@@ -260,12 +256,12 @@ export const CodeBlock = memo(function CodeBlock({
                   size="icon"
                   className="h-6 w-6"
                   onClick={handleDownload}
-                  aria-label="Download code"
+                  aria-label={t("downloadAria")}
                 >
                   <Download className="h-3 w-3" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Download</TooltipContent>
+              <TooltipContent>{t("download")}</TooltipContent>
             </Tooltip>
 
             <Tooltip>
@@ -275,12 +271,12 @@ export const CodeBlock = memo(function CodeBlock({
                   size="icon"
                   className="h-6 w-6"
                   onClick={() => setIsFullscreen(true)}
-                  aria-label="View fullscreen"
+                  aria-label={t("fullscreenAria")}
                 >
                   <Maximize2 className="h-3 w-3" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Fullscreen</TooltipContent>
+              <TooltipContent>{t("fullscreen")}</TooltipContent>
             </Tooltip>
           </div>
         </div>
@@ -292,7 +288,7 @@ export const CodeBlock = memo(function CodeBlock({
         <DialogContent className="max-w-[90vw] max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <span>{language || "Code"}</span>
+              <span>{language || t("defaultLabel")}</span>
               {filename && <span className="text-muted-foreground font-normal">— {filename}</span>}
               <div className="flex items-center gap-1 ml-auto">
                 <Tooltip>
@@ -302,13 +298,13 @@ export const CodeBlock = memo(function CodeBlock({
                       size="icon"
                       className="h-7 w-7"
                       onClick={() => setLocalShowLineNumbers(!localShowLineNumbers)}
-                      aria-label={localShowLineNumbers ? "Hide line numbers" : "Show line numbers"}
+                      aria-label={localShowLineNumbers ? t("hideLinesAria") : t("showLinesAria")}
                     >
                       <Hash className="h-3.5 w-3.5" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    {localShowLineNumbers ? "Hide lines" : "Show lines"}
+                    {localShowLineNumbers ? t("hideLines") : t("showLines")}
                   </TooltipContent>
                 </Tooltip>
                 <Tooltip>
@@ -318,12 +314,12 @@ export const CodeBlock = memo(function CodeBlock({
                       size="icon"
                       className="h-7 w-7"
                       onClick={() => setWordWrap(!wordWrap)}
-                      aria-label={wordWrap ? "Disable word wrap" : "Enable word wrap"}
+                      aria-label={wordWrap ? t("unwrapAria") : t("wrapAria")}
                     >
                       <WrapText className="h-3.5 w-3.5" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>{wordWrap ? "Unwrap" : "Wrap"}</TooltipContent>
+                  <TooltipContent>{wordWrap ? t("unwrap") : t("wrap")}</TooltipContent>
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -332,7 +328,7 @@ export const CodeBlock = memo(function CodeBlock({
                       size="icon"
                       className="h-7 w-7"
                       onClick={handleCopy}
-                      aria-label="Copy code"
+                      aria-label={t("copyAria")}
                     >
                       {copied ? (
                         <Check className="h-3.5 w-3.5" />
@@ -341,7 +337,7 @@ export const CodeBlock = memo(function CodeBlock({
                       )}
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Copy</TooltipContent>
+                  <TooltipContent>{t("copy")}</TooltipContent>
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -350,12 +346,12 @@ export const CodeBlock = memo(function CodeBlock({
                       size="icon"
                       className="h-7 w-7"
                       onClick={handleDownload}
-                      aria-label="Download code"
+                      aria-label={t("downloadAria")}
                     >
                       <Download className="h-3.5 w-3.5" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Download</TooltipContent>
+                  <TooltipContent>{t("download")}</TooltipContent>
                 </Tooltip>
               </div>
             </DialogTitle>
@@ -364,8 +360,7 @@ export const CodeBlock = memo(function CodeBlock({
           <div className="flex-1 overflow-auto rounded-lg border">{renderCode(true)}</div>
 
           <div className="text-xs text-muted-foreground pt-2">
-            {lines.length} line{lines.length !== 1 ? "s" : ""} • {code.length} character
-            {code.length !== 1 ? "s" : ""}
+            {t("footer", { lineCount: lines.length, charCount: code.length })}
           </div>
         </DialogContent>
       </Dialog>

@@ -394,42 +394,47 @@ export const DEFAULT_SUB_AGENT_CONFIG: SubAgentConfig = {
 }
 
 /**
- * SubAgent status display configuration
+ * SubAgent status display configuration.
+ *
+ * `labelKey` is an i18n key under the `agentStatus` namespace; UI consumers
+ * resolve it via `useTranslations("agentStatus")(labelKey)`.
  */
 export const SUB_AGENT_STATUS_CONFIG: Record<
   SubAgentStatus,
   {
-    label: string
+    labelKey: string
     color: string
     icon: string
   }
 > = {
-  pending: { label: "Pending", color: "text-muted-foreground", icon: "Circle" },
-  queued: { label: "Queued", color: "text-blue-500", icon: "Clock" },
-  running: { label: "Running", color: "text-primary", icon: "Loader2" },
-  waiting: { label: "Waiting", color: "text-yellow-500", icon: "Pause" },
-  completed: { label: "Completed", color: "text-green-500", icon: "CheckCircle" },
-  failed: { label: "Failed", color: "text-destructive", icon: "XCircle" },
-  cancelled: { label: "Cancelled", color: "text-orange-500", icon: "Ban" },
-  timeout: { label: "Timeout", color: "text-red-500", icon: "AlertTriangle" },
+  pending: { labelKey: "pending", color: "text-muted-foreground", icon: "Circle" },
+  queued: { labelKey: "queued", color: "text-blue-500", icon: "Clock" },
+  running: { labelKey: "running", color: "text-primary", icon: "Loader2" },
+  waiting: { labelKey: "waiting", color: "text-yellow-500", icon: "Pause" },
+  completed: { labelKey: "completed", color: "text-green-500", icon: "CheckCircle" },
+  failed: { labelKey: "failed", color: "text-destructive", icon: "XCircle" },
+  cancelled: { labelKey: "cancelled", color: "text-orange-500", icon: "Ban" },
+  timeout: { labelKey: "timeout", color: "text-red-500", icon: "AlertTriangle" },
 }
 
 /**
- * SubAgent priority display configuration
+ * SubAgent priority display configuration.
+ *
+ * `labelKey` is under the `agentPriority` namespace.
  */
 export const SUB_AGENT_PRIORITY_CONFIG: Record<
   SubAgentPriority,
   {
-    label: string
+    labelKey: string
     color: string
     weight: number
   }
 > = {
-  critical: { label: "Critical", color: "text-red-500", weight: 5 },
-  high: { label: "High", color: "text-orange-500", weight: 4 },
-  normal: { label: "Normal", color: "text-blue-500", weight: 3 },
-  low: { label: "Low", color: "text-muted-foreground", weight: 2 },
-  background: { label: "Background", color: "text-gray-400", weight: 1 },
+  critical: { labelKey: "critical", color: "text-red-500", weight: 5 },
+  high: { labelKey: "high", color: "text-orange-500", weight: 4 },
+  normal: { labelKey: "normal", color: "text-blue-500", weight: 3 },
+  low: { labelKey: "low", color: "text-muted-foreground", weight: 2 },
+  background: { labelKey: "background", color: "text-gray-400", weight: 1 },
 }
 
 /**

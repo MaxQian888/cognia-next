@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { Search, Check, Globe, ChevronRight, Plus } from "lucide-react"
+import { Search, Globe, ChevronRight, Plus } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -27,7 +27,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useSettingsStore } from "@/stores/settings"
 import {
   type SearchProviderType,
   SEARCH_PROVIDERS,
@@ -36,6 +36,10 @@ import {
 } from "@/lib/search/types"
 import { SEARCH_SOURCES } from "@/lib/search/search-constants"
 import { cn } from "@/lib/utils"
+import { createLogger } from "@/lib/logger"
+import { SourcePill } from "./_shared/source-pill"
+
+const log = createLogger("settings.search.global")
 
 export function SearchGlobalSettings() {
   const t = useTranslations("searchSettings")
@@ -72,7 +76,9 @@ export function SearchGlobalSettings() {
   })
 
   const toggleSearchSource = (sourceId: string) => {
-    if (defaultSearchSources.includes(sourceId)) {
+    const wasSelected = defaultSearchSources.includes(sourceId)
+    log.info("source_toggled", { sourceId, selected: !wasSelected })
+    if (wasSelected) {
       void setDefaultSearchSources(defaultSearchSources.filter((s) => s !== sourceId))
     } else {
       void setDefaultSearchSources([...defaultSearchSources, sourceId])
@@ -82,7 +88,9 @@ export function SearchGlobalSettings() {
   const handleAddCustomSource = () => {
     const name = newSourceName.trim()
     if (!name) return
-    void addCustomSearchSource({ id: `custom-${Date.now()}`, name })
+    const id = `custom-${Date.now()}`
+    log.info("custom_source_added", { id, name })
+    void addCustomSearchSource({ id, name })
     setNewSourceName("")
     setAddSourceOpen(false)
   }
@@ -104,7 +112,10 @@ export function SearchGlobalSettings() {
             <Label className="text-xs">{t("enableSearch")}</Label>
             <Switch
               checked={searchEnabled}
-              onCheckedChange={(v) => void setSearchEnabled(v)}
+              onCheckedChange={(v) => {
+                log.info("search_enabled_changed", { enabled: v })
+                void setSearchEnabled(v)
+              }}
               disabled={enabledCount === 0}
             />
           </div>
@@ -112,7 +123,10 @@ export function SearchGlobalSettings() {
             <Label className="text-xs">{t("fallbackEnabled")}</Label>
             <Switch
               checked={searchFallbackEnabled}
-              onCheckedChange={(v) => void setSearchFallbackEnabled(v)}
+              onCheckedChange={(v) => {
+                log.info("fallback_changed", { enabled: v })
+                void setSearchFallbackEnabled(v)
+              }}
               disabled={!searchEnabled}
             />
           </div>
@@ -123,7 +137,10 @@ export function SearchGlobalSettings() {
             <Label className="text-sm">{t("defaultProvider")}</Label>
             <Select
               value={defaultSearchProvider}
-              onValueChange={(v) => void setDefaultSearchProvider(v as SearchProviderType)}
+              onValueChange={(v) => {
+                log.info("default_provider_changed", { provider: v })
+                void setDefaultSearchProvider(v as SearchProviderType)
+              }}
               disabled={!searchEnabled || configuredProviders.length === 0}
             >
               <SelectTrigger className="w-full">
@@ -162,6 +179,7 @@ export function SearchGlobalSettings() {
             <Slider
               value={[searchMaxResults]}
               onValueChange={([v]) => void setSearchMaxResults(v)}
+              onValueCommit={([value]) => log.info("max_results_changed", { value })}
               min={1}
               max={10}
               step={1}
@@ -194,59 +212,38 @@ export function SearchGlobalSettings() {
               {SEARCH_SOURCES.map((source) => {
                 const isSelected = defaultSearchSources.includes(source.id)
                 return (
-                  <button
+                  <SourcePill
                     key={source.id}
-                    onClick={() => toggleSearchSource(source.id)}
+                    sourceId={source.id}
+                    name={source.name}
+                    icon={source.icon}
+                    selected={isSelected}
                     disabled={!searchEnabled}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
-                      isSelected
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-muted-foreground hover:bg-muted/80",
-                      !searchEnabled && "opacity-50 cursor-not-allowed",
-                      searchEnabled && "cursor-pointer"
-                    )}
-                  >
-                    <span>{source.icon}</span>
-                    <span>{source.name}</span>
-                    {isSelected && <Check className="h-3 w-3" />}
-                  </button>
+                    onToggle={() => toggleSearchSource(source.id)}
+                  />
                 )
               })}
               {customSearchSources.map((source) => {
                 const isSelected = defaultSearchSources.includes(source.id)
                 return (
-                  <button
+                  <SourcePill
                     key={source.id}
-                    onClick={() => toggleSearchSource(source.id)}
+                    sourceId={source.id}
+                    name={source.name}
+                    icon={source.icon}
+                    selected={isSelected}
                     disabled={!searchEnabled}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
-                      isSelected
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-muted-foreground hover:bg-muted/80",
-                      !searchEnabled && "opacity-50 cursor-not-allowed",
-                      searchEnabled && "cursor-pointer"
-                    )}
-                  >
-                    <span>{source.icon || "🔗"}</span>
-                    <span>{source.name}</span>
-                    {isSelected && <Check className="h-3 w-3" />}
-                    <span
-                      className="ml-1 hover:text-destructive cursor-pointer"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        void removeCustomSearchSource(source.id)
-                        if (isSelected) {
-                          void setDefaultSearchSources(
-                            defaultSearchSources.filter((s) => s !== source.id)
-                          )
-                        }
-                      }}
-                    >
-                      ×
-                    </span>
-                  </button>
+                    onToggle={() => toggleSearchSource(source.id)}
+                    onRemove={() => {
+                      log.info("custom_source_removed", { id: source.id })
+                      void removeCustomSearchSource(source.id)
+                      if (isSelected) {
+                        void setDefaultSearchSources(
+                          defaultSearchSources.filter((s) => s !== source.id)
+                        )
+                      }
+                    }}
+                  />
                 )
               })}
               <Dialog open={addSourceOpen} onOpenChange={setAddSourceOpen}>

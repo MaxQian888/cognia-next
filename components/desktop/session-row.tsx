@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
+import { loggers } from "@/lib/logger"
 import type { ChatSession } from "@/lib/claude/types"
 import {
   HashIcon,
@@ -19,7 +20,10 @@ import {
   Trash2Icon,
   UsersIcon,
 } from "lucide-react"
+import { useTranslations } from "next-intl"
 import { useEffect, useRef, useState, type KeyboardEvent } from "react"
+
+const log = loggers.ui
 
 export interface SessionRowProps {
   session: ChatSession
@@ -48,6 +52,7 @@ export function SessionRow({
   onDelete,
   onRename,
 }: SessionRowProps) {
+  const t = useTranslations("desktop.sessionRow")
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(session.title)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -67,6 +72,7 @@ export function SessionRow({
   const commit = () => {
     const next = draft.trim()
     if (next && next !== session.title) {
+      log.info("session rename commit", { sessionId: session.id, length: next.length })
       void onRename(session.id, next)
     } else {
       setDraft(session.title)
@@ -75,6 +81,7 @@ export function SessionRow({
   }
 
   const cancel = () => {
+    log.info("session rename cancel", { sessionId: session.id })
     setDraft(session.title)
     setEditing(false)
   }
@@ -87,6 +94,16 @@ export function SessionRow({
       e.preventDefault()
       cancel()
     }
+  }
+
+  const handleSelect = () => {
+    log.info("session select", { sessionId: session.id, kind: session.kind })
+    onSelect(session.id)
+  }
+
+  const handleDelete = () => {
+    log.info("session delete", { sessionId: session.id, kind: session.kind })
+    void onDelete(session.id)
   }
 
   const Icon =
@@ -114,7 +131,7 @@ export function SessionRow({
       ) : (
         <button
           type="button"
-          onClick={() => onSelect(session.id)}
+          onClick={handleSelect}
           onDoubleClick={() => setEditing(true)}
           className="flex flex-1 items-center gap-2 truncate text-left"
           title={session.title}
@@ -128,7 +145,7 @@ export function SessionRow({
           ) : (
             <Icon className="size-3.5 shrink-0 text-muted-foreground" />
           )}
-          <span className="truncate">{session.title || "(untitled)"}</span>
+          <span className="truncate">{session.title || t("untitled")}</span>
           {unread && unread > 0 ? (
             <span className="ml-auto rounded-full bg-primary px-1.5 py-0.5 text-[10px] leading-none text-primary-foreground">
               {unread > 99 ? "99+" : unread}
@@ -143,7 +160,7 @@ export function SessionRow({
               variant="ghost"
               size="icon"
               className="size-6 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
-              aria-label="Session actions"
+              aria-label={t("actionsMenu")}
             >
               <MoreHorizontalIcon className="size-3.5" />
             </Button>
@@ -151,15 +168,15 @@ export function SessionRow({
           <DropdownMenuContent align="end">
             <DropdownMenuItem onSelect={() => setEditing(true)}>
               <PencilIcon className="mr-2 size-4" />
-              Rename
+              {t("rename")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              onSelect={() => void onDelete(session.id)}
+              onSelect={handleDelete}
               className="text-destructive focus:text-destructive"
             >
               <Trash2Icon className="mr-2 size-4" />
-              Delete
+              {t("delete")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

@@ -1,6 +1,7 @@
 "use client"
 
 import { memo, useState } from "react"
+import { useTranslations } from "next-intl"
 import {
   Info,
   Lightbulb,
@@ -28,38 +29,32 @@ const alertConfig: Record<
   AlertType,
   {
     icon: LucideIcon
-    title: string
     className: string
     iconClassName: string
   }
 > = {
   note: {
     icon: Info,
-    title: "Note",
     className: "border-blue-500/50 bg-blue-500/10",
     iconClassName: "text-blue-500",
   },
   tip: {
     icon: Lightbulb,
-    title: "Tip",
     className: "border-green-500/50 bg-green-500/10",
     iconClassName: "text-green-500",
   },
   important: {
     icon: AlertCircle,
-    title: "Important",
     className: "border-purple-500/50 bg-purple-500/10",
     iconClassName: "text-purple-500",
   },
   warning: {
     icon: AlertTriangle,
-    title: "Warning",
     className: "border-yellow-500/50 bg-yellow-500/10",
     iconClassName: "text-yellow-500",
   },
   caution: {
     icon: Flame,
-    title: "Caution",
     className: "border-red-500/50 bg-red-500/10",
     iconClassName: "text-red-500",
   },
@@ -73,10 +68,11 @@ export const AlertBlock = memo(function AlertBlock({
   collapsible = false,
   defaultOpen = true,
 }: AlertBlockProps) {
+  const t = useTranslations("chat.renderers.alert")
   const [isOpen, setIsOpen] = useState(defaultOpen)
   const config = alertConfig[type]
   const Icon = config.icon
-  const displayTitle = title || config.title
+  const displayTitle = title || t(type)
 
   const content = (
     <div

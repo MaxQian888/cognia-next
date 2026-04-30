@@ -1,0 +1,670 @@
+import { act } from "@testing-library/react"
+import type { AppSettings } from "@/lib/claude/types"
+import {
+  DEFAULT_SEARCH_PROVIDER_SETTINGS,
+  createDefaultSearchUsageEntry,
+  createDefaultSearchUsageStats,
+} from "@/lib/search/types"
+
+// ---- Mocks ----
+
+jest.mock("@/lib/db/settings", () => ({
+  getSettings: jest.fn(),
+  saveSettings: jest.fn(),
+  addAlwaysAllow: jest.fn(),
+  removeAlwaysAllow: jest.fn(),
+}))
+
+jest.mock("@/lib/claude/ipc", () => ({
+  setApiKey: jest.fn(),
+  restartSidecar: jest.fn(),
+}))
+
+jest.mock("@/lib/tauri", () => ({
+  isTauri: jest.fn(),
+}))
+
+jest.mock("@/lib/tts/keyring", () => ({
+  setProviderKey: jest.fn(),
+  clearProviderKey: jest.fn(),
+  loadAllProviderKeys: jest.fn(),
+}))
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const dbSettings = require("@/lib/db/settings") as {
+  getSettings: jest.Mock
+  saveSettings: jest.Mock
+  addAlwaysAllow: jest.Mock
+  removeAlwaysAllow: jest.Mock
+}
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const ipc = require("@/lib/claude/ipc") as {
+  setApiKey: jest.Mock
+  restartSidecar: jest.Mock
+}
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const tauri = require("@/lib/tauri") as { isTauri: jest.Mock }
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const keyring = require("@/lib/tts/keyring") as {
+  setProviderKey: jest.Mock
+  clearProviderKey: jest.Mock
+  loadAllProviderKeys: jest.Mock
+}
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { useSettingsStore } = require("./settings-store") as typeof import("./settings-store")
+
+const baseSettings = (overrides: Partial<AppSettings> = {}): AppSettings => ({
+  id: "singleton",
+  permissionMode: "default",
+  alwaysAllowTools: [],
+  ...overrides,
+})
+
+const RESET = { settings: null, loaded: false, providerKeys: {} }
+
+beforeEach(() => {
+  jest.clearAllMocks()
+  jest.spyOn(console, "warn").mockImplementation(() => {})
+  jest.spyOn(console, "error").mockImplementation(() => {})
+  useSettingsStore.setState(RESET)
+})
+
+afterEach(() => {
+  jest.restoreAllMocks()
+})
+
+// ---- load ----
+
+describe("load", () => {
+  it("fetches settings, marks loaded, and pulls keyring keys when fresh", async () => {
+    dbSettings.getSettings.mockResolvedValue(baseSettings({ apiKey: "sk-x" }))
+    keyring.loadAllProviderKeys.mockResolvedValue({ openai: "sk-openai" })
+    tauri.isTauri.mockReturnValue(true)
+    ipc.setApiKey.mockResolvedValue(undefined)
+
+    await act(async () => {
+      await useSettingsStore.getState().load()
+    })
+
+    const s = useSettingsStore.getState()
+    expect(s.loaded).toBe(true)
+    expect(s.settings?.apiKey).toBe("sk-x")
+    expect(s.providerKeys).toEqual({ openai: "sk-openai" })
+    expect(ipc.setApiKey).toHaveBeenCalledWith("sk-x")
+    expect(keyring.loadAllProviderKeys).toHaveBeenCalledTimes(1)
+  })
+
+  it("short-circuits if already loaded", async () => {
+    useSettingsStore.setState({ loaded: true, settings: baseSettings() })
+    await useSettingsStore.getState().load()
+    expect(dbSettings.getSettings).not.toHaveBeenCalled()
+  })
+
+  it("falls back to defaults when getSettings throws", async () => {
+    dbSettings.getSettings.mockRejectedValue(new Error("db down"))
+    await act(async () => {
+      await useSettingsStore.getState().load()
+    })
+    const s = useSettingsStore.getState()
+    expect(s.loaded).toBe(true)
+    expect(s.settings).toEqual({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+    })
+  })
+
+  it("warns but does not throw when loadAllProviderKeys fails", async () => {
+    dbSettings.getSettings.mockResolvedValue(baseSettings())
+    keyring.loadAllProviderKeys.mockRejectedValue(new Error("keyring err"))
+    tauri.isTauri.mockReturnValue(false)
+    await act(async () => {
+      await useSettingsStore.getState().load()
+    })
+    expect(useSettingsStore.getState().providerKeys).toEqual({})
+    expect(console.warn).toHaveBeenCalled()
+  })
+
+  it("does not push apiKey down to Tauri when not in Tauri", async () => {
+    dbSettings.getSettings.mockResolvedValue(baseSettings({ apiKey: "sk-y" }))
+    keyring.loadAllProviderKeys.mockResolvedValue({})
+    tauri.isTauri.mockReturnValue(false)
+    await act(async () => {
+      await useSettingsStore.getState().load()
+    })
+    expect(ipc.setApiKey).not.toHaveBeenCalled()
+  })
+
+  it("warns when ipc.setApiKey throws during load", async () => {
+    dbSettings.getSettings.mockResolvedValue(baseSettings({ apiKey: "sk-x" }))
+    keyring.loadAllProviderKeys.mockResolvedValue({})
+    tauri.isTauri.mockReturnValue(true)
+    ipc.setApiKey.mockRejectedValue(new Error("ipc dead"))
+    await act(async () => {
+      await useSettingsStore.getState().load()
+    })
+    expect(console.warn).toHaveBeenCalled()
+    expect(useSettingsStore.getState().loaded).toBe(true)
+  })
+})
+
+// ---- save ----
+
+describe("save", () => {
+  it("delegates to saveSettings and writes the result back", async () => {
+    const next = baseSettings({ defaultModel: "claude-sonnet" })
+    dbSettings.saveSettings.mockResolvedValue(next)
+    await act(async () => {
+      await useSettingsStore.getState().save({ defaultModel: "claude-sonnet" })
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ defaultModel: "claude-sonnet" })
+    expect(useSettingsStore.getState().settings).toEqual(next)
+  })
+})
+
+// ---- toggleAlwaysAllow ----
+
+describe("toggleAlwaysAllow", () => {
+  it("adds a tool when enabling and reloads", async () => {
+    dbSettings.getSettings.mockResolvedValue(baseSettings({ alwaysAllowTools: ["Write"] }))
+    await act(async () => {
+      await useSettingsStore.getState().toggleAlwaysAllow("Write", true)
+    })
+    expect(dbSettings.addAlwaysAllow).toHaveBeenCalledWith("Write")
+    expect(dbSettings.removeAlwaysAllow).not.toHaveBeenCalled()
+    expect(useSettingsStore.getState().settings?.alwaysAllowTools).toContain("Write")
+  })
+
+  it("removes a tool when disabling and reloads", async () => {
+    dbSettings.getSettings.mockResolvedValue(baseSettings({ alwaysAllowTools: [] }))
+    await act(async () => {
+      await useSettingsStore.getState().toggleAlwaysAllow("Write", false)
+    })
+    expect(dbSettings.removeAlwaysAllow).toHaveBeenCalledWith("Write")
+    expect(dbSettings.addAlwaysAllow).not.toHaveBeenCalled()
+  })
+})
+
+// ---- setApiKey ----
+
+describe("setApiKey", () => {
+  beforeEach(() => {
+    dbSettings.saveSettings.mockResolvedValue(baseSettings({ apiKey: "sk-new" }))
+  })
+
+  it("trims the key and writes through Dexie", async () => {
+    tauri.isTauri.mockReturnValue(false)
+    await act(async () => {
+      await useSettingsStore.getState().setApiKey("  sk-new  ")
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ apiKey: "sk-new" })
+  })
+
+  it("normalises empty / whitespace-only keys to undefined", async () => {
+    tauri.isTauri.mockReturnValue(false)
+    dbSettings.saveSettings.mockResolvedValue(baseSettings({ apiKey: undefined }))
+    await act(async () => {
+      await useSettingsStore.getState().setApiKey("   ")
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ apiKey: undefined })
+
+    await act(async () => {
+      await useSettingsStore.getState().setApiKey(null)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ apiKey: undefined })
+  })
+
+  it("calls restartSidecar when the key actually changed (Tauri)", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    ipc.setApiKey.mockResolvedValue(undefined)
+    ipc.restartSidecar.mockResolvedValue(undefined)
+    useSettingsStore.setState({ settings: baseSettings({ apiKey: "old" }) })
+    await act(async () => {
+      await useSettingsStore.getState().setApiKey("sk-new")
+    })
+    expect(ipc.setApiKey).toHaveBeenCalledWith("sk-new")
+    expect(ipc.restartSidecar).toHaveBeenCalledTimes(1)
+  })
+
+  it("does NOT call restartSidecar when the key did not change", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    dbSettings.saveSettings.mockResolvedValue(baseSettings({ apiKey: "same" }))
+    useSettingsStore.setState({ settings: baseSettings({ apiKey: "same" }) })
+    await act(async () => {
+      await useSettingsStore.getState().setApiKey("same")
+    })
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+  })
+
+  it("does NOT call ipc.setApiKey or restartSidecar when not in Tauri", async () => {
+    tauri.isTauri.mockReturnValue(false)
+    await act(async () => {
+      await useSettingsStore.getState().setApiKey("sk-x")
+    })
+    expect(ipc.setApiKey).not.toHaveBeenCalled()
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+  })
+
+  it("warns when restartSidecar rejects", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    ipc.setApiKey.mockResolvedValue(undefined)
+    ipc.restartSidecar.mockRejectedValue(new Error("sidecar gone"))
+    useSettingsStore.setState({ settings: baseSettings({ apiKey: "old" }) })
+    await act(async () => {
+      await useSettingsStore.getState().setApiKey("sk-new")
+    })
+    expect(console.warn).toHaveBeenCalled()
+  })
+})
+
+// ---- Web search setters (top-level) ----
+
+describe("simple search setters delegating to saveSettings", () => {
+  const cases: Array<[keyof ReturnType<typeof useSettingsStore.getState>, unknown, string]> = [
+    ["setSearchEnabled", true, "searchEnabled"],
+    ["setSearchMaxResults", 25, "searchMaxResults"],
+    ["setSearchFallbackEnabled", false, "searchFallbackEnabled"],
+    ["setDefaultSearchProvider", "tavily", "defaultSearchProvider"],
+    ["setDefaultSearchType", "news", "defaultSearchType"],
+    ["setDefaultSearchDepth", "advanced", "defaultSearchDepth"],
+    ["setDefaultSearchRecency", "week", "defaultSearchRecency"],
+    ["setDefaultSearchCountry", "US", "defaultSearchCountry"],
+    ["setDefaultSearchLanguage", "en", "defaultSearchLanguage"],
+    ["setDefaultIncludeDomains", ["a.com"], "defaultIncludeDomains"],
+    ["setDefaultExcludeDomains", ["b.com"], "defaultExcludeDomains"],
+    ["setDefaultIncludeAnswer", true, "defaultIncludeAnswer"],
+    ["setDefaultIncludeRawContent", true, "defaultIncludeRawContent"],
+    ["setSearchCacheEnabled", true, "searchCacheEnabled"],
+    ["setSearchCacheTTL", 60_000, "searchCacheTTL"],
+    ["setSearchCacheMaxEntries", 200, "searchCacheMaxEntries"],
+    ["setSearchSafeSearchEnabled", true, "searchSafeSearchEnabled"],
+    ["setSearchSafeSearchLevel", "strict", "searchSafeSearchLevel"],
+    ["setSourceVerificationSettings", { enabled: true }, "sourceVerificationSettings"],
+    ["setDefaultSearchSources", ["src-1"], "defaultSearchSources"],
+  ]
+
+  it.each(cases)("%s persists patch and updates state", async (action, value, fieldName) => {
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const fn = (useSettingsStore.getState() as any)[action]
+      await fn(value)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ [fieldName]: value })
+  })
+})
+
+// ---- Per-provider mutators ----
+
+describe("setSearchProviderEnabled / ApiKey / Priority / Settings", () => {
+  it("falls back to default providers when settings is null", async () => {
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore.getState().setSearchProviderEnabled("tavily", true)
+    })
+    const calledWith = dbSettings.saveSettings.mock.calls[0]?.[0] as {
+      searchProviders: typeof DEFAULT_SEARCH_PROVIDER_SETTINGS
+    }
+    expect(calledWith.searchProviders.tavily.enabled).toBe(true)
+    // Other providers untouched
+    expect(calledWith.searchProviders.perplexity.enabled).toBe(
+      DEFAULT_SEARCH_PROVIDER_SETTINGS.perplexity.enabled
+    )
+  })
+
+  it("merges into the existing providers map", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({
+        searchProviders: {
+          ...DEFAULT_SEARCH_PROVIDER_SETTINGS,
+          tavily: { providerId: "tavily", apiKey: "old", enabled: false, priority: 1 },
+        },
+      }),
+    })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore.getState().setSearchProviderApiKey("tavily", "new-key")
+    })
+    const arg = dbSettings.saveSettings.mock.calls[0]?.[0] as {
+      searchProviders: { tavily: { apiKey: string; enabled: boolean } }
+    }
+    expect(arg.searchProviders.tavily.apiKey).toBe("new-key")
+    // Untouched fields preserved
+    expect(arg.searchProviders.tavily.enabled).toBe(false)
+  })
+
+  it("setSearchProviderPriority writes priority", async () => {
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore.getState().setSearchProviderPriority("tavily", 9)
+    })
+    const arg = dbSettings.saveSettings.mock.calls[0]?.[0] as {
+      searchProviders: { tavily: { priority: number } }
+    }
+    expect(arg.searchProviders.tavily.priority).toBe(9)
+  })
+
+  it("setSearchProviderSettings merges a partial patch", async () => {
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setSearchProviderSettings("tavily", { enabled: true, priority: 4 })
+    })
+    const arg = dbSettings.saveSettings.mock.calls[0]?.[0] as {
+      searchProviders: {
+        tavily: { providerId: string; apiKey: string; enabled: boolean; priority: number }
+      }
+    }
+    expect(arg.searchProviders.tavily).toEqual({
+      providerId: "tavily",
+      apiKey: "",
+      enabled: true,
+      priority: 4,
+    })
+  })
+})
+
+// ---- incrementSearchUsage ----
+
+describe("incrementSearchUsage", () => {
+  it("is a no-op when settings is null", () => {
+    useSettingsStore.getState().incrementSearchUsage("tavily", 100, true)
+    expect(dbSettings.saveSettings).not.toHaveBeenCalled()
+  })
+
+  it("seeds default usage stats on first call and increments counters", async () => {
+    useSettingsStore.setState({ settings: baseSettings() })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+
+    act(() => {
+      useSettingsStore.getState().incrementSearchUsage("tavily", 250, true)
+    })
+
+    const stats = useSettingsStore.getState().settings?.searchUsageStats
+    expect(stats?.tavily.searchCount).toBe(1)
+    expect(stats?.tavily.totalResponseTime).toBe(250)
+    expect(stats?.tavily.errorCount).toBe(0)
+    expect(stats?.tavily.lastUsedAt).not.toBeNull()
+  })
+
+  it("counts errors when success is false", () => {
+    useSettingsStore.setState({
+      settings: baseSettings({
+        searchUsageStats: {
+          ...createDefaultSearchUsageStats(),
+          tavily: { ...createDefaultSearchUsageEntry(), searchCount: 5 },
+        },
+      }),
+    })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+
+    act(() => {
+      useSettingsStore.getState().incrementSearchUsage("tavily", 50, false)
+    })
+
+    const stats = useSettingsStore.getState().settings?.searchUsageStats
+    expect(stats?.tavily.searchCount).toBe(6)
+    expect(stats?.tavily.errorCount).toBe(1)
+  })
+
+  it("warns when the background save rejects", async () => {
+    useSettingsStore.setState({ settings: baseSettings() })
+    dbSettings.saveSettings.mockRejectedValue(new Error("disk full"))
+    act(() => {
+      useSettingsStore.getState().incrementSearchUsage("tavily", 1, true)
+    })
+    // Allow the microtask queue to flush so the .catch fires
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(console.warn).toHaveBeenCalled()
+  })
+
+  it("resetSearchUsageStats writes a fresh stats object", async () => {
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore.getState().resetSearchUsageStats()
+    })
+    const arg = dbSettings.saveSettings.mock.calls[0]?.[0] as {
+      searchUsageStats: ReturnType<typeof createDefaultSearchUsageStats>
+    }
+    expect(arg.searchUsageStats.tavily).toEqual(createDefaultSearchUsageEntry())
+  })
+})
+
+// ---- Custom search sources ----
+
+describe("custom search sources", () => {
+  const source = { id: "src1", name: "Source 1", url: "https://x.com" }
+
+  it("addCustomSearchSource adds a new entry", async () => {
+    useSettingsStore.setState({ settings: baseSettings({ customSearchSources: [] }) })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings({ customSearchSources: [source] }))
+    await act(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await useSettingsStore.getState().addCustomSearchSource(source as any)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ customSearchSources: [source] })
+  })
+
+  it("addCustomSearchSource is a no-op when the id already exists", async () => {
+    useSettingsStore.setState({ settings: baseSettings({ customSearchSources: [source] }) })
+    await act(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await useSettingsStore.getState().addCustomSearchSource(source as any)
+    })
+    expect(dbSettings.saveSettings).not.toHaveBeenCalled()
+  })
+
+  it("addCustomSearchSource handles the no-existing-list case (empty default)", async () => {
+    useSettingsStore.setState({ settings: baseSettings({ customSearchSources: undefined }) })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings({ customSearchSources: [source] }))
+    await act(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await useSettingsStore.getState().addCustomSearchSource(source as any)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ customSearchSources: [source] })
+  })
+
+  it("removeCustomSearchSource filters by id and tolerates missing list", async () => {
+    useSettingsStore.setState({ settings: baseSettings({ customSearchSources: [source] }) })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings({ customSearchSources: [] }))
+    await act(async () => {
+      await useSettingsStore.getState().removeCustomSearchSource(source.id)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ customSearchSources: [] })
+
+    // No source list — must still call save with [] (filter on undefined defaults to [])
+    useSettingsStore.setState({ settings: baseSettings({ customSearchSources: undefined }) })
+    dbSettings.saveSettings.mockClear()
+    dbSettings.saveSettings.mockResolvedValue(baseSettings({ customSearchSources: [] }))
+    await act(async () => {
+      await useSettingsStore.getState().removeCustomSearchSource("anything")
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ customSearchSources: [] })
+  })
+})
+
+// ---- TTS provider keys ----
+
+describe("provider keys (TTS keyring)", () => {
+  it("setProviderApiKey trims, writes, and mirrors into providerKeys", async () => {
+    keyring.setProviderKey.mockResolvedValue(undefined)
+    await act(async () => {
+      await useSettingsStore.getState().setProviderApiKey("openai", "  sk-trim  ")
+    })
+    expect(keyring.setProviderKey).toHaveBeenCalledWith("openai", "sk-trim")
+    expect(useSettingsStore.getState().providerKeys.openai).toBe("sk-trim")
+  })
+
+  it("setProviderApiKey stores undefined when the trimmed string is empty", async () => {
+    keyring.setProviderKey.mockResolvedValue(undefined)
+    await act(async () => {
+      await useSettingsStore.getState().setProviderApiKey("openai", "    ")
+    })
+    expect(useSettingsStore.getState().providerKeys.openai).toBeUndefined()
+  })
+
+  it("clearProviderApiKey removes the slot", async () => {
+    useSettingsStore.setState({ providerKeys: { openai: "sk-x" } })
+    keyring.clearProviderKey.mockResolvedValue(undefined)
+    await act(async () => {
+      await useSettingsStore.getState().clearProviderApiKey("openai")
+    })
+    expect(keyring.clearProviderKey).toHaveBeenCalledWith("openai")
+    expect(useSettingsStore.getState().providerKeys.openai).toBeUndefined()
+  })
+
+  it("refreshProviderKeys overwrites on success", async () => {
+    keyring.loadAllProviderKeys.mockResolvedValue({ openai: "fresh" })
+    await act(async () => {
+      await useSettingsStore.getState().refreshProviderKeys()
+    })
+    expect(useSettingsStore.getState().providerKeys.openai).toBe("fresh")
+  })
+
+  it("refreshProviderKeys warns and keeps existing keys on failure", async () => {
+    useSettingsStore.setState({ providerKeys: { openai: "stale" } })
+    keyring.loadAllProviderKeys.mockRejectedValue(new Error("offline"))
+    await act(async () => {
+      await useSettingsStore.getState().refreshProviderKeys()
+    })
+    expect(useSettingsStore.getState().providerKeys.openai).toBe("stale")
+    expect(console.warn).toHaveBeenCalled()
+  })
+})
+
+// ---- TTS settings ----
+
+describe("TTS feature toggles and clamps", () => {
+  beforeEach(() => {
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+  })
+
+  const passthroughCases: Array<[string, unknown, string]> = [
+    ["setTtsEnabled", true, "ttsEnabled"],
+    ["setTtsProvider", "openai", "ttsProvider"],
+    ["setTtsAutoPlay", true, "ttsAutoPlay"],
+  ]
+
+  it.each(passthroughCases)("%s passes value through verbatim", async (action, value, field) => {
+    await act(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (useSettingsStore.getState() as any)[action](value)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ [field]: value })
+  })
+
+  it("setTtsRate clamps to [0.1, 10]", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().setTtsRate(20)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenLastCalledWith({ ttsRate: 10 })
+
+    await act(async () => {
+      await useSettingsStore.getState().setTtsRate(-5)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenLastCalledWith({ ttsRate: 0.1 })
+
+    await act(async () => {
+      await useSettingsStore.getState().setTtsRate(1.5)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenLastCalledWith({ ttsRate: 1.5 })
+  })
+
+  it("setTtsPitch clamps to [0, 2]", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().setTtsPitch(5)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenLastCalledWith({ ttsPitch: 2 })
+
+    await act(async () => {
+      await useSettingsStore.getState().setTtsPitch(-1)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenLastCalledWith({ ttsPitch: 0 })
+  })
+
+  it("setTtsVolume clamps to [0, 1]", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().setTtsVolume(2)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenLastCalledWith({ ttsVolume: 1 })
+
+    await act(async () => {
+      await useSettingsStore.getState().setTtsVolume(-3)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenLastCalledWith({ ttsVolume: 0 })
+  })
+})
+
+// ---- Coverage for fallback branches ----
+
+describe("fallback branches (existing-map-missing-id and friends)", () => {
+  it("setSearchProviderEnabled falls back to DEFAULT entry when providers map lacks the id", async () => {
+    // providers map exists but is empty — forces `providers[id] ?? defaults[id]` fallback
+    useSettingsStore.setState({
+      settings: baseSettings({
+        searchProviders: {} as Record<string, never>,
+      }),
+    })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore.getState().setSearchProviderEnabled("tavily", true)
+    })
+    const arg = dbSettings.saveSettings.mock.calls[0]?.[0] as {
+      searchProviders: { tavily: { providerId: string; enabled: boolean } }
+    }
+    expect(arg.searchProviders.tavily.enabled).toBe(true)
+    expect(arg.searchProviders.tavily.providerId).toBe("tavily")
+  })
+
+  it("setSearchProviderApiKey, Priority, Settings all use the same fallback", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ searchProviders: {} as Record<string, never> }),
+    })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+
+    await act(async () => {
+      await useSettingsStore.getState().setSearchProviderApiKey("tavily", "X")
+    })
+    await act(async () => {
+      await useSettingsStore.getState().setSearchProviderPriority("tavily", 7)
+    })
+    await act(async () => {
+      await useSettingsStore.getState().setSearchProviderSettings("tavily", { enabled: true })
+    })
+
+    expect(dbSettings.saveSettings).toHaveBeenCalledTimes(3)
+  })
+
+  it("incrementSearchUsage seeds an entry from defaults when stats is present but lacks the id", () => {
+    useSettingsStore.setState({
+      settings: baseSettings({
+        searchUsageStats: {} as Record<string, never>,
+      }),
+    })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    act(() => {
+      useSettingsStore.getState().incrementSearchUsage("tavily", 100, true)
+    })
+    const stats = useSettingsStore.getState().settings?.searchUsageStats
+    expect(stats?.tavily.searchCount).toBe(1)
+    expect(stats?.tavily.totalResponseTime).toBe(100)
+  })
+
+  it("syncApiKeyToTauri converts whitespace-only key to null when in Tauri", async () => {
+    // Ensures the `key && key.trim() ? key : null` falsy branch is exercised
+    tauri.isTauri.mockReturnValue(true)
+    ipc.setApiKey.mockResolvedValue(undefined)
+    dbSettings.saveSettings.mockResolvedValue(baseSettings({ apiKey: undefined }))
+    useSettingsStore.setState({ settings: baseSettings({ apiKey: "old" }) })
+
+    await act(async () => {
+      await useSettingsStore.getState().setApiKey("   ")
+    })
+    // Inside syncApiKeyToTauri, the `key && key.trim()` check on the trimmed
+    // arg (undefined here) falls to the null branch.
+    expect(ipc.setApiKey).toHaveBeenCalledWith(null)
+  })
+})

@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "next-intl"
 import {
   Conversation,
   ConversationContent,
@@ -22,13 +23,15 @@ import {
 import type { UIMessage } from "ai"
 import { DownloadIcon, Trash2Icon } from "lucide-react"
 import { MessageRenderer } from "./message-renderer"
-import { useChatStore } from "@/stores/chat-store"
+import { useChatStore } from "@/stores/chat"
 import { clearMessages } from "@/lib/db/messages"
 import { listCharacters } from "@/lib/db/characters"
 import { useLiveQuery } from "dexie-react-hooks"
 import type { Character } from "@/lib/claude/types"
 import { useCallback, useMemo } from "react"
 import { toast } from "sonner"
+import { downloadBlob } from "@/lib/files/download"
+import { loggers } from "@/lib/logger"
 
 interface Props {
   messages: UIMessage[]
@@ -39,6 +42,7 @@ interface Props {
 }
 
 export function MessageList({ messages, status, onCopy, onRegenerate, onEditResend }: Props) {
+  const t = useTranslations("chat.list")
   const lastIndex = messages.length - 1
   const sessionId = useChatStore((s) => s.activeSessionId)
 
@@ -56,29 +60,27 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
 
   const handleExport = useCallback(() => {
     if (messages.length === 0) {
-      toast.info("Nothing to export yet.")
+      toast.info(t("nothingToExport"))
       return
     }
     const md = messagesToMarkdown(messages)
     const blob = new Blob([md], { type: "text/markdown" })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement("a")
     const ts = new Date().toISOString().replaceAll(/[:.]/g, "-")
-    link.href = url
-    link.download = `cognia-chat-${ts}.md`
-    document.body.append(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(url)
-    toast.success("Exported as markdown.")
-  }, [messages])
+    downloadBlob(blob, `cognia-chat-${ts}.md`)
+    toast.success(t("exported"))
+  }, [messages, t])
 
   const handleClear = useCallback(async () => {
     if (!sessionId) return
-    await clearMessages(sessionId)
-    useChatStore.getState().replaceMessages([])
-    toast.success("Conversation cleared.")
-  }, [sessionId])
+    try {
+      await clearMessages(sessionId)
+      useChatStore.getState().replaceMessages([])
+      toast.success(t("cleared"))
+    } catch (err) {
+      loggers.chat.error("clear messages failed", err, { sessionId })
+      toast.error(err instanceof Error ? err.message : t("cleared"))
+    }
+  }, [sessionId, t])
 
   const lastAssistantId = (() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -93,7 +95,7 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
         <div className="flex items-center justify-end gap-1 border-b bg-background/40 px-3 py-1.5">
           <Button variant="ghost" size="sm" onClick={handleExport} className="h-7 gap-1.5 text-xs">
             <DownloadIcon className="size-3.5" />
-            Export
+            {t("export")}
           </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
@@ -103,21 +105,18 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
                 className="h-7 gap-1.5 text-xs text-destructive hover:text-destructive"
               >
                 <Trash2Icon className="size-3.5" />
-                Clear
+                {t("clear")}
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Clear this conversation?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  All messages in this session will be permanently deleted. The session itself will
-                  remain.
-                </AlertDialogDescription>
+                <AlertDialogTitle>{t("clearTitle")}</AlertDialogTitle>
+                <AlertDialogDescription>{t("clearDescription")}</AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogCancel>{t("clearCancel")}</AlertDialogCancel>
                 <AlertDialogAction onClick={() => void handleClear()}>
-                  Delete messages
+                  {t("clearAction")}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -145,7 +144,7 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
           ))}
           {shouldShowThinking(messages, status) && (
             <Shimmer as="p" className="px-1 py-2 text-sm">
-              Claude is thinking…
+              {t("thinking")}
             </Shimmer>
           )}
         </ConversationContent>

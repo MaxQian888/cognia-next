@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useState } from "react"
+import { useTranslations } from "next-intl"
 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -21,7 +22,7 @@ import {
 } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useSettingsStore } from "@/stores/settings"
 import {
   CARTESIA_TTS_MODELS,
   CARTESIA_TTS_VOICES,
@@ -71,6 +72,7 @@ function NumberSlider(props: {
 // -- System ------------------------------------------------------------------
 
 export function SystemConfig() {
+  const t = useTranslations("settings.speech.provider")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
 
@@ -91,16 +93,16 @@ export function SystemConfig() {
   return (
     <div className="space-y-3">
       <div className="space-y-2">
-        <Label className="text-xs">Voice</Label>
+        <Label className="text-xs">{t("voice")}</Label>
         <Select
           value={value || "auto"}
           onValueChange={(v) => void save({ systemVoice: v === "auto" ? "" : v })}
         >
           <SelectTrigger>
-            <SelectValue placeholder="Auto-select for language" />
+            <SelectValue placeholder={t("voiceAutoPlaceholder")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="auto">Auto-select for language</SelectItem>
+            <SelectItem value="auto">{t("voiceAuto")}</SelectItem>
             {voices.map((v) => (
               <SelectItem key={v.voiceURI} value={v.voiceURI}>
                 {v.name} ({v.lang})
@@ -109,9 +111,7 @@ export function SystemConfig() {
           </SelectContent>
         </Select>
         {voices.length === 0 && (
-          <p className="text-xs text-muted-foreground">
-            Loading installed voices… (browser-provided)
-          </p>
+          <p className="text-xs text-muted-foreground">{t("voicesLoading")}</p>
         )}
       </div>
     </div>
@@ -121,6 +121,7 @@ export function SystemConfig() {
 // -- OpenAI ------------------------------------------------------------------
 
 export function OpenAiConfig() {
+  const t = useTranslations("settings.speech.provider")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const voice = settings?.openaiVoice ?? "alloy"
@@ -130,9 +131,9 @@ export function OpenAiConfig() {
 
   return (
     <div className="space-y-3">
-      <ApiKeyInput provider="openai" label="OpenAI API key" placeholder="sk-…" />
+      <ApiKeyInput provider="openai" label={t("label.openai")} placeholder="sk-…" />
       <div className="space-y-2">
-        <Label className="text-xs">Voice</Label>
+        <Label className="text-xs">{t("voice")}</Label>
         <Select value={voice} onValueChange={(v) => void save({ openaiVoice: v })}>
           <SelectTrigger>
             <SelectValue />
@@ -147,7 +148,7 @@ export function OpenAiConfig() {
         </Select>
       </div>
       <div className="space-y-2">
-        <Label className="text-xs">Model</Label>
+        <Label className="text-xs">{t("model")}</Label>
         <Select value={model} onValueChange={(v) => void save({ openaiModel: v })}>
           <SelectTrigger>
             <SelectValue />
@@ -162,7 +163,7 @@ export function OpenAiConfig() {
         </Select>
       </div>
       <NumberSlider
-        label="Speed"
+        label={t("speed")}
         value={speed}
         min={0.25}
         max={4.0}
@@ -172,11 +173,11 @@ export function OpenAiConfig() {
       />
       {model === "gpt-4o-mini-tts" && (
         <div className="space-y-2">
-          <Label className="text-xs">Voice instructions (gpt-4o-mini-tts only)</Label>
+          <Label className="text-xs">{t("voiceInstructions")}</Label>
           <Textarea
             value={instructions}
             onChange={(e) => void save({ openaiInstructions: e.target.value })}
-            placeholder="Speak in a cheerful, encouraging tone."
+            placeholder={t("voiceInstructionsPlaceholder")}
             rows={3}
           />
         </div>
@@ -188,15 +189,16 @@ export function OpenAiConfig() {
 // -- Gemini ------------------------------------------------------------------
 
 export function GeminiConfig() {
+  const t = useTranslations("settings.speech.provider")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const voice = settings?.geminiVoice ?? "Kore"
 
   return (
     <div className="space-y-3">
-      <ApiKeyInput provider="google" label="Google AI Studio API key" placeholder="AIza…" />
+      <ApiKeyInput provider="google" label={t("label.google")} placeholder="AIza…" />
       <div className="space-y-2">
-        <Label className="text-xs">Voice</Label>
+        <Label className="text-xs">{t("voice")}</Label>
         <Select value={voice} onValueChange={(v) => void save({ geminiVoice: v })}>
           <SelectTrigger>
             <SelectValue />
@@ -217,6 +219,7 @@ export function GeminiConfig() {
 // -- Edge --------------------------------------------------------------------
 
 export function EdgeConfig() {
+  const t = useTranslations("settings.speech.provider")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const voice = settings?.edgeVoice ?? "en-US-JennyNeural"
@@ -230,12 +233,9 @@ export function EdgeConfig() {
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
-        Edge TTS is free and doesn&apos;t require an API key. Synthesis runs through the desktop
-        app&apos;s WebSocket bridge.
-      </p>
+      <p className="text-xs text-muted-foreground">{t("edgeIntro")}</p>
       <div className="space-y-2">
-        <Label className="text-xs">Voice</Label>
+        <Label className="text-xs">{t("voice")}</Label>
         <Select value={voice} onValueChange={(v) => void save({ edgeVoice: v })}>
           <SelectTrigger>
             <SelectValue />
@@ -251,7 +251,7 @@ export function EdgeConfig() {
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label className="text-xs">Rate</Label>
+          <Label className="text-xs">{t("edgeRate")}</Label>
           <Input
             value={rate}
             onChange={(e) => void save({ edgeRate: e.target.value })}
@@ -259,7 +259,7 @@ export function EdgeConfig() {
           />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs">Pitch</Label>
+          <Label className="text-xs">{t("edgePitch")}</Label>
           <Input
             value={pitch}
             onChange={(e) => void save({ edgePitch: e.target.value })}
@@ -268,7 +268,11 @@ export function EdgeConfig() {
         </div>
       </div>
       <p className="text-[10px] text-muted-foreground">
-        Rate accepts <code>+/-N%</code>; pitch accepts <code>+/-NHz</code>.
+        {t("edgeFormatHintBefore")}
+        <code>+/-N%</code>
+        {t("edgeFormatHintMid")}
+        <code>+/-NHz</code>
+        {t("edgeFormatHintAfter")}
       </p>
     </div>
   )
@@ -277,6 +281,7 @@ export function EdgeConfig() {
 // -- ElevenLabs --------------------------------------------------------------
 
 export function ElevenLabsConfig() {
+  const t = useTranslations("settings.speech.provider")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const voice = settings?.elevenlabsVoice ?? "rachel"
@@ -286,9 +291,9 @@ export function ElevenLabsConfig() {
 
   return (
     <div className="space-y-3">
-      <ApiKeyInput provider="elevenlabs" label="ElevenLabs API key" placeholder="sk_…" />
+      <ApiKeyInput provider="elevenlabs" label={t("label.elevenlabs")} placeholder="sk_…" />
       <div className="space-y-2">
-        <Label className="text-xs">Voice</Label>
+        <Label className="text-xs">{t("voice")}</Label>
         <Select value={voice} onValueChange={(v) => void save({ elevenlabsVoice: v })}>
           <SelectTrigger>
             <SelectValue />
@@ -303,7 +308,7 @@ export function ElevenLabsConfig() {
         </Select>
       </div>
       <div className="space-y-2">
-        <Label className="text-xs">Model</Label>
+        <Label className="text-xs">{t("model")}</Label>
         <Select value={model} onValueChange={(v) => void save({ elevenlabsModel: v })}>
           <SelectTrigger>
             <SelectValue />
@@ -318,7 +323,7 @@ export function ElevenLabsConfig() {
         </Select>
       </div>
       <NumberSlider
-        label="Stability"
+        label={t("elevenStability")}
         value={stability}
         min={0}
         max={1}
@@ -326,7 +331,7 @@ export function ElevenLabsConfig() {
         onChange={(n) => void save({ elevenlabsStability: n })}
       />
       <NumberSlider
-        label="Similarity boost"
+        label={t("elevenSimilarity")}
         value={similarityBoost}
         min={0}
         max={1}
@@ -340,6 +345,7 @@ export function ElevenLabsConfig() {
 // -- LMNT --------------------------------------------------------------------
 
 export function LmntConfig() {
+  const t = useTranslations("settings.speech.provider")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const voice = settings?.lmntVoice ?? "lily"
@@ -347,9 +353,9 @@ export function LmntConfig() {
 
   return (
     <div className="space-y-3">
-      <ApiKeyInput provider="lmnt" label="LMNT API key" />
+      <ApiKeyInput provider="lmnt" label={t("label.lmnt")} />
       <div className="space-y-2">
-        <Label className="text-xs">Voice</Label>
+        <Label className="text-xs">{t("voice")}</Label>
         <Select value={voice} onValueChange={(v) => void save({ lmntVoice: v })}>
           <SelectTrigger>
             <SelectValue />
@@ -364,7 +370,7 @@ export function LmntConfig() {
         </Select>
       </div>
       <NumberSlider
-        label="Speed"
+        label={t("speed")}
         value={speed}
         min={0.5}
         max={2.0}
@@ -379,15 +385,16 @@ export function LmntConfig() {
 // -- Hume --------------------------------------------------------------------
 
 export function HumeConfig() {
+  const t = useTranslations("settings.speech.provider")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const voice = settings?.humeVoice ?? "kora"
 
   return (
     <div className="space-y-3">
-      <ApiKeyInput provider="hume" label="Hume AI API key" />
+      <ApiKeyInput provider="hume" label={t("label.hume")} />
       <div className="space-y-2">
-        <Label className="text-xs">Voice</Label>
+        <Label className="text-xs">{t("voice")}</Label>
         <Select value={voice} onValueChange={(v) => void save({ humeVoice: v })}>
           <SelectTrigger>
             <SelectValue />
@@ -408,6 +415,7 @@ export function HumeConfig() {
 // -- Cartesia ----------------------------------------------------------------
 
 export function CartesiaConfig() {
+  const t = useTranslations("settings.speech.provider")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const voice = settings?.cartesiaVoice ?? "a0e99841-438c-4a64-b679-ae501e7d6091"
@@ -418,9 +426,9 @@ export function CartesiaConfig() {
 
   return (
     <div className="space-y-3">
-      <ApiKeyInput provider="cartesia" label="Cartesia API key" />
+      <ApiKeyInput provider="cartesia" label={t("label.cartesia")} />
       <div className="space-y-2">
-        <Label className="text-xs">Voice</Label>
+        <Label className="text-xs">{t("voice")}</Label>
         <Select value={voice} onValueChange={(v) => void save({ cartesiaVoice: v })}>
           <SelectTrigger>
             <SelectValue />
@@ -435,7 +443,7 @@ export function CartesiaConfig() {
         </Select>
       </div>
       <div className="space-y-2">
-        <Label className="text-xs">Model</Label>
+        <Label className="text-xs">{t("model")}</Label>
         <Select value={model} onValueChange={(v) => void save({ cartesiaModel: v })}>
           <SelectTrigger>
             <SelectValue />
@@ -451,7 +459,7 @@ export function CartesiaConfig() {
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label className="text-xs">Language</Label>
+          <Label className="text-xs">{t("cartesiaLanguage")}</Label>
           <Input
             value={language}
             onChange={(e) => void save({ cartesiaLanguage: e.target.value })}
@@ -459,7 +467,7 @@ export function CartesiaConfig() {
           />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs">Emotion</Label>
+          <Label className="text-xs">{t("cartesiaEmotion")}</Label>
           <Input
             value={emotion}
             onChange={(e) => void save({ cartesiaEmotion: e.target.value })}
@@ -468,7 +476,7 @@ export function CartesiaConfig() {
         </div>
       </div>
       <NumberSlider
-        label="Speed"
+        label={t("speed")}
         value={speed}
         min={-1.0}
         max={1.0}
@@ -483,15 +491,16 @@ export function CartesiaConfig() {
 // -- Deepgram ----------------------------------------------------------------
 
 export function DeepgramConfig() {
+  const t = useTranslations("settings.speech.provider")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const voice = settings?.deepgramVoice ?? "aura-2-asteria-en"
 
   return (
     <div className="space-y-3">
-      <ApiKeyInput provider="deepgram" label="Deepgram API key" />
+      <ApiKeyInput provider="deepgram" label={t("label.deepgram")} />
       <div className="space-y-2">
-        <Label className="text-xs">Voice</Label>
+        <Label className="text-xs">{t("voice")}</Label>
         <Select value={voice} onValueChange={(v) => void save({ deepgramVoice: v })}>
           <SelectTrigger>
             <SelectValue />

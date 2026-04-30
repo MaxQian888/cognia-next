@@ -11,13 +11,14 @@ import { CopyIcon, DownloadIcon, PencilIcon, PowerIcon, Trash2Icon } from "lucid
 import { duplicateSkill, inferCategory, inferSource, setSkillStatus } from "@/lib/db/skills"
 import { listResourcesForSkill } from "@/lib/db/skill-resources"
 import { getCategoryMeta, getSourceMeta } from "@/lib/skills/categories"
-import { useSkillsStore } from "@/stores/skills-store"
+import { useSkillsStore } from "@/stores/skills"
 import { serializeSkill, skillFilename } from "@/lib/claude/skills-io"
-import { saveFileAs } from "@/lib/file-bridge"
+import { saveFileAs } from "@/lib/files/file-bridge"
 import { toast } from "sonner"
 import type { Skill } from "@/lib/claude/types"
 import { SkillResourceManager } from "./skill-resource-manager"
 import { SkillSecurityScanner } from "./skill-security-scanner"
+import { loggers } from "@/lib/logger"
 
 interface Props {
   skill: Skill
@@ -26,6 +27,7 @@ interface Props {
 export function SkillDetail({ skill }: Props) {
   const t = useTranslations("skills")
   const tDetail = useTranslations("skills.detail")
+  const tToasts = useTranslations("skills.toasts")
   const category = getCategoryMeta(inferCategory(skill))
   const source = getSourceMeta(inferSource(skill))
   const Icon = category.icon
@@ -35,8 +37,14 @@ export function SkillDetail({ skill }: Props) {
   const resources = useLiveQuery(() => listResourcesForSkill(skill.id), [skill.id])
 
   const handleDuplicate = async () => {
-    const dup = await duplicateSkill(skill.id)
-    toast.success(`Duplicated as "${dup.name}".`)
+    try {
+      const dup = await duplicateSkill(skill.id)
+      toast.success(tToasts("duplicatedAs", { name: dup.name }))
+      loggers.skills.info("duplicate ok", { sourceId: skill.id, newId: dup.id })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+      loggers.skills.error("duplicate failed", err, { skillId: skill.id })
+    }
   }
 
   const handleExport = async () => {
@@ -46,9 +54,13 @@ export function SkillDetail({ skill }: Props) {
         content: serializeSkill(skill),
         filters: [{ name: "Markdown", extensions: ["md", "markdown"] }],
       })
-      if (ok) toast.success(`Exported "${skill.name}".`)
+      if (ok) {
+        toast.success(tToasts("exportedSingle", { name: skill.name }))
+        loggers.skills.info("export single ok", { skillId: skill.id })
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
+      loggers.skills.error("export single failed", err, { skillId: skill.id })
     }
   }
 
@@ -192,7 +204,7 @@ function OverviewSection({ skill }: { skill: Skill }) {
           : "—"}
       </Row>
       {skill.allowedTools && skill.allowedTools.length > 0 && (
-        <Row label="Tools">
+        <Row label={t("metaTools")}>
           <span className="font-mono">{skill.allowedTools.join(", ")}</span>
         </Row>
       )}

@@ -104,7 +104,7 @@ async function recordUsage(
   success: boolean
 ): Promise<void> {
   try {
-    const mod = await import("@/stores/settings-store")
+    const mod = await import("@/stores/settings")
     const fn = (
       mod.useSettingsStore.getState() as {
         incrementSearchUsage?: (id: SearchProviderType, ms: number, ok: boolean) => void

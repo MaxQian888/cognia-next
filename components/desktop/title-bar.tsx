@@ -2,9 +2,13 @@
 
 import { Button } from "@/components/ui/button"
 import { isTauri } from "@/lib/tauri"
+import { loggers } from "@/lib/logger"
 import { cn } from "@/lib/utils"
 import { MaximizeIcon, MinimizeIcon, MinusIcon, XIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
 import { useEffect, useState } from "react"
+
+const log = loggers.ui
 
 /**
  * Custom title bar shown when `decorations: false` in tauri.conf.json.
@@ -14,6 +18,7 @@ import { useEffect, useState } from "react"
  * Linux/Windows render their own min/max/close buttons here.
  */
 export function TitleBar() {
+  const t = useTranslations("desktop.titleBar")
   const [mounted, setMounted] = useState(false)
   const [maximized, setMaximized] = useState(false)
   const [platform, setPlatform] = useState<string>("")
@@ -38,7 +43,9 @@ export function TitleBar() {
           setMaximized(await win.isMaximized())
         })
       } catch (err) {
-        console.warn("title-bar window setup failed", err)
+        log.warn("title-bar window setup failed", {
+          error: err instanceof Error ? err.message : String(err),
+        })
       }
     })()
     return () => {
@@ -51,16 +58,31 @@ export function TitleBar() {
   const isMac = platform.includes("mac")
 
   const handleMin = async () => {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window")
-    await getCurrentWindow().minimize()
+    log.info("title-bar minimize")
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window")
+      await getCurrentWindow().minimize()
+    } catch (err) {
+      log.error("title-bar minimize failed", err)
+    }
   }
   const handleMax = async () => {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window")
-    await getCurrentWindow().toggleMaximize()
+    log.info("title-bar toggle maximize", { wasMaximized: maximized })
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window")
+      await getCurrentWindow().toggleMaximize()
+    } catch (err) {
+      log.error("title-bar toggle maximize failed", err)
+    }
   }
   const handleClose = async () => {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window")
-    await getCurrentWindow().close()
+    log.info("title-bar close")
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window")
+      await getCurrentWindow().close()
+    } catch (err) {
+      log.error("title-bar close failed", err)
+    }
   }
 
   return (
@@ -78,10 +100,10 @@ export function TitleBar() {
       </div>
       {!isMac && (
         <div className="flex items-center">
-          <TitleBarButton onClick={handleMin} aria-label="Minimize">
+          <TitleBarButton onClick={handleMin} aria-label={t("minimize")}>
             <MinusIcon className="size-3.5" />
           </TitleBarButton>
-          <TitleBarButton onClick={handleMax} aria-label="Maximize">
+          <TitleBarButton onClick={handleMax} aria-label={maximized ? t("restore") : t("maximize")}>
             {maximized ? (
               <MinimizeIcon className="size-3.5" />
             ) : (
@@ -90,7 +112,7 @@ export function TitleBar() {
           </TitleBarButton>
           <TitleBarButton
             onClick={handleClose}
-            aria-label="Close"
+            aria-label={t("close")}
             className="hover:bg-destructive hover:text-destructive-foreground"
           >
             <XIcon className="size-3.5" />

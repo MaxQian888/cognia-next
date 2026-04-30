@@ -26,24 +26,23 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { pickAndReadFiles, pickDirectory, saveFilesToDir } from "@/lib/file-bridge"
+import { pickAndReadFiles } from "@/lib/files/file-bridge"
 import { isTauri } from "@/lib/tauri"
 import { listSkills } from "@/lib/db/skills"
-import {
-  nameFromFilename,
-  parseSkillMarkdown,
-  serializeSkill,
-  skillFilename,
-} from "@/lib/claude/skills-io"
+import { nameFromFilename, parseSkillMarkdown } from "@/lib/claude/skills-io"
 import { scanClaudeSkills } from "@/lib/claude/ipc"
-import { useSkillsStore } from "@/stores/skills-store"
-import type { ImportStaging } from "@/stores/skills-store"
-import { useSkillSync } from "@/hooks/use-skill-sync"
+import { useSkillsStore } from "@/stores/skills"
+import type { ImportStaging } from "@/stores/skills"
+import { useSkillSync } from "@/hooks/skills"
+import { exportSkillsToDirWithFeedback } from "@/lib/skills/export-toast"
+import { loggers } from "@/lib/logger"
 
 const SKILL_FILE_FILTERS = [{ name: "Markdown", extensions: ["md", "markdown"] }]
 
 export function SkillPanelToolbar() {
   const t = useTranslations("skills.toolbar")
+  const tCommon = useTranslations("skills")
+  const tToasts = useTranslations("skills.toasts")
   const tSync = useTranslations("skills.sync")
   const tDiscovery = useTranslations("skills.discovery")
   const [busy, setBusy] = useState(false)
@@ -79,9 +78,13 @@ export function SkillPanelToolbar() {
       if (drafts.length === 0) {
         toast.error(
           parseErrors.length > 0
-            ? `Couldn't parse any of ${parseErrors.length} file(s).`
-            : "No skills imported."
+            ? tToasts("importNoFilesParsed", { count: parseErrors.length })
+            : tToasts("importNoSkills")
         )
+        loggers.skills.warn("import.markdown none parsed", {
+          attempted: files.length,
+          errors: parseErrors.length,
+        })
         return
       }
       setImportStaging({
@@ -89,8 +92,13 @@ export function SkillPanelToolbar() {
         sourceLabel: `${files.length} markdown file(s)`,
         parseErrors,
       })
+      loggers.skills.info("import.markdown staged", {
+        drafts: drafts.length,
+        errors: parseErrors.length,
+      })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
+      loggers.skills.error("import.markdown failed", err)
     } finally {
       setBusy(false)
     }
@@ -98,14 +106,15 @@ export function SkillPanelToolbar() {
 
   const handleImportFromClaudeCode = async () => {
     if (!isTauri()) {
-      toast.error("Importing from ~/.claude/skills/ requires desktop mode.")
+      toast.error(tToasts("importFromClaudeDesktopOnly"))
       return
     }
     setBusy(true)
     try {
       const discovered = await scanClaudeSkills()
       if (discovered.length === 0) {
-        toast.info("No SKILL.md files found under ~/.claude/skills/.")
+        toast.info(tToasts("importNoSkillMd"))
+        loggers.skills.info("import.claudeCode empty")
         return
       }
       const drafts: ImportStaging["drafts"] = []
@@ -126,8 +135,15 @@ export function SkillPanelToolbar() {
       }
       if (drafts.length === 0) {
         toast.error(
-          `Found ${discovered.length} skill(s) but none parsed: ${parseErrors[0]?.error ?? "unknown error"}`
+          tToasts("importNoneParsed", {
+            found: discovered.length,
+            first: parseErrors[0]?.error ?? "",
+          })
         )
+        loggers.skills.warn("import.claudeCode none parsed", {
+          found: discovered.length,
+          errors: parseErrors.length,
+        })
         return
       }
       setImportStaging({
@@ -135,8 +151,13 @@ export function SkillPanelToolbar() {
         sourceLabel: "~/.claude/skills/",
         parseErrors,
       })
+      loggers.skills.info("import.claudeCode staged", {
+        drafts: drafts.length,
+        errors: parseErrors.length,
+      })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
+      loggers.skills.error("import.claudeCode failed", err)
     } finally {
       setBusy(false)
     }
@@ -147,25 +168,13 @@ export function SkillPanelToolbar() {
     try {
       const all = await listSkills()
       const customSkills = all.filter((s) => !s.isBuiltIn)
-      if (customSkills.length === 0) {
-        toast.info("No custom skills to export.")
-        return
-      }
-      const dir = await pickDirectory()
-      const files = customSkills.map((sk) => ({
-        name: skillFilename(sk.name),
-        content: serializeSkill(sk),
-      }))
-      const result = await saveFilesToDir(dir, files)
-      if (result.errored.length > 0) {
-        toast.warning(
-          `Exported ${result.writtenCount}/${files.length} (${result.errored.length} failed).`
-        )
-      } else {
-        toast.success(`Exported ${result.writtenCount} skill file(s).`)
-      }
+      await exportSkillsToDirWithFeedback(customSkills, tToasts, {
+        source: "exportAll",
+        total: customSkills.length,
+      })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
+      loggers.skills.error("export all failed", err)
     } finally {
       setBusy(false)
     }
@@ -233,7 +242,7 @@ export function SkillPanelToolbar() {
             title={!isTauri() ? t("syncNativeDesktopOnly") : t("syncNative")}
           >
             <RefreshCwIcon className="mr-1.5 size-3.5" />
-            Sync
+            {tCommon("syncLabel")}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">

@@ -47,7 +47,11 @@ import {
 } from "lucide-react"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
-import { avatarColor, avatarGlyph } from "@/lib/avatar"
+import { useTranslations } from "next-intl"
+import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
+import { createLogger } from "@/lib/logger"
+
+const log = createLogger("settings.teams")
 
 const COLOR_PALETTE = [
   "oklch(0.74 0.16 90)",
@@ -58,14 +62,8 @@ const COLOR_PALETTE = [
   "oklch(0.7 0.14 320)",
 ]
 
-const ORCHESTRATION_LABELS: Record<TeamOrchestration, string> = {
-  mention_round_robin: "@mention + round-robin",
-  round_robin: "Round-robin (always all)",
-  manual: "Manual (user picks)",
-  supervisor: "Supervisor (one leader dispatches)",
-}
-
 export function TeamsSection() {
+  const t = useTranslations("settings.teams")
   const teams = useLiveQuery(() => listTeams(), []) ?? []
   const characters = useLiveQuery(() => listCharacters(), []) ?? []
   const mcpServers = useLiveQuery(() => listMcpServers(), []) ?? []
@@ -78,14 +76,9 @@ export function TeamsSection() {
         <div className="space-y-1">
           <Label className="flex items-center gap-2">
             <UsersIcon className="size-4" />
-            Teams
+            {t("title")}
           </Label>
-          <p className="text-xs text-muted-foreground">
-            A team is a named bundle of characters that respond together in group chat. Use
-            @CharacterName to address one member; otherwise every member replies once in declared
-            order. Supervisor mode lets one leader dispatch sub-tasks to other members and
-            synthesize.
-          </p>
+          <p className="text-xs text-muted-foreground">{t("description")}</p>
         </div>
         <Button
           size="sm"
@@ -95,45 +88,59 @@ export function TeamsSection() {
             setCreating(true)
           }}
           disabled={characters.length === 0}
-          title={characters.length === 0 ? "Create a character first" : "Add a team"}
+          title={characters.length === 0 ? t("createCharacterFirst") : t("addATeam")}
         >
           <PlusIcon className="mr-2 size-4" />
-          New team
+          {t("newTeam")}
         </Button>
       </div>
 
       {teams.length === 0 && !creating ? (
         <p className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
-          No teams yet. The built-in &quot;Brainstorm Squad&quot; should appear automatically.
+          {t("emptyHint")}
         </p>
       ) : (
         <div className="grid gap-2">
-          {teams.map((t) => (
+          {teams.map((tm) => (
             <TeamRow
-              key={t.id}
-              team={t}
+              key={tm.id}
+              team={tm}
               characters={characters}
               mcpServers={mcpServers}
-              editing={editing?.id === t.id}
-              onEditStart={() => setEditing(t)}
+              editing={editing?.id === tm.id}
+              onEditStart={() => setEditing(tm)}
               onEditCancel={() => setEditing(null)}
               onSave={async (patch) => {
-                await updateTeam(t.id, patch)
-                setEditing(null)
-                toast.success(`Updated ${patch.name ?? t.name}.`)
+                try {
+                  await updateTeam(tm.id, patch)
+                  log.info("team_updated", { id: tm.id })
+                  setEditing(null)
+                  toast.success(t("updatedToast", { name: patch.name ?? tm.name }))
+                } catch (err) {
+                  log.error("team_update_failed", err, { id: tm.id })
+                  toast.error(err instanceof Error ? err.message : String(err))
+                }
               }}
               onDelete={async () => {
                 try {
-                  await deleteTeam(t.id)
-                  toast.success(`Removed "${t.name}".`)
+                  await deleteTeam(tm.id)
+                  log.info("team_deleted", { id: tm.id })
+                  toast.success(t("removedToast", { name: tm.name }))
                 } catch (err) {
+                  log.error("team_delete_failed", err, { id: tm.id })
                   toast.error(err instanceof Error ? err.message : String(err))
                 }
               }}
               onDuplicate={async () => {
-                const dup = await duplicateTeam(t.id)
-                toast.success(`Duplicated as "${dup.name}".`)
-                setEditing(dup)
+                try {
+                  const dup = await duplicateTeam(tm.id)
+                  log.info("team_duplicated", { sourceId: tm.id, newId: dup.id })
+                  toast.success(t("duplicatedToast", { name: dup.name }))
+                  setEditing(dup)
+                } catch (err) {
+                  log.error("team_duplicate_failed", err, { id: tm.id })
+                  toast.error(err instanceof Error ? err.message : String(err))
+                }
               }}
             />
           ))}
@@ -154,12 +161,18 @@ export function TeamsSection() {
           }}
           characters={characters}
           mcpServers={mcpServers}
-          submitLabel="Create"
+          submitLabel={t("create")}
           onCancel={() => setCreating(false)}
           onSave={async (data) => {
-            await createTeam(data)
-            setCreating(false)
-            toast.success(`Added "${data.name}".`)
+            try {
+              await createTeam(data)
+              log.info("team_created", { name: data.name, orchestration: data.orchestration })
+              setCreating(false)
+              toast.success(t("addedToast", { name: data.name }))
+            } catch (err) {
+              log.error("team_create_failed", err)
+              toast.error(err instanceof Error ? err.message : String(err))
+            }
           }}
         />
       )}
@@ -190,6 +203,8 @@ function TeamRow({
   onDelete,
   onDuplicate,
 }: RowProps) {
+  const t = useTranslations("settings.teams")
+  const tOrch = useTranslations("settings.teams.orchestration")
   if (editing) {
     return (
       <TeamEditor
@@ -205,7 +220,7 @@ function TeamRow({
         }}
         characters={characters}
         mcpServers={mcpServers}
-        submitLabel="Save"
+        submitLabel={t("save")}
         onCancel={onEditCancel}
         onSave={onSave}
       />
@@ -213,7 +228,7 @@ function TeamRow({
   }
 
   const memberNames = team.members
-    .map((m) => characters.find((c) => c.id === m.characterId)?.name ?? "(deleted)")
+    .map((m) => characters.find((c) => c.id === m.characterId)?.name ?? t("memberDeleted"))
     .join(" · ")
 
   return (
@@ -234,18 +249,18 @@ function TeamRow({
             <p className="text-sm font-medium">{team.name}</p>
             {team.isBuiltIn && (
               <Badge variant="secondary" className="text-[10px]">
-                Built-in
+                {t("builtIn")}
               </Badge>
             )}
             <Badge variant="outline" className="text-[10px]">
-              {ORCHESTRATION_LABELS[team.orchestration]}
+              {tOrch(team.orchestration as TeamOrchestration)}
             </Badge>
           </div>
           {team.description && (
             <p className="mt-0.5 text-xs text-muted-foreground">{team.description}</p>
           )}
           <p className="mt-1 line-clamp-1 text-[11px] text-muted-foreground">
-            {team.members.length} member{team.members.length === 1 ? "" : "s"}: {memberNames}
+            {t("memberCount", { count: team.members.length, names: memberNames })}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -254,9 +269,9 @@ function TeamRow({
             size="icon"
             className="size-7"
             onClick={onEditStart}
-            aria-label={`Edit ${team.name}`}
+            aria-label={t("editAria", { name: team.name })}
             disabled={team.isBuiltIn}
-            title={team.isBuiltIn ? "Built-in teams are read-only — duplicate first" : "Edit"}
+            title={team.isBuiltIn ? t("builtInReadOnly") : t("edit")}
           >
             <PencilIcon className="size-3.5" />
           </Button>
@@ -265,8 +280,8 @@ function TeamRow({
             size="icon"
             className="size-7"
             onClick={() => void onDuplicate()}
-            aria-label={`Duplicate ${team.name}`}
-            title="Duplicate"
+            aria-label={t("duplicateAria", { name: team.name })}
+            title={t("duplicate")}
           >
             <CopyIcon className="size-3.5" />
           </Button>
@@ -276,7 +291,7 @@ function TeamRow({
                 variant="ghost"
                 size="icon"
                 className="size-7 text-destructive hover:text-destructive"
-                aria-label={`Delete ${team.name}`}
+                aria-label={t("deleteAria", { name: team.name })}
                 disabled={team.isBuiltIn}
               >
                 <Trash2Icon className="size-3.5" />
@@ -284,15 +299,14 @@ function TeamRow({
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Remove team?</AlertDialogTitle>
+                <AlertDialogTitle>{t("removeTitle")}</AlertDialogTitle>
                 <AlertDialogDescription>
-                  &quot;{team.name}&quot; will be removed. Existing conversations stay but can no
-                  longer route to this team.
+                  {t("removeBody", { name: team.name })}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={() => void onDelete()}>Remove</AlertDialogAction>
+                <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                <AlertDialogAction onClick={() => void onDelete()}>{t("remove")}</AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
@@ -343,6 +357,10 @@ function TeamEditor({
   onCancel,
   onSave,
 }: EditorProps) {
+  const t = useTranslations("settings.teams")
+  const tEditor = useTranslations("settings.teams.editor")
+  const tOrch = useTranslations("settings.teams.orchestration")
+  const tMS = useTranslations("settings.characters.multiselect")
   const [s, setS] = useState<EditorState>(initial)
   const [saving, setSaving] = useState(false)
 
@@ -385,20 +403,20 @@ function TeamEditor({
 
   const submit = async () => {
     if (!s.name.trim()) {
-      toast.error("Name is required.")
+      toast.error(t("validation.nameRequired"))
       return
     }
     if (s.members.length === 0) {
-      toast.error("A team needs at least one member.")
+      toast.error(t("validation.atLeastOneMember"))
       return
     }
     if (s.orchestration === "supervisor") {
       if (!s.supervisorCharacterId) {
-        toast.error("Supervisor mode requires a designated supervisor.")
+        toast.error(t("validation.supervisorRequired"))
         return
       }
       if (!memberIds.includes(s.supervisorCharacterId)) {
-        toast.error("The supervisor must be one of the team's members.")
+        toast.error(t("validation.supervisorMustBeMember"))
         return
       }
     }
@@ -437,10 +455,10 @@ function TeamEditor({
           <Input
             value={s.avatarEmoji}
             onChange={(e) => setS({ ...s, avatarEmoji: e.target.value })}
-            placeholder="🧩"
+            placeholder={tEditor("avatarEmojiPlaceholder")}
             className="h-7 w-12 text-center"
             maxLength={4}
-            aria-label="Avatar emoji"
+            aria-label={tEditor("avatarEmoji")}
           />
           <div className="grid grid-cols-3 gap-1">
             {COLOR_PALETTE.map((c) => (
@@ -454,35 +472,35 @@ function TeamEditor({
                   outline: s.avatarColor === c ? "2px solid var(--ring)" : undefined,
                   outlineOffset: 2,
                 }}
-                aria-label={`Pick color ${c}`}
+                aria-label={tEditor("pickColor", { color: c })}
               />
             ))}
           </div>
         </div>
         <div className="space-y-2">
           <div className="space-y-1">
-            <Label className="text-xs">Name</Label>
+            <Label className="text-xs">{tEditor("name")}</Label>
             <Input
               value={s.name}
               onChange={(e) => setS({ ...s, name: e.target.value })}
-              placeholder="Brainstorm Squad"
+              placeholder={tEditor("namePlaceholder")}
             />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">Description</Label>
+            <Label className="text-xs">{tEditor("description")}</Label>
             <Textarea
               rows={2}
               value={s.description}
               onChange={(e) => setS({ ...s, description: e.target.value })}
               className="text-xs"
-              placeholder="(optional)"
+              placeholder={tEditor("descriptionPlaceholder")}
             />
           </div>
         </div>
       </div>
 
       <div className="space-y-1">
-        <Label className="text-xs">Orchestration</Label>
+        <Label className="text-xs">{tEditor("orchestration")}</Label>
         <Select
           value={s.orchestration}
           onValueChange={(v) => setS({ ...s, orchestration: v as TeamOrchestration })}
@@ -493,7 +511,7 @@ function TeamEditor({
           <SelectContent>
             {TEAM_ORCHESTRATIONS.map((o) => (
               <SelectItem key={o} value={o}>
-                {ORCHESTRATION_LABELS[o]}
+                {tOrch(o as TeamOrchestration)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -502,18 +520,18 @@ function TeamEditor({
 
       {s.orchestration === "supervisor" && (
         <div className="space-y-1">
-          <Label className="text-xs">Supervisor (the leader)</Label>
+          <Label className="text-xs">{tEditor("supervisor")}</Label>
           <Select
             value={s.supervisorCharacterId ?? ""}
             onValueChange={(v) => setS({ ...s, supervisorCharacterId: v || undefined })}
           >
             <SelectTrigger>
-              <SelectValue placeholder="Pick a member to be the leader" />
+              <SelectValue placeholder={tEditor("supervisorPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
               {s.members.length === 0 && (
                 <SelectItem value="__none" disabled>
-                  Add members first
+                  {tEditor("addMembersFirst")}
                 </SelectItem>
               )}
               {s.members.map((m) => {
@@ -528,18 +546,18 @@ function TeamEditor({
             </SelectContent>
           </Select>
           <p className="text-[11px] text-muted-foreground">
-            The supervisor receives every user turn first and may either answer alone or emit{" "}
-            <code>{`<dispatch to="Name">task</dispatch>`}</code> to delegate to teammates, then
-            synthesize the final reply.
+            {tEditor("supervisorHelpBefore")}
+            <code>{`<dispatch to="Name">task</dispatch>`}</code>
+            {tEditor("supervisorHelpAfter")}
           </p>
         </div>
       )}
 
       <div className="space-y-1">
-        <Label className="text-xs">Members (order = round-robin order)</Label>
+        <Label className="text-xs">{tEditor("members")}</Label>
         <div className="flex flex-wrap gap-1.5">
           {characters.length === 0 ? (
-            <p className="text-[11px] italic text-muted-foreground">Create a character first.</p>
+            <p className="text-[11px] italic text-muted-foreground">{tEditor("membersEmpty")}</p>
           ) : (
             characters.map((c) => {
               const active = memberIds.includes(c.id)
@@ -577,7 +595,7 @@ function TeamEditor({
         </div>
         {s.members.length > 1 && (
           <div className="flex flex-wrap items-center gap-1.5 pt-1">
-            <span className="text-[11px] text-muted-foreground">Reorder:</span>
+            <span className="text-[11px] text-muted-foreground">{tMS("reorder")}</span>
             {s.members.map((m) => {
               const c = characters.find((x) => x.id === m.characterId)
               if (!c) return null
@@ -591,7 +609,7 @@ function TeamEditor({
                     type="button"
                     onClick={() => move(m.characterId, -1)}
                     className="px-1 text-muted-foreground hover:text-foreground"
-                    aria-label={`Move ${c.name} up`}
+                    aria-label={tEditor("moveUp", { name: c.name })}
                   >
                     ↑
                   </button>
@@ -599,7 +617,7 @@ function TeamEditor({
                     type="button"
                     onClick={() => move(m.characterId, 1)}
                     className="px-1 text-muted-foreground hover:text-foreground"
-                    aria-label={`Move ${c.name} down`}
+                    aria-label={tEditor("moveDown", { name: c.name })}
                   >
                     ↓
                   </button>
@@ -618,14 +636,11 @@ function TeamEditor({
               className="group flex w-full items-center gap-1.5 rounded-md py-1 text-left text-xs font-medium text-muted-foreground hover:text-foreground"
             >
               <ChevronDownIcon className="size-3.5 transition-transform group-data-[state=closed]:-rotate-90" />
-              Member overrides ({countOverrides(s.members)} active)
+              {tEditor("memberOverrides", { count: countOverrides(s.members) })}
             </button>
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-2 pt-1">
-            <p className="text-[11px] text-muted-foreground">
-              Each override replaces the corresponding character default for this team only. Leave
-              blank to inherit. Skills always apply on top.
-            </p>
+            <p className="text-[11px] text-muted-foreground">{tEditor("overrideHelp")}</p>
             {s.members.map((m) => {
               const c = characters.find((x) => x.id === m.characterId)
               if (!c) return null
@@ -644,14 +659,11 @@ function TeamEditor({
       )}
 
       <div className="space-y-1">
-        <Label className="text-xs">MCP servers (team-wide override)</Label>
-        <p className="text-[11px] text-muted-foreground">
-          Applies to members that don&apos;t set their own MCP subset. Leave all unselected to mean
-          &quot;use every enabled server&quot;.
-        </p>
+        <Label className="text-xs">{tEditor("mcpTeam")}</Label>
+        <p className="text-[11px] text-muted-foreground">{tEditor("mcpTeamHint")}</p>
         <div className="flex flex-wrap gap-1.5">
           {mcpServers.length === 0 ? (
-            <p className="text-[11px] italic text-muted-foreground">No MCP servers configured.</p>
+            <p className="text-[11px] italic text-muted-foreground">{tEditor("mcpEmpty")}</p>
           ) : (
             mcpServers.map((m) => {
               const active = (s.mcpServerIds ?? []).includes(m.id)
@@ -686,10 +698,10 @@ function TeamEditor({
 
       <div className="flex items-center justify-end gap-2 pt-1">
         <Button variant="ghost" size="sm" onClick={onCancel}>
-          Cancel
+          {t("cancel")}
         </Button>
         <Button size="sm" onClick={submit} disabled={saving}>
-          {saving ? "Saving…" : submitLabel}
+          {saving ? t("saving") : submitLabel}
         </Button>
       </div>
     </Card>
@@ -716,6 +728,7 @@ interface MemberOverrideProps {
 }
 
 function MemberOverrideCard({ character, member, mcpServers, onPatch }: MemberOverrideProps) {
+  const tEditor = useTranslations("settings.teams.editor")
   return (
     <Card className="space-y-2 border-dashed bg-muted/20 p-3">
       <div className="flex items-center gap-2">
@@ -731,40 +744,38 @@ function MemberOverrideCard({ character, member, mcpServers, onPatch }: MemberOv
 
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1">
-          <Label className="text-[11px]">Role label</Label>
+          <Label className="text-[11px]">{tEditor("role")}</Label>
           <Input
             value={member.role ?? ""}
             onChange={(e) => onPatch({ role: e.target.value || undefined })}
-            placeholder="e.g. Critic"
+            placeholder={tEditor("rolePlaceholder")}
             className="h-8 text-xs"
           />
         </div>
         <div className="space-y-1">
-          <Label className="text-[11px]">Model override</Label>
+          <Label className="text-[11px]">{tEditor("modelOverride")}</Label>
           <Input
             value={member.modelOverride ?? ""}
             onChange={(e) => onPatch({ modelOverride: e.target.value || undefined })}
-            placeholder={character.model ?? "(inherit)"}
+            placeholder={character.model ?? tEditor("modelOverrideInheritPlaceholder")}
             className="h-8 text-xs"
           />
         </div>
       </div>
 
       <div className="space-y-1">
-        <Label className="text-[11px]">System prompt override</Label>
+        <Label className="text-[11px]">{tEditor("systemPromptOverride")}</Label>
         <Textarea
           rows={3}
           value={member.systemPromptOverride ?? ""}
           onChange={(e) => onPatch({ systemPromptOverride: e.target.value || undefined })}
-          placeholder="(inherits character system prompt)"
+          placeholder={tEditor("systemPromptOverridePlaceholder")}
           className="text-xs"
         />
       </div>
 
       <div className="space-y-1">
-        <Label className="text-[11px]">
-          Allowed tools override (comma-separated; replaces character list)
-        </Label>
+        <Label className="text-[11px]">{tEditor("allowedToolsOverride")}</Label>
         <Input
           value={(member.allowedToolsOverride ?? []).join(", ")}
           onChange={(e) => {
@@ -777,17 +788,19 @@ function MemberOverrideCard({ character, member, mcpServers, onPatch }: MemberOv
             })
           }}
           placeholder={
-            character.allowedTools?.length ? character.allowedTools.join(", ") : "(inherit)"
+            character.allowedTools?.length
+              ? character.allowedTools.join(", ")
+              : tEditor("modelOverrideInheritPlaceholder")
           }
           className="h-8 text-xs"
         />
       </div>
 
       <div className="space-y-1">
-        <Label className="text-[11px]">MCP subset override</Label>
+        <Label className="text-[11px]">{tEditor("mcpSubsetOverride")}</Label>
         <div className="flex flex-wrap gap-1">
           {mcpServers.length === 0 ? (
-            <p className="text-[11px] italic text-muted-foreground">No MCP servers configured.</p>
+            <p className="text-[11px] italic text-muted-foreground">{tEditor("mcpEmpty")}</p>
           ) : (
             mcpServers.map((srv) => {
               const cur = member.mcpServerIdsOverride ?? null
@@ -819,9 +832,7 @@ function MemberOverrideCard({ character, member, mcpServers, onPatch }: MemberOv
           )}
         </div>
         {!member.mcpServerIdsOverride && (
-          <p className="text-[10px] italic text-muted-foreground">
-            Inherits character / team subset.
-          </p>
+          <p className="text-[10px] italic text-muted-foreground">{tEditor("inheritsFromTeam")}</p>
         )}
       </div>
     </Card>

@@ -18,6 +18,7 @@ import { skillsScanResources, skillsScanSecurity, type SkillScanIssue } from "@/
 import { listResourcesForSkill } from "@/lib/db/skill-resources"
 import { isTauri } from "@/lib/tauri"
 import type { Skill } from "@/lib/claude/types"
+import { loggers } from "@/lib/logger"
 
 interface Props {
   skill: Skill
@@ -53,7 +54,7 @@ export function SkillSecurityScanner({ skill }: Props) {
 
   const runScan = async () => {
     if (!desktop) {
-      setError("Security scan requires desktop mode.")
+      setError(t("errorDesktopOnly"))
       return
     }
     setRunning(true)
@@ -62,9 +63,17 @@ export function SkillSecurityScanner({ skill }: Props) {
       const contentIssues = await skillsScanSecurity(skill.content)
       const resList: Array<[string, string]> = (resources ?? []).map((r) => [r.path, r.content])
       const resourceIssues = resList.length > 0 ? await skillsScanResources(resList) : []
-      setIssues([...contentIssues, ...resourceIssues])
+      const all = [...contentIssues, ...resourceIssues]
+      setIssues(all)
+      loggers.skills.info("security scan ok", {
+        skillId: skill.id,
+        contentIssues: contentIssues.length,
+        resourceIssues: resourceIssues.length,
+        total: all.length,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+      loggers.skills.error("security scan failed", err, { skillId: skill.id })
     } finally {
       setRunning(false)
     }
@@ -102,10 +111,7 @@ export function SkillSecurityScanner({ skill }: Props) {
       </div>
 
       {!desktop && (
-        <Card className="p-3 text-xs text-muted-foreground">
-          Security scan runs the regex ruleset locally via the Tauri sidecar. Open the desktop app
-          to enable it.
-        </Card>
+        <Card className="p-3 text-xs text-muted-foreground">{t("desktopOnlyHint")}</Card>
       )}
 
       {error && (

@@ -2,8 +2,10 @@
 
 import { Component, type ReactNode } from "react"
 import { AlertTriangle, RefreshCw } from "lucide-react"
+import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { loggers } from "@/lib/logger"
 
 interface RendererErrorBoundaryProps {
   children: ReactNode
@@ -32,11 +34,10 @@ export class RendererErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
-    console.error(
-      `[${this.props.rendererName || "Renderer"}] render error`,
-      error,
-      errorInfo.componentStack
-    )
+    loggers.chat.error("renderer error boundary caught", error, {
+      renderer: this.props.rendererName ?? "Renderer",
+      componentStack: errorInfo.componentStack ?? undefined,
+    })
     this.props.onError?.(error, errorInfo)
   }
 
@@ -49,37 +50,58 @@ export class RendererErrorBoundary extends Component<
       if (this.props.fallback) {
         return this.props.fallback
       }
-
       return (
-        <div
-          className={cn(
-            "flex flex-col items-center justify-center gap-3 p-4 rounded-lg border border-destructive/30 bg-destructive/5 my-3",
-            this.props.className
-          )}
-          role="alert"
-        >
-          <div className="flex items-center gap-2 text-destructive">
-            <AlertTriangle className="h-5 w-5" />
-            <span className="font-medium text-sm">
-              {this.props.rendererName ? `${this.props.rendererName} ` : ""}
-              Render Error
-            </span>
-          </div>
-          {this.state.error && (
-            <pre className="max-w-md whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs text-muted-foreground">
-              {this.state.error.message}
-            </pre>
-          )}
-          <Button variant="outline" size="sm" onClick={this.handleRetry} className="gap-2">
-            <RefreshCw className="h-3 w-3" />
-            Retry
-          </Button>
-        </div>
+        <RendererErrorFallback
+          error={this.state.error}
+          rendererName={this.props.rendererName}
+          onRetry={this.handleRetry}
+          className={this.props.className}
+        />
       )
     }
 
     return this.props.children
   }
+}
+
+interface RendererErrorFallbackProps {
+  error: Error | null
+  rendererName?: string
+  onRetry: () => void
+  className?: string
+}
+
+function RendererErrorFallback({
+  error,
+  rendererName,
+  onRetry,
+  className,
+}: RendererErrorFallbackProps) {
+  const t = useTranslations("chat.renderers.errorBoundary")
+  const title = rendererName ? t("titleNamed", { name: rendererName }) : t("titleFallback")
+  return (
+    <div
+      className={cn(
+        "flex flex-col items-center justify-center gap-3 p-4 rounded-lg border border-destructive/30 bg-destructive/5 my-3",
+        className
+      )}
+      role="alert"
+    >
+      <div className="flex items-center gap-2 text-destructive">
+        <AlertTriangle className="h-5 w-5" />
+        <span className="font-medium text-sm">{title}</span>
+      </div>
+      {error && (
+        <pre className="max-w-md whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs text-muted-foreground">
+          {error.message}
+        </pre>
+      )}
+      <Button variant="outline" size="sm" onClick={onRetry} className="gap-2">
+        <RefreshCw className="h-3 w-3" />
+        {t("retry")}
+      </Button>
+    </div>
+  )
 }
 
 export function withRendererErrorBoundary<P extends object>(

@@ -23,6 +23,8 @@ import {
   BugIcon,
   PlugZapIcon,
   BotIcon,
+  ClockIcon,
+  PencilRulerIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
@@ -39,8 +41,11 @@ export type SettingsSectionId =
   | "skills"
   | "teams"
   | "presets"
+  | "artifacts"
+  | "canvas"
   | "mcp"
   | "data"
+  | "scheduled-tasks"
   | "logs"
   | "diagnostics"
   | "desktop"
@@ -148,6 +153,20 @@ export const SETTINGS_NAV: NavItem[] = [
     group: "interface",
     icon: BookmarkIcon,
   },
+  {
+    id: "artifacts",
+    labelKey: "artifacts",
+    descriptionKey: "artifacts",
+    group: "interface",
+    icon: Layers3Icon,
+  },
+  {
+    id: "canvas",
+    labelKey: "canvas",
+    descriptionKey: "canvas",
+    group: "interface",
+    icon: PencilRulerIcon,
+  },
 
   // === Data ===
   {
@@ -156,6 +175,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "data",
     group: "data",
     icon: DatabaseIcon,
+  },
+  {
+    id: "scheduled-tasks",
+    labelKey: "scheduledTasks",
+    descriptionKey: "scheduledTasks",
+    group: "data",
+    icon: ClockIcon,
   },
 
   // === Observability ===
@@ -250,6 +276,29 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "research",
   ],
   appearance: ["theme", "dark", "light", "font", "language"],
+  canvas: [
+    "canvas",
+    "monaco",
+    "editor",
+    "ai suggestion",
+    "autosave",
+    "version",
+    "diff",
+    "collaboration",
+    "websocket",
+    "execution",
+    "sandbox",
+    "python",
+    "keybinding",
+    "accessibility",
+    "快捷键",
+    "编辑器",
+    "版本",
+    "协作",
+    "执行",
+    "沙箱",
+    "无障碍",
+  ],
   speech: [
     "voice",
     "tts",
@@ -272,9 +321,60 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
   characters: ["persona", "agent"],
   skills: ["skill", "instruction", "prompt", "kit"],
   teams: ["multi-agent", "round-robin", "supervisor"],
-  presets: ["template", "system prompt"],
+  presets: [
+    "preset",
+    "presets",
+    "template",
+    "system prompt",
+    "persona",
+    "snippet",
+    "preset library",
+    "favorite",
+    "default preset",
+    "category",
+    "预设",
+    "模板",
+    "系统提示词",
+    "收藏",
+    "默认",
+  ],
+  artifacts: [
+    "artifact",
+    "artifacts",
+    "canvas",
+    "preview",
+    "code",
+    "document",
+    "auto detect",
+    "auto-create",
+    "react",
+    "html",
+    "svg",
+    "mermaid",
+    "chart",
+    "math",
+    "jupyter",
+    "工件",
+    "代码",
+    "预览",
+  ],
   mcp: ["model context", "stdio", "server", "tool"],
   data: ["export", "import", "backup", "wipe", "indexeddb"],
+  "scheduled-tasks": [
+    "schedule",
+    "scheduler",
+    "cron",
+    "task",
+    "tasks",
+    "automation",
+    "trigger",
+    "interval",
+    "timer",
+    "定时",
+    "调度",
+    "任务",
+    "自动化",
+  ],
   logs: [
     "log",
     "logs",

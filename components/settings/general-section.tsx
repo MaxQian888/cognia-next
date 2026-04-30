@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { open as openDialog } from "@tauri-apps/plugin-dialog"
 import { FolderOpenIcon, XIcon } from "lucide-react"
 import { toast } from "sonner"
+import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -18,23 +19,14 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { isTauri } from "@/lib/tauri"
 import type { AppSettings } from "@/lib/claude/types"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useSettingsStore } from "@/stores/settings"
+import { createLogger } from "@/lib/logger"
+import { MODEL_PRESET_VALUES, PERMISSION_MODE_VALUES } from "@/lib/claude/model-presets"
 
-const MODEL_PRESETS = [
-  { value: "claude-opus-4-7", label: "Claude Opus 4.7" },
-  { value: "claude-opus-4-5", label: "Claude Opus 4.5" },
-  { value: "claude-sonnet-4-5", label: "Claude Sonnet 4.5" },
-  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
-]
-
-const PERMISSION_MODES: NonNullable<AppSettings["permissionMode"]>[] = [
-  "default",
-  "acceptEdits",
-  "plan",
-  "bypassPermissions",
-]
+const log = createLogger("settings.general")
 
 export function GeneralSection({ onClose }: { onClose: () => void }) {
+  const t = useTranslations("settings.general")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const toggle = useSettingsStore((s) => s.toggleAlwaysAllow)
@@ -57,56 +49,71 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
 
   const handlePickDir = async () => {
     if (!isTauri()) return
-    const picked = await openDialog({
-      directory: true,
-      multiple: false,
-      title: "Select working directory",
-    })
-    if (typeof picked === "string") setWorkingDir(picked)
+    try {
+      const picked = await openDialog({
+        directory: true,
+        multiple: false,
+        title: t("selectWorkingDirectory"),
+      })
+      if (typeof picked === "string") setWorkingDir(picked)
+    } catch (err) {
+      log.error("general.pickDirFailed", err)
+    }
   }
 
   const handleSave = async () => {
-    await save({
-      defaultModel: model.trim() || undefined,
-      defaultSystemPrompt: systemPrompt.trim() || undefined,
-      defaultWorkingDir: workingDir.trim() || undefined,
-      permissionMode,
-    })
-    toast.success("Settings saved.")
+    try {
+      await save({
+        defaultModel: model.trim() || undefined,
+        defaultSystemPrompt: systemPrompt.trim() || undefined,
+        defaultWorkingDir: workingDir.trim() || undefined,
+        permissionMode,
+      })
+      log.info("general.defaultsSaved", {
+        modelSet: Boolean(model.trim()),
+        systemPromptSet: Boolean(systemPrompt.trim()),
+        workingDirSet: Boolean(workingDir.trim()),
+        permissionMode,
+      })
+      toast.success(t("saved"))
+    } catch (err) {
+      log.error("general.saveFailed", err)
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
   }
 
   return (
     <div className="space-y-5">
       <div className="space-y-2">
-        <Label htmlFor="settings-model">Default model</Label>
+        <Label htmlFor="settings-model">{t("defaultModel")}</Label>
         <Select value={model} onValueChange={setModel}>
           <SelectTrigger id="settings-model">
-            <SelectValue placeholder="Use SDK default" />
+            <SelectValue placeholder={t("useSdkDefault")} />
           </SelectTrigger>
           <SelectContent>
-            {MODEL_PRESETS.map((m) => (
-              <SelectItem key={m.value} value={m.value}>
-                {m.label}
+            {MODEL_PRESET_VALUES.map((v) => (
+              <SelectItem key={v} value={v}>
+                {t(`model.${v}` as `model.${typeof v}`)}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
         <Input
           id="settings-model-custom"
-          placeholder="Or paste a custom model id"
+          placeholder={t("orPasteModelId")}
           value={model}
           onChange={(e) => setModel(e.target.value)}
         />
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="settings-workdir">Working directory</Label>
+        <Label htmlFor="settings-workdir">{t("workingDirectory")}</Label>
         <div className="flex gap-2">
           <Input
             id="settings-workdir"
             value={workingDir}
             onChange={(e) => setWorkingDir(e.target.value)}
-            placeholder="/path/to/project"
+            placeholder={t("dirPlaceholder")}
           />
           <Button
             type="button"
@@ -114,7 +121,7 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
             size="icon"
             onClick={handlePickDir}
             disabled={!isTauri()}
-            aria-label="Pick directory"
+            aria-label={t("pickDirectory")}
           >
             <FolderOpenIcon className="size-4" />
           </Button>
@@ -122,7 +129,7 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="settings-permission">Permission mode</Label>
+        <Label htmlFor="settings-permission">{t("permissionMode")}</Label>
         <Select
           value={permissionMode}
           onValueChange={(v) => setPermissionMode(v as NonNullable<AppSettings["permissionMode"]>)}
@@ -131,45 +138,47 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {PERMISSION_MODES.map((m) => (
+            {PERMISSION_MODE_VALUES.map((m) => (
               <SelectItem key={m} value={m}>
-                {m}
+                {t(`permission.${m}` as `permission.${typeof m}`)}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
-          Controls how the agent treats tool calls. Most users want{" "}
-          <code className="rounded bg-muted px-1 py-0.5">default</code>.
+          {t("permissionModeHintBefore")}
+          <code className="rounded bg-muted px-1 py-0.5">{t("permissionModeHintCode")}</code>
+          {t("permissionModeHintAfter")}
         </p>
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="settings-system">Default system prompt</Label>
+        <Label htmlFor="settings-system">{t("defaultSystemPrompt")}</Label>
         <Textarea
           id="settings-system"
           value={systemPrompt}
           onChange={(e) => setSystemPrompt(e.target.value)}
-          placeholder="Optional. Prepended to every conversation when a session has no override."
+          placeholder={t("defaultSystemPromptPlaceholder")}
           rows={4}
         />
       </div>
 
       <div className="space-y-2">
-        <Label>Always-allowed tools</Label>
+        <Label>{t("alwaysAllowedTools")}</Label>
         <div className="flex flex-wrap gap-1.5">
           {(settings?.alwaysAllowTools ?? []).length === 0 && (
-            <p className="text-xs text-muted-foreground">
-              None yet. Tools you mark &quot;Allow always&quot; in approval dialogs appear here.
-            </p>
+            <p className="text-xs text-muted-foreground">{t("noneYet")}</p>
           )}
           {settings?.alwaysAllowTools?.map((tool) => (
             <Badge key={tool} variant="secondary" className="gap-1 pr-1.5 font-mono">
               {tool}
               <button
                 type="button"
-                onClick={() => void toggle(tool, false)}
-                aria-label={`Remove ${tool} from always-allow list`}
+                onClick={() => {
+                  log.info("general.alwaysAllowRemoved", { tool })
+                  void toggle(tool, false)
+                }}
+                aria-label={t("removeFromAllowList", { tool })}
                 className="rounded-sm hover:bg-muted"
               >
                 <XIcon className="size-3" />
@@ -181,9 +190,9 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
 
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="ghost" onClick={onClose}>
-          Cancel
+          {t("cancel")}
         </Button>
-        <Button onClick={handleSave}>Save</Button>
+        <Button onClick={handleSave}>{t("save")}</Button>
       </div>
     </div>
   )

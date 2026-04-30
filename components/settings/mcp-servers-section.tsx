@@ -63,8 +63,9 @@ import { McpAgentChipGroup, refreshAgentAvailability } from "./mcp-agent-chip-gr
 import { McpImportDialog } from "./mcp-import-dialog"
 import { McpAgentStatusBar } from "./mcp-agent-status-bar"
 import { McpDriftBanner } from "./mcp-drift-banner"
-import { getDetectedWritableAgents } from "@/hooks/use-agent-status"
+import { getDetectedWritableAgents } from "@/hooks/agent"
 import { cn } from "@/lib/utils"
+import { loggers } from "@/lib/logger"
 
 type TransportFilter = "all" | McpTransport
 type StatusFilter = "all" | "enabled" | "disabled"
@@ -137,8 +138,13 @@ export function McpServersSection() {
         enabled: true,
         appsEnabled,
       })
+      loggers.mcp.info("settings.serverCreatedFromPreset", {
+        presetId: preset.id,
+        transport: preset.transport,
+      })
       toast.success(tGallery("addedToast", { name: preset.name }))
     } catch (err) {
+      loggers.mcp.error("settings.serverCreateFromPresetFailed", err, { presetId: preset.id })
       toast.error(err instanceof Error ? err.message : String(err))
     }
   }
@@ -215,16 +221,34 @@ export function McpServersSection() {
                 onEditStart={() => setEditing(s)}
                 onEditCancel={() => setEditing(null)}
                 onSave={async (patch) => {
-                  await updateMcpServer(s.id, patch)
-                  setEditing(null)
-                  toast.success("MCP server updated.")
+                  try {
+                    await updateMcpServer(s.id, patch)
+                    loggers.mcp.info("settings.serverUpdated", { id: s.id })
+                    setEditing(null)
+                    toast.success(t("toasts.updated"))
+                  } catch (err) {
+                    loggers.mcp.error("settings.serverUpdateFailed", err, { id: s.id })
+                    throw err
+                  }
                 }}
                 onToggle={async (enabled) => {
-                  await updateMcpServer(s.id, { enabled })
+                  try {
+                    await updateMcpServer(s.id, { enabled })
+                    loggers.mcp.info("settings.serverToggled", { id: s.id, enabled })
+                  } catch (err) {
+                    loggers.mcp.error("settings.serverToggleFailed", err, { id: s.id })
+                    throw err
+                  }
                 }}
                 onDelete={async () => {
-                  await deleteMcpServer(s.id)
-                  toast.success(`Removed "${s.name}".`)
+                  try {
+                    await deleteMcpServer(s.id)
+                    loggers.mcp.info("settings.serverDeleted", { id: s.id })
+                    toast.success(t("toasts.removed", { name: s.name }))
+                  } catch (err) {
+                    loggers.mcp.error("settings.serverDeleteFailed", err, { id: s.id })
+                    throw err
+                  }
                 }}
               />
             ))
@@ -240,12 +264,21 @@ export function McpServersSection() {
             // Merge the smart-default appsEnabled set by the gallery (the
             // editor doesn't round-trip it). Without this, hand-crafted
             // servers would land in Cognia only — never in any agent file.
-            await createMcpServer({
-              ...data,
-              appsEnabled: creating.appsEnabled,
-            })
-            setCreating(null)
-            toast.success("MCP server added.")
+            try {
+              await createMcpServer({
+                ...data,
+                appsEnabled: creating.appsEnabled,
+              })
+              loggers.mcp.info("settings.serverCreated", {
+                name: data.name,
+                transport: data.transport,
+              })
+              setCreating(null)
+              toast.success(t("toasts.added"))
+            } catch (err) {
+              loggers.mcp.error("settings.serverCreateFailed", err, { name: data.name })
+              throw err
+            }
           }}
         />
       )}
@@ -592,26 +625,36 @@ function ServerRow({
 }: RowProps) {
   const tRow = useTranslations("mcp.row")
   const tDelete = useTranslations("mcp.delete")
+  const tTest = useTranslations("mcp.test")
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<McpTestResult | null>(null)
 
   const runTest = async () => {
     if (testing) return
     if (!isTauri()) {
-      toast.error("Testing MCP servers requires desktop mode.")
+      toast.error(tTest("desktopOnly"))
       return
     }
     setTesting(true)
     try {
+      loggers.mcp.info("settings.serverTestStarted", { id: server.id, transport: server.transport })
       const result = await testMcpServer(serverToTestRequest(server))
       setTestResult(result)
+      loggers.mcp.info("settings.serverTestResult", {
+        id: server.id,
+        ok: result.ok,
+        error: result.ok ? undefined : result.error,
+      })
       if (result.ok) {
-        toast.success(`${server.name} responded — ${result.toolCount} tool(s).`)
+        toast.success(tTest("success", { name: server.name, count: result.toolCount }))
       } else {
-        toast.error(`${server.name}: ${result.error ?? "unknown error"}`)
+        toast.error(
+          tTest("error", { name: server.name, error: result.error ?? tTest("unknownError") })
+        )
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      loggers.mcp.error("settings.serverTestThrew", err)
       setTestResult({
         ok: false,
         toolCount: 0,
@@ -619,7 +662,7 @@ function ServerRow({
         error: message,
         durationMs: 0,
       })
-      toast.error(`${server.name}: ${message}`)
+      toast.error(tTest("error", { name: server.name, error: message }))
     } finally {
       setTesting(false)
     }
@@ -765,6 +808,7 @@ function kvRowsToObject(rows: KvRow[]): Record<string, string> {
 }
 
 function ServerEditor({ initial, onCancel, onSave }: EditorProps) {
+  const tErrors = useTranslations("mcp.editor.errors")
   const [name, setName] = useState(initial.name)
   const [transport, setTransport] = useState<McpTransport>(initial.transport)
   const [enabled, setEnabled] = useState(initial.enabled)
@@ -838,14 +882,14 @@ function ServerEditor({ initial, onCancel, onSave }: EditorProps) {
       setShowJson(false)
     } catch (err) {
       toast.error(
-        `Can't switch back — JSON is invalid: ${err instanceof Error ? err.message : err}`
+        tErrors("jsonRevertFailed", { error: err instanceof Error ? err.message : String(err) })
       )
     }
   }
 
   const submit = async () => {
     if (!name.trim()) {
-      toast.error("Server name is required.")
+      toast.error(tErrors("nameRequired"))
       return
     }
     let config: Record<string, unknown>
@@ -853,17 +897,19 @@ function ServerEditor({ initial, onCancel, onSave }: EditorProps) {
       try {
         config = JSON.parse(configText) as Record<string, unknown>
       } catch (err) {
-        toast.error(`Config must be valid JSON: ${err instanceof Error ? err.message : err}`)
+        toast.error(
+          tErrors("invalidJson", { error: err instanceof Error ? err.message : String(err) })
+        )
         return
       }
     } else {
       config = buildConfig()
       if (transport === "stdio" && !command.trim()) {
-        toast.error("Command is required for stdio transport.")
+        toast.error(tErrors("commandRequired"))
         return
       }
       if (transport !== "stdio" && !url.trim()) {
-        toast.error("URL is required for sse / http transport.")
+        toast.error(tErrors("urlRequired"))
         return
       }
     }

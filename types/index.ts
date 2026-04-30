@@ -6,6 +6,7 @@
 
 export * from "./agent"
 export * from "./mcp"
+export * from "./artifact"
 
 // `Skill` is intentionally NOT re-exported here. Always import it from
 // `@/lib/claude/types` (cognia-next's authoritative shape) so we don't

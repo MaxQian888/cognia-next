@@ -1,2 +1,1 @@
-// Barrel re-export for upstream `@/stores/settings` imports.
-export * from "@/stores/settings-store"
+export * from "./settings-store"

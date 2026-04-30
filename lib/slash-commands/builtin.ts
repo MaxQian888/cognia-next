@@ -12,8 +12,8 @@
 //
 // A command with both fields is treated as Action (handler wins).
 
-import type { ChatStatus, PermissionMode } from "@/stores/chat-store"
-import { useChatStore } from "@/stores/chat-store"
+import type { ChatStatus, PermissionMode } from "@/stores/chat"
+import { useChatStore } from "@/stores/chat"
 import { handleCost, handleStatus } from "./actions/diagnostics"
 import { handleReset, handleResume, handleSessions } from "./actions/sessions"
 

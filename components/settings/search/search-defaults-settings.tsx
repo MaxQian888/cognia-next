@@ -1,13 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useRef } from "react"
 import { useTranslations } from "next-intl"
-import { Sliders, X } from "lucide-react"
+import { Sliders } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
 import {
   Select,
   SelectContent,
@@ -15,9 +14,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useSettingsStore } from "@/stores/settings"
 import type { SearchType, SearchDepth, SearchRecency } from "@/lib/search/types"
 import { cn } from "@/lib/utils"
+import { createLogger } from "@/lib/logger"
+import { DomainListInput } from "./_shared/domain-list-input"
+
+const log = createLogger("settings.search.defaults")
 
 const SEARCH_TYPES: { value: SearchType; labelKey: string }[] = [
   { value: "general", labelKey: "general" },
@@ -65,24 +68,8 @@ export function SearchDefaultsSettings() {
   const defaultIncludeAnswer = settings?.defaultIncludeAnswer ?? true
   const defaultIncludeRawContent = settings?.defaultIncludeRawContent ?? false
 
-  const [includeDomainInput, setIncludeDomainInput] = useState("")
-  const [excludeDomainInput, setExcludeDomainInput] = useState("")
-
-  const handleAddIncludeDomain = () => {
-    const d = includeDomainInput.trim().toLowerCase()
-    if (d && !defaultIncludeDomains.includes(d)) {
-      void setDefaultIncludeDomains([...defaultIncludeDomains, d])
-      setIncludeDomainInput("")
-    }
-  }
-
-  const handleAddExcludeDomain = () => {
-    const d = excludeDomainInput.trim().toLowerCase()
-    if (d && !defaultExcludeDomains.includes(d)) {
-      void setDefaultExcludeDomains([...defaultExcludeDomains, d])
-      setExcludeDomainInput("")
-    }
-  }
+  const lastLoggedCountry = useRef(defaultSearchCountry)
+  const lastLoggedLanguage = useRef(defaultSearchLanguage)
 
   return (
     <Card>
@@ -102,7 +89,10 @@ export function SearchDefaultsSettings() {
             {SEARCH_TYPES.map((type) => (
               <button
                 key={type.value}
-                onClick={() => void setDefaultSearchType(type.value)}
+                onClick={() => {
+                  log.info("default_type_changed", { type: type.value })
+                  void setDefaultSearchType(type.value)
+                }}
                 className={cn(
                   "px-3 py-1.5 rounded-md text-xs font-medium transition-colors border",
                   defaultSearchType === type.value
@@ -123,7 +113,10 @@ export function SearchDefaultsSettings() {
               {SEARCH_DEPTHS.map((depth) => (
                 <button
                   key={depth.value}
-                  onClick={() => void setDefaultSearchDepth(depth.value)}
+                  onClick={() => {
+                    log.info("default_depth_changed", { depth: depth.value })
+                    void setDefaultSearchDepth(depth.value)
+                  }}
                   className={cn(
                     "w-full flex items-start gap-2 p-2.5 rounded-md border text-left transition-colors",
                     defaultSearchDepth === depth.value
@@ -152,7 +145,10 @@ export function SearchDefaultsSettings() {
             <Label className="text-sm">{td("recency")}</Label>
             <Select
               value={defaultSearchRecency}
-              onValueChange={(v) => void setDefaultSearchRecency(v as SearchRecency)}
+              onValueChange={(v) => {
+                log.info("default_recency_changed", { recency: v })
+                void setDefaultSearchRecency(v as SearchRecency)
+              }}
             >
               <SelectTrigger className="w-full">
                 <SelectValue />
@@ -175,6 +171,12 @@ export function SearchDefaultsSettings() {
               placeholder={td("countryPlaceholder")}
               value={defaultSearchCountry}
               onChange={(e) => void setDefaultSearchCountry(e.target.value)}
+              onBlur={(e) => {
+                if (e.target.value !== lastLoggedCountry.current) {
+                  log.info("default_country_changed", { value: e.target.value })
+                  lastLoggedCountry.current = e.target.value
+                }
+              }}
               className="h-8 text-sm"
             />
           </div>
@@ -184,69 +186,49 @@ export function SearchDefaultsSettings() {
               placeholder={td("languagePlaceholder")}
               value={defaultSearchLanguage}
               onChange={(e) => void setDefaultSearchLanguage(e.target.value)}
+              onBlur={(e) => {
+                if (e.target.value !== lastLoggedLanguage.current) {
+                  log.info("default_language_changed", { value: e.target.value })
+                  lastLoggedLanguage.current = e.target.value
+                }
+              }}
               className="h-8 text-sm"
             />
           </div>
         </div>
 
         <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label className="text-sm">{td("includeDomains")}</Label>
-            <div className="flex gap-2">
-              <Input
-                placeholder={td("includeDomainsPlaceholder")}
-                value={includeDomainInput}
-                onChange={(e) => setIncludeDomainInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAddIncludeDomain()}
-                className="h-8 text-sm"
-              />
-            </div>
-            {defaultIncludeDomains.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-1">
-                {defaultIncludeDomains.map((d) => (
-                  <Badge key={d} variant="secondary" className="text-xs gap-1">
-                    {d}
-                    <button
-                      onClick={() =>
-                        void setDefaultIncludeDomains(defaultIncludeDomains.filter((x) => x !== d))
-                      }
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </Badge>
-                ))}
-              </div>
-            )}
-          </div>
+          <DomainListInput
+            label={td("includeDomains")}
+            placeholder={td("includeDomainsPlaceholder")}
+            domains={defaultIncludeDomains}
+            onAdd={(raw) => {
+              const d = raw.toLowerCase()
+              if (defaultIncludeDomains.includes(d)) return
+              log.info("include_domain_added", { domain: d })
+              void setDefaultIncludeDomains([...defaultIncludeDomains, d])
+            }}
+            onRemove={(d) => {
+              log.info("include_domain_removed", { domain: d })
+              void setDefaultIncludeDomains(defaultIncludeDomains.filter((x) => x !== d))
+            }}
+          />
 
-          <div className="space-y-1.5">
-            <Label className="text-sm">{td("excludeDomains")}</Label>
-            <div className="flex gap-2">
-              <Input
-                placeholder={td("excludeDomainsPlaceholder")}
-                value={excludeDomainInput}
-                onChange={(e) => setExcludeDomainInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAddExcludeDomain()}
-                className="h-8 text-sm"
-              />
-            </div>
-            {defaultExcludeDomains.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-1">
-                {defaultExcludeDomains.map((d) => (
-                  <Badge key={d} variant="secondary" className="text-xs gap-1">
-                    {d}
-                    <button
-                      onClick={() =>
-                        void setDefaultExcludeDomains(defaultExcludeDomains.filter((x) => x !== d))
-                      }
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </Badge>
-                ))}
-              </div>
-            )}
-          </div>
+          <DomainListInput
+            label={td("excludeDomains")}
+            placeholder={td("excludeDomainsPlaceholder")}
+            domains={defaultExcludeDomains}
+            onAdd={(raw) => {
+              const d = raw.toLowerCase()
+              if (defaultExcludeDomains.includes(d)) return
+              log.info("exclude_domain_added", { domain: d })
+              void setDefaultExcludeDomains([...defaultExcludeDomains, d])
+            }}
+            onRemove={(d) => {
+              log.info("exclude_domain_removed", { domain: d })
+              void setDefaultExcludeDomains(defaultExcludeDomains.filter((x) => x !== d))
+            }}
+          />
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -254,14 +236,20 @@ export function SearchDefaultsSettings() {
             <Label className="text-xs">{td("includeAnswer")}</Label>
             <Switch
               checked={defaultIncludeAnswer}
-              onCheckedChange={(v) => void setDefaultIncludeAnswer(v)}
+              onCheckedChange={(v) => {
+                log.info("include_answer_changed", { enabled: v })
+                void setDefaultIncludeAnswer(v)
+              }}
             />
           </div>
           <div className="flex items-center justify-between rounded-md border px-3 py-2">
             <Label className="text-xs">{td("includeRawContent")}</Label>
             <Switch
               checked={defaultIncludeRawContent}
-              onCheckedChange={(v) => void setDefaultIncludeRawContent(v)}
+              onCheckedChange={(v) => {
+                log.info("include_raw_content_changed", { enabled: v })
+                void setDefaultIncludeRawContent(v)
+              }}
             />
           </div>
         </div>

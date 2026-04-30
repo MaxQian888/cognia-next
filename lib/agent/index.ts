@@ -32,3 +32,5 @@ export {
 } from "./utils"
 
 export { LucideIcons } from "./resolve-icon"
+
+export { buildAgentModeSessionUpdate, type AgentModeSessionFields } from "./mode-session-update"

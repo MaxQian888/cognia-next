@@ -21,8 +21,9 @@ import type {
   TeamMember,
 } from "@/lib/claude/types"
 import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
-import { useAgentRuntimeStore } from "@/stores/agent-runtime-store"
+import { useAgentRuntimeStore } from "@/stores/agent"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
+import { buildAgentModeSessionUpdate } from "@/lib/agent"
 
 export interface BuildOptionsContext {
   session?: ChatSession | null
@@ -132,11 +133,6 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     void recordSkillUsage(skills.map((s) => s.id)).catch(() => undefined)
   }
 
-  // --- Model: per-session > member override > character > app default ------
-  const model =
-    session?.model ?? memberOverride?.modelOverride ?? character?.model ?? appSettings?.defaultModel
-  if (model) opts.model = model
-
   // --- Agent Mode (built-in / custom) -------------------------------------
   // Reads the active mode id from `useAgentRuntimeStore` unless ctx supplies
   // an explicit override. Modes are a *prompt modifier* — their systemPrompt
@@ -150,6 +146,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   } else {
     activeMode = resolveActiveAgentMode(useAgentRuntimeStore.getState().modeId)
   }
+
+  // Centralize mode-derived session fields through the shared helper. The
+  // returned `model` is whatever the (possibly custom) mode declares; we
+  // surface it below as one input to the model precedence.
+  const modeUpdate = activeMode ? buildAgentModeSessionUpdate(activeMode) : undefined
+
+  // --- Model: per-session > member override > mode override > character > app default ------
+  const model =
+    session?.model ??
+    memberOverride?.modelOverride ??
+    modeUpdate?.model ??
+    character?.model ??
+    appSettings?.defaultModel
+  if (model) opts.model = model
 
   // --- System prompt + skills section --------------------------------------
   // Member override replaces the character system prompt (skills still append).

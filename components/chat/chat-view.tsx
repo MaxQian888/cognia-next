@@ -1,12 +1,15 @@
 "use client"
 
-import { Composer } from "./composer"
+import { useTranslations } from "next-intl"
+import { Composer, type ComposerHandle } from "./composer"
 import { ChatHeader } from "./chat-header"
 import { EmptyChatState } from "./empty-state"
 import { InlineError } from "./inline-error"
 import { MessageList } from "./message-list"
-import { useChatStore } from "@/stores/chat-store"
+import { ExternalAgentSessionPanel } from "@/components/agent/external-agent-session-panel"
+import { useChatStore } from "@/stores/chat"
 import type { ChatSession, SendContent } from "@/lib/claude/types"
+import type { Ref } from "react"
 import { toast } from "sonner"
 
 interface ChatPaneProps {
@@ -18,6 +21,12 @@ interface ChatPaneProps {
   onCreate: () => void
   onUseSample: (text: string) => void
   onOpenSettings: (tab?: string) => void
+  /**
+   * Imperative handle on the Composer. The desktop shell uses it to insert
+   * `@CharacterName` mentions when the user clicks a row in the team
+   * member-list rail.
+   */
+  composerRef?: Ref<ComposerHandle>
 }
 
 /**
@@ -37,7 +46,9 @@ export function ChatPane({
   onCreate,
   onUseSample,
   onOpenSettings,
+  composerRef,
 }: ChatPaneProps) {
+  const tCopy = useTranslations("chat.copy")
   const messages = useChatStore((s) => s.messages)
   const status = useChatStore((s) => s.status)
   const errorMessage = useChatStore((s) => s.errorMessage)
@@ -62,6 +73,7 @@ export function ChatPane({
         messages={messages}
         onOpenSettings={() => onOpenSettings("api-key")}
       />
+      <ExternalAgentSessionPanel />
       {messages.length === 0 ? (
         <EmptyChatState
           onCreate={onCreate}
@@ -72,7 +84,7 @@ export function ChatPane({
         <MessageList
           messages={messages}
           status={status}
-          onCopy={() => toast.success("Copied to clipboard")}
+          onCopy={() => toast.success(tCopy("success"))}
           onRegenerate={() => void onRegenerate()}
           onEditResend={(id, newText) => void onEditResend(id, newText)}
         />
@@ -86,6 +98,7 @@ export function ChatPane({
         />
       )}
       <Composer
+        ref={composerRef}
         session={activeSession}
         onStartNewSession={() => onCreate()}
         onOpenSettings={(tab) => onOpenSettings(tab)}

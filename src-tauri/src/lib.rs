@@ -1,11 +1,13 @@
 mod agents;
 mod api_key;
+mod canvas;
 mod claude;
 mod commands;
 mod external_agent;
 mod files;
 mod hooks;
 mod logging;
+mod scheduler;
 mod settings;
 mod shell;
 mod skills;
@@ -147,6 +149,9 @@ pub fn run() {
         .manage(WindowBehavior::new())
         .manage(external_agent::commands::ExternalAgentState::default())
         .manage(external_agent::commands::AcpTerminalState::default())
+        .manage(scheduler::SchedulerState::new(
+            dirs::data_dir().map(|d| d.join("cognia").join("scheduler_metadata.sqlite")),
+        ))
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             claude::commands::claude_send,
@@ -160,6 +165,7 @@ pub fn run() {
             claude_set_api_key,
             claude_has_api_key,
             claude_restart_sidecar,
+            canvas::python_exec::canvas_run_python,
             window_behavior::set_tray_on_close,
             window_behavior::get_tray_on_close,
             files::read_text_file,
@@ -220,6 +226,22 @@ pub fn run() {
             logging::commands::platform_logging_get_status,
             logging::commands::platform_logging_set_config,
             logging::commands::platform_logging_forward,
+            scheduler::commands::scheduler_get_capabilities,
+            scheduler::commands::scheduler_is_available,
+            scheduler::commands::scheduler_is_elevated,
+            scheduler::commands::scheduler_create_task,
+            scheduler::commands::scheduler_update_task,
+            scheduler::commands::scheduler_delete_task,
+            scheduler::commands::scheduler_get_task,
+            scheduler::commands::scheduler_list_tasks,
+            scheduler::commands::scheduler_enable_task,
+            scheduler::commands::scheduler_disable_task,
+            scheduler::commands::scheduler_run_task_now,
+            scheduler::commands::scheduler_validate_task,
+            scheduler::commands::scheduler_confirm_task,
+            scheduler::commands::scheduler_cancel_confirmation,
+            scheduler::commands::scheduler_request_elevation,
+            scheduler::commands::scheduler_get_pending_confirmations,
         ])
         .setup(|app| {
             // Bootstrap native logging in *all* builds. Installs tauri-plugin-log

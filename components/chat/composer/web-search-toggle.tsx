@@ -9,8 +9,8 @@ import { useTranslations } from "next-intl"
 import { GlobeIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { useChatStore } from "@/stores/chat-store"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
 import {
   SEARCH_PROVIDERS,
   isProviderConfigured,
@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils"
 
 export function WebSearchToggle() {
   const t = useTranslations("webSearchToggle")
+  const tComposer = useTranslations("chat.composer")
 
   const on = useChatStore((s) => s.webSearchOnForNextSend)
   const setOn = useChatStore((s) => s.setWebSearchOnForNextSend)
@@ -52,7 +53,7 @@ export function WebSearchToggle() {
           type="button"
           size="sm"
           variant={on ? "default" : "ghost"}
-          aria-label="Toggle web search"
+          aria-label={tComposer("ariaToggleWebSearch")}
           aria-pressed={on}
           disabled={disabled}
           onClick={() => setOn(!on)}
@@ -62,7 +63,7 @@ export function WebSearchToggle() {
           )}
         >
           <GlobeIcon className="size-3.5" />
-          <span className="hidden sm:inline">Web</span>
+          <span className="hidden sm:inline">{tComposer("webLabel")}</span>
         </Button>
       </TooltipTrigger>
       <TooltipContent side="top">{tooltip}</TooltipContent>

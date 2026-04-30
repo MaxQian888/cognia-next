@@ -43,6 +43,14 @@ export interface PluginEventHooks {
   dispatchExternalAgentError: (...args: unknown[]) => void
   dispatchExternalAgentExecutionStart: (...args: unknown[]) => void
   dispatchExternalAgentExecutionComplete: (...args: unknown[]) => void
+  // Artifact lifecycle dispatchers (no-ops in this build). Plugins in
+  // upstream Cognia subscribe to these to react to artifact creation,
+  // edits, deletes, and panel open/close.
+  dispatchArtifactCreate: (...args: unknown[]) => void
+  dispatchArtifactUpdate: (...args: unknown[]) => void
+  dispatchArtifactDelete: (...args: unknown[]) => void
+  dispatchArtifactOpen: (...args: unknown[]) => void
+  dispatchArtifactClose: (...args: unknown[]) => void
 }
 
 export function getPluginEventHooks(): PluginEventHooks {
@@ -56,5 +64,34 @@ export function getPluginEventHooks(): PluginEventHooks {
     dispatchExternalAgentError: noop,
     dispatchExternalAgentExecutionStart: noop,
     dispatchExternalAgentExecutionComplete: noop,
+    dispatchArtifactCreate: noop,
+    dispatchArtifactUpdate: noop,
+    dispatchArtifactDelete: noop,
+    dispatchArtifactOpen: noop,
+    dispatchArtifactClose: noop,
+  }
+}
+
+/**
+ * Scheduler-side lifecycle dispatchers. Cognia plugins subscribe to these to
+ * react to scheduled task start/complete/error events. cognia-next has no
+ * runtime registry yet, so every dispatch is a no-op.
+ */
+export interface PluginLifecycleHooks {
+  dispatchOnScheduledTaskStart: (taskId: string, executionId: string) => void
+  dispatchOnScheduledTaskComplete: (
+    taskId: string,
+    executionId: string,
+    result: { success: boolean; output?: unknown }
+  ) => void
+  dispatchOnScheduledTaskError: (taskId: string, executionId: string, error: Error) => void
+}
+
+export function getPluginLifecycleHooks(): PluginLifecycleHooks {
+  const noop = () => undefined
+  return {
+    dispatchOnScheduledTaskStart: noop,
+    dispatchOnScheduledTaskComplete: noop,
+    dispatchOnScheduledTaskError: noop,
   }
 }

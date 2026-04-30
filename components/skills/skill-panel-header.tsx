@@ -5,7 +5,7 @@ import { ArrowLeftIcon, FilterIcon, SearchIcon } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { useSkillsStore } from "@/stores/skills-store"
+import { useSkillsStore } from "@/stores/skills"
 import { SkillPanelToolbar } from "./skill-panel-toolbar"
 
 interface Props {
@@ -45,7 +45,7 @@ export function SkillPanelHeader({ totalCount, filteredCount }: Props) {
       </div>
       <Button size="sm" variant="outline" onClick={() => setFilterSheetOpen(true)}>
         <FilterIcon className="mr-1.5 size-3.5" />
-        Filters
+        {t("filters")}
       </Button>
       <SkillPanelToolbar />
     </div>

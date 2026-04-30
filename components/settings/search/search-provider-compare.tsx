@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useSettingsStore } from "@/stores/settings"
 import { search } from "@/lib/search/search-service"
 import {
   type SearchProviderType,
@@ -23,6 +23,9 @@ import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
 } from "@/lib/search/types"
 import type { SearchResponse } from "@/lib/search/types"
+import { createLogger } from "@/lib/logger"
+
+const log = createLogger("settings.search.compare")
 
 export function SearchProviderCompare() {
   const tc = useTranslations("providerCompare")
@@ -51,6 +54,12 @@ export function SearchProviderCompare() {
     setResultA(null)
     setResultB(null)
 
+    log.info("compare_started", {
+      providerA,
+      providerB,
+      queryLen: query.trim().length,
+    })
+
     try {
       const [a, b] = await Promise.all([
         search(query, { provider: providerA, providerSettings, fallbackEnabled: false }),
@@ -58,8 +67,15 @@ export function SearchProviderCompare() {
       ])
       setResultA(a)
       setResultB(b)
+      log.info("compare_succeeded", {
+        providerA,
+        providerB,
+        aResults: a.results.length,
+        bResults: b.results.length,
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : "Comparison failed")
+      log.error("compare_failed", e, { providerA, providerB })
     } finally {
       setLoading(false)
     }

@@ -7,8 +7,12 @@
  *
  * This stub exposes just enough to satisfy the `external-agent-selector`
  * import: a panel that points the user at the External Agents settings
- * page (which already ships full CRUD). Replace with the upstream
- * manager when agent-trace + use-external-agent hooks land.
+ * page (which already ships full CRUD via
+ * `components/settings/agent/external-agent-settings.tsx`).
+ *
+ * TODO: Replace with the upstream manager once agent-trace + tool-approval
+ * dialogs land. Tracked alongside the agent-trace stub at
+ * `types/agent/agent-trace.ts`.
  */
 
 import { ExternalLinkIcon } from "lucide-react"

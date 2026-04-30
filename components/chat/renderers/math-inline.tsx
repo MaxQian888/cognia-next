@@ -1,11 +1,14 @@
 "use client"
 
 import { useMemo, useState, useCallback } from "react"
+import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Check, Copy } from "lucide-react"
 import { renderMathSafe } from "@/lib/latex/cache"
 import { withMathErrorBoundary } from "./math-error-boundary"
+import { useCopy } from "@/hooks/ui/use-copy"
+import { loggers } from "@/lib/logger"
 
 interface MathInlineProps {
   content: string
@@ -20,8 +23,9 @@ function MathInlineBase({
   scale = 1,
   showCopyOnHover = true,
 }: MathInlineProps) {
+  const t = useTranslations("chat.renderers.math")
   const [isHovered, setIsHovered] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
 
   const cleanContent = useMemo(() => {
     return content
@@ -36,33 +40,23 @@ function MathInlineBase({
     return renderMathSafe(cleanContent, false, { trust: false })
   }, [cleanContent])
 
-  const copy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(cleanContent)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch (err) {
-      console.error("clipboard write failed", err)
-    }
-  }, [cleanContent])
-
   const handleCopy = useCallback(
     async (e: React.MouseEvent) => {
       e.preventDefault()
       e.stopPropagation()
-      await copy()
+      await copy(cleanContent)
     },
-    [copy]
+    [copy, cleanContent]
   )
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault()
-        void copy()
+        void copy(cleanContent)
       }
     },
-    [copy]
+    [copy, cleanContent]
   )
 
   if (result.error) {
@@ -75,14 +69,14 @@ function MathInlineBase({
               className
             )}
             role="math"
-            aria-label={`Invalid math expression: ${cleanContent}`}
+            aria-label={t("invalidLabel", { tex: cleanContent })}
           >
             {content}
           </code>
         </TooltipTrigger>
         <TooltipContent>
           <div className="text-xs">
-            <p className="font-medium text-destructive">LaTeX Error</p>
+            <p className="font-medium text-destructive">{t("inlineErrorTitle")}</p>
             <p className="text-muted-foreground">{result.error}</p>
           </div>
         </TooltipContent>
@@ -103,7 +97,7 @@ function MathInlineBase({
           )}
           style={scaleStyle}
           role="math"
-          aria-label={`Math: ${cleanContent}`}
+          aria-label={t("expressionLabelInline", { tex: cleanContent })}
           tabIndex={0}
           onClick={handleCopy}
           onKeyDown={handleKeyDown}
@@ -121,7 +115,7 @@ function MathInlineBase({
       <TooltipContent>
         <div className="text-xs space-y-1">
           <p className="font-mono bg-muted px-1.5 py-0.5 rounded">{cleanContent}</p>
-          <p className="text-muted-foreground">Click to copy LaTeX</p>
+          <p className="text-muted-foreground">{t("clickToCopy")}</p>
         </div>
       </TooltipContent>
     </Tooltip>

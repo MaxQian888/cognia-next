@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { MicIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
@@ -13,8 +14,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { useSettingsStore } from "@/stores/settings-store"
-import { DEFAULT_SPEECH_LANGUAGE, SPEECH_LANGUAGES, type SpeechLanguageCode } from "@/lib/speech"
+import { useSettingsStore } from "@/stores/settings"
+import {
+  DEFAULT_SPEECH_LANGUAGE,
+  SPEECH_LANGUAGES,
+  type SpeechLanguageCode,
+} from "@/lib/tts/speech"
+import { loggers } from "@/lib/logger"
 
 type MicDevice = { deviceId: string; label: string }
 
@@ -24,6 +30,7 @@ type MicDevice = { deviceId: string; label: string }
  * support is detected at mount.
  */
 export function SttCard() {
+  const t = useTranslations("settings.speech.stt")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
 
@@ -40,41 +47,42 @@ export function SttCard() {
 
   useEffect(() => {
     if (typeof navigator === "undefined" || !navigator.mediaDevices) return
+    const fallbackLabel = t("microphone")
     navigator.mediaDevices
       .enumerateDevices()
       .then((devices) => {
         setMics(
           devices
             .filter((d) => d.kind === "audioinput")
-            .map((d) => ({ deviceId: d.deviceId, label: d.label || "Microphone" }))
+            .map((d) => ({ deviceId: d.deviceId, label: d.label || fallbackLabel }))
         )
       })
       .catch(() => setMics([]))
-  }, [])
+  }, [t])
 
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-base">
           <MicIcon className="size-4 text-muted-foreground" />
-          Speech-to-text
+          {t("title")}
           {supported === false && (
             <Badge variant="destructive" className="text-[10px]">
-              Not supported
+              {t("notSupported")}
             </Badge>
           )}
         </CardTitle>
-        <CardDescription className="text-xs">
-          The composer&apos;s voice-input button uses your browser&apos;s Web Speech API. Pick the
-          language you usually speak and the microphone you want to use.
-        </CardDescription>
+        <CardDescription className="text-xs">{t("description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
-          <Label className="text-sm">Language</Label>
+          <Label className="text-sm">{t("language")}</Label>
           <Select
             value={sttLanguage}
-            onValueChange={(value) => void save({ sttLanguage: value as SpeechLanguageCode })}
+            onValueChange={(value) => {
+              loggers.tts.info("settings.sttLanguageChanged", { language: value })
+              void save({ sttLanguage: value as SpeechLanguageCode })
+            }}
           >
             <SelectTrigger>
               <SelectValue />
@@ -91,20 +99,21 @@ export function SttCard() {
         </div>
 
         <div className="space-y-2">
-          <Label className="text-sm">Microphone</Label>
+          <Label className="text-sm">{t("microphone")}</Label>
           <Select
             value={selectedMicId ?? "default"}
-            onValueChange={(value) =>
+            onValueChange={(value) => {
+              loggers.tts.info("settings.micChanged", { micId: value === "default" ? null : value })
               void save({
                 selectedMicId: value === "default" ? undefined : value,
               })
-            }
+            }}
           >
             <SelectTrigger>
-              <SelectValue placeholder="System default" />
+              <SelectValue placeholder={t("systemDefault")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="default">System default</SelectItem>
+              <SelectItem value="default">{t("systemDefault")}</SelectItem>
               {mics.map((m) => (
                 <SelectItem key={m.deviceId} value={m.deviceId}>
                   {m.label}
@@ -113,9 +122,7 @@ export function SttCard() {
             </SelectContent>
           </Select>
           {mics.length === 0 && (
-            <p className="text-xs text-muted-foreground">
-              Grant microphone permission once for the device list to populate.
-            </p>
+            <p className="text-xs text-muted-foreground">{t("micPermissionHint")}</p>
           )}
         </div>
       </CardContent>

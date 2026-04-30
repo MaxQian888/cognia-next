@@ -14,13 +14,25 @@ const mocks = {
 
 let settings: Record<string, unknown> = {}
 
-jest.mock("@/stores/settings-store", () => ({
+jest.mock("@/stores/settings", () => ({
   useSettingsStore: <T,>(selector: (s: Record<string, unknown>) => T) =>
     selector({ settings, ...mocks }),
 }))
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+}))
+
+const mockLogInfo = jest.fn()
+jest.mock("@/lib/logger", () => ({
+  createLogger: () => ({
+    info: (...args: unknown[]) => mockLogInfo(...args),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn(),
+    trace: jest.fn(),
+    fatal: jest.fn(),
+  }),
 }))
 
 jest.mock("@/components/ui/select", () => ({
@@ -49,6 +61,7 @@ import { SearchDefaultsSettings } from "./search-defaults-settings"
 
 beforeEach(() => {
   Object.values(mocks).forEach((m) => m.mockReset())
+  mockLogInfo.mockReset()
   settings = {}
 })
 
@@ -124,6 +137,23 @@ describe("SearchDefaultsSettings", () => {
     fireEvent.change(includeInput, { target: { value: "a.com" } })
     fireEvent.keyDown(includeInput, { key: "Enter" })
     expect(mocks.setDefaultIncludeDomains).not.toHaveBeenCalled()
+  })
+
+  it("logs default_type_changed when type button clicked", () => {
+    render(<SearchDefaultsSettings />)
+    fireEvent.click(screen.getByText("news"))
+    expect(mockLogInfo).toHaveBeenCalledWith("default_type_changed", { type: "news" })
+  })
+
+  it("logs include_domain_added with sanitized domain", () => {
+    render(<SearchDefaultsSettings />)
+    const inputs = screen.getAllByPlaceholderText(/Placeholder|placeholder/)
+    const includeInput = inputs.find((i) =>
+      (i as HTMLInputElement).placeholder.includes("includeDomainsPlaceholder")
+    )!
+    fireEvent.change(includeInput, { target: { value: "Example.com" } })
+    fireEvent.keyDown(includeInput, { key: "Enter" })
+    expect(mockLogInfo).toHaveBeenCalledWith("include_domain_added", { domain: "example.com" })
   })
 
   it("adds exclude domain on Enter and removes on X click", () => {

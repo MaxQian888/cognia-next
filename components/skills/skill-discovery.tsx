@@ -12,10 +12,11 @@ import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Spinner } from "@/components/ui/spinner"
 import { skillsScanDir, skillsScanNative, type NativeSkill } from "@/lib/claude/ipc"
-import { pickDirectory } from "@/lib/file-bridge"
+import { pickDirectory } from "@/lib/files/file-bridge"
 import { isTauri } from "@/lib/tauri"
 import { parseSkillMarkdown } from "@/lib/claude/skills-io"
-import { useSkillsStore, type ImportStaging } from "@/stores/skills-store"
+import { useSkillsStore, type ImportStaging } from "@/stores/skills"
+import { loggers } from "@/lib/logger"
 
 type ScanState =
   | { status: "idle" }
@@ -38,6 +39,7 @@ export function SkillDiscovery() {
     try {
       const results = await fn()
       setScan({ status: "loaded", label, results })
+      loggers.skills.info("discovery scan ok", { label, count: results.length })
       if (results.length > 0) {
         // Pre-select everything so the user can hit Import without poking
         // each row individually. Easy to deselect via the header checkbox.
@@ -48,12 +50,13 @@ export function SkillDiscovery() {
         status: "error",
         message: err instanceof Error ? err.message : String(err),
       })
+      loggers.skills.error("discovery scan failed", err, { label })
     }
   }
 
   const handlePickAndScan = async () => {
     if (!desktop) {
-      toast.error("Discovery requires desktop mode.")
+      toast.error(t("errorDesktopOnly"))
       return
     }
     const dir = await pickDirectory()
@@ -86,13 +89,23 @@ export function SkillDiscovery() {
       }
     }
     if (drafts.length === 0) {
-      toast.error("Nothing selected, or all selected files failed to parse.")
+      toast.error(t("noFilesParsed"))
+      loggers.skills.warn("discovery import none parsed", {
+        label: scan.label,
+        attempted: scan.results.length,
+        errors: errors.length,
+      })
       return
     }
     setImportStaging({
       drafts,
       sourceLabel: scan.label,
       parseErrors: errors,
+    })
+    loggers.skills.info("discovery staged for import", {
+      label: scan.label,
+      drafts: drafts.length,
+      errors: errors.length,
     })
   }
 
@@ -129,7 +142,9 @@ export function SkillDiscovery() {
 
       <div className="flex items-end gap-2">
         <div className="flex-1 space-y-1">
-          <Label className="text-xs">{tCommon("toolbar.import")} — Path</Label>
+          <Label className="text-xs">
+            {tCommon("toolbar.import")} — {t("pathLabel")}
+          </Label>
           <Input
             value={customPath}
             onChange={(e) => setCustomPath(e.target.value)}
@@ -149,14 +164,14 @@ export function SkillDiscovery() {
           ) : (
             <SearchIcon className="mr-1.5 size-3.5" />
           )}
-          Scan
+          {t("scan")}
         </Button>
       </div>
 
       {scan.status === "loading" && (
         <Card className="flex items-center gap-2 p-3 text-xs text-muted-foreground">
           <Spinner className="size-3" />
-          Scanning {scan.label}…
+          {t("scanning", { label: scan.label })}
         </Card>
       )}
       {scan.status === "error" && (
@@ -209,7 +224,7 @@ export function SkillDiscovery() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium">{row.dirName}</p>
                       <p className="truncate text-[10px] text-muted-foreground">
-                        {row.filePath} · {row.resources.length} resource(s)
+                        {row.filePath} · {t("resourcesCount", { count: row.resources.length })}
                       </p>
                     </div>
                   </li>

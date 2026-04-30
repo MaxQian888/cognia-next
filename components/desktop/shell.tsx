@@ -1,26 +1,32 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ChatPane } from "@/components/chat/chat-view"
 import { CharacterPicker } from "@/components/chat/character-picker"
 import { CommandPalette } from "@/components/desktop/command-palette"
 import { GuildRail } from "@/components/desktop/guild-rail"
 import { ChannelList } from "@/components/desktop/channel-list"
 import { MemberList } from "@/components/desktop/member-list"
+import { ArtifactPanel } from "@/components/artifacts/artifact-panel"
+import { CanvasDocumentRail, CanvasWorkspace, CanvasSidePanels } from "@/components/canvas"
 import { OnboardingDialog } from "@/components/desktop/onboarding-dialog"
 import { TitleBar } from "@/components/desktop/title-bar"
 import { SettingsDialog } from "@/components/chat/settings-dialog"
 import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
-import { useClaudeChat } from "@/hooks/use-claude-chat"
-import { useTeamChat } from "@/hooks/use-team-chat"
-import { useSessions } from "@/hooks/use-sessions"
-import { useChatStore } from "@/stores/chat-store"
-import { useSettingsStore } from "@/stores/settings-store"
-import { useUIStore } from "@/stores/ui-store"
+import type { ComposerHandle } from "@/components/chat/composer"
+import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
+import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
+import { useUIStore } from "@/stores/ui"
 import { isTauri } from "@/lib/tauri"
 import { whenSeeded } from "@/lib/db/schema"
 import { markSessionRead } from "@/lib/db/session-state"
+import { guildFromSession } from "@/lib/claude/guild"
+import { loggers } from "@/lib/logger"
+import { useTranslations } from "next-intl"
 import { toast } from "sonner"
+
+const log = loggers.shell
 
 /**
  * The top-level Discord-style frame:
@@ -54,6 +60,11 @@ export function DiscordShell() {
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [onboardingDismissed, setOnboardingDismissed] = useState(false)
 
+  // Imperative handle on the chat composer — the member-list rail uses this
+  // to insert `@CharacterName` mentions at the caret without going through
+  // any draft store.
+  const composerRef = useRef<ComposerHandle | null>(null)
+
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -68,7 +79,12 @@ export function DiscordShell() {
   // Whenever the active session changes, mark it as read.
   useEffect(() => {
     if (!activeSessionId) return
-    void markSessionRead(activeSessionId).catch(() => {})
+    void markSessionRead(activeSessionId).catch((err) => {
+      log.warn("markSessionRead failed", {
+        sessionId: activeSessionId,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    })
   }, [activeSessionId])
 
   // First-run onboarding: nudge the user when there's no API key and they
@@ -78,6 +94,7 @@ export function DiscordShell() {
     const settings = useSettingsStore.getState().settings
     if (!settings) return
     if (!settings.apiKey && !onboardingDismissed && sessions.length === 0) {
+      log.info("onboarding shown")
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setOnboardingOpen(true)
     }
@@ -95,11 +112,12 @@ export function DiscordShell() {
       if (current && selectedGuild.kind === "team") {
         if (current.kind !== "team" || current.teamId !== selectedGuild.teamId) {
           // Honor the active session and adjust the guild filter.
-          if (current.kind === "team" && current.teamId) {
-            setSelectedGuild({ kind: "team", teamId: current.teamId })
-          } else {
-            setSelectedGuild({ kind: "dm" })
-          }
+          const target = guildFromSession(current)
+          log.info("auto guild-switch from active session", {
+            sessionId: current.id,
+            target,
+          })
+          setSelectedGuild(target)
         }
       }
       return
@@ -110,12 +128,16 @@ export function DiscordShell() {
       }
       return s.kind !== "team"
     })
-    if (matching) select(matching.id)
+    if (matching) {
+      log.info("auto-select session", { sessionId: matching.id })
+      select(matching.id)
+    }
   }, [mounted, sessions, activeSessionId, selectedGuild, select, setSelectedGuild])
 
   // Surface non-fatal errors as toasts (debounced).
   useEffect(() => {
     if (errorMessage && errorMessage !== lastErrorShown) {
+      log.warn("chat error surfaced", { message: errorMessage })
       toast.error(errorMessage)
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setLastErrorShown(errorMessage)
@@ -127,6 +149,7 @@ export function DiscordShell() {
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
 
   const openSettings = (tab?: string) => {
+    log.info("open settings", { tab: tab ?? "general" })
     setSettingsTab(tab ?? "general")
     setSettingsOpen(true)
   }
@@ -136,6 +159,7 @@ export function DiscordShell() {
   // re-trigger this effect even when the tab string didn't change.
   useEffect(() => {
     if (!pendingSettingsRequest) return
+    log.info("open settings via deep-link", { tab: pendingSettingsRequest.tab })
     // eslint-disable-next-line react-hooks/set-state-in-effect
     openSettings(pendingSettingsRequest.tab)
     clearPendingSettings()
@@ -143,35 +167,35 @@ export function DiscordShell() {
   }, [pendingSettingsRequest])
 
   const handleNewDirect = () => {
+    log.info("new-direct (open character picker)")
     // Open the character picker; the actual session is created in onPick.
     setCharacterPickerOpen(true)
   }
 
   const handleNewTeamConversation = async (teamId: string) => {
+    log.info("new-team-conversation", { teamId })
     const s = await create({ title: "New conversation", kind: "team", teamId })
     select(s.id)
   }
 
+  // Team creation is fully implemented in Settings → Teams. The guild rail's
+  // "+" button silently routes there; no toast needed.
   const handleCreateTeam = () => {
-    // The Teams settings tab lands in Phase 4. Until then, deep-link to the
-    // closest tab and surface a hint.
-    toast.info("Team creation lands with the Teams tab — check Settings → Teams.")
+    log.info("create-team click → settings")
     openSettings("teams")
   }
 
   const handleSwitchToSession = (id: string) => {
+    log.info("switch-to-session", { sessionId: id })
     select(id)
     const target = sessions.find((s) => s.id === id)
     if (!target) return
-    if (target.kind === "team" && target.teamId) {
-      setSelectedGuild({ kind: "team", teamId: target.teamId })
-    } else {
-      setSelectedGuild({ kind: "dm" })
-    }
+    setSelectedGuild(guildFromSession(target))
   }
 
   // Member-list is only shown for team sessions, and only on wide enough screens.
   const isTeamSession = activeSession?.kind === "team" && Boolean(activeSession.teamId)
+  const isCanvasGuild = selectedGuild.kind === "canvas"
 
   // Pick the right send/stop pair based on session kind. Team sessions go
   // through `useTeamChat`, direct chats stay on `useClaudeChat`.
@@ -192,18 +216,24 @@ export function DiscordShell() {
       <TitleBar />
       <div className="flex flex-1 overflow-hidden">
         <GuildRail onCreateTeam={handleCreateTeam} onOpenSettings={() => openSettings()} />
-        <ChannelList
-          sessions={sessions}
-          activeSessionId={activeSessionId}
-          onSelect={handleSwitchToSession}
-          onNewDirect={() => void handleNewDirect()}
-          onNewTeamConversation={(id) => void handleNewTeamConversation(id)}
-          onDelete={(id) => void remove(id)}
-          onRename={(id, t) => void rename(id, t)}
-        />
+        {isCanvasGuild ? (
+          <CanvasDocumentRail />
+        ) : (
+          <ChannelList
+            sessions={sessions}
+            activeSessionId={activeSessionId}
+            onSelect={handleSwitchToSession}
+            onNewDirect={() => void handleNewDirect()}
+            onNewTeamConversation={(id) => void handleNewTeamConversation(id)}
+            onDelete={(id) => void remove(id)}
+            onRename={(id, title) => void rename(id, title)}
+          />
+        )}
 
         <main className="relative flex flex-1 flex-col overflow-hidden">
-          {!mounted ? null : !isTauri() ? (
+          {!mounted ? null : isCanvasGuild ? (
+            <CanvasWorkspace />
+          ) : !isTauri() ? (
             <DesktopOnlyBanner />
           ) : (
             <ChatPane
@@ -211,35 +241,38 @@ export function DiscordShell() {
               onSend={send}
               onStop={stop}
               onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
-              onEditResend={isTeamSession ? async () => {} : directChat.editAndResend}
+              onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
               onCreate={handleNewDirect}
               onUseSample={(text) => void send(text)}
               onOpenSettings={openSettings}
+              composerRef={composerRef}
             />
           )}
         </main>
 
-        {isTeamSession && (
-          <MemberList
-            teamSessionId={activeSession?.id ?? null}
-            teamId={activeSession?.teamId ?? null}
-            onMention={(c) => {
-              // Phase 4 will hook this into the composer; for now just bump
-              // the draft directly.
-              const sid = activeSession?.id
-              if (!sid) return
-              const current = useUIStore.getState().composerDraft[sid] ?? ""
-              const sep = current && !current.endsWith(" ") ? " " : ""
-              useUIStore.getState().setComposerDraft(sid, `${current}${sep}@${c.name} `)
-            }}
-          />
+        {isCanvasGuild ? (
+          <aside className="hidden w-[300px] shrink-0 border-l md:block">
+            <CanvasSidePanels />
+          </aside>
+        ) : (
+          isTeamSession && (
+            <MemberList
+              teamSessionId={activeSession?.id ?? null}
+              teamId={activeSession?.teamId ?? null}
+              onMention={(c) => {
+                composerRef.current?.insertMention(c.name)
+              }}
+            />
+          )
         )}
+        {!isCanvasGuild && <ArtifactPanel />}
       </div>
 
       <CharacterPicker
         open={characterPickerOpen}
         onOpenChange={setCharacterPickerOpen}
         onPick={async (c) => {
+          log.info("character-picker pick", { characterId: c.id })
           const s = await create({
             title: `Chat with ${c.name}`,
             kind: "direct",
@@ -254,9 +287,13 @@ export function DiscordShell() {
         open={onboardingOpen}
         onOpenChange={(open) => {
           setOnboardingOpen(open)
-          if (!open) setOnboardingDismissed(true)
+          if (!open) {
+            log.info("onboarding dismissed")
+            setOnboardingDismissed(true)
+          }
         }}
         onPickCharacter={async (c) => {
+          log.info("onboarding pick-character", { characterId: c.id })
           const s = await create({
             title: `Chat with ${c.name}`,
             kind: "direct",
@@ -280,15 +317,17 @@ export function DiscordShell() {
 }
 
 function DesktopOnlyBanner() {
+  const t = useTranslations("desktop.shell")
   return (
     <div className="flex flex-1 items-center justify-center p-6">
       <div className="max-w-md space-y-3 text-center">
-        <h2 className="text-xl font-semibold">Run inside Tauri</h2>
+        <h2 className="text-xl font-semibold">{t("desktopOnlyTitle")}</h2>
         <p className="text-sm text-muted-foreground">
-          The Claude Code agent runs in a Node sidecar that ships with the desktop build. To use the
-          chat, launch the app with{" "}
-          <code className="rounded bg-muted px-1 py-0.5">pnpm tauri dev</code> rather than{" "}
-          <code className="rounded bg-muted px-1 py-0.5">pnpm dev</code>.
+          {t("desktopOnlyBodyPrefix")}
+          <code className="rounded bg-muted px-1 py-0.5">pnpm tauri dev</code>
+          {t("desktopOnlyBodyMiddle")}
+          <code className="rounded bg-muted px-1 py-0.5">pnpm dev</code>
+          {t("desktopOnlyBodySuffix")}
         </p>
       </div>
     </div>

@@ -16,7 +16,7 @@ let settings: {
   searchProviders?: Record<string, unknown>
 } = {}
 
-jest.mock("@/stores/settings-store", () => ({
+jest.mock("@/stores/settings", () => ({
   useSettingsStore: <T,>(
     selector: (s: {
       settings: typeof settings
@@ -44,6 +44,18 @@ jest.mock("@/lib/search/search-cache", () => ({
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+}))
+
+const mockLogInfo = jest.fn()
+jest.mock("@/lib/logger", () => ({
+  createLogger: () => ({
+    info: (...args: unknown[]) => mockLogInfo(...args),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn(),
+    trace: jest.fn(),
+    fatal: jest.fn(),
+  }),
 }))
 
 jest.mock("@/components/ui/slider", () => ({
@@ -100,6 +112,7 @@ beforeEach(() => {
     misses: 1,
     hitRate: 0.75,
   })
+  mockLogInfo.mockReset()
   settings = {}
 })
 
@@ -134,5 +147,22 @@ describe("SearchCacheSettings", () => {
     render(<SearchCacheSettings />)
     fireEvent.click(screen.getByText("clearCache"))
     expect(cacheClearMock).toHaveBeenCalled()
+  })
+
+  it("logs cache_enabled_changed when toggled", () => {
+    settings = { searchCacheEnabled: true }
+    render(<SearchCacheSettings />)
+    fireEvent.click(screen.getByRole("switch"))
+    expect(mockLogInfo).toHaveBeenCalledWith("cache_enabled_changed", { enabled: false })
+  })
+
+  it("logs cache_cleared with sizeBefore", () => {
+    settings = { searchCacheEnabled: true }
+    render(<SearchCacheSettings />)
+    fireEvent.click(screen.getByText("clearCache"))
+    expect(mockLogInfo).toHaveBeenCalledWith(
+      "cache_cleared",
+      expect.objectContaining({ provider: "all", sizeBefore: 5 })
+    )
   })
 })

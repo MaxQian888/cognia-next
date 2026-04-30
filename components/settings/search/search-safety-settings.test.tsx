@@ -8,7 +8,7 @@ let settings: {
   searchSafeSearchLevel?: "off" | "moderate" | "strict"
 } = {}
 
-jest.mock("@/stores/settings-store", () => ({
+jest.mock("@/stores/settings", () => ({
   useSettingsStore: <T,>(
     selector: (s: {
       settings: typeof settings
@@ -27,11 +27,24 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+const mockLogInfo = jest.fn()
+jest.mock("@/lib/logger", () => ({
+  createLogger: () => ({
+    info: (...args: unknown[]) => mockLogInfo(...args),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn(),
+    trace: jest.fn(),
+    fatal: jest.fn(),
+  }),
+}))
+
 import { SearchSafetySettings } from "./search-safety-settings"
 
 beforeEach(() => {
   setEnabledMock.mockReset()
   setLevelMock.mockReset()
+  mockLogInfo.mockReset()
   settings = {}
 })
 
@@ -68,5 +81,12 @@ describe("SearchSafetySettings", () => {
     render(<SearchSafetySettings />)
     fireEvent.click(screen.getByText("strict"))
     expect(setLevelMock).toHaveBeenCalledWith("strict")
+  })
+
+  it("logs safety_level_changed when level button clicked", () => {
+    settings = { searchSafeSearchEnabled: true, searchSafeSearchLevel: "moderate" }
+    render(<SearchSafetySettings />)
+    fireEvent.click(screen.getByText("strict"))
+    expect(mockLogInfo).toHaveBeenCalledWith("safety_level_changed", { level: "strict" })
   })
 })

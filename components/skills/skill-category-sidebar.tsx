@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl"
 import { LayersIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { SKILL_CATEGORIES, SKILL_SOURCES } from "@/lib/skills/categories"
-import { useSkillsStore } from "@/stores/skills-store"
+import { useSkillsStore } from "@/stores/skills"
 import type { SkillCategory, SkillSource } from "@/lib/claude/types"
 
 interface Props {

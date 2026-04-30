@@ -5,9 +5,9 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
-import { useSkillAnalytics } from "@/hooks/use-skill-analytics"
+import { useSkillAnalytics } from "@/hooks/skills"
 import { getCategoryMeta, getSourceMeta } from "@/lib/skills/categories"
-import { useSkillsStore } from "@/stores/skills-store"
+import { useSkillsStore } from "@/stores/skills"
 
 export function SkillAnalytics() {
   const t = useTranslations("skills.analytics")

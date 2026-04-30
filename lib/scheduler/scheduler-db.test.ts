@@ -1,0 +1,364 @@
+/**
+ * Scheduler Database Tests
+ */
+
+// Mock IndexedDB for tests
+import "fake-indexeddb/auto"
+import { schedulerDb } from "./scheduler-db"
+import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
+
+describe("SchedulerDatabase", () => {
+  beforeEach(async () => {
+    await schedulerDb.clearAll()
+  })
+
+  const createMockTask = (overrides: Partial<ScheduledTask> = {}): ScheduledTask => ({
+    id: `task-${Date.now()}`,
+    name: "Test Task",
+    description: "A test task",
+    type: "workflow",
+    trigger: {
+      type: "cron",
+      cronExpression: "0 9 * * *",
+      timezone: "UTC",
+    },
+    payload: { workflowId: "test-workflow" },
+    config: {
+      timeout: 300000,
+      maxRetries: 3,
+      retryDelay: 5000,
+      runMissedOnStartup: false,
+      maxMissedRuns: 1,
+      allowConcurrent: false,
+    },
+    notification: {
+      onStart: false,
+      onComplete: true,
+      onError: true,
+      onProgress: false,
+      channels: ["toast"],
+    },
+    status: "active",
+    runCount: 0,
+    successCount: 0,
+    failureCount: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  })
+
+  const createMockExecution = (
+    taskId: string,
+    overrides: Partial<TaskExecution> = {}
+  ): TaskExecution => ({
+    id: `exec-${Date.now()}`,
+    taskId,
+    taskName: "Test Task",
+    taskType: "workflow",
+    status: "completed",
+    retryAttempt: 0,
+    duration: 1000,
+    startedAt: new Date(),
+    completedAt: new Date(),
+    logs: [],
+    ...overrides,
+  })
+
+  describe("Task Operations", () => {
+    it("should create and retrieve a task", async () => {
+      const task = createMockTask({ id: "test-task-1" })
+      await schedulerDb.createTask(task)
+
+      const retrieved = await schedulerDb.getTask("test-task-1")
+      expect(retrieved).not.toBeNull()
+      expect(retrieved!.name).toBe("Test Task")
+      expect(retrieved!.type).toBe("workflow")
+    })
+
+    it("should update a task", async () => {
+      const task = createMockTask({ id: "test-task-2" })
+      await schedulerDb.createTask(task)
+
+      const updated = { ...task, name: "Updated Task", updatedAt: new Date() }
+      await schedulerDb.updateTask(updated)
+
+      const retrieved = await schedulerDb.getTask("test-task-2")
+      expect(retrieved!.name).toBe("Updated Task")
+    })
+
+    it("should delete a task and its executions", async () => {
+      const task = createMockTask({ id: "test-task-3" })
+      await schedulerDb.createTask(task)
+
+      const execution = createMockExecution("test-task-3")
+      await schedulerDb.createExecution(execution)
+
+      const deleted = await schedulerDb.deleteTask("test-task-3")
+      expect(deleted).toBe(true)
+
+      const retrieved = await schedulerDb.getTask("test-task-3")
+      expect(retrieved).toBeNull()
+
+      const executions = await schedulerDb.getTaskExecutions("test-task-3")
+      expect(executions.length).toBe(0)
+    })
+
+    it("should get all tasks", async () => {
+      await schedulerDb.createTask(createMockTask({ id: "task-a" }))
+      await schedulerDb.createTask(createMockTask({ id: "task-b" }))
+      await schedulerDb.createTask(createMockTask({ id: "task-c" }))
+
+      const tasks = await schedulerDb.getAllTasks()
+      expect(tasks.length).toBe(3)
+    })
+
+    it("should get tasks by status", async () => {
+      await schedulerDb.createTask(createMockTask({ id: "task-active", status: "active" }))
+      await schedulerDb.createTask(createMockTask({ id: "task-paused", status: "paused" }))
+      await schedulerDb.createTask(createMockTask({ id: "task-active-2", status: "active" }))
+
+      const activeTasks = await schedulerDb.getTasksByStatus("active")
+      expect(activeTasks.length).toBe(2)
+
+      const pausedTasks = await schedulerDb.getTasksByStatus("paused")
+      expect(pausedTasks.length).toBe(1)
+    })
+
+    it("should filter tasks by multiple criteria", async () => {
+      await schedulerDb.createTask(
+        createMockTask({
+          id: "task-1",
+          type: "workflow",
+          status: "active",
+          tags: ["important", "daily"],
+        })
+      )
+      await schedulerDb.createTask(
+        createMockTask({
+          id: "task-2",
+          type: "agent",
+          status: "active",
+          tags: ["weekly"],
+        })
+      )
+      await schedulerDb.createTask(
+        createMockTask({
+          id: "task-3",
+          type: "workflow",
+          status: "paused",
+          tags: ["important"],
+        })
+      )
+
+      // Filter by type
+      const workflowTasks = await schedulerDb.getFilteredTasks({ types: ["workflow"] })
+      expect(workflowTasks.length).toBe(2)
+
+      // Filter by status
+      const activeTasks = await schedulerDb.getFilteredTasks({ statuses: ["active"] })
+      expect(activeTasks.length).toBe(2)
+
+      // Filter by tags
+      const importantTasks = await schedulerDb.getFilteredTasks({ tags: ["important"] })
+      expect(importantTasks.length).toBe(2)
+    })
+  })
+
+  describe("Execution Operations", () => {
+    it("should create and retrieve executions", async () => {
+      const task = createMockTask({ id: "task-exec-test" })
+      await schedulerDb.createTask(task)
+
+      const execution = createMockExecution("task-exec-test", { id: "exec-1" })
+      await schedulerDb.createExecution(execution)
+
+      const executions = await schedulerDb.getTaskExecutions("task-exec-test")
+      expect(executions.length).toBe(1)
+      expect(executions[0].status).toBe("completed")
+    })
+
+    it("should update execution status", async () => {
+      const task = createMockTask({ id: "task-exec-update" })
+      await schedulerDb.createTask(task)
+
+      const execution = createMockExecution("task-exec-update", {
+        id: "exec-update",
+        status: "running",
+      })
+      await schedulerDb.createExecution(execution)
+
+      const updated = { ...execution, status: "completed" as const, completedAt: new Date() }
+      await schedulerDb.updateExecution(updated)
+
+      const retrieved = await schedulerDb.getExecution("exec-update")
+      expect(retrieved!.status).toBe("completed")
+    })
+
+    it("should get recent executions", async () => {
+      const task = createMockTask({ id: "task-recent" })
+      await schedulerDb.createTask(task)
+
+      for (let i = 0; i < 5; i++) {
+        await schedulerDb.createExecution(
+          createMockExecution("task-recent", {
+            id: `exec-${i}`,
+            startedAt: new Date(Date.now() - i * 1000),
+          })
+        )
+      }
+
+      const recent = await schedulerDb.getRecentExecutions(3)
+      expect(recent.length).toBe(3)
+    })
+
+    it("should cleanup old executions", async () => {
+      const task = createMockTask({ id: "task-cleanup" })
+      await schedulerDb.createTask(task)
+
+      // Create old execution
+      const oldDate = new Date()
+      oldDate.setDate(oldDate.getDate() - 10)
+      await schedulerDb.createExecution(
+        createMockExecution("task-cleanup", {
+          id: "old-exec",
+          startedAt: oldDate,
+        })
+      )
+
+      // Create recent execution
+      await schedulerDb.createExecution(
+        createMockExecution("task-cleanup", {
+          id: "recent-exec",
+          startedAt: new Date(),
+        })
+      )
+
+      const deleted = await schedulerDb.cleanupOldExecutions(5)
+      expect(deleted).toBe(1)
+
+      const remaining = await schedulerDb.getTaskExecutions("task-cleanup")
+      expect(remaining.length).toBe(1)
+      expect(remaining[0].id).toBe("recent-exec")
+    })
+  })
+
+  describe("Statistics", () => {
+    it("should calculate task statistics", async () => {
+      await schedulerDb.createTask(
+        createMockTask({
+          id: "stat-task-1",
+          status: "active",
+          successCount: 10,
+          failureCount: 2,
+        })
+      )
+      await schedulerDb.createTask(
+        createMockTask({
+          id: "stat-task-2",
+          status: "paused",
+          successCount: 5,
+          failureCount: 1,
+        })
+      )
+
+      await schedulerDb.createExecution(
+        createMockExecution("stat-task-1", {
+          id: "stat-exec-1",
+          status: "completed",
+          duration: 1000,
+        })
+      )
+      await schedulerDb.createExecution(
+        createMockExecution("stat-task-1", {
+          id: "stat-exec-2",
+          status: "failed",
+          duration: 500,
+        })
+      )
+
+      const stats = await schedulerDb.getStatistics()
+      expect(stats.totalTasks).toBe(2)
+      expect(stats.activeTasks).toBe(1)
+      expect(stats.pausedTasks).toBe(1)
+      expect(stats.totalExecutions).toBe(2)
+      expect(stats.successfulExecutions).toBe(1)
+      expect(stats.failedExecutions).toBe(1)
+    })
+  })
+
+  describe("Serialization", () => {
+    it("should correctly serialize and deserialize dates", async () => {
+      const now = new Date()
+      const task = createMockTask({
+        id: "date-test",
+        lastRunAt: now,
+        nextRunAt: new Date(now.getTime() + 3600000),
+        trigger: {
+          type: "once",
+          runAt: new Date(now.getTime() + 7200000),
+        },
+      })
+
+      await schedulerDb.createTask(task)
+      const retrieved = await schedulerDb.getTask("date-test")
+
+      expect(retrieved!.lastRunAt instanceof Date).toBe(true)
+      expect(retrieved!.nextRunAt instanceof Date).toBe(true)
+      expect(retrieved!.trigger.runAt instanceof Date).toBe(true)
+    })
+
+    it("should correctly serialize and deserialize execution logs", async () => {
+      const task = createMockTask({ id: "log-test" })
+      await schedulerDb.createTask(task)
+
+      const execution = createMockExecution("log-test", {
+        id: "log-exec",
+        logs: [
+          { id: "log-1", timestamp: new Date(), level: "info", message: "Started" },
+          {
+            id: "log-2",
+            timestamp: new Date(),
+            level: "error",
+            message: "Failed",
+            data: { code: 500 },
+          },
+        ],
+      })
+
+      await schedulerDb.createExecution(execution)
+      const retrieved = await schedulerDb.getExecution("log-exec")
+
+      expect(retrieved!.logs.length).toBe(2)
+      expect(retrieved!.logs[0].timestamp instanceof Date).toBe(true)
+      expect(retrieved!.logs[1].data).toEqual({ code: 500 })
+    })
+
+    it("should persist structured terminal metadata for tasks and executions", async () => {
+      const task = createMockTask({
+        id: "terminal-meta-task",
+        lastTerminalReason: "missed-run-skipped",
+        lastTerminalAt: new Date(),
+      })
+      await schedulerDb.createTask(task)
+
+      const execution = createMockExecution("terminal-meta-task", {
+        id: "terminal-meta-exec",
+        triggerSource: "catch-up",
+        scheduledFor: new Date(Date.now() - 60000),
+        terminalReason: "missed-run-skipped",
+        retryScheduledAt: new Date(),
+      })
+      await schedulerDb.createExecution(execution)
+
+      const retrievedTask = await schedulerDb.getTask("terminal-meta-task")
+      const retrievedExecution = await schedulerDb.getExecution("terminal-meta-exec")
+
+      expect(retrievedTask?.lastTerminalReason).toBe("missed-run-skipped")
+      expect(retrievedTask?.lastTerminalAt instanceof Date).toBe(true)
+      expect(retrievedExecution?.triggerSource).toBe("catch-up")
+      expect(retrievedExecution?.terminalReason).toBe("missed-run-skipped")
+      expect(retrievedExecution?.scheduledFor instanceof Date).toBe(true)
+      expect(retrievedExecution?.retryScheduledAt instanceof Date).toBe(true)
+    })
+  })
+})

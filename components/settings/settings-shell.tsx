@@ -16,7 +16,8 @@ import { CharactersSection } from "./characters-section"
 import { TeamsSection } from "./teams-section"
 import { PromptPresetsSection } from "./prompt-presets-section"
 import { McpServersSection } from "./mcp-servers-section"
-import { DataSection } from "./data-section"
+import { DataSection } from "./data/data-section"
+import { ScheduledTasksSection } from "./scheduled-tasks-section"
 import { DesktopSection } from "./desktop-section"
 import { AboutSection } from "./about-section"
 import { GeneralSection } from "./general-section"
@@ -26,6 +27,8 @@ import { LogsSection } from "./sections/logs-section"
 import { DiagnosticsSection } from "./sections/diagnostics-section"
 import ExternalAgentSettings from "./agent/external-agent-settings"
 import { CustomModeSettings } from "./agent/custom-mode-settings"
+import { ArtifactsSection } from "./artifacts-section"
+import { CanvasSection } from "./canvas-section"
 
 interface Props {
   /** Initial section to render. Updated when the URL `?section=` changes. */
@@ -182,10 +185,16 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <TeamsSection />
     case "presets":
       return <PromptPresetsSection />
+    case "artifacts":
+      return <ArtifactsSection />
+    case "canvas":
+      return <CanvasSection />
     case "mcp":
       return <McpServersSection />
     case "data":
       return <DataSection />
+    case "scheduled-tasks":
+      return <ScheduledTasksSection />
     case "logs":
       return <LogsSection onClose={onClose} />
     case "diagnostics":

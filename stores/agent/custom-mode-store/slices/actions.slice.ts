@@ -1,9 +1,12 @@
 import type { StoreApi } from "zustand"
 import { nanoid } from "nanoid"
+import { loggers } from "@/lib/logger"
 import { type CustomModeConfig } from "../definitions"
 import { analyzeModeDescription } from "../helpers"
 import { initialState } from "../initial-state"
 import type { CustomModeState } from "../types"
+
+const customModeLogger = loggers.agent.child("custom-mode-store")
 
 type CustomModeStoreSet = StoreApi<CustomModeState>["setState"]
 type CustomModeStoreGet = StoreApi<CustomModeState>["getState"]
@@ -232,7 +235,8 @@ export const createCustomModeActionsSlice = (
       })
 
       return imported
-    } catch {
+    } catch (error) {
+      customModeLogger.warn("Failed to import custom mode JSON", { error })
       return null
     }
   },
@@ -272,7 +276,8 @@ export const createCustomModeActionsSlice = (
       }
 
       return imported
-    } catch {
+    } catch (error) {
+      customModeLogger.warn("Failed to import custom modes collection JSON", { error })
       return 0
     }
   },
@@ -292,6 +297,7 @@ export const createCustomModeActionsSlice = (
       return result
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Generation failed"
+      customModeLogger.error("Custom mode generation failed", { error })
       set({ isGenerating: false, generationError: errorMessage })
       throw error
     }

@@ -38,22 +38,12 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { CopyIcon, PencilIcon, PlusIcon, Trash2Icon, UsersRoundIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
-import { avatarColor, avatarGlyph } from "@/lib/avatar"
+import { useTranslations } from "next-intl"
+import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
+import { createLogger } from "@/lib/logger"
+import { MODEL_PRESET_VALUES, PERMISSION_MODE_VALUES } from "@/lib/claude/model-presets"
 
-const MODEL_PRESETS = [
-  { value: "", label: "Use app default" },
-  { value: "claude-opus-4-7", label: "Claude Opus 4.7" },
-  { value: "claude-opus-4-5", label: "Claude Opus 4.5" },
-  { value: "claude-sonnet-4-5", label: "Claude Sonnet 4.5" },
-  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
-]
-
-const PERMISSION_MODES: NonNullable<AppSettings["permissionMode"]>[] = [
-  "default",
-  "acceptEdits",
-  "plan",
-  "bypassPermissions",
-]
+const log = createLogger("settings.characters")
 
 const COLOR_PALETTE = [
   "oklch(0.65 0.18 245)",
@@ -67,6 +57,7 @@ const COLOR_PALETTE = [
 ]
 
 export function CharactersSection() {
+  const t = useTranslations("settings.characters")
   const characters = useLiveQuery(() => listCharacters(), []) ?? []
   const skills = useLiveQuery(() => listSkills(), []) ?? []
   const mcpServers = useLiveQuery(() => listMcpServers(), []) ?? []
@@ -79,12 +70,9 @@ export function CharactersSection() {
         <div className="space-y-1">
           <Label className="flex items-center gap-2">
             <UsersRoundIcon className="size-4" />
-            Characters
+            {t("title")}
           </Label>
-          <p className="text-xs text-muted-foreground">
-            Reusable personas. Each character carries its own system prompt, model, MCP subset, and
-            skills. Pick one when you start a new chat.
-          </p>
+          <p className="text-xs text-muted-foreground">{t("description")}</p>
         </div>
         <Button
           size="sm"
@@ -95,13 +83,13 @@ export function CharactersSection() {
           }}
         >
           <PlusIcon className="mr-2 size-4" />
-          New character
+          {t("newCharacter")}
         </Button>
       </div>
 
       {characters.length === 0 && !creating ? (
         <p className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
-          No characters yet. The built-ins should appear here automatically.
+          {t("emptyHint")}
         </p>
       ) : (
         <div className="grid gap-2">
@@ -116,22 +104,36 @@ export function CharactersSection() {
               skillsCatalog={skills}
               mcpCatalog={mcpServers}
               onSave={async (patch) => {
-                await updateCharacter(c.id, patch)
-                setEditing(null)
-                toast.success(`Updated ${patch.name ?? c.name}.`)
+                try {
+                  await updateCharacter(c.id, patch)
+                  log.info("character_updated", { id: c.id })
+                  setEditing(null)
+                  toast.success(t("updatedToast", { name: patch.name ?? c.name }))
+                } catch (err) {
+                  log.error("character_update_failed", err, { id: c.id })
+                  toast.error(err instanceof Error ? err.message : String(err))
+                }
               }}
               onDelete={async () => {
                 try {
                   await deleteCharacter(c.id)
-                  toast.success(`Removed "${c.name}".`)
+                  log.info("character_deleted", { id: c.id })
+                  toast.success(t("removedToast", { name: c.name }))
                 } catch (err) {
+                  log.error("character_delete_failed", err, { id: c.id })
                   toast.error(err instanceof Error ? err.message : String(err))
                 }
               }}
               onDuplicate={async () => {
-                const dup = await duplicateCharacter(c.id)
-                toast.success(`Duplicated as "${dup.name}".`)
-                setEditing(dup)
+                try {
+                  const dup = await duplicateCharacter(c.id)
+                  log.info("character_duplicated", { sourceId: c.id, newId: dup.id })
+                  toast.success(t("duplicatedToast", { name: dup.name }))
+                  setEditing(dup)
+                } catch (err) {
+                  log.error("character_duplicate_failed", err, { id: c.id })
+                  toast.error(err instanceof Error ? err.message : String(err))
+                }
               }}
             />
           ))}
@@ -156,12 +158,18 @@ export function CharactersSection() {
           }}
           skillsCatalog={skills}
           mcpCatalog={mcpServers}
-          submitLabel="Create"
+          submitLabel={t("create")}
           onCancel={() => setCreating(false)}
           onSave={async (data) => {
-            await createCharacter(data)
-            setCreating(false)
-            toast.success(`Added "${data.name}".`)
+            try {
+              await createCharacter(data)
+              log.info("character_created", { name: data.name })
+              setCreating(false)
+              toast.success(t("addedToast", { name: data.name }))
+            } catch (err) {
+              log.error("character_create_failed", err)
+              toast.error(err instanceof Error ? err.message : String(err))
+            }
           }}
         />
       )}
@@ -194,6 +202,7 @@ function CharacterRow({
   onDelete,
   onDuplicate,
 }: RowProps) {
+  const t = useTranslations("settings.characters")
   if (editing) {
     return (
       <CharacterEditor
@@ -213,7 +222,7 @@ function CharacterRow({
         }}
         skillsCatalog={skillsCatalog}
         mcpCatalog={mcpCatalog}
-        submitLabel="Save"
+        submitLabel={t("save")}
         onCancel={onEditCancel}
         onSave={onSave}
       />
@@ -244,7 +253,7 @@ function CharacterRow({
             <p className="text-sm font-medium">{character.name}</p>
             {character.isBuiltIn && (
               <Badge variant="secondary" className="text-[10px]">
-                Built-in
+                {t("builtIn")}
               </Badge>
             )}
             {character.model && (
@@ -258,7 +267,7 @@ function CharacterRow({
           )}
           {skillCount > 0 && (
             <p className="mt-1 line-clamp-1 text-[11px] text-muted-foreground">
-              {skillCount} skill{skillCount === 1 ? "" : "s"}
+              {t("skillsCount", { count: skillCount })}
               {skillNames && `: ${skillNames}`}
             </p>
           )}
@@ -269,11 +278,9 @@ function CharacterRow({
             size="icon"
             className="size-7"
             onClick={onEditStart}
-            aria-label={`Edit ${character.name}`}
+            aria-label={t("editAria", { name: character.name })}
             disabled={character.isBuiltIn}
-            title={
-              character.isBuiltIn ? "Built-in characters are read-only — duplicate first" : "Edit"
-            }
+            title={character.isBuiltIn ? t("builtInReadOnly") : t("edit")}
           >
             <PencilIcon className="size-3.5" />
           </Button>
@@ -282,8 +289,8 @@ function CharacterRow({
             size="icon"
             className="size-7"
             onClick={() => void onDuplicate()}
-            aria-label={`Duplicate ${character.name}`}
-            title="Duplicate"
+            aria-label={t("duplicateAria", { name: character.name })}
+            title={t("duplicate")}
           >
             <CopyIcon className="size-3.5" />
           </Button>
@@ -293,24 +300,23 @@ function CharacterRow({
                 variant="ghost"
                 size="icon"
                 className="size-7 text-destructive hover:text-destructive"
-                aria-label={`Delete ${character.name}`}
+                aria-label={t("deleteAria", { name: character.name })}
                 disabled={character.isBuiltIn}
-                title={character.isBuiltIn ? "Built-in characters can't be deleted" : "Delete"}
+                title={character.isBuiltIn ? t("builtInUndeletable") : t("delete")}
               >
                 <Trash2Icon className="size-3.5" />
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Remove character?</AlertDialogTitle>
+                <AlertDialogTitle>{t("removeTitle")}</AlertDialogTitle>
                 <AlertDialogDescription>
-                  &quot;{character.name}&quot; will be removed. Existing conversations using this
-                  character keep their history but fall back to app defaults.
+                  {t("removeBody", { name: character.name })}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={() => void onDelete()}>Remove</AlertDialogAction>
+                <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                <AlertDialogAction onClick={() => void onDelete()}>{t("remove")}</AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
@@ -369,6 +375,9 @@ function CharacterEditor({
   onCancel,
   onSave,
 }: EditorProps) {
+  const t = useTranslations("settings.characters")
+  const tEditor = useTranslations("settings.characters.editor")
+  const tGeneral = useTranslations("settings.general")
   const [s, setS] = useState<EditorState>(initial)
   const [allowToolsText, setAllowToolsText] = useState(initial.allowedTools.join(", "))
   const [denyToolsText, setDenyToolsText] = useState(initial.disallowedTools.join(", "))
@@ -385,11 +394,11 @@ function CharacterEditor({
 
   const submit = async () => {
     if (!s.name.trim()) {
-      toast.error("Name is required.")
+      toast.error(t("validation.nameRequired"))
       return
     }
     if (!s.systemPrompt.trim()) {
-      toast.error("System prompt cannot be empty.")
+      toast.error(t("validation.systemPromptRequired"))
       return
     }
     setSaving(true)
@@ -432,10 +441,10 @@ function CharacterEditor({
           <Input
             value={s.avatarEmoji}
             onChange={(e) => setS({ ...s, avatarEmoji: e.target.value })}
-            placeholder="🤖"
+            placeholder={tEditor("avatarEmojiPlaceholder")}
             className="h-7 w-12 text-center"
             maxLength={4}
-            aria-label="Avatar emoji"
+            aria-label={tEditor("avatarEmoji")}
           />
           <div className="grid grid-cols-4 gap-1">
             {COLOR_PALETTE.map((c) => (
@@ -449,45 +458,45 @@ function CharacterEditor({
                   outline: s.avatarColor === c ? "2px solid var(--ring)" : undefined,
                   outlineOffset: 2,
                 }}
-                aria-label={`Pick color ${c}`}
+                aria-label={tEditor("pickColor", { color: c })}
               />
             ))}
           </div>
         </div>
         <div className="space-y-2">
           <div className="space-y-1">
-            <Label className="text-xs">Name</Label>
+            <Label className="text-xs">{tEditor("name")}</Label>
             <Input
               value={s.name}
               onChange={(e) => setS({ ...s, name: e.target.value })}
-              placeholder="Coding Assistant"
+              placeholder={tEditor("namePlaceholder")}
             />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">Description</Label>
+            <Label className="text-xs">{tEditor("description")}</Label>
             <Input
               value={s.description}
               onChange={(e) => setS({ ...s, description: e.target.value })}
-              placeholder="(optional) one-line summary"
+              placeholder={tEditor("descriptionPlaceholder")}
             />
           </div>
         </div>
       </div>
 
       <div className="space-y-1">
-        <Label className="text-xs">System prompt</Label>
+        <Label className="text-xs">{tEditor("systemPrompt")}</Label>
         <Textarea
           rows={6}
           value={s.systemPrompt}
           onChange={(e) => setS({ ...s, systemPrompt: e.target.value })}
           className="text-sm"
-          placeholder="You are…"
+          placeholder={tEditor("systemPromptPlaceholder")}
         />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
-          <Label className="text-xs">Model</Label>
+          <Label className="text-xs">{tEditor("model")}</Label>
           <Select
             value={s.model || "__default__"}
             onValueChange={(v) => setS({ ...s, model: v === "__default__" ? "" : v })}
@@ -496,10 +505,10 @@ function CharacterEditor({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__default__">Use app default</SelectItem>
-              {MODEL_PRESETS.filter((m) => m.value).map((m) => (
-                <SelectItem key={m.value} value={m.value}>
-                  {m.label}
+              <SelectItem value="__default__">{tEditor("useDefault")}</SelectItem>
+              {MODEL_PRESET_VALUES.map((v) => (
+                <SelectItem key={v} value={v}>
+                  {tGeneral(`model.${v}` as `model.${typeof v}`)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -507,12 +516,12 @@ function CharacterEditor({
           <Input
             value={s.model}
             onChange={(e) => setS({ ...s, model: e.target.value })}
-            placeholder="Or paste a model id"
+            placeholder={tEditor("modelIdPlaceholder")}
             className="font-mono text-xs"
           />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Permission mode</Label>
+          <Label className="text-xs">{tEditor("permissionMode")}</Label>
           <Select
             value={s.permissionMode ?? "__default__"}
             onValueChange={(v) =>
@@ -527,10 +536,10 @@ function CharacterEditor({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__default__">Use app default</SelectItem>
-              {PERMISSION_MODES.map((m) => (
+              <SelectItem value="__default__">{tEditor("useDefault")}</SelectItem>
+              {PERMISSION_MODE_VALUES.map((m) => (
                 <SelectItem key={m} value={m}>
-                  {m}
+                  {tGeneral(`permission.${m}` as `permission.${typeof m}`)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -540,38 +549,38 @@ function CharacterEditor({
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
-          <Label className="text-xs">Allowed tools (comma-sep)</Label>
+          <Label className="text-xs">{tEditor("allowedTools")}</Label>
           <Input
             value={allowToolsText}
             onChange={(e) => setAllowToolsText(e.target.value)}
-            placeholder="Bash, Read, WebSearch"
+            placeholder={tEditor("allowedToolsPlaceholder")}
             className="font-mono text-xs"
           />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Disallowed tools (comma-sep)</Label>
+          <Label className="text-xs">{tEditor("disallowedTools")}</Label>
           <Input
             value={denyToolsText}
             onChange={(e) => setDenyToolsText(e.target.value)}
-            placeholder="Bash"
+            placeholder={tEditor("disallowedToolsPlaceholder")}
             className="font-mono text-xs"
           />
         </div>
       </div>
 
       <div className="space-y-1">
-        <Label className="text-xs">Working directory</Label>
+        <Label className="text-xs">{tEditor("workingDir")}</Label>
         <Input
           value={s.workingDir}
           onChange={(e) => setS({ ...s, workingDir: e.target.value })}
-          placeholder="/path/to/project (optional)"
+          placeholder={tEditor("workingDirPlaceholder")}
           className="font-mono text-xs"
         />
       </div>
 
       <ItemMultiSelect
-        label="Skills"
-        helpText="Order matters — earlier skills are appended first to the system prompt."
+        label={tEditor("skills")}
+        helpText={tEditor("skillsHint")}
         items={skillsCatalog.map((sk) => ({
           id: sk.id,
           name: sk.name,
@@ -582,8 +591,8 @@ function CharacterEditor({
       />
 
       <ItemMultiSelect
-        label="MCP servers"
-        helpText='Leave all unselected to mean "use every enabled server".'
+        label={tEditor("mcpServers")}
+        helpText={tEditor("mcpServersHint")}
         items={mcpCatalog.map((m) => ({
           id: m.id,
           name: m.name,
@@ -591,16 +600,16 @@ function CharacterEditor({
         }))}
         selectedIds={s.mcpServerIds ?? []}
         allowEmpty
-        emptyHint="(uses all enabled MCP servers)"
+        emptyHint={tEditor("mcpServersEmptyHint")}
         onChange={(ids) => setS({ ...s, mcpServerIds: ids.length > 0 ? ids : undefined })}
       />
 
       <div className="flex items-center justify-end gap-2 pt-1">
         <Button variant="ghost" size="sm" onClick={onCancel}>
-          Cancel
+          {t("cancel")}
         </Button>
         <Button size="sm" onClick={submit} disabled={saving}>
-          {saving ? "Saving…" : submitLabel}
+          {saving ? t("saving") : submitLabel}
         </Button>
       </div>
     </Card>
@@ -637,6 +646,7 @@ function ItemMultiSelect({
   allowEmpty,
   emptyHint,
 }: MultiSelectProps) {
+  const tMS = useTranslations("settings.characters.multiselect")
   const toggle = (id: string) => {
     if (selectedIds.includes(id)) {
       onChange(selectedIds.filter((x) => x !== id))
@@ -664,7 +674,7 @@ function ItemMultiSelect({
       )}
       <div className="flex flex-wrap gap-1.5">
         {items.length === 0 ? (
-          <p className="text-[11px] italic text-muted-foreground">(none defined yet)</p>
+          <p className="text-[11px] italic text-muted-foreground">{tMS("noneDefined")}</p>
         ) : (
           items.map((it) => {
             const active = selectedIds.includes(it.id)
@@ -693,7 +703,7 @@ function ItemMultiSelect({
       </div>
       {selectedIds.length > 1 && (
         <div className="flex flex-wrap items-center gap-1.5 pt-1">
-          <span className="text-[11px] text-muted-foreground">Reorder:</span>
+          <span className="text-[11px] text-muted-foreground">{tMS("reorder")}</span>
           {selectedIds.map((id) => {
             const it = items.find((x) => x.id === id)
             if (!it) return null
@@ -707,7 +717,7 @@ function ItemMultiSelect({
                   type="button"
                   onClick={() => move(id, -1)}
                   className="px-1 text-muted-foreground hover:text-foreground"
-                  aria-label={`Move ${it.name} up`}
+                  aria-label={tMS("moveUp", { name: it.name })}
                 >
                   ↑
                 </button>
@@ -715,7 +725,7 @@ function ItemMultiSelect({
                   type="button"
                   onClick={() => move(id, 1)}
                   className="px-1 text-muted-foreground hover:text-foreground"
-                  aria-label={`Move ${it.name} down`}
+                  aria-label={tMS("moveDown", { name: it.name })}
                 >
                   ↓
                 </button>

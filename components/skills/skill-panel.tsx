@@ -4,9 +4,10 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
+import { loggers } from "@/lib/logger"
 import { createSkill, deleteSkill, getSkill, updateSkill } from "@/lib/db/skills"
-import { useSkills } from "@/hooks/use-skills"
-import { useSkillsStore } from "@/stores/skills-store"
+import { useSkills } from "@/hooks/skills"
+import { useSkillsStore } from "@/stores/skills"
 import { SkillPanelHeader } from "./skill-panel-header"
 import { SkillPanelTabs } from "./skill-panel-tabs"
 import { SkillPanelGrid } from "./skill-panel-grid"
@@ -28,7 +29,7 @@ import { SkillEditor } from "./skill-editor"
 import { SkillPanelProvider } from "./skill-panel-context"
 import { SkillMarketplace } from "./skill-marketplace"
 import { SkillAnalytics } from "./skill-analytics"
-import { useSkillAi } from "@/hooks/use-skill-ai"
+import { useSkillAi } from "@/hooks/skills"
 import { isTauri } from "@/lib/tauri"
 
 interface Props {
@@ -79,7 +80,7 @@ export function SkillPanel({ className }: Props) {
       <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">
         <div>
           <p className="font-medium">{t("tabs.editor")}</p>
-          <p className="mt-1 text-xs">Open a skill from the My Skills grid to edit it inline.</p>
+          <p className="mt-1 text-xs">{t("panel.editorPlaceholder")}</p>
         </div>
       </div>
     )
@@ -92,6 +93,7 @@ export function SkillPanel({ className }: Props) {
  */
 function SkillEditorHost() {
   const t = useTranslations("skills")
+  const tToasts = useTranslations("skills.toasts")
   const editorTarget = useSkillsStore((s) => s.editorTarget)
   const closeEditor = useSkillsStore((s) => s.closeEditor)
   const open = editorTarget !== null
@@ -103,11 +105,13 @@ function SkillEditorHost() {
   const ai = useSkillAi()
 
   const onSave = async (draft: Parameters<typeof createSkill>[0]) => {
+    const mode = editorTarget?.mode
     try {
-      if (editorTarget?.mode === "create") {
-        await createSkill(draft)
-        toast.success(`Created "${draft.name}".`)
-      } else if (editorTarget?.mode === "edit" && skill) {
+      if (mode === "create") {
+        const created = await createSkill(draft)
+        toast.success(tToasts("createdName", { name: draft.name }))
+        loggers.skills.info("create ok", { skillId: created.id, name: draft.name })
+      } else if (mode === "edit" && skill) {
         await updateSkill(skill.id, {
           name: draft.name,
           description: draft.description,
@@ -119,11 +123,17 @@ function SkillEditorHost() {
           author: draft.author,
           license: draft.license,
         })
-        toast.success(`Updated "${draft.name}".`)
+        toast.success(tToasts("updatedName", { name: draft.name }))
+        loggers.skills.info("update ok", { skillId: skill.id, name: draft.name })
       }
       closeEditor()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
+      loggers.skills.error("editor save failed", err, {
+        mode,
+        skillId: skill?.id,
+        name: draft.name,
+      })
     }
   }
 
@@ -151,6 +161,7 @@ function SkillEditorHost() {
                       return await ai.run(intent, current)
                     } catch (err) {
                       toast.error(err instanceof Error ? err.message : String(err))
+                      loggers.skills.error("ai assist failed", err, { intent })
                       return null
                     }
                   }
@@ -164,6 +175,7 @@ function SkillEditorHost() {
 }
 
 function SkillImportHost() {
+  const tToasts = useTranslations("skills.toasts")
   const staging = useSkillsStore((s) => s.importStaging)
   const setImportStaging = useSkillsStore((s) => s.setImportStaging)
   if (!staging) return null
@@ -173,11 +185,16 @@ function SkillImportHost() {
       onCancel={() => setImportStaging(null)}
       onComplete={(report) => {
         const parts: string[] = []
-        if (report.created > 0) parts.push(`${report.created} created`)
-        if (report.updated > 0) parts.push(`${report.updated} updated`)
-        if (report.skipped > 0) parts.push(`${report.skipped} skipped`)
-        if (report.errored.length > 0) parts.push(`${report.errored.length} errored`)
-        toast.success(`Imported — ${parts.join(", ") || "no changes"}.`)
+        if (report.created > 0) parts.push(tToasts("importPartCreated", { count: report.created }))
+        if (report.updated > 0) parts.push(tToasts("importPartUpdated", { count: report.updated }))
+        if (report.skipped > 0) parts.push(tToasts("importPartSkipped", { count: report.skipped }))
+        if (report.errored.length > 0)
+          parts.push(tToasts("importPartErrored", { count: report.errored.length }))
+        if (parts.length === 0) {
+          toast.success(tToasts("importSummaryNoChanges"))
+        } else {
+          toast.success(tToasts("importSummary", { parts: parts.join(", ") }))
+        }
         setImportStaging(null)
       }}
     />
@@ -185,6 +202,7 @@ function SkillImportHost() {
 }
 
 function SkillDeleteHost() {
+  const tToasts = useTranslations("skills.toasts")
   const target = useSkillsStore((s) => s.deleteTarget)
   const setTarget = useSkillsStore((s) => s.setDeleteTarget)
   return (
@@ -196,9 +214,14 @@ function SkillDeleteHost() {
         if (!target) return
         try {
           await deleteSkill(target.skillId)
-          toast.success(`Removed "${target.name}".`)
+          toast.success(tToasts("removedName", { name: target.name }))
+          loggers.skills.info("remove ok", { skillId: target.skillId, name: target.name })
         } catch (err) {
           toast.error(err instanceof Error ? err.message : String(err))
+          loggers.skills.error("remove failed", err, {
+            skillId: target.skillId,
+            name: target.name,
+          })
         } finally {
           setTarget(null)
         }

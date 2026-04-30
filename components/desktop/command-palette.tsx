@@ -26,38 +26,37 @@ import {
   UsersRoundIcon,
 } from "lucide-react"
 import { useTheme } from "next-themes"
+import { useTranslations } from "next-intl"
 import { useEffect, useState } from "react"
-import { useSessions } from "@/hooks/use-sessions"
-import { useChatStore } from "@/stores/chat-store"
-import { useSettingsStore } from "@/stores/settings-store"
-import { useUIStore } from "@/stores/ui-store"
+import { useSessions } from "@/hooks/chat"
+import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
+import { useUIStore } from "@/stores/ui"
+import { useClientLiveQuery } from "@/hooks/data"
 import { listCharacters } from "@/lib/db/characters"
 import { listTeams } from "@/lib/db/teams"
-import { useLiveQuery } from "dexie-react-hooks"
+import { loggers } from "@/lib/logger"
 import type { Character, Team } from "@/lib/claude/types"
 import { messagesToMarkdown } from "@/components/ai-elements/conversation"
-import { avatarColor, avatarGlyph } from "@/lib/avatar"
 import { isTauri } from "@/lib/tauri"
 import { toast } from "sonner"
+import { AvatarBadge } from "./avatar-badge"
+
+const log = loggers.ui
 
 interface Props {
   onOpenSettings: (tab?: string) => void
 }
 
 export function CommandPalette({ onOpenSettings }: Props) {
+  const t = useTranslations("desktop.commandPalette")
   const [open, setOpen] = useState(false)
   const { sessions, select, create } = useSessions()
   const messages = useChatStore((s) => s.messages)
   const settings = useSettingsStore((s) => s.settings)
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
-  const characters = useLiveQuery<Character[]>(
-    () => (typeof window === "undefined" ? Promise.resolve([]) : listCharacters()),
-    []
-  )
-  const teams = useLiveQuery<Team[]>(
-    () => (typeof window === "undefined" ? Promise.resolve([]) : listTeams()),
-    []
-  )
+  const characters = useClientLiveQuery<Character[]>(() => listCharacters(), [], [])
+  const teams = useClientLiveQuery<Team[]>(() => listTeams(), [], [])
   const { theme, setTheme } = useTheme()
 
   // Global Cmd/Ctrl+K trigger.
@@ -68,7 +67,10 @@ export function CommandPalette({ onOpenSettings }: Props) {
       const meta = isMac ? e.metaKey : e.ctrlKey
       if (meta && e.key.toLowerCase() === "k" && !e.shiftKey && !e.altKey) {
         e.preventDefault()
-        setOpen((v) => !v)
+        setOpen((v) => {
+          log.info("command-palette toggle", { next: !v, source: "shortcut" })
+          return !v
+        })
       }
     }
     window.addEventListener("keydown", onKey)
@@ -78,24 +80,28 @@ export function CommandPalette({ onOpenSettings }: Props) {
   const close = () => setOpen(false)
 
   const handleNewChat = async () => {
+    log.info("command-palette new-chat")
     close()
     await create()
   }
 
   const handleSelect = (id: string) => {
+    log.info("command-palette select session", { sessionId: id })
     close()
     select(id)
   }
 
   const handleSettings = (tab?: string) => {
+    log.info("command-palette open-settings", { tab })
     close()
     onOpenSettings(tab)
   }
 
   const handleExport = () => {
+    log.info("command-palette export-md", { messageCount: messages.length })
     close()
     if (messages.length === 0) {
-      toast.info("Nothing to export — start a conversation first.")
+      toast.info(t("toasts.nothingToExport"))
       return
     }
     const md = messagesToMarkdown(messages)
@@ -112,134 +118,149 @@ export function CommandPalette({ onOpenSettings }: Props) {
   }
 
   const handleClearMessages = async () => {
+    log.info("command-palette clear-messages")
     close()
     const id = useChatStore.getState().activeSessionId
     if (!id) return
-    const { clearMessages } = await import("@/lib/db/messages")
-    await clearMessages(id)
-    useChatStore.getState().replaceMessages([])
-    toast.success("Conversation cleared.")
+    try {
+      const { clearMessages } = await import("@/lib/db/messages")
+      await clearMessages(id)
+      useChatStore.getState().replaceMessages([])
+      toast.success(t("toasts.conversationCleared"))
+    } catch (err) {
+      log.error("command-palette clear-messages failed", err, { sessionId: id })
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
   }
 
   const handleCheckUpdate = async () => {
+    log.info("command-palette check-update")
     close()
     if (!isTauri()) {
-      toast.info("Updates are only available in the desktop build.")
+      toast.info(t("toasts.updatesDesktopOnly"))
       return
     }
     try {
       const { check } = await import("@tauri-apps/plugin-updater")
       const update = await check()
       if (!update) {
-        toast.success("You're on the latest version.")
+        toast.success(t("toasts.upToDate"))
         return
       }
-      toast.success(`Update available: ${update.version}`)
+      log.info("command-palette update-available", { version: update.version })
+      toast.success(t("toasts.updateAvailable", { version: update.version }))
       onOpenSettings("about")
     } catch (err) {
-      toast.error(`Update check failed: ${err instanceof Error ? err.message : String(err)}`)
+      log.error("command-palette update-check failed", err)
+      toast.error(
+        t("toasts.updateFailed", { message: err instanceof Error ? err.message : String(err) })
+      )
     }
   }
 
   const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark"
+    log.info("command-palette toggle-theme", { from: theme, to: next })
     close()
-    setTheme(theme === "dark" ? "light" : "dark")
+    setTheme(next)
+  }
+
+  const handleNewChatWithCharacter = async (c: Character) => {
+    log.info("command-palette new-chat-with-character", { characterId: c.id })
+    close()
+    const s = await create({
+      title: t("titles.chatWith", { name: c.name }),
+      kind: "direct",
+      characterId: c.id,
+    })
+    select(s.id)
+    setSelectedGuild({ kind: "dm" })
+  }
+
+  const handleSwitchToTeam = (team: Team) => {
+    log.info("command-palette switch-to-team", { teamId: team.id })
+    close()
+    setSelectedGuild({ kind: "team", teamId: team.id })
   }
 
   return (
     <CommandDialog
       open={open}
       onOpenChange={setOpen}
-      title="Command palette"
-      description="Search for commands and sessions"
+      title={t("title")}
+      description={t("description")}
     >
-      <CommandInput placeholder="Type a command or session name…" />
+      <CommandInput placeholder={t("placeholder")} />
       <CommandList>
-        <CommandEmpty>No matches found.</CommandEmpty>
+        <CommandEmpty>{t("empty")}</CommandEmpty>
 
-        <CommandGroup heading="Actions">
+        <CommandGroup heading={t("groups.actions")}>
           <CommandItem onSelect={handleNewChat}>
             <PlusIcon className="size-4" />
-            <span>New chat</span>
-            <span className="ml-auto text-xs text-muted-foreground">new</span>
+            <span>{t("actions.newChat")}</span>
+            <span className="ml-auto text-xs text-muted-foreground">
+              {t("actions.newChatHint")}
+            </span>
           </CommandItem>
           <CommandItem onSelect={handleExport}>
             <DownloadIcon className="size-4" />
-            <span>Export current chat as Markdown</span>
+            <span>{t("actions.exportMd")}</span>
           </CommandItem>
           <CommandItem onSelect={() => void handleClearMessages()}>
             <Trash2Icon className="size-4" />
-            <span>Clear current conversation</span>
+            <span>{t("actions.clearChat")}</span>
           </CommandItem>
           <CommandItem onSelect={toggleTheme}>
             {theme === "dark" ? <SunIcon className="size-4" /> : <MoonIcon className="size-4" />}
-            <span>Toggle theme</span>
+            <span>{t("actions.toggleTheme")}</span>
           </CommandItem>
         </CommandGroup>
 
         <CommandSeparator />
 
-        <CommandGroup heading="Settings">
+        <CommandGroup heading={t("groups.settings")}>
           <CommandItem onSelect={() => handleSettings("general")}>
             <SettingsIcon className="size-4" />
-            <span>Open settings</span>
+            <span>{t("actions.openSettings")}</span>
           </CommandItem>
           <CommandItem onSelect={() => handleSettings("api-key")}>
             <KeyRoundIcon className="size-4" />
-            <span>Manage API key</span>
+            <span>{t("actions.manageApiKey")}</span>
             {settings?.apiKey && <CheckIcon className="ml-auto size-3.5 text-muted-foreground" />}
           </CommandItem>
           <CommandItem onSelect={() => handleSettings("characters")}>
             <UsersRoundIcon className="size-4" />
-            <span>Manage characters</span>
+            <span>{t("actions.manageCharacters")}</span>
           </CommandItem>
           <CommandItem onSelect={() => handleSettings("skills")}>
             <SparklesIcon className="size-4" />
-            <span>Manage skills</span>
+            <span>{t("actions.manageSkills")}</span>
           </CommandItem>
           <CommandItem onSelect={() => handleSettings("teams")}>
             <UsersIcon className="size-4" />
-            <span>Manage teams</span>
+            <span>{t("actions.manageTeams")}</span>
           </CommandItem>
           <CommandItem onSelect={() => handleSettings("mcp")}>
             <ServerIcon className="size-4" />
-            <span>Manage MCP servers</span>
+            <span>{t("actions.manageMcp")}</span>
           </CommandItem>
           <CommandItem onSelect={() => void handleCheckUpdate()}>
             <RefreshCwIcon className="size-4" />
-            <span>Check for updates</span>
+            <span>{t("actions.checkUpdates")}</span>
           </CommandItem>
         </CommandGroup>
 
         {(characters?.length ?? 0) > 0 && (
           <>
             <CommandSeparator />
-            <CommandGroup heading="New chat with character">
+            <CommandGroup heading={t("groups.newChat")}>
               {characters!.map((c) => (
                 <CommandItem
                   key={c.id}
                   value={`character ${c.name} ${c.description ?? ""}`}
-                  onSelect={async () => {
-                    close()
-                    const s = await create({
-                      title: `Chat with ${c.name}`,
-                      kind: "direct",
-                      characterId: c.id,
-                    })
-                    select(s.id)
-                    setSelectedGuild({ kind: "dm" })
-                  }}
+                  onSelect={() => void handleNewChatWithCharacter(c)}
                 >
-                  <span
-                    className="flex size-5 items-center justify-center rounded-full text-[10px]"
-                    style={{
-                      backgroundColor: avatarColor(c),
-                      color: "white",
-                    }}
-                    aria-hidden
-                  >
-                    {avatarGlyph(c)}
-                  </span>
+                  <AvatarBadge subject={c} size={20} />
                   <span className="truncate">{c.name}</span>
                 </CommandItem>
               ))}
@@ -250,27 +271,15 @@ export function CommandPalette({ onOpenSettings }: Props) {
         {(teams?.length ?? 0) > 0 && (
           <>
             <CommandSeparator />
-            <CommandGroup heading="Switch to team">
-              {teams!.map((t) => (
+            <CommandGroup heading={t("groups.switchTeam")}>
+              {teams!.map((team) => (
                 <CommandItem
-                  key={t.id}
-                  value={`team ${t.name} ${t.description ?? ""}`}
-                  onSelect={() => {
-                    close()
-                    setSelectedGuild({ kind: "team", teamId: t.id })
-                  }}
+                  key={team.id}
+                  value={`team ${team.name} ${team.description ?? ""}`}
+                  onSelect={() => handleSwitchToTeam(team)}
                 >
-                  <span
-                    className="flex size-5 items-center justify-center rounded-full text-[10px]"
-                    style={{
-                      backgroundColor: avatarColor(t),
-                      color: "white",
-                    }}
-                    aria-hidden
-                  >
-                    {avatarGlyph(t)}
-                  </span>
-                  <span className="truncate">{t.name}</span>
+                  <AvatarBadge subject={team} size={20} />
+                  <span className="truncate">{team.name}</span>
                 </CommandItem>
               ))}
             </CommandGroup>
@@ -280,7 +289,7 @@ export function CommandPalette({ onOpenSettings }: Props) {
         {sessions.length > 0 && (
           <>
             <CommandSeparator />
-            <CommandGroup heading="Sessions">
+            <CommandGroup heading={t("groups.sessions")}>
               {sessions.slice(0, 12).map((s) => (
                 <CommandItem
                   key={s.id}

@@ -12,13 +12,25 @@ const mocks = {
 
 let settings: Record<string, unknown> = {}
 
-jest.mock("@/stores/settings-store", () => ({
+jest.mock("@/stores/settings", () => ({
   useSettingsStore: <T,>(selector: (s: Record<string, unknown>) => T) =>
     selector({ settings, ...mocks }),
 }))
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+}))
+
+const mockLogInfo = jest.fn()
+jest.mock("@/lib/logger", () => ({
+  createLogger: () => ({
+    info: (...args: unknown[]) => mockLogInfo(...args),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn(),
+    trace: jest.fn(),
+    fatal: jest.fn(),
+  }),
 }))
 
 jest.mock("@/components/ui/slider", () => ({
@@ -105,6 +117,7 @@ import { SearchGlobalSettings } from "./search-global-settings"
 
 beforeEach(() => {
   Object.values(mocks).forEach((m) => m.mockReset())
+  mockLogInfo.mockReset()
   settings = {}
 })
 
@@ -230,5 +243,15 @@ describe("SearchGlobalSettings", () => {
     fireEvent.change(dialogInput, { target: { value: "MyDocs" } })
     fireEvent.keyDown(dialogInput, { key: "Enter" })
     expect(mocks.addCustomSearchSource).toHaveBeenCalled()
+  })
+
+  it("logs source_toggled when a source pill is clicked", () => {
+    settings = { searchEnabled: true, defaultSearchSources: [] }
+    render(<SearchGlobalSettings />)
+    fireEvent.click(screen.getByText("Google"))
+    expect(mockLogInfo).toHaveBeenCalledWith("source_toggled", {
+      sourceId: "google",
+      selected: true,
+    })
   })
 })

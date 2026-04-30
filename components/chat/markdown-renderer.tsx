@@ -28,6 +28,7 @@ import { AudioBlock } from "@/components/chat/renderers/audio-block"
 import { AlertBlock, parseAlertFromBlockquote } from "@/components/chat/renderers/alert-block"
 import { DetailsBlock } from "@/components/chat/renderers/details-block"
 import { KbdInline } from "@/components/chat/renderers/kbd-inline"
+import { ArtifactCreateButton } from "@/components/artifacts/artifact-create-button"
 
 /**
  * Sanitization schema extended with KaTeX MathML and a small set of safe
@@ -128,6 +129,12 @@ interface MarkdownRendererProps {
   mathFontScale?: number
   mathDisplayAlignment?: "center" | "left"
   mathShowCopyButton?: boolean
+  /**
+   * Source message id used to attribute manually-created artifacts back to a
+   * specific assistant message; passed through to the per-block
+   * `ArtifactCreateButton`.
+   */
+  messageId?: string
 }
 
 export const MarkdownRenderer = memo(function MarkdownRenderer({
@@ -144,6 +151,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   mathFontScale = 1,
   mathDisplayAlignment = "center",
   mathShowCopyButton = true,
+  messageId,
 }: MarkdownRendererProps) {
   const remarkPlugins = useMemo(() => {
     const plugins: NonNullable<Parameters<typeof ReactMarkdown>[0]["remarkPlugins"]> = [remarkGfm]
@@ -217,8 +225,28 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
               return <DiffBlock content={codeContent} />
             }
 
+            // Multi-line code block: render the syntax-highlighted block plus
+            // a corner overlay button to promote the snippet into a tracked
+            // artifact. Inline code, math/diff/mermaid are handled above.
+            const showArtifactButton = codeContent.split("\n").length > 1
             return (
-              <CodeBlock code={codeContent} language={language} showLineNumbers={showLineNumbers} />
+              <div className="relative group/code">
+                <CodeBlock
+                  code={codeContent}
+                  language={language}
+                  showLineNumbers={showLineNumbers}
+                />
+                {showArtifactButton && (
+                  <div className="absolute right-1 top-1 opacity-0 group-hover/code:opacity-100 transition-opacity">
+                    <ArtifactCreateButton
+                      content={codeContent}
+                      language={language}
+                      messageId={messageId}
+                      variant="icon"
+                    />
+                  </div>
+                )}
+              </div>
             )
           },
           pre({ children }) {

@@ -7,13 +7,26 @@ jest.mock("@/lib/search/search-service", () => ({
   search: (...args: unknown[]) => searchMock(...args),
 }))
 
-jest.mock("@/stores/settings-store", () => ({
+jest.mock("@/stores/settings", () => ({
   useSettingsStore: <T,>(selector: (s: { settings: typeof settings }) => T) =>
     selector({ settings }),
 }))
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+}))
+
+const mockLogInfo = jest.fn()
+const mockLogError = jest.fn()
+jest.mock("@/lib/logger", () => ({
+  createLogger: () => ({
+    info: (...args: unknown[]) => mockLogInfo(...args),
+    error: (...args: unknown[]) => mockLogError(...args),
+    warn: jest.fn(),
+    debug: jest.fn(),
+    trace: jest.fn(),
+    fatal: jest.fn(),
+  }),
 }))
 
 jest.mock("@/components/ui/select", () => ({
@@ -42,6 +55,8 @@ import { SearchProviderCompare } from "./search-provider-compare"
 
 beforeEach(() => {
   searchMock.mockReset()
+  mockLogInfo.mockReset()
+  mockLogError.mockReset()
   settings = {
     searchProviders: {
       tavily: { providerId: "tavily", apiKey: "k", enabled: true, priority: 1 },
@@ -88,5 +103,35 @@ describe("SearchProviderCompare", () => {
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "q" } })
     fireEvent.click(screen.getByText("compare"))
     await waitFor(() => expect(screen.getByText(/network/)).toBeInTheDocument())
+  })
+
+  it("logs compare_started with queryLen only (no raw query)", async () => {
+    searchMock
+      .mockResolvedValueOnce({ provider: "tavily", query: "q", results: [], responseTime: 1 })
+      .mockResolvedValueOnce({ provider: "brave", query: "q", results: [], responseTime: 1 })
+    render(<SearchProviderCompare />)
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "secret-query" } })
+    fireEvent.click(screen.getByText("compare"))
+    await waitFor(() => expect(searchMock).toHaveBeenCalled())
+    expect(mockLogInfo).toHaveBeenCalledWith(
+      "compare_started",
+      expect.objectContaining({ queryLen: "secret-query".length })
+    )
+    const allArgs = JSON.stringify(mockLogInfo.mock.calls)
+    expect(allArgs).not.toContain("secret-query")
+  })
+
+  it("logs compare_failed via log.error on rejection", async () => {
+    const err = new Error("boom")
+    searchMock.mockRejectedValueOnce(err)
+    render(<SearchProviderCompare />)
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "q" } })
+    fireEvent.click(screen.getByText("compare"))
+    await waitFor(() => expect(mockLogError).toHaveBeenCalled())
+    expect(mockLogError).toHaveBeenCalledWith(
+      "compare_failed",
+      err,
+      expect.objectContaining({ providerA: "tavily", providerB: "brave" })
+    )
   })
 })

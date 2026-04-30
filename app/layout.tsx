@@ -11,6 +11,9 @@ import { SettingsSyncProvider } from "@/components/providers/settings-sync-provi
 import { TauriProvider } from "@/components/providers/tauri-provider"
 import { LoggerProvider } from "@/components/providers/logger-provider"
 import { ExternalAgentInitializer } from "@/components/providers/initializers/external-agent-initializer"
+import { SchedulerInitializer } from "@/components/scheduler"
+import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
+import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provider"
 import "./globals.css"
 
 const geistSans = Geist({
@@ -48,7 +51,10 @@ export default function RootLayout({
                 <TooltipProvider>
                   <LoggerProvider>
                     <ExternalAgentInitializer />
-                    {children}
+                    <SchedulerInitializer />
+                    <BackupSchedulerProvider>
+                      <CanvasBridgeProvider>{children}</CanvasBridgeProvider>
+                    </BackupSchedulerProvider>
                     <Toaster />
                   </LoggerProvider>
                 </TooltipProvider>

@@ -7,7 +7,7 @@
 import type { ToolState } from "@/types/core/message"
 import type { BackgroundAgent } from "@/types/agent/background-agent"
 import type { ReplayEvent } from "@/types/agent/component-types"
-import type { AgentTraceRecord } from "@/types/agent-trace"
+import type { AgentTraceRecord } from "@/types/agent/agent-trace"
 import type { DBAgentTrace } from "@/lib/db"
 import type { LucideIcon } from "lucide-react"
 import {
@@ -26,6 +26,9 @@ import {
   GitBranch,
 } from "lucide-react"
 import type { TeamTaskStatus } from "@/types/agent/agent-team"
+import { loggers } from "@/lib/logger"
+
+const agentUtilsLogger = loggers.agent.child("utils")
 
 // ============================================================================
 // Tool Timeline Constants & Helpers
@@ -284,19 +287,13 @@ export function buildAgentTeamWorkspaceHref(teamId?: string | null): string {
 // ============================================================================
 
 /**
- * Trigger a file download in the browser
+ * Browser-side file download helper.
+ *
+ * @deprecated Import from `@/lib/files/download` instead. This re-export is
+ * kept temporarily so existing call sites continue to compile during the
+ * migration. New code should import the canonical location.
  */
-export function downloadFile(filename: string, content: string, mimeType: string = "text/plain") {
-  const blob = new Blob([content], { type: mimeType })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement("a")
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-}
+export { downloadFile } from "@/lib/files/download"
 
 /**
  * Format a background agent as markdown for export
@@ -352,7 +349,8 @@ export function parseReplayEvent(row: DBAgentTrace): ReplayEvent | null {
       responsePreview: meta?.responsePreview as string | undefined,
       files: record.files.map((f) => f.path).filter(Boolean),
     }
-  } catch {
+  } catch (error) {
+    agentUtilsLogger.warn("Failed to parse agent trace row", { traceId: row.id, error })
     return null
   }
 }

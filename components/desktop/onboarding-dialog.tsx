@@ -11,13 +11,17 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { listCharacters } from "@/lib/db/characters"
+import { loggers } from "@/lib/logger"
 import type { Character } from "@/lib/claude/types"
-import { useSettingsStore } from "@/stores/settings-store"
-import { useLiveQuery } from "dexie-react-hooks"
+import { useSettingsStore } from "@/stores/settings"
+import { useClientLiveQuery } from "@/hooks/data"
 import { ArrowLeftIcon, ArrowRightIcon, CheckIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
 import { useState } from "react"
 import { toast } from "sonner"
-import { avatarColor, avatarGlyph } from "@/lib/avatar"
+import { AvatarBadge } from "./avatar-badge"
+
+const log = loggers.ui
 
 interface Props {
   open: boolean
@@ -35,12 +39,10 @@ interface Props {
  * until the API key is set.
  */
 export function OnboardingDialog({ open, onOpenChange, onPickCharacter }: Props) {
+  const t = useTranslations("desktop.onboarding")
   const setApiKey = useSettingsStore((s) => s.setApiKey)
   const settings = useSettingsStore((s) => s.settings)
-  const characters = useLiveQuery<Character[]>(
-    () => (typeof window === "undefined" ? Promise.resolve([]) : listCharacters()),
-    []
-  )
+  const characters = useClientLiveQuery<Character[]>(() => listCharacters(), [], [])
 
   const [step, setStep] = useState<1 | 2>(settings?.apiKey ? 2 : 1)
   const [keyInput, setKeyInput] = useState("")
@@ -49,31 +51,48 @@ export function OnboardingDialog({ open, onOpenChange, onPickCharacter }: Props)
   const handleSaveKey = async () => {
     const trimmed = keyInput.trim()
     if (!trimmed) {
-      toast.error("Paste your Anthropic API key to continue.")
+      log.warn("onboarding api key blank")
+      toast.error(t("toastNeedKey"))
       return
     }
     setSaving(true)
     try {
       await setApiKey(trimmed)
+      log.info("onboarding api key saved", { length: trimmed.length })
       setStep(2)
     } catch (err) {
+      log.error("onboarding api key save failed", err)
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setSaving(false)
     }
   }
 
+  const handleSkip = () => {
+    log.info("onboarding skip", { step })
+    onOpenChange(false)
+  }
+  const handleDone = () => {
+    log.info("onboarding done")
+    onOpenChange(false)
+  }
+  const handleBack = () => {
+    log.info("onboarding back-to-step1")
+    setStep(1)
+  }
+  const handlePick = (c: Character) => {
+    log.info("onboarding pick character", { characterId: c.id })
+    onPickCharacter(c)
+    onOpenChange(false)
+  }
+
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent className="max-w-lg">
         <AlertDialogHeader>
-          <AlertDialogTitle>
-            {step === 1 ? "Welcome to Cognia" : "Pick a character to start"}
-          </AlertDialogTitle>
+          <AlertDialogTitle>{step === 1 ? t("step1Title") : t("step2Title")}</AlertDialogTitle>
           <AlertDialogDescription>
-            {step === 1
-              ? "Cognia talks to Claude on your behalf. Paste an Anthropic API key to begin — it's stored locally in your browser's IndexedDB and pushed to the embedded Node sidecar."
-              : "Each character carries its own system prompt and tools. You can edit, duplicate, or create more later in Settings → Characters."}
+            {step === 1 ? t("step1Description") : t("step2Description")}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -81,28 +100,29 @@ export function OnboardingDialog({ open, onOpenChange, onPickCharacter }: Props)
           <div className="space-y-3 py-2">
             <div className="space-y-1">
               <Label htmlFor="onboarding-key" className="text-xs">
-                Anthropic API key
+                {t("apiKeyLabel")}
               </Label>
               <Input
                 id="onboarding-key"
                 type="password"
                 value={keyInput}
                 onChange={(e) => setKeyInput(e.target.value)}
-                placeholder="sk-ant-…"
+                placeholder={t("apiKeyPlaceholder")}
                 className="font-mono text-xs"
                 autoFocus
               />
               <p className="text-[11px] text-muted-foreground">
-                Get one at <code className="rounded bg-muted px-1">console.anthropic.com</code>. The
-                key never leaves your machine.
+                {t("apiKeyHintPrefix")}
+                <code className="rounded bg-muted px-1">{t("apiKeyHintHost")}</code>
+                {t("apiKeyHintSuffix")}
               </p>
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-                Skip for now
+              <Button variant="ghost" size="sm" onClick={handleSkip}>
+                {t("skip")}
               </Button>
               <Button size="sm" onClick={() => void handleSaveKey()} disabled={saving}>
-                {saving ? "Saving…" : "Continue"}
+                {saving ? t("saving") : t("continue")}
                 <ArrowRightIcon className="ml-1 size-3.5" />
               </Button>
             </div>
@@ -114,22 +134,10 @@ export function OnboardingDialog({ open, onOpenChange, onPickCharacter }: Props)
                 <button
                   key={c.id}
                   type="button"
-                  onClick={() => {
-                    onPickCharacter(c)
-                    onOpenChange(false)
-                  }}
+                  onClick={() => handlePick(c)}
                   className="flex items-start gap-2 rounded-md border p-2 text-left text-sm transition-colors hover:bg-accent"
                 >
-                  <span
-                    className="flex size-8 shrink-0 items-center justify-center rounded-full text-sm"
-                    style={{
-                      backgroundColor: avatarColor(c),
-                      color: "white",
-                    }}
-                    aria-hidden
-                  >
-                    {avatarGlyph(c)}
-                  </span>
+                  <AvatarBadge subject={c} size={32} textClassName="text-sm" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">{c.name}</p>
                     {c.description && (
@@ -145,15 +153,15 @@ export function OnboardingDialog({ open, onOpenChange, onPickCharacter }: Props)
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setStep(1)}
+                onClick={handleBack}
                 disabled={Boolean(settings?.apiKey)}
               >
                 <ArrowLeftIcon className="mr-1 size-3.5" />
-                Back
+                {t("back")}
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+              <Button variant="ghost" size="sm" onClick={handleDone}>
                 <CheckIcon className="mr-1 size-3.5" />
-                Done
+                {t("done")}
               </Button>
             </div>
           </div>

@@ -61,12 +61,15 @@ export const createAgentTeamActionsSlice = (
 
     const teamId = nanoid()
 
-    // Create lead
+    // Create lead. UI is expected to pass `input.leadName` /
+    // `input.leadDescription` resolved via i18n; the store keeps the
+    // resolved literal so re-renders don't need a translator.
     const lead: AgentTeammate = {
       id: nanoid(),
       teamId,
-      name: "Team Lead",
-      description: "Coordinates team work, assigns tasks, and synthesizes results",
+      name: input.leadName ?? "Team Lead",
+      description:
+        input.leadDescription ?? "Coordinates team work, assigns tasks, and synthesizes results",
       role: "lead",
       status: "idle",
       config: {},

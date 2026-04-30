@@ -827,6 +827,19 @@ export interface CreateTeamInput {
   config?: Partial<AgentTeamConfig>
   sessionId?: string
   metadata?: Record<string, unknown>
+  /**
+   * Display name for the auto-created Team Lead teammate. UI passes a
+   * translated string (e.g., `t("agentTeam.defaultTeamLeadName")`); the
+   * store keeps the literal so subsequent renders do not require i18n
+   * context. Falls back to "Team Lead" when omitted.
+   */
+  leadName?: string
+  /**
+   * Display description for the auto-created Team Lead teammate. Same
+   * i18n contract as `leadName`. Falls back to the English description
+   * when omitted.
+   */
+  leadDescription?: string
 }
 
 /**
@@ -1223,52 +1236,52 @@ export const BUILT_IN_TEAM_TEMPLATES: AgentTeamTemplate[] = [
 // ============================================================================
 
 /**
- * Team status display configuration
+ * Team status display configuration. `labelKey` is under `agentTeam.status.*`.
  */
 export const TEAM_STATUS_CONFIG: Record<
   TeamStatus,
-  { label: string; color: string; icon: string }
+  { labelKey: string; color: string; icon: string }
 > = {
-  idle: { label: "Idle", color: "text-muted-foreground", icon: "Circle" },
-  planning: { label: "Planning", color: "text-blue-500", icon: "Brain" },
-  executing: { label: "Executing", color: "text-primary", icon: "Play" },
-  paused: { label: "Paused", color: "text-yellow-500", icon: "Pause" },
-  completed: { label: "Completed", color: "text-green-500", icon: "CheckCircle" },
-  failed: { label: "Failed", color: "text-destructive", icon: "XCircle" },
-  cancelled: { label: "Cancelled", color: "text-orange-500", icon: "Ban" },
+  idle: { labelKey: "idle", color: "text-muted-foreground", icon: "Circle" },
+  planning: { labelKey: "planning", color: "text-blue-500", icon: "Brain" },
+  executing: { labelKey: "executing", color: "text-primary", icon: "Play" },
+  paused: { labelKey: "paused", color: "text-yellow-500", icon: "Pause" },
+  completed: { labelKey: "completed", color: "text-green-500", icon: "CheckCircle" },
+  failed: { labelKey: "failed", color: "text-destructive", icon: "XCircle" },
+  cancelled: { labelKey: "cancelled", color: "text-orange-500", icon: "Ban" },
 }
 
 /**
- * Teammate status display configuration
+ * Teammate status display configuration. `labelKey` is under `agentTeam.teammateStatus.*`.
  */
 export const TEAMMATE_STATUS_CONFIG: Record<
   TeammateStatus,
-  { label: string; color: string; icon: string }
+  { labelKey: string; color: string; icon: string }
 > = {
-  idle: { label: "Idle", color: "text-muted-foreground", icon: "Circle" },
-  planning: { label: "Planning", color: "text-blue-500", icon: "FileText" },
-  awaiting_approval: { label: "Awaiting Approval", color: "text-yellow-500", icon: "Clock" },
-  executing: { label: "Executing", color: "text-primary", icon: "Loader2" },
-  paused: { label: "Paused", color: "text-yellow-500", icon: "Pause" },
-  completed: { label: "Completed", color: "text-green-500", icon: "CheckCircle" },
-  failed: { label: "Failed", color: "text-destructive", icon: "XCircle" },
-  cancelled: { label: "Cancelled", color: "text-orange-500", icon: "Ban" },
-  shutdown: { label: "Shutdown", color: "text-muted-foreground", icon: "Power" },
+  idle: { labelKey: "idle", color: "text-muted-foreground", icon: "Circle" },
+  planning: { labelKey: "planning", color: "text-blue-500", icon: "FileText" },
+  awaiting_approval: { labelKey: "awaitingApproval", color: "text-yellow-500", icon: "Clock" },
+  executing: { labelKey: "executing", color: "text-primary", icon: "Loader2" },
+  paused: { labelKey: "paused", color: "text-yellow-500", icon: "Pause" },
+  completed: { labelKey: "completed", color: "text-green-500", icon: "CheckCircle" },
+  failed: { labelKey: "failed", color: "text-destructive", icon: "XCircle" },
+  cancelled: { labelKey: "cancelled", color: "text-orange-500", icon: "Ban" },
+  shutdown: { labelKey: "shutdown", color: "text-muted-foreground", icon: "Power" },
 }
 
 /**
- * Task status display configuration
+ * Task status display configuration. `labelKey` is under `agentTeam.taskStatus.*`.
  */
 export const TASK_STATUS_CONFIG: Record<
   TeamTaskStatus,
-  { label: string; color: string; icon: string }
+  { labelKey: string; color: string; icon: string }
 > = {
-  pending: { label: "Pending", color: "text-muted-foreground", icon: "Circle" },
-  blocked: { label: "Blocked", color: "text-red-400", icon: "Lock" },
-  claimed: { label: "Claimed", color: "text-blue-400", icon: "Hand" },
-  in_progress: { label: "In Progress", color: "text-primary", icon: "Loader2" },
-  review: { label: "In Review", color: "text-purple-500", icon: "Eye" },
-  completed: { label: "Completed", color: "text-green-500", icon: "CheckCircle" },
-  failed: { label: "Failed", color: "text-destructive", icon: "XCircle" },
-  cancelled: { label: "Cancelled", color: "text-orange-500", icon: "Ban" },
+  pending: { labelKey: "pending", color: "text-muted-foreground", icon: "Circle" },
+  blocked: { labelKey: "blocked", color: "text-red-400", icon: "Lock" },
+  claimed: { labelKey: "claimed", color: "text-blue-400", icon: "Hand" },
+  in_progress: { labelKey: "inProgress", color: "text-primary", icon: "Loader2" },
+  review: { labelKey: "review", color: "text-purple-500", icon: "Eye" },
+  completed: { labelKey: "completed", color: "text-green-500", icon: "CheckCircle" },
+  failed: { labelKey: "failed", color: "text-destructive", icon: "XCircle" },
+  cancelled: { labelKey: "cancelled", color: "text-orange-500", icon: "Ban" },
 }

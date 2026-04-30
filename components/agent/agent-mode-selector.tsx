@@ -105,6 +105,7 @@ export function AgentModeSelector({
 }: AgentModeSelectorProps) {
   const t = useTranslations("agentMode")
   const tCommon = useTranslations("common")
+  const tTeamStatus = useTranslations("agentTeam.status")
 
   // Custom mode store
   const { customModes, deleteMode, duplicateMode, recordModeUsage } = useCustomModeStore()
@@ -367,7 +368,7 @@ export function AgentModeSelector({
                                 variant="outline"
                                 className={cn("text-[9px]", statusCfg.color)}
                               >
-                                {statusCfg.label}
+                                {tTeamStatus(statusCfg.labelKey)}
                               </Badge>
                             </div>
                             <p className="text-xs text-muted-foreground line-clamp-1">

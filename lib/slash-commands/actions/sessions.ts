@@ -4,7 +4,7 @@
 
 import type { SlashContext } from "../builtin"
 import { listSessions } from "@/lib/db/sessions"
-import { useChatStore } from "@/stores/chat-store"
+import { useChatStore } from "@/stores/chat"
 
 /**
  * Render the user's session list as a markdown table system message. Pulls

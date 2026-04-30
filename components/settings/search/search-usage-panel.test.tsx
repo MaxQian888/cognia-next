@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react"
 const resetMock = jest.fn()
 let settings: { searchUsageStats?: Record<string, unknown> } = {}
 
-jest.mock("@/stores/settings-store", () => ({
+jest.mock("@/stores/settings", () => ({
   useSettingsStore: <T,>(
     selector: (s: { settings: typeof settings; resetSearchUsageStats: typeof resetMock }) => T
   ) => selector({ settings, resetSearchUsageStats: resetMock }),
@@ -13,10 +13,23 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+const mockLogInfo = jest.fn()
+jest.mock("@/lib/logger", () => ({
+  createLogger: () => ({
+    info: (...args: unknown[]) => mockLogInfo(...args),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn(),
+    trace: jest.fn(),
+    fatal: jest.fn(),
+  }),
+}))
+
 import { SearchUsagePanel } from "./search-usage-panel"
 
 beforeEach(() => {
   resetMock.mockReset()
+  mockLogInfo.mockReset()
   settings = {}
 })
 
@@ -71,5 +84,30 @@ describe("SearchUsagePanel", () => {
     render(<SearchUsagePanel />)
     fireEvent.click(screen.getByText("reset"))
     expect(resetMock).toHaveBeenCalled()
+  })
+
+  it("logs usage_stats_reset with totals captured before reset", () => {
+    settings = {
+      searchUsageStats: {
+        tavily: {
+          searchCount: 5,
+          totalResponseTime: 500,
+          errorCount: 2,
+          lastUsedAt: null,
+        },
+        brave: {
+          searchCount: 3,
+          totalResponseTime: 100,
+          errorCount: 1,
+          lastUsedAt: null,
+        },
+      },
+    }
+    render(<SearchUsagePanel />)
+    fireEvent.click(screen.getByText("reset"))
+    expect(mockLogInfo).toHaveBeenCalledWith("usage_stats_reset", {
+      totalSearches: 8,
+      totalErrors: 3,
+    })
   })
 })

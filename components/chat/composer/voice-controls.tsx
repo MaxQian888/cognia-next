@@ -9,6 +9,7 @@
 // transcription backend in this app.
 
 import { useCallback, useState } from "react"
+import { useTranslations } from "next-intl"
 import { AudioLinesIcon, LanguagesIcon, Settings2Icon } from "lucide-react"
 import {
   MicSelector,
@@ -32,8 +33,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { useSettingsStore } from "@/stores/settings-store"
-import { DEFAULT_SPEECH_LANGUAGE, SPEECH_LANGUAGES, type SpeechLanguageCode } from "@/lib/speech"
+import { useSettingsStore } from "@/stores/settings"
+import {
+  DEFAULT_SPEECH_LANGUAGE,
+  SPEECH_LANGUAGES,
+  type SpeechLanguageCode,
+} from "@/lib/tts/speech"
 import { cn } from "@/lib/utils"
 
 interface VoiceControlsProps {
@@ -42,6 +47,7 @@ interface VoiceControlsProps {
 }
 
 export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps) {
+  const t = useTranslations("chat.composer.voice")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const language = (settings?.sttLanguage ?? DEFAULT_SPEECH_LANGUAGE) as SpeechLanguageCode
@@ -88,7 +94,7 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
       <Tooltip>
         <TooltipTrigger asChild>
           <SpeechInput
-            aria-label="Hold to talk"
+            aria-label={t("holdToTalk")}
             className="size-8! rounded-md! bg-transparent! text-muted-foreground! shadow-none! hover:bg-accent! hover:text-foreground! data-[disabled=true]:opacity-50"
             disabled={disabled}
             lang={lang}
@@ -98,7 +104,7 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
             variant="ghost"
           />
         </TooltipTrigger>
-        <TooltipContent>Hold to talk</TooltipContent>
+        <TooltipContent>{t("holdToTalk")}</TooltipContent>
       </Tooltip>
 
       <Popover>
@@ -106,7 +112,7 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
           <TooltipTrigger asChild>
             <PopoverTrigger asChild>
               <Button
-                aria-label="Voice settings"
+                aria-label={t("voiceSettings")}
                 className="size-8 shrink-0"
                 disabled={disabled}
                 size="icon"
@@ -117,18 +123,18 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
               </Button>
             </PopoverTrigger>
           </TooltipTrigger>
-          <TooltipContent>Voice settings</TooltipContent>
+          <TooltipContent>{t("voiceSettings")}</TooltipContent>
         </Tooltip>
 
         <PopoverContent align="end" side="top" className="w-72 space-y-4 p-4">
           <div className="space-y-2">
             <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               <AudioLinesIcon className="size-3.5" />
-              Microphone
+              {t("microphoneLabel")}
             </div>
             <MicSelector onValueChange={onMicChange} value={mic}>
               <MicSelectorTrigger
-                aria-label="Select microphone"
+                aria-label={t("selectMicAria")}
                 className={cn("h-9 w-full justify-between gap-2 px-3 text-left text-xs")}
                 size="sm"
                 variant="outline"
@@ -160,7 +166,7 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
           <div className="space-y-2">
             <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               <LanguagesIcon className="size-3.5" />
-              Language
+              {t("languageLabel")}
             </div>
             <Select onValueChange={onLangChange} value={lang}>
               <SelectTrigger className="h-9 w-full text-xs">

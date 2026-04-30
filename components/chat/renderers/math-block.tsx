@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState, useCallback } from "react"
+import { useTranslations } from "next-intl"
 import { AlertCircle, Copy, Check, Maximize2, Code2, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -8,6 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { renderMathSafe } from "@/lib/latex/cache"
 import { withMathErrorBoundary } from "./math-error-boundary"
+import { useCopy } from "@/hooks/ui/use-copy"
+import { loggers } from "@/lib/logger"
 
 interface MathBlockProps {
   content: string
@@ -17,9 +20,10 @@ interface MathBlockProps {
 }
 
 function MathBlockBase({ content, className, scale = 1, alignment = "center" }: MathBlockProps) {
+  const t = useTranslations("chat.renderers.math")
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showSource, setShowSource] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
 
   const cleanContent = useMemo(() => {
     return content
@@ -35,14 +39,8 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
   }, [cleanContent])
 
   const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(cleanContent)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch (err) {
-      console.error("clipboard write failed", err)
-    }
-  }, [cleanContent])
+    await copy(cleanContent)
+  }, [copy, cleanContent])
 
   const handleRetry = useCallback(() => {
     setShowSource(false)
@@ -56,12 +54,12 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
           className
         )}
         role="alert"
-        aria-label="LaTeX error"
+        aria-label={t("error")}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-destructive">
             <AlertCircle className="h-4 w-4" aria-hidden="true" />
-            <span className="text-sm font-medium">LaTeX error</span>
+            <span className="text-sm font-medium">{t("error")}</span>
           </div>
           <div className="flex items-center gap-1">
             <Tooltip>
@@ -71,12 +69,12 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
                   size="icon"
                   className="h-7 w-7"
                   onClick={handleRetry}
-                  aria-label="Retry"
+                  aria-label={t("retry")}
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Retry</TooltipContent>
+              <TooltipContent>{t("retry")}</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -85,12 +83,12 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
                   size="icon"
                   className="h-7 w-7"
                   onClick={handleCopy}
-                  aria-label="Copy LaTeX"
+                  aria-label={t("copyLatex")}
                 >
                   {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Copy LaTeX</TooltipContent>
+              <TooltipContent>{t("copyLatex")}</TooltipContent>
             </Tooltip>
           </div>
         </div>
@@ -109,7 +107,7 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
       <div
         className={cn("group relative my-4 rounded-lg", className)}
         role="math"
-        aria-label="Math expression"
+        aria-label={t("expressionLabel")}
       >
         <div className="absolute top-0 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-background/80 backdrop-blur-sm rounded-lg p-0.5">
           <Tooltip>
@@ -119,13 +117,13 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
                 size="icon"
                 className="h-7 w-7"
                 onClick={() => setShowSource(!showSource)}
-                aria-label={showSource ? "Hide source" : "Show source"}
+                aria-label={showSource ? t("hideSource") : t("showSource")}
                 aria-pressed={showSource}
               >
                 <Code2 className="h-3.5 w-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{showSource ? "Hide source" : "Show source"}</TooltipContent>
+            <TooltipContent>{showSource ? t("hideSource") : t("showSource")}</TooltipContent>
           </Tooltip>
 
           <Tooltip>
@@ -135,12 +133,12 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
                 size="icon"
                 className="h-7 w-7"
                 onClick={handleCopy}
-                aria-label="Copy LaTeX"
+                aria-label={t("copyLatex")}
               >
                 {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Copy LaTeX</TooltipContent>
+            <TooltipContent>{t("copyLatex")}</TooltipContent>
           </Tooltip>
 
           <Tooltip>
@@ -150,12 +148,12 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
                 size="icon"
                 className="h-7 w-7"
                 onClick={() => setIsFullscreen(true)}
-                aria-label="View fullscreen"
+                aria-label={t("viewFullscreen")}
               >
                 <Maximize2 className="h-3.5 w-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>View fullscreen</TooltipContent>
+            <TooltipContent>{t("viewFullscreen")}</TooltipContent>
           </Tooltip>
         </div>
 
@@ -179,7 +177,7 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
         <DialogContent className="max-w-[90vw] max-h-[90vh] overflow-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <span>Math expression</span>
+              <span>{t("expressionLabel")}</span>
               <div className="flex items-center gap-1 ml-auto">
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -188,7 +186,7 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
                       size="icon"
                       className="h-7 w-7"
                       onClick={handleCopy}
-                      aria-label="Copy LaTeX"
+                      aria-label={t("copyLatex")}
                     >
                       {copied ? (
                         <Check className="h-3.5 w-3.5" />
@@ -197,7 +195,7 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
                       )}
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Copy LaTeX</TooltipContent>
+                  <TooltipContent>{t("copyLatex")}</TooltipContent>
                 </Tooltip>
               </div>
             </DialogTitle>
@@ -212,7 +210,7 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
             <details className="group">
               <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-2">
                 <Code2 className="h-4 w-4" />
-                <span>View source</span>
+                <span>{t("viewSource")}</span>
               </summary>
               <pre className="mt-2 p-4 rounded-lg bg-muted text-sm overflow-auto font-mono">
                 <code>{cleanContent}</code>

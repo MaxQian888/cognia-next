@@ -5,6 +5,7 @@
 // real switch lives in Settings), the active permission mode, and the
 // running token / context-window indicator.
 
+import { useTranslations } from "next-intl"
 import {
   Context,
   ContextContent,
@@ -17,29 +18,33 @@ import {
   ContextTrigger,
 } from "@/components/ai-elements/context"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { useChatStore } from "@/stores/chat-store"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@/lib/claude/types"
-import { getLatestUsage, getModelContextWindow, tokensInWindow } from "@/lib/usage"
+import { getLatestUsage, getModelContextWindow, tokensInWindow } from "@/lib/claude/usage"
 import type { LanguageModelUsage } from "ai"
 import { CpuIcon } from "lucide-react"
 import { PermissionModeIndicator } from "../permission-mode-indicator"
 import { WebSearchToggle } from "./web-search-toggle"
 import { AgentRuntimeSelector } from "@/components/agent/agent-runtime-selector"
 import { AgentModeSelector } from "@/components/agent/agent-mode-selector"
-import { useAgentRuntimeStore } from "@/stores/agent-runtime-store"
+import { ExternalAgentSelector } from "@/components/agent/external-agent-selector"
+import { useAgentRuntimeStore } from "@/stores/agent"
 
 interface BottomToolbarProps {
   session: ChatSession | null
 }
 
 export function BottomToolbar({ session }: BottomToolbarProps) {
+  const t = useTranslations("chat.composer.toolbar")
   const messages = useChatStore((s) => s.messages)
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const modeId = useAgentRuntimeStore((s) => s.modeId)
   const setModeId = useAgentRuntimeStore((s) => s.setModeId)
   const runtime = useAgentRuntimeStore((s) => s.runtime)
+  const externalAgentId = useAgentRuntimeStore((s) => s.externalAgentId)
+  const setExternalAgentId = useAgentRuntimeStore((s) => s.setExternalAgentId)
 
   // Mirrors `lib/claude/build-options.ts` model resolution: per-session
   // override > app default. (Character / member overrides aren't loaded
@@ -71,13 +76,19 @@ export function BottomToolbar({ session }: BottomToolbarProps) {
               <span className="truncate font-mono">{modelId}</span>
             </span>
           </TooltipTrigger>
-          <TooltipContent side="top">Active model · change in Settings → API Key</TooltipContent>
+          <TooltipContent side="top">{t("modelTooltip")}</TooltipContent>
         </Tooltip>
         <PermissionModeIndicator onCycle={(next) => setPermissionMode(next)} />
         <WebSearchToggle />
         <AgentRuntimeSelector />
         {runtime === "claude-sdk" && (
           <AgentModeSelector selectedModeId={modeId} onModeChange={(mode) => setModeId(mode.id)} />
+        )}
+        {runtime === "external" && (
+          <ExternalAgentSelector
+            selectedAgentId={externalAgentId}
+            onAgentChange={setExternalAgentId}
+          />
         )}
       </div>
 
@@ -87,9 +98,9 @@ export function BottomToolbar({ session }: BottomToolbarProps) {
           <ContextContentHeader />
           <ContextContentBody>
             <div className="space-y-1.5">
-              <UsageRow label="Input" slot={<ContextInputUsage />} />
-              <UsageRow label="Output" slot={<ContextOutputUsage />} />
-              <UsageRow label="Cached" slot={<ContextCacheUsage />} />
+              <UsageRow label={t("usageInput")} slot={<ContextInputUsage />} />
+              <UsageRow label={t("usageOutput")} slot={<ContextOutputUsage />} />
+              <UsageRow label={t("usageCached")} slot={<ContextCacheUsage />} />
             </div>
           </ContextContentBody>
           <ContextContentFooter />

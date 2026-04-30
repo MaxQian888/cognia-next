@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, memo, useCallback } from "react"
+import { useTranslations } from "next-intl"
 import {
   ZoomIn,
   ZoomOut,
@@ -24,6 +25,9 @@ import {
 } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useCopy } from "@/hooks/ui/use-copy"
+import { downloadFromUrl } from "@/lib/files/download"
+import { loggers } from "@/lib/logger"
 
 interface ImageBlockProps {
   src: string
@@ -42,12 +46,13 @@ export const ImageBlock = memo(function ImageBlock({
   width,
   height,
 }: ImageBlockProps) {
+  const t = useTranslations("chat.renderers.image")
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
   const [zoom, setZoom] = useState(1)
   const [rotation, setRotation] = useState(0)
-  const [copied, setCopied] = useState(false)
+  const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
 
   const handleLoad = useCallback(() => {
     setIsLoading(false)
@@ -77,32 +82,21 @@ export const ImageBlock = memo(function ImageBlock({
   }, [])
 
   const handleDownload = useCallback(async () => {
+    const filename = src.split("/").pop() || t("defaultFilename")
     try {
-      const response = await fetch(src)
-      const blob = await response.blob()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.href = url
-      const filename = src.split("/").pop() || "image"
-      link.download = filename
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      URL.revokeObjectURL(url)
-    } catch {
+      await downloadFromUrl(src, filename, { fetchAsBlob: true })
+    } catch (err) {
+      loggers.chat.warn("image download failed, opening in new tab", {
+        err: err instanceof Error ? err.message : String(err),
+        src,
+      })
       window.open(src, "_blank")
     }
-  }, [src])
+  }, [src, t])
 
   const handleCopyUrl = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(src)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch (err) {
-      console.error("clipboard write failed", err)
-    }
-  }, [src])
+    await copy(src)
+  }, [copy, src])
 
   const handleOpenExternal = useCallback(() => {
     window.open(src, "_blank")
@@ -117,11 +111,11 @@ export const ImageBlock = memo(function ImageBlock({
         )}
       >
         <ImageIcon className="h-12 w-12 text-muted-foreground/50 mb-2" />
-        <p className="text-sm text-muted-foreground">Failed to load image</p>
+        <p className="text-sm text-muted-foreground">{t("failedToLoad")}</p>
         {alt && <p className="text-xs text-muted-foreground/70 mt-1">{alt}</p>}
         <Button variant="ghost" size="sm" className="mt-2" onClick={handleOpenExternal}>
           <ExternalLink className="h-3 w-3 mr-1" />
-          Open URL
+          {t("openUrl")}
         </Button>
       </div>
     )
@@ -162,11 +156,12 @@ export const ImageBlock = memo(function ImageBlock({
                 size="icon"
                 className="h-7 w-7 bg-background/80 backdrop-blur-sm"
                 onClick={() => setIsOpen(true)}
+                aria-label={t("viewFullscreen")}
               >
                 <Maximize2 className="h-3 w-3" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>View fullscreen</TooltipContent>
+            <TooltipContent>{t("viewFullscreen")}</TooltipContent>
           </Tooltip>
 
           <Tooltip>
@@ -176,12 +171,12 @@ export const ImageBlock = memo(function ImageBlock({
                 size="icon"
                 className="h-7 w-7 bg-background/80 backdrop-blur-sm"
                 onClick={handleDownload}
-                aria-label="Download"
+                aria-label={t("download")}
               >
                 <Download className="h-3 w-3" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Download</TooltipContent>
+            <TooltipContent>{t("download")}</TooltipContent>
           </Tooltip>
 
           <Tooltip>
@@ -191,12 +186,12 @@ export const ImageBlock = memo(function ImageBlock({
                 size="icon"
                 className="h-7 w-7 bg-background/80 backdrop-blur-sm"
                 onClick={handleCopyUrl}
-                aria-label="Copy URL"
+                aria-label={t("copyUrl")}
               >
                 {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Copy URL</TooltipContent>
+            <TooltipContent>{t("copyUrl")}</TooltipContent>
           </Tooltip>
         </div>
 
@@ -214,11 +209,9 @@ export const ImageBlock = memo(function ImageBlock({
         >
           <DialogHeader className="absolute top-0 left-0 right-0 z-10 flex flex-row items-center justify-between p-3 bg-gradient-to-b from-black/60 to-transparent">
             <DialogTitle className="text-white text-sm truncate max-w-[60%]">
-              {title || alt || "Image"}
+              {title || alt || t("defaultTitle")}
             </DialogTitle>
-            <DialogDescription className="sr-only">
-              Preview the selected image, zoom or rotate it.
-            </DialogDescription>
+            <DialogDescription className="sr-only">{t("previewDescription")}</DialogDescription>
             <div className="flex items-center gap-1">
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -228,12 +221,12 @@ export const ImageBlock = memo(function ImageBlock({
                     className="h-8 w-8 text-white hover:bg-white/20"
                     onClick={handleZoomOut}
                     disabled={zoom <= 0.5}
-                    aria-label="Zoom out"
+                    aria-label={t("zoomOut")}
                   >
                     <ZoomOut className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Zoom out</TooltipContent>
+                <TooltipContent>{t("zoomOut")}</TooltipContent>
               </Tooltip>
 
               <span className="text-white text-xs px-2 min-w-[3rem] text-center">
@@ -248,12 +241,12 @@ export const ImageBlock = memo(function ImageBlock({
                     className="h-8 w-8 text-white hover:bg-white/20"
                     onClick={handleZoomIn}
                     disabled={zoom >= 3}
-                    aria-label="Zoom in"
+                    aria-label={t("zoomIn")}
                   >
                     <ZoomIn className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Zoom in</TooltipContent>
+                <TooltipContent>{t("zoomIn")}</TooltipContent>
               </Tooltip>
 
               <Tooltip>
@@ -263,12 +256,12 @@ export const ImageBlock = memo(function ImageBlock({
                     size="icon"
                     className="h-8 w-8 text-white hover:bg-white/20"
                     onClick={handleRotate}
-                    aria-label="Rotate"
+                    aria-label={t("rotate")}
                   >
                     <RotateCw className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Rotate</TooltipContent>
+                <TooltipContent>{t("rotate")}</TooltipContent>
               </Tooltip>
 
               <Tooltip>
@@ -278,12 +271,12 @@ export const ImageBlock = memo(function ImageBlock({
                     size="icon"
                     className="h-8 w-8 text-white hover:bg-white/20"
                     onClick={handleDownload}
-                    aria-label="Download"
+                    aria-label={t("download")}
                   >
                     <Download className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Download</TooltipContent>
+                <TooltipContent>{t("download")}</TooltipContent>
               </Tooltip>
 
               <Tooltip>
@@ -293,12 +286,12 @@ export const ImageBlock = memo(function ImageBlock({
                     size="icon"
                     className="h-8 w-8 text-white hover:bg-white/20"
                     onClick={handleOpenExternal}
-                    aria-label="Open in new tab"
+                    aria-label={t("openInNewTab")}
                   >
                     <ExternalLink className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Open in new tab</TooltipContent>
+                <TooltipContent>{t("openInNewTab")}</TooltipContent>
               </Tooltip>
 
               <Tooltip>
@@ -308,12 +301,12 @@ export const ImageBlock = memo(function ImageBlock({
                     size="icon"
                     className="h-8 w-8 text-white hover:bg-white/20"
                     onClick={() => setIsOpen(false)}
-                    aria-label="Close"
+                    aria-label={t("close")}
                   >
                     <X className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Close</TooltipContent>
+                <TooltipContent>{t("close")}</TooltipContent>
               </Tooltip>
             </div>
           </DialogHeader>

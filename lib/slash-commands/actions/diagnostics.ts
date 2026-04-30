@@ -6,8 +6,8 @@ import { getSidecarStatus, hasApiKey } from "@/lib/claude/ipc"
 import { getSession } from "@/lib/db/sessions"
 import { listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import { resolveSendOptions } from "@/lib/claude/build-options"
-import { useChatStore } from "@/stores/chat-store"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
 import type { UsageInfo } from "@/lib/claude/adapter"
 
 /**

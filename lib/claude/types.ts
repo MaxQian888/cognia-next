@@ -448,14 +448,123 @@ export interface AppSettings {
   customSearchSources?: CustomSearchSource[]
   /** Currently-selected research source ids. */
   defaultSearchSources?: string[]
+
+  // ---- Artifacts ----
+  /**
+   * Artifact panel + auto-detection preferences. The detector runs after each
+   * assistant turn; the store dedupes by source fingerprint so toggling these
+   * never produces duplicates from re-detection.
+   */
+  artifacts?: {
+    /** Enable auto-detection of artifacts in assistant responses. */
+    autoCreate?: boolean
+    /** Minimum line count to auto-create code/document artifacts (3..50). */
+    minLines?: number
+    /** Subset of types eligible for auto-creation (defaults to all 9). */
+    enabledTypes?: import("@/types/artifact/artifact").ArtifactType[]
+    /** Show a sonner toast when an artifact is auto-created. */
+    showNotification?: boolean
+    /** Initial tab when the panel opens for a previewable artifact. */
+    defaultPanelMode?: "preview" | "code"
+    /** When false, artifacts are wiped when the session is cleared. */
+    persistAcrossSessions?: boolean
+  }
+
+  // ---- Backup reminders & scheduling ----
+  /**
+   * Days between "you should back up" reminder toasts. 0 disables reminders.
+   * Default 7. Range 1..90.
+   */
+  backupReminderDays?: number
+  /** Epoch ms the user last clicked "Dismiss" on the reminder. */
+  backupReminderDismissedAt?: number
+  /**
+   * Auto-schedule config — when enabled, the in-app provider writes a backup
+   * to `dirPath` every `intervalDays`, retaining only the newest `retainCount`
+   * files. Tauri-only (web has no `dirPath`).
+   */
+  backupAutoSchedule?: BackupAutoSchedule
 }
 
+export interface BackupAutoSchedule {
+  enabled: boolean
+  /** 1..30 days between automated backups. */
+  intervalDays: number
+  /** Absolute path to the destination directory. Tauri only. */
+  dirPath?: string
+  /** Keep this many newest auto-backup files; older ones are deleted. */
+  retainCount: number
+}
+
+/** Defaults applied when the user hasn't customized the schedule yet. */
+export const DEFAULT_BACKUP_AUTO_SCHEDULE: BackupAutoSchedule = {
+  enabled: false,
+  intervalDays: 7,
+  retainCount: 5,
+}
+
+/**
+ * High-level grouping for presets. Drives the section's filter chips and
+ * lets users organise their library across topics. Mirrors Cognia's preset
+ * categories (`D:\Project\Cognia\types\content\preset.ts`) so labels carry
+ * across between the two apps when users export/import presets.
+ */
+export type PresetCategory =
+  | "general"
+  | "coding"
+  | "writing"
+  | "research"
+  | "education"
+  | "business"
+  | "creative"
+  | "productivity"
+
+/**
+ * A reusable session-configuration template. The `content` field carries the
+ * system prompt; the optional override fields mirror what `ChatSession` and
+ * `Character` carry, so applying a preset to a session is a simple field
+ * copy. All fields beyond the original 5 are optional — legacy rows from v2
+ * (when this table only stored `id/name/content/createdAt/updatedAt`)
+ * migrate forward losslessly via the v12 schema upgrade hook.
+ */
 export interface SystemPromptPreset {
+  // --- v2 baseline fields ----------------------------------------------
   id: string
   name: string
+  /** The system prompt body. Named `content` for back-compat with v2. */
   content: string
   createdAt: number
   updatedAt: number
+  // --- metadata --------------------------------------------------------
+  description?: string
+  /** Single emoji glyph rendered inside the preset card avatar. */
+  icon?: string
+  /** CSS color token (oklch / hex) used for the card avatar background. */
+  color?: string
+  category?: PresetCategory
+  // --- chat-config overrides (mirrors ChatSession / Character fields) -
+  model?: string
+  permissionMode?: SendOptions["permissionMode"]
+  effort?: SendOptions["effort"]
+  allowedTools?: string[]
+  disallowedTools?: string[]
+  /** Subset of MCP server ids to enable. Undefined means "all enabled". */
+  mcpServerIds?: string[]
+  /** Ordered list of skill ids appended to the system prompt at send time. */
+  skillIds?: string[]
+  /** Built-in or custom Agent Mode id. Undefined means "use whatever is active". */
+  agentModeId?: string
+  workingDir?: string
+  // --- organisation ---------------------------------------------------
+  isDefault?: boolean
+  isFavorite?: boolean
+  /** Seeded built-ins are read-only; UI offers "Duplicate" instead of edit. */
+  isBuiltIn?: boolean
+  /** Manual sort position. Lower comes first. Auto-assigned at create time. */
+  sortOrder?: number
+  // --- usage tracking -------------------------------------------------
+  usageCount?: number
+  lastUsedAt?: number
 }
 
 export type McpTransport = "stdio" | "sse" | "http"

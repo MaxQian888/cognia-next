@@ -14,6 +14,13 @@ import type {
   Team,
 } from "@/lib/claude/types"
 import type { TrustedWorkspace } from "./trusted-workspaces"
+import type { BackupHistoryRow } from "./backup-history"
+import type {
+  CanvasDocumentRow,
+  CanvasVersionRow,
+  CanvasCommentRow,
+  CanvasSessionRow,
+} from "./canvas-types"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -26,6 +33,11 @@ export class CogniaDB extends Dexie {
   skillResources!: Table<SkillResource, string>
   teams!: Table<Team, string>
   trustedWorkspaces!: Table<TrustedWorkspace, string>
+  backupHistory!: Table<BackupHistoryRow, string>
+  canvasDocuments!: Table<CanvasDocumentRow, string>
+  canvasVersions!: Table<CanvasVersionRow, string>
+  canvasComments!: Table<CanvasCommentRow, string>
+  canvasSessions!: Table<CanvasSessionRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -201,6 +213,92 @@ export class CogniaDB extends Dexie {
       trustedWorkspaces: "path, trustedAt",
       tts_provider_keys: "id",
     })
+
+    // v10 — `backupHistory` for the data-section's history card. Pure new
+    // table; no upgrade hook needed. Indexed by `completedAt` so the panel
+    // can sort newest-first with `db.backupHistory.orderBy("completedAt").reverse()`,
+    // and by `type` / `success` so we can filter to only auto-backups or
+    // failures without scanning the whole table.
+    this.version(10).stores({
+      sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
+      messages: "id, sessionId, [sessionId+createdAt], senderId",
+      settings: "id",
+      promptPresets: "id, updatedAt",
+      mcpServers: "id, name, enabled",
+      characters: "id, name, updatedAt, isBuiltIn",
+      skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
+      skillResources: "id, skillId, [skillId+kind], [skillId+path], updatedAt",
+      teams: "id, name, updatedAt, isBuiltIn",
+      sessionState: "sessionId, lastReadAt",
+      trustedWorkspaces: "path, trustedAt",
+      tts_provider_keys: "id",
+      backupHistory: "id, completedAt, type, success",
+    })
+
+    // v11 — Canvas (Monaco-based code/document editor) tables. Pure new
+    // tables; no upgrade hook needed. Documents are the primary records;
+    // versions/comments/sessions hang off documentId for cascade deletes
+    // performed at the CRUD layer (lib/db/canvas-documents.ts).
+    this.version(11).stores({
+      sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
+      messages: "id, sessionId, [sessionId+createdAt], senderId",
+      settings: "id",
+      promptPresets: "id, updatedAt",
+      mcpServers: "id, name, enabled",
+      characters: "id, name, updatedAt, isBuiltIn",
+      skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
+      skillResources: "id, skillId, [skillId+kind], [skillId+path], updatedAt",
+      teams: "id, name, updatedAt, isBuiltIn",
+      sessionState: "sessionId, lastReadAt",
+      trustedWorkspaces: "path, trustedAt",
+      tts_provider_keys: "id",
+      backupHistory: "id, completedAt, type, success",
+      canvasDocuments: "id, title, language, type, updatedAt, createdAt",
+      canvasVersions: "id, documentId, [documentId+createdAt], isAutoSave",
+      canvasComments: "id, documentId, [documentId+createdAt], parentId, resolvedAt",
+      canvasSessions: "id, documentId, ownerId, createdAt",
+    })
+
+    // v12 — Preset feature uplift. Existing 5-field rows survive untouched;
+    // the upgrade hook back-fills `isBuiltIn=false`, `isFavorite=false`,
+    // `usageCount=0`, `sortOrder=0` so newly-added filters/sort indexes don't
+    // see "(empty)" buckets. Indexes for the rich-preset section: category
+    // (filter chips), sortOrder (manual reorder), lastUsedAt ("Recent" filter),
+    // isDefault / isFavorite / isBuiltIn (badge queries). IndexedDB doesn't
+    // index booleans reliably across browsers — these flags are stored as-is
+    // (no 1/0 coercion) and filtered in memory by the CRUD layer.
+    this.version(12)
+      .stores({
+        sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
+        messages: "id, sessionId, [sessionId+createdAt], senderId",
+        settings: "id",
+        promptPresets:
+          "id, updatedAt, isBuiltIn, isDefault, isFavorite, sortOrder, category, lastUsedAt",
+        mcpServers: "id, name, enabled",
+        characters: "id, name, updatedAt, isBuiltIn",
+        skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
+        skillResources: "id, skillId, [skillId+kind], [skillId+path], updatedAt",
+        teams: "id, name, updatedAt, isBuiltIn",
+        sessionState: "sessionId, lastReadAt",
+        trustedWorkspaces: "path, trustedAt",
+        tts_provider_keys: "id",
+        backupHistory: "id, completedAt, type, success",
+        canvasDocuments: "id, title, language, type, updatedAt, createdAt",
+        canvasVersions: "id, documentId, [documentId+createdAt], isAutoSave",
+        canvasComments: "id, documentId, [documentId+createdAt], parentId, resolvedAt",
+        canvasSessions: "id, documentId, ownerId, createdAt",
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table("promptPresets")
+          .toCollection()
+          .modify((row: Record<string, unknown>) => {
+            if (row.isBuiltIn === undefined) row.isBuiltIn = false
+            if (row.isFavorite === undefined) row.isFavorite = false
+            if (row.usageCount === undefined) row.usageCount = 0
+            if (row.sortOrder === undefined) row.sortOrder = 0
+          })
+      })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -241,6 +339,10 @@ export function getDb(): CogniaDB {
     _seedPromise = import("./seed")
       .then(({ seedBuiltIns }) => seedBuiltIns())
       .catch((err) => {
+        // DatabaseClosedError fires when the db is deleted out from under us
+        // (common during tests and hard resets). Not actionable; suppress.
+        const name = err instanceof Error ? err.name : ""
+        if (name === "DatabaseClosedError" || name === "DatabaseClosed") return
         console.error("seedBuiltIns failed", err)
       })
   }
@@ -257,4 +359,14 @@ export function whenSeeded(): Promise<void> {
   // Touch getDb to ensure seeding has been kicked off.
   getDb()
   return _seedPromise ?? Promise.resolve()
+}
+
+/**
+ * Test-only: drop the cached Dexie instance so the next `getDb()` call
+ * re-opens a fresh database. Use after `db.delete()` in `beforeEach` blocks
+ * — production code must never call this.
+ */
+export function __resetDbForTesting(): void {
+  _db = null
+  _seedPromise = null
 }

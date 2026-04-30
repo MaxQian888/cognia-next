@@ -40,7 +40,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet"
-import { useMediaQuery } from "@/hooks/use-media-query"
+import { useMediaQuery } from "@/hooks/ui"
 import { AGENT_TRACE_MODULE } from "@/lib/agent-trace/log-adapter"
 import type { StructuredLogEntry } from "@/lib/logger"
 

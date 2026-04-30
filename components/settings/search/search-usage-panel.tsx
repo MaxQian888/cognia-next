@@ -7,12 +7,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useSettingsStore } from "@/stores/settings"
 import {
   SEARCH_PROVIDERS,
   createDefaultSearchUsageStats,
   type SearchProviderType,
 } from "@/lib/search/types"
+import { createLogger } from "@/lib/logger"
+
+const log = createLogger("settings.search.usage")
 
 export function SearchUsagePanel() {
   const tu = useTranslations("searchUsage")
@@ -79,7 +82,10 @@ export function SearchUsagePanel() {
               variant="ghost"
               size="sm"
               className="h-8 text-xs"
-              onClick={() => void resetStats()}
+              onClick={() => {
+                log.info("usage_stats_reset", { totalSearches, totalErrors })
+                void resetStats()
+              }}
             >
               <RotateCcw className="h-3 w-3 mr-1" />
               {tu("reset")}

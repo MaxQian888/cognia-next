@@ -11,12 +11,14 @@
 // handlers.
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
+import { useTranslations } from "next-intl"
 import { FileIcon, FolderIcon, SlashIcon, TerminalIcon, BookMarkedIcon } from "lucide-react"
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { searchWorkspace } from "@/lib/files/workspace-search"
 import type { WorkspaceEntry } from "@/lib/files/types"
 import type { SlashCommand } from "@/lib/slash-commands/builtin"
 import { cn } from "@/lib/utils"
+import { loggers } from "@/lib/logger"
 
 import type { ComposerTrigger, TriggerKind } from "./composer-trigger"
 
@@ -58,6 +60,8 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
   { trigger, cwd, slashCommands, anchor, onPick, onDismiss },
   ref
 ) {
+  const t = useTranslations("chat.composer.popover")
+  const tMemory = useTranslations("chat.composer.memory")
   const [highlight, setHighlight] = useState(0)
   // The async file-search produces an `ItemList` over time; for slash, memory
   // and bash kinds we derive the list synchronously below. The combined view
@@ -91,7 +95,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
       setFileList({
         items: [],
         loading: false,
-        error: "Set a working directory in session settings to use @-references.",
+        error: t("workspaceMissing"),
         emptyMessage: "",
       })
       return
@@ -107,11 +111,16 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
             items: entries.map((entry) => ({ kind: "file" as const, entry })),
             loading: false,
             error: null,
-            emptyMessage: q ? `No files match "${q}".` : "Workspace is empty.",
+            emptyMessage: q ? t("noFiles", { query: q }) : t("workspaceEmpty"),
           })
         })
         .catch((err) => {
           if (lastQueryRef.current !== q) return
+          loggers.chat.warn("composer file search failed", {
+            err: err instanceof Error ? err.message : String(err),
+            cwd,
+            query: q,
+          })
           setFileList({
             items: [],
             loading: false,
@@ -121,7 +130,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
         })
     }, 200)
     return () => window.clearTimeout(handle)
-  }, [trigger, cwd])
+  }, [trigger, cwd, t])
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const displayList: ItemList = useMemo(() => {
@@ -139,12 +148,12 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
         error: null,
         emptyMessage:
           slashCommands.length === 0
-            ? "No commands available."
-            : `No commands match "/${trigger.query}".`,
+            ? t("noCommands")
+            : t("noCommandMatches", { query: trigger.query }),
       }
     }
     if (trigger.kind === "memory") {
-      const preview = trigger.query.trim() || "(start typing the memory line)"
+      const preview = trigger.query.trim() || tMemory("emptyPreview")
       return {
         items: [
           { kind: "memory", scope: "project", preview },
@@ -167,7 +176,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
         emptyMessage: "",
       }
     )
-  }, [trigger, slashCommands, fileList])
+  }, [trigger, slashCommands, fileList, t, tMemory])
 
   // Clamp the highlight whenever the visible list shrinks below it. The
   // updater form means the clamp is idempotent if it fires multiple times.
@@ -199,7 +208,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
   )
 
   const open = trigger !== null && anchor !== null
-  const title = useMemo(() => triggerTitle(trigger?.kind), [trigger?.kind])
+  const title = useMemo(() => triggerTitle(trigger?.kind, t), [trigger?.kind, t])
 
   return (
     <Popover open={open} onOpenChange={(v) => (!v ? onDismiss() : undefined)}>
@@ -216,7 +225,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
         <div className="flex items-center gap-2 border-b px-3 py-2 text-xs text-muted-foreground">
           {title.icon}
           <span className="flex-1 truncate">{title.label}</span>
-          {displayList.loading ? <span>searching…</span> : null}
+          {displayList.loading ? <span>{t("searchingShort")}</span> : null}
         </div>
         {trigger?.kind === "bash" ? (
           <BashHint query={trigger.query} />
@@ -224,7 +233,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
           <div className="px-3 py-3 text-sm text-destructive">{displayList.error}</div>
         ) : displayList.items.length === 0 ? (
           <div className="px-3 py-3 text-sm text-muted-foreground">
-            {displayList.loading ? "Searching…" : displayList.emptyMessage}
+            {displayList.loading ? t("searching") : displayList.emptyMessage}
           </div>
         ) : (
           <ul className="max-h-72 overflow-auto py-1">
@@ -252,22 +261,25 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
   )
 })
 
-function triggerTitle(kind: TriggerKind | undefined): {
+function triggerTitle(
+  kind: TriggerKind | undefined,
+  t: (key: string) => string
+): {
   icon: React.ReactNode
   label: string
 } {
   switch (kind) {
     case "slash":
-      return { icon: <SlashIcon className="size-3.5" />, label: "Slash command" }
+      return { icon: <SlashIcon className="size-3.5" />, label: t("slashTitle") }
     case "file":
-      return { icon: <FileIcon className="size-3.5" />, label: "Reference a file or folder" }
+      return { icon: <FileIcon className="size-3.5" />, label: t("fileTitle") }
     case "memory":
       return {
         icon: <BookMarkedIcon className="size-3.5" />,
-        label: "Append to memory",
+        label: t("memoryTitle"),
       }
     case "bash":
-      return { icon: <TerminalIcon className="size-3.5" />, label: "Run shell command" }
+      return { icon: <TerminalIcon className="size-3.5" />, label: t("bashTitle") }
     default:
       return { icon: null, label: "" }
   }
@@ -281,6 +293,8 @@ function itemKey(item: PopoverItem, idx: number): string {
 }
 
 function ItemRow({ item }: { item: PopoverItem }) {
+  const t = useTranslations("chat.composer.popover")
+  const tMemory = useTranslations("chat.composer.memory")
   if (item.kind === "slash") {
     const c = item.command
     return (
@@ -293,7 +307,7 @@ function ItemRow({ item }: { item: PopoverItem }) {
         <span
           className={cn("ml-auto truncate text-xs text-muted-foreground", c.disabled && "italic")}
         >
-          {c.disabled ? "Coming soon" : c.description}
+          {c.disabled ? t("comingSoon") : c.description}
         </span>
         <span className="rounded border px-1 text-[10px] text-muted-foreground">{c.scope}</span>
       </>
@@ -320,7 +334,7 @@ function ItemRow({ item }: { item: PopoverItem }) {
       <>
         <BookMarkedIcon className="size-4 shrink-0 text-muted-foreground" />
         <span className="font-medium">
-          {item.scope === "project" ? "Project memory" : "User memory"}
+          {item.scope === "project" ? tMemory("projectLabel") : tMemory("userLabel")}
         </span>
         <span className="ml-auto truncate text-xs text-muted-foreground">{item.preview}</span>
       </>
@@ -330,13 +344,14 @@ function ItemRow({ item }: { item: PopoverItem }) {
 }
 
 function BashHint({ query }: { query: string }) {
+  const t = useTranslations("chat.composer.popover")
   return (
     <div className="px-3 py-3 text-sm text-muted-foreground">
       <p className="mb-1">
-        Press <kbd>Enter</kbd> to run as a shell command.
+        {t("bashHintPrefix")} <kbd>Enter</kbd> {t("bashHintSuffix")}
       </p>
       <code className="block truncate rounded bg-muted px-2 py-1 font-mono text-xs">
-        $ {query || "<empty>"}
+        $ {query || t("bashEmpty")}
       </code>
     </div>
   )

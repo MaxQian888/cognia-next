@@ -10,15 +10,20 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
-import { avatarColor, avatarGlyph } from "@/lib/avatar"
 import { listCharactersByIds } from "@/lib/db/characters"
 import { getSession, updateSession } from "@/lib/db/sessions"
 import { getTeam } from "@/lib/db/teams"
-import { useUIStore, type MemberStatus } from "@/stores/ui-store"
-import type { Character } from "@/lib/claude/types"
-import { useLiveQuery } from "dexie-react-hooks"
+import { loggers } from "@/lib/logger"
+import { avatarColor } from "@/lib/ui/avatar"
+import { useClientLiveQuery } from "@/hooks/data"
+import { useUIStore, type MemberStatus } from "@/stores/ui"
+import type { Character, Team } from "@/lib/claude/types"
 import { ChevronDownIcon, ChevronRightIcon, StickyNoteIcon, UsersIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { AvatarBadge } from "./avatar-badge"
+
+const log = loggers.ui
 
 interface Props {
   /** Currently active team session id; member list is hidden if null. */
@@ -37,22 +42,24 @@ interface Props {
  * `@mention` into the composer.
  */
 export function MemberList({ teamSessionId, teamId, onMention }: Props) {
+  const t = useTranslations("desktop.memberList")
   const showMemberList = useUIStore((s) => s.showMemberList)
   const setShowMemberList = useUIStore((s) => s.setShowMemberList)
   const memberStatus = useUIStore((s) => s.memberStatus)
 
-  const team = useLiveQuery(() => {
-    if (typeof window === "undefined") return Promise.resolve(undefined)
-    if (!teamId) return Promise.resolve(undefined)
-    return getTeam(teamId)
-  }, [teamId])
+  const team = useClientLiveQuery<Team | undefined>(
+    () => (teamId ? getTeam(teamId) : Promise.resolve(undefined)),
+    [teamId],
+    undefined
+  )
 
   const memberIdsKey = team?.members.map((m) => m.characterId).join(",") ?? ""
-  const members = useLiveQuery<Character[]>(() => {
-    if (typeof window === "undefined") return Promise.resolve([])
-    if (!team) return Promise.resolve([])
-    return listCharactersByIds(team.members.map((m) => m.characterId))
-  }, [team?.id, memberIdsKey])
+  const members = useClientLiveQuery<Character[]>(
+    () =>
+      team ? listCharactersByIds(team.members.map((m) => m.characterId)) : Promise.resolve([]),
+    [team?.id, memberIdsKey],
+    []
+  )
 
   const orderedMembers = useMemo(() => {
     if (!team || !members) return []
@@ -61,6 +68,15 @@ export function MemberList({ teamSessionId, teamId, onMention }: Props) {
       .map((m) => byId.get(m.characterId))
       .filter((c): c is Character => Boolean(c))
   }, [team, members])
+
+  const handleShow = () => {
+    log.info("member-list show")
+    setShowMemberList(true)
+  }
+  const handleHide = () => {
+    log.info("member-list hide")
+    setShowMemberList(false)
+  }
 
   if (!teamId || !teamSessionId) return null
 
@@ -71,9 +87,9 @@ export function MemberList({ teamSessionId, teamId, onMention }: Props) {
           variant="ghost"
           size="icon"
           className="m-2 size-8"
-          onClick={() => setShowMemberList(true)}
-          aria-label="Show member list"
-          title="Show member list"
+          onClick={handleShow}
+          aria-label={t("show")}
+          title={t("show")}
         >
           <UsersIcon className="size-4" />
         </Button>
@@ -84,19 +100,19 @@ export function MemberList({ teamSessionId, teamId, onMention }: Props) {
   return (
     <aside
       className="hidden h-full w-56 shrink-0 flex-col border-l bg-muted/20 lg:flex"
-      aria-label="Team members"
+      aria-label={t("label")}
     >
       <div className="flex items-center justify-between gap-2 px-3 py-3">
         <span className="truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Members — {orderedMembers.length}
+          {t("heading", { count: orderedMembers.length })}
         </span>
         <Button
           variant="ghost"
           size="icon"
           className="size-6"
-          onClick={() => setShowMemberList(false)}
-          aria-label="Hide member list"
-          title="Hide member list"
+          onClick={handleHide}
+          aria-label={t("hide")}
+          title={t("hide")}
         >
           <ChevronRightIcon className="size-4" />
         </Button>
@@ -112,11 +128,17 @@ export function MemberList({ teamSessionId, teamId, onMention }: Props) {
               teamSessionId={teamSessionId}
               character={member}
               status={memberStatus[`${teamSessionId}::${member.id}`] ?? "idle"}
-              onMention={() => onMention(member)}
+              onMention={() => {
+                log.info("member-list mention", {
+                  teamSessionId,
+                  characterId: member.id,
+                })
+                onMention(member)
+              }}
             />
           ))}
           {orderedMembers.length === 0 && (
-            <li className="px-2 py-3 text-xs text-muted-foreground">No members.</li>
+            <li className="px-2 py-3 text-xs text-muted-foreground">{t("empty")}</li>
           )}
         </ul>
       </ScrollArea>
@@ -125,13 +147,11 @@ export function MemberList({ teamSessionId, teamId, onMention }: Props) {
 }
 
 function ScratchpadPanel({ teamSessionId }: { teamSessionId: string }) {
+  const t = useTranslations("desktop.memberList")
   const collapsed = useUIStore((s) => s.scratchpadCollapsed[teamSessionId] ?? false)
   const setCollapsed = useUIStore((s) => s.setScratchpadCollapsed)
 
-  const session = useLiveQuery(() => {
-    if (typeof window === "undefined") return Promise.resolve(undefined)
-    return getSession(teamSessionId)
-  }, [teamSessionId])
+  const session = useClientLiveQuery(() => getSession(teamSessionId), [teamSessionId], undefined)
 
   const [draft, setDraft] = useState(session?.scratchpad ?? "")
   // Keep the textarea in sync when the session id changes (different team).
@@ -152,7 +172,9 @@ function ScratchpadPanel({ teamSessionId }: { teamSessionId: string }) {
     if (draft === persisted) return
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
-      void updateSession(teamSessionId, { scratchpad: draft }).catch(() => {})
+      void updateSession(teamSessionId, { scratchpad: draft }).catch((err) => {
+        log.error("scratchpad persist failed", err, { teamSessionId })
+      })
     }, 500)
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -174,9 +196,9 @@ function ScratchpadPanel({ teamSessionId }: { teamSessionId: string }) {
           <ChevronDownIcon className="size-3" />
         )}
         <StickyNoteIcon className="size-3" />
-        Shared notes
+        {t("sharedNotes")}
         <span className="ml-auto font-normal normal-case text-muted-foreground">
-          {draft.length > 0 ? `${draft.length} chars` : ""}
+          {draft.length > 0 ? t("charsCount", { count: draft.length }) : ""}
         </span>
       </button>
       {!collapsed && (
@@ -185,7 +207,7 @@ function ScratchpadPanel({ teamSessionId }: { teamSessionId: string }) {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             rows={4}
-            placeholder="Notes injected into every member's transcript on each turn…"
+            placeholder={t("notesPlaceholder")}
             className="text-xs"
           />
         </div>
@@ -205,7 +227,13 @@ function MemberRow({
   status: MemberStatus
   onMention: () => void
 }) {
+  const t = useTranslations("desktop.memberList")
   const requestStop = useUIStore((s) => s.requestStopMember)
+
+  const handleStop = () => {
+    log.info("member-list stop request", { teamSessionId, characterId: character.id })
+    requestStop(teamSessionId, character.id)
+  }
 
   return (
     <ContextMenu>
@@ -215,27 +243,24 @@ function MemberRow({
             type="button"
             onClick={onMention}
             className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm"
-            title={`Mention ${character.name}`}
+            title={t("mentionTitle", { name: character.name })}
           >
-            <span
-              className="relative flex size-6 items-center justify-center rounded-full text-xs"
-              style={{
-                backgroundColor: avatarColor(character),
-                color: "white",
-              }}
-              aria-hidden
-            >
-              {avatarGlyph(character)}
-              <span
-                className={cn(
-                  "absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full ring-2 ring-background",
-                  status === "thinking" && "animate-pulse bg-amber-500",
-                  status === "errored" && "bg-destructive",
-                  status === "idle" && "bg-emerald-500"
-                )}
-                aria-label={`Status: ${status}`}
-              />
-            </span>
+            <AvatarBadge
+              subject={character}
+              size={24}
+              textClassName="text-xs"
+              statusDot={
+                <span
+                  className={cn(
+                    "absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full ring-2 ring-background",
+                    status === "thinking" && "animate-pulse bg-amber-500",
+                    status === "errored" && "bg-destructive",
+                    status === "idle" && "bg-emerald-500"
+                  )}
+                  aria-label={t("statusLabel", { status })}
+                />
+              }
+            />
             <span className="min-w-0 flex-1 truncate" style={{ color: avatarColor(character) }}>
               {character.name}
             </span>
@@ -243,11 +268,8 @@ function MemberRow({
         </li>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem
-          disabled={status !== "thinking"}
-          onSelect={() => requestStop(teamSessionId, character.id)}
-        >
-          Stop this member
+        <ContextMenuItem disabled={status !== "thinking"} onSelect={handleStop}>
+          {t("stopMember")}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

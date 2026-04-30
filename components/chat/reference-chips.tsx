@@ -5,11 +5,13 @@
 // the reference from the chat-store; the @path token already in the textarea
 // is left alone (the user can edit/remove the text manually).
 
+import { useTranslations } from "next-intl"
 import { FileIcon, FolderIcon, XIcon } from "lucide-react"
-import { useChatStore } from "@/stores/chat-store"
+import { useChatStore } from "@/stores/chat"
 import { cn } from "@/lib/utils"
 
 export function ReferenceChips() {
+  const t = useTranslations("chat.composer.references")
   const refs = useChatStore((s) => s.referencedPaths)
   const remove = useChatStore((s) => s.removeReferencedPath)
 
@@ -32,7 +34,7 @@ export function ReferenceChips() {
           <span className="max-w-[280px] truncate font-mono">{r.relative}</span>
           <button
             type="button"
-            aria-label={`Remove reference to ${r.relative}`}
+            aria-label={t("removeAria", { path: r.relative })}
             onClick={() => remove(r.absolute)}
             className="rounded p-0.5 opacity-60 transition-opacity hover:bg-background hover:opacity-100"
           >

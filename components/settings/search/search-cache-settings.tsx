@@ -17,9 +17,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useSettingsStore } from "@/stores/settings"
 import { getSearchCache } from "@/lib/search/search-cache"
 import { DEFAULT_SEARCH_PROVIDER_SETTINGS } from "@/lib/search/types"
+import { createLogger } from "@/lib/logger"
+
+const log = createLogger("settings.search.cache")
 
 export function SearchCacheSettings() {
   const tc = useTranslations("searchCache")
@@ -41,11 +44,13 @@ export function SearchCacheSettings() {
   }, [])
 
   const handleClearCache = useCallback(() => {
+    const sizeBefore = getSearchCache().getStats().size
     if (selectedProvider === "all") {
       getSearchCache().clear()
     } else {
       getSearchCache().invalidate(`search:${selectedProvider}`)
     }
+    log.info("cache_cleared", { provider: selectedProvider, sizeBefore })
     refreshStats()
   }, [selectedProvider, refreshStats])
 
@@ -82,7 +87,10 @@ export function SearchCacheSettings() {
           </div>
           <Switch
             checked={searchCacheEnabled}
-            onCheckedChange={(v) => void setSearchCacheEnabled(v)}
+            onCheckedChange={(v) => {
+              log.info("cache_enabled_changed", { enabled: v })
+              void setSearchCacheEnabled(v)
+            }}
           />
         </div>
       </CardHeader>
@@ -95,6 +103,7 @@ export function SearchCacheSettings() {
             <Slider
               value={[searchCacheTTL]}
               onValueChange={handleTTLChange}
+              onValueCommit={([value]) => log.info("cache_ttl_changed", { ttlMs: value })}
               min={60_000}
               max={3_600_000}
               step={60_000}
@@ -108,6 +117,9 @@ export function SearchCacheSettings() {
             <Slider
               value={[searchCacheMaxEntries]}
               onValueChange={handleMaxEntriesChange}
+              onValueCommit={([value]) =>
+                log.info("cache_max_entries_changed", { maxEntries: value })
+              }
               min={100}
               max={2000}
               step={100}

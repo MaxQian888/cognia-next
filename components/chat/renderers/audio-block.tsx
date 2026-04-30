@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, memo, useRef, useCallback, useEffect } from "react"
+import { useTranslations } from "next-intl"
 import {
   Play,
   Pause,
@@ -17,6 +18,8 @@ import { cn, formatVideoTime } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { downloadFromUrl } from "@/lib/files/download"
+import { loggers } from "@/lib/logger"
 
 interface AudioBlockProps {
   src: string
@@ -41,6 +44,7 @@ export const AudioBlock = memo(function AudioBlock({
   loop = false,
   showDownload = true,
 }: AudioBlockProps) {
+  const t = useTranslations("chat.renderers.audio")
   const audioRef = useRef<HTMLAudioElement>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -117,14 +121,16 @@ export const AudioBlock = memo(function AudioBlock({
     audioRef.current.currentTime = Math.min(duration, audioRef.current.currentTime + 10)
   }, [duration])
 
-  const handleDownload = useCallback(() => {
-    const link = document.createElement("a")
-    link.href = src
-    link.download = title || "audio"
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }, [src, title])
+  const handleDownload = useCallback(async () => {
+    try {
+      await downloadFromUrl(src, title || t("defaultFilename"))
+    } catch (err) {
+      loggers.chat.warn("audio download failed", {
+        err: err instanceof Error ? err.message : String(err),
+        src,
+      })
+    }
+  }, [src, title, t])
 
   const VolumeIcon = isMuted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2
 
@@ -138,7 +144,7 @@ export const AudioBlock = memo(function AudioBlock({
       >
         <Music className="h-10 w-10 text-muted-foreground/50" />
         <div className="flex-1">
-          <p className="text-sm text-muted-foreground">Failed to load audio</p>
+          <p className="text-sm text-muted-foreground">{t("failedToLoad")}</p>
           {title && <p className="text-xs text-muted-foreground/70">{title}</p>}
         </div>
       </div>
@@ -165,7 +171,7 @@ export const AudioBlock = memo(function AudioBlock({
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={cover}
-            alt={title || "Album cover"}
+            alt={title || t("coverAlt")}
             className="h-16 w-16 rounded-lg object-cover"
           />
         ) : (
@@ -212,11 +218,12 @@ export const AudioBlock = memo(function AudioBlock({
                   className="h-8 w-8"
                   onClick={handleSkipBack}
                   disabled={isLoading}
+                  aria-label={t("skipBack")}
                 >
                   <SkipBack className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>-10s</TooltipContent>
+              <TooltipContent>{t("skipBack")}</TooltipContent>
             </Tooltip>
 
             <Button
@@ -237,11 +244,12 @@ export const AudioBlock = memo(function AudioBlock({
                   className="h-8 w-8"
                   onClick={handleSkipForward}
                   disabled={isLoading}
+                  aria-label={t("skipForward")}
                 >
                   <SkipForward className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>+10s</TooltipContent>
+              <TooltipContent>{t("skipForward")}</TooltipContent>
             </Tooltip>
           </div>
 
@@ -254,11 +262,12 @@ export const AudioBlock = memo(function AudioBlock({
                     size="icon"
                     className="h-8 w-8"
                     onClick={handleMuteToggle}
+                    aria-label={isMuted ? t("unmute") : t("mute")}
                   >
                     <VolumeIcon className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>{isMuted ? "Unmute" : "Mute"}</TooltipContent>
+                <TooltipContent>{isMuted ? t("unmute") : t("mute")}</TooltipContent>
               </Tooltip>
               <Slider
                 value={[isMuted ? 0 : volume]}
@@ -276,21 +285,28 @@ export const AudioBlock = memo(function AudioBlock({
                   size="icon"
                   className={cn("h-8 w-8", isLooping && "text-primary")}
                   onClick={handleLoopToggle}
+                  aria-label={t("loop")}
                 >
                   <Repeat className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Loop</TooltipContent>
+              <TooltipContent>{t("loop")}</TooltipContent>
             </Tooltip>
 
             {showDownload && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleDownload}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={handleDownload}
+                    aria-label={t("download")}
+                  >
                     <Download className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Download</TooltipContent>
+                <TooltipContent>{t("download")}</TooltipContent>
               </Tooltip>
             )}
           </div>

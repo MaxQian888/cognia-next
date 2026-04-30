@@ -9,31 +9,54 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { RefreshCwIcon, SearchIcon, ShoppingBagIcon } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
-import { useSkillMarketplace, type MarketplaceSourceFilter } from "@/hooks/use-skill-marketplace"
+import { useSkillMarketplace, type MarketplaceSourceFilter } from "@/hooks/skills"
 import type { MarketplaceItem } from "@/lib/skills/marketplace-types"
 import { SkillMarketplaceCard } from "./skill-marketplace-card"
 import { SkillMarketplaceDetail } from "./skill-marketplace-detail"
+import { loggers } from "@/lib/logger"
 
 export function SkillMarketplace() {
   const t = useTranslations("skills.marketplace")
+  const tCommon = useTranslations("skills")
+  const tToasts = useTranslations("skills.toasts")
   const m = useSkillMarketplace()
   const [openItem, setOpenItem] = useState<MarketplaceItem | null>(null)
 
   const handleInstall = async (item: MarketplaceItem) => {
     try {
       await m.install(item)
-      toast.success(`Installed "${item.name}".`)
+      toast.success(tToasts("installed", { name: item.name }))
+      loggers.skills.info("marketplace install ok", {
+        itemId: item.id,
+        source: item.source,
+        sourceId: item.sourceId,
+      })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
+      loggers.skills.error("marketplace install failed", err, {
+        itemId: item.id,
+        source: item.source,
+        sourceId: item.sourceId,
+      })
     }
   }
 
   const handleUninstall = async (item: MarketplaceItem) => {
     try {
       await m.uninstall(item)
-      toast.success(`Uninstalled "${item.name}".`)
+      toast.success(tToasts("uninstalled", { name: item.name }))
+      loggers.skills.info("marketplace uninstall ok", {
+        itemId: item.id,
+        source: item.source,
+        sourceId: item.sourceId,
+      })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
+      loggers.skills.error("marketplace uninstall failed", err, {
+        itemId: item.id,
+        source: item.source,
+        sourceId: item.sourceId,
+      })
     }
   }
 
@@ -67,7 +90,7 @@ export function SkillMarketplace() {
           <Input
             value={m.query}
             onChange={(e) => m.setQuery(e.target.value)}
-            placeholder="Search…"
+            placeholder={tCommon("searchPlaceholder")}
             className="h-8 pl-8 text-xs"
           />
         </div>
@@ -77,7 +100,7 @@ export function SkillMarketplace() {
           className="size-8"
           onClick={() => void m.refresh()}
           disabled={m.state.loading}
-          aria-label="Refresh"
+          aria-label={tCommon("refresh")}
         >
           <RefreshCwIcon className="size-3.5" />
         </Button>

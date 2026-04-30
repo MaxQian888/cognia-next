@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "next-intl"
 import {
   CommandDialog,
   CommandEmpty,
@@ -11,7 +12,7 @@ import {
 import { listCharacters } from "@/lib/db/characters"
 import type { Character } from "@/lib/claude/types"
 import { useLiveQuery } from "dexie-react-hooks"
-import { avatarColor, avatarGlyph } from "@/lib/avatar"
+import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 
 interface Props {
   open: boolean
@@ -26,6 +27,7 @@ interface Props {
  * button.
  */
 export function CharacterPicker({ open, onOpenChange, onPick }: Props) {
+  const t = useTranslations("chat.characterPicker")
   const characters =
     useLiveQuery<Character[]>(
       () => (typeof window === "undefined" ? Promise.resolve([]) : listCharacters()),
@@ -36,13 +38,13 @@ export function CharacterPicker({ open, onOpenChange, onPick }: Props) {
     <CommandDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Pick a character"
-      description="Each character has its own system prompt, model, and tools."
+      title={t("title")}
+      description={t("description")}
     >
-      <CommandInput placeholder="Search characters…" />
+      <CommandInput placeholder={t("searchPlaceholder")} />
       <CommandList>
-        <CommandEmpty>No characters match.</CommandEmpty>
-        <CommandGroup heading="Characters">
+        <CommandEmpty>{t("empty")}</CommandEmpty>
+        <CommandGroup heading={t("groupHeading")}>
           {characters.map((c) => (
             <CommandItem
               key={c.id}

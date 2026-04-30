@@ -39,6 +39,7 @@ import {
   type SkillResourceDraft,
 } from "@/lib/db/skill-resources"
 import type { SkillResource, SkillResourceKind } from "@/lib/claude/types"
+import { loggers } from "@/lib/logger"
 
 interface Props {
   skillId: string
@@ -59,10 +60,12 @@ export function SkillResourceManager({ skillId }: Props) {
   const handleCreate = async (draft: Omit<SkillResourceDraft, "skillId">) => {
     try {
       await createResource({ ...draft, skillId })
-      toast.success(`Added ${draft.name}.`)
+      toast.success(t("addedToast", { name: draft.name }))
+      loggers.skills.info("resource create ok", { skillId, kind: draft.kind, name: draft.name })
       setCreating(null)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
+      loggers.skills.error("resource create failed", err, { skillId, kind: draft.kind })
     }
   }
 
@@ -74,7 +77,7 @@ export function SkillResourceManager({ skillId }: Props) {
           <DropdownMenuTrigger asChild>
             <Button size="sm" variant="outline">
               <PlusIcon className="mr-1.5 size-3.5" />
-              {t("addScript").replace(/script/i, "")}
+              {t("addGeneric")}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -111,11 +114,11 @@ export function SkillResourceManager({ skillId }: Props) {
 
       {resources === undefined ? (
         <p className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
-          Loading…
+          {t("loading")}
         </p>
       ) : resources.length === 0 && !creating ? (
         <p className="rounded-md border border-dashed p-4 text-center text-xs text-muted-foreground">
-          {t("title")} — empty
+          {t("emptyState", { title: t("title") })}
         </p>
       ) : (
         <div className="space-y-1.5">
@@ -130,17 +133,27 @@ export function SkillResourceManager({ skillId }: Props) {
                 try {
                   await updateResource(r.id, patch)
                   setEditingId(null)
-                  toast.success("Updated.")
+                  toast.success(t("updatedToast"))
+                  loggers.skills.info("resource update ok", { skillId, resourceId: r.id })
                 } catch (err) {
                   toast.error(err instanceof Error ? err.message : String(err))
+                  loggers.skills.error("resource update failed", err, {
+                    skillId,
+                    resourceId: r.id,
+                  })
                 }
               }}
               onDelete={async () => {
                 try {
                   await deleteResource(r.id)
-                  toast.success(`Removed ${r.name}.`)
+                  toast.success(t("removedToast", { name: r.name }))
+                  loggers.skills.info("resource delete ok", { skillId, resourceId: r.id })
                 } catch (err) {
                   toast.error(err instanceof Error ? err.message : String(err))
+                  loggers.skills.error("resource delete failed", err, {
+                    skillId,
+                    resourceId: r.id,
+                  })
                 }
               }}
             />
@@ -254,16 +267,16 @@ function ResourceForm({
     <Card className="space-y-2 p-3">
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1">
-          <Label className="text-xs">Name</Label>
+          <Label className="text-xs">{t("name")}</Label>
           <Input
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
-            placeholder="setup.sh"
+            placeholder={t("namePlaceholder")}
             className="h-8 text-xs"
           />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Kind</Label>
+          <Label className="text-xs">{t("kind")}</Label>
           <Select
             value={form.kind}
             onValueChange={(v) => setForm({ ...form, kind: v as SkillResourceKind })}
@@ -280,16 +293,16 @@ function ResourceForm({
         </div>
       </div>
       <div className="space-y-1">
-        <Label className="text-xs">Path</Label>
+        <Label className="text-xs">{t("path")}</Label>
         <Input
           value={form.path}
           onChange={(e) => setForm({ ...form, path: e.target.value })}
-          placeholder="scripts/setup.sh"
+          placeholder={t("pathPlaceholder")}
           className="h-8 font-mono text-xs"
         />
       </div>
       <div className="space-y-1">
-        <Label className="text-xs">Content</Label>
+        <Label className="text-xs">{t("content")}</Label>
         <Textarea
           rows={8}
           value={form.content}
@@ -307,7 +320,7 @@ function ResourceForm({
       </Label>
       <div className="flex items-center justify-end gap-2 pt-1">
         <Button variant="ghost" size="sm" onClick={onCancel}>
-          Cancel
+          {t("cancel")}
         </Button>
         <Button
           size="sm"
@@ -323,7 +336,7 @@ function ResourceForm({
             })
           }
         >
-          {mode === "create" ? "Add" : "Save"}
+          {mode === "create" ? t("addGeneric") : t("save")}
         </Button>
       </div>
     </Card>

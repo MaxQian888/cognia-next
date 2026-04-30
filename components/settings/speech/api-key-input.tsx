@@ -3,13 +3,15 @@
 import { useEffect, useState } from "react"
 import { EyeIcon, EyeOffIcon } from "lucide-react"
 import { toast } from "sonner"
+import { useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useSettingsStore } from "@/stores/settings"
 import { type KeyringProviderId } from "@/lib/tts/keyring"
+import { loggers } from "@/lib/logger"
 
 interface Props {
   provider: KeyringProviderId
@@ -23,6 +25,7 @@ interface Props {
  * `useSettingsStore.providerKeys` so it survives reloads.
  */
 export function ApiKeyInput({ provider, label, placeholder }: Props) {
+  const t = useTranslations("settings.speech.apiKey")
   const stored = useSettingsStore((s) => s.providerKeys[provider] ?? "")
   const setProviderApiKey = useSettingsStore((s) => s.setProviderApiKey)
   const clearProviderApiKey = useSettingsStore((s) => s.clearProviderApiKey)
@@ -42,8 +45,10 @@ export function ApiKeyInput({ provider, label, placeholder }: Props) {
     setBusy(true)
     try {
       await setProviderApiKey(provider, draft)
-      toast.success(`${label} API key saved.`)
+      loggers.tts.info("settings.providerKey.saved", { provider, keySet: Boolean(draft) })
+      toast.success(t("savedToast", { label }))
     } catch (err) {
+      loggers.tts.error("settings.providerKey.saveFailed", err, { provider })
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
@@ -55,8 +60,10 @@ export function ApiKeyInput({ provider, label, placeholder }: Props) {
     try {
       await clearProviderApiKey(provider)
       setDraft("")
-      toast.success(`${label} API key cleared.`)
+      loggers.tts.info("settings.providerKey.cleared", { provider })
+      toast.success(t("clearedToast", { label }))
     } catch (err) {
+      loggers.tts.error("settings.providerKey.clearFailed", err, { provider })
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
@@ -69,11 +76,11 @@ export function ApiKeyInput({ provider, label, placeholder }: Props) {
         <Label className="text-xs">{label}</Label>
         {stored ? (
           <Badge variant="secondary" className="text-[10px]">
-            Configured
+            {t("configured")}
           </Badge>
         ) : (
           <Badge variant="outline" className="text-[10px]">
-            Not configured
+            {t("notConfigured")}
           </Badge>
         )}
       </div>
@@ -92,18 +99,18 @@ export function ApiKeyInput({ provider, label, placeholder }: Props) {
           variant="outline"
           size="icon"
           onClick={() => setShow((s) => !s)}
-          aria-label={show ? "Hide key" : "Show key"}
+          aria-label={show ? t("hideKey") : t("showKey")}
         >
           {show ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
         </Button>
       </div>
       <div className="flex gap-2">
         <Button size="sm" onClick={handleSave} disabled={busy || !dirty}>
-          {busy ? "Saving…" : "Save"}
+          {busy ? t("saving") : t("save")}
         </Button>
         {stored && (
           <Button size="sm" variant="outline" onClick={handleClear} disabled={busy}>
-            Clear
+            {t("clear")}
           </Button>
         )}
       </div>

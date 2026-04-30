@@ -127,6 +127,42 @@ if (isTauri()) {
 }
 ```
 
+## Data Backup & Transfer
+
+cognia-next ships a full-featured backup/import system under `lib/data/`. The
+schema is **v3** (`BackupPackageV3` in `lib/data/types.ts`). v1 files import
+through the `migrateEnvelope` boundary so legacy users keep working.
+
+- **Build a snapshot**: `buildBackupPackage({ includeSessions, includeApiKey })`
+  → returns `BackupPackageV3` with a `manifest.integrity` SHA-256 checksum.
+- **Encrypt**: `encryptBackupPackage(plaintext, passphrase, manifest)` →
+  `EncryptedEnvelopeV1` (AES-GCM, PBKDF2-SHA256-600000).
+- **Migrate-on-import**: `migrateEnvelope(parsed)` accepts v1, v3, or
+  encrypted; throws `IsEncryptedError` for the latter so the caller can
+  prompt for a passphrase.
+- **Apply**: `applyBackupPackage(pkg, opts)` writes the payload to Dexie
+  under one of three merge strategies (skip / overwrite / duplicate),
+  preserving built-in characters/skills/teams.
+- **Per-domain transfers**: `lib/data/domain/index.ts` exports `DOMAIN_TRANSFERS`
+  - `buildDomainExport(key)` / `applyDomainImport(file, strategy)` for each of
+    skills, MCP servers, prompt presets, characters, teams, and theme.
+- **External imports**: `lib/data/import-registry.ts` dispatches to
+  `chatgpt-import.ts` / `claude-import.ts` / `gemini-import.ts`.
+- **Scheduled backups**: `BackupSchedulerProvider` mounted in `app/layout.tsx`
+  drives an auto-key encrypted write every `intervalDays` to the user's
+  configured folder (Tauri only). Web users see the reminder banner.
+- **History**: `lib/db/backup-history.ts` records every success/failure to
+  the `backupHistory` Dexie table (capped at 50 newest, indexed by completedAt).
+- **Settings tabs**: `components/settings/data/data-section.tsx` is a tabbed
+  shell — Overview / Backup & restore / Domain transfer / Maintenance, with
+  the active tab reflected in `?dataTab=` on the URL.
+- **Chat-header trigger**: every chat shows a `SingleExportTrigger`
+  (`components/chat/dialogs/single-export-trigger.tsx`) that opens a
+  per-session export dialog (Markdown / JSON / Plain text / Beautiful HTML
+  / Animated HTML, with theme + custom-theme editor for the HTML formats).
+
+See `docs/content/docs/adr/0001-backup-schema-v3.md` for the full ADR.
+
 ## Testing Standards
 
 - **Coverage requirement**: every source file must reach **≥90% test coverage** (lines, branches, functions). Verify with `pnpm test:coverage`.

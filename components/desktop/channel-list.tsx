@@ -4,17 +4,22 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
-import { useIsNarrow } from "@/hooks/use-media-query"
+import { useIsNarrow } from "@/hooks/ui"
+import { useClientLiveQuery } from "@/hooks/data"
 import { listCharacters } from "@/lib/db/characters"
 import { listSessionStates } from "@/lib/db/session-state"
 import { getTeam } from "@/lib/db/teams"
-import { useUIStore } from "@/stores/ui-store"
+import { loggers } from "@/lib/logger"
+import { avatarColor } from "@/lib/ui/avatar"
+import { useUIStore } from "@/stores/ui"
 import type { Character, ChatSession, Team } from "@/lib/claude/types"
-import { useLiveQuery } from "dexie-react-hooks"
 import { MailIcon, MenuIcon, PlusIcon, UsersIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
 import { useMemo, useState } from "react"
+import { AvatarBadge } from "./avatar-badge"
 import { SessionRow } from "./session-row"
-import { avatarColor, avatarGlyph } from "@/lib/avatar"
+
+const log = loggers.ui
 
 interface Props {
   sessions: ChatSession[]
@@ -32,6 +37,7 @@ interface Props {
  * triggered by a hamburger button at the very top-left.
  */
 export function ChannelList(props: Props) {
+  const t = useTranslations("desktop.channelList")
   const isNarrow = useIsNarrow()
   const [openMobile, setOpenMobile] = useState(false)
 
@@ -40,14 +46,19 @@ export function ChannelList(props: Props) {
     if (isNarrow) setOpenMobile(false)
   }
 
+  const handleSheetChange = (next: boolean) => {
+    log.info("channel-list sheet toggle", { open: next })
+    setOpenMobile(next)
+  }
+
   if (isNarrow) {
     return (
-      <Sheet open={openMobile} onOpenChange={setOpenMobile}>
+      <Sheet open={openMobile} onOpenChange={handleSheetChange}>
         <SheetTrigger asChild>
           <Button
             variant="ghost"
             size="icon"
-            aria-label="Open sessions"
+            aria-label={t("openSessions")}
             className="absolute top-2 left-2 z-10 md:hidden"
           >
             <MenuIcon className="size-5" />
@@ -55,7 +66,7 @@ export function ChannelList(props: Props) {
         </SheetTrigger>
         <SheetContent side="left" className="w-72 p-0">
           <SheetHeader className="px-3 pt-3 pb-1">
-            <SheetTitle className="text-sm">Conversations</SheetTitle>
+            <SheetTitle className="text-sm">{t("conversationsTitle")}</SheetTitle>
           </SheetHeader>
           <ChannelListBody {...props} onSelect={handleSelect} />
         </SheetContent>
@@ -66,7 +77,7 @@ export function ChannelList(props: Props) {
   return (
     <aside
       className="hidden h-full w-64 shrink-0 flex-col border-r bg-background md:flex"
-      aria-label="Conversations"
+      aria-label={t("conversationsTitle")}
     >
       <ChannelListBody {...props} onSelect={handleSelect} />
     </aside>
@@ -82,21 +93,20 @@ function ChannelListBody({
   onDelete,
   onRename,
 }: Props) {
+  const t = useTranslations("desktop.channelList")
   const selectedGuild = useUIStore((s) => s.selectedGuild)
-  const characters = useLiveQuery<Character[]>(
-    () => (typeof window === "undefined" ? Promise.resolve([]) : listCharacters()),
-    []
-  )
+  // Narrow once: this component is only ever rendered for the chat
+  // (DM/team) guilds. The shell branches on `kind === "canvas"`
+  // upstream and renders the CanvasDocumentRail instead.
+  const chatGuild = selectedGuild.kind === "canvas" ? ({ kind: "dm" } as const) : selectedGuild
+  const characters = useClientLiveQuery<Character[]>(() => listCharacters(), [], [])
   const characterById = useMemo(() => {
     const map = new Map<string, Character>()
     for (const c of characters ?? []) map.set(c.id, c)
     return map
   }, [characters])
 
-  const sessionStates = useLiveQuery(
-    () => (typeof window === "undefined" ? Promise.resolve([]) : listSessionStates()),
-    []
-  )
+  const sessionStates = useClientLiveQuery(() => listSessionStates(), [], [])
   const unreadById = useMemo(() => {
     const map = new Map<string, number>()
     for (const s of sessionStates ?? []) {
@@ -105,24 +115,24 @@ function ChannelListBody({
     return map
   }, [sessionStates])
 
-  const team = useLiveQuery<Team | undefined>(() => {
-    if (typeof window === "undefined") return Promise.resolve(undefined)
-    if (selectedGuild.kind !== "team") return Promise.resolve(undefined)
-    return getTeam(selectedGuild.teamId)
-  }, [selectedGuild])
+  const team = useClientLiveQuery<Team | undefined>(
+    () => (chatGuild.kind === "team" ? getTeam(chatGuild.teamId) : Promise.resolve(undefined)),
+    [chatGuild],
+    undefined
+  )
 
   // Filter the session list by selected guild.
   const filtered = useMemo(() => {
-    if (selectedGuild.kind === "team") {
-      return sessions.filter((s) => s.kind === "team" && s.teamId === selectedGuild.teamId)
+    if (chatGuild.kind === "team") {
+      return sessions.filter((s) => s.kind === "team" && s.teamId === chatGuild.teamId)
     }
     // DM bucket: anything that isn't a team session.
     return sessions.filter((s) => s.kind !== "team")
-  }, [sessions, selectedGuild])
+  }, [sessions, chatGuild])
 
   // For DMs, group by character; legacy sessions land under "Other".
   const dmGroups = useMemo(() => {
-    if (selectedGuild.kind !== "dm") return null
+    if (chatGuild.kind !== "dm") return null
     const groups = new Map<string | null, ChatSession[]>()
     for (const s of filtered) {
       const key = s.characterId ?? null
@@ -131,25 +141,37 @@ function ChannelListBody({
       groups.set(key, arr)
     }
     return groups
-  }, [filtered, selectedGuild])
+  }, [filtered, chatGuild])
 
+  const handleNewDirect = () => {
+    log.info("channel-list new-direct")
+    onNewDirect()
+  }
+  const handleNewTeamConversation = (teamId: string) => {
+    log.info("channel-list new-team-conversation", { teamId })
+    onNewTeamConversation(teamId)
+  }
+
+  // Canvas guild has its own dedicated rail; do not render the chat
+  // session list when the user is in canvas mode.
+  if (selectedGuild.kind === "canvas") {
+    return null
+  }
   return (
     <div className="flex h-full flex-col">
       <Header
-        selectedGuild={selectedGuild}
+        selectedGuild={chatGuild}
         team={team ?? null}
-        onNewDirect={onNewDirect}
-        onNewTeamConversation={onNewTeamConversation}
+        onNewDirect={handleNewDirect}
+        onNewTeamConversation={handleNewTeamConversation}
       />
       <Separator />
       <ScrollArea className="flex-1">
         {filtered.length === 0 ? (
           <p className="px-4 py-6 text-center text-xs text-muted-foreground">
-            {selectedGuild.kind === "team"
-              ? "No conversations yet. Start one above."
-              : "No chats yet. Pick a character to begin."}
+            {chatGuild.kind === "team" ? t("emptyTeam") : t("emptyDm")}
           </p>
-        ) : selectedGuild.kind === "team" ? (
+        ) : chatGuild.kind === "team" ? (
           <ul className="flex flex-col gap-0.5 p-2">
             {filtered.map((s) => (
               <SessionRow
@@ -191,21 +213,24 @@ function Header({
   onNewDirect: () => void
   onNewTeamConversation: (teamId: string) => void
 }) {
+  const t = useTranslations("desktop.channelList")
+  const isTeam = selectedGuild.kind === "team"
+  const ctaLabel = isTeam ? t("newConversation") : t("newChat")
   return (
     <div className="flex items-center justify-between gap-2 px-3 py-3">
       <div className="flex min-w-0 items-center gap-2">
-        {selectedGuild.kind === "dm" ? (
-          <MailIcon className="size-4 shrink-0 text-muted-foreground" />
-        ) : (
+        {isTeam ? (
           <UsersIcon
             className="size-4 shrink-0"
             style={{
               color: team ? avatarColor(team) : undefined,
             }}
           />
+        ) : (
+          <MailIcon className="size-4 shrink-0 text-muted-foreground" />
         )}
         <span className="truncate text-sm font-semibold tracking-tight">
-          {selectedGuild.kind === "dm" ? "Direct Messages" : (team?.name ?? "Team")}
+          {isTeam ? (team?.name ?? t("teamFallback")) : t("directMessages")}
         </span>
       </div>
       <Button
@@ -219,8 +244,8 @@ function Header({
             onNewDirect()
           }
         }}
-        aria-label={selectedGuild.kind === "team" ? "New conversation" : "New chat"}
-        title={selectedGuild.kind === "team" ? "New conversation" : "New chat"}
+        aria-label={ctaLabel}
+        title={ctaLabel}
       >
         <PlusIcon className="size-4" />
       </Button>
@@ -245,6 +270,7 @@ function DmGroupedList({
   onDelete: (id: string) => void | Promise<void>
   onRename: (id: string, title: string) => void | Promise<void>
 }) {
+  const t = useTranslations("desktop.channelList")
   // Sort: characters with sessions first (alphabetical by name), then "Other".
   const entries = [...groups.entries()].sort((a, b) => {
     if (a[0] === null) return 1
@@ -258,25 +284,17 @@ function DmGroupedList({
     <div className="flex flex-col gap-3 p-2">
       {entries.map(([characterId, list]) => {
         const character = characterId ? characterById.get(characterId) : null
+        const groupName = character?.name ?? t("groupOther")
         return (
-          <section key={characterId ?? "other"} aria-label={character?.name ?? "Other"}>
+          <section key={characterId ?? "other"} aria-label={groupName}>
             <div className="flex items-center gap-2 px-2 pb-1">
               {character ? (
-                <span
-                  className="flex size-4 items-center justify-center rounded-full text-[10px]"
-                  style={{
-                    backgroundColor: avatarColor(character),
-                    color: "white",
-                  }}
-                  aria-hidden
-                >
-                  {avatarGlyph(character)}
-                </span>
+                <AvatarBadge subject={character} size={16} />
               ) : (
                 <span className="size-2 rounded-full bg-muted-foreground/40" aria-hidden />
               )}
               <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {character?.name ?? "Other"}
+                {groupName}
               </span>
             </div>
             <ul className="flex flex-col gap-0.5">

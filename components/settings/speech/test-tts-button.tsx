@@ -1,10 +1,12 @@
 "use client"
 
 import { Loader2, Play, Square } from "lucide-react"
+import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
-import { useTTS } from "@/hooks/use-tts"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useTTS } from "@/hooks/media"
+import { useSettingsStore } from "@/stores/settings"
+import { loggers } from "@/lib/logger"
 
 /**
  * "Test voice" button. Speaks a language-aware sample using the active
@@ -12,21 +14,24 @@ import { useSettingsStore } from "@/stores/settings-store"
  * configuration before committing.
  */
 export function TestTtsButton() {
+  const t = useTranslations("settings.speech.tts")
   const sttLanguage = useSettingsStore((s) => s.settings?.sttLanguage ?? "en-US")
   const { speak, stop, isPlaying, isLoading } = useTTS({ source: "settings" })
 
   const handleClick = () => {
     if (isPlaying) {
+      loggers.tts.info("settings.testVoice.stopped")
       stop()
       return
     }
     const sample = sttLanguage.startsWith("zh")
-      ? "你好，这是一段测试语音。"
+      ? t("sample.zh")
       : sttLanguage.startsWith("ja")
-        ? "こんにちは、これはテスト音声です。"
+        ? t("sample.ja")
         : sttLanguage.startsWith("ko")
-          ? "안녕하세요, 음성 테스트입니다."
-          : "Hello, this is a test of the text-to-speech feature."
+          ? t("sample.ko")
+          : t("sample.en")
+    loggers.tts.info("settings.testVoice.requested", { lang: sttLanguage })
     void speak(sample)
   }
 
@@ -39,7 +44,9 @@ export function TestTtsButton() {
       ) : (
         <Play className="size-4" />
       )}
-      <span className="ml-2">{isLoading ? "Loading…" : isPlaying ? "Stop" : "Test voice"}</span>
+      <span className="ml-2">
+        {isLoading ? t("loading") : isPlaying ? t("stop") : t("testVoice")}
+      </span>
     </Button>
   )
 }

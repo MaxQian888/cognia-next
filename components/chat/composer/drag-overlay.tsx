@@ -5,6 +5,7 @@
 // composer's own dragenter/dragleave counter since `<PromptInput>` does
 // not expose its drag state.
 
+import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { UploadCloudIcon } from "lucide-react"
 
@@ -13,7 +14,9 @@ interface DragOverlayProps {
   label?: string
 }
 
-export function DragOverlay({ visible, label = "Drop image to attach" }: DragOverlayProps) {
+export function DragOverlay({ visible, label }: DragOverlayProps) {
+  const t = useTranslations("chat.composer.dragOverlay")
+  const text = label ?? t("dropToAttach")
   return (
     <div
       aria-hidden={!visible}
@@ -24,7 +27,7 @@ export function DragOverlay({ visible, label = "Drop image to attach" }: DragOve
     >
       <div className="flex items-center gap-2 text-sm font-medium text-primary">
         <UploadCloudIcon className="size-5" />
-        {label}
+        {text}
       </div>
     </div>
   )

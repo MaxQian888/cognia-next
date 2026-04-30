@@ -1,7 +1,7 @@
 "use client"
 
 import { NextIntlClientProvider } from "next-intl"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useSettingsStore } from "@/stores/settings"
 import { allMessages } from "@/i18n/messages"
 import { defaultLocale, type Locale } from "@/i18n/config"
 

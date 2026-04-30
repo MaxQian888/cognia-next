@@ -24,15 +24,19 @@ import { ArrowUpIcon, Loader2Icon, PaperclipIcon, SquareIcon } from "lucide-reac
 import {
   ChangeEvent,
   ClipboardEvent as ReactClipboardEvent,
+  forwardRef,
   KeyboardEvent as ReactKeyboardEvent,
+  type Ref,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
 } from "react"
-import { useChatStore } from "@/stores/chat-store"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useTranslations } from "next-intl"
+import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
 import { search, formatSearchResultsForLLM } from "@/lib/search/search-service"
 import type { SendContent, SendContentBlock, ChatSession } from "@/lib/claude/types"
 import { toast } from "sonner"
@@ -55,6 +59,7 @@ import { loadCustomSlashCommands } from "@/lib/slash-commands/custom"
 import { executeShell, formatShellResult } from "@/lib/shell/exec"
 import { appendMemory, type MemoryScope } from "@/lib/files/memory"
 import { updateSession } from "@/lib/db/sessions"
+import { loggers } from "@/lib/logger"
 import { AttachmentPreview } from "./composer/attachment-preview"
 import { BottomToolbar } from "./composer/bottom-toolbar"
 import { CharCounter } from "./composer/char-counter"
@@ -70,6 +75,15 @@ interface Props {
   onSend: (content: SendContent) => void | Promise<void>
   onStop: () => void | Promise<void>
   disabled?: boolean
+}
+
+/**
+ * Imperative handle exposed by `<Composer>`. The desktop shell uses it to
+ * inject `@CharacterName` mentions at the caret when the user clicks a
+ * row in the team member list.
+ */
+export interface ComposerHandle {
+  insertMention: (name: string) => void
 }
 
 const SUPPORTED_IMAGE_PREFIX = "image/"
@@ -144,9 +158,14 @@ interface InnerProps {
   onStop: () => void | Promise<void>
   onCommand: (cmd: SlashCommand, args: string) => Promise<boolean>
   onSubmitMemory: (scope: MemoryScope, text: string) => Promise<boolean>
+  handleRef?: Ref<ComposerHandle>
 }
 
 function ComposerInner(props: InnerProps) {
+  const t = useTranslations("chat.composer")
+  const tAttach = useTranslations("chat.composer.attachments")
+  const tCommands = useTranslations("chat.composer.commands")
+  const tMemory = useTranslations("chat.composer.memory")
   const controller = usePromptInputController()
   const attachments = usePromptInputAttachments()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -186,7 +205,12 @@ function ComposerInner(props: InnerProps) {
     if (props.session.permissionMode === permissionMode) return
     void updateSession(props.session.id, {
       permissionMode: permissionMode ?? undefined,
-    }).catch((err) => console.warn("updateSession permissionMode failed", err))
+    }).catch((err) => {
+      loggers.chat.warn("updateSession permissionMode failed", {
+        sessionId: props.session?.id,
+        err: err instanceof Error ? err.message : String(err),
+      })
+    })
   }, [permissionMode, props.session])
 
   // --- Hydrate chat-store from session row on first session change -------
@@ -204,22 +228,22 @@ function ComposerInner(props: InnerProps) {
   )
 
   const trigger = useMemo<ComposerTrigger | null>(() => {
-    const t = detectTrigger(controller.textInput.value, caret)
-    if (!t) return null
+    const tg = detectTrigger(controller.textInput.value, caret)
+    if (!tg) return null
     if (
       popoverDismissed &&
-      popoverDismissed.kind === t.kind &&
-      popoverDismissed.tokenStart === t.tokenStart
+      popoverDismissed.kind === tg.kind &&
+      popoverDismissed.tokenStart === tg.tokenStart
     ) {
       return null
     }
-    return t
+    return tg
   }, [controller.textInput.value, caret, popoverDismissed])
 
   useEffect(() => {
     if (!popoverDismissed) return
-    const t = detectTrigger(controller.textInput.value, caret)
-    if (!t || t.kind !== popoverDismissed.kind || t.tokenStart !== popoverDismissed.tokenStart) {
+    const tg = detectTrigger(controller.textInput.value, caret)
+    if (!tg || tg.kind !== popoverDismissed.kind || tg.tokenStart !== popoverDismissed.tokenStart) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPopoverDismissed(null)
     }
@@ -260,7 +284,7 @@ function ComposerInner(props: InnerProps) {
       if (item.kind === "slash") {
         const cmd = item.command
         if (cmd.disabled) {
-          toast.info(`/${cmd.name} is not available yet.`)
+          toast.info(tCommands("unavailable", { name: cmd.name }))
           return
         }
         const args = trigger.query.replace(new RegExp(`^${cmd.name}\\s*`), "").trim()
@@ -302,7 +326,7 @@ function ComposerInner(props: InnerProps) {
       } else if (item.kind === "memory") {
         const text = trigger.query.trim()
         if (!text) {
-          toast.error("Type the memory line after #.")
+          toast.error(tMemory("needsLine"))
           return
         }
         const ok = await props.onSubmitMemory(item.scope, text)
@@ -310,7 +334,16 @@ function ComposerInner(props: InnerProps) {
         dismissPopover()
       }
     },
-    [trigger, controller.textInput, addReferencedPath, insertReplacement, props, dismissPopover]
+    [
+      trigger,
+      controller.textInput,
+      addReferencedPath,
+      insertReplacement,
+      props,
+      dismissPopover,
+      tCommands,
+      tMemory,
+    ]
   )
 
   // --- Submit handler ----------------------------------------------------
@@ -394,8 +427,8 @@ function ComposerInner(props: InnerProps) {
   )
 
   const onSelect = useCallback((e: React.SyntheticEvent<HTMLTextAreaElement>) => {
-    const t = e.currentTarget
-    setCaret(t.selectionStart ?? t.value.length)
+    const ta = e.currentTarget
+    setCaret(ta.selectionStart ?? ta.value.length)
   }, [])
 
   // --- Paste / drag for attachments -------------------------------------
@@ -406,17 +439,20 @@ function ComposerInner(props: InnerProps) {
       const rejected = incoming.length - sized.length
       if (rejected > 0) {
         toast.warning(
-          `${rejected} file${rejected === 1 ? "" : "s"} exceeded ${MAX_FILE_SIZE / (1024 * 1024)}MB.`
+          tAttach("fileSizeExceeded", {
+            count: rejected,
+            max: MAX_FILE_SIZE / (1024 * 1024),
+          })
         )
       }
       const headroom = Math.max(0, MAX_FILES - attachments.files.length)
       const take = sized.slice(0, headroom)
       if (sized.length > headroom) {
-        toast.warning(`Only ${MAX_FILES} attachments allowed.`)
+        toast.warning(tAttach("countLimit", { max: MAX_FILES }))
       }
       if (take.length > 0) attachments.add(take)
     },
-    [attachments]
+    [attachments, tAttach]
   )
 
   const onPaste = useCallback(
@@ -471,6 +507,34 @@ function ComposerInner(props: InnerProps) {
     fileInputRef.current?.click()
   }, [])
 
+  // Imperative handle: insert `@name ` at the caret. Used by the desktop
+  // shell's member list to mention a teammate without going through any
+  // intermediate draft store.
+  useImperativeHandle(
+    props.handleRef,
+    () => ({
+      insertMention: (name: string) => {
+        const ta = textareaRef.current
+        const cur = controller.textInput.value
+        const pos = ta?.selectionStart ?? cur.length
+        const needsLeadSpace = pos > 0 && !/\s$/.test(cur.slice(0, pos))
+        const insertion = `${needsLeadSpace ? " " : ""}@${name} `
+        const next = cur.slice(0, pos) + insertion + cur.slice(pos)
+        controller.textInput.setInput(next)
+        const caret = pos + insertion.length
+        requestAnimationFrame(() => {
+          const ta2 = textareaRef.current
+          if (ta2) {
+            ta2.setSelectionRange(caret, caret)
+            ta2.focus()
+          }
+        })
+        setCaret(caret)
+      },
+    }),
+    [controller.textInput]
+  )
+
   const isStreaming = props.status === "streaming"
 
   return (
@@ -489,10 +553,9 @@ function ComposerInner(props: InnerProps) {
       >
         <DragOverlay visible={isDragging} />
 
-        {/* Hidden file input for the paperclip button */}
         <input
           accept="image/*"
-          aria-label="Upload image"
+          aria-label={t("ariaUploadImage")}
           className="hidden"
           multiple
           onChange={onFilePick}
@@ -500,12 +563,11 @@ function ComposerInner(props: InnerProps) {
           type="file"
         />
 
-        {/* Left button cluster — bottom-aligned with the textarea baseline */}
         <div className="flex shrink-0 items-center gap-0.5">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                aria-label="Attach image"
+                aria-label={t("ariaAttachImage")}
                 className="size-9 text-muted-foreground hover:text-foreground"
                 disabled={props.disabled}
                 onClick={openFileDialog}
@@ -516,7 +578,7 @@ function ComposerInner(props: InnerProps) {
                 <PaperclipIcon className="size-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Attach image</TooltipContent>
+            <TooltipContent>{t("attachImageTooltip")}</TooltipContent>
           </Tooltip>
 
           {isTauri() && <ScreenshotButton disabled={props.disabled} />}
@@ -524,13 +586,9 @@ function ComposerInner(props: InnerProps) {
           <VoiceTranscriptionBridge disabled={props.disabled} />
         </div>
 
-        {/* Textarea — takes the remaining width.
-            `min-h-9` matches the button cluster so single-line content
-            visually centers between them. `field-sizing-content` makes
-            it grow up to `max-h-48` as the user types. */}
         <div className="relative flex-1 self-center">
           <textarea
-            aria-label="Message"
+            aria-label={t("ariaMessage")}
             className={cn(
               "field-sizing-content block min-h-6 w-full resize-none bg-transparent px-1 py-1.5 pr-10 text-sm leading-6 outline-none placeholder:text-muted-foreground"
             )}
@@ -542,11 +600,7 @@ function ComposerInner(props: InnerProps) {
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             onSelect={onSelect}
-            placeholder={
-              props.disabled
-                ? "Select a session to start chatting…"
-                : "Send a message — try /, @, !, or #"
-            }
+            placeholder={props.disabled ? t("placeholderDisabled") : t("placeholder")}
             ref={textareaRef}
             rows={1}
             style={{ maxHeight: "12rem" }}
@@ -555,14 +609,11 @@ function ComposerInner(props: InnerProps) {
           <CharCounter />
         </div>
 
-        {/* Right cluster — submit only. Permission mode lives in the
-            bottom toolbar so it doesn't fight the submit button for
-            vertical alignment. */}
         <div className="flex shrink-0 items-center">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                aria-label={isStreaming ? "Stop" : "Send"}
+                aria-label={isStreaming ? t("ariaStop") : t("ariaSend")}
                 className="size-9 rounded-full"
                 disabled={
                   !isStreaming &&
@@ -583,7 +634,7 @@ function ComposerInner(props: InnerProps) {
                 )}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{isStreaming ? "Stop" : "Send"}</TooltipContent>
+            <TooltipContent>{isStreaming ? t("stopTooltip") : t("sendTooltip")}</TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -617,14 +668,15 @@ function VoiceTranscriptionBridge({ disabled }: { disabled?: boolean }) {
 
 // --- Outer component ------------------------------------------------------
 
-export function Composer({
-  session,
-  onStartNewSession,
-  onOpenSettings,
-  onSend,
-  onStop,
-  disabled,
-}: Props) {
+export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
+  { session, onStartNewSession, onOpenSettings, onSend, onStop, disabled },
+  ref
+) {
+  const tCommands = useTranslations("chat.composer.commands")
+  const tShell = useTranslations("chat.composer.shell")
+  const tMemory = useTranslations("chat.composer.memory")
+  const tAttach = useTranslations("chat.composer.attachments")
+  const tWebSearch = useTranslations("webSearchToggle")
   const status = useChatStore((s) => s.status)
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
   const appendMessage = useChatStore((s) => s.appendMessage)
@@ -659,14 +711,26 @@ export function Composer({
         try {
           await cmd.handler(ctx)
         } catch (err) {
-          toast.error(err instanceof Error ? err.message : "Command failed")
+          loggers.chat.error("slash command failed", err, {
+            command: cmd.name,
+            sessionId: session?.id,
+          })
+          toast.error(err instanceof Error ? err.message : tCommands("failed"))
         }
         return true
       }
       if (cmd.template) return true
       return false
     },
-    [session, status, onStartNewSession, onOpenSettings, setPermissionMode, pushSystemMessage]
+    [
+      session,
+      status,
+      onStartNewSession,
+      onOpenSettings,
+      setPermissionMode,
+      pushSystemMessage,
+      tCommands,
+    ]
   )
 
   const handleBashSubmit = useCallback(
@@ -674,35 +738,40 @@ export function Composer({
       const cmd = rawCmd.trim()
       if (!cmd) return false
       if (!cwd) {
-        toast.error("Set a working directory before running shell commands.")
+        toast.error(tShell("needsCwd"))
         return false
       }
-      pushSystemMessage(`Running \`$ ${cmd}\` in \`${cwd}\`…`)
+      pushSystemMessage(tShell("runningHint", { cmd, cwd }))
       try {
         const result = await executeShell(cmd, cwd)
         pushSystemMessage(formatShellResult(cmd, result))
       } catch (err) {
+        loggers.chat.error("shell command failed", err, { cmd, cwd })
         pushSystemMessage(
-          `\`$ ${cmd}\` failed: ${err instanceof Error ? err.message : String(err)}`
+          tShell("failed", {
+            cmd,
+            error: err instanceof Error ? err.message : String(err),
+          })
         )
       }
       return true
     },
-    [cwd, pushSystemMessage]
+    [cwd, pushSystemMessage, tShell]
   )
 
   const handleMemorySubmit = useCallback(
     async (scope: MemoryScope, text: string): Promise<boolean> => {
       try {
         const path = await appendMemory(scope, text, cwd)
-        toast.success(`Appended to ${path}`)
+        toast.success(tMemory("appended", { path }))
         return true
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Memory write failed")
+        loggers.chat.error("memory append failed", err, { scope, cwd })
+        toast.error(err instanceof Error ? err.message : tMemory("failed"))
         return false
       }
     },
-    [cwd]
+    [cwd, tMemory]
   )
 
   const handleSubmit = useCallback(
@@ -713,7 +782,7 @@ export function Composer({
         return
       }
       if (trimmed.startsWith("#")) {
-        toast.info("Pick Project or User memory in the popover to save.")
+        toast.info(tMemory("pickScope"))
         return
       }
 
@@ -744,9 +813,19 @@ export function Composer({
           })
           const ctx = formatSearchResultsForLLM(resp)
           augmented = `${ctx}\n\n---\n\nUser question: ${text}`
-          pushSystemMessage(`🔎 Searched via ${resp.provider} — ${resp.results.length} results`)
+          pushSystemMessage(
+            `🔎 ${tWebSearch("searchedVia", {
+              provider: resp.provider,
+              count: resp.results.length,
+            })}`
+          )
         } catch (err) {
-          toast.error(`Web search failed: ${err instanceof Error ? err.message : String(err)}`)
+          loggers.chat.error("web search failed", err, { query: trimmed })
+          toast.error(
+            tWebSearch("searchFailed", {
+              message: err instanceof Error ? err.message : String(err),
+            })
+          )
         }
         useChatStore.getState().setWebSearchOnForNextSend(false)
       }
@@ -757,16 +836,20 @@ export function Composer({
         (Array.isArray(content) && content.length === 0)
       if (isEmpty) return
       if (rejected > 0) {
-        toast.warning(
-          rejected === 1
-            ? "1 attachment was skipped (only images are supported)."
-            : `${rejected} attachments were skipped (only images are supported).`
-        )
+        toast.warning(tAttach("skipped", { count: rejected }))
       }
       await onSend(content)
       clearReferencedPaths()
     },
-    [onSend, handleBashSubmit, clearReferencedPaths, pushSystemMessage]
+    [
+      onSend,
+      handleBashSubmit,
+      clearReferencedPaths,
+      pushSystemMessage,
+      tAttach,
+      tMemory,
+      tWebSearch,
+    ]
   )
 
   const promptStatus: PromptStatus =
@@ -787,10 +870,11 @@ export function Composer({
           onStop={onStop}
           onCommand={handleSlashCommand}
           onSubmitMemory={handleMemorySubmit}
+          handleRef={ref}
         />
         <BottomToolbar session={session ?? null} />
         <HelperHints />
       </PromptInputProvider>
     </div>
   )
-}
+})

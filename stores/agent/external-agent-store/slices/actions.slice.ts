@@ -1,5 +1,6 @@
 import type { StoreApi } from "zustand"
 import { nanoid } from "nanoid"
+import { loggers } from "@/lib/logger"
 import type {
   ExternalAgentBenchmarkCapabilityEntry,
   ExternalAgentConfig,
@@ -52,6 +53,8 @@ type ExternalAgentStoreSet = StoreApi<ExternalAgentStore>["setState"]
 type ExternalAgentStoreGet = StoreApi<ExternalAgentStore>["getState"]
 
 type ExternalAgentActionsSlice = Omit<ExternalAgentStore, keyof typeof initialState>
+
+const externalAgentStoreLogger = loggers.agent.child("external-agent-store")
 
 function toDate(value: Date | string | undefined, fallback = new Date()): Date {
   if (value instanceof Date) {
@@ -536,6 +539,7 @@ export const createExternalAgentActionsSlice = (
       return id
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      externalAgentStoreLogger.error("spawnAgent failed", { err })
       set({ lastError: message, isLoading: false })
       throw err
     }
@@ -550,6 +554,7 @@ export const createExternalAgentActionsSlice = (
       await sendToExternalAgent(agentId, message)
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err)
+      externalAgentStoreLogger.error("sendToAgent failed", { agentId, err })
       set({ lastError: errorMessage })
       throw err
     }
@@ -574,6 +579,7 @@ export const createExternalAgentActionsSlice = (
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      externalAgentStoreLogger.error("killRunningAgent failed", { agentId, err })
       set({ lastError: message })
       throw err
     }
@@ -611,6 +617,7 @@ export const createExternalAgentActionsSlice = (
       set({ runningAgents, runningAgentIds: agentIds, isLoading: false })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      externalAgentStoreLogger.error("refreshRunningAgents failed", { err })
       set({ lastError: message, isLoading: false })
     }
   },
@@ -623,6 +630,7 @@ export const createExternalAgentActionsSlice = (
       set({ runningAgents: {}, runningAgentIds: [] })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      externalAgentStoreLogger.error("killAllRunningAgents failed", { err })
       set({ lastError: message })
       throw err
     }
@@ -665,6 +673,7 @@ export const createExternalAgentActionsSlice = (
       return terminalId
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      externalAgentStoreLogger.error("createTerminal failed", { sessionId, err })
       set({ lastError: message, isLoading: false })
       throw err
     }
@@ -679,6 +688,7 @@ export const createExternalAgentActionsSlice = (
       await acpTerminalWrite(terminalId, data)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      externalAgentStoreLogger.error("writeToTerminal failed", { terminalId, err })
       set({ lastError: message })
       throw err
     }
@@ -731,6 +741,7 @@ export const createExternalAgentActionsSlice = (
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      externalAgentStoreLogger.error("killTerminal failed", { terminalId, err })
       set({ lastError: message })
       throw err
     }
@@ -750,6 +761,7 @@ export const createExternalAgentActionsSlice = (
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      externalAgentStoreLogger.error("releaseTerminal failed", { terminalId, err })
       set({ lastError: message })
       throw err
     }
@@ -778,6 +790,7 @@ export const createExternalAgentActionsSlice = (
       return exitCode
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      externalAgentStoreLogger.error("waitForTerminalExit failed", { terminalId, err })
       set({ lastError: message })
       throw err
     }
@@ -809,6 +822,7 @@ export const createExternalAgentActionsSlice = (
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      externalAgentStoreLogger.error("killSessionTerminals failed", { sessionId, err })
       set({ lastError: message })
       throw err
     }
@@ -868,14 +882,16 @@ export const createExternalAgentActionsSlice = (
             exitCode,
             createdAt: existing?.createdAt ?? Date.now(),
           }
-        } catch {
+        } catch (err) {
           // Terminal may have been released
+          externalAgentStoreLogger.debug("Skipping released terminal during refresh", { id, err })
         }
       }
 
       set({ terminals, terminalIds, isLoading: false })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      externalAgentStoreLogger.error("refreshTerminals failed", { err })
       set({ lastError: message, isLoading: false })
     }
   },

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, memo, useRef, useCallback } from "react"
+import { useTranslations } from "next-intl"
 import {
   Play,
   Pause,
@@ -14,6 +15,8 @@ import {
 import { cn, formatVideoTime } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { downloadFromUrl } from "@/lib/files/download"
+import { loggers } from "@/lib/logger"
 
 interface VideoBlockProps {
   src: string
@@ -61,6 +64,7 @@ export const VideoBlock = memo(function VideoBlock({
   muted = false,
   controls = true,
 }: VideoBlockProps) {
+  const t = useTranslations("chat.renderers.video")
   const videoRef = useRef<HTMLVideoElement>(null)
   const [isPlaying, setIsPlaying] = useState(autoPlay)
   const [isMuted, setIsMuted] = useState(muted)
@@ -117,14 +121,16 @@ export const VideoBlock = memo(function VideoBlock({
     setCurrentTime(time)
   }, [])
 
-  const handleDownload = useCallback(() => {
-    const link = document.createElement("a")
-    link.href = src
-    link.download = title || "video"
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }, [src, title])
+  const handleDownload = useCallback(async () => {
+    try {
+      await downloadFromUrl(src, title || t("defaultFilename"))
+    } catch (err) {
+      loggers.chat.warn("video download failed", {
+        err: err instanceof Error ? err.message : String(err),
+        src,
+      })
+    }
+  }, [src, title, t])
 
   const handleOpenExternal = useCallback(() => {
     window.open(src, "_blank")
@@ -140,10 +146,10 @@ export const VideoBlock = memo(function VideoBlock({
         style={{ aspectRatio: "16/9" }}
       >
         <VideoIcon className="h-12 w-12 text-muted-foreground/50 mb-2" />
-        <p className="text-sm text-muted-foreground">Failed to load video</p>
+        <p className="text-sm text-muted-foreground">{t("failedToLoad")}</p>
         <Button variant="ghost" size="sm" className="mt-2" onClick={handleOpenExternal}>
           <ExternalLink className="h-3 w-3 mr-1" />
-          Open URL
+          {t("openUrl")}
         </Button>
       </div>
     )
@@ -155,7 +161,7 @@ export const VideoBlock = memo(function VideoBlock({
         <div className="relative rounded-lg overflow-hidden" style={{ aspectRatio: "16/9" }}>
           <iframe
             src={`https://www.youtube.com/embed/${youtubeId}${autoPlay ? "?autoplay=1" : ""}`}
-            title={title || "YouTube video"}
+            title={title || t("youtubeTitle")}
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen
             className="absolute inset-0 w-full h-full"
@@ -176,7 +182,7 @@ export const VideoBlock = memo(function VideoBlock({
         <div className="relative rounded-lg overflow-hidden" style={{ aspectRatio: "16/9" }}>
           <iframe
             src={`https://player.vimeo.com/video/${vimeoId}${autoPlay ? "?autoplay=1" : ""}`}
-            title={title || "Vimeo video"}
+            title={title || t("vimeoTitle")}
             allow="autoplay; fullscreen; picture-in-picture"
             allowFullScreen
             className="absolute inset-0 w-full h-full"
@@ -200,7 +206,7 @@ export const VideoBlock = memo(function VideoBlock({
         <div className="relative rounded-lg overflow-hidden" style={{ aspectRatio: "16/9" }}>
           <iframe
             src={bilibiliSrc}
-            title={title || "Bilibili video"}
+            title={title || t("bilibiliTitle")}
             allowFullScreen
             className="absolute inset-0 w-full h-full"
           />
@@ -262,11 +268,12 @@ export const VideoBlock = memo(function VideoBlock({
                       size="icon"
                       className="h-8 w-8 text-white hover:bg-white/20"
                       onClick={handlePlayPause}
+                      aria-label={isPlaying ? t("pause") : t("play")}
                     >
                       {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>{isPlaying ? "Pause" : "Play"}</TooltipContent>
+                  <TooltipContent>{isPlaying ? t("pause") : t("play")}</TooltipContent>
                 </Tooltip>
 
                 <Tooltip>
@@ -276,11 +283,12 @@ export const VideoBlock = memo(function VideoBlock({
                       size="icon"
                       className="h-8 w-8 text-white hover:bg-white/20"
                       onClick={handleMuteToggle}
+                      aria-label={isMuted ? t("unmute") : t("mute")}
                     >
                       {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>{isMuted ? "Unmute" : "Mute"}</TooltipContent>
+                  <TooltipContent>{isMuted ? t("unmute") : t("mute")}</TooltipContent>
                 </Tooltip>
 
                 <span className="text-xs text-white">
@@ -297,11 +305,12 @@ export const VideoBlock = memo(function VideoBlock({
                         size="icon"
                         className="h-8 w-8 text-white hover:bg-white/20"
                         onClick={handleDownload}
+                        aria-label={t("download")}
                       >
                         <Download className="h-4 w-4" />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>Download</TooltipContent>
+                    <TooltipContent>{t("download")}</TooltipContent>
                   </Tooltip>
                 )}
 
@@ -312,11 +321,12 @@ export const VideoBlock = memo(function VideoBlock({
                       size="icon"
                       className="h-8 w-8 text-white hover:bg-white/20"
                       onClick={handleFullscreen}
+                      aria-label={t("fullscreen")}
                     >
                       <Maximize className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Fullscreen</TooltipContent>
+                  <TooltipContent>{t("fullscreen")}</TooltipContent>
                 </Tooltip>
               </div>
             </div>

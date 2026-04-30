@@ -4,6 +4,7 @@
 
 export * from "./agent"
 export * from "./agent-mode"
+export * from "./agent-trace"
 export * from "./sub-agent"
 export * from "./agent-team"
 export * from "./background-agent"

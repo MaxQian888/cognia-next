@@ -28,10 +28,13 @@ import {
 import type { ToolUIPart, UIMessage } from "ai"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import type { Character } from "@/lib/claude/types"
-import { useMemo, useState, type KeyboardEvent } from "react"
+import { useCallback, useMemo, useState, type KeyboardEvent } from "react"
+import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
-import { avatarColor, avatarGlyph } from "@/lib/avatar"
-import { useChatStore } from "@/stores/chat-store"
+import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
+import { useChatStore } from "@/stores/chat"
+import { useCopy } from "@/hooks/ui/use-copy"
+import { loggers } from "@/lib/logger"
 
 interface Props {
   message: UIMessage
@@ -55,10 +58,11 @@ export function MessageRenderer({
   onRegenerate,
   onEditResend,
 }: Props) {
+  const t = useTranslations("chat.message")
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState("")
-  const [copied, setCopied] = useState(false)
   const [shared, setShared] = useState(false)
+  const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
 
   const bookmarkedIds = useChatStore((s) => s.bookmarkedIds)
   const toggleBookmark = useChatStore((s) => s.toggleBookmark)
@@ -111,20 +115,14 @@ export function MessageRenderer({
     }
   }
 
-  const handleCopy = async () => {
+  const handleCopy = useCallback(async () => {
     const text = extractText(message)
     if (!text) return
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      onCopy?.()
-      window.setTimeout(() => setCopied(false), 1500)
-    } catch (err) {
-      console.error("clipboard write failed", err)
-    }
-  }
+    const ok = await copy(text)
+    if (ok) onCopy?.()
+  }, [message, copy, onCopy])
 
-  const handleShare = async () => {
+  const handleShare = useCallback(async () => {
     const text = extractText(message)
     if (!text) return
     try {
@@ -139,10 +137,12 @@ export function MessageRenderer({
       // Web Share API can throw on user cancel — that's not a real error.
       const name = (err as { name?: string })?.name
       if (name !== "AbortError") {
-        console.error("share failed", err)
+        loggers.chat.warn("share failed", {
+          err: err instanceof Error ? err.message : String(err),
+        })
       }
     }
-  }
+  }, [message])
 
   const usage = (message as { metadata?: { usage?: UsageInfo } }).metadata?.usage
 
@@ -183,10 +183,10 @@ export function MessageRenderer({
           />
           <div className="flex justify-end gap-2 text-xs">
             <Button variant="ghost" size="sm" onClick={cancelEdit}>
-              Cancel
+              {t("editingCancel")}
             </Button>
             <Button size="sm" onClick={submitEdit}>
-              Send (⌘/Ctrl+Enter)
+              {t("editingSubmit")}
             </Button>
           </div>
         </div>
@@ -198,7 +198,9 @@ export function MessageRenderer({
               `${message.id}-${i}`,
               isStreaming,
               message.role === "user" ? mentionPattern : null,
-              characterById
+              characterById,
+              message.id,
+              t
             )
           )}
         </MessageContent>
@@ -226,24 +228,24 @@ export function MessageRenderer({
           )}
 
           <MessageAction
-            tooltip={copied ? "Copied!" : "Copy message"}
-            label="Copy message"
+            tooltip={copied ? t("copyDone") : t("copyTooltip")}
+            label={t("copyLabel")}
             onClick={handleCopy}
           >
             {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
           </MessageAction>
 
           <MessageAction
-            tooltip={shared ? "Shared!" : "Share"}
-            label="Share message"
+            tooltip={shared ? t("shareDone") : t("shareTooltip")}
+            label={t("shareLabel")}
             onClick={handleShare}
           >
             <Share2Icon className="size-3.5" />
           </MessageAction>
 
           <MessageAction
-            tooltip={isBookmarked ? "Remove bookmark" : "Bookmark"}
-            label="Toggle bookmark"
+            tooltip={isBookmarked ? t("bookmarkRemoveTooltip") : t("bookmarkTooltip")}
+            label={t("bookmarkLabel")}
             onClick={() => toggleBookmark(message.id)}
             className={cn(isBookmarked && "text-yellow-500")}
           >
@@ -251,15 +253,15 @@ export function MessageRenderer({
           </MessageAction>
 
           {message.role === "user" && onEditResend && (
-            <MessageAction tooltip="Edit & resend" label="Edit and resend" onClick={startEdit}>
+            <MessageAction tooltip={t("editTooltip")} label={t("editLabel")} onClick={startEdit}>
               <PencilIcon className="size-3.5" />
             </MessageAction>
           )}
 
           {message.role === "assistant" && isLastAssistant && onRegenerate && (
             <MessageAction
-              tooltip="Regenerate"
-              label="Regenerate"
+              tooltip={t("regenerateTooltip")}
+              label={t("regenerateLabel")}
               onClick={() => void onRegenerate()}
               disabled={isStreaming}
             >
@@ -273,17 +275,20 @@ export function MessageRenderer({
 }
 
 function UsageBreakdown({ usage }: { usage: UsageInfo }) {
+  const t = useTranslations("chat.message")
   return (
     <div className="space-y-0.5 font-mono text-xs">
-      <div>Input: {usage.inputTokens ?? 0}</div>
-      <div>Output: {usage.outputTokens ?? 0}</div>
+      <div>{t("usageInput", { n: usage.inputTokens ?? 0 })}</div>
+      <div>{t("usageOutput", { n: usage.outputTokens ?? 0 })}</div>
       {usage.cacheReadInputTokens !== undefined && usage.cacheReadInputTokens > 0 && (
-        <div>Cache hit: {usage.cacheReadInputTokens}</div>
+        <div>{t("usageCacheHit", { n: usage.cacheReadInputTokens })}</div>
       )}
       {usage.cacheCreationInputTokens !== undefined && usage.cacheCreationInputTokens > 0 && (
-        <div>Cache write: {usage.cacheCreationInputTokens}</div>
+        <div>{t("usageCacheWrite", { n: usage.cacheCreationInputTokens })}</div>
       )}
-      {usage.totalCostUsd !== undefined && <div>Cost: ${usage.totalCostUsd.toFixed(4)}</div>}
+      {usage.totalCostUsd !== undefined && (
+        <div>{t("usageCost", { cost: usage.totalCostUsd.toFixed(4) })}</div>
+      )}
     </div>
   )
 }
@@ -372,7 +377,9 @@ function renderPart(
   key: string,
   isStreaming: boolean,
   mentionPattern: RegExp | null,
-  characterById: Map<string, Character> | undefined
+  characterById: Map<string, Character> | undefined,
+  messageId: string | undefined,
+  t: ReturnType<typeof useTranslations>
 ) {
   const type = (part as { type?: string }).type
   if (!type) return null
@@ -380,9 +387,6 @@ function renderPart(
   if (type === "text") {
     const text = (part as { text?: string }).text ?? ""
     if (mentionPattern && characterById) {
-      // User-side text with team mention colorization. We render plain
-      // whitespace-preserved text here (no markdown) because user messages
-      // are short and we want to inline the colored mentions.
       const segments = highlightMentions(text, mentionPattern, characterById)
       return (
         <span key={key} className="whitespace-pre-wrap">
@@ -391,16 +395,15 @@ function renderPart(
       )
     }
 
-    // Streaming: streamdown for smooth incremental updates.
     if (isStreaming) {
       return <MessageResponse key={key}>{text}</MessageResponse>
     }
 
-    // Completed / historical: react-markdown + custom block renderers.
     return (
       <MarkdownRenderer
         key={key}
         content={text}
+        messageId={messageId}
         className="size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
       />
     )
@@ -426,7 +429,7 @@ function renderPart(
         <img
           key={key}
           src={url}
-          alt={(part as { filename?: string }).filename ?? "attachment"}
+          alt={(part as { filename?: string }).filename ?? t("attachmentAlt")}
           className="max-h-64 max-w-xs rounded-md border"
         />
       )
@@ -439,23 +442,25 @@ function renderPart(
     const tp = part as ToolUIPart
     const todos = parseTodoInput(tp.input)
     if (todos) {
-      const completed = todos.filter((t) => t.status === "completed").length
+      const completed = todos.filter((todo) => todo.status === "completed").length
       return (
         <Task key={key} defaultOpen className="not-prose mb-2 w-full">
-          <TaskTrigger title={`Plan · ${completed}/${todos.length} done`} />
+          <TaskTrigger title={t("todoPlanTitle", { done: completed, total: todos.length })} />
           <TaskContent>
-            {todos.map((t, i) => (
+            {todos.map((todo, i) => (
               <TaskItem
                 key={i}
                 className={cn(
                   "flex items-start gap-2",
-                  t.status === "completed" && "text-muted-foreground line-through",
-                  t.status === "in_progress" && "text-foreground"
+                  todo.status === "completed" && "text-muted-foreground line-through",
+                  todo.status === "in_progress" && "text-foreground"
                 )}
               >
-                <TodoStatusGlyph status={t.status} />
+                <TodoStatusGlyph status={todo.status} />
                 <span className="min-w-0 flex-1 break-words">
-                  {t.status === "in_progress" && t.activeForm ? t.activeForm : t.content}
+                  {todo.status === "in_progress" && todo.activeForm
+                    ? todo.activeForm
+                    : todo.content}
                 </span>
               </TaskItem>
             ))}

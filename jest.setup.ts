@@ -6,6 +6,77 @@
 import "@testing-library/jest-dom"
 import React from "react"
 
+// jsdom omits TextEncoder/TextDecoder — node:util has them. Required by
+// crypto helpers and fake-indexeddb's structured clone.
+if (typeof globalThis.TextEncoder === "undefined") {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { TextEncoder, TextDecoder } = require("node:util")
+  Object.assign(globalThis, { TextEncoder, TextDecoder })
+}
+
+// jsdom omits ResizeObserver / IntersectionObserver — Radix primitives use them
+// (Sheet, Slider, etc.). Provide a minimal polyfill so component tests can mount.
+class MockResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+if (typeof globalThis.ResizeObserver === "undefined") {
+  ;(globalThis as unknown as { ResizeObserver: typeof MockResizeObserver }).ResizeObserver =
+    MockResizeObserver
+}
+if (
+  typeof window !== "undefined" &&
+  typeof (window as unknown as { ResizeObserver?: unknown }).ResizeObserver === "undefined"
+) {
+  ;(window as unknown as { ResizeObserver: typeof MockResizeObserver }).ResizeObserver =
+    MockResizeObserver
+}
+
+class MockIntersectionObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  takeRecords() {
+    return [] as unknown[]
+  }
+  root = null
+  rootMargin = ""
+  thresholds: number[] = []
+}
+
+if (typeof globalThis.IntersectionObserver === "undefined") {
+  ;(
+    globalThis as unknown as { IntersectionObserver: typeof MockIntersectionObserver }
+  ).IntersectionObserver = MockIntersectionObserver
+}
+if (
+  typeof window !== "undefined" &&
+  typeof (window as unknown as { IntersectionObserver?: unknown }).IntersectionObserver ===
+    "undefined"
+) {
+  ;(
+    window as unknown as { IntersectionObserver: typeof MockIntersectionObserver }
+  ).IntersectionObserver = MockIntersectionObserver
+}
+
+// Radix primitives sometimes call hasPointerCapture / scrollIntoView, neither
+// of which jsdom implements. Stub them to satisfy callers.
+if (typeof Element !== "undefined") {
+  if (typeof Element.prototype.hasPointerCapture !== "function") {
+    Element.prototype.hasPointerCapture = function () {
+      return false
+    }
+  }
+  if (typeof Element.prototype.releasePointerCapture !== "function") {
+    Element.prototype.releasePointerCapture = function () {}
+  }
+  if (typeof Element.prototype.scrollIntoView !== "function") {
+    Element.prototype.scrollIntoView = function () {}
+  }
+}
+
 // jsdom doesn't expose structuredClone, but Node.js 17+ has it on the global
 // scope. Make it visible to jsdom-environment tests so fake-indexeddb (which
 // clones values for insertion) works inside the IndexedDB transport tests.

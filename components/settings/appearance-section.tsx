@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useSettingsStore } from "@/stores/settings"
 import type { AppFontScale, AppLanguage, AppTheme } from "@/lib/claude/types"
 import { PaletteIcon } from "lucide-react"
 

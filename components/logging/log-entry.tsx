@@ -40,7 +40,7 @@ import {
 import { AGENT_TRACE_MODULE } from "@/lib/agent-trace/log-adapter"
 import { LIVE_TRACE_EVENT_ICONS, LIVE_TRACE_EVENT_COLORS } from "@/lib/agent"
 import type { StructuredLogEntry, LogLevel } from "@/lib/logger"
-import type { AgentTraceEventType } from "@/types/agent-trace"
+import type { AgentTraceEventType } from "@/types/agent/agent-trace"
 
 export const LEVEL_CONFIG: Record<
   LogLevel,

@@ -13,7 +13,7 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useSettingsStore } from "@/stores/settings"
 import {
   type SearchProviderType,
   SEARCH_PROVIDERS,
@@ -22,6 +22,9 @@ import {
 } from "@/lib/search/types"
 import { testProviderConnection } from "@/lib/search/provider-test"
 import { SearchProviderCard, type ProviderTestState } from "./search-provider-card"
+import { createLogger } from "@/lib/logger"
+
+const log = createLogger("settings.search.providers")
 
 const ALL_PROVIDER_IDS = Object.keys(SEARCH_PROVIDERS) as SearchProviderType[]
 
@@ -102,17 +105,24 @@ export function SearchProviderGrid() {
         ...prev,
         [providerId]: { testing: true, result: null },
       }))
+      log.info("provider_test_started", { providerId })
       try {
         const isValid = await testProviderConnection(
           providerId,
           apiKey,
           providerId === "google" ? { cx: searchProviders[providerId]?.cx } : undefined
         )
+        if (isValid) {
+          log.info("provider_test_succeeded", { providerId })
+        } else {
+          log.info("provider_test_failed", { providerId })
+        }
         setTestStates((prev) => ({
           ...prev,
           [providerId]: { testing: false, result: isValid ? "success" : "error" },
         }))
-      } catch {
+      } catch (err) {
+        log.error("provider_test_failed", err, { providerId })
         setTestStates((prev) => ({
           ...prev,
           [providerId]: { testing: false, result: "error" },
@@ -123,15 +133,19 @@ export function SearchProviderGrid() {
   )
 
   const enableAll = () => {
+    const enabled: SearchProviderType[] = []
     filteredProviders.forEach((id) => {
       if (isProviderConfigured(id, searchProviders[id])) {
+        enabled.push(id)
         void setSearchProviderEnabled(id, true)
       }
     })
+    log.info("provider_enable_all", { count: enabled.length })
   }
 
   const disableAll = () => {
     filteredProviders.forEach((id) => void setSearchProviderEnabled(id, false))
+    log.info("provider_disable_all", { count: filteredProviders.length })
   }
 
   const resetToDefaults = () => {
@@ -140,6 +154,7 @@ export function SearchProviderGrid() {
     })
     setSearchQuery("")
     setFeatureFilters([])
+    log.info("provider_reset_to_defaults")
   }
 
   return (

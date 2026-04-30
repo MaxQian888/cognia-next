@@ -15,13 +15,17 @@ import type { SubAgentStatus } from "@/types/agent/sub-agent"
 import type { BackgroundAgentStatus } from "@/types/agent/background-agent"
 
 /**
- * Status configuration for visual display
+ * Status configuration for visual display.
+ *
+ * `labelKey` is an i18n key under the `agentStatus` namespace — components
+ * resolve it via `useTranslations("agentStatus")(labelKey)`. Keeping i18n
+ * out of this lib module avoids pulling next-intl into non-React code.
  */
 export interface StatusConfig {
   icon: LucideIcon
   color: string
   bgColor: string
-  label: string
+  labelKey: string
   animate?: boolean
 }
 
@@ -33,50 +37,50 @@ export const SUB_AGENT_STATUS_CONFIG: Record<SubAgentStatus, StatusConfig> = {
     icon: Clock,
     color: "text-muted-foreground",
     bgColor: "bg-muted",
-    label: "Pending",
+    labelKey: "pending",
   },
   queued: {
     icon: Clock,
     color: "text-blue-500",
     bgColor: "bg-blue-50 dark:bg-blue-950",
-    label: "Queued",
+    labelKey: "queued",
   },
   running: {
     icon: Loader2,
     color: "text-primary",
     bgColor: "bg-primary/10",
-    label: "Running",
+    labelKey: "running",
     animate: true,
   },
   waiting: {
     icon: Pause,
     color: "text-yellow-500",
     bgColor: "bg-yellow-50 dark:bg-yellow-950",
-    label: "Waiting",
+    labelKey: "waiting",
   },
   completed: {
     icon: CheckCircle,
     color: "text-green-500",
     bgColor: "bg-green-50 dark:bg-green-950",
-    label: "Completed",
+    labelKey: "completed",
   },
   failed: {
     icon: XCircle,
     color: "text-destructive",
     bgColor: "bg-destructive/10",
-    label: "Failed",
+    labelKey: "failed",
   },
   cancelled: {
     icon: XCircle,
     color: "text-orange-500",
     bgColor: "bg-orange-50 dark:bg-orange-950",
-    label: "Cancelled",
+    labelKey: "cancelled",
   },
   timeout: {
     icon: AlertTriangle,
     color: "text-red-500",
     bgColor: "bg-red-50 dark:bg-red-950",
-    label: "Timeout",
+    labelKey: "timeout",
   },
 }
 
@@ -88,62 +92,62 @@ export const BACKGROUND_AGENT_STATUS_CONFIG: Record<BackgroundAgentStatus, Statu
     icon: Clock,
     color: "text-muted-foreground",
     bgColor: "bg-muted",
-    label: "Idle",
+    labelKey: "idle",
   },
   queued: {
     icon: Clock,
     color: "text-blue-500",
     bgColor: "bg-blue-50 dark:bg-blue-950",
-    label: "Queued",
+    labelKey: "queued",
   },
   initializing: {
     icon: Loader2,
     color: "text-blue-500",
     bgColor: "bg-blue-50 dark:bg-blue-950",
-    label: "Initializing",
+    labelKey: "initializing",
   },
   running: {
     icon: Loader2,
     color: "text-primary",
     bgColor: "bg-primary/10",
-    label: "Running",
+    labelKey: "running",
     animate: true,
   },
   paused: {
     icon: Pause,
     color: "text-yellow-500",
     bgColor: "bg-yellow-50 dark:bg-yellow-950",
-    label: "Paused",
+    labelKey: "paused",
   },
   waiting: {
     icon: Clock,
     color: "text-orange-500",
     bgColor: "bg-orange-50 dark:bg-orange-950",
-    label: "Waiting",
+    labelKey: "waiting",
   },
   completed: {
     icon: CheckCircle,
     color: "text-green-500",
     bgColor: "bg-green-50 dark:bg-green-950",
-    label: "Completed",
+    labelKey: "completed",
   },
   failed: {
     icon: XCircle,
     color: "text-destructive",
     bgColor: "bg-destructive/10",
-    label: "Failed",
+    labelKey: "failed",
   },
   cancelled: {
     icon: XCircle,
     color: "text-orange-500",
     bgColor: "bg-orange-50 dark:bg-orange-950",
-    label: "Cancelled",
+    labelKey: "cancelled",
   },
   timeout: {
     icon: XCircle,
     color: "text-red-500",
     bgColor: "bg-red-50 dark:bg-red-950",
-    label: "Timeout",
+    labelKey: "timeout",
   },
 }
 

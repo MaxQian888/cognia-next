@@ -44,6 +44,13 @@ tauri-plugin-store = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "sync", "time"] }
 dirs = "5"
 ignore = "0.4"
+
+# System scheduler — async-trait abstraction over Windows Task Scheduler /
+# launchd / systemd, plus a sqlite-backed metadata store for recovery.
+async-trait = "0.1"
+parking_lot = "0.12"
+rusqlite = { version = "0.32", features = ["bundled"] }
+
 gray_matter = { version = "0.2", default-features = false, features = ["yaml"] }
 wait-timeout = "0.2"
 regex = "1"
@@ -75,3 +82,7 @@ oslog = "0.2"
 [target."cfg(target_os = \"linux\")".dependencies]
 libsystemd = "0.7"
 syslog = "7"
+
+[dev-dependencies]
+# Unit tests for the scheduler metadata store create temp sqlite DBs.
+tempfile = "3"

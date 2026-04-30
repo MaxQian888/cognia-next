@@ -5,33 +5,25 @@
 // acceptEdits → plan → bypassPermissions → default), the same cycle as
 // Shift+Tab on the textarea. Tooltip explains what each mode does.
 
-import { useChatStore, type PermissionMode } from "@/stores/chat-store"
+import { useTranslations } from "next-intl"
+import { useChatStore, type PermissionMode } from "@/stores/chat"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 const ORDER: (PermissionMode | null)[] = [null, "acceptEdits", "plan", "bypassPermissions"]
 
-const META: Record<string, { label: string; tooltip: string; toneClass: string }> = {
-  null: {
-    label: "Default",
-    tooltip: "Tools prompt for permission as usual.",
-    toneClass: "text-muted-foreground",
-  },
-  acceptEdits: {
-    label: "Accept edits",
-    tooltip: "Auto-approve file edits; other tools still prompt.",
-    toneClass: "text-blue-500",
-  },
-  plan: {
-    label: "Plan",
-    tooltip: "Read-only planning mode — Claude proposes changes without applying them.",
-    toneClass: "text-amber-500",
-  },
-  bypassPermissions: {
-    label: "Bypass",
-    tooltip: "All tools auto-approved. Use with care — Claude can run any command.",
-    toneClass: "text-rose-500",
-  },
+const TONE_BY_MODE: Record<string, string> = {
+  null: "text-muted-foreground",
+  acceptEdits: "text-blue-500",
+  plan: "text-amber-500",
+  bypassPermissions: "text-rose-500",
+}
+
+const TRANSLATION_KEY_BY_MODE: Record<string, "default" | "acceptEdits" | "plan" | "bypass"> = {
+  null: "default",
+  acceptEdits: "acceptEdits",
+  plan: "plan",
+  bypassPermissions: "bypass",
 }
 
 export function nextPermissionMode(cur: PermissionMode | null): PermissionMode | null {
@@ -48,8 +40,12 @@ export interface PermissionModeIndicatorProps {
 }
 
 export function PermissionModeIndicator({ onCycle }: PermissionModeIndicatorProps) {
+  const t = useTranslations("chat.permissionMode")
   const mode = useChatStore((s) => s.permissionMode)
-  const meta = META[String(mode)] ?? META.null
+  const key = TRANSLATION_KEY_BY_MODE[String(mode)] ?? "default"
+  const label = t(`${key}.label`)
+  const tooltip = t(`${key}.tooltip`)
+  const toneClass = TONE_BY_MODE[String(mode)] ?? TONE_BY_MODE.null
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -58,16 +54,16 @@ export function PermissionModeIndicator({ onCycle }: PermissionModeIndicatorProp
           onClick={() => onCycle(nextPermissionMode(mode))}
           className={cn(
             "rounded border px-2 py-0.5 font-mono text-[11px] transition-colors hover:bg-accent",
-            meta.toneClass
+            toneClass
           )}
-          aria-label={`Permission mode: ${meta.label}. Click to cycle.`}
+          aria-label={t("aria", { label })}
         >
-          ⇧⇥ {meta.label}
+          ⇧⇥ {label}
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-xs">
-        <p className="text-xs">{meta.tooltip}</p>
-        <p className="mt-1 text-[10px] text-muted-foreground">Shift+Tab to cycle.</p>
+        <p className="text-xs">{tooltip}</p>
+        <p className="mt-1 text-[10px] text-muted-foreground">{t("shiftTabHint")}</p>
       </TooltipContent>
     </Tooltip>
   )

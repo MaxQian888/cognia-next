@@ -1,0 +1,205 @@
+// End-to-end test for `buildBackupPackage` against a fake IndexedDB. We seed
+// each table, build a v3 package, and verify the manifest, payload, checksum,
+// and behavior of the include* options.
+
+import "fake-indexeddb/auto"
+import { buildBackupPackage, defaultExportFileName, serializePackage } from "./build-package"
+import { canonicalStringify } from "./migrate"
+import { sha256Hex } from "./crypto"
+import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
+import { saveSettings } from "@/lib/db/settings"
+
+beforeEach(async () => {
+  await getDb().delete()
+  __resetDbForTesting()
+  // Touch getDb() so the seed kicks off, then wait it out and wipe everything
+  // so each test starts from a known-empty state. Without this we'd race the
+  // seed on every test and end up with a mix of seeded built-ins + our rows.
+  const db = getDb()
+  await whenSeeded()
+  await Promise.all([
+    db.characters.clear(),
+    db.skills.clear(),
+    db.teams.clear(),
+    db.skillResources.clear(),
+  ])
+})
+
+async function seedAll() {
+  const db = getDb()
+  await saveSettings({ apiKey: "secret", defaultModel: "claude" })
+  await db.characters.put({
+    id: "c-builtin",
+    name: "Built-in",
+    avatarColor: "oklch(0 0 0)",
+    systemPrompt: "be helpful",
+    isBuiltIn: true,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  await db.characters.put({
+    id: "c-user",
+    name: "Custom",
+    avatarColor: "oklch(0 0 0)",
+    systemPrompt: "be witty",
+    isBuiltIn: false,
+    createdAt: 2,
+    updatedAt: 2,
+  })
+  await db.skills.put({
+    id: "s-builtin",
+    name: "Skill A",
+    content: "how-to",
+    isBuiltIn: true,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  await db.skills.put({
+    id: "s-user",
+    name: "Skill B",
+    content: "how-to-2",
+    isBuiltIn: false,
+    createdAt: 2,
+    updatedAt: 2,
+  })
+  await db.skillResources.put({
+    id: "r-1",
+    skillId: "s-builtin",
+    kind: "reference",
+    name: "ref1",
+    path: "ref/1",
+    content: "x",
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  await db.skillResources.put({
+    id: "r-2",
+    skillId: "s-user",
+    kind: "reference",
+    name: "ref2",
+    path: "ref/2",
+    content: "y",
+    createdAt: 2,
+    updatedAt: 2,
+  })
+  await db.teams.put({
+    id: "t-builtin",
+    name: "Team A",
+    avatarColor: "oklch(0 0 0)",
+    members: [],
+    orchestration: "round_robin",
+    isBuiltIn: true,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  await db.teams.put({
+    id: "t-user",
+    name: "Team B",
+    avatarColor: "oklch(0 0 0)",
+    members: [],
+    orchestration: "round_robin",
+    isBuiltIn: false,
+    createdAt: 2,
+    updatedAt: 2,
+  })
+  await db.promptPresets.put({
+    id: "p-1",
+    name: "preset",
+    content: "hi",
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  await db.mcpServers.put({
+    id: "m-1",
+    name: "test",
+    transport: "stdio",
+    config: {},
+    enabled: true,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  await db.sessions.put({
+    id: "sess-1",
+    title: "Hi",
+    kind: "direct",
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  await db.messages.put({
+    id: "msg-1",
+    sessionId: "sess-1",
+    role: "user",
+    parts: [{ type: "text", text: "yo" }],
+    createdAt: 1,
+  })
+  await db.sessionState.put({ sessionId: "sess-1", lastReadAt: 1, unreadCount: 0 })
+  await db.trustedWorkspaces.put({ path: "/some/dir", trustedAt: 5 })
+  await db.tts_provider_keys.put({ id: "tts.providerKey.openai", value: "sk-xxx" })
+}
+
+describe("buildBackupPackage", () => {
+  it("filters built-ins by default and excludes the API key", async () => {
+    await seedAll()
+    const pkg = await buildBackupPackage({ includeSessions: true, includeApiKey: false })
+    expect(pkg.version).toBe("3.0")
+    expect(pkg.manifest.version).toBe("3.0")
+    expect(pkg.manifest.schemaVersion).toBe(3)
+    expect(pkg.manifest.appVersion).toMatch(/\d+\.\d+\.\d+/)
+    expect(pkg.payload.settings?.apiKey).toBeUndefined()
+    expect(pkg.payload.characters?.map((c) => c.id)).toEqual(["c-user"])
+    expect(pkg.payload.skills?.map((s) => s.id)).toEqual(["s-user"])
+    expect(pkg.payload.teams?.map((t) => t.id)).toEqual(["t-user"])
+    // Built-in skill's resources are dropped along with the skill.
+    expect(pkg.payload.skillResources?.map((r) => r.id).sort()).toEqual(["r-2"])
+    expect(pkg.payload.sessions?.map((s) => s.id)).toEqual(["sess-1"])
+    expect(pkg.payload.messages?.map((m) => m.id)).toEqual(["msg-1"])
+    expect(pkg.payload.sessionState?.map((s) => s.sessionId)).toEqual(["sess-1"])
+    expect(pkg.payload.trustedWorkspaces?.map((w) => w.path)).toEqual(["/some/dir"])
+    expect(pkg.payload.ttsProviderKeys?.map((k) => k.id)).toEqual(["tts.providerKey.openai"])
+  })
+
+  it("includes built-ins and the API key when explicitly opted in", async () => {
+    await seedAll()
+    const pkg = await buildBackupPackage({
+      includeSessions: false,
+      includeApiKey: true,
+      includeBuiltIns: true,
+    })
+    expect(pkg.payload.settings?.apiKey).toBe("secret")
+    expect(pkg.payload.characters?.length).toBe(2)
+    expect(pkg.payload.skills?.length).toBe(2)
+    expect(pkg.payload.teams?.length).toBe(2)
+    // Sessions/messages/sessionState are omitted when includeSessions=false.
+    expect(pkg.payload.sessions).toBeUndefined()
+    expect(pkg.payload.messages).toBeUndefined()
+    expect(pkg.payload.sessionState).toBeUndefined()
+  })
+
+  it("computes a manifest checksum that matches sha256(canonical(payload))", async () => {
+    await seedAll()
+    const pkg = await buildBackupPackage({ includeSessions: true, includeApiKey: false })
+    const expected = await sha256Hex(canonicalStringify(pkg.payload))
+    expect(pkg.manifest.integrity.checksum).toBe(expected)
+    expect(pkg.manifest.integrity.algorithm).toBe("SHA-256")
+  })
+})
+
+describe("serializePackage", () => {
+  it("produces pretty-printed JSON parseable back to the same object", async () => {
+    await seedAll()
+    const pkg = await buildBackupPackage({ includeSessions: false, includeApiKey: false })
+    const serialized = serializePackage(pkg)
+    expect(serialized).toContain("\n  ")
+    expect(JSON.parse(serialized)).toEqual(pkg)
+  })
+})
+
+describe("defaultExportFileName", () => {
+  it("uses .cbk for plaintext and .enc.cbk for encrypted", () => {
+    const d = new Date("2024-03-04T10:00:00Z")
+    expect(defaultExportFileName(d, "plain")).toMatch(/^cognia-backup-\d{4}-\d{2}-\d{2}\.cbk$/)
+    expect(defaultExportFileName(d, "encrypted")).toMatch(
+      /^cognia-backup-\d{4}-\d{2}-\d{2}\.enc\.cbk$/
+    )
+  })
+})

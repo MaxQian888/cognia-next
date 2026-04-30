@@ -2,7 +2,7 @@
 
 import { useEffect } from "react"
 import { useTheme } from "next-themes"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useSettingsStore } from "@/stores/settings"
 import type { AppFontScale } from "@/lib/claude/types"
 
 const FONT_SIZE_PX: Record<AppFontScale, number> = {

@@ -5,9 +5,12 @@ import { Shield } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useSettingsStore } from "@/stores/settings"
 import type { SafeSearchLevel } from "@/lib/search/types"
 import { cn } from "@/lib/utils"
+import { createLogger } from "@/lib/logger"
+
+const log = createLogger("settings.search.safety")
 
 const LEVELS: { value: SafeSearchLevel; labelKey: string; descKey: string }[] = [
   { value: "off", labelKey: "off", descKey: "offDesc" },
@@ -36,7 +39,13 @@ export function SearchSafetySettings() {
               <CardDescription className="text-xs">{ts("description")}</CardDescription>
             </div>
           </div>
-          <Switch checked={enabled} onCheckedChange={(v) => void setEnabled(v)} />
+          <Switch
+            checked={enabled}
+            onCheckedChange={(v) => {
+              log.info("safety_enabled_changed", { enabled: v })
+              void setEnabled(v)
+            }}
+          />
         </div>
       </CardHeader>
       {enabled && (
@@ -46,7 +55,10 @@ export function SearchSafetySettings() {
             {LEVELS.map((l) => (
               <button
                 key={l.value}
-                onClick={() => void setLevel(l.value)}
+                onClick={() => {
+                  log.info("safety_level_changed", { level: l.value })
+                  void setLevel(l.value)
+                }}
                 className={cn(
                   "flex flex-col items-center gap-1 p-3 rounded-lg border transition-all",
                   level === l.value

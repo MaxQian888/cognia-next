@@ -14,8 +14,6 @@ import {
   ShieldCheck,
   ShieldAlert,
   ShieldQuestion,
-  Plus,
-  Trash2,
   AlertTriangle,
   CheckCircle2,
   XCircle,
@@ -27,7 +25,6 @@ import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import {
   Select,
@@ -38,14 +35,17 @@ import {
 } from "@/components/ui/select"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useSettingsStore } from "@/stores/settings"
 import {
   type SourceVerificationMode,
   type SourceVerificationSettings as VerifSettings,
   DEFAULT_SOURCE_VERIFICATION_SETTINGS,
 } from "@/lib/search/types"
 import { cn } from "@/lib/utils"
+import { createLogger } from "@/lib/logger"
+import { DomainListInput } from "./_shared/domain-list-input"
+
+const log = createLogger("settings.search.verification")
 
 // Inlined here (Cognia keeps this in `lib/settings/tools`).
 const VERIFICATION_MODE_KEYS: Record<
@@ -64,8 +64,6 @@ interface Props {
 
 export function SourceVerificationSettings({ className, compact = false }: Props) {
   const t = useTranslations("sourceVerification")
-  const [newTrustedDomain, setNewTrustedDomain] = useState("")
-  const [newBlockedDomain, setNewBlockedDomain] = useState("")
   const [domainsExpanded, setDomainsExpanded] = useState(false)
 
   const settings = useSettingsStore((s) => s.settings)
@@ -87,29 +85,12 @@ export function SourceVerificationSettings({ className, compact = false }: Props
 
   const patch = (p: Partial<VerifSettings>) => void setVerifSettings({ ...verif, ...p })
 
-  const handleAddTrustedDomain = () => {
-    const domain = newTrustedDomain
+  const sanitizeDomain = (raw: string) =>
+    raw
       .trim()
       .toLowerCase()
       .replace(/^https?:\/\//, "")
       .replace(/^www\./, "")
-    if (domain && !trustedDomains.includes(domain)) {
-      patch({ trustedDomains: [...trustedDomains, domain] })
-      setNewTrustedDomain("")
-    }
-  }
-
-  const handleAddBlockedDomain = () => {
-    const domain = newBlockedDomain
-      .trim()
-      .toLowerCase()
-      .replace(/^https?:\/\//, "")
-      .replace(/^www\./, "")
-    if (domain && !blockedDomains.includes(domain)) {
-      patch({ blockedDomains: [...blockedDomains, domain] })
-      setNewBlockedDomain("")
-    }
-  }
 
   const credibilityPercentage = Math.round(minimumCredibilityScore * 100)
 
@@ -121,7 +102,13 @@ export function SourceVerificationSettings({ className, compact = false }: Props
             <Shield className="h-4 w-4" />
             <Label className="text-sm font-medium">{t("title")}</Label>
           </div>
-          <Switch checked={enabled} onCheckedChange={(v) => patch({ enabled: v })} />
+          <Switch
+            checked={enabled}
+            onCheckedChange={(v) => {
+              log.info("verification_enabled_changed", { enabled: v })
+              patch({ enabled: v })
+            }}
+          />
         </div>
 
         {enabled && (
@@ -130,7 +117,10 @@ export function SourceVerificationSettings({ className, compact = false }: Props
               <Label className="text-xs text-muted-foreground">{t("verificationMode")}</Label>
               <Select
                 value={mode}
-                onValueChange={(value) => patch({ mode: value as SourceVerificationMode })}
+                onValueChange={(value) => {
+                  log.info("verification_mode_changed", { mode: value })
+                  patch({ mode: value as SourceVerificationMode })
+                }}
               >
                 <SelectTrigger className="h-8 text-xs">
                   <SelectValue />
@@ -169,7 +159,13 @@ export function SourceVerificationSettings({ className, compact = false }: Props
             <Shield className="h-5 w-5" />
             <CardTitle className="text-base">{t("title")}</CardTitle>
           </div>
-          <Switch checked={enabled} onCheckedChange={(v) => patch({ enabled: v })} />
+          <Switch
+            checked={enabled}
+            onCheckedChange={(v) => {
+              log.info("verification_enabled_changed", { enabled: v })
+              patch({ enabled: v })
+            }}
+          />
         </div>
         <CardDescription className="text-xs">{t("description")}</CardDescription>
       </CardHeader>
@@ -188,7 +184,10 @@ export function SourceVerificationSettings({ className, compact = false }: Props
                 <Tooltip key={key}>
                   <TooltipTrigger asChild>
                     <button
-                      onClick={() => patch({ mode: key })}
+                      onClick={() => {
+                        log.info("verification_mode_changed", { mode: key })
+                        patch({ mode: key })
+                      }}
                       className={cn(
                         "flex flex-col items-center gap-1 p-3 rounded-lg border transition-all",
                         mode === key
@@ -222,6 +221,7 @@ export function SourceVerificationSettings({ className, compact = false }: Props
             <Slider
               value={[credibilityPercentage]}
               onValueChange={([value]) => patch({ minimumCredibilityScore: value / 100 })}
+              onValueCommit={([value]) => log.info("verification_threshold_changed", { value })}
               min={0}
               max={100}
               step={5}
@@ -240,7 +240,10 @@ export function SourceVerificationSettings({ className, compact = false }: Props
             </div>
             <Switch
               checked={autoFilterLowCredibility}
-              onCheckedChange={(v) => patch({ autoFilterLowCredibility: v })}
+              onCheckedChange={(v) => {
+                log.info("auto_filter_changed", { enabled: v })
+                patch({ autoFilterLowCredibility: v })
+              }}
             />
           </div>
 
@@ -251,7 +254,10 @@ export function SourceVerificationSettings({ className, compact = false }: Props
             </div>
             <Switch
               checked={enableCrossValidation}
-              onCheckedChange={(v) => patch({ enableCrossValidation: v })}
+              onCheckedChange={(v) => {
+                log.info("cross_validation_changed", { enabled: v })
+                patch({ enableCrossValidation: v })
+              }}
             />
           </div>
 
@@ -262,7 +268,10 @@ export function SourceVerificationSettings({ className, compact = false }: Props
             </div>
             <Switch
               checked={showVerificationBadges}
-              onCheckedChange={(v) => patch({ showVerificationBadges: v })}
+              onCheckedChange={(v) => {
+                log.info("show_badges_changed", { enabled: v })
+                patch({ showVerificationBadges: v })
+              }}
             />
           </div>
 
@@ -284,99 +293,55 @@ export function SourceVerificationSettings({ className, compact = false }: Props
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent className="pt-4 space-y-4">
-              <div className="space-y-2">
-                <Label className="text-sm flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-green-500" />
-                  {t("trustedDomains")}
-                </Label>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder={t("trustedDomainPlaceholder")}
-                    value={newTrustedDomain}
-                    onChange={(e) => setNewTrustedDomain(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleAddTrustedDomain()}
-                    className="h-8 text-sm"
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleAddTrustedDomain}
-                    disabled={!newTrustedDomain.trim()}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </div>
-                {trustedDomains.length > 0 && (
-                  <ScrollArea className="h-24">
-                    <div className="flex flex-wrap gap-1">
-                      {trustedDomains.map((domain) => (
-                        <Badge key={domain} variant="secondary" className="text-xs pr-1">
-                          <CheckCircle2 className="h-3 w-3 mr-1 text-green-500" />
-                          {domain}
-                          <button
-                            onClick={() =>
-                              patch({
-                                trustedDomains: trustedDomains.filter((d) => d !== domain),
-                              })
-                            }
-                            className="ml-1 hover:text-destructive"
-                            aria-label={`Remove ${domain}`}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </Badge>
-                      ))}
-                    </div>
-                  </ScrollArea>
-                )}
-              </div>
+              <DomainListInput
+                label={
+                  <Label className="text-sm flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    {t("trustedDomains")}
+                  </Label>
+                }
+                placeholder={t("trustedDomainPlaceholder")}
+                domains={trustedDomains}
+                onAdd={(raw) => {
+                  const domain = sanitizeDomain(raw)
+                  if (!domain || trustedDomains.includes(domain)) return
+                  log.info("trusted_domain_added", { domain })
+                  patch({ trustedDomains: [...trustedDomains, domain] })
+                }}
+                onRemove={(domain) => {
+                  log.info("trusted_domain_removed", { domain })
+                  patch({ trustedDomains: trustedDomains.filter((d) => d !== domain) })
+                }}
+                badgeIcon={<CheckCircle2 className="h-3 w-3 mr-1 text-green-500" />}
+                showAddButton
+                scrollable
+                removeAriaLabel={(d) => `Remove ${d}`}
+              />
 
-              <div className="space-y-2">
-                <Label className="text-sm flex items-center gap-2">
-                  <XCircle className="h-4 w-4 text-red-500" />
-                  {t("blockedDomains")}
-                </Label>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder={t("blockedDomainPlaceholder")}
-                    value={newBlockedDomain}
-                    onChange={(e) => setNewBlockedDomain(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleAddBlockedDomain()}
-                    className="h-8 text-sm"
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleAddBlockedDomain}
-                    disabled={!newBlockedDomain.trim()}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </div>
-                {blockedDomains.length > 0 && (
-                  <ScrollArea className="h-24">
-                    <div className="flex flex-wrap gap-1">
-                      {blockedDomains.map((domain) => (
-                        <Badge key={domain} variant="secondary" className="text-xs pr-1">
-                          <XCircle className="h-3 w-3 mr-1 text-red-500" />
-                          {domain}
-                          <button
-                            onClick={() =>
-                              patch({
-                                blockedDomains: blockedDomains.filter((d) => d !== domain),
-                              })
-                            }
-                            className="ml-1 hover:text-destructive"
-                            aria-label={`Remove ${domain}`}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </Badge>
-                      ))}
-                    </div>
-                  </ScrollArea>
-                )}
-              </div>
+              <DomainListInput
+                label={
+                  <Label className="text-sm flex items-center gap-2">
+                    <XCircle className="h-4 w-4 text-red-500" />
+                    {t("blockedDomains")}
+                  </Label>
+                }
+                placeholder={t("blockedDomainPlaceholder")}
+                domains={blockedDomains}
+                onAdd={(raw) => {
+                  const domain = sanitizeDomain(raw)
+                  if (!domain || blockedDomains.includes(domain)) return
+                  log.info("blocked_domain_added", { domain })
+                  patch({ blockedDomains: [...blockedDomains, domain] })
+                }}
+                onRemove={(domain) => {
+                  log.info("blocked_domain_removed", { domain })
+                  patch({ blockedDomains: blockedDomains.filter((d) => d !== domain) })
+                }}
+                badgeIcon={<XCircle className="h-3 w-3 mr-1 text-red-500" />}
+                showAddButton
+                scrollable
+                removeAriaLabel={(d) => `Remove ${d}`}
+              />
             </CollapsibleContent>
           </Collapsible>
 

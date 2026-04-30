@@ -56,7 +56,7 @@ jest.mock("./providers/brave", () => ({
 
 const incrementSearchUsageMock = jest.fn()
 
-jest.mock("@/stores/settings-store", () => ({
+jest.mock("@/stores/settings", () => ({
   useSettingsStore: {
     getState: () => ({ incrementSearchUsage: incrementSearchUsageMock }),
   },

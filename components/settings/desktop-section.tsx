@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
 import { CopyIcon, ExternalLinkIcon, LaptopIcon, PowerIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
 import { isTauri } from "@/lib/tauri"
 import { isAutostartEnabled, setAutostart } from "@/lib/tauri/autostart"
 import { writeClipboardText } from "@/lib/tauri/clipboard"
@@ -14,6 +15,7 @@ import { openExternal, revealInExplorer } from "@/lib/tauri/opener"
 import { getOsInfo, type OsInfo } from "@/lib/tauri/os"
 import { getPref, setPref } from "@/lib/tauri/store"
 import { invoke } from "@tauri-apps/api/core"
+import { loggers } from "@/lib/logger"
 
 const PREF_TRAY_ON_CLOSE = "tray.minimize-on-close"
 
@@ -25,6 +27,7 @@ const PREF_TRAY_ON_CLOSE = "tray.minimize-on-close"
  * during `pnpm dev` without throwing.
  */
 export function DesktopSection() {
+  const t = useTranslations("settings.desktop")
   const [osInfo, setOsInfo] = useState<OsInfo | null>(null)
   const [autostart, setAutostartState] = useState<boolean>(false)
   const [trayOnClose, setTrayOnClose] = useState<boolean>(false)
@@ -59,7 +62,7 @@ export function DesktopSection() {
           // Non-fatal — Rust may not have the command on web/dev mode.
         }
       } catch (err) {
-        console.warn("DesktopSection load failed", err)
+        loggers.app.warn("desktop.loadFailed", { err: String(err) })
       } finally {
         if (!cancelled) setLoaded(true)
       }
@@ -75,12 +78,12 @@ export function DesktopSection() {
       <div className="space-y-2">
         <Label className="flex items-center gap-2">
           <LaptopIcon className="size-4" />
-          Desktop preferences
+          {t("title")}
         </Label>
         <p className="text-xs text-muted-foreground">
-          Available in the desktop build only. Run{" "}
-          <code className="rounded bg-muted px-1 py-0.5">pnpm tauri dev</code> to see this tab in
-          action.
+          {t("webOnlyHintBefore")}
+          <code className="rounded bg-muted px-1 py-0.5">{t("webOnlyHintCode")}</code>
+          {t("webOnlyHintAfter")}
         </p>
       </div>
     )
@@ -90,9 +93,12 @@ export function DesktopSection() {
     try {
       await setAutostart(checked)
       setAutostartState(checked)
-      toast.success(checked ? "Cognia will launch at login." : "Launch-at-login disabled.")
+      loggers.app.info("desktop.autostart", { enabled: checked })
+      toast.success(checked ? t("launchOnToast") : t("launchOffToast"))
     } catch (err) {
-      toast.error(`Could not change autostart: ${err instanceof Error ? err.message : String(err)}`)
+      const errorText = err instanceof Error ? err.message : String(err)
+      loggers.app.error("desktop.autostartFailed", err)
+      toast.error(t("launchAutostartFailed", { error: errorText }))
     }
   }
 
@@ -101,10 +107,11 @@ export function DesktopSection() {
     await setPref(PREF_TRAY_ON_CLOSE, checked)
     try {
       await invoke("set_tray_on_close", { enabled: checked })
+      loggers.app.info("desktop.trayOnClose", { enabled: checked })
     } catch (err) {
-      toast.error(
-        `Could not update close behavior: ${err instanceof Error ? err.message : String(err)}`
-      )
+      const errorText = err instanceof Error ? err.message : String(err)
+      loggers.app.error("desktop.trayOnCloseFailed", err)
+      toast.error(t("trayOnCloseFailed", { error: errorText }))
     }
   }
 
@@ -112,10 +119,11 @@ export function DesktopSection() {
     if (!appDataDir) return
     try {
       await revealInExplorer(appDataDir)
+      loggers.app.info("desktop.revealDataDir", { path: appDataDir })
     } catch (err) {
-      toast.error(
-        `Could not open data directory: ${err instanceof Error ? err.message : String(err)}`
-      )
+      const errorText = err instanceof Error ? err.message : String(err)
+      loggers.app.error("desktop.revealFailed", err)
+      toast.error(t("revealFailed", { error: errorText }))
     }
   }
 
@@ -133,9 +141,12 @@ export function DesktopSection() {
     const text = lines.join("\n")
     try {
       await writeClipboardText(text)
-      toast.success("Debug info copied to clipboard.")
+      loggers.app.info("desktop.copyDebug", { length: text.length })
+      toast.success(t("copyDebugSuccess"))
     } catch (err) {
-      toast.error(`Copy failed: ${err instanceof Error ? err.message : String(err)}`)
+      const errorText = err instanceof Error ? err.message : String(err)
+      loggers.app.error("desktop.copyDebugFailed", err)
+      toast.error(t("copyDebugFailed", { error: errorText }))
     }
   }
 
@@ -147,23 +158,26 @@ export function DesktopSection() {
     const { ensureNotificationPermission, notify } = await import("@/lib/tauri/notification")
     const granted = await ensureNotificationPermission()
     if (granted !== "granted") {
-      toast.warning("Notification permission not granted.")
+      loggers.app.warn("desktop.notificationDenied")
+      toast.warning(t("notificationDenied"))
       return
     }
     await notify({
-      title: "Cognia",
-      body: "Test notification — your desktop integration is wired up.",
+      title: t("notificationTitle"),
+      body: t("notificationBody"),
     })
+    loggers.app.info("desktop.testNotification")
   }
 
-  // Use the version we already had wired in About — shell out via the
-  // app api just like AboutSection does, to avoid coupling.
   const handlePing = async () => {
     try {
       const out = await invoke<string>("greet", { name: "desktop" })
-      toast.message("Greet roundtrip", { description: out })
+      loggers.app.info("desktop.pingRust", { ok: true })
+      toast.message(t("pingTitle"), { description: out })
     } catch (err) {
-      toast.error(`greet failed: ${err instanceof Error ? err.message : String(err)}`)
+      const errorText = err instanceof Error ? err.message : String(err)
+      loggers.app.error("desktop.pingFailed", err)
+      toast.error(t("pingFailed", { error: errorText }))
     }
   }
 
@@ -172,11 +186,9 @@ export function DesktopSection() {
       <div className="space-y-1">
         <Label className="flex items-center gap-2">
           <LaptopIcon className="size-4" />
-          Desktop preferences
+          {t("title")}
         </Label>
-        <p className="text-xs text-muted-foreground">
-          Settings that only apply when running as the native desktop app.
-        </p>
+        <p className="text-xs text-muted-foreground">{t("subtitle")}</p>
       </div>
 
       <section className="space-y-3 rounded-md border p-4">
@@ -184,68 +196,63 @@ export function DesktopSection() {
           <div className="space-y-1">
             <Label className="text-sm flex items-center gap-2">
               <PowerIcon className="size-3.5" />
-              Launch at login
+              {t("launchAtLogin")}
             </Label>
-            <p className="text-xs text-muted-foreground">
-              Start Cognia automatically when you sign in to your computer.
-            </p>
+            <p className="text-xs text-muted-foreground">{t("launchAtLoginHint")}</p>
           </div>
           <Switch
             checked={autostart}
             onCheckedChange={(c) => void handleAutostart(c)}
             disabled={!loaded}
-            aria-label="Toggle launch at login"
+            aria-label={t("launchAtLoginToggle")}
           />
         </div>
 
         <div className="flex items-start justify-between gap-4 border-t pt-3">
           <div className="space-y-1">
-            <Label className="text-sm">Minimize to tray on close</Label>
-            <p className="text-xs text-muted-foreground">
-              Closing the window hides Cognia to the system tray instead of quitting. Quit
-              explicitly from the tray menu.
-            </p>
+            <Label className="text-sm">{t("trayOnClose")}</Label>
+            <p className="text-xs text-muted-foreground">{t("trayOnCloseHint")}</p>
           </div>
           <Switch
             checked={trayOnClose}
             onCheckedChange={(c) => void handleTrayOnClose(c)}
             disabled={!loaded}
-            aria-label="Toggle minimize to tray"
+            aria-label={t("trayOnCloseToggle")}
           />
         </div>
       </section>
 
       <section className="space-y-2 rounded-md border p-4">
-        <Label className="text-sm">System</Label>
+        <Label className="text-sm">{t("system")}</Label>
         {!loaded ? (
           <Skeleton className="h-16 w-full" />
         ) : osInfo ? (
           <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs">
-            <dt className="text-muted-foreground">Platform</dt>
+            <dt className="text-muted-foreground">{t("platform")}</dt>
             <dd className="font-mono">
               {osInfo.osType} ({osInfo.platform})
             </dd>
-            <dt className="text-muted-foreground">Architecture</dt>
+            <dt className="text-muted-foreground">{t("architecture")}</dt>
             <dd className="font-mono">{osInfo.arch}</dd>
-            <dt className="text-muted-foreground">Version</dt>
+            <dt className="text-muted-foreground">{t("version")}</dt>
             <dd className="font-mono">{osInfo.version}</dd>
-            <dt className="text-muted-foreground">Family</dt>
+            <dt className="text-muted-foreground">{t("family")}</dt>
             <dd className="font-mono">{osInfo.family}</dd>
             {osInfo.locale && (
               <>
-                <dt className="text-muted-foreground">Locale</dt>
+                <dt className="text-muted-foreground">{t("locale")}</dt>
                 <dd className="font-mono">{osInfo.locale}</dd>
               </>
             )}
             {appDataDir && (
               <>
-                <dt className="text-muted-foreground">Data dir</dt>
+                <dt className="text-muted-foreground">{t("dataDir")}</dt>
                 <dd className="break-all font-mono text-[11px]">{appDataDir}</dd>
               </>
             )}
           </dl>
         ) : (
-          <p className="text-xs text-muted-foreground">OS info unavailable.</p>
+          <p className="text-xs text-muted-foreground">{t("osUnavailable")}</p>
         )}
 
         <div className="flex flex-wrap gap-2 pt-2">
@@ -256,20 +263,20 @@ export function DesktopSection() {
             disabled={!appDataDir}
           >
             <ExternalLinkIcon className="mr-2 size-3.5" />
-            Reveal data directory
+            {t("revealDataDir")}
           </Button>
           <Button variant="outline" size="sm" onClick={() => void handleCopyDebug()}>
             <CopyIcon className="mr-2 size-3.5" />
-            Copy debug info
+            {t("copyDebug")}
           </Button>
           <Button variant="outline" size="sm" onClick={() => void handleTestNotification()}>
-            Test notification
+            {t("testNotification")}
           </Button>
           <Button variant="ghost" size="sm" onClick={() => void handlePing()}>
-            Ping Rust
+            {t("pingRust")}
           </Button>
           <Button variant="ghost" size="sm" onClick={() => void handleOpenDocs()}>
-            Tauri docs
+            {t("tauriDocs")}
           </Button>
         </div>
       </section>

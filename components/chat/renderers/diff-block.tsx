@@ -1,10 +1,13 @@
 "use client"
 
 import { useState, memo, useCallback, useMemo } from "react"
+import { useTranslations } from "next-intl"
 import { Copy, Check, Columns, Rows, Plus, Minus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useCopy } from "@/hooks/ui/use-copy"
+import { loggers } from "@/lib/logger"
 
 interface DiffLine {
   type: "add" | "remove" | "context" | "info"
@@ -29,20 +32,15 @@ export const DiffBlock = memo(function DiffBlock({
   oldFilename,
   newFilename,
 }: DiffBlockProps) {
+  const t = useTranslations("chat.renderers.diff")
   const [viewMode, setViewMode] = useState<"unified" | "split">("unified")
-  const [copied, setCopied] = useState(false)
+  const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
 
   const parsedDiff = useMemo(() => parseDiff(content), [content])
 
   const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(content)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch (err) {
-      console.error("clipboard write failed", err)
-    }
-  }, [content])
+    await copy(content)
+  }, [content, copy])
 
   const stats = useMemo(() => {
     let additions = 0
@@ -59,7 +57,7 @@ export const DiffBlock = memo(function DiffBlock({
       <div className="flex items-center justify-between px-3 py-2 bg-muted/80 border-b text-xs">
         <div className="flex items-center gap-3">
           <span className="font-mono font-medium">
-            {filename || oldFilename || newFilename || "diff"}
+            {filename || oldFilename || newFilename || t("defaultName")}
           </span>
           <div className="flex items-center gap-2 text-muted-foreground">
             <span className="flex items-center gap-0.5 text-green-600">
@@ -81,11 +79,12 @@ export const DiffBlock = memo(function DiffBlock({
                 size="icon"
                 className={cn("h-6 w-6", viewMode === "unified" && "bg-accent")}
                 onClick={() => setViewMode("unified")}
+                aria-label={t("unifiedView")}
               >
                 <Rows className="h-3 w-3" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Unified view</TooltipContent>
+            <TooltipContent>{t("unifiedView")}</TooltipContent>
           </Tooltip>
 
           <Tooltip>
@@ -95,20 +94,27 @@ export const DiffBlock = memo(function DiffBlock({
                 size="icon"
                 className={cn("h-6 w-6", viewMode === "split" && "bg-accent")}
                 onClick={() => setViewMode("split")}
+                aria-label={t("splitView")}
               >
                 <Columns className="h-3 w-3" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Split view</TooltipContent>
+            <TooltipContent>{t("splitView")}</TooltipContent>
           </Tooltip>
 
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCopy}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={handleCopy}
+                aria-label={t("copy")}
+              >
                 {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Copy</TooltipContent>
+            <TooltipContent>{t("copy")}</TooltipContent>
           </Tooltip>
         </div>
       </div>

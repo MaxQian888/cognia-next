@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/sheet"
 import { Badge } from "@/components/ui/badge"
 import { SKILL_CATEGORIES, SKILL_SOURCES } from "@/lib/skills/categories"
-import { useSkillsStore } from "@/stores/skills-store"
+import { useSkillsStore } from "@/stores/skills"
 import type { SkillCategory, SkillSource, SkillStatus } from "@/lib/claude/types"
 
 interface Props {

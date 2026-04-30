@@ -1,0 +1,366 @@
+jest.mock("@/lib/tauri", () => ({
+  isTauri: jest.fn(),
+}))
+jest.mock("@/lib/claude/ipc", () => ({
+  skillsInstallNative: jest.fn(),
+  skillsScanNative: jest.fn(),
+}))
+jest.mock("@/lib/db/skills", () => ({
+  bulkImportSkills: jest.fn(),
+  listSkills: jest.fn(),
+  updateSkill: jest.fn(),
+}))
+jest.mock("@/lib/db/skill-resources", () => ({
+  listResourcesForSkill: jest.fn(),
+  replaceResourcesForSkill: jest.fn(),
+}))
+jest.mock("@/lib/claude/skills-io", () => ({
+  parseSkillMarkdown: jest.fn(),
+  serializeSkill: jest.fn(() => "MD"),
+  skillFilename: jest.fn((n: string) => `${n}.skill.md`),
+}))
+
+import { pushAllToNative, pullAllFromNative, suggestedFilename } from "./sync"
+import { isTauri } from "@/lib/tauri"
+import { skillsInstallNative, skillsScanNative } from "@/lib/claude/ipc"
+import { bulkImportSkills, listSkills, updateSkill } from "@/lib/db/skills"
+import { listResourcesForSkill, replaceResourcesForSkill } from "@/lib/db/skill-resources"
+import { parseSkillMarkdown } from "@/lib/claude/skills-io"
+import type { Skill, SkillResource } from "@/lib/claude/types"
+
+const mockedIsTauri = isTauri as unknown as jest.Mock
+const mockedInstall = skillsInstallNative as unknown as jest.Mock
+const mockedScan = skillsScanNative as unknown as jest.Mock
+const mockedListSkills = listSkills as unknown as jest.Mock
+const mockedUpdateSkill = updateSkill as unknown as jest.Mock
+const mockedListRes = listResourcesForSkill as unknown as jest.Mock
+const mockedReplaceRes = replaceResourcesForSkill as unknown as jest.Mock
+const mockedBulk = bulkImportSkills as unknown as jest.Mock
+const mockedParse = parseSkillMarkdown as unknown as jest.Mock
+
+beforeEach(() => {
+  jest.clearAllMocks()
+})
+
+describe("suggestedFilename", () => {
+  it("delegates to skillFilename", () => {
+    expect(suggestedFilename({ name: "x" } as unknown as Skill)).toBe("x.skill.md")
+  })
+})
+
+describe("pushAllToNative", () => {
+  it("returns desktop-only error when not Tauri", async () => {
+    mockedIsTauri.mockReturnValue(false)
+    const r = await pushAllToNative()
+    expect(r.errors[0].error).toMatch(/Desktop only/)
+  })
+
+  it("skips builtins and pushes user skills, recording fingerprint", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedListSkills.mockResolvedValue([
+      { id: "b", name: "Builtin", isBuiltIn: true },
+      { id: "c", name: "Custom", source: "custom" },
+      { id: "d", name: "Other", source: "builtin" },
+    ])
+    mockedListRes.mockResolvedValue([] as SkillResource[])
+    mockedInstall.mockResolvedValue({ directory: "/dir/Custom" })
+    mockedUpdateSkill.mockResolvedValue(undefined)
+    const r = await pushAllToNative()
+    expect(r.skipped).toBe(2)
+    expect(r.pushed).toBe(1)
+    expect(mockedUpdateSkill).toHaveBeenCalledWith(
+      "c",
+      expect.objectContaining({
+        nativeDirectory: "/dir/Custom",
+        syncOrigin: "frontend",
+        lastSyncError: null,
+      })
+    )
+  })
+
+  it("uses existing nativeDirectory's tail when present", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedListSkills.mockResolvedValue([
+      {
+        id: "x",
+        name: "OldName",
+        source: "custom",
+        nativeDirectory: "/abs/path/OldDir",
+      },
+    ])
+    mockedListRes.mockResolvedValue([])
+    mockedInstall.mockResolvedValue({ directory: "/abs/path/OldDir" })
+    await pushAllToNative()
+    expect(mockedInstall).toHaveBeenCalledWith(
+      expect.objectContaining({ dirName: "OldDir", clean: true })
+    )
+  })
+
+  it("falls back to slug when native directory has empty tail", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedListSkills.mockResolvedValue([
+      {
+        id: "x",
+        name: "Edge Case",
+        source: "custom",
+        nativeDirectory: "trailing/",
+      },
+    ])
+    mockedListRes.mockResolvedValue([])
+    mockedInstall.mockResolvedValue({ directory: "trailing/" })
+    await pushAllToNative()
+    expect(mockedInstall).toHaveBeenCalledWith(expect.objectContaining({ dirName: "edge-case" }))
+  })
+
+  it("captures and reports per-skill errors", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedListSkills.mockResolvedValue([{ id: "c", name: "C", source: "custom" }])
+    mockedListRes.mockResolvedValue([])
+    mockedInstall.mockRejectedValue(new Error("boom"))
+    mockedUpdateSkill.mockResolvedValue(undefined)
+    const r = await pushAllToNative()
+    expect(r.errors).toEqual([{ name: "C", error: "boom" }])
+    expect(mockedUpdateSkill).toHaveBeenCalledWith(
+      "c",
+      expect.objectContaining({ lastSyncError: "boom" })
+    )
+  })
+
+  it("captures non-Error rejections", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedListSkills.mockResolvedValue([{ id: "c", name: "C", source: "custom" }])
+    mockedListRes.mockResolvedValue([])
+    mockedInstall.mockRejectedValue("plain")
+    mockedUpdateSkill.mockResolvedValue(undefined)
+    const r = await pushAllToNative()
+    expect(r.errors[0].error).toBe("plain")
+  })
+
+  it("falls back to length-based hash when crypto is unavailable", async () => {
+    const orig = (globalThis as unknown as { crypto?: unknown }).crypto
+    ;(globalThis as unknown as { crypto?: unknown }).crypto = undefined
+    mockedIsTauri.mockReturnValue(true)
+    mockedListSkills.mockResolvedValue([{ id: "c", name: "C", source: "custom" }])
+    mockedListRes.mockResolvedValue([
+      { path: "x", kind: "file", content: "c" },
+    ] as unknown as SkillResource[])
+    mockedInstall.mockResolvedValue({ directory: "/x" })
+    mockedUpdateSkill.mockResolvedValue(undefined)
+    const r = await pushAllToNative()
+    expect(r.pushed).toBe(1)
+    ;(globalThis as unknown as { crypto?: unknown }).crypto = orig
+  })
+
+  it("uses crypto.subtle digest when available", async () => {
+    // jsdom's `crypto` global lacks `.subtle`; patch a stub that returns a
+    // deterministic ArrayBuffer so the fingerprint() function exercises the
+    // hex-encoding branch.
+    const cryptoLike = globalThis.crypto as unknown as { subtle?: SubtleCrypto }
+    const origSubtle = cryptoLike.subtle
+    cryptoLike.subtle = {
+      digest: async () => new Uint8Array([0xab, 0xcd, 0x01, 0x02]).buffer,
+    } as unknown as SubtleCrypto
+    mockedIsTauri.mockReturnValue(true)
+    mockedListSkills.mockResolvedValue([{ id: "c", name: "C", source: "custom" }])
+    mockedListRes.mockResolvedValue([])
+    mockedInstall.mockResolvedValue({ directory: "/x" })
+    mockedUpdateSkill.mockResolvedValue(undefined)
+    const r = await pushAllToNative()
+    expect(r.pushed).toBe(1)
+    expect(mockedUpdateSkill).toHaveBeenCalledWith(
+      "c",
+      expect.objectContaining({
+        // Hex-encoded SHA-256 from our stubbed digest; first byte 0xab → "ab".
+        syncFingerprint: "abcd0102",
+      })
+    )
+    cryptoLike.subtle = origSubtle as SubtleCrypto
+  })
+})
+
+describe("pullAllFromNative", () => {
+  it("returns desktop-only error when not Tauri", async () => {
+    mockedIsTauri.mockReturnValue(false)
+    const r = await pullAllFromNative()
+    expect(r.errors[0].error).toMatch(/Desktop only/)
+  })
+
+  it("returns empty result when no native skills", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedScan.mockResolvedValue([])
+    const r = await pullAllFromNative()
+    expect(r).toEqual({ pushed: 0, pulled: 0, skipped: 0, errors: [] })
+  })
+
+  it("creates a fresh row when no local match exists", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedScan.mockResolvedValue([
+      {
+        dirName: "alpha",
+        filePath: "/native/alpha/SKILL.md",
+        content: "MD",
+        resources: [],
+      },
+    ])
+    mockedListSkills
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "freshly", name: "Alpha" }])
+    mockedParse.mockReturnValue({
+      draft: { name: "Alpha", description: "d", content: "BODY" },
+    })
+    mockedBulk.mockResolvedValue({ created: 1 })
+    mockedReplaceRes.mockResolvedValue(undefined)
+    const r = await pullAllFromNative()
+    expect(r.pulled).toBe(1)
+    expect(mockedBulk).toHaveBeenCalled()
+    expect(mockedReplaceRes).toHaveBeenCalledWith("freshly", [])
+  })
+
+  it("does not call replaceResourcesForSkill when bulk import created nothing", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedScan.mockResolvedValue([
+      {
+        dirName: "alpha",
+        filePath: "/native/alpha/SKILL.md",
+        content: "MD",
+        resources: [],
+      },
+    ])
+    mockedListSkills.mockResolvedValueOnce([])
+    mockedParse.mockReturnValue({
+      draft: { name: "Alpha", content: "BODY" },
+    })
+    mockedBulk.mockResolvedValue({ created: 0 })
+    const r = await pullAllFromNative()
+    expect(r.pulled).toBe(1)
+    expect(mockedReplaceRes).not.toHaveBeenCalled()
+  })
+
+  it("matches by nativeDirectory and updates on stale local row", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedScan.mockResolvedValue([
+      {
+        dirName: "alpha",
+        filePath: "/native/alpha/SKILL.md",
+        content: "MD",
+        resources: [
+          {
+            kind: "file",
+            path: "x",
+            name: "x",
+            content: "c",
+            encoding: "utf-8",
+            size: 1,
+          },
+        ],
+      },
+    ])
+    const existing = {
+      id: "abc",
+      name: "Alpha",
+      nativeDirectory: "/native/alpha",
+      updatedAt: 0,
+    }
+    mockedListSkills.mockResolvedValueOnce([existing])
+    mockedParse.mockReturnValue({
+      draft: { name: "Alpha", content: "BODY" },
+    })
+    const r = await pullAllFromNative()
+    expect(r.pulled).toBe(1)
+    expect(mockedUpdateSkill).toHaveBeenCalledWith(
+      "abc",
+      expect.objectContaining({
+        name: "Alpha",
+        syncOrigin: "native",
+        nativeDirectory: "/native/alpha",
+      })
+    )
+    expect(mockedReplaceRes).toHaveBeenCalled()
+  })
+
+  it("skips update when local row is fresh", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedScan.mockResolvedValue([
+      {
+        dirName: "alpha",
+        filePath: "/native/alpha/SKILL.md",
+        content: "MD",
+        resources: [],
+      },
+    ])
+    const existing = {
+      id: "abc",
+      name: "Alpha",
+      nativeDirectory: "/native/alpha",
+      updatedAt: Date.now() + 60_000, // newer than now
+    }
+    mockedListSkills.mockResolvedValueOnce([existing])
+    mockedParse.mockReturnValue({
+      draft: { name: "Alpha", content: "BODY" },
+    })
+    const r = await pullAllFromNative()
+    expect(r.skipped).toBe(1)
+    expect(r.pulled).toBe(0)
+    expect(mockedUpdateSkill).not.toHaveBeenCalled()
+  })
+
+  it("matches by name when nativeDirectory miss", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedScan.mockResolvedValue([
+      {
+        dirName: "alpha",
+        filePath: "/native/alpha\\SKILL.md",
+        content: "MD",
+        resources: [],
+      },
+    ])
+    const existing = {
+      id: "byname",
+      name: "Alpha",
+      updatedAt: 0,
+    }
+    mockedListSkills.mockResolvedValueOnce([existing])
+    mockedParse.mockReturnValue({
+      draft: { name: "Alpha", content: "BODY" },
+    })
+    const r = await pullAllFromNative()
+    expect(r.pulled).toBe(1)
+    expect(mockedUpdateSkill).toHaveBeenCalledWith("byname", expect.any(Object))
+  })
+
+  it("captures parse errors per-skill", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedScan.mockResolvedValue([
+      {
+        dirName: "alpha",
+        filePath: "/native/alpha/SKILL.md",
+        content: "MD",
+        resources: [],
+      },
+    ])
+    mockedListSkills.mockResolvedValue([])
+    mockedParse.mockImplementation(() => {
+      throw new Error("parse fail")
+    })
+    const r = await pullAllFromNative()
+    expect(r.errors).toEqual([{ name: "alpha", error: "parse fail" }])
+  })
+
+  it("captures non-Error parse errors", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedScan.mockResolvedValue([
+      {
+        dirName: "x",
+        filePath: "/x/SKILL.md",
+        content: "MD",
+        resources: [],
+      },
+    ])
+    mockedListSkills.mockResolvedValue([])
+    mockedParse.mockImplementation(() => {
+      throw "plain"
+    })
+    const r = await pullAllFromNative()
+    expect(r.errors[0].error).toBe("plain")
+  })
+})

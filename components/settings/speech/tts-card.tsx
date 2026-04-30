@@ -1,6 +1,7 @@
 "use client"
 
 import { Volume2Icon } from "lucide-react"
+import { useTranslations } from "next-intl"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
@@ -14,10 +15,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useSettingsStore } from "@/stores/settings"
 import { ORDERED_TTS_PROVIDERS, TTS_PROVIDERS, type TTSProvider } from "@/lib/tts/types"
 import { TestTtsButton } from "./test-tts-button"
 import { PROVIDER_CONFIG_COMPONENTS } from "./provider-config"
+import { loggers } from "@/lib/logger"
 
 /**
  * Text-to-speech card. Shows the master toggle, provider switch, the
@@ -25,6 +27,7 @@ import { PROVIDER_CONFIG_COMPONENTS } from "./provider-config"
  * controls + auto-play / cache toggles.
  */
 export function TtsCard() {
+  const t = useTranslations("settings.speech.tts")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
 
@@ -52,24 +55,24 @@ export function TtsCard() {
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-base">
           <Volume2Icon className="size-4 text-muted-foreground" />
-          Text-to-speech
+          {t("title")}
         </CardTitle>
-        <CardDescription className="text-xs">
-          Configure read-aloud, auto-play of assistant responses, and your preferred provider.
-          Provider API keys are stored in your OS keyring on the desktop app, or in IndexedDB on the
-          web shell.
-        </CardDescription>
+        <CardDescription className="text-xs">{t("description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
         {/* Master toggle */}
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
-            <Label className="text-sm">Enable text-to-speech</Label>
-            <p className="text-xs text-muted-foreground">
-              When on, you can read assistant messages aloud and (optionally) auto-play them.
-            </p>
+            <Label className="text-sm">{t("enable")}</Label>
+            <p className="text-xs text-muted-foreground">{t("enableHint")}</p>
           </div>
-          <Switch checked={ttsEnabled} onCheckedChange={(v) => void setTtsEnabled(v)} />
+          <Switch
+            checked={ttsEnabled}
+            onCheckedChange={(v) => {
+              loggers.tts.info("settings.ttsEnabledChanged", { enabled: v })
+              void setTtsEnabled(v)
+            }}
+          />
         </div>
 
         {ttsEnabled && (
@@ -79,10 +82,16 @@ export function TtsCard() {
             {/* Provider switch */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-sm">Provider</Label>
+                <Label className="text-sm">{t("provider")}</Label>
                 <TestTtsButton />
               </div>
-              <Select value={provider} onValueChange={(v) => void setTtsProvider(v as TTSProvider)}>
+              <Select
+                value={provider}
+                onValueChange={(v) => {
+                  loggers.tts.info("settings.ttsProviderChanged", { provider: v })
+                  void setTtsProvider(v as TTSProvider)
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -110,7 +119,7 @@ export function TtsCard() {
             <div className="space-y-3">
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs">Rate</Label>
+                  <Label className="text-xs">{t("rate")}</Label>
                   <span className="text-xs text-muted-foreground tabular-nums">
                     {ttsRate.toFixed(2)}x
                   </span>
@@ -125,7 +134,7 @@ export function TtsCard() {
               </div>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs">Pitch</Label>
+                  <Label className="text-xs">{t("pitch")}</Label>
                   <span className="text-xs text-muted-foreground tabular-nums">
                     {ttsPitch.toFixed(2)}
                   </span>
@@ -140,7 +149,7 @@ export function TtsCard() {
               </div>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs">Volume</Label>
+                  <Label className="text-xs">{t("volume")}</Label>
                   <span className="text-xs text-muted-foreground tabular-nums">
                     {Math.round(ttsVolume * 100)}%
                   </span>
@@ -161,38 +170,43 @@ export function TtsCard() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <Label className="text-sm">Auto-play assistant responses</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Speak each completed assistant message automatically.
-                  </p>
-                </div>
-                <Switch checked={ttsAutoPlay} onCheckedChange={(v) => void setTtsAutoPlay(v)} />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label className="text-sm">Cache audio</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Re-use generated audio for repeated playback. Cleared with the rest of your data
-                    via Settings → Data.
-                  </p>
+                  <Label className="text-sm">{t("autoPlay")}</Label>
+                  <p className="text-xs text-muted-foreground">{t("autoPlayHint")}</p>
                 </div>
                 <Switch
-                  checked={ttsCacheEnabled}
-                  onCheckedChange={(v) => void save({ ttsCacheEnabled: v })}
+                  checked={ttsAutoPlay}
+                  onCheckedChange={(v) => {
+                    loggers.tts.info("settings.ttsAutoPlayChanged", { enabled: v })
+                    void setTtsAutoPlay(v)
+                  }}
                 />
               </div>
 
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <Label className="text-sm">Enable streaming (when supported)</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Some providers stream first-byte audio for lower latency.
-                  </p>
+                  <Label className="text-sm">{t("cache")}</Label>
+                  <p className="text-xs text-muted-foreground">{t("cacheHint")}</p>
+                </div>
+                <Switch
+                  checked={ttsCacheEnabled}
+                  onCheckedChange={(v) => {
+                    loggers.tts.info("settings.ttsCacheChanged", { enabled: v })
+                    void save({ ttsCacheEnabled: v })
+                  }}
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm">{t("streaming")}</Label>
+                  <p className="text-xs text-muted-foreground">{t("streamingHint")}</p>
                 </div>
                 <Switch
                   checked={ttsStreamingEnabled}
-                  onCheckedChange={(v) => void save({ ttsStreamingEnabled: v })}
+                  onCheckedChange={(v) => {
+                    loggers.tts.info("settings.ttsStreamingChanged", { enabled: v })
+                    void save({ ttsStreamingEnabled: v })
+                  }}
                 />
               </div>
             </div>

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -12,6 +13,7 @@ import {
 } from "@/components/ui/dialog"
 import { ShieldAlertIcon } from "lucide-react"
 import { trustWorkspace } from "@/lib/db/trusted-workspaces"
+import { loggers } from "@/lib/logger"
 
 interface Props {
   /**
@@ -41,6 +43,7 @@ interface Props {
  * VS Code workspace-trust pattern: persisted per absolute path; revocable.
  */
 export function WorkspaceTrustDialog({ workspacePath, pendingActions, onResolved }: Props) {
+  const t = useTranslations("chat.workspaceTrust")
   const [busy, setBusy] = useState(false)
   const open = !!workspacePath
 
@@ -50,6 +53,9 @@ export function WorkspaceTrustDialog({ workspacePath, pendingActions, onResolved
     try {
       await trustWorkspace(workspacePath)
       onResolved(true)
+    } catch (err) {
+      loggers.chat.error("trustWorkspace failed", err, { workspacePath })
+      throw err
     } finally {
       setBusy(false)
     }
@@ -61,26 +67,23 @@ export function WorkspaceTrustDialog({ workspacePath, pendingActions, onResolved
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ShieldAlertIcon className="size-4 text-amber-500" />
-            Trust this workspace?
+            {t("title")}
           </DialogTitle>
-          <DialogDescription>
-            This project ships configuration that can run commands on your machine. Trust it only if
-            you wrote it or recognise the source.
-          </DialogDescription>
+          <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
         {workspacePath && (
           <div className="space-y-3 text-sm">
             <div>
               <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Workspace
+                {t("workspaceLabel")}
               </div>
               <div className="break-all font-mono text-xs">{workspacePath}</div>
             </div>
             {pendingActions.length > 0 && (
               <div>
                 <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  About to run
+                  {t("aboutToRunLabel")}
                 </div>
                 <ul className="list-disc pl-5 text-sm">
                   {pendingActions.map((a, i) => (
@@ -89,18 +92,16 @@ export function WorkspaceTrustDialog({ workspacePath, pendingActions, onResolved
                 </ul>
               </div>
             )}
-            <p className="text-xs text-muted-foreground">
-              You can revoke this trust later from Settings → Hooks.
-            </p>
+            <p className="text-xs text-muted-foreground">{t("revokeHint")}</p>
           </div>
         )}
 
         <DialogFooter>
           <Button variant="outline" disabled={busy} onClick={() => onResolved(false)}>
-            Don&apos;t run
+            {t("dontRun")}
           </Button>
           <Button disabled={busy} onClick={handleTrust}>
-            {busy ? "Saving…" : "Trust workspace"}
+            {busy ? t("saving") : t("trust")}
           </Button>
         </DialogFooter>
       </DialogContent>

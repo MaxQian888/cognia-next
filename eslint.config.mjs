@@ -21,6 +21,9 @@ const eslintConfig = defineConfig([
     ".claude/**",
     "sidecar/**",
     "node_modules/**",
+    // Bundled Monaco assets copied from node_modules by
+    // scripts/copy-monaco-assets.mjs — minified vendor JS, never authored here.
+    "public/monaco/**",
   ]),
   // Allow underscore-prefixed unused variables (standard convention for intentional-unused).
   {
@@ -52,6 +55,14 @@ const eslintConfig = defineConfig([
   // Jest CommonJS mock shims — runtime is Node CJS, require() is the correct call.
   {
     files: ["__mocks__/**/*.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
+  // Canvas-store re-export test relies on Jest's `require()` to compare
+  // module identity — that's the right idiom for this exact assertion.
+  {
+    files: ["stores/canvas/index.test.ts"],
     rules: {
       "@typescript-eslint/no-require-imports": "off",
     },

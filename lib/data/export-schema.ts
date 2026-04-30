@@ -1,85 +1,27 @@
-// Envelope shape for the user-facing JSON export/import format. Versioned
-// independently of the Dexie schema so the user can carry data between app
-// versions without surprise migrations: the import code branches on
-// schemaVersion and refuses anything it doesn't understand.
+// Backwards-compat barrel. The contracts now live in `./types.ts`. New code
+// should import from `@/lib/data/types` directly.
 
-import type {
-  AppSettings,
-  Character,
-  ChatSession,
-  McpServer,
-  Skill,
-  StoredMessage,
-  SystemPromptPreset,
-  Team,
-} from "@/lib/claude/types"
+export {
+  EXPORT_SCHEMA_VERSION,
+  IsEncryptedError,
+  UnsupportedSchemaVersionError,
+  IntegrityCheckFailedError,
+  emptySummary,
+} from "./types"
 
-export const EXPORT_SCHEMA_VERSION = 1 as const
+export type {
+  BackupManifestV3,
+  BackupPackageV3,
+  BackupPayloadV3,
+  EncryptedEnvelopeV1,
+  ExportOptions,
+  ImportMergeStrategy,
+  ImportOptions,
+  ImportSummary,
+} from "./types"
 
-/**
- * Self-contained snapshot of the user's local data. Every field is optional so
- * partial exports (e.g., "settings only") and partial imports both work.
- *
- * `settings.apiKey` is optional and only included when the user explicitly
- * opts in at export time — secrets shouldn't ride along by default.
- */
-export interface ExportEnvelope {
-  schemaVersion: typeof EXPORT_SCHEMA_VERSION
-  exportedAt: number
-  appVersion: string
-  settings?: AppSettings
-  /** Only user-created rows (built-ins are skipped). */
-  characters?: Character[]
-  skills?: Skill[]
-  teams?: Team[]
-  promptPresets?: SystemPromptPreset[]
-  mcpServers?: McpServer[]
-  sessions?: ChatSession[]
-  messages?: StoredMessage[]
-}
-
-export interface ExportOptions {
-  /** Include sessions + messages in the envelope. Off by default. */
-  includeSessions: boolean
-  /** Include the Anthropic API key inside settings. Off by default. */
-  includeApiKey: boolean
-}
-
-export type ImportMergeStrategy = "skip" | "overwrite" | "duplicate"
-
-export interface ImportOptions {
-  mergeStrategy: ImportMergeStrategy
-  includeSessions: boolean
-  includeApiKey: boolean
-}
-
-/**
- * Per-table counters reported back to the UI after an import. The UI shows
- * this in the confirmation dialog so the user sees the blast radius before
- * committing.
- */
-export interface ImportSummary {
-  added: Record<string, number>
-  overwritten: Record<string, number>
-  skipped: Record<string, number>
-  /** Imported rows whose id matched a local built-in row (always preserved). */
-  builtInsSkipped: Record<string, number>
-}
-
-export class UnsupportedSchemaVersionError extends Error {
-  constructor(found: unknown) {
-    super(
-      `Unsupported export schemaVersion: ${String(found)}. This build accepts ${EXPORT_SCHEMA_VERSION}.`
-    )
-    this.name = "UnsupportedSchemaVersionError"
-  }
-}
-
-export function emptySummary(): ImportSummary {
-  return {
-    added: {},
-    overwritten: {},
-    skipped: {},
-    builtInsSkipped: {},
-  }
-}
+// v1 callers consumed `ExportEnvelope`. The shape is gone, but consumers can
+// still rely on the v3 package — they'll see the same payload fields nested
+// under `payload`. Provide a type alias for the few call sites that haven't
+// been migrated yet (they get refactored in Phase 8).
+export type { BackupPackageV3 as ExportEnvelope } from "./types"

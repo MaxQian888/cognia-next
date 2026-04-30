@@ -1,10 +1,13 @@
 "use client"
 
-import React, { useState } from "react"
+import React from "react"
 import { AlertCircle, RefreshCw, Copy, Check } from "lucide-react"
+import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useCopy } from "@/hooks/ui/use-copy"
+import { loggers } from "@/lib/logger"
 
 interface MathErrorBoundaryProps {
   children: React.ReactNode
@@ -33,7 +36,9 @@ export class MathErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
-    console.error("[math-error-boundary] caught", error, errorInfo.componentStack)
+    loggers.chat.error("math error boundary caught", error, {
+      componentStack: errorInfo.componentStack ?? undefined,
+    })
   }
 
   handleRetry = (): void => {
@@ -65,17 +70,12 @@ interface MathErrorFallbackProps {
 }
 
 export function MathErrorFallback({ error, latex, onRetry, className }: MathErrorFallbackProps) {
-  const [copied, setCopied] = useState(false)
+  const t = useTranslations("chat.renderers.math")
+  const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
 
   const handleCopy = async () => {
     if (!latex) return
-    try {
-      await navigator.clipboard.writeText(latex)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch (err) {
-      console.error("clipboard write failed", err)
-    }
+    await copy(latex)
   }
 
   return (
@@ -85,12 +85,12 @@ export function MathErrorFallback({ error, latex, onRetry, className }: MathErro
         className
       )}
       role="alert"
-      aria-label="Math render error"
+      aria-label={t("renderError")}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-destructive">
           <AlertCircle className="h-4 w-4" aria-hidden="true" />
-          <span className="text-sm font-medium">Math render error</span>
+          <span className="text-sm font-medium">{t("renderError")}</span>
         </div>
         <div className="flex items-center gap-1">
           {onRetry && (
@@ -101,12 +101,12 @@ export function MathErrorFallback({ error, latex, onRetry, className }: MathErro
                   size="icon"
                   className="h-7 w-7"
                   onClick={onRetry}
-                  aria-label="Retry"
+                  aria-label={t("retry")}
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Retry</TooltipContent>
+              <TooltipContent>{t("retry")}</TooltipContent>
             </Tooltip>
           )}
           {latex && (
@@ -117,12 +117,12 @@ export function MathErrorFallback({ error, latex, onRetry, className }: MathErro
                   size="icon"
                   className="h-7 w-7"
                   onClick={handleCopy}
-                  aria-label="Copy source"
+                  aria-label={t("copySource")}
                 >
                   {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Copy source</TooltipContent>
+              <TooltipContent>{t("copySource")}</TooltipContent>
             </Tooltip>
           )}
         </div>

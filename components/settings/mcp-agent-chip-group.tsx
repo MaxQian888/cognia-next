@@ -19,10 +19,10 @@ import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
 import { updateMcpServer } from "@/lib/db/mcp-servers"
 import type { McpServer } from "@/lib/claude/types"
-import { useAgentStatuses, type AgentStatus } from "@/hooks/use-agent-status"
+import { useAgentStatuses, type AgentStatus } from "@/hooks/agent"
 
 // Re-export for back-compat with callers.
-export { refreshAgentStatuses as refreshAgentAvailability } from "@/hooks/use-agent-status"
+export { refreshAgentStatuses as refreshAgentAvailability } from "@/hooks/agent"
 
 interface AgentChipGroupProps {
   server: McpServer

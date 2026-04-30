@@ -21,7 +21,7 @@ import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useSettingsStore } from "@/stores/settings"
 import {
   type SearchProviderType,
   SEARCH_PROVIDERS,
@@ -30,6 +30,9 @@ import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
 } from "@/lib/search/types"
 import { cn } from "@/lib/utils"
+import { createLogger } from "@/lib/logger"
+
+const log = createLogger("settings.search.provider")
 
 export interface ProviderTestState {
   testing: boolean
@@ -74,7 +77,9 @@ export function SearchProviderCard({
   const adjustPriority = useCallback(
     (delta: number) => {
       const current = settings?.priority ?? 5
-      void setSearchProviderPriority(providerId, Math.max(1, Math.min(10, current + delta)))
+      const next = Math.max(1, Math.min(10, current + delta))
+      void setSearchProviderPriority(providerId, next)
+      log.info("provider_priority_changed", { providerId, priority: next })
     },
     [settings?.priority, providerId, setSearchProviderPriority]
   )
@@ -113,7 +118,10 @@ export function SearchProviderCard({
             <div className="flex items-center gap-2 shrink-0">
               <Switch
                 checked={settings?.enabled ?? false}
-                onCheckedChange={(v) => void setSearchProviderEnabled(providerId, v)}
+                onCheckedChange={(v) => {
+                  log.info("provider_enabled_changed", { providerId, enabled: v })
+                  void setSearchProviderEnabled(providerId, v)
+                }}
                 disabled={!settings?.enabled && !canEnable}
                 onClick={(e) => e.stopPropagation()}
               />
@@ -141,6 +149,13 @@ export function SearchProviderCard({
                     placeholder={config.apiKeyPlaceholder}
                     value={settings?.apiKey ?? ""}
                     onChange={(e) => void setSearchProviderApiKey(providerId, e.target.value)}
+                    onBlur={(e) =>
+                      log.info("provider_api_key_changed", {
+                        providerId,
+                        hasKey: Boolean(e.target.value),
+                        valid: e.target.value ? validateApiKey(providerId, e.target.value) : false,
+                      })
+                    }
                     className="pr-10"
                     autoComplete="new-password"
                     data-form-type="other"
@@ -209,6 +224,12 @@ export function SearchProviderCard({
                   value={settings?.cx ?? ""}
                   onChange={(e) =>
                     void setSearchProviderSettings(providerId, { cx: e.target.value })
+                  }
+                  onBlur={(e) =>
+                    log.info("provider_cx_changed", {
+                      providerId,
+                      hasCx: Boolean(e.target.value.trim()),
+                    })
                   }
                   autoComplete="off"
                   data-form-type="other"

@@ -381,27 +381,35 @@ export const DEFAULT_BACKGROUND_AGENT_CONFIG: BackgroundAgentConfig = {
 }
 
 /**
- * Background agent status display configuration
+ * Background agent status display configuration.
+ *
+ * `labelKey` is an i18n key under the `agentStatus` namespace; UI consumers
+ * resolve it via `useTranslations("agentStatus")(labelKey)`.
  */
 export const BACKGROUND_AGENT_STATUS_CONFIG: Record<
   BackgroundAgentStatus,
   {
-    label: string
+    labelKey: string
     color: string
     icon: string
     animate?: boolean
   }
 > = {
-  idle: { label: "Idle", color: "text-muted-foreground", icon: "Circle" },
-  queued: { label: "Queued", color: "text-blue-500", icon: "Clock" },
-  initializing: { label: "Initializing", color: "text-blue-500", icon: "Loader2", animate: true },
-  running: { label: "Running", color: "text-primary", icon: "Loader2", animate: true },
-  paused: { label: "Paused", color: "text-yellow-500", icon: "Pause" },
-  waiting: { label: "Waiting", color: "text-orange-500", icon: "AlertCircle" },
-  completed: { label: "Completed", color: "text-green-500", icon: "CheckCircle" },
-  failed: { label: "Failed", color: "text-destructive", icon: "XCircle" },
-  cancelled: { label: "Cancelled", color: "text-orange-500", icon: "Ban" },
-  timeout: { label: "Timeout", color: "text-red-500", icon: "AlertTriangle" },
+  idle: { labelKey: "idle", color: "text-muted-foreground", icon: "Circle" },
+  queued: { labelKey: "queued", color: "text-blue-500", icon: "Clock" },
+  initializing: {
+    labelKey: "initializing",
+    color: "text-blue-500",
+    icon: "Loader2",
+    animate: true,
+  },
+  running: { labelKey: "running", color: "text-primary", icon: "Loader2", animate: true },
+  paused: { labelKey: "paused", color: "text-yellow-500", icon: "Pause" },
+  waiting: { labelKey: "waiting", color: "text-orange-500", icon: "AlertCircle" },
+  completed: { labelKey: "completed", color: "text-green-500", icon: "CheckCircle" },
+  failed: { labelKey: "failed", color: "text-destructive", icon: "XCircle" },
+  cancelled: { labelKey: "cancelled", color: "text-orange-500", icon: "Ban" },
+  timeout: { labelKey: "timeout", color: "text-red-500", icon: "AlertTriangle" },
 }
 
 /**

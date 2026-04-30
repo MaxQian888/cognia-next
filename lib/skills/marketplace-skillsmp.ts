@@ -8,7 +8,7 @@
 
 import { isTauri } from "@/lib/tauri"
 import { skillsFetchRemoteMd } from "@/lib/claude/ipc"
-import { useSettingsStore } from "@/stores/settings-store"
+import { useSettingsStore } from "@/stores/settings"
 import type { FetchSkillContent, MarketplaceItem } from "./marketplace-types"
 import type { SkillCategory } from "@/lib/claude/types"
 

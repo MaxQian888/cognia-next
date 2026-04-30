@@ -6,7 +6,7 @@ const mocks = {
 
 let settings: { searchProviders?: Record<string, unknown> } = {}
 
-jest.mock("@/stores/settings-store", () => ({
+jest.mock("@/stores/settings", () => ({
   useSettingsStore: <T,>(selector: (s: Record<string, unknown>) => T) =>
     selector({ settings, ...mocks }),
 }))
@@ -23,6 +23,18 @@ jest.mock("./search-provider-card", () => ({
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+}))
+
+const mockLogInfo = jest.fn()
+jest.mock("@/lib/logger", () => ({
+  createLogger: () => ({
+    info: (...args: unknown[]) => mockLogInfo(...args),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn(),
+    trace: jest.fn(),
+    fatal: jest.fn(),
+  }),
 }))
 
 jest.mock("@/components/ui/dropdown-menu", () => ({
@@ -44,6 +56,7 @@ import { SearchProviderGrid } from "./search-provider-grid"
 
 beforeEach(() => {
   Object.values(mocks).forEach((m) => m.mockReset())
+  mockLogInfo.mockReset()
   settings = {
     searchProviders: {
       tavily: { providerId: "tavily", apiKey: "k", enabled: true, priority: 1 },
@@ -77,5 +90,11 @@ describe("SearchProviderGrid", () => {
       target: { value: "nonexistent" },
     })
     expect(screen.getByText("noMatchingProviders")).toBeInTheDocument()
+  })
+
+  it("logs provider_reset_to_defaults when reset clicked", () => {
+    render(<SearchProviderGrid />)
+    fireEvent.click(screen.getByText("reset"))
+    expect(mockLogInfo).toHaveBeenCalledWith("provider_reset_to_defaults")
   })
 })

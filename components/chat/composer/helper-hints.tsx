@@ -3,13 +3,16 @@
 // Tiny chip row at the very bottom of the composer reminding the user of
 // the most useful shortcuts. Kept terse to avoid stealing attention.
 
+import { useTranslations } from "next-intl"
+
 export function HelperHints() {
+  const t = useTranslations("chat.composer.helperHints")
   return (
     <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5 text-[10px] text-muted-foreground/70">
-      <Hint>⏎ Send · ⇧⏎ New line</Hint>
-      <Hint>Drop / paste images</Hint>
+      <Hint>{t("send")}</Hint>
+      <Hint>{t("dropImages")}</Hint>
       <Hint>
-        Try <code className="font-mono">/</code> <code className="font-mono">@</code>{" "}
+        {t("tryPrefix")} <code className="font-mono">/</code> <code className="font-mono">@</code>{" "}
         <code className="font-mono">!</code> <code className="font-mono">#</code>
       </Hint>
     </div>

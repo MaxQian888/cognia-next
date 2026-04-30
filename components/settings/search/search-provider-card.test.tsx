@@ -21,7 +21,7 @@ let providerSettings: {
   priority: 1,
 }
 
-jest.mock("@/stores/settings-store", () => ({
+jest.mock("@/stores/settings", () => ({
   useSettingsStore: <T,>(
     selector: (s: { settings: { searchProviders: Record<string, typeof providerSettings> } }) => T
   ) =>
@@ -35,6 +35,18 @@ jest.mock("@/stores/settings-store", () => ({
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+}))
+
+const mockLogInfo = jest.fn()
+jest.mock("@/lib/logger", () => ({
+  createLogger: () => ({
+    info: (...args: unknown[]) => mockLogInfo(...args),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn(),
+    trace: jest.fn(),
+    fatal: jest.fn(),
+  }),
 }))
 
 jest.mock("@/components/ui/collapsible", () => ({
@@ -70,6 +82,7 @@ function renderCard(props: Partial<React.ComponentProps<typeof SearchProviderCar
 
 beforeEach(() => {
   Object.values(mocks).forEach((m) => m.mockReset())
+  mockLogInfo.mockReset()
   providerSettings = {
     providerId: "tavily",
     apiKey: "",
@@ -125,6 +138,37 @@ describe("SearchProviderCard", () => {
     }
     renderCard({ providerId: "google" })
     expect(screen.getAllByText(/googleCx/i).length).toBeGreaterThan(0)
+  })
+
+  it("logs provider_enabled_changed when switch toggled", () => {
+    providerSettings = {
+      providerId: "tavily",
+      apiKey: "tvly-1234567890abc",
+      enabled: false,
+      priority: 1,
+    }
+    renderCard()
+    fireEvent.click(screen.getByRole("switch"))
+    expect(mockLogInfo).toHaveBeenCalledWith("provider_enabled_changed", {
+      providerId: "tavily",
+      enabled: true,
+    })
+  })
+
+  it("logs provider_api_key_changed on input blur with hasKey shape only", () => {
+    renderCard()
+    const input = screen.getByPlaceholderText(/tvly-/)
+    fireEvent.change(input, { target: { value: "tvly-1234567890abc" } })
+    fireEvent.blur(input, { target: { value: "tvly-1234567890abc" } })
+    expect(mockLogInfo).toHaveBeenCalledWith(
+      "provider_api_key_changed",
+      expect.objectContaining({ providerId: "tavily", hasKey: true })
+    )
+    const calls = mockLogInfo.mock.calls.filter(([n]) => n === "provider_api_key_changed")
+    expect(calls.length).toBeGreaterThan(0)
+    const [, ctx] = calls[calls.length - 1]
+    expect((ctx as Record<string, unknown>).apiKey).toBeUndefined()
+    expect(JSON.stringify(ctx)).not.toContain("tvly-1234567890abc")
   })
 
   it("adjusts priority up and down", () => {

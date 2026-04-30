@@ -153,6 +153,7 @@ export const loggers = {
   screenshot: createLogger("screenshot"),
   tts: createLogger("tts"),
   shell: createLogger("shell"),
+  canvas: createLogger("canvas"),
 }
 
 /**

@@ -14,6 +14,7 @@ import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import { CheckCircle2Icon, DownloadIcon, FolderXIcon, Loader2Icon, ServerIcon } from "lucide-react"
+import { loggers } from "@/lib/logger"
 
 import {
   Dialog,
@@ -127,9 +128,11 @@ export function McpImportDialog({ trigger, onImported }: ImportDialogProps) {
     setChosen(new Set())
     try {
       const p = await previewAgentImport(id)
+      loggers.mcp.info("import.previewLoaded", { agent: id, count: p.drafts.length })
       setPreview(p)
       setChosen(new Set(p.drafts.map((d) => d.name)))
     } catch (err) {
+      loggers.mcp.error("import.previewFailed", err, { agent: id })
       toast.error(err instanceof Error ? err.message : String(err))
     }
   }
@@ -139,11 +142,19 @@ export function McpImportDialog({ trigger, onImported }: ImportDialogProps) {
     setBusy(true)
     try {
       const filtered = preview.drafts.filter((d) => chosen.has(d.name))
-      // We re-implement importFromAgent's read so we can pass the user's
-      // selection. Easier: just call importFromAgent and trust strategy.
-      // But we want to respect the unchecked items — that means skip them.
-      // Pass `strategy` directly; for unchecked rows we don't write at all.
+      loggers.mcp.info("import.confirmStarted", {
+        agent: picked,
+        selected: filtered.length,
+        strategy,
+      })
       const result = await importFromAgentWithSelection(picked, filtered, strategy)
+      loggers.mcp.info("import.completed", {
+        agent: picked,
+        created: result.created,
+        updated: result.updated,
+        skipped: result.skipped,
+        errored: result.errored.length,
+      })
       const parts: string[] = []
       if (result.created > 0) parts.push(t("created", { count: result.created }))
       if (result.updated > 0) parts.push(t("updated", { count: result.updated }))
@@ -159,6 +170,7 @@ export function McpImportDialog({ trigger, onImported }: ImportDialogProps) {
       onImported?.()
       handleOpenChange(false)
     } catch (err) {
+      loggers.mcp.error("import.failed", err, { agent: picked })
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)

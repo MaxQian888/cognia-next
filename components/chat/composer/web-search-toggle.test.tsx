@@ -24,11 +24,11 @@ let settingsState: {
   defaultSearchProvider?: string
 } = {}
 
-jest.mock("@/stores/chat-store", () => ({
+jest.mock("@/stores/chat", () => ({
   useChatStore: <T,>(selector: (s: typeof chatState) => T) => selector(chatState),
 }))
 
-jest.mock("@/stores/settings-store", () => ({
+jest.mock("@/stores/settings", () => ({
   useSettingsStore: <T,>(selector: (s: { settings: typeof settingsState }) => T) =>
     selector({ settings: settingsState }),
 }))

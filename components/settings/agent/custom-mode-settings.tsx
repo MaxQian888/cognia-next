@@ -7,6 +7,7 @@
 
 import { useState, useCallback, useRef } from "react"
 import { useTranslations } from "next-intl"
+import { loggers } from "@/lib/logger"
 import {
   Plus,
   Download,
@@ -172,7 +173,10 @@ export function CustomModeSettings() {
     (id: string) => {
       const duplicated = duplicateMode(id)
       if (duplicated) {
+        loggers.agent.info("settings.modeDuplicated", { sourceId: id, newId: duplicated.id })
         toast.success(tCustomMode("modeDuplicated"))
+      } else {
+        loggers.agent.warn("settings.modeDuplicateMissing", { id })
       }
     },
     [duplicateMode, tCustomMode]
@@ -182,6 +186,7 @@ export function CustomModeSettings() {
   const handleDelete = useCallback(() => {
     if (deleteConfirmId) {
       deleteMode(deleteConfirmId)
+      loggers.agent.info("settings.modeDeleted", { id: deleteConfirmId })
       setDeleteConfirmId(null)
       setSelectedModes((prev) => {
         const next = new Set(prev)
@@ -204,6 +209,7 @@ export function CustomModeSettings() {
         a.download = `custom-mode-${id}.json`
         a.click()
         URL.revokeObjectURL(url)
+        loggers.agent.info("settings.modeExported", { id })
         toast.success(tCustomMode("modeExported"))
       }
     },
@@ -220,6 +226,7 @@ export function CustomModeSettings() {
     a.download = `custom-modes-${new Date().toISOString().split("T")[0]}.json`
     a.click()
     URL.revokeObjectURL(url)
+    loggers.agent.info("settings.allModesExported", { count: modesArray.length })
     toast.success(tCustomMode("exportedModes", { count: modesArray.length }))
   }, [exportAllModes, modesArray.length, tCustomMode])
 
@@ -236,18 +243,23 @@ export function CustomModeSettings() {
           const data = JSON.parse(content)
           if (data.type === "custom-modes-collection") {
             const count = importModes(content)
+            loggers.agent.info("settings.modesImported", { count })
             toast.success(tCustomMode("importedModes", { count }))
           } else if (data.type === "custom-mode") {
             const imported = importMode(content)
             if (imported) {
+              loggers.agent.info("settings.modeImported", { name: imported.name })
               toast.success(tCustomMode("importedMode", { name: imported.name }))
             } else {
+              loggers.agent.warn("settings.modeImportRejected")
               toast.error(tCustomMode("failedToImportMode"))
             }
           } else {
+            loggers.agent.warn("settings.modeImportInvalidFormat", { type: data?.type })
             toast.error(tCustomMode("invalidFileFormat"))
           }
-        } catch {
+        } catch (err) {
+          loggers.agent.error("settings.modeImportParseFailed", err)
           toast.error(tCustomMode("failedToParseFile"))
         }
       }
@@ -263,7 +275,9 @@ export function CustomModeSettings() {
 
   // Handle bulk delete
   const handleBulkDelete = useCallback(() => {
+    const ids = Array.from(selectedModes)
     selectedModes.forEach((id) => deleteMode(id))
+    loggers.agent.info("settings.bulkDelete", { count: ids.length })
     toast.success(tCustomMode("deletedModes", { count: selectedModes.size }))
     setSelectedModes(new Set())
   }, [selectedModes, deleteMode, tCustomMode])

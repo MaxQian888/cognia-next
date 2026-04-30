@@ -16,28 +16,28 @@ import { BotIcon, ChevronDownIcon, PlugZapIcon } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { useAgentRuntimeStore, type AgentRuntime } from "@/stores/agent-runtime-store"
+import { useAgentRuntimeStore, type AgentRuntime } from "@/stores/agent"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 
 interface Props {
   className?: string
 }
 
+// Picks runtime type only (claude-sdk | external). The external-agent
+// record itself is selected by the sibling `<ExternalAgentSelector>` in
+// the composer toolbar — keeping this widget single-purpose.
 export function AgentRuntimeSelector({ className }: Props) {
   const t = useTranslations("agentRuntime")
   const runtime = useAgentRuntimeStore((s) => s.runtime)
   const setRuntime = useAgentRuntimeStore((s) => s.setRuntime)
   const externalAgentId = useAgentRuntimeStore((s) => s.externalAgentId)
-  const setExternalAgentId = useAgentRuntimeStore((s) => s.setExternalAgentId)
   const externalAgents = useExternalAgentStore((s) => s.getAllAgents())
 
   const Icon = runtime === "external" ? PlugZapIcon : BotIcon
@@ -85,36 +85,6 @@ export function AgentRuntimeSelector({ className }: Props) {
             </div>
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
-
-        {runtime === "external" && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-xs text-muted-foreground">
-              {t("externalAgentLabel")}
-            </DropdownMenuLabel>
-            {externalAgents.length === 0 ? (
-              <DropdownMenuItem disabled className="text-xs">
-                {t("externalEmpty")}
-              </DropdownMenuItem>
-            ) : (
-              externalAgents.map((agent) => (
-                <DropdownMenuItem
-                  key={agent.id}
-                  onSelect={() => setExternalAgentId(agent.id)}
-                  className={cn("text-sm", agent.id === externalAgentId && "bg-accent")}
-                >
-                  <PlugZapIcon className="mr-2 size-3.5" />
-                  <div className="flex flex-col">
-                    <span>{agent.name}</span>
-                    <span className="text-[10px] text-muted-foreground">
-                      {agent.protocol.toUpperCase()} · {agent.transport}
-                    </span>
-                  </div>
-                </DropdownMenuItem>
-              ))
-            )}
-          </>
-        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )

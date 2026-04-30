@@ -50,7 +50,7 @@ import {
   formatTokens,
 } from "@/lib/agent"
 import { formatCost } from "@/lib/agent-trace/cost-estimator"
-import type { AgentTraceEventType } from "@/types/agent-trace"
+import type { AgentTraceEventType } from "@/types/agent/agent-trace"
 import type { StructuredLogEntry, LogLevel } from "@/lib/logger"
 
 export interface LogDetailPanelProps {

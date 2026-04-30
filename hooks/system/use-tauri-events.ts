@@ -1,0 +1,213 @@
+"use client"
+
+import { useEffect } from "react"
+import { useRouter } from "next/navigation"
+import { toast } from "sonner"
+import { listen } from "@tauri-apps/api/event"
+import { TAURI_EVENTS, onTauriEvent } from "@/lib/tauri"
+import { isTauri } from "@/lib/tauri"
+import { useChatStore } from "@/stores/chat"
+import { useUIStore } from "@/stores/ui"
+import { useSettingsStore } from "@/stores/settings"
+
+interface ParsedDeepLink {
+  kind: "chat" | "settings" | "workspace" | "unknown"
+  chatId?: string
+  workspacePath?: string
+  settingsTab?: string
+}
+
+/**
+ * Parse a single `cognia://` URL into the action it should drive.
+ *
+ *   cognia://chat/<id>            → open that session
+ *   cognia://settings[?tab=xyz]   → open settings (optionally on a tab)
+ *   cognia://workspace?path=…     → set the default working directory
+ */
+function parseDeepLink(raw: string): ParsedDeepLink {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return { kind: "unknown" }
+  }
+  if (url.protocol !== "cognia:") return { kind: "unknown" }
+
+  // For custom schemes, `host` holds the first segment after `://`.
+  const head = url.host || url.pathname.replace(/^\/+/, "").split("/")[0] || ""
+  if (head === "chat") {
+    const id =
+      url.pathname.replace(/^\/+/, "").split("/").filter(Boolean)[0] ||
+      url.searchParams.get("id") ||
+      ""
+    return { kind: "chat", chatId: id || undefined }
+  }
+  if (head === "settings") {
+    return { kind: "settings", settingsTab: url.searchParams.get("tab") ?? undefined }
+  }
+  if (head === "workspace") {
+    return { kind: "workspace", workspacePath: url.searchParams.get("path") ?? undefined }
+  }
+  return { kind: "unknown" }
+}
+
+/**
+ * Subscribes the renderer to events emitted by `src-tauri/src/{lib,tray,menu}.rs`
+ * and dispatches them into the existing zustand stores.
+ *
+ * Mount this once near the root of the app — `tauri-provider.tsx` does that.
+ */
+export function useTauriEvents(): void {
+  const router = useRouter()
+
+  useEffect(() => {
+    if (!isTauri()) return
+    const unsubscribers: Array<() => void> = []
+    let cancelled = false
+
+    /**
+     * The tray menu, View menu, and Ctrl+Shift+L global shortcut all want to
+     * surface the Log Panel. They emit different events for traceability but
+     * share this single navigator so the destination stays consistent.
+     */
+    const navigateToLogs = () => {
+      router.push("/logs")
+    }
+
+    const handleDeepLinks = (urls: string[]) => {
+      for (const raw of urls) {
+        const action = parseDeepLink(raw)
+        switch (action.kind) {
+          case "chat": {
+            if (action.chatId) {
+              useChatStore.getState().setActiveSession(action.chatId)
+              useUIStore.getState().setSelectedGuild({ kind: "dm" })
+            }
+            break
+          }
+          case "settings": {
+            useUIStore.getState().requestOpenSettings(action.settingsTab)
+            break
+          }
+          case "workspace": {
+            if (action.workspacePath) {
+              void useSettingsStore.getState().save({
+                defaultWorkingDir: action.workspacePath,
+              })
+              toast.success("Working directory updated", {
+                description: action.workspacePath,
+              })
+            }
+            break
+          }
+          default: {
+            console.warn("unhandled deep link", raw)
+            toast.message("Deep link", { description: raw })
+          }
+        }
+      }
+    }
+
+    const subscribe = async () => {
+      // Tray actions
+      const trayNewChat = await onTauriEvent(TAURI_EVENTS.trayNewChat, () => {
+        useChatStore.getState().clear()
+        useUIStore.getState().setSelectedGuild({ kind: "dm" })
+      })
+      const traySettings = await onTauriEvent(TAURI_EVENTS.traySettings, () => {
+        useUIStore.getState().requestOpenSettings()
+      })
+      const trayOpenLogs = await onTauriEvent(TAURI_EVENTS.trayOpenLogs, () => {
+        navigateToLogs()
+      })
+
+      // Menu items — `menu://<id>` for any item not handled natively in Rust.
+      const unlistenNewChat = await listen<null>("menu://new-chat", () => {
+        useChatStore.getState().clear()
+        useUIStore.getState().setSelectedGuild({ kind: "dm" })
+      })
+      const unlistenMenuOpenLogs = await listen<null>(TAURI_EVENTS.menuOpenLogs, () =>
+        navigateToLogs()
+      )
+      const unlistenOpenWs = await listen<null>("menu://open-workspace", async () => {
+        try {
+          const { open: openDialog } = await import("@tauri-apps/plugin-dialog")
+          const picked = await openDialog({
+            directory: true,
+            multiple: false,
+            title: "Select workspace",
+          })
+          if (typeof picked === "string") {
+            await useSettingsStore.getState().save({ defaultWorkingDir: picked })
+            toast.success("Workspace updated", { description: picked })
+          }
+        } catch (err) {
+          console.warn("open-workspace dialog failed", err)
+        }
+      })
+      const unlistenDocs = await listen<null>("menu://documentation", async () => {
+        const { openExternal } = await import("@/lib/tauri/opener")
+        await openExternal("https://v2.tauri.app")
+      })
+
+      // CLI args (first launch + second-instance forwarding)
+      const cliMatches = await onTauriEvent<unknown>(TAURI_EVENTS.cliMatches, (payload) => {
+        console.info("cli://matches", payload)
+      })
+      const cliSecondInstance = await onTauriEvent<{
+        args: string[]
+        cwd: string
+      }>(TAURI_EVENTS.cliSecondInstance, (payload) => {
+        toast.message("Cognia is already running", {
+          description: payload?.args?.join(" ") || payload?.cwd || "Window focused",
+        })
+      })
+
+      // Deep-link URLs received while running
+      const deepLink = await onTauriEvent<string[]>(TAURI_EVENTS.deepLink, (urls) => {
+        if (Array.isArray(urls)) handleDeepLinks(urls)
+        else handleDeepLinks([String(urls)])
+      })
+
+      if (cancelled) {
+        trayNewChat()
+        traySettings()
+        trayOpenLogs()
+        unlistenNewChat()
+        unlistenMenuOpenLogs()
+        unlistenOpenWs()
+        unlistenDocs()
+        cliMatches()
+        cliSecondInstance()
+        deepLink()
+        return
+      }
+
+      unsubscribers.push(
+        trayNewChat,
+        traySettings,
+        trayOpenLogs,
+        unlistenNewChat,
+        unlistenMenuOpenLogs,
+        unlistenOpenWs,
+        unlistenDocs,
+        cliMatches,
+        cliSecondInstance,
+        deepLink
+      )
+    }
+
+    void subscribe()
+
+    return () => {
+      cancelled = true
+      for (const fn of unsubscribers) {
+        try {
+          fn()
+        } catch (err) {
+          console.warn("tauri-event unsubscribe failed", err)
+        }
+      }
+    }
+  }, [router])
+}

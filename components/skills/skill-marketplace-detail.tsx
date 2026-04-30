@@ -18,6 +18,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { fetchMarketplaceContent } from "@/lib/skills/marketplace-install"
 import { getCategoryMeta } from "@/lib/skills/categories"
 import type { MarketplaceItem } from "@/lib/skills/marketplace-types"
+import { loggers } from "@/lib/logger"
 
 interface Props {
   item: MarketplaceItem
@@ -56,6 +57,11 @@ export function SkillMarketplaceDetail({
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+        loggers.skills.error("marketplace fetch content failed", err, {
+          itemId: item.id,
+          source: item.source,
+          sourceId: item.sourceId,
+        })
       })
       .finally(() => {
         if (!cancelled) setLoading(false)

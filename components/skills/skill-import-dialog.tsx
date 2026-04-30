@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import {
   Dialog,
   DialogContent,
@@ -23,7 +24,8 @@ import {
   type ImportConflictStrategy,
   type SkillDraft,
 } from "@/lib/db/skills"
-import type { ImportStaging } from "@/stores/skills-store"
+import type { ImportStaging } from "@/stores/skills"
+import { loggers } from "@/lib/logger"
 
 interface Props {
   staging: ImportStaging
@@ -49,7 +51,21 @@ export function SkillImportDialog({ staging, onCancel, onComplete }: Props) {
         source: "imported",
       }))
       const report = await bulkImportSkills(drafts, strategy)
+      loggers.skills.info("bulk import ok", {
+        strategy,
+        attempted: drafts.length,
+        created: report.created,
+        updated: report.updated,
+        skipped: report.skipped,
+        errored: report.errored.length,
+      })
       onComplete(report)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+      loggers.skills.error("bulk import failed", err, {
+        strategy,
+        attempted: staging.drafts.length,
+      })
     } finally {
       setRunning(false)
     }
@@ -65,7 +81,9 @@ export function SkillImportDialog({ staging, onCancel, onComplete }: Props) {
 
         <div className="space-y-3">
           <Card className="p-3">
-            <p className="mb-1 text-xs font-medium">{staging.drafts.length} skill(s) staged</p>
+            <p className="mb-1 text-xs font-medium">
+              {t("stagedCount", { count: staging.drafts.length })}
+            </p>
             <ScrollArea className="h-40">
               <div className="space-y-1.5">
                 {staging.drafts.map((d, i) => (
@@ -76,9 +94,9 @@ export function SkillImportDialog({ staging, onCancel, onComplete }: Props) {
                     <span className="truncate">{d.name}</span>
                     {d.tags && d.tags.length > 0 && (
                       <span className="flex gap-1 shrink-0">
-                        {d.tags.slice(0, 2).map((t) => (
-                          <Badge key={t} variant="outline" className="h-4 text-[9px]">
-                            {t}
+                        {d.tags.slice(0, 2).map((tag) => (
+                          <Badge key={tag} variant="outline" className="h-4 text-[9px]">
+                            {tag}
                           </Badge>
                         ))}
                       </span>
@@ -89,8 +107,10 @@ export function SkillImportDialog({ staging, onCancel, onComplete }: Props) {
             </ScrollArea>
             {staging.parseErrors.length > 0 && (
               <p className="mt-2 text-[11px] text-destructive">
-                {staging.parseErrors.length} file(s) failed to parse:{" "}
-                {staging.parseErrors[0]?.error}
+                {t("parseErrorsLine", {
+                  count: staging.parseErrors.length,
+                  first: staging.parseErrors[0]?.error ?? "",
+                })}
               </p>
             )}
           </Card>
@@ -111,7 +131,7 @@ export function SkillImportDialog({ staging, onCancel, onComplete }: Props) {
 
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={onCancel} disabled={running}>
-            Cancel
+            {t("cancel")}
           </Button>
           <Button size="sm" onClick={apply} disabled={running}>
             {running && <Spinner className="mr-1.5 size-3" />}
