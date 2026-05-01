@@ -23,6 +23,7 @@ import type {
 } from "./canvas-types"
 import type { A2UIAppRow, A2UISurfaceRow, A2UITemplateRow, A2UIEventHistoryRow } from "./a2ui-types"
 import { buildA2UIBridgeMcpRow, A2UI_BRIDGE_SERVER_NAME } from "@/lib/a2ui/mcp-tool-schemas"
+import type { TwinSource, TwinChunk, TwinProfile, TwinDraft, TwinJob } from "@/types/twin"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -44,6 +45,11 @@ export class CogniaDB extends Dexie {
   a2uiSurfaces!: Table<A2UISurfaceRow, string>
   a2uiTemplates!: Table<A2UITemplateRow, string>
   a2uiEventHistory!: Table<A2UIEventHistoryRow, string>
+  twinSources!: Table<TwinSource, string>
+  twinChunks!: Table<TwinChunk, string>
+  twinProfile!: Table<TwinProfile, string>
+  twinDrafts!: Table<TwinDraft, string>
+  twinJobs!: Table<TwinJob, string>
 
   constructor() {
     super("cognia-claude")
@@ -352,6 +358,52 @@ export class CogniaDB extends Dexie {
           await tx.table("mcpServers").add(buildA2UIBridgeMcpRow())
         }
       })
+
+    // v14 — Employee Digital Twin tables. Pure additions (no upgrade hook
+    // required): the only existing-row migration is the `Character.twinId` /
+    // `Character.twinSettings` fields, both of which are TS-optional and
+    // schema-less in Dexie (non-indexed) — old rows simply omit them.
+    //
+    // Indexes are picked for the hot paths the Phase 4-7 code drives:
+    //   • `twinSources`  — by twinId+kind/status to power the workbench source
+    //                      list, by `fingerprint` for dedupe-on-import.
+    //   • `twinChunks`   — by twinId+sourceId for cascade-delete and source
+    //                      drilldown, by `vectorDocId` to resolve a vector
+    //                      search hit back to its full-text payload.
+    //   • `twinProfile`  — 1:1 with twinId; only the lookup index is needed.
+    //   • `twinDrafts`   — by twinId+status to render the "needs review"
+    //                      queue, by twinId+kind to filter character vs skill.
+    //   • `twinJobs`     — by twinId+status for "in-flight" badges; by
+    //                      `queuedAt` to drive a FIFO scheduler picker.
+    this.version(14).stores({
+      sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
+      messages: "id, sessionId, [sessionId+createdAt], senderId",
+      settings: "id",
+      promptPresets:
+        "id, updatedAt, isBuiltIn, isDefault, isFavorite, sortOrder, category, lastUsedAt",
+      mcpServers: "id, name, enabled",
+      characters: "id, name, updatedAt, isBuiltIn",
+      skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
+      skillResources: "id, skillId, [skillId+kind], [skillId+path], updatedAt",
+      teams: "id, name, updatedAt, isBuiltIn",
+      sessionState: "sessionId, lastReadAt",
+      trustedWorkspaces: "path, trustedAt",
+      tts_provider_keys: "id",
+      backupHistory: "id, completedAt, type, success",
+      canvasDocuments: "id, title, language, type, updatedAt, createdAt",
+      canvasVersions: "id, documentId, [documentId+createdAt], isAutoSave",
+      canvasComments: "id, documentId, [documentId+createdAt], parentId, resolvedAt",
+      canvasSessions: "id, documentId, ownerId, createdAt",
+      a2uiApps: "id, name, updatedAt, createdAt, isBuiltIn, category, isFavorite, sortOrder",
+      a2uiSurfaces: "id, appId, sessionId, updatedAt, createdAt, type",
+      a2uiTemplates: "id, name, category, updatedAt, source",
+      a2uiEventHistory: "id, surfaceId, [surfaceId+timestamp], timestamp, type",
+      twinSources: "&id, twinId, kind, format, status, fingerprint, [twinId+kind], [twinId+status]",
+      twinChunks: "&id, twinId, sourceId, vectorDocId, [twinId+sourceId], [twinId+createdAt]",
+      twinProfile: "&id, twinId",
+      twinDrafts: "&id, twinId, jobId, kind, status, [twinId+status], [twinId+kind]",
+      twinJobs: "&id, twinId, status, queuedAt, [twinId+status], [twinId+kind]",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>

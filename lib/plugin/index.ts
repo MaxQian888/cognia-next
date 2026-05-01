@@ -51,6 +51,13 @@ export interface PluginEventHooks {
   dispatchArtifactDelete: (...args: unknown[]) => void
   dispatchArtifactOpen: (...args: unknown[]) => void
   dispatchArtifactClose: (...args: unknown[]) => void
+  // Compression lifecycle dispatcher — Cognia plugins can intercept the
+  // pre-compaction step to swap in custom summarizers. cognia-next has no
+  // plugin runtime, so this is a no-op that returns `null` (the stub
+  // contract that `lib/ai/embedding/compression.ts` checks for).
+  dispatchPreCompact: (
+    payload: unknown
+  ) => Promise<{ handled?: boolean; summary?: string; metadata?: Record<string, unknown> } | null>
 }
 
 export function getPluginEventHooks(): PluginEventHooks {
@@ -69,6 +76,7 @@ export function getPluginEventHooks(): PluginEventHooks {
     dispatchArtifactDelete: noop,
     dispatchArtifactOpen: noop,
     dispatchArtifactClose: noop,
+    dispatchPreCompact: async () => null,
   }
 }
 

@@ -30,6 +30,31 @@ export const knowledgeRag = {
   retrieve: retrieveKnowledge,
 }
 
+/**
+ * Stub for `searchKnowledgeBaseAdvanced` — Cognia's RAG-aware search entry.
+ * cognia-next will replace this when the twin RAG runtime is wired up; for
+ * now it returns an empty result so the ported parity test in
+ * `lib/ai/rag/rag-consumption-parity.test.ts` typechecks. The test itself
+ * is gated behind `describe.skip` because cognia-next has a different RAG
+ * architecture (see Phase 2 plan).
+ */
+export interface AdvancedSearchOptions {
+  query: string
+  topK?: number
+  filter?: Record<string, unknown>
+}
+
+export interface AdvancedSearchResult {
+  chunks: KnowledgeChunk[]
+  total: number
+}
+
+export async function searchKnowledgeBaseAdvanced(
+  _options: AdvancedSearchOptions
+): Promise<AdvancedSearchResult> {
+  return { chunks: [], total: 0 }
+}
+
 export interface BuildProjectContextOptions {
   maxContextLength?: number
   useRelevanceFiltering?: boolean

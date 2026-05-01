@@ -293,11 +293,16 @@ const config: Config = {
   // A map from regular expressions to paths to transformers
   // transform: undefined,
 
-  // An array of regexp pattern strings that are matched against all source file paths, matched files will skip transformation
-  // transformIgnorePatterns: [
-  //   "\\\\node_modules\\\\",
-  //   "\\.pnp\\.[^\\\\]+$"
-  // ],
+  // Several ported npm packages are ESM-only (no CJS dist), so Jest's default
+  // CJS loader trips on `export` keywords. The pattern below uses a negative
+  // lookahead applied to the *entire remainder of the path*, which is the
+  // only form that survives pnpm's two-layer
+  // `.pnpm/<scope>+<pkg>@<ver>/node_modules/<scope>/<pkg>` layout. Add new
+  // ESM packages to the negative-lookahead alternation as they surface.
+  transformIgnorePatterns: [
+    "/node_modules/(?!.*(?:@qdrant\\+|@qdrant/|@huggingface\\+|@huggingface/|chromadb|@chroma-core|@pinecone-database\\+|@pinecone-database/|weaviate-client|simple-git|onnxruntime-common))",
+    "\\.pnp\\.[^\\\\]+$",
+  ],
 
   // An array of regexp pattern strings that are matched against all modules before the module loader will automatically return a mock for them
   // unmockedModulePathPatterns: undefined,

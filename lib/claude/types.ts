@@ -725,6 +725,23 @@ export interface Character {
   a2uiEnabled?: boolean
   /** Optional A2UI catalog this character defaults to (academic / financial / general / …). */
   a2uiCatalogId?: string
+  /**
+   * Soft-bind this character to an Employee Digital Twin. When set, the runtime
+   * (`lib/twin/runtime/apply-twin-context.ts`, Phase 6) injects RAG-retrieved
+   * chunks + style-sample few-shots into the send-time system prompt before
+   * Claude is called. When unset the character behaves like a normal one.
+   */
+  twinId?: string
+  /**
+   * Per-character runtime preferences for the twin pipeline. All optional;
+   * the runtime falls back to `DEFAULT_TWIN_SETTINGS` from `@/types/twin`.
+   */
+  twinSettings?: {
+    enableRag?: boolean
+    ragTopK?: number
+    enableStyleFewShot?: boolean
+    styleSamplesK?: number
+  }
   createdAt: number
   updatedAt: number
 }

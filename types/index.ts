@@ -28,3 +28,34 @@ export interface Project {
   knowledgeBase?: unknown[]
   metadata?: Record<string, unknown>
 }
+
+/**
+ * KnowledgeFile stub — mirrors the shape used by ported parsers in
+ * `lib/document/`. cognia-next's twin subsystem owns the real ingestion
+ * surface (`twinSources`/`twinChunks` Dexie tables) so this type only has
+ * to satisfy the literal-union references inside `lib/document/support-matrix.ts`.
+ */
+export interface KnowledgeFile {
+  id: string
+  name: string
+  type:
+    | "text"
+    | "pdf"
+    | "code"
+    | "markdown"
+    | "json"
+    | "word"
+    | "excel"
+    | "csv"
+    | "html"
+    | "presentation"
+    | "rtf"
+    | "epub"
+  content: string
+  size: number
+  mimeType?: string
+  originalSize?: number
+  pageCount?: number
+  createdAt: Date
+  updatedAt: Date
+}

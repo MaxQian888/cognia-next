@@ -18,3 +18,10 @@ export type ToolState =
   | "output-denied"
   | "approval-requested"
   | "approval-responded"
+
+/**
+ * Re-export the AI-SDK `UIMessage` shape under the cognia-next types path so
+ * ported code (e.g. `lib/ai/embedding/compression.ts`) that imports
+ * `UIMessage` from `@/types/core/message` resolves cleanly.
+ */
+export type { UIMessage } from "ai"
