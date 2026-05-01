@@ -3,15 +3,13 @@
 /**
  * Source uploader. Two modes share one card:
  *
- *   1. **File picker** — accepts text-based files (.md, .txt, .csv, .html,
- *      .json, .eml, .mbox, source code …). Each file is read as text,
- *      classified by extension, and turned into one or more `twinSources`
- *      rows. .mbox / .eml route through `lib/twin/importers/email/*` so a
- *      single mailbox file can produce many source rows in one click.
- *      Binary formats (PDF / DOCX / PPTX) are intentionally NOT handled
- *      here yet — they need the Tauri filesystem path to round-trip
- *      reliably; the UI surfaces a "use Tauri" hint instead of silently
- *      mis-parsing.
+ *   1. **File picker** — accepts text AND binary files. Text formats land
+ *      verbatim in Dexie; binary formats (PDF / DOCX / PPTX / EPUB / ODT /
+ *      ODP) are parsed in the browser via
+ *      `lib/document/document-processor:processDocumentAsync` and only
+ *      their extracted text is stored. .mbox / .eml route through
+ *      `lib/twin/importers/email/*` so a single mailbox produces many
+ *      source rows in one click.
  *
  *   2. **Paste text** — the original Phase 7 path; useful for snippets or
  *      content that doesn't live in a file (slack message dumps, prose
@@ -33,11 +31,11 @@ import type { TwinSourceFormat, TwinSourceKind } from "@/types/twin"
 const FORMATS: TwinSourceFormat[] = listSupportedFormats() as TwinSourceFormat[]
 
 /**
- * Extensions accepted by the text-based file picker. Binary formats are
- * deliberately excluded; the picker hint and a small inline disclosure
- * guide users towards the paste path or a future Tauri file dialog.
+ * Extensions accepted by the file picker. Binary formats are parsed in the
+ * browser; only the extracted text lands in Dexie.
  */
 const FILE_PICKER_ACCEPT = [
+  // Text
   ".md",
   ".markdown",
   ".txt",
@@ -49,6 +47,7 @@ const FILE_PICKER_ACCEPT = [
   ".eml",
   ".mbox",
   ".rtf",
+  // Code
   ".ts",
   ".tsx",
   ".js",
@@ -62,6 +61,13 @@ const FILE_PICKER_ACCEPT = [
   ".h",
   ".swift",
   ".kt",
+  // Binary (parsed client-side)
+  ".pdf",
+  ".docx",
+  ".pptx",
+  ".odt",
+  ".odp",
+  ".epub",
 ].join(",")
 
 const TEXTUAL_FORMATS: ReadonlySet<TwinSourceFormat> = new Set<TwinSourceFormat>([
@@ -79,6 +85,19 @@ const TEXTUAL_FORMATS: ReadonlySet<TwinSourceFormat> = new Set<TwinSourceFormat>
   "lark-export",
   "dingtalk-export",
   "wechat-export",
+])
+
+/**
+ * Formats handled by `lib/document/document-processor:processDocumentAsync`.
+ * Parsed in the browser; we persist the resulting text only.
+ */
+const BINARY_FORMATS: ReadonlySet<TwinSourceFormat> = new Set<TwinSourceFormat>([
+  "pdf",
+  "docx",
+  "pptx",
+  "odt",
+  "odp",
+  "epub",
 ])
 
 function inferKind(format: TwinSourceFormat): TwinSourceKind {
@@ -109,6 +128,18 @@ async function readFileAsText(file: File): Promise<string> {
   })
 }
 
+async function readFileAsArrayBuffer(file: File): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result
+      resolve(result instanceof ArrayBuffer ? result : new ArrayBuffer(0))
+    }
+    reader.onerror = () => reject(reader.error ?? new Error("FileReader failed"))
+    reader.readAsArrayBuffer(file)
+  })
+}
+
 interface IngestedFromFile {
   /** Sources actually created (already written to Dexie). */
   sources: number
@@ -124,10 +155,49 @@ async function ingestFile(
   if (!detected) {
     return { sources: 0, error: "Unknown file type — pick the format manually via paste mode." }
   }
+
+  // Binary formats — parse in the browser via the ported document processor
+  // and persist only the extracted text. The worker / scheduler stay
+  // text-only.
+  if (BINARY_FORMATS.has(detected)) {
+    try {
+      const buffer = await readFileAsArrayBuffer(file)
+      const { processDocumentAsync } = await import("@/lib/document/document-processor")
+      const tempId = `tws_pre_${twinId}_${Date.now().toString(36)}`
+      const processed = await processDocumentAsync(tempId, file.name, buffer, {
+        extractEmbeddable: true,
+      })
+      const text = processed.embeddableContent || processed.content
+      if (!text.trim()) {
+        return { sources: 0, error: `Parsed ${detected} but no text was extracted.` }
+      }
+      const fingerprint = await sha256(text)
+      await createTwinSource({
+        twinId,
+        kind: inferKind(detected),
+        format: "markdown", // post-parse the body is structured text
+        source: text,
+        title: processed.metadata.title || file.name,
+        bytes: buffer.byteLength,
+        fingerprint,
+        redacted: false,
+        status: "pending",
+        tags: [detected, "extracted"],
+      })
+      return { sources: 1 }
+    } catch (err) {
+      return {
+        sources: 0,
+        error:
+          err instanceof Error ? `Failed to parse ${detected}: ${err.message}` : "Parse failed",
+      }
+    }
+  }
+
   if (!TEXTUAL_FORMATS.has(detected)) {
     return {
       sources: 0,
-      error: `Format "${detected}" is binary — desktop file picker support lands later. Paste-text path still works.`,
+      error: `Format "${detected}" is not yet supported in the file picker. Paste-text path still works.`,
     }
   }
 
@@ -261,9 +331,9 @@ export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderPro
       <section className="flex flex-col gap-2">
         <h3 className="text-sm font-medium">From file(s)</h3>
         <p className="text-muted-foreground text-xs">
-          Markdown / text / CSV / HTML / JSON / source code / .eml / .mbox. mbox files produce one
-          source per message. Binary formats (PDF / DOCX / PPTX) are deferred until the desktop file
-          path lands.
+          Text formats (Markdown / CSV / HTML / JSON / source code / .eml / .mbox) are stored as-is.
+          Binary formats (PDF / DOCX / PPTX / EPUB / ODT / ODP) are parsed in the browser; only the
+          extracted text lands in Dexie. mbox files produce one source per message.
         </p>
         <div className="flex items-center gap-2">
           <input
