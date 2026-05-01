@@ -70,6 +70,19 @@ export async function persistChunks(input: PersistInput): Promise<PersistResult>
   const collection = input.vectorCollection ?? vectorCollectionName(input.twinId)
   const now = Date.now()
 
+  // 0. Ensure the collection exists. Most vector backends raise on
+  //    addDocuments-before-create; calling this once per persist call is
+  //    cheap (clients short-circuit when the collection is already there).
+  //    Failures here are non-fatal — if the upsert below works anyway, the
+  //    backend already had the collection or auto-created it.
+  try {
+    await input.store.createCollection(collection, {
+      dimension: input.embeddings[0]?.length,
+    })
+  } catch {
+    // ignore — most clients throw "already exists" which we treat as success
+  }
+
   // 1. Build rows + ids in memory.
   const rows: TwinChunk[] = input.chunks.map((c, i) => ({
     id: `twc_${now.toString(36)}_${i}_${Math.random().toString(36).slice(2, 6)}`,

@@ -34,6 +34,7 @@ import type {
 import { registerTaskExecutor } from "../task-scheduler"
 import { executePluginTask } from "./plugin-executor"
 import { executeBackupTask } from "./backup-executor"
+import { executeTwinTask } from "./twin-executor"
 import { executeScript } from "../script-executor"
 import { sendPrompt, onClaudeMessage } from "@/lib/claude/ipc"
 import type {
@@ -638,9 +639,10 @@ export function registerBuiltInExecutors(): void {
   registerTaskExecutor("backup", executeBackupTask)
   registerTaskExecutor("custom", executeCustomTask)
   registerTaskExecutor("external-agent", executeExternalAgentTask)
+  registerTaskExecutor("twin", executeTwinTask)
 
   log.info(
-    "Built-in scheduler executors registered: chat, agent, skill, script, plugin, backup, custom, external-agent"
+    "Built-in scheduler executors registered: chat, agent, skill, script, plugin, backup, custom, external-agent, twin"
   )
 }
 
