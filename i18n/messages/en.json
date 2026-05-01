@@ -2421,6 +2421,7 @@
       "traceId": "Trace ID",
       "noTraceId": "No Trace ID",
       "logs": "logs",
+      "back": "Back",
       "error": "Error",
       "warning": "Warning",
       "groupByTrace": "Group by Trace",

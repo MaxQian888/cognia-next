@@ -6,7 +6,7 @@ import { serializeSkill, skillFilename } from "@/lib/claude/skills-io"
 import { pickDirectory, saveFilesToDir } from "@/lib/files/file-bridge"
 import { loggers } from "@/lib/logger"
 
-type TranslatorValues = Record<string, string | number | Date | null | undefined>
+type TranslatorValues = Record<string, string | number | Date>
 type Translator = (key: string, vars?: TranslatorValues) => string
 
 export interface ExportOutcome {

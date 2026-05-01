@@ -26,7 +26,7 @@ export default function LogsPage() {
         <Button asChild variant="ghost" size="sm" className="-ml-1">
           <Link href="/">
             <ChevronLeftIcon className="h-4 w-4 mr-1" />
-            {t("back" as never, { default: "Back" })}
+            {t("back")}
           </Link>
         </Button>
         <h1 className="text-base font-semibold">{t("logs")}</h1>

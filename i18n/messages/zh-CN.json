@@ -2412,6 +2412,7 @@
       "traceId": "追踪 ID",
       "noTraceId": "无追踪 ID",
       "logs": "条日志",
+      "back": "返回",
       "error": "错误",
       "warning": "警告",
       "groupByTrace": "按追踪分组",
