@@ -1,0 +1,283 @@
+/**
+ * Shared draft / payload shapes for the structured task-payload editors.
+ *
+ * The form keeps its working state in `ChatLikeDraft` (one shape for chat,
+ * agent, and skill tasks — distinct fields are validated per task type) and
+ * `ExternalAgentDraft`. Drafts are converted to the typed payload shapes
+ * defined in `@/types/scheduler` on submit.
+ */
+
+import type {
+  AgentTaskPayload,
+  ChatLikeTaskPayload,
+  ExternalAgentTaskPayload,
+  ScheduledTaskType,
+  SkillTaskPayload,
+} from "@/types/scheduler"
+import type { BuiltinToolsConfig, SendOptions } from "@/lib/claude/types"
+import type { AcpPermissionMode } from "@/types/agent/external-agent"
+
+/**
+ * MCP picker mode — "default" lets `resolveSendOptions` pick the subset
+ * (character → team → all enabled), "custom" uses the explicit
+ * `mcpServerIds` array. Distinguishing this matters because an empty array
+ * has the meaning "no MCP at all" — we don't want that to be the same as
+ * "use the character's default".
+ */
+export type McpPickerMode = "default" | "custom"
+
+export interface ChatLikeDraft {
+  prompt: string
+
+  // Per-type required fields (validated at submit)
+  characterId?: string
+  skillId?: string
+
+  // Session continuity
+  sessionId?: string
+  sessionTitle?: string
+  teamId?: string
+
+  // Mode + model
+  agentModeId?: string | null
+  model?: string
+
+  // Permission + tool
+  permissionMode?: SendOptions["permissionMode"]
+  allowedTools?: string[]
+  disallowedTools?: string[]
+  mcpMode: McpPickerMode
+  mcpServerIds?: string[]
+  additionalDirectories?: string[]
+  builtinTools?: Partial<BuiltinToolsConfig>
+
+  // Misc
+  appendSystemPrompt?: string
+  maxTurns?: number
+  effort?: SendOptions["effort"]
+  disabledSkillIds?: string[]
+}
+
+export interface ExternalAgentDraft {
+  prompt: string
+  agentId: string
+  permissionMode?: AcpPermissionMode
+  cwd?: string
+  timeoutMs?: number
+}
+
+export const EMPTY_CHAT_LIKE_DRAFT: ChatLikeDraft = {
+  prompt: "",
+  mcpMode: "default",
+}
+
+export const EMPTY_EXTERNAL_AGENT_DRAFT: ExternalAgentDraft = {
+  prompt: "",
+  agentId: "",
+}
+
+/**
+ * Convert an existing JSON-shaped payload back into a `ChatLikeDraft` so an
+ * edit-in-place flow doesn't lose user input when the form mounts.
+ *
+ * Field name reconciliation: if the payload uses the legacy `message` /
+ * `agentTask` keys we lift them to `prompt` (mirrors the executor's lazy
+ * migration). Unknown / non-string values are dropped.
+ */
+export function payloadToChatLikeDraft(taskType: ScheduledTaskType, raw: unknown): ChatLikeDraft {
+  const draft: ChatLikeDraft = { ...EMPTY_CHAT_LIKE_DRAFT }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return draft
+  const p = raw as Record<string, unknown>
+
+  if (typeof p.prompt === "string") draft.prompt = p.prompt
+  else if (typeof p.message === "string") draft.prompt = p.message
+  else if (typeof p.agentTask === "string") draft.prompt = p.agentTask
+
+  if (typeof p.characterId === "string") draft.characterId = p.characterId
+  if (typeof p.skillId === "string") draft.skillId = p.skillId
+  if (typeof p.sessionId === "string") draft.sessionId = p.sessionId
+  if (typeof p.sessionTitle === "string") draft.sessionTitle = p.sessionTitle
+  if (typeof p.teamId === "string") draft.teamId = p.teamId
+  if (typeof p.model === "string") draft.model = p.model
+  if (p.agentModeId === null) draft.agentModeId = null
+  else if (typeof p.agentModeId === "string") draft.agentModeId = p.agentModeId
+
+  if (typeof p.permissionMode === "string")
+    draft.permissionMode = p.permissionMode as SendOptions["permissionMode"]
+
+  if (Array.isArray(p.allowedTools)) {
+    draft.allowedTools = p.allowedTools.filter((s): s is string => typeof s === "string")
+  }
+  if (Array.isArray(p.disallowedTools)) {
+    draft.disallowedTools = p.disallowedTools.filter((s): s is string => typeof s === "string")
+  }
+  if (Array.isArray(p.mcpServerIds)) {
+    draft.mcpServerIds = p.mcpServerIds.filter((s): s is string => typeof s === "string")
+    draft.mcpMode = "custom"
+  }
+  if (Array.isArray(p.additionalDirectories)) {
+    draft.additionalDirectories = p.additionalDirectories.filter(
+      (s): s is string => typeof s === "string"
+    )
+  }
+  if (Array.isArray(p.disabledSkillIds)) {
+    draft.disabledSkillIds = p.disabledSkillIds.filter((s): s is string => typeof s === "string")
+  }
+
+  if (p.builtinTools && typeof p.builtinTools === "object" && !Array.isArray(p.builtinTools)) {
+    const bt = p.builtinTools as Record<string, unknown>
+    const partial: Partial<BuiltinToolsConfig> = {}
+    if (typeof bt.fileExtras === "boolean") partial.fileExtras = bt.fileExtras
+    if (typeof bt.git === "boolean") partial.git = bt.git
+    if (typeof bt.process === "boolean") partial.process = bt.process
+    if (typeof bt.environment === "boolean") partial.environment = bt.environment
+    if (typeof bt.shellAdvanced === "boolean") partial.shellAdvanced = bt.shellAdvanced
+    if (Object.keys(partial).length > 0) draft.builtinTools = partial
+  }
+
+  if (typeof p.appendSystemPrompt === "string") draft.appendSystemPrompt = p.appendSystemPrompt
+  if (typeof p.maxTurns === "number" && p.maxTurns > 0) draft.maxTurns = Math.floor(p.maxTurns)
+  if (typeof p.effort === "string") draft.effort = p.effort as SendOptions["effort"]
+
+  // Acknowledge the task-type discriminator without forcing characterId / skillId
+  // when the payload is partial. Validation happens at submit.
+  void taskType
+  return draft
+}
+
+export function payloadToExternalAgentDraft(raw: unknown): ExternalAgentDraft {
+  const draft: ExternalAgentDraft = { ...EMPTY_EXTERNAL_AGENT_DRAFT }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return draft
+  const p = raw as Record<string, unknown>
+  if (typeof p.prompt === "string") draft.prompt = p.prompt
+  if (typeof p.agentId === "string") draft.agentId = p.agentId
+  if (typeof p.permissionMode === "string")
+    draft.permissionMode = p.permissionMode as AcpPermissionMode
+  if (typeof p.cwd === "string") draft.cwd = p.cwd
+  if (typeof p.timeoutMs === "number" && p.timeoutMs > 0) draft.timeoutMs = Math.floor(p.timeoutMs)
+  return draft
+}
+
+/**
+ * Serialize a draft to its typed payload shape. Drops empty strings / empty
+ * arrays so the resulting JSON stays compact and round-trips cleanly. Throws
+ * a `DraftValidationError` when required per-type fields are missing — the
+ * UI surfaces the per-field messages.
+ */
+export class DraftValidationError extends Error {
+  constructor(public errors: Record<string, string>) {
+    super("Draft validation failed")
+    this.name = "DraftValidationError"
+  }
+}
+
+function trimOrUndef(value: string | undefined): string | undefined {
+  if (typeof value !== "string") return undefined
+  const t = value.trim()
+  return t.length > 0 ? t : undefined
+}
+
+export function chatLikeDraftToPayload(
+  taskType: ScheduledTaskType,
+  draft: ChatLikeDraft
+): ChatLikeTaskPayload | AgentTaskPayload | SkillTaskPayload {
+  const errors: Record<string, string> = {}
+  const prompt = trimOrUndef(draft.prompt)
+  if (!prompt) errors.prompt = "promptRequired"
+
+  let characterId: string | undefined
+  if (taskType === "agent") {
+    characterId = trimOrUndef(draft.characterId)
+    if (!characterId) errors.characterId = "characterIdRequired"
+  } else if (draft.characterId) {
+    characterId = trimOrUndef(draft.characterId)
+  }
+
+  let skillId: string | undefined
+  if (taskType === "skill") {
+    skillId = trimOrUndef(draft.skillId)
+    if (!skillId) errors.skillId = "skillIdRequired"
+  }
+
+  if (Object.keys(errors).length > 0) throw new DraftValidationError(errors)
+
+  const out: ChatLikeTaskPayload = { prompt: prompt! }
+
+  if (draft.sessionId) out.sessionId = trimOrUndef(draft.sessionId)
+  if (draft.sessionTitle) out.sessionTitle = trimOrUndef(draft.sessionTitle)
+  if (draft.teamId) out.teamId = trimOrUndef(draft.teamId)
+
+  if (draft.model) out.model = trimOrUndef(draft.model)
+
+  if (draft.agentModeId === null) out.agentModeId = null
+  else if (typeof draft.agentModeId === "string" && draft.agentModeId.trim().length > 0)
+    out.agentModeId = draft.agentModeId
+
+  if (draft.permissionMode) out.permissionMode = draft.permissionMode
+
+  if (draft.allowedTools && draft.allowedTools.length > 0) {
+    out.allowedTools = [...draft.allowedTools]
+  }
+  if (draft.disallowedTools && draft.disallowedTools.length > 0) {
+    out.disallowedTools = [...draft.disallowedTools]
+  }
+  if (draft.mcpMode === "custom") {
+    out.mcpServerIds = draft.mcpServerIds ? [...draft.mcpServerIds] : []
+  }
+  if (draft.additionalDirectories && draft.additionalDirectories.length > 0) {
+    out.additionalDirectories = [...draft.additionalDirectories]
+  }
+  if (draft.disabledSkillIds && draft.disabledSkillIds.length > 0) {
+    out.disabledSkillIds = [...draft.disabledSkillIds]
+  }
+  if (draft.builtinTools && Object.keys(draft.builtinTools).length > 0) {
+    out.builtinTools = { ...draft.builtinTools }
+  }
+  if (draft.appendSystemPrompt && draft.appendSystemPrompt.trim().length > 0) {
+    out.appendSystemPrompt = draft.appendSystemPrompt.trim()
+  }
+  if (typeof draft.maxTurns === "number" && draft.maxTurns > 0) {
+    out.maxTurns = Math.floor(draft.maxTurns)
+  }
+  if (draft.effort) out.effort = draft.effort
+
+  if (taskType === "agent") {
+    return { ...out, characterId: characterId! } as AgentTaskPayload
+  }
+  if (taskType === "skill") {
+    const result: SkillTaskPayload = { ...out, skillId: skillId! }
+    if (characterId) result.characterId = characterId
+    return result
+  }
+  if (characterId) out.characterId = characterId
+  return out
+}
+
+export function externalAgentDraftToPayload(draft: ExternalAgentDraft): ExternalAgentTaskPayload {
+  const errors: Record<string, string> = {}
+  const prompt = trimOrUndef(draft.prompt)
+  if (!prompt) errors.prompt = "promptRequired"
+  const agentId = trimOrUndef(draft.agentId)
+  if (!agentId) errors.agentId = "agentIdRequired"
+  if (Object.keys(errors).length > 0) throw new DraftValidationError(errors)
+
+  const out: ExternalAgentTaskPayload = { prompt: prompt!, agentId: agentId! }
+  if (draft.permissionMode) out.permissionMode = draft.permissionMode
+  if (draft.cwd) {
+    const cwd = trimOrUndef(draft.cwd)
+    if (cwd) out.cwd = cwd
+  }
+  if (typeof draft.timeoutMs === "number" && draft.timeoutMs > 0) {
+    out.timeoutMs = Math.floor(draft.timeoutMs)
+  }
+  return out
+}
+
+/** Whether a task type uses the chat-like structured editor. */
+export function isChatLikeTaskType(t: ScheduledTaskType): boolean {
+  return t === "chat" || t === "agent" || t === "skill"
+}
+
+export function isStructuredEditableTaskType(t: ScheduledTaskType): boolean {
+  return isChatLikeTaskType(t) || t === "external-agent"
+}

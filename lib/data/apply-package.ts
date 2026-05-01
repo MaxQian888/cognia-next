@@ -21,7 +21,18 @@ import type {
 import type { TrustedWorkspace } from "@/lib/db/trusted-workspaces"
 import type { SessionStateRow, TtsProviderKeyRow } from "@/lib/db/schema"
 import { getDb } from "@/lib/db/schema"
-import { emptySummary, type BackupPackageV3, type ImportOptions, type ImportSummary } from "./types"
+import {
+  emptySummary,
+  type BackupPackageV3,
+  type ImportOptions,
+  type ImportSummary,
+  type LocalStorageImportReport,
+  type SyncProjectionReport,
+} from "./types"
+import { browserSnapshotStorage, SNAPSHOT_MODULES } from "./snapshots/registry"
+import { readAllSnapshots, restoreFromPreSnap, writeAllSnapshots } from "./snapshots/helpers"
+import type { LocalStorageSnapshot, SnapshotEnv, SnapshotStorage } from "./snapshots/types"
+import { projectMcpToAllAgents } from "./sync-projection"
 
 interface BuiltInRow {
   id: string
@@ -32,17 +43,49 @@ function newId(prefix: string): string {
   return prefix + "_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
 }
 
+/** Optional knobs primarily used by tests so we can inject a stub
+ * `localStorage` and bypass the Tauri `syncToAgent` projection. */
+export interface ApplyBackupExtras {
+  /** Override the `localStorage` shim. Defaults to `browserSnapshotStorage()`
+   * (which itself returns `null` outside the browser). */
+  storage?: SnapshotStorage | null
+  /** Forwarded to snapshot warning calls. */
+  warn?: SnapshotEnv["warn"]
+  /** Stub the Tauri-only `syncToAgent` projection step. When omitted, the
+   * built-in `projectMcpToAllAgents` is used. */
+  projectMcp?: () => Promise<SyncProjectionReport[]>
+}
+
 /**
  * Apply the package to local storage under the chosen merge strategy. Wraps
  * every write in a single Dexie transaction so a partial failure rolls back.
+ *
+ * Five-stage flow:
+ *   1) capture pre-import `localStorage` snapshot (so we can roll back if
+ *      anything past the Dexie commit fails);
+ *   2) Dexie transaction — own atomicity is delegated to Dexie;
+ *   3) write `localStorageSnapshots` payload via the snapshot registry;
+ *   4) Tauri-only — re-project MCP servers to each writable agent's config
+ *      file via `syncToAgent`;
+ *   5) on any post-(2) failure, restore (1) and rethrow.
  */
 export async function applyBackupPackage(
   pkg: BackupPackageV3,
-  opts: ImportOptions
+  opts: ImportOptions,
+  extras: ApplyBackupExtras = {}
 ): Promise<ImportSummary> {
   const summary = emptySummary()
   const db = getDb()
   const env = pkg.payload
+
+  // Stage 1: snapshot localStorage face *before* Dexie writes so we can
+  // roll it back if something blows up after the Dexie commit. Tauri/web
+  // both use this same path.
+  const storage = extras.storage === undefined ? browserSnapshotStorage() : extras.storage
+  const snapshotEnv: SnapshotEnv | null = storage ? { storage, warn: extras.warn } : null
+  const preSnap: Record<string, LocalStorageSnapshot> = snapshotEnv
+    ? readAllSnapshots(SNAPSHOT_MODULES, snapshotEnv).snapshots
+    : {}
 
   await db.transaction(
     "rw",
@@ -63,6 +106,9 @@ export async function applyBackupPackage(
       db.canvasVersions,
       db.canvasComments,
       db.canvasSessions,
+      db.a2uiApps,
+      db.a2uiTemplates,
+      db.a2uiEventHistory,
     ],
     async () => {
       // --- settings (singleton) -------------------------------------------
@@ -197,6 +243,36 @@ export async function applyBackupPackage(
         respectBuiltIn: false,
       })
 
+      // --- a2ui apps / templates / event history -------------------------
+      await applyCollection({
+        rows: env.a2uiApps,
+        table: db.a2uiApps,
+        kind: "a2uiApps",
+        opts,
+        summary,
+        idPrefix: "a2app",
+        // built-in apps stay locally seeded — incoming built-ins are skipped
+        respectBuiltIn: true,
+      })
+      await applyCollection({
+        rows: env.a2uiTemplates,
+        table: db.a2uiTemplates,
+        kind: "a2uiTemplates",
+        opts,
+        summary,
+        idPrefix: "a2tpl",
+        respectBuiltIn: false,
+      })
+      await applyCollection({
+        rows: env.a2uiEventHistory,
+        table: db.a2uiEventHistory,
+        kind: "a2uiEventHistory",
+        opts,
+        summary,
+        idPrefix: "a2evt",
+        respectBuiltIn: false,
+      })
+
       // --- sessions + messages + sessionState (off by default) -----------
       if (opts.includeSessions) {
         await applyCollection<ChatSession>({
@@ -228,6 +304,60 @@ export async function applyBackupPackage(
       }
     }
   )
+
+  // --- Stage 3: write the localStorage face --------------------------------
+  // Dexie has committed. Anything that fails from here on triggers a
+  // best-effort restore from `preSnap` so the localStorage face stays in
+  // lockstep with what the user had before the import.
+  let lsReport: LocalStorageImportReport | undefined
+  if (snapshotEnv && env.localStorageSnapshots) {
+    try {
+      const result = writeAllSnapshots(
+        SNAPSHOT_MODULES,
+        env.localStorageSnapshots,
+        opts.mergeStrategy,
+        snapshotEnv
+      )
+      lsReport = {
+        written: result.written,
+        skipped: result.skipped,
+        errors: result.errors,
+      }
+      if (result.errors.length > 0) {
+        const restored = restoreFromPreSnap(SNAPSHOT_MODULES, preSnap, snapshotEnv)
+        lsReport.restoredFromPreSnap = [...restored.restored, ...restored.cleared]
+      }
+    } catch (err) {
+      const restored = restoreFromPreSnap(SNAPSHOT_MODULES, preSnap, snapshotEnv)
+      lsReport = {
+        written: [],
+        skipped: [],
+        errors: [
+          {
+            key: "*",
+            error: err instanceof Error ? err.message : String(err),
+          },
+        ],
+        restoredFromPreSnap: [...restored.restored, ...restored.cleared],
+      }
+    }
+  }
+  if (lsReport) summary.localStorage = lsReport
+
+  // --- Stage 4: Tauri MCP projection (best-effort) -------------------------
+  const project = extras.projectMcp ?? projectMcpToAllAgents
+  try {
+    const syncResults = await project()
+    if (syncResults.length > 0) summary.syncResults = syncResults
+  } catch (err) {
+    summary.syncResults = [
+      {
+        agentId: "*",
+        ok: false,
+        reason: err instanceof Error ? err.message : String(err),
+      },
+    ]
+  }
 
   return summary
 }

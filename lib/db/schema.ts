@@ -21,6 +21,8 @@ import type {
   CanvasCommentRow,
   CanvasSessionRow,
 } from "./canvas-types"
+import type { A2UIAppRow, A2UISurfaceRow, A2UITemplateRow, A2UIEventHistoryRow } from "./a2ui-types"
+import { buildA2UIBridgeMcpRow, A2UI_BRIDGE_SERVER_NAME } from "@/lib/a2ui/mcp-tool-schemas"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -38,6 +40,10 @@ export class CogniaDB extends Dexie {
   canvasVersions!: Table<CanvasVersionRow, string>
   canvasComments!: Table<CanvasCommentRow, string>
   canvasSessions!: Table<CanvasSessionRow, string>
+  a2uiApps!: Table<A2UIAppRow, string>
+  a2uiSurfaces!: Table<A2UISurfaceRow, string>
+  a2uiTemplates!: Table<A2UITemplateRow, string>
+  a2uiEventHistory!: Table<A2UIEventHistoryRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -298,6 +304,53 @@ export class CogniaDB extends Dexie {
             if (row.usageCount === undefined) row.usageCount = 0
             if (row.sortOrder === undefined) row.sortOrder = 0
           })
+      })
+
+    // v13 — A2UI subsystem tables + the in-process `a2ui-bridge` MCP server
+    // row. The new tables are pure additions; characters get an
+    // `a2uiEnabled = false` backfill so prompts don't grow until the user
+    // explicitly opts in. The MCP row is seeded idempotently by name so
+    // re-running the upgrade (test resets, schema rollbacks) is safe.
+    this.version(13)
+      .stores({
+        sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
+        messages: "id, sessionId, [sessionId+createdAt], senderId",
+        settings: "id",
+        promptPresets:
+          "id, updatedAt, isBuiltIn, isDefault, isFavorite, sortOrder, category, lastUsedAt",
+        mcpServers: "id, name, enabled",
+        characters: "id, name, updatedAt, isBuiltIn",
+        skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
+        skillResources: "id, skillId, [skillId+kind], [skillId+path], updatedAt",
+        teams: "id, name, updatedAt, isBuiltIn",
+        sessionState: "sessionId, lastReadAt",
+        trustedWorkspaces: "path, trustedAt",
+        tts_provider_keys: "id",
+        backupHistory: "id, completedAt, type, success",
+        canvasDocuments: "id, title, language, type, updatedAt, createdAt",
+        canvasVersions: "id, documentId, [documentId+createdAt], isAutoSave",
+        canvasComments: "id, documentId, [documentId+createdAt], parentId, resolvedAt",
+        canvasSessions: "id, documentId, ownerId, createdAt",
+        a2uiApps: "id, name, updatedAt, createdAt, isBuiltIn, category, isFavorite, sortOrder",
+        a2uiSurfaces: "id, appId, sessionId, updatedAt, createdAt, type",
+        a2uiTemplates: "id, name, category, updatedAt, source",
+        a2uiEventHistory: "id, surfaceId, [surfaceId+timestamp], timestamp, type",
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table("characters")
+          .toCollection()
+          .modify((row: Record<string, unknown>) => {
+            if (row.a2uiEnabled === undefined) row.a2uiEnabled = false
+          })
+        const exists = await tx
+          .table("mcpServers")
+          .where("name")
+          .equals(A2UI_BRIDGE_SERVER_NAME)
+          .first()
+        if (!exists) {
+          await tx.table("mcpServers").add(buildA2UIBridgeMcpRow())
+        }
       })
   }
 

@@ -22,6 +22,7 @@ import { MathInline } from "@/components/chat/renderers/math-inline"
 import { MermaidBlock } from "@/components/chat/renderers/mermaid-block"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { DiffBlock } from "@/components/chat/renderers/diff-block"
+import { A2UIBlock } from "@/components/chat/renderers/a2ui-block"
 import { ImageBlock } from "@/components/chat/renderers/image-block"
 import { VideoBlock } from "@/components/chat/renderers/video-block"
 import { AudioBlock } from "@/components/chat/renderers/audio-block"
@@ -223,6 +224,13 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
             if (enableDiff && language === "diff") {
               return <DiffBlock content={codeContent} />
+            }
+
+            // Explicit ```a2ui``` fence — route through the A2UI inline
+            // pipeline. Generic ```json``` blocks that happen to contain
+            // a2ui payloads are handled earlier in `adapter.ts`.
+            if (language === "a2ui") {
+              return <A2UIBlock content={codeContent} messageId={messageId} />
             }
 
             // Multi-line code block: render the syntax-highlighted block plus

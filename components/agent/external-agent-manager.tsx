@@ -1,43 +1,1370 @@
 "use client"
 
 /**
- * Lightweight ExternalAgentManager dialog body — replaces Cognia's
- * ~1000-LOC chat-side manager that pulled in agent-trace, tool-approval
- * dialogs, and a custom hooks barrel that aren't migrated yet.
+ * External Agent Manager
  *
- * This stub exposes just enough to satisfy the `external-agent-selector`
- * import: a panel that points the user at the External Agents settings
- * page (which already ships full CRUD via
- * `components/settings/agent/external-agent-settings.tsx`).
+ * Chat-side dialog body that surfaces every Codex / OpenCode / Claude Code
+ * (ACP) capability the runtime exposes:
  *
- * TODO: Replace with the upstream manager once agent-trace + tool-approval
- * dialogs land. Tracked alongside the agent-trace stub at
- * `types/agent/agent-trace.ts`.
+ *   - Agent CRUD with preset-driven onboarding (codex, claude-code,
+ *     gemini-cli, cursor-cli, custom).
+ *   - Connection lifecycle + per-agent runtime diagnostics
+ *     (executable / health / auth / session-extension support /
+ *     ecosystem readiness / canonical contract / last-run snapshot).
+ *   - ACP session list, fork, resume — gated by extension support.
+ *   - Available slash commands and execution plan rendering.
+ *   - Dynamic ACP config options (model, agent, mode selectors).
+ *   - ACP permission flow via the ACP-aware ToolApprovalDialog.
+ *
+ * Ported from `D:\Project\Cognia\components\agent\external-agent-manager.tsx`.
+ * cognia-next has not migrated the agent-trace observability stack yet, so
+ * the analytics hook + health badge are local stubs that no-op gracefully.
  */
 
-import { ExternalLinkIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
+import {
+  Activity,
+  AlertCircle,
+  ExternalLink,
+  Plus,
+  Power,
+  PowerOff,
+  RefreshCw,
+  Settings,
+  Trash2,
+} from "lucide-react"
 
-interface Props {
-  onOpenSettings?: () => void
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Separator } from "@/components/ui/separator"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { toast } from "@/components/ui/sonner"
+import { cn, isTauri } from "@/lib/utils"
+
+import { useExternalAgent } from "@/hooks/agent"
+import { useAgentTraceAnalytics } from "@/hooks/agent-trace"
+import { ExternalAgentCommands } from "./external-agent-commands"
+import { ExternalAgentPlan } from "./external-agent-plan"
+import { ExternalAgentConfigOptions } from "./external-agent-config-options"
+import { ToolApprovalDialog } from "./tool-approval-dialog"
+import { TraceHealthBadge } from "./trace-health-badge"
+
+import type {
+  AcpPermissionOption,
+  CreateExternalAgentInput,
+  ExternalAgentConfig,
+  ExternalAgentConnectionStatus,
+  ExternalAgentValiditySnapshot,
+} from "@/types/agent/external-agent"
+import {
+  getExternalAgentEcosystemReadiness,
+  getExternalAgentExecutionBlockReason,
+} from "@/lib/ai/agent/external/config-normalizer"
+import { getExternalAgentEcosystemAdapter } from "@/lib/ai/agent/external/ecosystem-adapters"
+import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session-extension-errors"
+import {
+  EXTERNAL_AGENT_PRESETS,
+  getAvailablePresets,
+  type ExternalAgentPresetId,
+} from "@/lib/ai/agent/external/presets"
+
+import type { AddAgentFormData } from "@/types/agent/component-types"
+import type { SessionObservationSummary } from "@/types/agent/agent-trace"
+
+const DEFAULT_TIMEOUT_MS = "300000"
+const DEFAULT_RETRY_MAX_RETRIES = "3"
+const DEFAULT_RETRY_DELAY_MS = "1000"
+const DEFAULT_RETRY_MAX_DELAY_MS = "30000"
+
+const DEFAULT_ADD_AGENT_FORM_DATA: AddAgentFormData = {
+  name: "",
+  protocol: "acp",
+  transport: "stdio",
+  command: "",
+  args: "",
+  endpoint: "",
+  timeoutMs: DEFAULT_TIMEOUT_MS,
+  retryMaxRetries: DEFAULT_RETRY_MAX_RETRIES,
+  retryDelayMs: DEFAULT_RETRY_DELAY_MS,
+  retryExponentialBackoff: true,
+  retryMaxDelayMs: DEFAULT_RETRY_MAX_DELAY_MS,
+  retryOnErrors: "",
 }
 
-export function ExternalAgentManager({ onOpenSettings }: Props) {
+// ============================================================================
+// Status Badge
+// ============================================================================
+
+function ConnectionStatusBadge({ status }: { status: ExternalAgentConnectionStatus }) {
   const t = useTranslations("externalAgent")
 
+  const statusConfig: Record<
+    ExternalAgentConnectionStatus,
+    { label: string; variant: "default" | "secondary" | "destructive" | "outline" }
+  > = {
+    connected: { label: t("statusConnected"), variant: "default" },
+    connecting: { label: t("statusConnecting"), variant: "secondary" },
+    disconnected: { label: t("statusDisconnected"), variant: "outline" },
+    reconnecting: { label: t("statusReconnecting"), variant: "secondary" },
+    error: { label: t("statusError"), variant: "destructive" },
+  }
+
+  const config = statusConfig[status]
+
   return (
-    <div className="space-y-3 p-1">
-      <p className="text-sm text-muted-foreground">{t("settings.description")}</p>
-      <div className="rounded-md border bg-muted/40 p-3 text-sm">
-        {t("settings.configuredAgentsDesc")}
-      </div>
-      {onOpenSettings && (
-        <Button variant="outline" size="sm" onClick={onOpenSettings}>
-          <ExternalLinkIcon className="mr-2 h-4 w-4" />
-          {t("settings.title")}
-        </Button>
+    <Badge variant={config.variant} className="text-xs">
+      {status === "connected" && <Activity className="mr-1 h-3 w-3" />}
+      {status === "error" && <AlertCircle className="mr-1 h-3 w-3" />}
+      {config.label}
+    </Badge>
+  )
+}
+
+// ============================================================================
+// Agent Card
+// ============================================================================
+
+interface AgentCardProps {
+  agent: {
+    config: ExternalAgentConfig
+    connectionStatus: ExternalAgentConnectionStatus
+    validity?: ExternalAgentValiditySnapshot
+  }
+  isActive: boolean
+  onConnect: () => void
+  onDisconnect: () => void
+  onRemove: () => void
+  onSelect: () => void
+}
+
+function AgentCard({
+  agent,
+  isActive,
+  onConnect,
+  onDisconnect,
+  onRemove,
+  onSelect,
+}: AgentCardProps) {
+  const tSettings = useTranslations("externalAgent.settings")
+  const tManager = useTranslations("externalAgent.manager")
+  const tCommon = useTranslations("common")
+  const { config, connectionStatus, validity } = agent
+  const isConnected = connectionStatus === "connected"
+  const executionBlockReason =
+    (validity?.executable === false ? validity.blockingReason : null) ??
+    getExternalAgentExecutionBlockReason(config)
+  const connectDisabled = !isConnected && !!executionBlockReason
+  const ecosystem = validity?.ecosystem ?? getExternalAgentEcosystemReadiness(config)
+
+  return (
+    <Card
+      className={cn(
+        "cursor-pointer transition-all hover:shadow-md",
+        isActive && "ring-2 ring-primary"
       )}
+      onClick={onSelect}
+    >
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-base">{config.name}</CardTitle>
+              {ecosystem?.supportTier && (
+                <Badge variant="outline" className="text-[10px]">
+                  {ecosystem.supportTier}
+                </Badge>
+              )}
+            </div>
+            <CardDescription className="text-xs">
+              {tManager("protocolViaTransport", {
+                protocol: config.protocol.toUpperCase(),
+                transport: config.transport,
+              })}
+            </CardDescription>
+            {ecosystem?.surfaceName && (
+              <p className="text-[11px] text-muted-foreground">{ecosystem.surfaceName}</p>
+            )}
+          </div>
+          <ConnectionStatusBadge status={connectionStatus} />
+        </div>
+      </CardHeader>
+      <CardContent className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-muted-foreground">
+            {config.process?.command || config.network?.endpoint || tManager("noEndpoint")}
+          </div>
+          <div className="flex gap-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (connectDisabled) return
+                    if (isConnected) {
+                      onDisconnect()
+                    } else {
+                      onConnect()
+                    }
+                  }}
+                  disabled={connectDisabled}
+                >
+                  {isConnected ? (
+                    <PowerOff className="h-4 w-4 text-destructive" />
+                  ) : (
+                    <Power className="h-4 w-4 text-green-600" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {isConnected ? tSettings("disconnect") : tSettings("connect")}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onRemove()
+                  }}
+                >
+                  <Trash2 className="h-4 w-4 text-muted-foreground" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{tCommon("remove")}</TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
+        {executionBlockReason && (
+          <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">
+            {executionBlockReason}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ============================================================================
+// Add Agent Dialog
+// ============================================================================
+
+interface AddAgentDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onAdd: (data: AddAgentFormData) => Promise<void> | void
+}
+
+function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
+  const tSettings = useTranslations("externalAgent.settings")
+  const tManager = useTranslations("externalAgent.manager")
+  const tCommon = useTranslations("common")
+  const tauriRuntime = isTauri()
+  const [selectedPreset, setSelectedPreset] = useState<ExternalAgentPresetId | "">("")
+  const [formData, setFormData] = useState<AddAgentFormData>(DEFAULT_ADD_AGENT_FORM_DATA)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const isStdio = formData.transport === "stdio"
+
+  const handlePresetChange = (presetId: string) => {
+    setSelectedPreset(presetId as ExternalAgentPresetId | "")
+    if (presetId && presetId !== "custom") {
+      const preset = EXTERNAL_AGENT_PRESETS[presetId as ExternalAgentPresetId]
+      if (preset) {
+        setFormData((current) => ({
+          ...current,
+          name: preset.name,
+          protocol: preset.protocol,
+          transport: preset.transport,
+          command: preset.process?.command || "",
+          args: preset.process?.args.join(" ") || "",
+          endpoint: preset.network?.endpoint || "",
+        }))
+      }
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (formData.protocol !== "acp") {
+      toast.error(tManager("unsupportedProtocol"))
+      return
+    }
+    if (!formData.name.trim()) {
+      toast.error(tSettings("nameRequired"))
+      return
+    }
+    if (isStdio && !formData.command.trim()) {
+      toast.error(tSettings("commandRequired"))
+      return
+    }
+    if (!isStdio && !formData.endpoint.trim()) {
+      toast.error(tSettings("endpointRequired"))
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      await onAdd({
+        ...formData,
+        name: formData.name.trim(),
+        command: formData.command.trim(),
+        endpoint: formData.endpoint.trim(),
+      })
+      setFormData(DEFAULT_ADD_AGENT_FORM_DATA)
+      setSelectedPreset("")
+      onOpenChange(false)
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message ? error.message : tManager("addAgentFailed")
+      toast.error(message)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const currentPreset = selectedPreset
+    ? EXTERNAL_AGENT_PRESETS[selectedPreset as ExternalAgentPresetId]
+    : null
+  const currentAdapter = currentPreset?.adapterId
+    ? getExternalAgentEcosystemAdapter(currentPreset.adapterId)
+    : null
+  const relatedOfficialSurfaces =
+    currentAdapter?.surfaces.filter((surface) => surface.id !== currentPreset?.surfaceId) ?? []
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-125">
+        <form onSubmit={handleSubmit}>
+          <DialogHeader>
+            <DialogTitle>{tManager("addExternalAgent")}</DialogTitle>
+            <DialogDescription>{tManager("configureNewExternalAgentConnection")}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            {/* Preset Selector */}
+            <div className="grid gap-2">
+              <Label>{tManager("quickStartPreset")}</Label>
+              <Select value={selectedPreset} onValueChange={handlePresetChange}>
+                <SelectTrigger>
+                  <SelectValue placeholder={tManager("selectPresetOrConfigureManually")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {getAvailablePresets().map((presetId) => {
+                    const preset = EXTERNAL_AGENT_PRESETS[presetId]
+                    if (!preset) return null
+                    return (
+                      <SelectItem key={presetId} value={presetId}>
+                        <div className="flex items-center gap-2">
+                          <span>{preset.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            ({preset.tags.join(", ")})
+                          </span>
+                        </div>
+                      </SelectItem>
+                    )
+                  })}
+                  <SelectItem value="custom">{tManager("customConfiguration")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {currentPreset && (
+              <div className="rounded-md border p-3 text-xs space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {currentPreset.supportTier && (
+                    <Badge variant="outline" className="text-[10px]">
+                      {currentPreset.supportTier}
+                    </Badge>
+                  )}
+                  {currentPreset.docsUrl && (
+                    <a
+                      href={currentPreset.docsUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      Official Docs
+                    </a>
+                  )}
+                </div>
+                {currentPreset.setupHint && <p>{currentPreset.setupHint}</p>}
+                {relatedOfficialSurfaces.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="font-medium">Other Official Surfaces</p>
+                    {relatedOfficialSurfaces.map((surface) => (
+                      <div key={surface.id} className="rounded-sm border bg-muted/40 px-2 py-1.5">
+                        <div className="flex items-center gap-2">
+                          <span>{surface.name}</span>
+                          <Badge variant="secondary" className="text-[10px]">
+                            {surface.supportTier}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-muted-foreground">
+                          {surface.limitationNote ?? surface.setupHint ?? surface.description}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {currentPreset?.envVarHint && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                <span className="font-medium">{tManager("noteLabel")}:</span>{" "}
+                {currentPreset.envVarHint}
+              </div>
+            )}
+
+            <Separator />
+
+            <div className="grid gap-2">
+              <Label htmlFor="name">{tManager("name")}</Label>
+              <Input
+                id="name"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="Claude Code"
+                required
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="protocol">{tSettings("protocol")}</Label>
+                <Select
+                  value={formData.protocol}
+                  onValueChange={(value: AddAgentFormData["protocol"]) =>
+                    setFormData({ ...formData, protocol: value })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="acp">ACP</SelectItem>
+                    <SelectItem value="a2a" disabled>
+                      {tManager("a2aComingSoon")}
+                    </SelectItem>
+                    <SelectItem value="http" disabled>
+                      {tManager("httpProtocolComingSoon")}
+                    </SelectItem>
+                    <SelectItem value="websocket" disabled>
+                      {tManager("websocketProtocolComingSoon")}
+                    </SelectItem>
+                    <SelectItem value="custom" disabled>
+                      {tManager("customProtocolComingSoon")}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="transport">{tSettings("transport")}</Label>
+                <Select
+                  value={formData.transport}
+                  onValueChange={(value: AddAgentFormData["transport"]) =>
+                    setFormData({ ...formData, transport: value })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="stdio">{tManager("transportStdioLocal")}</SelectItem>
+                    <SelectItem value="http">{tManager("transportHttp")}</SelectItem>
+                    <SelectItem value="websocket">{tManager("transportWebsocket")}</SelectItem>
+                    <SelectItem value="sse">{tManager("transportSse")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            {isStdio ? (
+              <>
+                {!tauriRuntime && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                    {tManager("stdioDesktopRuntimeWarning")}
+                  </div>
+                )}
+                <div className="grid gap-2">
+                  <Label htmlFor="command">{tSettings("command")}</Label>
+                  <Input
+                    id="command"
+                    value={formData.command}
+                    onChange={(e) => setFormData({ ...formData, command: e.target.value })}
+                    placeholder="npx"
+                    required={isStdio}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="args">{tSettings("arguments")}</Label>
+                  <Input
+                    id="args"
+                    value={formData.args}
+                    onChange={(e) => setFormData({ ...formData, args: e.target.value })}
+                    placeholder="@anthropics/claude-code --stdio"
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="grid gap-2">
+                <Label htmlFor="endpoint">{tSettings("endpoint")}</Label>
+                <Input
+                  id="endpoint"
+                  value={formData.endpoint}
+                  onChange={(e) => setFormData({ ...formData, endpoint: e.target.value })}
+                  placeholder="http://localhost:8080"
+                  required={!isStdio}
+                />
+              </div>
+            )}
+            <Separator />
+            <div className="grid gap-2">
+              <Label htmlFor="timeoutMs">{tSettings("executionTimeoutMs")}</Label>
+              <Input
+                id="timeoutMs"
+                type="number"
+                min={1000}
+                step={1000}
+                value={formData.timeoutMs}
+                onChange={(e) => setFormData({ ...formData, timeoutMs: e.target.value })}
+                placeholder={DEFAULT_TIMEOUT_MS}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="retryMaxRetries">{tSettings("maxRetries")}</Label>
+                <Input
+                  id="retryMaxRetries"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={formData.retryMaxRetries}
+                  onChange={(e) => setFormData({ ...formData, retryMaxRetries: e.target.value })}
+                  placeholder={DEFAULT_RETRY_MAX_RETRIES}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="retryDelayMs">{tSettings("retryDelayMs")}</Label>
+                <Input
+                  id="retryDelayMs"
+                  type="number"
+                  min={0}
+                  step={100}
+                  value={formData.retryDelayMs}
+                  onChange={(e) => setFormData({ ...formData, retryDelayMs: e.target.value })}
+                  placeholder={DEFAULT_RETRY_DELAY_MS}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="retryMaxDelayMs">{tSettings("maxRetryDelayMs")}</Label>
+                <Input
+                  id="retryMaxDelayMs"
+                  type="number"
+                  min={0}
+                  step={100}
+                  value={formData.retryMaxDelayMs}
+                  onChange={(e) => setFormData({ ...formData, retryMaxDelayMs: e.target.value })}
+                  placeholder={DEFAULT_RETRY_MAX_DELAY_MS}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="retryExponentialBackoff">{tSettings("backoffStrategy")}</Label>
+                <Select
+                  value={formData.retryExponentialBackoff ? "true" : "false"}
+                  onValueChange={(value) =>
+                    setFormData({ ...formData, retryExponentialBackoff: value === "true" })
+                  }
+                >
+                  <SelectTrigger id="retryExponentialBackoff">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="true">{tSettings("backoffExponential")}</SelectItem>
+                    <SelectItem value="false">{tSettings("backoffFixedDelay")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="retryOnErrors">{tSettings("retryErrorPatterns")}</Label>
+              <textarea
+                id="retryOnErrors"
+                className="min-h-20 rounded-md border border-input bg-transparent px-3 py-2 text-sm"
+                value={formData.retryOnErrors}
+                onChange={(e) => setFormData({ ...formData, retryOnErrors: e.target.value })}
+                placeholder={tSettings("retryErrorPatternsPlaceholder")}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={isSubmitting}
+            >
+              {tCommon("cancel")}
+            </Button>
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? tManager("addingAgent") : tSettings("addAgent")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ============================================================================
+// Main Component
+// ============================================================================
+
+export interface ExternalAgentManagerProps {
+  className?: string
+}
+
+export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
+  const t = useTranslations("externalAgent")
+  const tSettings = useTranslations("externalAgent.settings")
+  const tManager = useTranslations("externalAgent.manager")
+  const tCommon = useTranslations("common")
+  const refreshSessionsFailedMessage = tManager("refreshSessionsFailed")
+  const [addDialogOpen, setAddDialogOpen] = useState(false)
+  const [sessionList, setSessionList] = useState<
+    Array<{ sessionId: string; title?: string; createdAt?: string; updatedAt?: string }>
+  >([])
+  const [isLoadingSessions, setIsLoadingSessions] = useState(false)
+
+  const {
+    agents,
+    activeAgentId,
+    activeSession,
+    activeAgentValidity,
+    activeLastRunSnapshot,
+    activeBenchmarkCapabilities,
+    isExecuting,
+    isLoading,
+    error,
+    pendingPermission,
+    availableCommands,
+    planEntries,
+    planStep,
+    configOptions,
+    addAgent,
+    removeAgent,
+    connect,
+    disconnect,
+    execute,
+    setActiveAgent,
+    respondToPermission,
+    setConfigOption,
+    listSessions,
+    forkSession,
+    resumeSession,
+    refresh,
+    clearError,
+  } = useExternalAgent()
+
+  const handleAddAgent = useCallback(
+    async (data: AddAgentFormData) => {
+      const toNonNegativeInteger = (value: string, fallback: number): number => {
+        const parsed = Number.parseInt(value, 10)
+        if (Number.isNaN(parsed) || parsed < 0) return fallback
+        return parsed
+      }
+
+      const retryOnErrors = data.retryOnErrors
+        .split(/\r?\n|,/)
+        .map((pattern) => pattern.trim())
+        .filter(Boolean)
+
+      const config: CreateExternalAgentInput = {
+        name: data.name,
+        protocol: "acp",
+        transport: data.transport,
+        timeout: toNonNegativeInteger(data.timeoutMs, Number.parseInt(DEFAULT_TIMEOUT_MS, 10)),
+        retryConfig: {
+          maxRetries: toNonNegativeInteger(
+            data.retryMaxRetries,
+            Number.parseInt(DEFAULT_RETRY_MAX_RETRIES, 10)
+          ),
+          retryDelay: toNonNegativeInteger(
+            data.retryDelayMs,
+            Number.parseInt(DEFAULT_RETRY_DELAY_MS, 10)
+          ),
+          exponentialBackoff: data.retryExponentialBackoff,
+          maxRetryDelay: toNonNegativeInteger(
+            data.retryMaxDelayMs,
+            Number.parseInt(DEFAULT_RETRY_MAX_DELAY_MS, 10)
+          ),
+          retryOnErrors,
+        },
+      }
+
+      if (data.transport === "stdio") {
+        config.process = {
+          command: data.command,
+          args: data.args.split(" ").filter(Boolean),
+        }
+      } else {
+        config.network = {
+          endpoint: data.endpoint,
+        }
+      }
+
+      await addAgent(config)
+    },
+    [addAgent]
+  )
+
+  const getErrorMessage = useCallback((err: unknown, fallback: string) => {
+    if (err instanceof Error && err.message) return err.message
+    return fallback
+  }, [])
+
+  const handleConnect = useCallback(
+    async (agentId: string) => {
+      try {
+        await connect(agentId)
+        toast.success(tSettings("connected"))
+      } catch (err) {
+        toast.error(getErrorMessage(err, tSettings("connectionFailed")))
+      }
+    },
+    [connect, tSettings, getErrorMessage]
+  )
+
+  const handleDisconnect = useCallback(
+    async (agentId: string) => {
+      try {
+        await disconnect(agentId)
+        toast.success(tSettings("disconnected"))
+      } catch (err) {
+        toast.error(getErrorMessage(err, tSettings("disconnectFailed")))
+      }
+    },
+    [disconnect, tSettings, getErrorMessage]
+  )
+
+  const handleRemove = useCallback(
+    async (agentId: string) => {
+      const confirmFn =
+        typeof window !== "undefined" && typeof window.confirm === "function"
+          ? window.confirm.bind(window)
+          : () => true
+      if (!confirmFn(tManager("removeAgentConfirm"))) return
+      try {
+        await removeAgent(agentId)
+        toast.success(tSettings("agentRemoved"))
+      } catch (err) {
+        toast.error(getErrorMessage(err, tManager("removeAgentFailed")))
+      }
+    },
+    [removeAgent, tManager, tSettings, getErrorMessage]
+  )
+
+  const handleCommandExecute = useCallback(
+    async (command: string, args?: string) => {
+      const prompt = args ? `${command} ${args}` : command
+      await execute(prompt)
+    },
+    [execute]
+  )
+
+  const activeAgent = activeAgentId
+    ? agents.find((agent) => agent.config.id === activeAgentId) || null
+    : null
+  const activeAgentBlockedReason =
+    activeAgentValidity?.blockingReason ??
+    (activeAgent ? getExternalAgentExecutionBlockReason(activeAgent.config) : null)
+  const isActiveAgentExecutable =
+    activeAgentValidity?.executable ?? (activeAgentBlockedReason ? false : true)
+  const isActiveAgentConnected = activeAgent?.connectionStatus === "connected"
+  const listSupport = activeAgentValidity?.sessionExtensions["session/list"]
+  const forkSupport = activeAgentValidity?.sessionExtensions["session/fork"]
+  const resumeSupport = activeAgentValidity?.sessionExtensions["session/resume"]
+  const canUseSessionActions =
+    !!activeAgentId &&
+    isActiveAgentConnected &&
+    isActiveAgentExecutable &&
+    listSupport?.state !== "unsupported"
+  const contractVersion = activeAgentValidity?.contractVersion ?? 1
+  const lifecycleStage = activeAgentValidity?.lifecycleStage || "config"
+  const blockedStage = activeAgentValidity?.blockedStage
+  const canonicalReasonCode =
+    activeAgentValidity?.canonicalReasonCode || activeAgentValidity?.lastBranchReasonCode || "ok"
+  const canonicalReason =
+    activeAgentValidity?.canonicalReason ||
+    activeAgentValidity?.lastBranchReason ||
+    activeAgentBlockedReason ||
+    "No blocking reason recorded."
+  const branchOutcome = activeAgentValidity?.branchOutcome || "external"
+  const recoveryHints = activeAgentValidity?.recoveryHints || []
+  const activeEcosystem =
+    activeAgentValidity?.ecosystem ??
+    (activeAgent ? getExternalAgentEcosystemReadiness(activeAgent.config) : undefined)
+  const correlationSessionId = activeAgentValidity?.correlation?.sessionId
+  const correlationTurnId = activeAgentValidity?.correlation?.turnId
+  const benchmarkEntries = activeBenchmarkCapabilities || []
+  const commandsDisabled =
+    isExecuting || !isActiveAgentConnected || !isActiveAgentExecutable || !activeSession
+
+  const { sessionSummary: lastRunSessionSummary } = useAgentTraceAnalytics({
+    sessionId: activeLastRunSnapshot?.linkedSessionId,
+    autoLoad: Boolean(activeLastRunSnapshot?.linkedSessionId),
+  })
+
+  const lastRunHealthSummary: SessionObservationSummary | null =
+    activeLastRunSnapshot?.linkedSessionId && lastRunSessionSummary
+      ? {
+          sessionId: activeLastRunSnapshot.linkedSessionId,
+          outcome:
+            activeLastRunSnapshot.terminalOutcome === "error" ||
+            (lastRunSessionSummary.eventTypeCounts.error ?? 0) > 0
+              ? "error"
+              : "success",
+          totalTokenCost: lastRunSessionSummary.totalCost,
+          toolCallCount: lastRunSessionSummary.toolCallCount,
+          errorCount:
+            (lastRunSessionSummary.eventTypeCounts.error ?? 0) ||
+            lastRunSessionSummary.toolFailureCount,
+          latencyP50Ms: lastRunSessionSummary.avgLatencyMs,
+          startedAt: lastRunSessionSummary.firstTimestamp,
+          endedAt: lastRunSessionSummary.lastTimestamp,
+        }
+      : null
+
+  const refreshSessions = useCallback(async () => {
+    const clearSessionListIfNeeded = () => {
+      setSessionList((prev) => (prev.length === 0 ? prev : []))
+    }
+
+    if (
+      !activeAgentId ||
+      !isActiveAgentConnected ||
+      !isActiveAgentExecutable ||
+      listSupport?.state === "unsupported"
+    ) {
+      clearSessionListIfNeeded()
+      return
+    }
+    setIsLoadingSessions(true)
+    try {
+      const sessions = await listSessions(activeAgentId)
+      setSessionList(sessions)
+    } catch (err) {
+      const unsupported = isExternalAgentSessionExtensionUnsupportedForMethod(err, "session/list")
+      clearSessionListIfNeeded()
+      if (!unsupported) {
+        toast.error(getErrorMessage(err, refreshSessionsFailedMessage))
+      }
+    } finally {
+      setIsLoadingSessions(false)
+    }
+  }, [
+    activeAgentId,
+    isActiveAgentConnected,
+    isActiveAgentExecutable,
+    listSupport?.state,
+    listSessions,
+    getErrorMessage,
+    refreshSessionsFailedMessage,
+  ])
+
+  const handleResumeSession = useCallback(
+    async (sessionId: string) => {
+      try {
+        await resumeSession(sessionId)
+        await refreshSessions()
+      } catch (err) {
+        const unsupported = isExternalAgentSessionExtensionUnsupportedForMethod(
+          err,
+          "session/resume"
+        )
+        if (unsupported) {
+          setSessionList((prev) => (prev.length === 0 ? prev : []))
+          return
+        }
+        toast.error(getErrorMessage(err, tManager("resumeSessionFailed")))
+      }
+    },
+    [resumeSession, refreshSessions, tManager, getErrorMessage]
+  )
+
+  const handleForkSession = useCallback(
+    async (sessionId: string) => {
+      try {
+        await forkSession(sessionId)
+        await refreshSessions()
+      } catch (err) {
+        const unsupported = isExternalAgentSessionExtensionUnsupportedForMethod(err, "session/fork")
+        if (unsupported) {
+          setSessionList((prev) => (prev.length === 0 ? prev : []))
+          return
+        }
+        toast.error(getErrorMessage(err, tManager("forkSessionFailed")))
+      }
+    },
+    [forkSession, refreshSessions, tManager, getErrorMessage]
+  )
+
+  const mapAcpOptions = useCallback((options?: AcpPermissionOption[]) => {
+    return options?.map((option) => ({
+      optionId: option.optionId,
+      name: option.name,
+      description: option.description,
+      kind: option.kind,
+      isDefault: option.isDefault,
+    }))
+  }, [])
+
+  const buildPermissionResponseRequestId = useCallback(() => {
+    if (!pendingPermission) return ""
+    return pendingPermission.requestId || pendingPermission.id
+  }, [pendingPermission])
+
+  const pickAllowOptionId = useCallback((options?: AcpPermissionOption[]): string | undefined => {
+    if (!options?.length) return undefined
+    const defaultAllow = options.find(
+      (opt) => opt.isDefault && opt.kind.toLowerCase().includes("allow")
+    )
+    if (defaultAllow) return defaultAllow.optionId
+    const allowOnce = options.find((opt) => opt.kind.toLowerCase().includes("allow_once"))
+    if (allowOnce) return allowOnce.optionId
+    return options.find((opt) => opt.kind.toLowerCase().includes("allow"))?.optionId
+  }, [])
+
+  const handlePermissionApprove = useCallback(async () => {
+    if (!pendingPermission) return
+    const requestId = buildPermissionResponseRequestId()
+    await respondToPermission({
+      requestId,
+      granted: true,
+      optionId: pickAllowOptionId(pendingPermission.options),
+    })
+  }, [pendingPermission, respondToPermission, buildPermissionResponseRequestId, pickAllowOptionId])
+
+  const handlePermissionDeny = useCallback(async () => {
+    if (!pendingPermission) return
+    const requestId = buildPermissionResponseRequestId()
+    await respondToPermission({
+      requestId,
+      granted: false,
+    })
+  }, [pendingPermission, respondToPermission, buildPermissionResponseRequestId])
+
+  const handlePermissionSelectOption = useCallback(
+    async (_id: string, optionId: string) => {
+      if (!pendingPermission) return
+      const requestId = buildPermissionResponseRequestId()
+      await respondToPermission({
+        requestId,
+        granted: true,
+        optionId,
+      })
+    },
+    [pendingPermission, respondToPermission, buildPermissionResponseRequestId]
+  )
+
+  useEffect(() => {
+    if (!activeAgentId || !canUseSessionActions) {
+      // Noop when already empty; otherwise clear stale entries when the
+      // active agent becomes ineligible for session listing.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSessionList((prev) => (prev.length === 0 ? prev : []))
+      return
+    }
+    void refreshSessions()
+  }, [activeAgentId, canUseSessionActions, refreshSessions])
+
+  return (
+    <div className={cn("flex flex-col gap-4", className)}>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold">{t("externalAgents")}</h3>
+          <p className="text-sm text-muted-foreground">{tSettings("configuredAgentsDesc")}</p>
+        </div>
+        <div className="flex gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="icon" onClick={refresh} disabled={isLoading}>
+                <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{tManager("refresh")}</TooltipContent>
+          </Tooltip>
+          <Button onClick={() => setAddDialogOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            {tSettings("addAgent")}
+          </Button>
+        </div>
+      </div>
+
+      {/* Error Display */}
+      {error && (
+        <div className="flex items-center justify-between rounded-lg border border-destructive bg-destructive/10 p-3">
+          <div className="flex items-center gap-2 text-sm text-destructive">
+            <AlertCircle className="h-4 w-4" />
+            {error}
+          </div>
+          <Button variant="ghost" size="sm" onClick={clearError}>
+            {tCommon("dismiss")}
+          </Button>
+        </div>
+      )}
+
+      <Separator />
+
+      {/* Agent List */}
+      <ScrollArea className="h-100">
+        {agents.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <Settings className="mb-4 h-12 w-12 text-muted-foreground/50" />
+            <h4 className="text-lg font-medium">{tManager("noExternalAgents")}</h4>
+            <p className="mt-1 text-sm text-muted-foreground">{tSettings("addAgentToStart")}</p>
+            <Button className="mt-4" onClick={() => setAddDialogOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              {tSettings("addAgent")}
+            </Button>
+          </div>
+        ) : (
+          <div className="grid gap-3">
+            {agents.map((agent) => (
+              <AgentCard
+                key={agent.config.id}
+                agent={agent}
+                isActive={activeAgentId === agent.config.id}
+                onConnect={() => handleConnect(agent.config.id)}
+                onDisconnect={() => handleDisconnect(agent.config.id)}
+                onRemove={() => handleRemove(agent.config.id)}
+                onSelect={() => setActiveAgent(agent.config.id)}
+              />
+            ))}
+          </div>
+        )}
+      </ScrollArea>
+
+      {/* Session Management */}
+      {activeAgentId && (
+        <div className="rounded-md border p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-sm font-medium">{tManager("sessions")}</div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={refreshSessions}
+              disabled={isLoadingSessions || !canUseSessionActions}
+            >
+              {isLoadingSessions ? tCommon("loading") : tManager("refreshSessions")}
+            </Button>
+          </div>
+          {!isActiveAgentExecutable ? (
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              {activeAgentBlockedReason || "Agent is currently non-executable."}
+            </p>
+          ) : !isActiveAgentConnected ? (
+            <p className="text-xs text-muted-foreground">
+              Connect the agent to list or manage ACP sessions.
+            </p>
+          ) : listSupport?.state === "unsupported" ? (
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              {listSupport.reason || "Session listing is unsupported by this ACP endpoint."}
+            </p>
+          ) : sessionList.length === 0 ? (
+            <p className="text-xs text-muted-foreground">{tManager("noResumableSessions")}</p>
+          ) : (
+            <div className="space-y-2">
+              {sessionList.map((session) => (
+                <div
+                  key={session.sessionId}
+                  className="flex items-center justify-between rounded border px-2 py-1.5"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-medium">
+                      {session.title || session.sessionId}
+                    </p>
+                    <p className="truncate text-[11px] text-muted-foreground">
+                      {session.sessionId}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleResumeSession(session.sessionId)}
+                      disabled={
+                        isExecuting ||
+                        activeSession?.id === session.sessionId ||
+                        !isActiveAgentExecutable ||
+                        !isActiveAgentConnected ||
+                        resumeSupport?.state === "unsupported"
+                      }
+                    >
+                      {tManager("resume")}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleForkSession(session.sessionId)}
+                      disabled={
+                        isExecuting ||
+                        !isActiveAgentExecutable ||
+                        !isActiveAgentConnected ||
+                        forkSupport?.state === "unsupported"
+                      }
+                    >
+                      {tManager("fork")}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {(resumeSupport?.state === "unsupported" || forkSupport?.state === "unsupported") && (
+            <div className="mt-2 space-y-1 text-[11px] text-amber-700 dark:text-amber-400">
+              {resumeSupport?.state === "unsupported" && (
+                <p>
+                  Resume unsupported:{" "}
+                  {resumeSupport.reason || "This endpoint does not support session/resume."}
+                </p>
+              )}
+              {forkSupport?.state === "unsupported" && (
+                <p>
+                  Fork unsupported:{" "}
+                  {forkSupport.reason || "This endpoint does not support session/fork."}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Runtime Diagnostics */}
+      {activeAgent && (
+        <div className="rounded-md border p-3 text-xs" data-testid="external-agent-diagnostics">
+          <div className="mb-2 text-sm font-medium">Runtime Diagnostics</div>
+          <div className="grid gap-1 text-muted-foreground">
+            <p>
+              Protocol/Transport: {activeAgent.config.protocol.toUpperCase()} via{" "}
+              {activeAgent.config.transport}
+            </p>
+            <p>
+              Executable: {isActiveAgentExecutable ? "yes" : "no"}
+              {activeAgentValidity?.blockingReasonCode
+                ? ` (${activeAgentValidity.blockingReasonCode})`
+                : ""}
+            </p>
+            <p>Health: {activeAgentValidity?.healthStatus || "unknown"}</p>
+            <p>Auth Required: {activeAgentValidity?.negotiation?.authRequired ? "yes" : "no"}</p>
+            <p>
+              Auth Methods:{" "}
+              {activeAgentValidity?.negotiation?.authMethods?.length
+                ? activeAgentValidity.negotiation.authMethods.map((method) => method.id).join(", ")
+                : "none"}
+            </p>
+            <p>
+              Session Support: list={listSupport?.state || "unknown"} / fork=
+              {forkSupport?.state || "unknown"} / resume={resumeSupport?.state || "unknown"}
+            </p>
+            {activeEcosystem?.adapterName && <p>Adapter: {activeEcosystem.adapterName}</p>}
+            {activeEcosystem?.surfaceName && <p>Surface: {activeEcosystem.surfaceName}</p>}
+            {activeEcosystem?.supportTier && <p>Support Tier: {activeEcosystem.supportTier}</p>}
+            {activeEcosystem?.prerequisiteStatus && (
+              <p>Prerequisite Status: {activeEcosystem.prerequisiteStatus}</p>
+            )}
+            <p>Contract Version: v{contractVersion}</p>
+            <p>Lifecycle Stage: {lifecycleStage}</p>
+            {blockedStage && <p>Blocked Stage: {blockedStage}</p>}
+            <p>Branch Outcome: {branchOutcome}</p>
+            <p>
+              Canonical Reason: {canonicalReasonCode}
+              {canonicalReason ? ` - ${canonicalReason}` : ""}
+            </p>
+            {(correlationSessionId || correlationTurnId) && (
+              <p>
+                Correlation: session={correlationSessionId || "n/a"} / turn=
+                {correlationTurnId || "n/a"}
+              </p>
+            )}
+            {activeLastRunSnapshot && (
+              <div className="rounded border p-2 text-foreground">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span>{`Latest run: ${activeLastRunSnapshot.terminalOutcome}`}</span>
+                  <Badge variant="outline" className="text-[10px]">
+                    {activeLastRunSnapshot.branchReasonCode}
+                  </Badge>
+                  {lastRunHealthSummary && <TraceHealthBadge summary={lastRunHealthSummary} />}
+                </div>
+                <p className="mt-1 text-muted-foreground">
+                  {activeLastRunSnapshot.timestamp.toLocaleString()}
+                </p>
+                {activeLastRunSnapshot.linkedTraceId && (
+                  <p className="text-muted-foreground">
+                    Trace: {activeLastRunSnapshot.linkedTraceId}
+                  </p>
+                )}
+                {activeLastRunSnapshot.diagnosticText && (
+                  <p className="text-muted-foreground">{activeLastRunSnapshot.diagnosticText}</p>
+                )}
+                {activeLastRunSnapshot.linkedSessionId && (
+                  <p className="text-muted-foreground">
+                    Session: {activeLastRunSnapshot.linkedSessionId}
+                  </p>
+                )}
+              </div>
+            )}
+            {activeAgentBlockedReason && (
+              <p className="text-amber-700 dark:text-amber-400">
+                Blocking reason: {activeAgentBlockedReason}
+              </p>
+            )}
+            {recoveryHints.length > 0 && <p>Recovery Hints: {recoveryHints.join(" | ")}</p>}
+            {activeEcosystem?.recommendedActions?.length ? (
+              <p>Recommended Actions: {activeEcosystem.recommendedActions.join(" | ")}</p>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* Benchmark Adaptation */}
+      {activeAgent && (
+        <div
+          className="rounded-md border p-3 text-xs"
+          data-testid="external-agent-benchmark-adaptation"
+        >
+          <div className="mb-2 text-sm font-medium">Benchmark Adaptation</div>
+          {benchmarkEntries.length === 0 ? (
+            <p className="text-muted-foreground">No benchmark adaptation entries yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {benchmarkEntries.map((entry) => (
+                <div key={entry.id} className="rounded border p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-medium">{entry.title}</p>
+                    <Badge variant="outline" className="text-[11px]">
+                      {entry.status}
+                    </Badge>
+                  </div>
+                  <p className="text-muted-foreground">Gap: {entry.gapGrade}</p>
+                  <p className="text-muted-foreground">Target: {entry.adaptationTarget}</p>
+                  {entry.status === "validated" && (
+                    <p className="text-muted-foreground">
+                      Evidence:{" "}
+                      {entry.evidence.length > 0
+                        ? entry.evidence.map((item) => item.reference).join(", ")
+                        : "missing"}
+                    </p>
+                  )}
+                  {entry.status === "intentional-deviation" && entry.deviation && (
+                    <div className="space-y-1 text-amber-700 dark:text-amber-400">
+                      <p>Rationale: {entry.deviation.rationale}</p>
+                      <p>Trade-off: {entry.deviation.tradeOff}</p>
+                      <p>User Impact: {entry.deviation.userImpact}</p>
+                      <p>
+                        Review: {entry.deviation.review.reviewedBy}
+                        {entry.deviation.review.reviewLink
+                          ? ` (${entry.deviation.review.reviewLink})`
+                          : ""}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Config Options */}
+      {configOptions.length > 0 && isActiveAgentConnected && (
+        <ExternalAgentConfigOptions
+          configOptions={configOptions}
+          onSetConfigOption={setConfigOption}
+          disabled={commandsDisabled}
+          compact
+        />
+      )}
+
+      {(availableCommands.length > 0 || planEntries.length > 0) &&
+        isActiveAgentConnected &&
+        isActiveAgentExecutable && (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              <ExternalAgentCommands
+                commands={availableCommands}
+                onExecute={handleCommandExecute}
+                isExecuting={commandsDisabled}
+              />
+            </div>
+            <ExternalAgentPlan entries={planEntries} currentStep={planStep ?? undefined} />
+          </div>
+        )}
+
+      {/* Add Agent Dialog */}
+      <AddAgentDialog open={addDialogOpen} onOpenChange={setAddDialogOpen} onAdd={handleAddAgent} />
+
+      {/* ACP Permission Dialog */}
+      <ToolApprovalDialog
+        request={
+          pendingPermission
+            ? {
+                id: pendingPermission.requestId || pendingPermission.id,
+                toolName: pendingPermission.title || pendingPermission.toolInfo.name,
+                toolDescription:
+                  pendingPermission.reason || pendingPermission.toolInfo.description || "",
+                args: pendingPermission.rawInput || {},
+                riskLevel:
+                  pendingPermission.riskLevel === "critical"
+                    ? "high"
+                    : pendingPermission.riskLevel || "medium",
+                acpOptions: mapAcpOptions(pendingPermission.options),
+              }
+            : null
+        }
+        open={!!pendingPermission}
+        onOpenChange={(open) => {
+          if (!open && pendingPermission) {
+            void handlePermissionDeny()
+          }
+        }}
+        onApprove={() => {
+          void handlePermissionApprove()
+        }}
+        onDeny={() => {
+          void handlePermissionDeny()
+        }}
+        onSelectOption={(id, optionId) => {
+          void handlePermissionSelectOption(id, optionId)
+        }}
+      />
     </div>
   )
 }

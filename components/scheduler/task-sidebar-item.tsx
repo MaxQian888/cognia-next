@@ -104,6 +104,11 @@ const taskTypeConfig: Record<
     bg: "bg-fuchsia-500/10",
     color: "text-fuchsia-500",
   },
+  "external-agent": {
+    icon: <Bot className="h-3.5 w-3.5" />,
+    bg: "bg-teal-500/10",
+    color: "text-teal-500",
+  },
 }
 
 const statusDotColor: Record<ScheduledTaskStatus, string> = {

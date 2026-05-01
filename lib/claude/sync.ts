@@ -25,6 +25,8 @@ import {
   type AgentWriteResult,
 } from "./ipc"
 import { getAgentAdapter, requireAgentAdapter } from "./agents"
+import { resolveBuiltinMcpConfig } from "./builtin-mcp/resolve"
+import { getBuiltinMcpRuntimeContext } from "./builtin-mcp/runtime-context"
 
 // ---- Sync (Cognia → Agent) ----------------------------------------------
 
@@ -77,6 +79,20 @@ export async function syncToAgent(
   const targets = all.filter((s) => s.appsEnabled?.[agentId] === true)
   const managedNames: ReadonlySet<string> = new Set([...all.map((s) => s.name), ...tombstones])
 
+  // Resolve `${COGNIA_SIDECAR_DIR}` placeholders + inject the bridge socket
+  // env on builtin rows before handing them to the per-agent projector.
+  // Without this, external agents would see the literal placeholder string in
+  // their config files and fail to spawn the a2ui-bridge child.
+  let resolvedTargets = targets
+  try {
+    const ctx = await getBuiltinMcpRuntimeContext()
+    if (ctx) {
+      resolvedTargets = targets.map((s) => resolveBuiltinMcpConfig(s, ctx))
+    }
+  } catch (err) {
+    return { ok: false, skipped: false, error: errMessage(err) }
+  }
+
   let cfg: AgentReadResult
   try {
     cfg = await readAgentConfig(agentId)
@@ -96,7 +112,7 @@ export async function syncToAgent(
     // hard failure that would scare the user.
   }
 
-  const nextTree = adapter.project(cfg.parsed, targets, managedNames)
+  const nextTree = adapter.project(cfg.parsed, resolvedTargets, managedNames)
 
   try {
     const result = await writeAgentConfig(agentId, nextTree)

@@ -20,6 +20,37 @@ import type {
 
 // ---- Outbound (UI → Tauri → sidecar) -------------------------------------
 
+/**
+ * Per-category toggles for the in-process `cognia-tools` MCP server hosted
+ * inside the sidecar. The sidecar reads this blob, builds the corresponding
+ * MCP server, and merges it into `options.mcpServers` before the SDK sees
+ * the call. This is a sidecar-protocol field — NOT an SDK-recognised option
+ * — so the sidecar strips it from the `options` it actually passes to
+ * `query()`. See `lib/settings/builtin-tools.ts` for the mapping from each
+ * id to concrete tools.
+ */
+export interface BuiltinToolsConfig {
+  /** Advanced FS ops the SDK's Read/Write/Glob/Grep don't cover (hash, diff, content_search, …). */
+  fileExtras: boolean
+  /** Structured git_* tools backed by the local `git` CLI. */
+  git: boolean
+  /** list/get/search/start/terminate processes. Off by default — high-risk. */
+  process: boolean
+  /** list_env, get_env, system_info. Read-only with secret redaction. */
+  environment: boolean
+  /** Allowlist-gated single-program shell. Off by default — overlaps SDK Bash. */
+  shellAdvanced: boolean
+}
+
+/** Default values when the user hasn't customised the toggles. Mirrors `lib/db/settings.ts`. */
+export const DEFAULT_BUILTIN_TOOLS: BuiltinToolsConfig = {
+  fileExtras: true,
+  git: true,
+  process: false,
+  environment: true,
+  shellAdvanced: false,
+}
+
 export interface SendOptions {
   cwd?: string
   model?: string
@@ -51,6 +82,12 @@ export interface SendOptions {
   resumeSessionId?: string
   /** Fork a new branch from an existing SDK session id. */
   forkFromSessionId?: string
+  /**
+   * Per-category toggles for the sidecar's built-in `cognia-tools` MCP
+   * server. Sidecar-protocol field — the sidecar strips it before calling
+   * the SDK. See {@link BuiltinToolsConfig}.
+   */
+  builtinTools?: BuiltinToolsConfig
 }
 
 /**
@@ -317,6 +354,12 @@ export interface AppSettings {
   // Tools the user has chosen to always allow for this app (per-tool name).
   alwaysAllowTools: string[]
   /**
+   * Per-category toggles for the sidecar's built-in `cognia-tools` MCP
+   * server. Resolved into {@link SendOptions.builtinTools} on each turn by
+   * `lib/claude/build-options.ts`. See {@link BuiltinToolsConfig}.
+   */
+  builtinTools: BuiltinToolsConfig
+  /**
    * Anthropic API key. v1 stores the key in IndexedDB plaintext — the user is
    * told this in the settings UI. Future iterations should migrate to an OS
    * keyring via `tauri-plugin-stronghold` or similar.
@@ -484,6 +527,22 @@ export interface AppSettings {
    * files. Tauri-only (web has no `dirPath`).
    */
   backupAutoSchedule?: BackupAutoSchedule
+
+  // ---- A2UI defaults (schema v13) ----
+  /**
+   * Global A2UI on/off. New characters default to this; per-character
+   * `a2uiEnabled` overrides. When false, the model never receives the
+   * `mcp__a2ui-bridge__*` tool whitelist or the A2UI system prompt.
+   */
+  a2uiDefaultEnabled?: boolean
+  /** Default catalog id for new A2UI surfaces (academic / financial / general). */
+  a2uiDefaultCatalogId?: string
+  /** Default widget host strategy used when a surface omits the field. */
+  a2uiDefaultHostStrategy?: import("@/types/a2ui/schema").A2UIWidgetHostStrategy
+  /** Default widget theme. */
+  a2uiDefaultTheme?: import("@/types/a2ui/schema").A2UIWidgetTheme
+  /** LRU surface cap kept in zustand persist (default 20). */
+  a2uiPersistenceLimit?: number
 }
 
 export interface BackupAutoSchedule {
@@ -494,6 +553,13 @@ export interface BackupAutoSchedule {
   dirPath?: string
   /** Keep this many newest auto-backup files; older ones are deleted. */
   retainCount: number
+  /**
+   * ISO-8601 timestamp of the most recent successful auto-backup. Stored on
+   * the singleton settings row so it rides along with backups themselves
+   * (the previous source — `backupHistory` — is local-only and isn't
+   * carried in v3 packages).
+   */
+  lastRunAt?: string
 }
 
 /** Defaults applied when the user hasn't customized the schedule yet. */
@@ -655,6 +721,10 @@ export interface Character {
   workingDir?: string
   /** Seeded built-ins are read-only (UI offers "Duplicate" instead of edit). */
   isBuiltIn?: boolean
+  /** Whether this character is allowed to drive A2UI surfaces (4-tool whitelist + system prompt). */
+  a2uiEnabled?: boolean
+  /** Optional A2UI catalog this character defaults to (academic / financial / general / …). */
+  a2uiCatalogId?: string
   createdAt: number
   updatedAt: number
 }

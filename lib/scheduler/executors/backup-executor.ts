@@ -29,6 +29,8 @@ import {
 import { encryptBackupPackage } from "@/lib/data/crypto"
 import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 import { appendBackupHistory } from "@/lib/db/backup-history"
+import { DEFAULT_BACKUP_AUTO_SCHEDULE, type BackupAutoSchedule } from "@/lib/claude/types"
+import { getSettings, saveSettings } from "@/lib/db/settings"
 import { isTauri } from "@/lib/tauri"
 import { loggers } from "@/lib/logger"
 
@@ -136,6 +138,27 @@ export async function executeBackupTask(
       sizeBytes: body.length,
       filename,
     })
+
+    // Stamp settings.backupAutoSchedule.lastRunAt so cross-device sync (and
+    // the in-app "next run at" indicator) can derive recency without
+    // walking `backupHistory`. Best-effort; a failure here doesn't undo the
+    // backup itself.
+    try {
+      const settings = await getSettings()
+      const current: BackupAutoSchedule =
+        settings.backupAutoSchedule ?? DEFAULT_BACKUP_AUTO_SCHEDULE
+      await saveSettings({
+        backupAutoSchedule: {
+          ...current,
+          lastRunAt: new Date().toISOString(),
+        },
+      })
+    } catch (err) {
+      log.warn("Failed to stamp backupAutoSchedule.lastRunAt", {
+        taskId: task.id,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
 
     log.info("Scheduler backup task complete", {
       taskId: task.id,

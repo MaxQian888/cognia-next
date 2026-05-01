@@ -275,8 +275,11 @@ const config: Config = {
   // The glob patterns Jest uses to detect test files
   testMatch: ["**/__tests__/**/*.?([mc])[jt]s?(x)", "**/?(*.)+(spec|test).?([mc])[jt]s?(x)"],
 
-  // An array of regexp pattern strings that are matched against all test paths, matched tests are skipped
-  testPathIgnorePatterns: ["/node_modules/", "/.next/", "/out/", "/src-tauri/"],
+  // An array of regexp pattern strings that are matched against all test paths, matched tests are skipped.
+  // `/sidecar/` is excluded because the sidecar's `.mjs` tests use Node's
+  // built-in `--test` runner (see `pnpm sidecar:test`), not Jest. The two test
+  // surfaces have different setup expectations and should not be run together.
+  testPathIgnorePatterns: ["/node_modules/", "/.next/", "/out/", "/src-tauri/", "/sidecar/"],
 
   // The regexp pattern or array of patterns that Jest uses to detect test files
   // testRegex: [],

@@ -14,6 +14,7 @@ import { ExternalAgentInitializer } from "@/components/providers/initializers/ex
 import { SchedulerInitializer } from "@/components/scheduler"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provider"
+import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provider"
 import "./globals.css"
 
 const geistSans = Geist({
@@ -53,7 +54,9 @@ export default function RootLayout({
                     <ExternalAgentInitializer />
                     <SchedulerInitializer />
                     <BackupSchedulerProvider>
-                      <CanvasBridgeProvider>{children}</CanvasBridgeProvider>
+                      <CanvasBridgeProvider>
+                        <A2UIDispatchProvider>{children}</A2UIDispatchProvider>
+                      </CanvasBridgeProvider>
                     </BackupSchedulerProvider>
                     <Toaster />
                   </LoggerProvider>

@@ -52,6 +52,13 @@ describe("stores root barrel — synthetic adapters", () => {
           id: "singleton",
           permissionMode: "default",
           alwaysAllowTools: [],
+          builtinTools: {
+            fileExtras: true,
+            git: true,
+            process: false,
+            environment: true,
+            shellAdvanced: false,
+          },
           defaultModel: "claude-haiku",
           apiKey: "sk-test",
         },

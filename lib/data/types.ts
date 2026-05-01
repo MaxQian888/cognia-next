@@ -25,6 +25,8 @@ import type {
   CanvasCommentRow,
   CanvasSessionRow,
 } from "@/lib/db/canvas-types"
+import type { A2UIAppRow, A2UITemplateRow, A2UIEventHistoryRow } from "@/lib/db/a2ui-types"
+import type { LocalStorageSnapshot } from "./snapshots/types"
 
 /** Schema version currently emitted by `buildBackupPackage`. */
 export const EXPORT_SCHEMA_VERSION = 3 as const
@@ -78,6 +80,20 @@ export interface BackupPayloadV3 {
   canvasVersions?: CanvasVersionRow[]
   canvasComments?: CanvasCommentRow[]
   canvasSessions?: CanvasSessionRow[]
+  /** A2UI tables (schema v13). Surfaces are NOT exported — they're
+   * runtime-derived; only saved apps + user templates + the debugger
+   * event log round-trip through backups. */
+  a2uiApps?: A2UIAppRow[]
+  a2uiTemplates?: A2UITemplateRow[]
+  a2uiEventHistory?: A2UIEventHistoryRow[]
+  /**
+   * Zustand-persist faces that live in `localStorage` (external agents,
+   * custom modes, agent teams, custom themes, artifacts, canvas prefs, …).
+   * Single field for forward-compatibility: adding a new persist store to
+   * the backup never bumps `BackupPayloadV3` again — only the snapshot
+   * registry changes. Keyed by Zustand persist `name`.
+   */
+  localStorageSnapshots?: Record<string, LocalStorageSnapshot>
 }
 
 /** The on-disk plaintext shape. JSON-serialized verbatim. */
@@ -134,6 +150,38 @@ export interface ImportSummary {
   skipped: Record<string, number>
   /** Imported rows whose id matched a local built-in row (always preserved). */
   builtInsSkipped: Record<string, number>
+  /**
+   * Per-snapshot outcome for the `localStorage` face (external agents,
+   * custom modes, …). Absent when the package didn't carry any snapshots.
+   */
+  localStorage?: LocalStorageImportReport
+  /**
+   * Tauri-only: result of replaying `syncToAgent()` for each known external
+   * agent after the Dexie + localStorage faces were applied. Lets the UI
+   * tell the user which agents were re-projected to disk and which were
+   * skipped (e.g. read-only adapter, agent not installed).
+   */
+  syncResults?: SyncProjectionReport[]
+}
+
+export interface LocalStorageImportReport {
+  /** Persist keys that were applied. */
+  written: string[]
+  /** Persist keys present in the package that no module knows how to apply. */
+  skipped: string[]
+  /** Persist keys whose write threw — the rollback path will list them. */
+  errors: { key: string; error: string }[]
+  /** Persist keys that we restored from `preSnap` after a failure. */
+  restoredFromPreSnap?: string[]
+}
+
+export interface SyncProjectionReport {
+  agentId: string
+  ok: boolean
+  /** A short reason string when `ok=false`; `undefined` on success. */
+  reason?: string
+  /** When `ok=true`, the count of servers projected. */
+  count?: number
 }
 
 export function emptySummary(): ImportSummary {

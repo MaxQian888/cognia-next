@@ -21,6 +21,7 @@ import { ScheduledTasksSection } from "./scheduled-tasks-section"
 import { DesktopSection } from "./desktop-section"
 import { AboutSection } from "./about-section"
 import { GeneralSection } from "./general-section"
+import { A2UISection } from "./a2ui-section"
 import { SkillsLinkCard } from "./sections/skills-link-card"
 import { SpeechSection } from "./speech-section"
 import { LogsSection } from "./sections/logs-section"
@@ -29,6 +30,7 @@ import ExternalAgentSettings from "./agent/external-agent-settings"
 import { CustomModeSettings } from "./agent/custom-mode-settings"
 import { ArtifactsSection } from "./artifacts-section"
 import { CanvasSection } from "./canvas-section"
+import { ToolSettingsSection } from "./tools"
 
 interface Props {
   /** Initial section to render. Updated when the URL `?section=` changes. */
@@ -171,6 +173,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <ExternalAgentSettings />
     case "agent-modes":
       return <CustomModeSettings />
+    case "tools":
+      return <ToolSettingsSection />
     case "search":
       return <SearchSettings />
     case "appearance":
@@ -191,6 +195,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <CanvasSection />
     case "mcp":
       return <McpServersSection />
+    case "a2ui":
+      return <A2UISection />
     case "data":
       return <DataSection />
     case "scheduled-tasks":

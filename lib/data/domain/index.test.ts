@@ -33,6 +33,8 @@ describe("DOMAIN_TRANSFERS", () => {
     const keys = DOMAIN_TRANSFERS.map((d) => d.key).sort()
     expect(keys).toEqual(
       [
+        // Dexie-backed domains
+        "a2ui",
         "canvas",
         "characters",
         "mcpServers",
@@ -40,12 +42,45 @@ describe("DOMAIN_TRANSFERS", () => {
         "settingsTheme",
         "skills",
         "teams",
+        // Zustand-persist (localStorage) snapshot-backed domains
+        "a2uiSurfaces",
+        "agentRuntime",
+        "agentTeamsLayout",
+        "artifacts",
+        "canvasComments",
+        "canvasKeybindings",
+        "canvasSettings",
+        "customModes",
+        "customThemes",
+        "externalAgents",
+        "schedulerPrefs",
       ].sort()
     )
   })
 
   it("getDomain returns undefined for unknown keys", () => {
     expect(getDomain("does-not-exist" as never)).toBeUndefined()
+  })
+})
+
+describe("DOMAIN_TRANSFERS — snapshot-backed domains", () => {
+  beforeEach(() => {
+    if (typeof localStorage !== "undefined") localStorage.clear()
+  })
+
+  it("externalAgents export wraps the persist payload as localStorageSnapshots", async () => {
+    localStorage.setItem(
+      "cognia-external-agents",
+      JSON.stringify({ state: { agents: { foo: 1 } }, version: 5 })
+    )
+    const file = await buildDomainExport("externalAgents")
+    const snap = file.payload.localStorageSnapshots?.["cognia-external-agents"]
+    expect(snap?.raw.state).toEqual({ agents: { foo: 1 } })
+  })
+
+  it("snapshot domain returns empty payload when storage is empty", async () => {
+    const file = await buildDomainExport("customThemes")
+    expect(file.payload.localStorageSnapshots).toBeUndefined()
   })
 })
 
@@ -226,6 +261,13 @@ describe("settingsTheme — projection", () => {
     await db.settings.put({
       id: "singleton",
       alwaysAllowTools: ["Read"],
+      builtinTools: {
+        fileExtras: true,
+        git: true,
+        process: false,
+        environment: true,
+        shellAdvanced: false,
+      },
       apiKey: "sk-secret",
       theme: "dark",
       fontScale: "lg",

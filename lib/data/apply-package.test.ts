@@ -151,14 +151,38 @@ describe("settings merge", () => {
   it("adds when no local row, overwrites when present and strategy != skip", async () => {
     const db = getDb()
     const noLocal = await applyBackupPackage(
-      pkg({ settings: { id: "singleton", alwaysAllowTools: ["Read"] } }),
+      pkg({
+        settings: {
+          id: "singleton",
+          alwaysAllowTools: ["Read"],
+          builtinTools: {
+            fileExtras: true,
+            git: true,
+            process: false,
+            environment: true,
+            shellAdvanced: false,
+          },
+        },
+      }),
       { mergeStrategy: "skip", includeSessions: false, includeApiKey: false }
     )
     expect(noLocal.added.settings).toBe(1)
     expect((await db.settings.get("singleton"))?.alwaysAllowTools).toEqual(["Read"])
 
     const withLocal = await applyBackupPackage(
-      pkg({ settings: { id: "singleton", alwaysAllowTools: ["Write"] } }),
+      pkg({
+        settings: {
+          id: "singleton",
+          alwaysAllowTools: ["Write"],
+          builtinTools: {
+            fileExtras: true,
+            git: true,
+            process: false,
+            environment: true,
+            shellAdvanced: false,
+          },
+        },
+      }),
       { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false }
     )
     expect(withLocal.overwritten.settings).toBe(1)
@@ -168,12 +192,38 @@ describe("settings merge", () => {
   it("strips the API key unless includeApiKey is true", async () => {
     const db = getDb()
     await applyBackupPackage(
-      pkg({ settings: { id: "singleton", alwaysAllowTools: [], apiKey: "secret" } }),
+      pkg({
+        settings: {
+          id: "singleton",
+          alwaysAllowTools: [],
+          builtinTools: {
+            fileExtras: true,
+            git: true,
+            process: false,
+            environment: true,
+            shellAdvanced: false,
+          },
+          apiKey: "secret",
+        },
+      }),
       { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false }
     )
     expect((await db.settings.get("singleton"))?.apiKey).toBeUndefined()
     await applyBackupPackage(
-      pkg({ settings: { id: "singleton", alwaysAllowTools: [], apiKey: "secret" } }),
+      pkg({
+        settings: {
+          id: "singleton",
+          alwaysAllowTools: [],
+          builtinTools: {
+            fileExtras: true,
+            git: true,
+            process: false,
+            environment: true,
+            shellAdvanced: false,
+          },
+          apiKey: "secret",
+        },
+      }),
       { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: true }
     )
     expect((await db.settings.get("singleton"))?.apiKey).toBe("secret")
@@ -181,9 +231,31 @@ describe("settings merge", () => {
 
   it("counts as skipped when strategy=skip and a local settings row exists", async () => {
     const db = getDb()
-    await db.settings.put({ id: "singleton", alwaysAllowTools: ["A"] })
+    await db.settings.put({
+      id: "singleton",
+      alwaysAllowTools: ["A"],
+      builtinTools: {
+        fileExtras: true,
+        git: true,
+        process: false,
+        environment: true,
+        shellAdvanced: false,
+      },
+    })
     const summary = await applyBackupPackage(
-      pkg({ settings: { id: "singleton", alwaysAllowTools: ["B"] } }),
+      pkg({
+        settings: {
+          id: "singleton",
+          alwaysAllowTools: ["B"],
+          builtinTools: {
+            fileExtras: true,
+            git: true,
+            process: false,
+            environment: true,
+            shellAdvanced: false,
+          },
+        },
+      }),
       { mergeStrategy: "skip", includeSessions: false, includeApiKey: false }
     )
     expect(summary.skipped.settings).toBe(1)
@@ -264,5 +336,100 @@ describe("empty / missing collections", () => {
     expect(summary.overwritten).toEqual({})
     expect(summary.skipped).toEqual({})
     expect(summary.builtInsSkipped).toEqual({})
+  })
+})
+
+describe("applyBackupPackage — localStorage snapshot face", () => {
+  beforeEach(() => {
+    if (typeof localStorage !== "undefined") localStorage.clear()
+  })
+
+  it("writes localStorageSnapshots into the snapshot registry's storage", async () => {
+    const summary = await applyBackupPackage(
+      pkg({
+        localStorageSnapshots: {
+          "cognia-external-agents": {
+            key: "cognia-external-agents",
+            storeVersion: 5,
+            snapshotFormatVersion: 1,
+            raw: { state: { agents: { foo: { id: "foo" } } }, version: 5 },
+            capturedAt: "2024-01-01T00:00:00.000Z",
+          },
+        },
+      }),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    expect(summary.localStorage?.written).toEqual(["cognia-external-agents"])
+    expect(localStorage.getItem("cognia-external-agents")).toContain('"foo"')
+  })
+
+  it("includes the syncResults from the injected projector", async () => {
+    const summary = await applyBackupPackage(
+      pkg({}),
+      { mergeStrategy: "skip", includeSessions: false, includeApiKey: false },
+      {
+        projectMcp: async () => [
+          { agentId: "claude-code", ok: true, count: 2 },
+          { agentId: "cursor", ok: false, reason: "not-tauri" },
+        ],
+      }
+    )
+    expect(summary.syncResults).toEqual([
+      { agentId: "claude-code", ok: true, count: 2 },
+      { agentId: "cursor", ok: false, reason: "not-tauri" },
+    ])
+  })
+
+  it("captures a thrown projector failure into syncResults rather than rejecting", async () => {
+    const summary = await applyBackupPackage(
+      pkg({}),
+      { mergeStrategy: "skip", includeSessions: false, includeApiKey: false },
+      {
+        projectMcp: async () => {
+          throw new Error("locked")
+        },
+      }
+    )
+    expect(summary.syncResults).toEqual([{ agentId: "*", ok: false, reason: "locked" }])
+  })
+
+  it("rolls localStorage back to preSnap when a write fails after the Dexie commit", async () => {
+    localStorage.setItem(
+      "cognia-external-agents",
+      JSON.stringify({ state: { agents: { pre: 1 } }, version: 5 })
+    )
+    // Inject a storage that throws on setItem for one key to simulate a
+    // post-commit localStorage write failure.
+    const realStorage = window.localStorage
+    let setItemCalls = 0
+    const failingStorage = {
+      getItem: (k: string) => realStorage.getItem(k),
+      setItem: (k: string, v: string) => {
+        setItemCalls++
+        if (k === "cognia-external-agents" && setItemCalls === 1) {
+          throw new Error("disk-full")
+        }
+        realStorage.setItem(k, v)
+      },
+      removeItem: (k: string) => realStorage.removeItem(k),
+    }
+    const summary = await applyBackupPackage(
+      pkg({
+        localStorageSnapshots: {
+          "cognia-external-agents": {
+            key: "cognia-external-agents",
+            storeVersion: 5,
+            snapshotFormatVersion: 1,
+            raw: { state: { agents: { post: 1 } }, version: 5 },
+            capturedAt: "2024-01-01T00:00:00.000Z",
+          },
+        },
+      }),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { storage: failingStorage, projectMcp: async () => [] }
+    )
+    expect(summary.localStorage?.errors[0]?.error).toBe("disk-full")
+    expect(summary.localStorage?.restoredFromPreSnap).toContain("cognia-external-agents")
   })
 })

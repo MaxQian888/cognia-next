@@ -32,6 +32,21 @@ import {
   DEFAULT_EXECUTION_CONFIG,
 } from "@/types/scheduler"
 import {
+  ChatPayloadEditor,
+  ExternalAgentPayloadEditor,
+  EMPTY_CHAT_LIKE_DRAFT,
+  EMPTY_EXTERNAL_AGENT_DRAFT,
+  payloadToChatLikeDraft,
+  payloadToExternalAgentDraft,
+  chatLikeDraftToPayload,
+  externalAgentDraftToPayload,
+  isChatLikeTaskType,
+  isStructuredEditableTaskType,
+  DraftValidationError,
+  type ChatLikeDraft,
+  type ExternalAgentDraft,
+} from "@/components/scheduler/payload-editors"
+import {
   validateCronExpression,
   describeCronExpression,
   formatCronExpression,
@@ -55,13 +70,15 @@ interface TaskFormProps {
 // Display labels are sourced from i18n keys `scheduler.taskTypes.*` and
 // `scheduler.triggerTypes.*` — only the value (and icon for triggers) lives here.
 const TASK_TYPES: Array<{ value: ScheduledTaskType }> = [
-  { value: "workflow" },
+  { value: "chat" },
   { value: "agent" },
+  { value: "skill" },
+  { value: "external-agent" },
+  { value: "workflow" },
   { value: "sync" },
   { value: "backup" },
   { value: "script" },
   { value: "ai-generation" },
-  { value: "chat" },
   { value: "test" },
   { value: "custom" },
   { value: "plugin" },
@@ -73,6 +90,8 @@ const TRIGGER_TYPES: Array<{ value: TaskTriggerType; icon: React.ReactNode }> = 
   { value: "once", icon: <Zap className="h-4 w-4" /> },
   { value: "event", icon: <Bell className="h-4 w-4" /> },
 ]
+
+type PayloadEditorMode = "structured" | "json"
 
 interface TaskFormState {
   name: string
@@ -88,6 +107,18 @@ interface TaskFormState {
   eventType: string
   timezone: string
   payloadJson: string
+  /** Structured-mode draft for chat / agent / skill task types. */
+  chatLikeDraft: ChatLikeDraft
+  /** Structured-mode draft for external-agent task type. */
+  externalAgentDraft: ExternalAgentDraft
+  /**
+   * Which editor to render. Toggling structured → JSON serializes the draft
+   * into payloadJson; toggling back parses payloadJson into the draft. Free-
+   * form JSON edits stick when the user explicitly stays in JSON mode.
+   */
+  payloadEditorMode: PayloadEditorMode
+  /** Per-field validation messages for the structured editor. */
+  payloadFieldErrors: Record<string, string>
   notifyOnStart: boolean
   notifyOnComplete: boolean
   notifyOnError: boolean
@@ -113,10 +144,12 @@ function formReducer(state: TaskFormState, update: Partial<TaskFormState>): Task
 }
 
 function createInitialState(initialValues?: Partial<CreateScheduledTaskInput>): TaskFormState {
+  const initialType: ScheduledTaskType = initialValues?.type || "chat"
+  const startInStructured = isStructuredEditableTaskType(initialType)
   return {
     name: initialValues?.name || "",
     description: initialValues?.description || "",
-    taskType: initialValues?.type || "workflow",
+    taskType: initialType,
     triggerType: initialValues?.trigger?.type || "cron",
     cronExpression: initialValues?.trigger?.cronExpression || "0 9 * * *",
     cronPreset: "",
@@ -127,6 +160,15 @@ function createInitialState(initialValues?: Partial<CreateScheduledTaskInput>): 
     eventType: "",
     timezone: initialValues?.trigger?.timezone || "UTC",
     payloadJson: initialValues?.payload ? JSON.stringify(initialValues.payload, null, 2) : "{}",
+    chatLikeDraft: isChatLikeTaskType(initialType)
+      ? payloadToChatLikeDraft(initialType, initialValues?.payload)
+      : { ...EMPTY_CHAT_LIKE_DRAFT },
+    externalAgentDraft:
+      initialType === "external-agent"
+        ? payloadToExternalAgentDraft(initialValues?.payload)
+        : { ...EMPTY_EXTERNAL_AGENT_DRAFT },
+    payloadEditorMode: startInStructured ? "structured" : "json",
+    payloadFieldErrors: {},
     notifyOnStart: initialValues?.notification?.onStart ?? false,
     notifyOnComplete: initialValues?.notification?.onComplete ?? true,
     notifyOnError: initialValues?.notification?.onError ?? true,
@@ -209,6 +251,124 @@ export function TaskForm({
     }
   }, [])
 
+  // ---- Payload editor mode + task-type change -----------------------------
+
+  /**
+   * Switch between structured and JSON payload editors. We always serialize
+   * the current draft into `payloadJson` when leaving structured mode (even
+   * if validation would fail) so the user never loses their data — they get
+   * back what they typed. Going JSON → structured re-parses `payloadJson`
+   * into a draft.
+   */
+  const togglePayloadEditorMode = useCallback(() => {
+    if (f.payloadEditorMode === "structured") {
+      // structured → json: serialize draft (best-effort, ignore validation)
+      let serialized: string = f.payloadJson
+      try {
+        const built =
+          f.taskType === "external-agent"
+            ? externalAgentDraftToPayload(f.externalAgentDraft)
+            : chatLikeDraftToPayload(f.taskType, f.chatLikeDraft)
+        serialized = JSON.stringify(built, null, 2)
+      } catch {
+        // Validation failed — fall back to a partial dump so the user keeps
+        // whatever fragments they typed.
+        if (f.taskType === "external-agent") {
+          serialized = JSON.stringify(f.externalAgentDraft, null, 2)
+        } else {
+          serialized = JSON.stringify(f.chatLikeDraft, null, 2)
+        }
+      }
+      updateForm({
+        payloadEditorMode: "json",
+        payloadJson: serialized,
+        payloadError: null,
+        payloadFieldErrors: {},
+      })
+    } else {
+      // json → structured: parse JSON into the appropriate draft
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(f.payloadJson || "{}")
+      } catch {
+        updateForm({
+          payloadError: t("invalidJson") || "Invalid JSON",
+        })
+        return
+      }
+      updateForm({
+        payloadEditorMode: "structured",
+        payloadError: null,
+        payloadFieldErrors: {},
+        chatLikeDraft: isChatLikeTaskType(f.taskType)
+          ? payloadToChatLikeDraft(f.taskType, parsed)
+          : f.chatLikeDraft,
+        externalAgentDraft:
+          f.taskType === "external-agent"
+            ? payloadToExternalAgentDraft(parsed)
+            : f.externalAgentDraft,
+      })
+    }
+  }, [f.payloadEditorMode, f.taskType, f.chatLikeDraft, f.externalAgentDraft, f.payloadJson, t])
+
+  /**
+   * Handle the user picking a different task type. We migrate the structured
+   * drafts where it makes sense (chat ↔ agent ↔ skill share fields; external
+   * agent has its own draft) and force the editor mode to whatever's
+   * appropriate for the new type.
+   */
+  const handleTaskTypeChange = useCallback(
+    (next: ScheduledTaskType) => {
+      const wasStructured = isStructuredEditableTaskType(f.taskType)
+      const willBeStructured = isStructuredEditableTaskType(next)
+      const updates: Partial<TaskFormState> = {
+        taskType: next,
+        payloadFieldErrors: {},
+        payloadError: null,
+      }
+
+      if (willBeStructured && !wasStructured) {
+        // Switching INTO a structured-aware type — try to seed the draft from
+        // the current JSON, but fall back to empty if it doesn't parse.
+        let parsed: unknown = {}
+        try {
+          parsed = JSON.parse(f.payloadJson || "{}")
+        } catch {
+          parsed = {}
+        }
+        if (isChatLikeTaskType(next)) {
+          updates.chatLikeDraft = payloadToChatLikeDraft(next, parsed)
+        } else {
+          updates.externalAgentDraft = payloadToExternalAgentDraft(parsed)
+        }
+        updates.payloadEditorMode = "structured"
+      } else if (willBeStructured && wasStructured) {
+        // chat ↔ agent ↔ skill share the same draft shape, so we keep it.
+        // Only swap the active draft when crossing the chat-like / external
+        // boundary.
+        const wasChatLike = isChatLikeTaskType(f.taskType)
+        const isChatLike = isChatLikeTaskType(next)
+        if (wasChatLike && !isChatLike) {
+          updates.externalAgentDraft = {
+            ...EMPTY_EXTERNAL_AGENT_DRAFT,
+            prompt: f.chatLikeDraft.prompt,
+          }
+        } else if (!wasChatLike && isChatLike) {
+          updates.chatLikeDraft = {
+            ...EMPTY_CHAT_LIKE_DRAFT,
+            prompt: f.externalAgentDraft.prompt,
+          }
+        }
+      } else if (!willBeStructured && wasStructured) {
+        // Leaving the structured world entirely — leave payloadJson alone.
+        updates.payloadEditorMode = "json"
+      }
+
+      updateForm(updates)
+    },
+    [f.taskType, f.payloadJson, f.chatLikeDraft, f.externalAgentDraft]
+  )
+
   // Apply task template to fill form
   const applyTemplate = useCallback((template: TaskTemplate) => {
     const input = template.getInput()
@@ -221,6 +381,15 @@ export function TaskForm({
       timezone: input.trigger.timezone || "UTC",
       intervalMinutes: input.trigger.intervalMs ? input.trigger.intervalMs / 60000 : 60,
       payloadJson: input.payload ? JSON.stringify(input.payload, null, 2) : "{}",
+      chatLikeDraft: isChatLikeTaskType(input.type)
+        ? payloadToChatLikeDraft(input.type, input.payload)
+        : { ...EMPTY_CHAT_LIKE_DRAFT },
+      externalAgentDraft:
+        input.type === "external-agent"
+          ? payloadToExternalAgentDraft(input.payload)
+          : { ...EMPTY_EXTERNAL_AGENT_DRAFT },
+      payloadEditorMode: isStructuredEditableTaskType(input.type) ? "structured" : "json",
+      payloadFieldErrors: {},
       notifyOnStart: input.notification?.onStart ?? false,
       notifyOnComplete: input.notification?.onComplete ?? true,
       notifyOnError: input.notification?.onError ?? true,
@@ -277,19 +446,52 @@ export function TaskForm({
       errors.nameError = null
     }
 
-    // Validate payload JSON and size
+    // Validate payload — structured mode uses the typed draft, JSON mode keeps
+    // the existing free-form JSON behaviour.
     let payload: Record<string, unknown> = {}
-    try {
-      payload = JSON.parse(f.payloadJson)
-      if (f.payloadJson.length > MAX_PAYLOAD_SIZE) {
-        errors.payloadError = t("payloadTooLarge") || "Payload exceeds 64KB limit"
-        hasErrors = true
-      } else {
-        errors.payloadError = null
+    let payloadFieldErrors: Record<string, string> | undefined
+    if (f.payloadEditorMode === "structured" && isStructuredEditableTaskType(f.taskType)) {
+      try {
+        const built =
+          f.taskType === "external-agent"
+            ? externalAgentDraftToPayload(f.externalAgentDraft)
+            : chatLikeDraftToPayload(f.taskType, f.chatLikeDraft)
+        payload = built as Record<string, unknown>
+        const serialized = JSON.stringify(payload)
+        if (serialized.length > MAX_PAYLOAD_SIZE) {
+          errors.payloadError = t("payloadTooLarge") || "Payload exceeds 64KB limit"
+          hasErrors = true
+        } else {
+          errors.payloadError = null
+        }
+      } catch (err) {
+        if (err instanceof DraftValidationError) {
+          payloadFieldErrors = err.errors
+          errors.payloadError = t("payloadFieldErrors") || "Please fix the highlighted fields"
+          hasErrors = true
+        } else {
+          errors.payloadError = err instanceof Error ? err.message : String(err)
+          hasErrors = true
+        }
       }
-    } catch {
-      errors.payloadError = t("invalidJson") || "Invalid JSON"
-      hasErrors = true
+    } else {
+      try {
+        payload = JSON.parse(f.payloadJson)
+        if (f.payloadJson.length > MAX_PAYLOAD_SIZE) {
+          errors.payloadError = t("payloadTooLarge") || "Payload exceeds 64KB limit"
+          hasErrors = true
+        } else {
+          errors.payloadError = null
+        }
+      } catch {
+        errors.payloadError = t("invalidJson") || "Invalid JSON"
+        hasErrors = true
+      }
+    }
+    if (payloadFieldErrors) {
+      ;(errors as Partial<TaskFormState>).payloadFieldErrors = payloadFieldErrors
+    } else {
+      ;(errors as Partial<TaskFormState>).payloadFieldErrors = {}
     }
 
     // Build trigger
@@ -468,7 +670,7 @@ export function TaskForm({
                 <button
                   key={type.value}
                   type="button"
-                  onClick={() => updateForm({ taskType: type.value })}
+                  onClick={() => handleTaskTypeChange(type.value)}
                   className={cn(
                     "rounded-lg border px-2 py-2 text-xs font-medium transition-all",
                     "hover:border-primary/50 hover:bg-primary/5",
@@ -666,33 +868,87 @@ export function TaskForm({
 
       {/* Task Payload Section */}
       <div className="rounded-xl border bg-gradient-to-br from-card to-card/50 p-3 sm:p-4 shadow-sm">
-        <div className="mb-4 flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-500/10">
-            <Settings className="h-4 w-4 text-purple-500" />
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-500/10">
+              <Settings className="h-4 w-4 text-purple-500" />
+            </div>
+            <div>
+              <h3 className="font-semibold">{t("taskPayload") || "Task Payload"}</h3>
+              <p className="text-xs text-muted-foreground">
+                {f.payloadEditorMode === "structured"
+                  ? t("payloadStructuredHelp") ||
+                    "Pick the agent / tools / MCP servers / built-in tool toggles for this run."
+                  : t("payloadHelp") || "JSON configuration passed to the task executor"}
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="font-semibold">{t("taskPayload") || "Task Payload"}</h3>
-            <p className="text-xs text-muted-foreground">
-              {t("payloadHelp") || "JSON configuration passed to the task executor"}
-            </p>
-          </div>
+          {isStructuredEditableTaskType(f.taskType) && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={togglePayloadEditorMode}
+              data-testid="scheduler-task-payload-mode-toggle"
+            >
+              {f.payloadEditorMode === "structured"
+                ? t("payloadEditorMode.toJson") || "Edit as JSON"
+                : t("payloadEditorMode.toStructured") || "Use structured editor"}
+            </Button>
+          )}
         </div>
 
-        <div className="space-y-2">
-          <Textarea
-            value={f.payloadJson}
-            onChange={(e) => updateForm({ payloadJson: e.target.value, payloadError: null })}
-            placeholder='{"key": "value"}'
-            className={cn(
-              "min-h-[100px] resize-none font-mono text-sm transition-all",
-              f.payloadError
-                ? "border-destructive focus:ring-destructive/20"
-                : "focus:ring-2 focus:ring-primary/20"
-            )}
-            rows={4}
+        {f.payloadEditorMode === "structured" && isChatLikeTaskType(f.taskType) && (
+          <ChatPayloadEditor
+            taskType={f.taskType}
+            draft={f.chatLikeDraft}
+            onDraftChange={(draft) => {
+              updateForm({
+                chatLikeDraft: draft,
+                payloadError: null,
+                payloadFieldErrors: {},
+              })
+            }}
+            errors={f.payloadFieldErrors}
+            disabled={isSubmitting}
+            testId="scheduler-task-chat-editor"
           />
-          {f.payloadError && <p className="text-xs text-destructive">{f.payloadError}</p>}
-        </div>
+        )}
+
+        {f.payloadEditorMode === "structured" && f.taskType === "external-agent" && (
+          <ExternalAgentPayloadEditor
+            draft={f.externalAgentDraft}
+            onDraftChange={(draft) =>
+              updateForm({
+                externalAgentDraft: draft,
+                payloadError: null,
+                payloadFieldErrors: {},
+              })
+            }
+            errors={f.payloadFieldErrors}
+            disabled={isSubmitting}
+            testId="scheduler-task-external-agent-editor"
+          />
+        )}
+
+        {(f.payloadEditorMode === "json" || !isStructuredEditableTaskType(f.taskType)) && (
+          <div className="space-y-2">
+            <Textarea
+              value={f.payloadJson}
+              onChange={(e) => updateForm({ payloadJson: e.target.value, payloadError: null })}
+              placeholder='{"key": "value"}'
+              className={cn(
+                "min-h-[100px] resize-none font-mono text-sm transition-all",
+                f.payloadError
+                  ? "border-destructive focus:ring-destructive/20"
+                  : "focus:ring-2 focus:ring-primary/20"
+              )}
+              rows={4}
+              data-testid="scheduler-task-payload-json"
+            />
+          </div>
+        )}
+        {f.payloadError && <p className="mt-2 text-xs text-destructive">{f.payloadError}</p>}
       </div>
 
       {/* Notifications Section */}

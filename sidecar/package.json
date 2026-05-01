@@ -12,6 +12,9 @@
     "smoke": "node claude-host.mjs --smoke"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "latest"
+    "@anthropic-ai/claude-agent-sdk": "latest",
+    "diff": "^7.0.0",
+    "fast-glob": "^3.3.3",
+    "zod": "^4.0.0"
   }
 }

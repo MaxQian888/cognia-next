@@ -18,6 +18,12 @@
 import { query } from "@anthropic-ai/claude-agent-sdk"
 import { randomUUID } from "node:crypto"
 import readline from "node:readline"
+import {
+  buildCogniaToolsServer,
+  namesForDisabledCategories,
+  SERVER_NAME as BUILTIN_SERVER_NAME,
+} from "./builtin-tools/index.mjs"
+import { buildA2UIBridgeServer, SERVER_NAME as A2UI_SERVER_NAME } from "./a2ui-tools/index.mjs"
 
 // ---- IO helpers -----------------------------------------------------------
 
@@ -109,6 +115,52 @@ function startSession(sessionId, firstPrompt, sendOptions = {}) {
   const resumeId = sendOptions.resumeSessionId ?? sendOptions.forkFromSessionId
   const isFork = sendOptions.forkFromSessionId != null
 
+  // Built-in cognia-tools MCP server: the parent passes a `builtinTools`
+  // category-toggle blob (sidecar protocol, not an SDK option). We build an
+  // in-process MCP server with the enabled categories' tools and merge it
+  // into options.mcpServers below. User-supplied entries win on collision so
+  // an explicit override (e.g., the user added a server named "cognia-tools"
+  // themselves) is always respected.
+  const builtinEnabled = sendOptions.builtinTools
+  const builtinServer = buildCogniaToolsServer({ enabled: builtinEnabled })
+  const baseUserServers = sendOptions.mcpServers ?? {}
+  const withBuiltins = builtinServer
+    ? Object.prototype.hasOwnProperty.call(baseUserServers, BUILTIN_SERVER_NAME)
+      ? (() => {
+          log(
+            "warn",
+            `user-defined mcp server '${BUILTIN_SERVER_NAME}' shadows built-in tools — keeping user's`
+          )
+          return baseUserServers
+        })()
+      : { ...baseUserServers, [BUILTIN_SERVER_NAME]: builtinServer }
+    : { ...baseUserServers }
+
+  // A2UI bridge: always-on in-process MCP server that lets the model paint
+  // interactive surfaces via 4 tools. The user can still shadow it by
+  // declaring an mcpServer with the same name.
+  const a2uiServer = buildA2UIBridgeServer({ sessionId, emit })
+  const mergedMcpServers = Object.prototype.hasOwnProperty.call(withBuiltins, A2UI_SERVER_NAME)
+    ? (() => {
+        log(
+          "warn",
+          `user-defined mcp server '${A2UI_SERVER_NAME}' shadows built-in a2ui-bridge — keeping user's`
+        )
+        return withBuiltins
+      })()
+    : { ...withBuiltins, [A2UI_SERVER_NAME]: a2uiServer }
+
+  // Defence-in-depth: if a category is off, push its tool names onto
+  // disallowedTools so even a stray reference (e.g., from a stale cached
+  // system prompt or a misconfigured character) is rejected at the SDK
+  // boundary in addition to never being registered.
+  const disallowed = new Set(sendOptions.disallowedTools ?? [])
+  if (builtinEnabled !== undefined) {
+    for (const name of namesForDisabledCategories(builtinEnabled)) {
+      disallowed.add(name)
+    }
+  }
+
   const options = {
     cwd: sendOptions.cwd,
     model: sendOptions.model,
@@ -116,10 +168,10 @@ function startSession(sessionId, firstPrompt, sendOptions = {}) {
     systemPrompt: sendOptions.systemPrompt,
     appendSystemPrompt: sendOptions.appendSystemPrompt,
     allowedTools: sendOptions.allowedTools,
-    disallowedTools: sendOptions.disallowedTools,
+    disallowedTools: disallowed.size > 0 ? [...disallowed] : sendOptions.disallowedTools,
     additionalDirectories: sendOptions.additionalDirectories,
     permissionMode: sendOptions.permissionMode,
-    mcpServers: sendOptions.mcpServers,
+    mcpServers: mergedMcpServers,
     maxTurns: sendOptions.maxTurns,
     includePartialMessages: sendOptions.includePartialMessages,
     settingSources: sendOptions.settingSources,

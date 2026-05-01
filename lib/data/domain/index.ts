@@ -11,6 +11,7 @@ import type {
   SystemPromptPreset,
   Team,
 } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 import { getDb } from "@/lib/db/schema"
 import { applyBackupPackage } from "@/lib/data/apply-package"
 import {
@@ -22,6 +23,8 @@ import {
 } from "@/lib/data/types"
 import { sha256Hex } from "@/lib/data/crypto"
 import { canonicalStringify } from "@/lib/data/migrate"
+import { browserSnapshotStorage, DOMAIN_SNAPSHOT_MODULES } from "@/lib/data/snapshots/registry"
+import type { LocalStorageSnapshot, SnapshotEnv, SnapshotModule } from "@/lib/data/snapshots/types"
 
 export type DomainKey =
   | "skills"
@@ -31,6 +34,18 @@ export type DomainKey =
   | "teams"
   | "settingsTheme"
   | "canvas"
+  | "a2ui"
+  | "externalAgents"
+  | "customModes"
+  | "agentTeamsLayout"
+  | "agentRuntime"
+  | "customThemes"
+  | "artifacts"
+  | "a2uiSurfaces"
+  | "canvasKeybindings"
+  | "canvasComments"
+  | "canvasSettings"
+  | "schedulerPrefs"
 
 export interface DomainExportFile {
   version: "cognia-domain-1.0"
@@ -59,6 +74,47 @@ function makeSpec(
   defaultStrategy: ImportMergeStrategy = "skip"
 ): DomainSpec {
   return { key, labelKey, read, defaultStrategy }
+}
+
+/** Wrap a {@link SnapshotModule} as a domain spec. The exported file
+ * carries a single-key `localStorageSnapshots` map so the rest of the
+ * pipeline (apply / import) reuses the existing v3 path. */
+function makeSnapshotSpec(
+  key: DomainKey,
+  labelKey: string,
+  module: SnapshotModule,
+  defaultStrategy: ImportMergeStrategy = "overwrite"
+): DomainSpec {
+  return makeSpec(
+    key,
+    labelKey,
+    async () => {
+      const storage = browserSnapshotStorage()
+      if (!storage) return {}
+      const env: SnapshotEnv = { storage }
+      const snap = module.read(env)
+      if (!snap) return {}
+      const localStorageSnapshots: Record<string, LocalStorageSnapshot> = {
+        [module.key]: snap,
+      }
+      return { localStorageSnapshots }
+    },
+    defaultStrategy
+  )
+}
+
+const SNAPSHOT_DOMAIN_KEYS: Record<string, DomainKey> = {
+  "cognia-external-agents": "externalAgents",
+  "cognia-custom-modes": "customModes",
+  "cognia-agent-teams": "agentTeamsLayout",
+  "cognia-next.agent-runtime": "agentRuntime",
+  "cognia-custom-themes": "customThemes",
+  "cognia-artifacts": "artifacts",
+  "cognia-a2ui-surfaces": "a2uiSurfaces",
+  "cognia-canvas-keybindings": "canvasKeybindings",
+  "cognia-canvas-comments": "canvasComments",
+  "cognia-canvas-settings": "canvasSettings",
+  "cognia-scheduler": "schedulerPrefs",
 }
 
 export const DOMAIN_TRANSFERS: DomainSpec[] = [
@@ -107,6 +163,20 @@ export const DOMAIN_TRANSFERS: DomainSpec[] = [
     ])
     return { canvasDocuments, canvasVersions, canvasComments, canvasSessions }
   }),
+  makeSpec("a2ui", "a2ui", async () => {
+    const db = getDb()
+    const [a2uiApps, a2uiTemplates, a2uiEventHistory] = await Promise.all([
+      db.a2uiApps.toArray(),
+      db.a2uiTemplates.toArray(),
+      db.a2uiEventHistory.toArray(),
+    ])
+    // Built-in apps stay locally seeded; surfaces are runtime-only.
+    return {
+      a2uiApps: a2uiApps.filter((a) => !a.isBuiltIn),
+      a2uiTemplates,
+      a2uiEventHistory,
+    }
+  }),
   makeSpec(
     "settingsTheme",
     "theme",
@@ -120,6 +190,7 @@ export const DOMAIN_TRANSFERS: DomainSpec[] = [
         settings: {
           id: "singleton",
           alwaysAllowTools: settings.alwaysAllowTools ?? [],
+          builtinTools: settings.builtinTools ?? DEFAULT_BUILTIN_TOOLS,
           theme: settings.theme,
           fontScale: settings.fontScale,
           language: settings.language,
@@ -129,6 +200,18 @@ export const DOMAIN_TRANSFERS: DomainSpec[] = [
     },
     "overwrite"
   ),
+  // Snapshot-backed domains (one per non-UI Zustand persist store). The UI
+  // store is intentionally excluded — it's window-layout state that the
+  // user shouldn't be exporting separately.
+  ...DOMAIN_SNAPSHOT_MODULES.map((module) => {
+    const domainKey = SNAPSHOT_DOMAIN_KEYS[module.key]
+    if (!domainKey) {
+      throw new Error(
+        `SNAPSHOT_DOMAIN_KEYS missing entry for ${module.key} — register it in domain/index.ts`
+      )
+    }
+    return makeSnapshotSpec(domainKey, module.labelKey, module)
+  }),
 ]
 
 export function getDomain(key: DomainKey): DomainSpec | undefined {

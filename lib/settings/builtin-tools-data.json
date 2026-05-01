@@ -1,0 +1,302 @@
+{
+  "$schema": "./builtin-tools-data.schema.json",
+  "serverName": "cognia-tools",
+  "serverVersion": "1.0.0",
+  "categories": [
+    {
+      "id": "fileExtras",
+      "nameKey": "fileExtras",
+      "descriptionKey": "fileExtrasDesc",
+      "riskLevel": "medium",
+      "requiresApproval": true,
+      "desktopOnly": true,
+      "tools": [
+        {
+          "name": "file_hash",
+          "descriptionKey": "tools.fileHash",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "file_diff",
+          "descriptionKey": "tools.fileDiff",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "file_info",
+          "descriptionKey": "tools.fileInfo",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "file_search",
+          "descriptionKey": "tools.fileSearch",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "content_search",
+          "descriptionKey": "tools.contentSearch",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "file_exists",
+          "descriptionKey": "tools.fileExists",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "file_append",
+          "descriptionKey": "tools.fileAppend",
+          "riskLevel": "high",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "file_binary_write",
+          "descriptionKey": "tools.fileBinaryWrite",
+          "riskLevel": "high",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "file_copy",
+          "descriptionKey": "tools.fileCopy",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "file_rename",
+          "descriptionKey": "tools.fileRename",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "file_move",
+          "descriptionKey": "tools.fileMove",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "directory_create",
+          "descriptionKey": "tools.directoryCreate",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "directory_delete",
+          "descriptionKey": "tools.directoryDelete",
+          "riskLevel": "high",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        }
+      ]
+    },
+    {
+      "id": "git",
+      "nameKey": "gitOperations",
+      "descriptionKey": "gitOperationsDesc",
+      "riskLevel": "low",
+      "requiresApproval": false,
+      "desktopOnly": true,
+      "tools": [
+        {
+          "name": "git_status",
+          "descriptionKey": "tools.gitStatus",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "git_diff",
+          "descriptionKey": "tools.gitDiff",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "git_log",
+          "descriptionKey": "tools.gitLog",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "git_branch",
+          "descriptionKey": "tools.gitBranch",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "git_remote",
+          "descriptionKey": "tools.gitRemote",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "git_tag",
+          "descriptionKey": "tools.gitTag",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "git_repo_inspect",
+          "descriptionKey": "tools.gitRepoInspect",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "git_changes",
+          "descriptionKey": "tools.gitChanges",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "git_history",
+          "descriptionKey": "tools.gitHistory",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        }
+      ]
+    },
+    {
+      "id": "process",
+      "nameKey": "processManagement",
+      "descriptionKey": "processManagementDesc",
+      "riskLevel": "high",
+      "requiresApproval": true,
+      "desktopOnly": true,
+      "tools": [
+        {
+          "name": "list_processes",
+          "descriptionKey": "tools.listProcesses",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "get_process",
+          "descriptionKey": "tools.getProcess",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "search_processes",
+          "descriptionKey": "tools.searchProcesses",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "top_memory_processes",
+          "descriptionKey": "tools.topMemoryProcesses",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "check_program_allowed",
+          "descriptionKey": "tools.checkProgramAllowed",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "get_process_manager_status",
+          "descriptionKey": "tools.getProcessManagerStatus",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "get_tracked_processes",
+          "descriptionKey": "tools.getTrackedProcesses",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "start_process",
+          "descriptionKey": "tools.startProcess",
+          "riskLevel": "high",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "terminate_process",
+          "descriptionKey": "tools.terminateProcess",
+          "riskLevel": "high",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        }
+      ]
+    },
+    {
+      "id": "environment",
+      "nameKey": "environmentManagement",
+      "descriptionKey": "environmentManagementDesc",
+      "riskLevel": "low",
+      "requiresApproval": false,
+      "desktopOnly": true,
+      "tools": [
+        {
+          "name": "list_env",
+          "descriptionKey": "tools.listEnv",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "get_env",
+          "descriptionKey": "tools.getEnv",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "system_info",
+          "descriptionKey": "tools.systemInfo",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        }
+      ]
+    },
+    {
+      "id": "shellAdvanced",
+      "nameKey": "shellExecution",
+      "descriptionKey": "shellExecutionDesc",
+      "riskLevel": "high",
+      "requiresApproval": true,
+      "desktopOnly": true,
+      "tools": [
+        {
+          "name": "shell_execute_advanced",
+          "descriptionKey": "tools.shellExecuteAdvanced",
+          "riskLevel": "high",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        }
+      ]
+    }
+  ]
+}

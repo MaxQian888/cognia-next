@@ -1,3 +1,4 @@
+mod a2ui_bridge;
 mod agents;
 mod api_key;
 mod canvas;
@@ -242,6 +243,7 @@ pub fn run() {
             scheduler::commands::scheduler_cancel_confirmation,
             scheduler::commands::scheduler_request_elevation,
             scheduler::commands::scheduler_get_pending_confirmations,
+            a2ui_bridge::commands::a2ui_bridge_runtime_paths,
         ])
         .setup(|app| {
             // Bootstrap native logging in *all* builds. Installs tauri-plugin-log
@@ -336,6 +338,18 @@ pub fn run() {
                             }
                         }
                     }
+                });
+            }
+
+            // A2UI bridge socket — listens for `a2ui_dispatch` lines emitted
+            // by `sidecar/a2ui-mcp.mjs` (spawned by external agents like
+            // Claude Code CLI). The path is exposed via the
+            // `COGNIA_BRIDGE_SOCKET` env var; adapters propagate it through
+            // `McpServer.config.env` when projecting a2ui-bridge.
+            {
+                let app = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    a2ui_bridge::spawn(app).await;
                 });
             }
 

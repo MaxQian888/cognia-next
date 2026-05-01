@@ -1,11 +1,16 @@
 "use client"
 
+import type { ComponentType } from "react"
 import { useTranslations } from "next-intl"
 import { BarChart3Icon, PencilIcon, ShoppingBagIcon, SparklesIcon } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useSkillsStore, type SkillPanelTab } from "@/stores/skills"
 
-const TAB_DEFS: { id: SkillPanelTab; labelKey: string; icon: React.ElementType }[] = [
+const TAB_DEFS: {
+  id: SkillPanelTab
+  labelKey: string
+  icon: ComponentType<{ className?: string }>
+}[] = [
   { id: "my-skills", labelKey: "mySkills", icon: SparklesIcon },
   { id: "browse", labelKey: "browse", icon: ShoppingBagIcon },
   { id: "editor", labelKey: "editor", icon: PencilIcon },

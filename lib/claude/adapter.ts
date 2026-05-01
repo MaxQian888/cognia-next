@@ -14,6 +14,8 @@ import type {
   SendContent,
   SendContentBlock,
 } from "./types"
+import type { A2UIPart } from "./parts-extensions"
+import { extractA2UIFromResponse } from "@/lib/a2ui/parser"
 
 type Parts = UIMessage["parts"]
 type Part = Parts[number]
@@ -30,10 +32,61 @@ export interface UsageInfo {
 function buildAssistantParts(message: BetaMessage): Parts {
   const parts: Parts = []
   for (const block of message.content) {
-    const part = blockToPart(block)
-    if (part) parts.push(part)
+    const expanded = blockToParts(block)
+    for (const part of expanded) parts.push(part)
   }
   return parts
+}
+
+/**
+ * Detect A2UI content inside a free-text block. When found, splits the text
+ * into pre / a2ui / post parts so the surface renders inline at the same
+ * position the model emitted it.
+ *
+ * Order matters: the explicit ```a2ui fence is treated as a hard signal,
+ * generic ```json fences fall back to `detectA2UIContent` heuristics inside
+ * `extractA2UIFromResponse`. Markdown code-fences for other languages (html,
+ * react, mermaid, …) are left untouched and rendered by the markdown layer.
+ */
+function blockToParts(block: BetaContentBlock): Part[] {
+  if (block.type === "text") {
+    const b = block as Extract<BetaContentBlock, { type: "text" }>
+    return splitTextForA2UI(b.text ?? "")
+  }
+  const single = blockToPart(block)
+  return single ? [single] : []
+}
+
+function splitTextForA2UI(text: string): Part[] {
+  if (!text) return []
+  // Fast-path: skip the regex if no a2ui marker in sight.
+  if (!/```a2ui|"createSurface"|"updateComponents"|"surface"\s*:/i.test(text)) {
+    return [textPart(text)]
+  }
+  const extracted = extractA2UIFromResponse(text)
+  if (!extracted) return [textPart(text)]
+  // We don't get back the exact span the parser consumed, so we strip the
+  // first ```a2ui|json fence (if any) to expose surrounding prose. When the
+  // payload is raw JSON without a fence we keep the plain text part empty.
+  const fenceRe = /```(?:a2ui|json)?\s*\n?[\s\S]*?\n?```/i
+  const fenceMatch = text.match(fenceRe)
+  const before = fenceMatch ? text.slice(0, fenceMatch.index ?? 0) : ""
+  const after = fenceMatch ? text.slice((fenceMatch.index ?? 0) + fenceMatch[0].length) : ""
+  const a2ui: A2UIPart = {
+    type: "a2ui",
+    surfaceId: extracted.surfaceId,
+    content: fenceMatch ? fenceMatch[0] : text,
+    source: "codeblock",
+  }
+  const out: Part[] = []
+  if (before.trim()) out.push(textPart(before))
+  out.push(a2ui as unknown as Part)
+  if (after.trim()) out.push(textPart(after))
+  return out
+}
+
+function textPart(text: string): Part {
+  return { type: "text", text, state: "done" } as unknown as Part
 }
 
 function blockToPart(block: BetaContentBlock): Part | null {

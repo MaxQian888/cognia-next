@@ -39,6 +39,10 @@ describe("getSettings", () => {
     // Missing field is filled from defaults.
     expect(s.theme).toBe("system")
     expect(s.searchProviders).toBeDefined()
+    // Newly-introduced nested object is populated from DEFAULT_BUILTIN_TOOLS.
+    expect(s.builtinTools).toBeDefined()
+    expect(s.builtinTools.fileExtras).toBe(true)
+    expect(s.builtinTools.shellAdvanced).toBe(false)
   })
 })
 

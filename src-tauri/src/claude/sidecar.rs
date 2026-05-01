@@ -15,6 +15,12 @@ use crate::hooks;
 /// `listen("claude://message", ...)`.
 pub const SIDECAR_EVENT: &str = "claude://message";
 
+/// Dedicated event channel for A2UI dispatches (createSurface,
+/// updateComponents, dataModelUpdate, deleteSurface). Kept separate from
+/// `SIDECAR_EVENT` so the a2ui store can subscribe without sifting through
+/// every sidecar message.
+pub const A2UI_EVENT: &str = "a2ui://dispatch";
+
 /// Shared, mutable state. Cloned cheaply via `Arc`.
 #[derive(Clone, Default)]
 pub struct SidecarState {
@@ -55,22 +61,40 @@ impl SidecarState {
     }
 }
 
-/// Resolve the absolute path to `sidecar/claude-host.mjs`, in both dev and
-/// release builds.
-fn resolve_sidecar_script(app: &AppHandle) -> Result<PathBuf, String> {
-    // Release: live under the bundled resource dir at `sidecar/claude-host.mjs`.
+/// Resolve the absolute path to the bundled `sidecar/` directory in both
+/// dev and release builds. Used by:
+///   - `resolve_sidecar_script` to locate `claude-host.mjs`
+///   - `a2ui_bridge::commands::a2ui_bridge_runtime_paths` so external-agent
+///     MCP configs can spawn `node ${sidecarDir}/a2ui-mcp.mjs` with an
+///     absolute argv.
+pub fn sidecar_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    // Release: bundled resources directory.
     if let Ok(resource_dir) = app.path().resource_dir() {
-        let candidate = resource_dir.join("sidecar").join("claude-host.mjs");
+        let candidate = resource_dir.join("sidecar");
         if candidate.exists() {
             return Ok(candidate);
         }
     }
-    // Dev: walk up from the Cargo manifest dir.
+    // Dev: walk up from the Cargo manifest dir to the repo root.
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let candidate = manifest
         .parent()
-        .map(|p| p.join("sidecar").join("claude-host.mjs"))
+        .map(|p| p.join("sidecar"))
         .ok_or_else(|| "could not locate project root".to_string())?;
+    if candidate.exists() {
+        return Ok(candidate);
+    }
+    Err(format!(
+        "sidecar directory not found at {}",
+        candidate.display()
+    ))
+}
+
+/// Resolve the absolute path to `sidecar/claude-host.mjs`, in both dev and
+/// release builds.
+fn resolve_sidecar_script(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = sidecar_dir(app)?;
+    let candidate = dir.join("claude-host.mjs");
     if candidate.exists() {
         return Ok(candidate);
     }
@@ -181,6 +205,16 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
                                     tokio::spawn(async move {
                                         handle_permission_request(app, state, value).await;
                                     });
+                                    continue;
+                                }
+                                // A2UI bridge dispatches go on a dedicated channel so the
+                                // a2ui store can listen without filtering every sidecar event.
+                                if value.get("type").and_then(|t| t.as_str())
+                                    == Some("a2ui_dispatch")
+                                {
+                                    if let Err(e) = app.emit(A2UI_EVENT, &value) {
+                                        log::error!("failed to emit a2ui dispatch: {e}");
+                                    }
                                     continue;
                                 }
                                 if let Err(e) = app.emit(SIDECAR_EVENT, &value) {

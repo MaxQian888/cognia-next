@@ -58,6 +58,13 @@ const baseSettings = (overrides: Partial<AppSettings> = {}): AppSettings => ({
   id: "singleton",
   permissionMode: "default",
   alwaysAllowTools: [],
+  builtinTools: {
+    fileExtras: true,
+    git: true,
+    process: false,
+    environment: true,
+    shellAdvanced: false,
+  },
   ...overrides,
 })
 
@@ -112,6 +119,13 @@ describe("load", () => {
       id: "singleton",
       permissionMode: "default",
       alwaysAllowTools: [],
+      builtinTools: {
+        fileExtras: true,
+        git: true,
+        process: false,
+        environment: true,
+        shellAdvanced: false,
+      },
     })
   })
 
@@ -183,6 +197,94 @@ describe("toggleAlwaysAllow", () => {
     })
     expect(dbSettings.removeAlwaysAllow).toHaveBeenCalledWith("Write")
     expect(dbSettings.addAlwaysAllow).not.toHaveBeenCalled()
+  })
+})
+
+// ---- setBuiltinToolEnabled ----
+
+describe("setBuiltinToolEnabled", () => {
+  beforeEach(() => {
+    // Hydrate the store with a baseline settings row.
+    useSettingsStore.setState({ settings: baseSettings(), loaded: true })
+  })
+
+  it("flips a single category and persists the rest", async () => {
+    const after = baseSettings({
+      builtinTools: {
+        fileExtras: true,
+        git: true,
+        process: true,
+        environment: true,
+        shellAdvanced: false,
+      },
+    })
+    dbSettings.saveSettings.mockResolvedValue(after)
+    await act(async () => {
+      await useSettingsStore.getState().setBuiltinToolEnabled("process", true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      builtinTools: {
+        fileExtras: true,
+        git: true,
+        process: true,
+        environment: true,
+        shellAdvanced: false,
+      },
+    })
+    expect(useSettingsStore.getState().settings?.builtinTools.process).toBe(true)
+  })
+
+  it("falls back to defaults if settings.builtinTools was missing", async () => {
+    // Older legacy row that hadn't picked up the field.
+    useSettingsStore.setState({
+      settings: {
+        ...baseSettings(),
+        // @ts-expect-error — simulating a legacy row missing the field.
+        builtinTools: undefined,
+      },
+    })
+    const after = baseSettings({
+      builtinTools: {
+        fileExtras: true,
+        git: true,
+        process: false,
+        environment: true,
+        shellAdvanced: true,
+      },
+    })
+    dbSettings.saveSettings.mockResolvedValue(after)
+    await act(async () => {
+      await useSettingsStore.getState().setBuiltinToolEnabled("shellAdvanced", true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      builtinTools: {
+        fileExtras: true,
+        git: true,
+        process: false,
+        environment: true,
+        shellAdvanced: true,
+      },
+    })
+  })
+
+  it("hydrates from disk if no settings cached in store", async () => {
+    useSettingsStore.setState({ settings: null, loaded: false })
+    dbSettings.getSettings.mockResolvedValue(baseSettings())
+    const after = baseSettings({
+      builtinTools: {
+        fileExtras: false,
+        git: true,
+        process: false,
+        environment: true,
+        shellAdvanced: false,
+      },
+    })
+    dbSettings.saveSettings.mockResolvedValue(after)
+    await act(async () => {
+      await useSettingsStore.getState().setBuiltinToolEnabled("fileExtras", false)
+    })
+    expect(dbSettings.getSettings).toHaveBeenCalled()
+    expect(dbSettings.saveSettings).toHaveBeenCalled()
   })
 })
 

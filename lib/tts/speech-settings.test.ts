@@ -10,6 +10,13 @@ describe("selectSpeechSettings", () => {
     const out = selectSpeechSettings({
       id: "singleton",
       alwaysAllowTools: [],
+      builtinTools: {
+        fileExtras: true,
+        git: true,
+        process: false,
+        environment: true,
+        shellAdvanced: false,
+      },
       ttsEnabled: true,
       ttsProvider: "openai",
       openaiVoice: "nova",

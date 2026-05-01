@@ -24,6 +24,8 @@ import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 import { buildAgentModeSessionUpdate } from "@/lib/agent"
+import { namespacedA2UIToolNames } from "@/lib/a2ui/mcp-tool-schemas"
+import { A2UI_SYSTEM_PROMPT } from "@/lib/ai/prompts/a2ui-prompts"
 
 export interface BuildOptionsContext {
   session?: ChatSession | null
@@ -217,8 +219,26 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // Agent mode tools union in too — picking "Code Generator" should grant
   // execute_code without forcing the user to also tweak the character.
   for (const t of activeMode?.tools ?? []) allowed.add(t)
+  // A2UI: when the active scope opts in, fold the 4 bridge tools into the
+  // whitelist + tack the A2UI system-prompt extension onto appendSystemPrompt
+  // so the model knows when to paint surfaces. Resolution order matches the
+  // rest of build-options: session > character > appSettings default.
+  const a2uiEnabled =
+    (session as { a2uiEnabled?: boolean } | undefined)?.a2uiEnabled ??
+    character?.a2uiEnabled ??
+    appSettings?.a2uiDefaultEnabled ??
+    false
+  if (a2uiEnabled) {
+    for (const t of namespacedA2UIToolNames()) allowed.add(t)
+  }
+
   if (allowed.size > 0) opts.allowedTools = [...allowed]
   if (character?.disallowedTools?.length) opts.disallowedTools = [...character.disallowedTools]
+
+  if (a2uiEnabled) {
+    const existing = opts.appendSystemPrompt?.trim() ?? ""
+    opts.appendSystemPrompt = existing ? `${existing}\n\n${A2UI_SYSTEM_PROMPT}` : A2UI_SYSTEM_PROMPT
+  }
 
   // --- MCP server subset ---------------------------------------------------
   // Resolution order:
@@ -251,6 +271,16 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   } catch (err) {
     // Non-fatal — just skip MCP for this turn.
     console.warn("listEnabledMcpServers failed", err)
+  }
+
+  // --- Built-in tools (sidecar protocol field) ----------------------------
+  // Forward the per-category toggles from app settings to the sidecar. The
+  // sidecar consumes this field to build the in-process `cognia-tools` MCP
+  // server and strips it before calling the SDK. Keeping this on every
+  // SendOptions (rather than relying on settings IPC) means a per-session
+  // override could later be added without changing the sidecar protocol.
+  if (appSettings?.builtinTools) {
+    opts.builtinTools = appSettings.builtinTools
   }
 
   // --- Resume continuity ---------------------------------------------------

@@ -7,7 +7,8 @@
 
 import { useEffect, useRef } from "react"
 import { isTauri } from "@/lib/tauri"
-import { getSettings } from "@/lib/db/settings"
+import { getSettings, saveSettings } from "@/lib/db/settings"
+import { DEFAULT_BACKUP_AUTO_SCHEDULE } from "@/lib/claude/types"
 import {
   buildBackupPackage,
   defaultExportFileName,
@@ -142,6 +143,17 @@ export async function runOnce(): Promise<boolean> {
       sizeBytes: body.length,
       filename: fileName,
     })
+    // Stamp lastRunAt for cross-device sync + UI "next run at".
+    try {
+      await saveSettings({
+        backupAutoSchedule: {
+          ...(config ?? DEFAULT_BACKUP_AUTO_SCHEDULE),
+          lastRunAt: new Date().toISOString(),
+        },
+      })
+    } catch {
+      // Non-fatal.
+    }
     return true
   } catch (err) {
     await appendBackupHistory({

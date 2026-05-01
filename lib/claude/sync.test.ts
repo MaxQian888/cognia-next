@@ -16,10 +16,15 @@ jest.mock("./ipc", () => ({
   writeAgentConfig: jest.fn(),
 }))
 
+jest.mock("./builtin-mcp/runtime-context", () => ({
+  getBuiltinMcpRuntimeContext: jest.fn(),
+}))
+
 import { bulkImportMcpServers, listMcpServers, updateMcpServer } from "@/lib/db/mcp-servers"
 import { isTauri } from "@/lib/tauri"
 
 import { readAgentConfig, writeAgentConfig } from "./ipc"
+import { getBuiltinMcpRuntimeContext } from "./builtin-mcp/runtime-context"
 import {
   importFromAgent,
   previewAgentImport,
@@ -30,6 +35,7 @@ import {
 } from "./sync"
 import type { AgentReadResult, AgentWriteResult } from "./ipc"
 import type { McpServer } from "@/lib/claude/types"
+import { A2UI_BRIDGE_SERVER_NAME } from "@/lib/a2ui/mcp-tool-schemas"
 
 const mIsTauri = isTauri as jest.Mock
 const mList = listMcpServers as jest.Mock
@@ -37,6 +43,7 @@ const mRead = readAgentConfig as jest.Mock
 const mWrite = writeAgentConfig as jest.Mock
 const mBulk = bulkImportMcpServers as jest.Mock
 const mUpdate = updateMcpServer as jest.Mock
+const mCtx = getBuiltinMcpRuntimeContext as jest.Mock
 
 function makeServer(partial: Partial<McpServer> & { name: string }): McpServer {
   return {
@@ -55,6 +62,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   jest.useRealTimers()
   mIsTauri.mockReturnValue(true)
+  mCtx.mockResolvedValue(null) // default: skip resolution unless a test opts in
 })
 
 describe("syncToAgent — gating", () => {
@@ -421,5 +429,100 @@ describe("importFromAgent", () => {
       expect.arrayContaining([expect.objectContaining({ name: "fs" })]),
       "overwrite"
     )
+  })
+})
+
+describe("syncToAgent — builtin MCP placeholder resolution", () => {
+  const cfg: AgentReadResult = {
+    path: "/x.json",
+    exists: true,
+    writable: true,
+    format: "json",
+    raw: "{}",
+    parsed: {},
+  }
+
+  it("rewrites ${COGNIA_SIDECAR_DIR} and stamps COGNIA_BRIDGE_SOCKET on the a2ui-bridge row", async () => {
+    mList.mockResolvedValueOnce([
+      makeServer({
+        id: "builtin:a2ui-bridge",
+        name: A2UI_BRIDGE_SERVER_NAME,
+        config: {
+          command: "node",
+          args: ["${COGNIA_SIDECAR_DIR}/a2ui-mcp.mjs"],
+          env: {},
+        },
+        appsEnabled: { "claude-code": true },
+      }),
+    ])
+    mRead.mockResolvedValueOnce(cfg)
+    mWrite.mockResolvedValueOnce({ path: "/x.json" })
+    mCtx.mockResolvedValueOnce({
+      sidecarDir: "/abs/sidecar",
+      socketPath: "/abs/sock",
+    })
+
+    await syncToAgent("claude-code")
+    const tree = mWrite.mock.calls[0][1] as {
+      mcpServers: Record<string, { args?: string[]; env?: Record<string, string> }>
+    }
+    const projected = tree.mcpServers[A2UI_BRIDGE_SERVER_NAME]
+    expect(projected).toBeDefined()
+    expect(projected.args).toEqual(["/abs/sidecar/a2ui-mcp.mjs"])
+    expect(projected.env?.COGNIA_BRIDGE_SOCKET).toBe("/abs/sock")
+  })
+
+  it("leaves non-builtin rows untouched even when the runtime context is present", async () => {
+    mList.mockResolvedValueOnce([
+      makeServer({
+        name: "fs",
+        config: { command: "node", args: ["server.js"] },
+        appsEnabled: { "claude-code": true },
+      }),
+    ])
+    mRead.mockResolvedValueOnce(cfg)
+    mWrite.mockResolvedValueOnce({ path: "/x.json" })
+    mCtx.mockResolvedValueOnce({ sidecarDir: "/abs/sidecar", socketPath: "/abs/sock" })
+
+    await syncToAgent("claude-code")
+    const tree = mWrite.mock.calls[0][1] as {
+      mcpServers: Record<string, { args?: string[]; env?: Record<string, string> }>
+    }
+    expect(tree.mcpServers.fs.env?.COGNIA_BRIDGE_SOCKET).toBeUndefined()
+    expect(tree.mcpServers.fs.args).toEqual(["server.js"])
+  })
+
+  it("projects unresolved placeholders verbatim when the context fetch returns null", async () => {
+    mList.mockResolvedValueOnce([
+      makeServer({
+        id: "builtin:a2ui-bridge",
+        name: A2UI_BRIDGE_SERVER_NAME,
+        config: {
+          command: "node",
+          args: ["${COGNIA_SIDECAR_DIR}/a2ui-mcp.mjs"],
+        },
+        appsEnabled: { "claude-code": true },
+      }),
+    ])
+    mRead.mockResolvedValueOnce(cfg)
+    mWrite.mockResolvedValueOnce({ path: "/x.json" })
+    mCtx.mockResolvedValueOnce(null)
+
+    await syncToAgent("claude-code")
+    const tree = mWrite.mock.calls[0][1] as {
+      mcpServers: Record<string, { args?: string[] }>
+    }
+    expect(tree.mcpServers[A2UI_BRIDGE_SERVER_NAME].args).toEqual([
+      "${COGNIA_SIDECAR_DIR}/a2ui-mcp.mjs",
+    ])
+  })
+
+  it("returns a hard error when the runtime context fetch throws", async () => {
+    mList.mockResolvedValueOnce([])
+    mRead.mockResolvedValueOnce(cfg)
+    mCtx.mockRejectedValueOnce(new Error("ipc unavailable"))
+    const r = await syncToAgent("claude-code")
+    expect(r).toEqual({ ok: false, skipped: false, error: "ipc unavailable" })
+    expect(mWrite).not.toHaveBeenCalled()
   })
 })

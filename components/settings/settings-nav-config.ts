@@ -25,6 +25,8 @@ import {
   BotIcon,
   ClockIcon,
   PencilRulerIcon,
+  WrenchIcon,
+  BlocksIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
@@ -34,6 +36,7 @@ export type SettingsSectionId =
   | "api-key"
   | "agents"
   | "agent-modes"
+  | "tools"
   | "search"
   | "appearance"
   | "speech"
@@ -44,6 +47,7 @@ export type SettingsSectionId =
   | "artifacts"
   | "canvas"
   | "mcp"
+  | "a2ui"
   | "data"
   | "scheduled-tasks"
   | "logs"
@@ -94,6 +98,14 @@ export const SETTINGS_NAV: NavItem[] = [
     icon: BotIcon,
   },
   {
+    id: "tools",
+    labelKey: "tools",
+    descriptionKey: "tools",
+    group: "ai",
+    icon: WrenchIcon,
+    desktopOnly: true,
+  },
+  {
     id: "search",
     labelKey: "search",
     descriptionKey: "search",
@@ -129,6 +141,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "mcp",
     group: "extensions",
     icon: PuzzleIcon,
+  },
+  {
+    id: "a2ui",
+    labelKey: "a2ui",
+    descriptionKey: "a2ui",
+    group: "extensions",
+    icon: BlocksIcon,
   },
 
   // === Interface ===
@@ -258,6 +277,21 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "designer",
     "代理模式",
   ],
+  tools: [
+    "tools",
+    "builtin",
+    "built-in",
+    "shell",
+    "filesystem",
+    "file system",
+    "git",
+    "process",
+    "environment",
+    "always allow",
+    "approval",
+    "工具",
+    "内置工具",
+  ],
   search: [
     "web search",
     "联网搜索",
@@ -359,6 +393,19 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "预览",
   ],
   mcp: ["model context", "stdio", "server", "tool"],
+  a2ui: [
+    "a2ui",
+    "agent ui",
+    "agent-to-ui",
+    "mini-app",
+    "mini-apps",
+    "interactive",
+    "surface",
+    "widget",
+    "a2ui-bridge",
+    "小应用",
+    "代理界面",
+  ],
   data: ["export", "import", "backup", "wipe", "indexeddb"],
   "scheduled-tasks": [
     "schedule",

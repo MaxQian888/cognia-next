@@ -11,6 +11,8 @@ import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-e
 import { Task, TaskContent, TaskItem, TaskTrigger } from "@/components/ai-elements/task"
 import { Tool, ToolBody, ToolHeader, ToolContent } from "@/components/ai-elements/tool"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
+import { A2UIPart } from "@/components/chat/message-parts/a2ui-part"
+import type { A2UIPart as A2UIPartType } from "@/lib/claude/parts-extensions"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -383,6 +385,10 @@ function renderPart(
 ) {
   const type = (part as { type?: string }).type
   if (!type) return null
+
+  if (type === "a2ui") {
+    return <A2UIPart key={key} part={part as unknown as A2UIPartType} _messageId={messageId} />
+  }
 
   if (type === "text") {
     const text = (part as { text?: string }).text ?? ""

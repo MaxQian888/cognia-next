@@ -55,8 +55,32 @@ export interface SessionObservationSummary {
   sessionId: string
   startedAt?: number
   endedAt?: number
-  eventCount: number
+  eventCount?: number
   errorCount: number
-  toolCount: number
+  toolCount?: number
   health?: "ok" | "degraded" | "error" | "unknown"
+  /** Coarse run outcome the external-agent manager uses for badge color. */
+  outcome?: "success" | "error" | "partial"
+  /** Total estimated cost in USD when an analytics layer can compute one. */
+  totalTokenCost?: number
+  /** Total number of tool calls observed in the session. */
+  toolCallCount?: number
+  /** P50 latency for tool/turn execution in ms. */
+  latencyP50Ms?: number
+}
+
+/**
+ * Lightweight per-session analytics shape consumed by the chat-side
+ * external-agent manager. Cognia exposes a richer recorder-backed value;
+ * cognia-next currently only stubs it (the analytics hook returns null
+ * until observability lands).
+ */
+export interface AgentTraceSessionAnalyticsSummary {
+  totalCost: number
+  toolCallCount: number
+  toolFailureCount: number
+  avgLatencyMs: number
+  firstTimestamp?: number
+  lastTimestamp?: number
+  eventTypeCounts: Record<string, number | undefined>
 }

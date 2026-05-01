@@ -35,6 +35,7 @@
     "targets": "all",
     "resources": [
       "../sidecar/claude-host.mjs",
+      "../sidecar/a2ui-mcp.mjs",
       "../sidecar/package.json",
       "../sidecar/node_modules/**/*"
     ],

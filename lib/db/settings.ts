@@ -1,4 +1,5 @@
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings, BuiltinToolsConfig } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 import { DEFAULT_TTS_SETTINGS } from "@/lib/tts/types"
 import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
@@ -16,6 +17,7 @@ const DEFAULTS: AppSettings = {
   defaultWorkingDir: undefined,
   permissionMode: "default",
   alwaysAllowTools: [],
+  builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
   apiKey: undefined,
   lastUpdateCheckAt: undefined,
   theme: "system",
@@ -89,7 +91,19 @@ export async function getSettings(): Promise<AppSettings> {
   // Forward-compat: merge defaults under the persisted row so older installs
   // pick up new fields (e.g., searchProviders) without a schema migration.
   if (!row) return DEFAULTS
-  return { ...DEFAULTS, ...row, id: SINGLETON_ID }
+  return {
+    ...DEFAULTS,
+    ...row,
+    // Nested objects need their own forward-compat merge — a v1 row that
+    // shipped without `builtinTools.shellAdvanced` would otherwise drop the
+    // default when we eventually add it.
+    builtinTools: mergeBuiltinTools(row.builtinTools),
+    id: SINGLETON_ID,
+  }
+}
+
+function mergeBuiltinTools(stored: BuiltinToolsConfig | undefined): BuiltinToolsConfig {
+  return { ...DEFAULT_BUILTIN_TOOLS, ...(stored ?? {}) }
 }
 
 export async function saveSettings(patch: Partial<Omit<AppSettings, "id">>): Promise<AppSettings> {

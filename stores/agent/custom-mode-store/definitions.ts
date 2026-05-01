@@ -97,91 +97,100 @@ export interface GeneratedModeResult {
 // =============================================================================
 
 /**
- * Tool categories for selection
+ * Tool categories for the custom-mode `allowedTools` selector.
+ *
+ * These are the names actually surfaced to a Claude Agent SDK session via the
+ * sidecar — the SDK's built-ins (Bash, Read, Write, Edit, Glob, Grep, …) and
+ * the `cognia-tools` MCP server's namespaced tools (`mcp__cognia-tools__*`).
+ * See `lib/settings/builtin-tools-data.json` for the source of truth that
+ * the sidecar registers; the names listed here MUST match.
+ *
+ * The previous version of this constant referenced tool names (web_scraper,
+ * document_summarize, image_generate, …) that had no implementation behind
+ * them in cognia-next — they were inherited from the Cognia template. Those
+ * are removed; if/when the equivalents are ported they can be added under a
+ * new category.
  */
 export const TOOL_CATEGORIES = {
-  search: {
-    name: "Search & Web",
-    icon: "Search",
-    tools: ["web_search", "rag_search", "web_scraper", "bulk_web_scraper", "search_and_scrape"],
-  },
-  file: {
-    name: "File Operations",
-    icon: "FileText",
+  sdk_builtin: {
+    name: "Built-in (SDK)",
+    icon: "Sparkles",
     tools: [
-      "file_read",
-      "file_write",
-      "file_list",
-      "file_exists",
-      "file_delete",
-      "file_copy",
-      "file_rename",
-      "file_info",
-      "file_search",
-      "file_append",
-      "directory_create",
+      "Bash",
+      "Read",
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "Glob",
+      "Grep",
+      "NotebookEdit",
+      "WebFetch",
+      "WebSearch",
+      "TodoWrite",
     ],
   },
-  git: {
+  cognia_file_extras: {
+    name: "File extras",
+    icon: "FolderOpen",
+    tools: [
+      "mcp__cognia-tools__file_hash",
+      "mcp__cognia-tools__file_diff",
+      "mcp__cognia-tools__file_info",
+      "mcp__cognia-tools__file_search",
+      "mcp__cognia-tools__content_search",
+      "mcp__cognia-tools__file_exists",
+      "mcp__cognia-tools__file_append",
+      "mcp__cognia-tools__file_binary_write",
+      "mcp__cognia-tools__file_copy",
+      "mcp__cognia-tools__file_rename",
+      "mcp__cognia-tools__file_move",
+      "mcp__cognia-tools__directory_create",
+      "mcp__cognia-tools__directory_delete",
+    ],
+  },
+  cognia_git: {
     name: "Git",
     icon: "GitBranch",
     tools: [
-      "git_repo_inspect",
-      "git_changes",
-      "git_branch",
-      "git_history",
-      "git_remote",
-      "git_tag",
+      "mcp__cognia-tools__git_status",
+      "mcp__cognia-tools__git_diff",
+      "mcp__cognia-tools__git_log",
+      "mcp__cognia-tools__git_branch",
+      "mcp__cognia-tools__git_remote",
+      "mcp__cognia-tools__git_tag",
+      "mcp__cognia-tools__git_repo_inspect",
+      "mcp__cognia-tools__git_changes",
+      "mcp__cognia-tools__git_history",
     ],
   },
-  document: {
-    name: "Document Processing",
-    icon: "FileSearch",
-    tools: ["document_summarize", "document_chunk", "document_analyze"],
-  },
-  academic: {
-    name: "Academic Research",
-    icon: "GraduationCap",
-    tools: ["academic_search", "academic_analysis", "paper_comparison"],
-  },
-  media: {
-    name: "Media Generation",
-    icon: "Image",
+  cognia_process: {
+    name: "Processes",
+    icon: "Cpu",
     tools: [
-      "image_generate",
-      "image_edit",
-      "image_variation",
-      "video_generate",
-      "video_status",
-      "video_subtitles",
-      "video_analyze",
+      "mcp__cognia-tools__list_processes",
+      "mcp__cognia-tools__get_process",
+      "mcp__cognia-tools__search_processes",
+      "mcp__cognia-tools__top_memory_processes",
+      "mcp__cognia-tools__check_program_allowed",
+      "mcp__cognia-tools__get_process_manager_status",
+      "mcp__cognia-tools__get_tracked_processes",
+      "mcp__cognia-tools__start_process",
+      "mcp__cognia-tools__terminate_process",
     ],
   },
-  ppt: {
-    name: "Presentations",
-    icon: "Presentation",
-    tools: ["ppt_outline", "ppt_slide_content", "ppt_finalize", "ppt_export"],
-  },
-  learning: {
-    name: "Learning Tools",
-    icon: "BookOpen",
+  cognia_environment: {
+    name: "Environment",
+    icon: "Box",
     tools: [
-      "display_flashcard",
-      "display_flashcard_deck",
-      "display_quiz",
-      "display_quiz_question",
-      "display_review_session",
-      "display_progress_summary",
-      "display_concept_explanation",
-      "display_step_guide",
-      "display_concept_map",
-      "display_animation",
+      "mcp__cognia-tools__list_env",
+      "mcp__cognia-tools__get_env",
+      "mcp__cognia-tools__system_info",
     ],
   },
-  system: {
-    name: "System",
-    icon: "Calculator",
-    tools: ["calculator"],
+  cognia_shell_advanced: {
+    name: "Guarded shell",
+    icon: "Terminal",
+    tools: ["mcp__cognia-tools__shell_execute_advanced"],
   },
 } as const
 
@@ -193,6 +202,10 @@ export const ALL_AVAILABLE_TOOLS = Object.values(TOOL_CATEGORIES).flatMap((cat) 
 /**
  * Tool requirements - which tools need specific API keys or configurations.
  * `desktopOnly: true` means the tool is only functional in the Tauri desktop build.
+ *
+ * The names are the same ones used in `Character.allowedTools` /
+ * `MODE_TEMPLATES.tools` — SDK built-ins (Bash, Read, Write, …) plus the
+ * `mcp__cognia-tools__*` namespaced tools registered by the sidecar.
  */
 export const TOOL_REQUIREMENTS: Record<
   string,
@@ -202,47 +215,170 @@ export const TOOL_REQUIREMENTS: Record<
     desktopOnly?: boolean
   }
 > = {
-  web_search: {
-    requiresApiKey: "search",
-    description: "Requires at least one configured web search provider",
+  // SDK built-in web tools — work in both desktop and web modes via the sidecar's
+  // SDK call; no API key from us required (the SDK has its own gating).
+  WebSearch: {
+    description: "Built-in web search via the Claude Agent SDK.",
   },
-  search_and_scrape: {
-    requiresApiKey: "search",
-    description: "Requires at least one configured web search provider",
+  WebFetch: {
+    description: "Built-in web fetch via the Claude Agent SDK.",
   },
-  image_generate: { requiresApiKey: "openai", description: "Requires OpenAI API key for DALL-E" },
-  image_edit: { requiresApiKey: "openai", description: "Requires OpenAI API key for DALL-E" },
-  image_variation: { requiresApiKey: "openai", description: "Requires OpenAI API key for DALL-E" },
-  video_generate: { requiresApiKey: "openai", description: "Requires OpenAI API key for Sora" },
-  video_status: { requiresApiKey: "openai", description: "Requires OpenAI API key" },
-  video_subtitles: { requiresApiKey: "openai", description: "Requires OpenAI API key for Whisper" },
-  video_analyze: { requiresApiKey: "openai", description: "Requires OpenAI API key" },
-  // Desktop-only tools — require the Tauri runtime and are unavailable in the web build
-  execute_code: {
+  // SDK built-ins that hit the local filesystem — they only work when the
+  // sidecar is running, which only happens in the desktop build.
+  Bash: { desktopOnly: true, description: "Built-in shell. Requires the desktop sidecar." },
+  Read: { desktopOnly: true, description: "Built-in file read. Requires the desktop sidecar." },
+  Write: { desktopOnly: true, description: "Built-in file write. Requires the desktop sidecar." },
+  Edit: { desktopOnly: true, description: "Built-in file edit. Requires the desktop sidecar." },
+  MultiEdit: {
     desktopOnly: true,
-    description:
-      "Full multi-language execution requires the desktop app; web mode supports JavaScript only",
+    description: "Built-in multi-file edit. Requires the desktop sidecar.",
   },
-  shell_execute: {
+  Glob: { desktopOnly: true, description: "Built-in glob. Requires the desktop sidecar." },
+  Grep: {
     desktopOnly: true,
-    description: "Shell command execution requires the desktop app",
+    description: "Built-in content search. Requires the desktop sidecar.",
   },
-  file_write: { desktopOnly: true, description: "Writing files requires the desktop app" },
-  file_delete: { desktopOnly: true, description: "Deleting files requires the desktop app" },
-  directory_create: {
+  // Cognia-tools MCP server — every tool requires the sidecar.
+  "mcp__cognia-tools__file_hash": {
     desktopOnly: true,
-    description: "Creating directories requires the desktop app",
+    description: "File hash. Requires the desktop sidecar.",
   },
-  directory_delete: {
+  "mcp__cognia-tools__file_diff": {
     desktopOnly: true,
-    description: "Deleting directories requires the desktop app",
+    description: "Unified file diff. Requires the desktop sidecar.",
   },
-  git_repo_inspect: { desktopOnly: true, description: "Git operations require the desktop app" },
-  git_changes: { desktopOnly: true, description: "Git operations require the desktop app" },
-  git_branch: { desktopOnly: true, description: "Git operations require the desktop app" },
-  git_history: { desktopOnly: true, description: "Git operations require the desktop app" },
-  git_remote: { desktopOnly: true, description: "Git operations require the desktop app" },
-  git_tag: { desktopOnly: true, description: "Git operations require the desktop app" },
+  "mcp__cognia-tools__file_info": {
+    desktopOnly: true,
+    description: "File metadata. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__file_search": {
+    desktopOnly: true,
+    description: "Glob-based file search. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__content_search": {
+    desktopOnly: true,
+    description: "Regex content search. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__file_exists": {
+    desktopOnly: true,
+    description: "Existence check. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__file_append": {
+    desktopOnly: true,
+    description: "Append to a file. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__file_binary_write": {
+    desktopOnly: true,
+    description: "Binary write. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__file_copy": {
+    desktopOnly: true,
+    description: "Copy a file. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__file_rename": {
+    desktopOnly: true,
+    description: "Rename a file. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__file_move": {
+    desktopOnly: true,
+    description: "Move a file. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__directory_create": {
+    desktopOnly: true,
+    description: "Create a directory. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__directory_delete": {
+    desktopOnly: true,
+    description: "Delete a directory. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__git_status": {
+    desktopOnly: true,
+    description: "git status. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__git_diff": {
+    desktopOnly: true,
+    description: "git diff. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__git_log": {
+    desktopOnly: true,
+    description: "git log. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__git_branch": {
+    desktopOnly: true,
+    description: "git branch. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__git_remote": {
+    desktopOnly: true,
+    description: "git remote. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__git_tag": {
+    desktopOnly: true,
+    description: "git tag. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__git_repo_inspect": {
+    desktopOnly: true,
+    description: "Inspect repo HEAD/upstream. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__git_changes": {
+    desktopOnly: true,
+    description: "Working-tree changes. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__git_history": {
+    desktopOnly: true,
+    description: "Path history. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__list_processes": {
+    desktopOnly: true,
+    description: "List processes. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__get_process": {
+    desktopOnly: true,
+    description: "Get a process. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__search_processes": {
+    desktopOnly: true,
+    description: "Search processes. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__top_memory_processes": {
+    desktopOnly: true,
+    description: "Top-memory processes. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__check_program_allowed": {
+    desktopOnly: true,
+    description: "Check program allowlist. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__get_process_manager_status": {
+    desktopOnly: true,
+    description: "Process manager status. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__get_tracked_processes": {
+    desktopOnly: true,
+    description: "Tracked PIDs. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__start_process": {
+    desktopOnly: true,
+    description: "Start a process. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__terminate_process": {
+    desktopOnly: true,
+    description: "Terminate a process. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__list_env": {
+    desktopOnly: true,
+    description: "List env vars. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__get_env": {
+    desktopOnly: true,
+    description: "Read an env var. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__system_info": {
+    desktopOnly: true,
+    description: "Platform info. Requires the desktop sidecar.",
+  },
+  "mcp__cognia-tools__shell_execute_advanced": {
+    desktopOnly: true,
+    description: "Guarded shell. Requires the desktop sidecar.",
+  },
 }
 
 /**
@@ -299,15 +435,20 @@ export const MODE_TEMPLATES: ModeTemplate[] = [
     icon: "Code2",
     category: "technical",
     tools: [
-      "calculator",
-      "file_read",
-      "file_write",
-      "file_list",
-      "web_search",
-      "git_repo_inspect",
-      "git_changes",
-      "git_branch",
-      "git_history",
+      "Read",
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "Glob",
+      "Grep",
+      "Bash",
+      "WebSearch",
+      "mcp__cognia-tools__git_repo_inspect",
+      "mcp__cognia-tools__git_changes",
+      "mcp__cognia-tools__git_branch",
+      "mcp__cognia-tools__git_history",
+      "mcp__cognia-tools__git_diff",
+      "mcp__cognia-tools__file_diff",
     ],
     systemPrompt: `You are an expert software developer. Help users with:
 - Writing clean, efficient, and well-documented code
@@ -326,14 +467,7 @@ Always explain your reasoning and provide working code examples.`,
     description: "Academic and web research with citation support",
     icon: "GraduationCap",
     category: "research",
-    tools: [
-      "web_search",
-      "rag_search",
-      "academic_search",
-      "academic_analysis",
-      "paper_comparison",
-      "web_scraper",
-    ],
+    tools: ["WebSearch", "WebFetch", "Read", "Write", "mcp__cognia-tools__content_search"],
     systemPrompt: `You are a thorough research analyst. Help users with:
 - Finding and synthesizing information from multiple sources
 - Academic paper analysis and comparison
@@ -351,7 +485,7 @@ Always cite your sources and indicate confidence levels in your findings.`,
     description: "Professional writing for blogs, articles, and marketing",
     icon: "PenTool",
     category: "creative",
-    tools: ["web_search", "rag_search"],
+    tools: ["WebSearch", "WebFetch", "Read", "Write"],
     systemPrompt: `You are a professional content writer. Help users with:
 - Blog posts and articles with engaging hooks and clear structure
 - Marketing copy and persuasive content
@@ -369,7 +503,15 @@ Focus on clarity, engagement, and the target audience's needs.`,
     description: "Data analysis, visualization, and insights generation",
     icon: "BarChart3",
     category: "technical",
-    tools: ["calculator", "rag_search", "file_read"],
+    tools: [
+      "Read",
+      "Write",
+      "Glob",
+      "Grep",
+      "Bash",
+      "mcp__cognia-tools__content_search",
+      "mcp__cognia-tools__file_info",
+    ],
     systemPrompt: `You are a data analyst expert. Help users with:
 - Analyzing datasets and finding patterns
 - Creating clear data visualizations
@@ -387,7 +529,7 @@ Present findings clearly with supporting evidence and visualizations.`,
     description: "Web and app UI design with live preview",
     icon: "Layout",
     category: "creative",
-    tools: ["image_generate", "web_search"],
+    tools: ["Read", "Write", "Edit", "WebSearch", "WebFetch"],
     systemPrompt: `You are a UI/UX designer and React developer. Help users with:
 - Creating modern, responsive web interfaces
 - Implementing best UX practices and accessibility
@@ -406,14 +548,7 @@ Generate clean React code that can be previewed immediately.`,
     description: "PPT slides and presentation content generation",
     icon: "Presentation",
     category: "productivity",
-    tools: [
-      "ppt_outline",
-      "ppt_slide_content",
-      "ppt_finalize",
-      "ppt_export",
-      "web_search",
-      "image_generate",
-    ],
+    tools: ["Read", "Write", "Edit", "WebSearch", "WebFetch"],
     systemPrompt: `You are a presentation expert. Help users with:
 - Creating compelling presentation outlines
 - Writing concise, impactful slide content
@@ -431,20 +566,7 @@ Focus on clear messaging and visual appeal.`,
     description: "Educational assistant with flashcards and quizzes",
     icon: "BookOpen",
     category: "education",
-    tools: [
-      "display_flashcard",
-      "display_flashcard_deck",
-      "display_quiz",
-      "display_quiz_question",
-      "display_review_session",
-      "display_progress_summary",
-      "display_concept_explanation",
-      "display_step_guide",
-      "display_concept_map",
-      "display_animation",
-      "web_search",
-      "rag_search",
-    ],
+    tools: ["WebSearch", "WebFetch", "Read", "Write"],
     systemPrompt: `You are an expert tutor using proven learning techniques. Help users with:
 - Explaining concepts clearly with examples
 - Creating interactive flashcards for memorization
@@ -462,7 +584,7 @@ Make learning engaging and effective through active recall and practice.`,
     description: "Multi-language translation and localization",
     icon: "Globe",
     category: "productivity",
-    tools: ["web_search"],
+    tools: ["WebSearch", "WebFetch"],
     systemPrompt: `You are a professional translator. Help users with:
 - Accurate translation between languages
 - Cultural adaptation and localization

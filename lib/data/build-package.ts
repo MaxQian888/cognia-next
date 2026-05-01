@@ -15,6 +15,9 @@ import {
   type BackupPayloadV3,
   type ExportOptions,
 } from "./types"
+import { browserSnapshotStorage, SNAPSHOT_MODULES } from "./snapshots/registry"
+import { readAllSnapshots } from "./snapshots/helpers"
+import type { SnapshotEnv, SnapshotStorage } from "./snapshots/types"
 
 const APP_VERSION = "0.1.0"
 
@@ -27,12 +30,23 @@ function newTraceId(): string {
   return `${rand()}-${rand().slice(0, 4)}-${rand().slice(0, 4)}-${rand().slice(0, 4)}-${rand()}${rand().slice(0, 4)}`
 }
 
+/** Optional knobs for tests / non-browser callers. */
+export interface BuildBackupExtras {
+  /** Override `localStorage` source. Defaults to `browserSnapshotStorage()`. */
+  storage?: SnapshotStorage | null
+  /** Forwarded to snapshot read warnings. */
+  warn?: SnapshotEnv["warn"]
+}
+
 /**
  * Read every table and assemble the v3 payload. The payload is canonicalized
  * (keys sorted recursively) before its SHA-256 is computed so the manifest's
  * checksum field is stable across JS engines and table-iteration orders.
  */
-export async function buildBackupPackage(opts: ExportOptions): Promise<BackupPackageV3> {
+export async function buildBackupPackage(
+  opts: ExportOptions,
+  extras: BuildBackupExtras = {}
+): Promise<BackupPackageV3> {
   const db = getDb()
   const includeBuiltIns = opts.includeBuiltIns ?? false
 
@@ -53,6 +67,9 @@ export async function buildBackupPackage(opts: ExportOptions): Promise<BackupPac
     canvasVersions,
     canvasComments,
     canvasSessions,
+    a2uiApps,
+    a2uiTemplates,
+    a2uiEventHistory,
   ] = await Promise.all([
     getSettings(),
     db.characters.toArray(),
@@ -70,6 +87,9 @@ export async function buildBackupPackage(opts: ExportOptions): Promise<BackupPac
     db.canvasVersions.toArray(),
     db.canvasComments.toArray(),
     db.canvasSessions.toArray(),
+    db.a2uiApps.toArray(),
+    db.a2uiTemplates.toArray(),
+    db.a2uiEventHistory.toArray(),
   ])
 
   // Strip the API key unless the user opted in.
@@ -102,11 +122,28 @@ export async function buildBackupPackage(opts: ExportOptions): Promise<BackupPac
     canvasVersions,
     canvasComments,
     canvasSessions,
+    // A2UI: built-in apps stay local; only user-created apps round-trip.
+    a2uiApps: includeBuiltIns ? a2uiApps : a2uiApps.filter((a) => !a.isBuiltIn),
+    a2uiTemplates,
+    a2uiEventHistory,
   }
   if (opts.includeSessions) {
     payload.sessions = sessions
     payload.messages = messages
     payload.sessionState = sessionState
+  }
+
+  // localStorage-backed Zustand persist faces (external agents, custom
+  // modes, agent teams, custom themes, artifacts, canvas prefs, …). Each
+  // module's `read` is non-throwing — a single corrupt persist key cannot
+  // brick the build.
+  const storage = extras.storage === undefined ? browserSnapshotStorage() : extras.storage
+  if (storage) {
+    const env: SnapshotEnv = { storage, warn: extras.warn }
+    const { snapshots } = readAllSnapshots(SNAPSHOT_MODULES, env)
+    if (Object.keys(snapshots).length > 0) {
+      payload.localStorageSnapshots = snapshots
+    }
   }
 
   const checksum = await sha256Hex(canonicalStringify(payload))

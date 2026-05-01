@@ -203,3 +203,53 @@ describe("defaultExportFileName", () => {
     )
   })
 })
+
+describe("buildBackupPackage — localStorage snapshots", () => {
+  it("captures every persist key present in storage", async () => {
+    const storage = {
+      _data: new Map<string, string>([
+        ["cognia-external-agents", JSON.stringify({ state: { agents: { foo: 1 } }, version: 5 })],
+        ["cognia-custom-modes", JSON.stringify({ state: { customModes: {} }, version: 0 })],
+      ]),
+      getItem(k: string) {
+        return this._data.get(k) ?? null
+      },
+      setItem(k: string, v: string) {
+        this._data.set(k, v)
+      },
+      removeItem(k: string) {
+        this._data.delete(k)
+      },
+    }
+    const pkg = await buildBackupPackage(
+      { includeSessions: false, includeApiKey: false },
+      { storage }
+    )
+    expect(pkg.payload.localStorageSnapshots).toBeDefined()
+    expect(pkg.payload.localStorageSnapshots?.["cognia-external-agents"]?.raw.state).toEqual({
+      agents: { foo: 1 },
+    })
+    expect(pkg.payload.localStorageSnapshots?.["cognia-custom-modes"]).toBeDefined()
+  })
+
+  it("omits the field entirely when storage is empty", async () => {
+    const storage = {
+      getItem: () => null,
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    }
+    const pkg = await buildBackupPackage(
+      { includeSessions: false, includeApiKey: false },
+      { storage }
+    )
+    expect(pkg.payload.localStorageSnapshots).toBeUndefined()
+  })
+
+  it("omits the field entirely when storage=null is forced (non-browser caller)", async () => {
+    const pkg = await buildBackupPackage(
+      { includeSessions: false, includeApiKey: false },
+      { storage: null }
+    )
+    expect(pkg.payload.localStorageSnapshots).toBeUndefined()
+  })
+})

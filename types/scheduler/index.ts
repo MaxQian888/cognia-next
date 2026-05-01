@@ -3,14 +3,19 @@
  * Types for scheduled tasks, cron expressions, and task execution
  */
 
+import type { BuiltinToolsConfig, SendOptions } from "@/lib/claude/types"
+import type { AcpPermissionMode } from "@/types/agent/external-agent"
+
 // Task trigger types
 export type TaskTriggerType = "cron" | "interval" | "once" | "event"
 
-// Task types that can be scheduled. `skill` is a cognia-next-specific addition:
-// we route skill-driven Claude sessions through a dedicated executor in
-// `lib/scheduler/executors`. The other variants are kept for source-fidelity
-// with Cognia even though only chat / agent / skill / script / custom / plugin
-// have backing executors here.
+// Task types that can be scheduled. `skill` and `external-agent` are
+// cognia-next-specific additions:
+//   - `skill`          → routes a Claude turn with one extra skill enabled
+//   - `external-agent` → drives an ACP agent (Claude Desktop, Cursor, …)
+// The other variants are kept for source-fidelity with Cognia even though
+// only chat / agent / skill / external-agent / script / custom / plugin /
+// backup have backing executors here.
 export type ScheduledTaskType =
   | "workflow"
   | "agent"
@@ -24,6 +29,7 @@ export type ScheduledTaskType =
   | "chat"
   | "im-push"
   | "skill"
+  | "external-agent"
 
 // Task execution status
 export type TaskExecutionStatus =
@@ -76,7 +82,99 @@ export interface BackupTaskPayload extends Record<string, unknown> {
   options?: BackupSelectionOptions
 }
 
-export type ScheduledTaskPayload = Record<string, unknown> | BackupTaskPayload
+export type ScheduledTaskPayload =
+  | Record<string, unknown>
+  | BackupTaskPayload
+  | ChatLikeTaskPayload
+  | AgentTaskPayload
+  | SkillTaskPayload
+  | ExternalAgentTaskPayload
+
+/**
+ * Common payload shape for any task that drives a Claude turn through the
+ * sidecar (chat / agent / skill). Mirrors the knobs `resolveSendOptions`
+ * already understands so a scheduled run reaches feature parity with an
+ * interactive turn (character / agent mode / skills / tools / MCP / built-in
+ * tools / permission mode / additional dirs / max turns / effort / resume).
+ *
+ * The executor layers payload-level overrides on top of the base resolution
+ * (see `lib/scheduler/executors/index.ts`). `allowedTools` and
+ * `additionalDirectories` are *unioned* with the resolved set; the rest are
+ * direct overrides. Leave a field undefined to defer to the resolved value.
+ */
+export interface ChatLikeTaskPayload extends Record<string, unknown> {
+  /** Required. The user-turn content sent to the sidecar. */
+  prompt: string
+  /** Append to an existing session instead of creating a new one. */
+  sessionId?: string
+  /** Title used when the executor creates a new session for this run. */
+  sessionTitle?: string
+  /** When set, the scheduler creates a `kind: "team"` session bound to this team. */
+  teamId?: string
+
+  /** Override the model picked by character / mode / app default. */
+  model?: string
+  /**
+   * Apply a specific built-in or custom agent mode to this run.
+   * - undefined → fall through to `useAgentRuntimeStore.modeId` at run time
+   * - null      → opt OUT of mode application entirely (raw character + skills)
+   * - string    → look up by id in built-in then custom mode registries
+   */
+  agentModeId?: string | null
+  /** SDK permission mode override. */
+  permissionMode?: SendOptions["permissionMode"]
+  /** Tools to UNION onto the resolved allowedTools whitelist. */
+  allowedTools?: string[]
+  /** Tools to add to the disallow list (replaces resolved value when set). */
+  disallowedTools?: string[]
+  /** Subset of MCP server ids to use (replaces character/team subset when set). */
+  mcpServerIds?: string[]
+  /** Extra directories the SDK may read from (UNIONED with resolved value). */
+  additionalDirectories?: string[]
+  /** Patches `appSettings.builtinTools` for this run only. */
+  builtinTools?: Partial<BuiltinToolsConfig>
+  /** Appended to the system prompt (sidecar `appendSystemPrompt`). */
+  appendSystemPrompt?: string
+  /** Hard cap on agentic turns inside the SDK invocation. */
+  maxTurns?: number
+  /** SDK effort level. */
+  effort?: SendOptions["effort"]
+  /** Skill ids to disable for this run, in addition to `session.disabledSkillIds`. */
+  disabledSkillIds?: string[]
+}
+
+/** Payload for `agent` task type — a chat-like turn bound to a specific character. */
+export interface AgentTaskPayload extends ChatLikeTaskPayload {
+  /** Required. The character (a.k.a. agent persona) that drives the reply. */
+  characterId: string
+}
+
+/**
+ * Payload for `skill` task type — a chat-like turn that activates one
+ * additional skill for the run. The character's own `skillIds` still apply.
+ */
+export interface SkillTaskPayload extends ChatLikeTaskPayload {
+  /** Required. Skill to enable on top of the character's skill set. */
+  skillId: string
+}
+
+/**
+ * Payload for `external-agent` task type — drives an ACP agent (Claude
+ * Desktop / Cursor / Codex / Gemini / …). Uses
+ * `lib/ai/agent/external/manager.ts:executeOnExternalAgent` under the hood.
+ */
+export interface ExternalAgentTaskPayload extends Record<string, unknown> {
+  /** Required. The user-turn content sent to the external agent. */
+  prompt: string
+  /** Required. ExternalAgentConfig.id of the configured ACP agent. */
+  agentId: string
+  /** ACP permission mode override (defaults to the agent's configured mode). */
+  permissionMode?: AcpPermissionMode
+  /** Working directory for the ACP session. */
+  cwd?: string
+  /** Per-task timeout (ms). When omitted, falls back to task.config.timeout. */
+  timeoutMs?: number
+}
 
 /**
  * Cron expression parts for validation and display

@@ -200,7 +200,7 @@ describe("TaskScheduler", () => {
         ).rejects.toThrow("must be in the future")
       })
 
-      it("should reject scheduled chat task without message payload", async () => {
+      it("should reject scheduled chat task without prompt payload", async () => {
         await expect(
           scheduler.createTask({
             name: "Invalid Chat Task",
@@ -208,10 +208,10 @@ describe("TaskScheduler", () => {
             trigger: { type: "cron", cronExpression: "0 9 * * *" },
             payload: {},
           })
-        ).rejects.toThrow("message")
+        ).rejects.toThrow("prompt")
       })
 
-      it("should reject scheduled agent task without agent prompt payload", async () => {
+      it("should reject scheduled agent task without prompt payload", async () => {
         await expect(
           scheduler.createTask({
             name: "Invalid Agent Task",
@@ -219,7 +219,7 @@ describe("TaskScheduler", () => {
             trigger: { type: "cron", cronExpression: "0 9 * * *" },
             payload: {},
           })
-        ).rejects.toThrow("agent")
+        ).rejects.toThrow("prompt")
       })
     })
 
@@ -287,7 +287,7 @@ describe("TaskScheduler", () => {
           scheduler.updateTask("task-chat-1", {
             payload: { message: "   " },
           })
-        ).rejects.toThrow("message")
+        ).rejects.toThrow("prompt")
       })
     })
 

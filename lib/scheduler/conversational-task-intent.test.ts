@@ -32,7 +32,7 @@ describe("conversational-task-intent", () => {
     expect(draft?.input.type).toBe("agent")
     expect(draft?.input.payload).toEqual(
       expect.objectContaining({
-        agentTask: "每周一运行 agent 总结上周项目风险",
+        prompt: "每周一运行 agent 总结上周项目风险",
       })
     )
   })
@@ -68,7 +68,7 @@ describe("conversational-task-intent", () => {
     expect(draft?.input.type).toBe("chat")
     expect(draft?.input.payload).toEqual(
       expect.objectContaining({
-        message: "明早9点提醒我发邮件给客户",
+        prompt: "明早9点提醒我发邮件给客户",
         sessionId: "session-1",
       })
     )

@@ -1,7 +1,8 @@
 "use client"
 
 import { create } from "zustand"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings, BuiltinToolsConfig } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 import { addAlwaysAllow, getSettings, removeAlwaysAllow, saveSettings } from "@/lib/db/settings"
 import { restartSidecar, setApiKey } from "@/lib/claude/ipc"
 import { isTauri } from "@/lib/tauri"
@@ -41,6 +42,12 @@ interface SettingsState {
   load: () => Promise<void>
   save: (patch: Partial<Omit<AppSettings, "id">>) => Promise<void>
   toggleAlwaysAllow: (toolName: string, allow: boolean) => Promise<void>
+  /**
+   * Toggle a single category in `AppSettings.builtinTools`. The next agent
+   * turn picks up the change via `lib/claude/build-options.ts`. Returns the
+   * promise from `saveSettings` so callers can await persistence.
+   */
+  setBuiltinToolEnabled: (category: keyof BuiltinToolsConfig, enabled: boolean) => Promise<void>
   /**
    * Persist the API key to Dexie *and* push it down to the Rust process. If
    * the key changed, also tells the sidecar to restart so the SDK re-reads
@@ -119,6 +126,7 @@ const DEFAULTS: AppSettings = {
   id: "singleton",
   permissionMode: "default",
   alwaysAllowTools: [],
+  builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
 }
 
 async function syncApiKeyToTauri(key: string | null | undefined) {
@@ -176,6 +184,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     else await removeAlwaysAllow(toolName)
     const s = await getSettings()
     set({ settings: s })
+  },
+
+  setBuiltinToolEnabled: async (category, enabled) => {
+    const cur = get().settings ?? (await getSettings())
+    const builtinTools: BuiltinToolsConfig = {
+      ...DEFAULT_BUILTIN_TOOLS,
+      ...(cur.builtinTools ?? {}),
+      [category]: enabled,
+    }
+    const next = await saveSettings({ builtinTools })
+    set({ settings: next })
   },
 
   setApiKey: async (key) => {
