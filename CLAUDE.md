@@ -163,6 +163,63 @@ through the `migrateEnvelope` boundary so legacy users keep working.
 
 See `docs/content/docs/adr/0001-backup-schema-v3.md` for the full ADR.
 
+## Employee Digital Twin
+
+cognia-next can distil a person's documents, chat exports, and code into
+a chat-ready "twin" that runs RAG + style few-shot at send time. The
+subsystem lives entirely under `lib/twin/`, `types/twin/`, and
+`components/twin/`, with five Dexie tables added at schema v14
+(`twinSources` / `twinChunks` / `twinProfile` / `twinDrafts` /
+`twinJobs`).
+
+- **Ingest pipeline** (`lib/twin/ingest/`): seven stages — `dispatch` →
+  `parse` (via `lib/document/document-processor`) → `redact` (PII
+  scrubbed before any cloud call) → `chunk` (format-aware strategy:
+  heading for markdown, code for source, paragraph for chat) →
+  `embed` (`lib/ai/embedding/embedding`) → `persist` (Dexie + remote
+  vector store double-write) → `finalize`. The `runIngestJob`
+  orchestrator updates `TwinJob.phase` + `progress` for the workbench.
+- **Distill pipeline** (`lib/twin/distill/`): five sub-agents under one
+  orchestrator — `KnowledgeAgent` (entity extraction, batched 100
+  chunks per call), `StyleAgent` (representative writing samples),
+  `PlaybookAgent` (repeated work patterns w/ confidence floor),
+  `Synthesizer` (Character + Skill drafts), `Evaluator`
+  (newcomer-perspective qualityScore + concerns + suggestions). All
+  agents go through the `LlmClient` interface in
+  `lib/twin/distill/llm.ts`; tests use mocks, production wires
+  `createAnthropicLlmClient`.
+- **Runtime** (`lib/twin/runtime/`): `applyTwinContext` is the single
+  entry point. It embeds the user message once, runs RAG via the
+  remote vector store, picks top-K style few-shot from the profile,
+  and assembles a four-segment system prompt (character prompt →
+  identity block → retrieved chunks → style examples). Always returns
+  — never throws — so a vector-store outage degrades to a no-context
+  send rather than breaking the chat. **Phase 8 leaves the
+  `lib/claude/build-options.ts:resolveSendOptions` integration as
+  opt-in;** call sites that want the runtime injection do so
+  explicitly.
+- **Workbench UI** (`app/twin/`, `components/twin/`): four tabs —
+  Sources (paste + format picker + status badges), Jobs (live progress
+  - queue ingest / queue distill), Drafts (pending-first sort, accept
+    flow writes a real `Character` / `Skill` row + stamps the draft as
+    accepted), and Settings (read-only profile stats).
+- **Job worker** (`lib/twin/job-worker.ts`): drains the `twinJobs` queue
+  for both `ingest` and `distill` jobs. Phase 4 ships immediate-execute
+  semantics; cron-driven retries via the scheduler executor are a
+  later add.
+- **Soft binding**: a "twin" is a string id; characters opt in via
+  `Character.twinId` and tune via `Character.twinSettings`
+  (`enableRag`, `ragTopK`, `enableStyleFewShot`, `styleSamplesK`).
+  Multiple characters can share a twin; multiple twins can co-exist
+  in one Dexie database.
+- **Privacy**: PII (emails, phone numbers, CN national IDs, Luhn-valid
+  bank cards, hint-driven names) is replaced with
+  `<KIND_NNN>` placeholders before any embed / LLM call. The
+  redaction map is encrypted on disk (`twinSources.redactionMapEnc`).
+  `lib/twin/ingest/redact.ts:hasNoLeakingPii` is the red-line check.
+
+See `docs/content/docs/adr/0003-employee-digital-twin.md` for the full ADR.
+
 ## Testing Standards
 
 - **Coverage requirement**: every source file must reach **≥90% test coverage** (lines, branches, functions). Verify with `pnpm test:coverage`.
