@@ -12,3 +12,6 @@ export type { EmlImportOptions } from "./email/eml"
 
 export { parseGitRepo } from "./code-repo/git-repo"
 export type { GitRepoImportOptions, CommitRecord } from "./code-repo/git-repo"
+
+export { parseSlackExport } from "./chat-export/slack"
+export type { SlackImportOptions } from "./chat-export/slack"

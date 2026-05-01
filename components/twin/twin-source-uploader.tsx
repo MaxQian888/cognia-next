@@ -24,7 +24,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { createTwinSource } from "@/lib/db/twin-sources"
 import { detectSourceFormat, listSupportedFormats } from "@/lib/twin/ingest"
-import { parseMbox, parseEml } from "@/lib/twin/importers"
+import { parseMbox, parseEml, parseSlackExport } from "@/lib/twin/importers"
 import type { RawSource } from "@/lib/twin/ingest"
 import type { TwinSourceFormat, TwinSourceKind } from "@/types/twin"
 
@@ -105,6 +105,18 @@ function inferKind(format: TwinSourceFormat): TwinSourceKind {
   if (format === "mbox" || format === "eml") return "email"
   if (format.endsWith("-export")) return "chat"
   return "document"
+}
+
+/**
+ * Heuristic: detect Slack-export JSON by looking for the canonical
+ * `"type":"message"` token or `"messages":` envelope key near the top of
+ * the document. Cheap regex avoids parsing twice.
+ */
+function isSlackShape(jsonText: string): boolean {
+  const head = jsonText.slice(0, 4000)
+  if (/"type"\s*:\s*"message"/.test(head)) return true
+  if (/"messages"\s*:/.test(head) && /"text"\s*:/.test(head)) return true
+  return false
 }
 
 async function sha256(text: string): Promise<string> {
@@ -204,6 +216,44 @@ async function ingestFile(
   const text = await readFileAsText(file)
   if (!text.trim()) {
     return { sources: 0, error: "File is empty." }
+  }
+
+  // JSON files: try Slack export shape first (`messages` array of
+  // `{type:"message", user, text, ts, …}`). Falls through to plain JSON
+  // ingest if the shape doesn't match.
+  if (file.name.toLowerCase().endsWith(".json") && isSlackShape(text)) {
+    try {
+      const raws = parseSlackExport(text, {
+        twinId,
+        source: file.name.replace(/\.json$/i, ""),
+      })
+      if (raws.length === 0) {
+        return { sources: 0, error: "Slack-shaped JSON had no usable messages." }
+      }
+      const raw = raws[0]
+      const fingerprint = await sha256(raw.text ?? "")
+      await createTwinSource({
+        twinId,
+        kind: "chat",
+        format: "markdown",
+        source: raw.text ?? "",
+        title: raw.filename,
+        bytes: (raw.text ?? "").length,
+        fingerprint,
+        redacted: false,
+        status: "pending",
+        tags: ["slack-export"],
+      })
+      return { sources: 1 }
+    } catch (err) {
+      return {
+        sources: 0,
+        error:
+          err instanceof Error
+            ? `Failed to parse Slack JSON: ${err.message}`
+            : "Slack parse failed",
+      }
+    }
   }
 
   // mbox / eml fan out into many sources via the importer layer.
