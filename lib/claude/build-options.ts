@@ -53,6 +53,48 @@ export interface BuildOptionsContext {
    * application (e.g., diagnostics dumps).
    */
   agentMode?: AgentModeConfig | null
+  /**
+   * Optional twin runtime configuration. When BOTH this and `twinUserMessage`
+   * are supplied AND the resolving character carries a `twinId`,
+   * `resolveSendOptions` will invoke `applyTwinContext` and replace the base
+   * character system prompt with the four-segment twin prompt (character +
+   * identity + retrieved chunks + style few-shot). Mode / Skill sections still
+   * append below.
+   *
+   * Importing the dep type lazily to avoid a hard cycle when build-options.ts
+   * is loaded outside the twin runtime — the field is structurally typed so
+   * tests / non-twin callers can omit it cleanly.
+   */
+  twinDeps?: TwinRuntimeDepsForBuild
+  /**
+   * The user's current message text. Required input to twin RAG; ignored when
+   * `twinDeps` or `character.twinId` is missing.
+   */
+  twinUserMessage?: string
+}
+
+/**
+ * Structural mirror of `lib/twin/runtime/apply-twin-context:ApplyTwinContextDeps`.
+ * Keeping the shape inline here decouples build-options.ts from the twin
+ * subsystem at type-resolution time so the chat-send hook only pays the cost
+ * (importing twin code) when it actually opts in via `ctx.twinDeps`.
+ */
+export interface TwinRuntimeDepsForBuild {
+  store: {
+    searchByEmbedding?: (
+      collection: string,
+      embedding: number[],
+      options?: { limit?: number }
+    ) => Promise<Array<{ id: string; content: string; score: number }>>
+  }
+  embedding: {
+    provider: "openai" | "google" | "cohere" | "mistral" | "transformersjs"
+    model: string
+    apiKey: string
+    baseURL?: string
+  }
+  vectorBackend?: "qdrant" | "pinecone" | "milvus" | "weaviate" | "chroma"
+  vectorCollection?: string
 }
 
 /**
@@ -165,12 +207,34 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
 
   // --- System prompt + skills section --------------------------------------
   // Member override replaces the character system prompt (skills still append).
-  const baseSystem =
+  let baseSystem =
     session?.systemPrompt ??
     memberOverride?.systemPromptOverride ??
     character?.systemPrompt ??
     appSettings?.defaultSystemPrompt ??
     undefined
+
+  // --- Twin runtime injection (opt-in) -------------------------------------
+  // When the resolving character is twin-bound AND the caller supplied
+  // `twinDeps` + `twinUserMessage`, replace `baseSystem` with the four-segment
+  // twin prompt. The runtime never throws — failures degrade to a no-context
+  // prompt, matching the rest of the resolver's "best effort" semantics.
+  if (character?.twinId && ctx.twinDeps && ctx.twinUserMessage && ctx.twinUserMessage.trim()) {
+    try {
+      const { applyTwinContext } = await import("@/lib/twin/runtime")
+      const result = await applyTwinContext({
+        character,
+        userMessage: ctx.twinUserMessage,
+        deps: ctx.twinDeps as Parameters<typeof applyTwinContext>[0]["deps"],
+      })
+      if (result.applied) {
+        baseSystem = result.applied.systemPrompt
+      }
+    } catch {
+      // Twin runtime failure is non-fatal — keep the original baseSystem.
+    }
+  }
+
   const skillSection = renderSkillsSection(skills)
   const modeSection = activeMode?.systemPrompt?.trim() || ""
   const systemPrompt = [baseSystem, modeSection, skillSection]
