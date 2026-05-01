@@ -34,6 +34,8 @@ export type CharacterDraft = Pick<Character, "name" | "systemPrompt"> &
       | "mcpServerIds"
       | "skillIds"
       | "workingDir"
+      | "twinId"
+      | "twinSettings"
     >
   >
 
@@ -53,6 +55,8 @@ export async function createCharacter(draft: CharacterDraft): Promise<Character>
     mcpServerIds: draft.mcpServerIds,
     skillIds: draft.skillIds,
     workingDir: draft.workingDir,
+    twinId: draft.twinId,
+    twinSettings: draft.twinSettings,
     createdAt: now,
     updatedAt: now,
   }

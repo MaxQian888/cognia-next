@@ -28,10 +28,10 @@ export { runIngestJob } from "./job-runner"
 export { parseSource } from "./parse"
 
 /**
- * Queue an ingest job for the scheduler executor (`twin-distill-executor`)
- * to pick up. Returns the freshly-created `TwinJob` row so the caller can
- * subscribe to its progress.
+ * Queue an ingest job for the worker to pick up. Returns the freshly-
+ * created `TwinJob` row so the caller can subscribe to its progress.
+ * The `kind` field is set to `"ingest"` automatically.
  */
-export async function enqueueIngestJob(draft: TwinJobDraft): Promise<TwinJob> {
+export async function enqueueIngestJob(draft: Omit<TwinJobDraft, "kind">): Promise<TwinJob> {
   return createTwinJob({ ...draft, kind: "ingest" })
 }
