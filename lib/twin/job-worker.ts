@@ -20,6 +20,8 @@ import { type EmbeddingConfig } from "./ingest/embed"
 import { type RawSource } from "./ingest/parse"
 import { runIngestJob } from "./ingest/job-runner"
 import { claimNextQueuedJob } from "@/lib/db/twin-jobs"
+import { runDistillJob } from "./distill/job-runner"
+import type { LlmClient } from "./distill/llm"
 
 const log = loggers.scheduler
 
@@ -47,6 +49,13 @@ export interface JobWorkerConfig {
   sourceLoader: SourceLoader
   /** Polling interval when running in `start()` mode. Defaults to 2 s. */
   pollIntervalMs?: number
+  /**
+   * LLM client for distill jobs. Required when distill / re-distill jobs
+   * are queued; ingest-only deployments can leave it undefined.
+   */
+  llm?: LlmClient
+  /** Maximum chunks fed into a single distill run. */
+  distillMaxChunks?: number
 }
 
 function resolveStore(config: JobWorkerConfig): IVectorStore {
@@ -71,39 +80,64 @@ export async function processJob(jobId: string, config: JobWorkerConfig): Promis
   }
   if (job.status === "completed") return
 
-  if (job.kind !== "ingest") {
-    // distill / re-distill are owned by Phase 5's distill orchestrator;
-    // surface a clear error so a misrouted job doesn't silently burn the
-    // queue slot.
-    await failJob(job.id, `Worker only handles ingest jobs (got: ${job.kind})`)
+  if (job.kind === "ingest") {
+    const store = resolveStore(config)
+    const sources = await loadSourcesForJob(job, config.sourceLoader)
+    try {
+      const result = await runIngestJob({
+        job,
+        rawSources: sources,
+        embedding: config.embedding,
+        vectorBackend: config.vectorBackend,
+        store,
+      })
+      await completeJob(job.id, {
+        llmTokensUsed: 0,
+        embeddingTokensUsed: result.totalEmbeddingTokens,
+      })
+      log.info("twin job-worker: ingest complete", {
+        jobId: job.id,
+        twinId: job.twinId,
+        sources: result.parsedSourceIds.length,
+        chunks: result.totalChunks,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      log.error("twin job-worker: ingest failed", err)
+      await failJob(job.id, message)
+    }
     return
   }
 
-  const store = resolveStore(config)
-  const sources = await loadSourcesForJob(job, config.sourceLoader)
-  try {
-    const result = await runIngestJob({
-      job,
-      rawSources: sources,
-      embedding: config.embedding,
-      vectorBackend: config.vectorBackend,
-      store,
-    })
-    await completeJob(job.id, {
-      llmTokensUsed: 0,
-      embeddingTokensUsed: result.totalEmbeddingTokens,
-    })
-    log.info("twin job-worker: ingest complete", {
-      jobId: job.id,
-      twinId: job.twinId,
-      sources: result.parsedSourceIds.length,
-      chunks: result.totalChunks,
-    })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    log.error("twin job-worker: ingest failed", err)
-    await failJob(job.id, message)
+  if (job.kind === "distill" || job.kind === "re-distill") {
+    if (!config.llm) {
+      await failJob(job.id, "Distill job queued but no LLM client configured on the worker")
+      return
+    }
+    try {
+      const result = await runDistillJob({
+        job,
+        llm: config.llm,
+        maxChunks: config.distillMaxChunks,
+      })
+      await completeJob(job.id, { outputDraftIds: result.draftIds })
+      log.info("twin job-worker: distill complete", {
+        jobId: job.id,
+        twinId: job.twinId,
+        drafts: result.draftIds.length,
+        styleSamples: result.styleSampleCount,
+        playbooks: result.playbookCount,
+        entities: result.entityCount,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      log.error("twin job-worker: distill failed", err)
+      await failJob(job.id, message)
+    }
+    return
   }
+
+  await failJob(job.id, `Worker received unknown job kind: ${String(job.kind)}`)
 }
 
 async function loadSourcesForJob(job: TwinJob, loader: SourceLoader): Promise<RawSource[]> {
