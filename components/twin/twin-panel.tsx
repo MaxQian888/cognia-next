@@ -22,6 +22,7 @@ import { TwinSourcesTab } from "./twin-sources-tab"
 import { TwinJobsTab } from "./twin-jobs-tab"
 import { TwinDraftsTab } from "./twin-drafts-tab"
 import { TwinSettingsTab } from "./twin-settings-tab"
+import { useTwinWorker } from "./use-twin-worker"
 
 interface KnownTwin {
   twinId: string
@@ -47,6 +48,11 @@ export function TwinPanel() {
   const twins = useKnownTwins()
   const [activeTwinId, setActiveTwinId] = useState<string | null>(null)
   const effectiveTwinId = activeTwinId ?? twins[0]?.twinId ?? null
+
+  // Side-effect: spin up the job worker against the active twin's runtime
+  // settings. Called UNCONDITIONALLY (rules-of-hooks); the hook itself
+  // short-circuits on a null twinId.
+  const workerStatus = useTwinWorker(effectiveTwinId)
 
   if (!effectiveTwinId) {
     return (
@@ -85,6 +91,16 @@ export function TwinPanel() {
             <span className="text-muted-foreground text-sm">{twins[0].displayName}</span>
           )}
         </div>
+        <span
+          className={
+            workerStatus.active
+              ? "text-xs text-emerald-600 dark:text-emerald-400"
+              : "text-muted-foreground text-xs"
+          }
+          title={workerStatus.reason}
+        >
+          worker {workerStatus.active ? "● active" : "○ idle"}
+        </span>
       </header>
 
       <Tabs defaultValue="sources" className="flex flex-1 flex-col">

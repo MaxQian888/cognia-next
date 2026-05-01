@@ -401,3 +401,59 @@ export const DEFAULT_TWIN_SETTINGS: TwinSettings = {
   enableStyleFewShot: true,
   styleSamplesK: 3,
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Runtime settings — vector store + embedding + distill LLM configuration.
+// Stored as a single Dexie row under id "twin-runtime"; see
+// `lib/db/twin-runtime-settings.ts`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface TwinRuntimeStorageConfig {
+  vectorBackend: VectorBackend
+  qdrant?: { url: string; apiKey?: string }
+  pinecone?: { apiKey: string; indexName: string; namespace?: string }
+  weaviate?: { url: string; apiKey?: string }
+  milvus?: { address: string; token?: string; ssl?: boolean }
+  chroma?: { mode: "embedded" | "server"; serverUrl?: string }
+}
+
+export interface TwinRuntimeEmbeddingSettings {
+  provider: "openai" | "google" | "cohere" | "mistral" | "transformersjs"
+  model: string
+  apiKey: string
+  baseURL?: string
+}
+
+export interface TwinRuntimeLlmSettings {
+  /** Currently only "anthropic" is wired through to a real client. */
+  provider: "anthropic"
+  model: string
+  apiKey: string
+  baseURL?: string
+}
+
+export interface TwinRuntimeSettings {
+  /** When false, the workbench does not auto-start its job-worker even if
+   *  jobs are queued. */
+  workerEnabled: boolean
+  storage: TwinRuntimeStorageConfig
+  embedding: TwinRuntimeEmbeddingSettings
+  llm: TwinRuntimeLlmSettings
+}
+
+export const DEFAULT_TWIN_RUNTIME_SETTINGS: TwinRuntimeSettings = {
+  workerEnabled: false,
+  storage: {
+    vectorBackend: "qdrant",
+  },
+  embedding: {
+    provider: "openai",
+    model: "text-embedding-3-small",
+    apiKey: "",
+  },
+  llm: {
+    provider: "anthropic",
+    model: "claude-sonnet-4-6",
+    apiKey: "",
+  },
+}
