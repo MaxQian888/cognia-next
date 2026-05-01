@@ -78,17 +78,18 @@ const createMockDocuments = (): DocumentWithEmbedding[] => [
   },
 ]
 
-// Test-only fixture; real embedding-model interface is internal to `ai` and
-// not exported. `unknown` keeps the assertion site type-checked while
-// allowing the test to pass this stub through APIs that expect the full
-// `EmbeddingModelV1` shape.
-const mockEmbeddingModel: unknown = {
+// Test-only fixture; structurally matches the AI-SDK `EmbeddingModel` shape
+// well enough for the consumer here. Cast through `unknown` to satisfy the
+// strict ESLint `no-explicit-any` rule without leaking `any` into call sites.
+import type { EmbeddingModel } from "ai"
+
+const mockEmbeddingModel = {
   specificationVersion: "v1",
   provider: "test",
   modelId: "test-embed",
   maxEmbeddingsPerCall: 100,
   supportsParallelCalls: true,
-}
+} as unknown as EmbeddingModel
 
 describe("find-relevant", () => {
   beforeEach(() => {
