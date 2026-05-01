@@ -14,6 +14,35 @@ if (typeof globalThis.TextEncoder === "undefined") {
   Object.assign(globalThis, { TextEncoder, TextDecoder })
 }
 
+// jsdom omits Web Crypto's `subtle` API; Node's `node:crypto` has the same
+// shape under `webcrypto.subtle`. Wire it up so `crypto.subtle.digest()` and
+// the rest of the WebCrypto surface work inside tests (used by the twin
+// source uploader's SHA-256 fingerprinter and a few other paths).
+//
+// We wrap webcrypto in a plain object so `crypto.subtle = …` style mocks in
+// individual tests (`lib/skills/sync.test.ts`) still work. The native
+// `Crypto` interface exposes `subtle` as a read-only getter; copying the
+// fields onto a plain object preserves call behaviour while letting tests
+// reassign the property.
+if (typeof globalThis.crypto === "undefined" || !globalThis.crypto.subtle) {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { webcrypto } = require("node:crypto")
+  const mutableCrypto: {
+    subtle: typeof webcrypto.subtle
+    getRandomValues: typeof webcrypto.getRandomValues
+    randomUUID: typeof webcrypto.randomUUID
+  } = {
+    subtle: webcrypto.subtle,
+    getRandomValues: webcrypto.getRandomValues.bind(webcrypto),
+    randomUUID: webcrypto.randomUUID.bind(webcrypto),
+  }
+  Object.defineProperty(globalThis, "crypto", {
+    value: mutableCrypto,
+    configurable: true,
+    writable: true,
+  })
+}
+
 // jsdom omits the WHATWG Streams globals (TransformStream / ReadableStream /
 // WritableStream). Several ported HTTP clients (undici under
 // `@qdrant/js-client-rest`, `pdfjs-dist` workers, the AI SDK) construct these
