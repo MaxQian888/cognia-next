@@ -1,0 +1,149 @@
+/**
+ * Coverage for `system-prompt-template.ts`. Pure assembly so the tests
+ * focus on segment ordering, optional-section behaviour, truncation
+ * rules, and metadata payload.
+ */
+
+import { applySystemPromptTemplate } from "./system-prompt-template"
+import type { ProfileEntity, StyleSample, TwinChunk } from "@/types/twin"
+
+function makeChunk(id: string, content = "the chunk body"): TwinChunk {
+  return {
+    id,
+    twinId: "twin_a",
+    sourceId: "src_1",
+    content,
+    contentRedacted: content,
+    charStart: 0,
+    charEnd: content.length,
+    vectorBackend: "qdrant",
+    vectorCollection: "c",
+    vectorDocId: `vec_${id}`,
+    strategy: "paragraph",
+    tokenCount: 1,
+    metadata: {},
+    createdAt: 1,
+  }
+}
+
+function makeSample(id: string, label: string, original: string, tone: string[] = []): StyleSample {
+  return {
+    id,
+    contextLabel: label,
+    original,
+    summary: original.slice(0, 30),
+    sourceChunkId: "c1",
+    tone,
+    addedAt: 1,
+    addedBy: "distill",
+  }
+}
+
+describe("applySystemPromptTemplate", () => {
+  it("emits only the identity block when no other sections are populated", () => {
+    const out = applySystemPromptTemplate({
+      twinName: "Alice",
+      entities: [],
+      retrievedChunks: [],
+      styleSamples: [],
+    })
+    expect(out.systemPrompt).toContain("You are Alice.")
+    expect(out.systemPrompt).not.toContain("## Relevant historical material")
+    expect(out.systemPrompt).not.toContain("## Style examples")
+    expect(out.metadata.twinName).toBe("Alice")
+    expect(out.metadata.retrievedChunkIds).toEqual([])
+    expect(out.metadata.styleSampleIds).toEqual([])
+  })
+
+  it("places the original character prompt first, before identity", () => {
+    const out = applySystemPromptTemplate({
+      baseSystemPrompt: "ALPHA",
+      twinName: "Alice",
+      entities: [],
+      retrievedChunks: [],
+      styleSamples: [],
+    })
+    const alphaIdx = out.systemPrompt.indexOf("ALPHA")
+    const identityIdx = out.systemPrompt.indexOf("You are Alice.")
+    expect(alphaIdx).toBeGreaterThanOrEqual(0)
+    expect(alphaIdx).toBeLessThan(identityIdx)
+  })
+
+  it("renders entity dictionary with role priority + max-shown cap", () => {
+    const entities: ProfileEntity[] = [
+      { name: "X-service", aliases: ["x-svc"], role: "system", firstSeenChunkId: "c1" },
+      { name: "Bob", aliases: [], role: "person", firstSeenChunkId: "c1" },
+      { name: "ProjectX", aliases: [], role: "project", firstSeenChunkId: "c1" },
+      { name: "concept-1", aliases: [], role: "concept", firstSeenChunkId: "c1" },
+      { name: "concept-2", aliases: [], role: "concept", firstSeenChunkId: "c1" },
+    ]
+    const out = applySystemPromptTemplate({
+      twinName: "Alice",
+      entities,
+      retrievedChunks: [],
+      styleSamples: [],
+      maxEntitiesShown: 3,
+    })
+    expect(out.systemPrompt).toMatch(/Person: Bob[\s\S]*Project: ProjectX[\s\S]*System: X-service/)
+    // Max 3 entries, so concept entries are dropped.
+    expect(out.systemPrompt).not.toContain("concept-1")
+  })
+
+  it("truncates a long voice summary with an ellipsis", () => {
+    const long = "x".repeat(500)
+    const out = applySystemPromptTemplate({
+      twinName: "Alice",
+      voiceSummary: long,
+      entities: [],
+      retrievedChunks: [],
+      styleSamples: [],
+      maxVoiceSummary: 100,
+    })
+    expect(out.systemPrompt).toContain("…")
+    expect(out.systemPrompt).not.toContain("x".repeat(101))
+  })
+
+  it("emits retrieved chunks with score and source title", () => {
+    const out = applySystemPromptTemplate({
+      twinName: "Alice",
+      entities: [],
+      retrievedChunks: [
+        { chunk: makeChunk("c1", "first body"), score: 0.92, sourceTitle: "Onboarding doc" },
+        { chunk: makeChunk("c2", "second body"), score: 0.81 },
+      ],
+      styleSamples: [],
+    })
+    expect(out.systemPrompt).toContain("## Relevant historical material")
+    expect(out.systemPrompt).toContain("Onboarding doc (score 0.92)")
+    expect(out.systemPrompt).toContain("Unknown source")
+    expect(out.metadata.retrievedChunkIds).toEqual(["c1", "c2"])
+  })
+
+  it("emits style samples with tone tags", () => {
+    const out = applySystemPromptTemplate({
+      twinName: "Alice",
+      entities: [],
+      retrievedChunks: [],
+      styleSamples: [
+        makeSample("ss_1", "rejection", "Sorry, can't do that.", ["concise", "polite"]),
+        makeSample("ss_2", "approval", "Yes — happy to help."),
+      ],
+    })
+    expect(out.systemPrompt).toContain("## Style examples")
+    expect(out.systemPrompt).toContain("Sample 1 — rejection [concise, polite]")
+    expect(out.systemPrompt).toContain("Sample 2 — approval")
+    expect(out.metadata.styleSampleIds).toEqual(["ss_1", "ss_2"])
+  })
+
+  it("omits empty optional sections so headings don't dangle", () => {
+    const out = applySystemPromptTemplate({
+      twinName: "Alice",
+      voiceSummary: "concise",
+      entities: [],
+      retrievedChunks: [],
+      styleSamples: [],
+    })
+    expect(out.systemPrompt).toContain("Voice and tone:")
+    expect(out.systemPrompt).not.toMatch(/People, teams[\s\S]*\n\n$/)
+  })
+})

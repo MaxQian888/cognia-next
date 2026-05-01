@@ -82,9 +82,11 @@ describe("runStyleAgent", () => {
 
   it("respects the maxChunks cap", async () => {
     const chunks = Array.from({ length: 100 }, (_, i) => makeChunk(`c${i}`, `body ${i}`))
-    const completeMock = jest.fn(async () => `{"samples": []}`)
+    const completeMock = jest.fn(async (_prompt: string) => `{"samples": []}`)
     await runStyleAgent({ complete: completeMock }, { chunks, maxChunks: 5 })
-    const promptArg = completeMock.mock.calls[0][0]
+    const calls = completeMock.mock.calls
+    expect(calls.length).toBeGreaterThan(0)
+    const promptArg: string = calls[0][0]
     // The prompt should only contain the first 5 chunk ids.
     expect(promptArg).toContain("[c0]")
     expect(promptArg).toContain("[c4]")
