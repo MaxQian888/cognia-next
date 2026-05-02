@@ -1,23 +1,49 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
+import { invoke } from "@tauri-apps/api/core"
+import { appDataDir } from "@tauri-apps/api/path"
+import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { Badge } from "@/components/ui/badge"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { countTwinChunksByTwin } from "@/lib/db/twin-chunks"
 import { listTwinSourcesByTwin } from "@/lib/db/twin-sources"
 import { getTwinProfile } from "@/lib/db/twin-profile"
 import { observeTwinRuntimeSettings, saveTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
+import { isTauri } from "@/lib/utils"
+import { revealInExplorer } from "@/lib/tauri/opener"
+import { verifyVectorBackendReadiness } from "@/lib/vector/readiness"
+import type { StorageBackendReadinessState } from "@/lib/storage/persistence/types"
 import {
   DEFAULT_TWIN_RUNTIME_SETTINGS,
   type TwinRuntimeSettings,
   type VectorBackend,
 } from "@/types/twin"
 
-const VECTOR_BACKENDS: VectorBackend[] = ["qdrant", "pinecone", "weaviate", "milvus", "chroma"]
+const VECTOR_BACKENDS: VectorBackend[] = [
+  "qdrant",
+  "pinecone",
+  "weaviate",
+  "milvus",
+  "chroma",
+  "native",
+]
 
 export function TwinSettingsTab({ twinId }: { twinId: string }) {
   const sourceCount = useLiveQuery(
@@ -67,6 +93,13 @@ function RuntimeConfigCard() {
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<number | null>(null)
   const dirtyRef = useRef(false)
+
+  // Hide the "native" option when not running under Tauri — it requires
+  // the Tauri IPC bridge and will never work in the web browser.
+  const visibleBackends = useMemo(
+    () => VECTOR_BACKENDS.filter((b) => b !== "native" || isTauri()),
+    []
+  )
 
   // Sync the form whenever Dexie reports new settings AND the user hasn't
   // started editing locally. Side-effects only — no setState during render.
@@ -184,9 +217,9 @@ function RuntimeConfigCard() {
               })
             }
           >
-            {VECTOR_BACKENDS.map((b) => (
+            {visibleBackends.map((b) => (
               <option key={b} value={b}>
-                {b}
+                {b === "native" ? "Native (Tauri local)" : b}
               </option>
             ))}
           </select>
@@ -319,7 +352,131 @@ function BackendSpecificFields({ settings, onPatch }: BackendFieldsProps) {
       </div>
     )
   }
+  if (backend === "native") {
+    return <NativeBackendFields settings={settings} />
+  }
   return null
+}
+
+// ─── Native backend controls ──────────────────────────────────────────────────
+
+type ReadinessState = StorageBackendReadinessState | null
+
+function stateVariant(state: ReadinessState): "default" | "secondary" | "destructive" | "outline" {
+  if (state === "operational") return "default"
+  if (state === "reachable" || state === "configured") return "secondary"
+  if (state === "unconfigured") return "outline"
+  return "destructive"
+}
+
+function stateLabel(state: ReadinessState): string {
+  if (!state) return ""
+  return state.charAt(0).toUpperCase() + state.slice(1)
+}
+
+function NativeBackendFields({ settings }: { settings: TwinRuntimeSettings }) {
+  const [testLoading, setTestLoading] = useState(false)
+  const [testState, setTestState] = useState<ReadinessState>(null)
+  const [testCode, setTestCode] = useState<string | undefined>(undefined)
+
+  const handleOpenFolder = async () => {
+    try {
+      const base = await appDataDir()
+      // Reveal the vectors.sqlite file — the OS file manager will highlight
+      // the file inside its containing folder (cognia/).
+      const filePath = `${base}cognia/vectors.sqlite`
+      await revealInExplorer(filePath)
+    } catch {
+      // No-op: if Tauri isn't available or the path doesn't exist yet, silently
+      // skip — the file might not exist until the first vector write.
+    }
+  }
+
+  const handleTestConnection = async () => {
+    setTestLoading(true)
+    setTestState(null)
+    setTestCode(undefined)
+    try {
+      const result = await verifyVectorBackendReadiness({
+        provider: "native",
+        embeddingConfig: {
+          provider: settings.embedding.provider,
+          model: settings.embedding.model,
+        },
+        embeddingApiKey: settings.embedding.apiKey,
+        native: {},
+      })
+      setTestState(result.state)
+      setTestCode(result.diagnostic?.code)
+    } catch {
+      setTestState("degraded")
+    } finally {
+      setTestLoading(false)
+    }
+  }
+
+  const handleReset = async () => {
+    try {
+      await invoke("vector_reset_store")
+      toast.success("Vector store reset. Reload the page to reinitialise the store.")
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      toast.error(`Reset failed: ${msg}`)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-muted-foreground text-xs">
+        Stores vectors locally in a SQLite file inside your app data folder. No external service
+        required.
+      </p>
+
+      {/* Open data folder */}
+      <Button variant="outline" size="sm" onClick={() => void handleOpenFolder()}>
+        Open data folder
+      </Button>
+
+      {/* Test connection */}
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void handleTestConnection()}
+          disabled={testLoading}
+        >
+          {testLoading ? "Testing…" : "Test connection"}
+        </Button>
+        {testState !== null && (
+          <Badge variant={stateVariant(testState)}>
+            {stateLabel(testState)}
+            {testCode ? ` — ${testCode}` : ""}
+          </Badge>
+        )}
+      </div>
+
+      {/* Reset vector store (two-step confirm) */}
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button variant="destructive" size="sm">
+            Reset vector store
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset vector store?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This deletes the local vectors.sqlite file. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void handleReset()}>Confirm reset</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  )
 }
 
 interface FieldDef {
