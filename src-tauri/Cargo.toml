@@ -50,6 +50,12 @@ ignore = "0.4"
 async-trait = "0.1"
 parking_lot = "0.12"
 rusqlite = { version = "0.32", features = ["bundled"] }
+# Native vector store backend — sqlite-vec FFI is loaded as a SQLite
+# auto-extension before any connection opens (mirrors the pattern in the
+# crate's own integration test). The crate itself has no rusqlite dep, so
+# its only constraint is that the host SQLite supports loadable extensions
+# (the `bundled` feature does).
+sqlite-vec = "0.1"
 
 gray_matter = { version = "0.2", default-features = false, features = ["yaml"] }
 wait-timeout = "0.2"

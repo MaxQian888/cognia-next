@@ -13,6 +13,7 @@ mod settings;
 mod shell;
 mod skills;
 mod tts;
+mod vector;
 
 mod window_behavior;
 
@@ -153,6 +154,9 @@ pub fn run() {
         .manage(scheduler::SchedulerState::new(
             dirs::data_dir().map(|d| d.join("cognia").join("scheduler_metadata.sqlite")),
         ))
+        .manage(vector::VectorState::new(
+            dirs::data_dir().map(|d| d.join("cognia").join("vectors.sqlite")),
+        ))
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             claude::commands::claude_send,
@@ -243,6 +247,17 @@ pub fn run() {
             scheduler::commands::scheduler_cancel_confirmation,
             scheduler::commands::scheduler_request_elevation,
             scheduler::commands::scheduler_get_pending_confirmations,
+            vector::commands::vector_create_collection,
+            vector::commands::vector_delete_collection,
+            vector::commands::vector_list_collections,
+            vector::commands::vector_get_collection,
+            vector::commands::vector_upsert_points,
+            vector::commands::vector_delete_points,
+            vector::commands::vector_delete_all_points,
+            vector::commands::vector_get_points,
+            vector::commands::vector_search_points,
+            vector::commands::vector_truncate_collection,
+            vector::commands::vector_reset_store,
             a2ui_bridge::commands::a2ui_bridge_runtime_paths,
         ])
         .setup(|app| {

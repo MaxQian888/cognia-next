@@ -1,0 +1,1313 @@
+//! `VectorStore` — the SQLite-backed native vector backend.
+//!
+//! Mirrors `scheduler::metadata_store::SchedulerMetadataStore`:
+//! - `parking_lot::Mutex<Connection>` for in-process serialisation.
+//! - `WAL + NORMAL` pragmas applied on connection open.
+//! - Migrations applied via `execute_batch` inside per-version transactions.
+//!
+//! The `sqlite-vec` extension is registered as a SQLite *auto-extension* via
+//! `rusqlite::ffi::sqlite3_auto_extension` exactly once per process on the
+//! first `VectorStore::new` call (guarded by `Once`). This matches the
+//! pattern in the upstream crate's own `tests/integration_test.rs`.
+
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Once;
+
+use chrono::Utc;
+use parking_lot::Mutex;
+use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension, Row};
+
+use super::error::{Result, VectorError};
+use super::filters::build_where;
+use super::schema::MIGRATIONS;
+use super::types::{Collection, Filter, FilterMode, Point, SearchHit, SearchResponse};
+
+/// Module-level guard so the auto-extension is registered at most once per
+/// process. Calling `sqlite3_auto_extension` more than once with the same
+/// pointer is a no-op upstream, but the `Once` keeps the FFI call out of
+/// the hot path entirely.
+static REGISTER_VEC_EXTENSION: Once = Once::new();
+
+fn register_vec_extension() {
+    REGISTER_VEC_EXTENSION.call_once(|| {
+        // SAFETY: the upstream crate documents this exact pattern. The
+        // function pointer signature is the C-ABI sqlite3 extension entry
+        // point; rusqlite's `ffi::sqlite3_auto_extension` accepts that.
+        unsafe {
+            rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
+                sqlite_vec::sqlite3_vec_init as *const (),
+            )));
+        }
+    });
+}
+
+fn map_sql_err(err: rusqlite::Error) -> VectorError {
+    VectorError::Sqlite(err.to_string())
+}
+
+fn now_iso() -> String {
+    Utc::now().to_rfc3339()
+}
+
+fn vec_table_name(collection_id: i64) -> String {
+    format!("vec_{}", collection_id)
+}
+
+/// Convert a `Vec<f32>` into the byte form `vec0` expects when bound as a
+/// blob via `?`. sqlite-vec accepts either JSON arrays (as text) or raw
+/// little-endian f32 blobs; the blob path is faster and avoids string
+/// parsing for large vectors.
+fn vector_to_blob(vec: &[f32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(vec.len() * 4);
+    for f in vec {
+        out.extend_from_slice(&f.to_le_bytes());
+    }
+    out
+}
+
+pub struct VectorStore {
+    conn: Mutex<Connection>,
+    path: PathBuf,
+}
+
+impl VectorStore {
+    /// Open (or create) the SQLite file at `path`, register the sqlite-vec
+    /// extension (idempotent), apply pragmas, and run pending migrations.
+    pub fn new(path: PathBuf) -> Result<Self> {
+        register_vec_extension();
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let conn = Connection::open(&path).map_err(map_sql_err)?;
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;\n\
+             PRAGMA synchronous = NORMAL;\n\
+             PRAGMA foreign_keys = ON;",
+        )
+        .map_err(map_sql_err)?;
+
+        Self::run_migrations(&conn)?;
+
+        Ok(Self {
+            conn: Mutex::new(conn),
+            path,
+        })
+    }
+
+    fn run_migrations(conn: &Connection) -> Result<()> {
+        // The first migration creates `migration_meta`, so we can't read
+        // the version until v1 has run. The bootstrap below is idempotent
+        // because every CREATE TABLE / CREATE INDEX is `IF NOT EXISTS`.
+        let current_version: u32 = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='migration_meta'")
+            .map_err(map_sql_err)?
+            .exists([])
+            .map_err(map_sql_err)?
+            .then(|| -> Result<u32> {
+                conn.query_row("SELECT COALESCE(MAX(version), 0) FROM migration_meta", [], |r| {
+                    r.get::<_, i64>(0).map(|n| n as u32)
+                })
+                .map_err(map_sql_err)
+            })
+            .transpose()?
+            .unwrap_or(0);
+
+        for (version, sql) in MIGRATIONS {
+            if *version <= current_version {
+                continue;
+            }
+            conn.execute_batch("BEGIN;").map_err(map_sql_err)?;
+            let result = (|| -> Result<()> {
+                conn.execute_batch(sql).map_err(|e| {
+                    VectorError::Migration(format!("v{}: {}", version, e))
+                })?;
+                conn.execute(
+                    "INSERT OR REPLACE INTO migration_meta (version, applied_at) VALUES (?1, ?2)",
+                    params![*version as i64, now_iso()],
+                )
+                .map_err(map_sql_err)?;
+                Ok(())
+            })();
+            match result {
+                Ok(()) => {
+                    conn.execute_batch("COMMIT;").map_err(map_sql_err)?;
+                }
+                Err(e) => {
+                    let _ = conn.execute_batch("ROLLBACK;");
+                    return Err(e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Path of the underlying SQLite file. Used by `reset_store` to delete
+    /// the WAL/SHM siblings.
+    #[allow(dead_code)]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    // -----------------------------------------------------------------
+    // Collections
+    // -----------------------------------------------------------------
+
+    pub fn create_collection(
+        &self,
+        name: &str,
+        dimension: usize,
+        description: Option<&str>,
+        embedding_model: Option<&str>,
+        embedding_provider: Option<&str>,
+        metadata: Option<&serde_json::Value>,
+    ) -> Result<()> {
+        if name.trim().is_empty() {
+            return Err(VectorError::InvalidArgument(
+                "collection name cannot be empty".into(),
+            ));
+        }
+        if dimension == 0 {
+            return Err(VectorError::InvalidArgument(
+                "dimension must be > 0".into(),
+            ));
+        }
+
+        let conn = self.conn.lock();
+
+        // Reject duplicate names with a structured error rather than a
+        // raw UNIQUE-constraint message.
+        let existing: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM collections WHERE name = ?1",
+                params![name],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?;
+        if existing.is_some() {
+            return Err(VectorError::CollectionAlreadyExists(name.to_string()));
+        }
+
+        let metadata_json = metadata
+            .map(|v| serde_json::to_string(v))
+            .transpose()
+            .map_err(|e| VectorError::Serialization(e.to_string()))?;
+        let now = now_iso();
+
+        conn.execute(
+            "INSERT INTO collections \
+             (name, dim, description, embedding_model, embedding_provider, \
+              metadata_json, point_count, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?7)",
+            params![
+                name,
+                dimension as i64,
+                description,
+                embedding_model,
+                embedding_provider,
+                metadata_json,
+                now,
+            ],
+        )
+        .map_err(map_sql_err)?;
+
+        let id = conn.last_insert_rowid();
+        let table = vec_table_name(id);
+        // sqlite-vec accepts `vec0(embedding float[<dim>])` syntax. The
+        // identifier is interpolated (built from a numeric id), the
+        // dimension is interpolated as a number; both safe.
+        let create_vec = format!(
+            "CREATE VIRTUAL TABLE {} USING vec0(embedding float[{}])",
+            table, dimension
+        );
+        conn.execute_batch(&create_vec).map_err(map_sql_err)?;
+
+        Ok(())
+    }
+
+    pub fn delete_collection(&self, name: &str) -> Result<()> {
+        let conn = self.conn.lock();
+        let id = Self::lookup_collection_id(&conn, name)?;
+        // Foreign-key cascade clears `points` rows; we still drop the
+        // virtual table explicitly because vec0 isn't FK-aware.
+        conn.execute("DELETE FROM collections WHERE id = ?1", params![id])
+            .map_err(map_sql_err)?;
+        let drop_vec = format!("DROP TABLE IF EXISTS {}", vec_table_name(id));
+        conn.execute_batch(&drop_vec).map_err(map_sql_err)?;
+        Ok(())
+    }
+
+    pub fn list_collections(&self) -> Result<Vec<Collection>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, dim, description, embedding_model, embedding_provider, \
+                 metadata_json, point_count, created_at, updated_at \
+                 FROM collections ORDER BY name ASC",
+            )
+            .map_err(map_sql_err)?;
+        let rows = stmt
+            .query_map([], Self::row_to_collection)
+            .map_err(map_sql_err)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(map_sql_err)?);
+        }
+        Ok(out)
+    }
+
+    pub fn get_collection(&self, name: &str) -> Result<Collection> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT id, name, dim, description, embedding_model, embedding_provider, \
+             metadata_json, point_count, created_at, updated_at \
+             FROM collections WHERE name = ?1",
+            params![name],
+            Self::row_to_collection,
+        )
+        .optional()
+        .map_err(map_sql_err)?
+        .ok_or_else(|| VectorError::CollectionNotFound(name.to_string()))
+    }
+
+    fn row_to_collection(row: &Row<'_>) -> rusqlite::Result<Collection> {
+        let _id: i64 = row.get(0)?;
+        let name: String = row.get(1)?;
+        let dim: i64 = row.get(2)?;
+        let description: Option<String> = row.get(3)?;
+        let embedding_model: Option<String> = row.get(4)?;
+        let embedding_provider: Option<String> = row.get(5)?;
+        let metadata_json: Option<String> = row.get(6)?;
+        let point_count: i64 = row.get(7)?;
+        let created_at: String = row.get(8)?;
+        let updated_at: String = row.get(9)?;
+
+        let metadata = metadata_json
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(|err| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    6,
+                    rusqlite::types::Type::Text,
+                    Box::new(err),
+                )
+            })?;
+
+        Ok(Collection {
+            name,
+            dimension: dim as usize,
+            description,
+            embedding_model,
+            embedding_provider,
+            metadata,
+            document_count: point_count.max(0) as usize,
+            created_at,
+            updated_at,
+        })
+    }
+
+    fn lookup_collection_id(conn: &Connection, name: &str) -> Result<i64> {
+        conn.query_row(
+            "SELECT id FROM collections WHERE name = ?1",
+            params![name],
+            |r| r.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(map_sql_err)?
+        .ok_or_else(|| VectorError::CollectionNotFound(name.to_string()))
+    }
+
+    fn lookup_collection_id_and_dim(conn: &Connection, name: &str) -> Result<(i64, usize)> {
+        conn.query_row(
+            "SELECT id, dim FROM collections WHERE name = ?1",
+            params![name],
+            |r| {
+                let id: i64 = r.get(0)?;
+                let dim: i64 = r.get(1)?;
+                Ok((id, dim as usize))
+            },
+        )
+        .optional()
+        .map_err(map_sql_err)?
+        .ok_or_else(|| VectorError::CollectionNotFound(name.to_string()))
+    }
+
+    fn refresh_point_count(conn: &Connection, collection_id: i64) -> Result<()> {
+        conn.execute(
+            "UPDATE collections \
+             SET point_count = (SELECT COUNT(*) FROM points WHERE collection_id = ?1), \
+                 updated_at = ?2 \
+             WHERE id = ?1",
+            params![collection_id, now_iso()],
+        )
+        .map_err(map_sql_err)?;
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------
+    // Points — write
+    // -----------------------------------------------------------------
+
+    pub fn upsert_points(&self, collection: &str, points: &[Point]) -> Result<()> {
+        if points.is_empty() {
+            return Ok(());
+        }
+
+        let conn = self.conn.lock();
+        let (collection_id, dim) = Self::lookup_collection_id_and_dim(&conn, collection)?;
+
+        // Pre-validate dims so we don't open a transaction we'll have to
+        // roll back. Returns the FIRST mismatch (matches scheduler's
+        // posture of failing fast).
+        for p in points {
+            if p.vector.len() != dim {
+                return Err(VectorError::DimensionMismatch {
+                    collection: collection.to_string(),
+                    expected: dim,
+                    actual: p.vector.len(),
+                });
+            }
+        }
+
+        let table = vec_table_name(collection_id);
+        // `vec0` virtual tables don't support UPSERT, so for points that
+        // already exist we delete-then-insert. We still want a single
+        // stable rowid per (collection_id, id), so the points-table
+        // upsert uses ON CONFLICT … DO UPDATE … RETURNING rowid; the
+        // vector side splits into DELETE + INSERT.
+        let upsert_point_sql =
+            "INSERT INTO points (id, collection_id, content, payload_json) \
+             VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(collection_id, id) DO UPDATE SET \
+             content = excluded.content, payload_json = excluded.payload_json \
+             RETURNING rowid";
+        let delete_vec_sql = format!("DELETE FROM {table} WHERE rowid = ?1");
+        let insert_vec_sql =
+            format!("INSERT INTO {table} (rowid, embedding) VALUES (?1, ?2)");
+
+        conn.execute_batch("BEGIN;").map_err(map_sql_err)?;
+        let result = (|| -> Result<()> {
+            for p in points {
+                let (content, payload_json) = split_payload(&p.payload);
+                let rowid: i64 = conn
+                    .query_row(
+                        upsert_point_sql,
+                        params![p.id, collection_id, content, payload_json],
+                        |r| r.get(0),
+                    )
+                    .map_err(map_sql_err)?;
+
+                let blob = vector_to_blob(&p.vector);
+                // Idempotent: delete any prior row for this rowid (no-op
+                // on first insert), then insert the fresh embedding.
+                conn.execute(&delete_vec_sql, params![rowid])
+                    .map_err(map_sql_err)?;
+                conn.execute(&insert_vec_sql, params![rowid, blob])
+                    .map_err(map_sql_err)?;
+            }
+            Self::refresh_point_count(&conn, collection_id)?;
+            Ok(())
+        })();
+
+        match result {
+            Ok(()) => {
+                conn.execute_batch("COMMIT;").map_err(map_sql_err)?;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK;");
+                Err(e)
+            }
+        }
+    }
+
+    pub fn delete_points(&self, collection: &str, ids: &[String]) -> Result<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let conn = self.conn.lock();
+        let collection_id = Self::lookup_collection_id(&conn, collection)?;
+        let table = vec_table_name(collection_id);
+
+        conn.execute_batch("BEGIN;").map_err(map_sql_err)?;
+        let result = (|| -> Result<()> {
+            for id in ids {
+                let rowid: Option<i64> = conn
+                    .query_row(
+                        "SELECT rowid FROM points WHERE collection_id = ?1 AND id = ?2",
+                        params![collection_id, id],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                    .map_err(map_sql_err)?;
+                if let Some(r) = rowid {
+                    conn.execute(
+                        "DELETE FROM points WHERE rowid = ?1",
+                        params![r],
+                    )
+                    .map_err(map_sql_err)?;
+                    let del_vec = format!("DELETE FROM {table} WHERE rowid = ?1");
+                    conn.execute(&del_vec, params![r]).map_err(map_sql_err)?;
+                }
+            }
+            Self::refresh_point_count(&conn, collection_id)?;
+            Ok(())
+        })();
+
+        match result {
+            Ok(()) => {
+                conn.execute_batch("COMMIT;").map_err(map_sql_err)?;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK;");
+                Err(e)
+            }
+        }
+    }
+
+    pub fn delete_all_points(&self, collection: &str) -> Result<usize> {
+        let conn = self.conn.lock();
+        let collection_id = Self::lookup_collection_id(&conn, collection)?;
+        let table = vec_table_name(collection_id);
+
+        conn.execute_batch("BEGIN;").map_err(map_sql_err)?;
+        let result = (|| -> Result<usize> {
+            let count = conn
+                .execute(
+                    "DELETE FROM points WHERE collection_id = ?1",
+                    params![collection_id],
+                )
+                .map_err(map_sql_err)?;
+            // `DELETE FROM vec_<id>` clears the virtual table; no WHERE
+            // needed because we own all rows in this per-collection table.
+            let clear = format!("DELETE FROM {table}");
+            conn.execute_batch(&clear).map_err(map_sql_err)?;
+            Self::refresh_point_count(&conn, collection_id)?;
+            Ok(count)
+        })();
+
+        match result {
+            Ok(count) => {
+                conn.execute_batch("COMMIT;").map_err(map_sql_err)?;
+                Ok(count)
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK;");
+                Err(e)
+            }
+        }
+    }
+
+    pub fn truncate_collection(&self, name: &str) -> Result<()> {
+        // Same as delete_all_points but with a void return per the JS
+        // `IVectorStore.truncateCollection` signature.
+        self.delete_all_points(name)?;
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------
+    // Points — read
+    // -----------------------------------------------------------------
+
+    pub fn get_points(&self, collection: &str, ids: &[String]) -> Result<Vec<Point>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock();
+        let collection_id = Self::lookup_collection_id(&conn, collection)?;
+        let table = vec_table_name(collection_id);
+
+        let placeholders = vec!["?"; ids.len()].join(", ");
+        let sql = format!(
+            "SELECT p.id, p.content, p.payload_json, v.embedding \
+             FROM points p JOIN {table} v ON v.rowid = p.rowid \
+             WHERE p.collection_id = ? AND p.id IN ({placeholders})"
+        );
+
+        let mut stmt = conn.prepare(&sql).map_err(map_sql_err)?;
+        let mut params_vec: Vec<Value> = Vec::with_capacity(ids.len() + 1);
+        params_vec.push(Value::Integer(collection_id));
+        for id in ids {
+            params_vec.push(Value::Text(id.clone()));
+        }
+
+        let rows = stmt
+            .query_map(params_from_iter(params_vec), |row| {
+                let id: String = row.get(0)?;
+                let content: Option<String> = row.get(1)?;
+                let payload_json: Option<String> = row.get(2)?;
+                let blob: Vec<u8> = row.get(3)?;
+                Ok(materialise_point(id, content, payload_json, &blob))
+            })
+            .map_err(map_sql_err)?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(map_sql_err)?);
+        }
+        Ok(out)
+    }
+
+    // -----------------------------------------------------------------
+    // Search
+    // -----------------------------------------------------------------
+
+    /// L2 distance from sqlite-vec → score in `[0, 1]`. All embedding
+    /// providers in this project produce unit-normalised vectors
+    /// (OpenAI, Cohere, Google, Mistral all guarantee this), so the
+    /// maximum L2 distance between two unit vectors is 2.0
+    /// (antipodal). `score = 1 - distance / 2` therefore maps `[0, 2]`
+    /// → `[1, 0]`. See spec §"Score convention".
+    fn distance_to_score(distance: f32) -> f32 {
+        let score = 1.0 - distance / 2.0;
+        score.clamp(0.0, 1.0)
+    }
+
+    fn score_to_max_distance(score_threshold: f32) -> f32 {
+        // Inverse of `distance_to_score`. score >= threshold ⇔
+        // distance <= (1 - threshold) * 2.
+        ((1.0 - score_threshold) * 2.0).max(0.0)
+    }
+
+    pub fn search_points(
+        &self,
+        collection: &str,
+        vector: &[f32],
+        top_k: usize,
+        score_threshold: Option<f32>,
+        offset: Option<usize>,
+        limit: Option<usize>,
+        filters: Option<&[Filter]>,
+        filter_mode: Option<FilterMode>,
+    ) -> Result<SearchResponse> {
+        if top_k == 0 {
+            return Err(VectorError::InvalidArgument(
+                "top_k must be > 0".into(),
+            ));
+        }
+
+        let conn = self.conn.lock();
+        let (collection_id, dim) = Self::lookup_collection_id_and_dim(&conn, collection)?;
+
+        if vector.len() != dim {
+            return Err(VectorError::DimensionMismatch {
+                collection: collection.to_string(),
+                expected: dim,
+                actual: vector.len(),
+            });
+        }
+
+        let table = vec_table_name(collection_id);
+        let mode = filter_mode.unwrap_or_default();
+        let (where_fragment, where_params) = match filters {
+            Some(fs) => build_where(fs, mode),
+            None => (String::new(), Vec::new()),
+        };
+
+        let max_distance = score_threshold.map(Self::score_to_max_distance);
+
+        let mut sql = format!(
+            "SELECT p.id, p.content, p.payload_json, vec_distance_l2(v.embedding, ?) AS distance \
+             FROM points p JOIN {table} v ON v.rowid = p.rowid \
+             WHERE p.collection_id = ?"
+        );
+        if !where_fragment.is_empty() {
+            sql.push_str(" AND ");
+            sql.push_str(&where_fragment);
+        }
+        if max_distance.is_some() {
+            sql.push_str(" AND distance <= ?");
+        }
+        sql.push_str(" ORDER BY distance ASC");
+
+        let effective_limit = limit.unwrap_or(top_k).min(top_k);
+        let effective_offset = offset.unwrap_or(0);
+        sql.push_str(" LIMIT ? OFFSET ?");
+
+        // Bind order: [query vector blob, collection_id, ...filter params,
+        // (optional max_distance), limit, offset].
+        let mut params_vec: Vec<Value> = Vec::new();
+        params_vec.push(Value::Blob(vector_to_blob(vector)));
+        params_vec.push(Value::Integer(collection_id));
+        for p in where_params {
+            params_vec.push(p);
+        }
+        if let Some(d) = max_distance {
+            params_vec.push(Value::Real(d as f64));
+        }
+        params_vec.push(Value::Integer(effective_limit as i64));
+        params_vec.push(Value::Integer(effective_offset as i64));
+
+        let mut stmt = conn.prepare(&sql).map_err(map_sql_err)?;
+        let rows = stmt
+            .query_map(params_from_iter(params_vec), |row| {
+                let id: String = row.get(0)?;
+                let content: Option<String> = row.get(1)?;
+                let payload_json: Option<String> = row.get(2)?;
+                let distance: f64 = row.get(3)?;
+                let payload = payload_json
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+                let mut payload = payload;
+                if let Some(c) = content.as_deref() {
+                    if let Some(serde_json::Value::Object(ref mut map)) = payload {
+                        map.entry("content".to_string())
+                            .or_insert(serde_json::Value::String(c.to_string()));
+                    } else if payload.is_none() {
+                        let mut m = serde_json::Map::new();
+                        m.insert(
+                            "content".to_string(),
+                            serde_json::Value::String(c.to_string()),
+                        );
+                        payload = Some(serde_json::Value::Object(m));
+                    }
+                }
+                Ok(SearchHit {
+                    id,
+                    score: Self::distance_to_score(distance as f32),
+                    payload,
+                    content,
+                })
+            })
+            .map_err(map_sql_err)?;
+
+        let mut hits = Vec::new();
+        for r in rows {
+            hits.push(r.map_err(map_sql_err)?);
+        }
+
+        // For pagination context, fetch the unfiltered-by-distance count.
+        // Cheap because it's a single COUNT(*) over the same JOIN.
+        let mut count_sql = format!(
+            "SELECT COUNT(*) FROM points p JOIN {table} v ON v.rowid = p.rowid \
+             WHERE p.collection_id = ?"
+        );
+        let mut count_params: Vec<Value> = vec![Value::Integer(collection_id)];
+        if !where_fragment.is_empty() {
+            count_sql.push_str(" AND ");
+            count_sql.push_str(&where_fragment);
+            // Re-build filter params; build_where is deterministic for the
+            // same input so this is safe.
+            let mode_again = filter_mode.unwrap_or_default();
+            let (_, ps) = match filters {
+                Some(fs) => build_where(fs, mode_again),
+                None => (String::new(), Vec::new()),
+            };
+            for p in ps {
+                count_params.push(p);
+            }
+        }
+        let total: i64 = conn
+            .query_row(&count_sql, params_from_iter(count_params), |r| r.get(0))
+            .map_err(map_sql_err)?;
+
+        Ok(SearchResponse {
+            results: hits,
+            total: total.max(0) as usize,
+            offset: effective_offset,
+            limit: effective_limit,
+        })
+    }
+
+    // -----------------------------------------------------------------
+    // Admin
+    // -----------------------------------------------------------------
+
+    /// Close the current connection, delete the SQLite file (and its
+    /// `-wal` / `-shm` siblings), then re-open with the same schema. The
+    /// `&mut self` keeps callers honest — only `VectorState` mutates and
+    /// it's guarded by an outer lock.
+    pub fn reset_store(&mut self) -> Result<()> {
+        // Drop the connection by replacing it with a sentinel. We can't
+        // actually drop the inner `Connection` without taking ownership,
+        // so we replace the whole `Mutex` after re-open.
+        let path = self.path.clone();
+
+        let wal = with_extension(&path, "sqlite-wal");
+        let shm = with_extension(&path, "sqlite-shm");
+        let alt_wal = path.with_file_name(format!(
+            "{}-wal",
+            path.file_name().and_then(|n| n.to_str()).unwrap_or("")
+        ));
+        let alt_shm = path.with_file_name(format!(
+            "{}-shm",
+            path.file_name().and_then(|n| n.to_str()).unwrap_or("")
+        ));
+
+        // Replace conn with a fresh in-memory one so the old file handle
+        // is dropped before we try to delete the file (Windows in
+        // particular won't let us unlink an open file).
+        {
+            let mut guard = self.conn.lock();
+            *guard = Connection::open_in_memory().map_err(map_sql_err)?;
+        }
+
+        for p in [&path, &wal, &shm, &alt_wal, &alt_shm] {
+            if p.exists() {
+                fs::remove_file(p)?;
+            }
+        }
+
+        let fresh = Self::new(path)?;
+        // Move the fresh connection in-place. We take the lock briefly to
+        // swap; the path stays the same.
+        {
+            let mut guard = self.conn.lock();
+            let new_conn = std::mem::replace(
+                &mut *fresh.conn.lock(),
+                Connection::open_in_memory().map_err(map_sql_err)?,
+            );
+            *guard = new_conn;
+        }
+        Ok(())
+    }
+}
+
+fn with_extension(path: &Path, ext: &str) -> PathBuf {
+    path.with_extension(ext)
+}
+
+/// Pull `payload.content` out as the dedicated `points.content` column
+/// (so search can return it without re-parsing payload), keeping the rest
+/// of the payload as JSON.
+fn split_payload(payload: &Option<serde_json::Value>) -> (String, Option<String>) {
+    match payload {
+        Some(serde_json::Value::Object(map)) => {
+            let content = map
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            // Preserve the full payload — including content — in the
+            // JSON column too, so callers that only read payload_json see
+            // the same shape they sent.
+            let json = serde_json::to_string(&serde_json::Value::Object(map.clone()))
+                .unwrap_or_else(|_| "{}".to_string());
+            (content, Some(json))
+        }
+        Some(other) => {
+            let json = serde_json::to_string(other).unwrap_or_else(|_| "null".to_string());
+            (String::new(), Some(json))
+        }
+        None => (String::new(), None),
+    }
+}
+
+fn materialise_point(
+    id: String,
+    content: Option<String>,
+    payload_json: Option<String>,
+    blob: &[u8],
+) -> Point {
+    let mut payload = payload_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+    if let Some(c) = content.as_deref() {
+        if let Some(serde_json::Value::Object(ref mut map)) = payload {
+            map.entry("content".to_string())
+                .or_insert(serde_json::Value::String(c.to_string()));
+        } else if payload.is_none() && !c.is_empty() {
+            let mut m = serde_json::Map::new();
+            m.insert("content".to_string(), serde_json::Value::String(c.to_string()));
+            payload = Some(serde_json::Value::Object(m));
+        }
+    }
+
+    let mut vector = Vec::with_capacity(blob.len() / 4);
+    for chunk in blob.chunks_exact(4) {
+        let mut buf = [0u8; 4];
+        buf.copy_from_slice(chunk);
+        vector.push(f32::from_le_bytes(buf));
+    }
+
+    Point {
+        id,
+        vector,
+        payload,
+    }
+}
+
+// Allow `HashMap` use site to match `metadata` Option in tests below.
+#[allow(dead_code)]
+fn _hashmap_marker(_: HashMap<String, serde_json::Value>) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vector::types::FilterOp;
+    use serde_json::json;
+    use tempfile::tempdir;
+
+    fn open_store(name: &str) -> (tempfile::TempDir, VectorStore) {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join(name);
+        let store = VectorStore::new(path).expect("open");
+        (dir, store)
+    }
+
+    fn pt(id: &str, vec: Vec<f32>, payload: serde_json::Value) -> Point {
+        Point {
+            id: id.into(),
+            vector: vec,
+            payload: Some(payload),
+        }
+    }
+
+    #[test]
+    fn migrations_apply_on_fresh_db() {
+        let (_dir, store) = open_store("v.sqlite");
+        let conn = store.conn.lock();
+        let v: i64 = conn
+            .query_row("SELECT MAX(version) FROM migration_meta", [], |r| r.get(0))
+            .expect("query version");
+        assert_eq!(v, 1);
+    }
+
+    #[test]
+    fn migrations_idempotent_on_existing_db() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("v.sqlite");
+        let s1 = VectorStore::new(path.clone()).expect("open 1");
+        drop(s1);
+        let s2 = VectorStore::new(path).expect("open 2");
+        let conn = s2.conn.lock();
+        let v: i64 = conn
+            .query_row("SELECT MAX(version) FROM migration_meta", [], |r| r.get(0))
+            .expect("query version");
+        assert_eq!(v, 1);
+    }
+
+    #[test]
+    fn create_collection_creates_vec_virtual_table_with_correct_dim() {
+        let (_dir, store) = open_store("v.sqlite");
+        store
+            .create_collection("docs", 4, None, None, None, None)
+            .expect("create");
+        let conn = store.conn.lock();
+        let exists: bool = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='vec_1'")
+            .expect("prep")
+            .exists([])
+            .expect("query");
+        assert!(exists, "vec_<id> virtual table should exist");
+    }
+
+    #[test]
+    fn create_collection_rejects_duplicates() {
+        let (_dir, store) = open_store("v.sqlite");
+        store
+            .create_collection("docs", 4, None, None, None, None)
+            .expect("first");
+        let err = store
+            .create_collection("docs", 4, None, None, None, None)
+            .unwrap_err();
+        assert!(matches!(err, VectorError::CollectionAlreadyExists(_)));
+    }
+
+    #[test]
+    fn create_collection_validates_inputs() {
+        let (_dir, store) = open_store("v.sqlite");
+        let err = store
+            .create_collection("", 4, None, None, None, None)
+            .unwrap_err();
+        assert!(matches!(err, VectorError::InvalidArgument(_)));
+        let err = store
+            .create_collection("ok", 0, None, None, None, None)
+            .unwrap_err();
+        assert!(matches!(err, VectorError::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn list_and_get_collection() {
+        let (_dir, store) = open_store("v.sqlite");
+        store
+            .create_collection(
+                "docs",
+                3,
+                Some("desc"),
+                Some("model"),
+                Some("provider"),
+                Some(&json!({"k": "v"})),
+            )
+            .expect("create");
+        let list = store.list_collections().expect("list");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "docs");
+        assert_eq!(list[0].dimension, 3);
+        assert_eq!(list[0].embedding_model.as_deref(), Some("model"));
+
+        let one = store.get_collection("docs").expect("get");
+        assert_eq!(one.description.as_deref(), Some("desc"));
+        assert_eq!(one.metadata, Some(json!({"k": "v"})));
+
+        let missing = store.get_collection("nope").unwrap_err();
+        assert!(matches!(missing, VectorError::CollectionNotFound(_)));
+    }
+
+    #[test]
+    fn upsert_points_idempotent() {
+        let (_dir, store) = open_store("v.sqlite");
+        store
+            .create_collection("c", 3, None, None, None, None)
+            .expect("c");
+        let p1 = pt("a", vec![0.1, 0.2, 0.3], json!({"content": "first"}));
+        store.upsert_points("c", &[p1]).expect("first");
+        let p2 = pt("a", vec![0.4, 0.5, 0.6], json!({"content": "second"}));
+        store.upsert_points("c", &[p2]).expect("second");
+
+        let info = store.get_collection("c").expect("get");
+        assert_eq!(info.document_count, 1);
+
+        let got = store
+            .get_points("c", &["a".to_string()])
+            .expect("get_points");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].vector, vec![0.4, 0.5, 0.6]);
+        assert_eq!(
+            got[0]
+                .payload
+                .as_ref()
+                .and_then(|v| v.get("content"))
+                .and_then(|v| v.as_str()),
+            Some("second")
+        );
+    }
+
+    #[test]
+    fn upsert_dim_mismatch_rolls_back_batch() {
+        let (_dir, store) = open_store("v.sqlite");
+        store
+            .create_collection("c", 3, None, None, None, None)
+            .expect("c");
+        let batch = vec![
+            pt("p1", vec![0.1, 0.1, 0.1], json!({"content": "ok"})),
+            pt("p2", vec![0.2, 0.2, 0.2], json!({"content": "ok"})),
+            // Wrong dim — entire batch must roll back.
+            pt("p3", vec![0.3, 0.3], json!({"content": "bad"})),
+            pt("p4", vec![0.4, 0.4, 0.4], json!({"content": "ok"})),
+            pt("p5", vec![0.5, 0.5, 0.5], json!({"content": "ok"})),
+        ];
+        let err = store.upsert_points("c", &batch).unwrap_err();
+        assert!(matches!(
+            err,
+            VectorError::DimensionMismatch { expected: 3, actual: 2, .. }
+        ));
+
+        let info = store.get_collection("c").expect("get");
+        assert_eq!(info.document_count, 0, "batch should have rolled back");
+    }
+
+    #[test]
+    fn delete_collection_drops_virtual_table_and_cascades_points() {
+        let (_dir, store) = open_store("v.sqlite");
+        store
+            .create_collection("c", 3, None, None, None, None)
+            .expect("c");
+        store
+            .upsert_points(
+                "c",
+                &[pt("a", vec![0.1, 0.2, 0.3], json!({"content": "x"}))],
+            )
+            .expect("upsert");
+
+        store.delete_collection("c").expect("delete");
+
+        let conn = store.conn.lock();
+        let collection_gone: bool = !conn
+            .prepare("SELECT 1 FROM collections WHERE name = 'c'")
+            .expect("prep")
+            .exists([])
+            .expect("ex");
+        assert!(collection_gone);
+        let points_gone: i64 = conn
+            .query_row("SELECT COUNT(*) FROM points", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(points_gone, 0);
+        let vec_gone: bool = !conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='vec_1'")
+            .expect("prep")
+            .exists([])
+            .expect("ex");
+        assert!(vec_gone, "vec_<id> virtual table should be dropped");
+    }
+
+    #[test]
+    fn delete_points_removes_from_both_tables() {
+        let (_dir, store) = open_store("v.sqlite");
+        store
+            .create_collection("c", 3, None, None, None, None)
+            .expect("c");
+        store
+            .upsert_points(
+                "c",
+                &[
+                    pt("a", vec![0.1, 0.2, 0.3], json!({"content": "x"})),
+                    pt("b", vec![0.4, 0.5, 0.6], json!({"content": "y"})),
+                ],
+            )
+            .expect("upsert");
+
+        store
+            .delete_points("c", &["a".to_string()])
+            .expect("delete");
+
+        let info = store.get_collection("c").expect("get");
+        assert_eq!(info.document_count, 1);
+        let remaining = store
+            .get_points("c", &["a".to_string(), "b".to_string()])
+            .expect("get");
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, "b");
+    }
+
+    #[test]
+    fn search_returns_ordered_hits_with_limit_offset_and_threshold() {
+        let (_dir, store) = open_store("v.sqlite");
+        store
+            .create_collection("c", 3, None, None, None, None)
+            .expect("c");
+        // Three points at increasing L2 distance from [1,0,0].
+        store
+            .upsert_points(
+                "c",
+                &[
+                    pt("near", vec![1.0, 0.0, 0.0], json!({"content": "n"})),
+                    pt("mid", vec![0.0, 1.0, 0.0], json!({"content": "m"})),
+                    pt("far", vec![-1.0, 0.0, 0.0], json!({"content": "f"})),
+                ],
+            )
+            .expect("upsert");
+
+        let resp = store
+            .search_points("c", &[1.0, 0.0, 0.0], 3, None, None, None, None, None)
+            .expect("search");
+        assert_eq!(resp.results.len(), 3);
+        assert_eq!(resp.results[0].id, "near");
+        assert!(resp.results[0].score >= resp.results[1].score);
+        assert!(resp.results[1].score >= resp.results[2].score);
+        assert_eq!(resp.total, 3);
+
+        // top_k = 1 caps to one result.
+        let resp = store
+            .search_points("c", &[1.0, 0.0, 0.0], 1, None, None, None, None, None)
+            .expect("search top_k");
+        assert_eq!(resp.results.len(), 1);
+        assert_eq!(resp.results[0].id, "near");
+
+        // OFFSET skips the first result.
+        let resp = store
+            .search_points(
+                "c",
+                &[1.0, 0.0, 0.0],
+                3,
+                None,
+                Some(1),
+                Some(3),
+                None,
+                None,
+            )
+            .expect("search offset");
+        assert_eq!(resp.results.len(), 2);
+        assert_eq!(resp.results[0].id, "mid");
+
+        // High threshold drops far points.
+        let resp = store
+            .search_points("c", &[1.0, 0.0, 0.0], 3, Some(0.95), None, None, None, None)
+            .expect("search threshold");
+        assert!(resp.results.iter().all(|h| h.score >= 0.95));
+    }
+
+    #[test]
+    fn search_with_filter_combines_correctly() {
+        let (_dir, store) = open_store("v.sqlite");
+        store
+            .create_collection("c", 3, None, None, None, None)
+            .expect("c");
+        let mut batch = Vec::new();
+        for i in 0..10 {
+            let cat = if i % 2 == 0 { "x" } else { "y" };
+            batch.push(pt(
+                &format!("p{}", i),
+                vec![1.0, i as f32 / 10.0, 0.0],
+                json!({"content": format!("c{}", i), "category": cat}),
+            ));
+        }
+        store.upsert_points("c", &batch).expect("upsert");
+
+        let filter = Filter {
+            key: "category".into(),
+            value: json!("x"),
+            operation: FilterOp::Equals,
+        };
+        let resp = store
+            .search_points(
+                "c",
+                &[1.0, 0.0, 0.0],
+                10,
+                None,
+                None,
+                None,
+                Some(&[filter]),
+                None,
+            )
+            .expect("search");
+        assert_eq!(resp.results.len(), 5);
+        assert!(resp.results.iter().all(|h| {
+            h.payload
+                .as_ref()
+                .and_then(|p| p.get("category"))
+                .and_then(|v| v.as_str())
+                == Some("x")
+        }));
+        assert_eq!(resp.total, 5);
+    }
+
+    #[test]
+    fn search_rejects_dim_mismatch() {
+        let (_dir, store) = open_store("v.sqlite");
+        store
+            .create_collection("c", 3, None, None, None, None)
+            .expect("c");
+        let err = store
+            .search_points("c", &[1.0, 0.0], 5, None, None, None, None, None)
+            .unwrap_err();
+        assert!(matches!(err, VectorError::DimensionMismatch { .. }));
+    }
+
+    #[test]
+    fn search_rejects_top_k_zero() {
+        let (_dir, store) = open_store("v.sqlite");
+        store
+            .create_collection("c", 3, None, None, None, None)
+            .expect("c");
+        let err = store
+            .search_points("c", &[1.0, 0.0, 0.0], 0, None, None, None, None, None)
+            .unwrap_err();
+        assert!(matches!(err, VectorError::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn concurrent_searches_under_mutex() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("v.sqlite");
+        let store = std::sync::Arc::new(VectorStore::new(path).expect("open"));
+        store
+            .create_collection("c", 3, None, None, None, None)
+            .expect("c");
+        let mut batch = Vec::new();
+        for i in 0..20 {
+            batch.push(pt(
+                &format!("p{}", i),
+                vec![1.0, (i as f32) / 20.0, 0.0],
+                json!({"content": format!("c{}", i)}),
+            ));
+        }
+        store.upsert_points("c", &batch).expect("upsert");
+
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let s = store.clone();
+                std::thread::spawn(move || {
+                    for _ in 0..100 {
+                        let resp = s
+                            .search_points(
+                                "c",
+                                &[1.0, 0.5, 0.0],
+                                5,
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                            )
+                            .expect("search");
+                        assert_eq!(resp.results.len(), 5);
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().expect("join");
+        }
+    }
+
+    #[test]
+    fn truncate_collection_empties_points_and_vec() {
+        let (_dir, store) = open_store("v.sqlite");
+        store
+            .create_collection("c", 3, None, None, None, None)
+            .expect("c");
+        store
+            .upsert_points(
+                "c",
+                &[
+                    pt("a", vec![0.1, 0.2, 0.3], json!({"content": "x"})),
+                    pt("b", vec![0.4, 0.5, 0.6], json!({"content": "y"})),
+                ],
+            )
+            .expect("upsert");
+
+        store.truncate_collection("c").expect("truncate");
+
+        let info = store.get_collection("c").expect("get");
+        assert_eq!(info.document_count, 0);
+
+        let conn = store.conn.lock();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM vec_1", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn delete_all_points_returns_count() {
+        let (_dir, store) = open_store("v.sqlite");
+        store
+            .create_collection("c", 3, None, None, None, None)
+            .expect("c");
+        store
+            .upsert_points(
+                "c",
+                &[
+                    pt("a", vec![0.1, 0.2, 0.3], json!({"content": "x"})),
+                    pt("b", vec![0.4, 0.5, 0.6], json!({"content": "y"})),
+                    pt("c", vec![0.7, 0.8, 0.9], json!({"content": "z"})),
+                ],
+            )
+            .expect("upsert");
+        let count = store.delete_all_points("c").expect("delete");
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn reset_store_recreates_empty_database() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("v.sqlite");
+        let mut store = VectorStore::new(path.clone()).expect("open");
+        store
+            .create_collection("c", 3, None, None, None, None)
+            .expect("c");
+        store
+            .upsert_points(
+                "c",
+                &[pt("a", vec![0.1, 0.2, 0.3], json!({"content": "x"}))],
+            )
+            .expect("upsert");
+
+        store.reset_store().expect("reset");
+
+        let list = store.list_collections().expect("list");
+        assert!(list.is_empty(), "collections should be empty after reset");
+        // Schema still in place — we should be able to create again.
+        store
+            .create_collection("c2", 3, None, None, None, None)
+            .expect("recreate");
+    }
+}
