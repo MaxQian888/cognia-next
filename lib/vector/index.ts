@@ -17,30 +17,9 @@
 // Embedding utilities
 export * from "./embedding"
 
-// ChromaDB client (prefixed exports to avoid conflicts)
-export {
-  type ChromaMode,
-  type ChromaConfig,
-  type DocumentChunk,
-  type SearchResult as ChromaSearchResult,
-  type CollectionInfo as ChromaCollectionInfo,
-  getChromaClient,
-  resetChromaClient,
-  getOrCreateCollection,
-  deleteCollection as deleteChromaCollection,
-  listCollections as listChromaCollections,
-  addDocuments as addChromaDocuments,
-  updateDocuments as updateChromaDocuments,
-  upsertDocuments as upsertChromaDocuments,
-  deleteDocuments as deleteChromaDocuments,
-  queryCollection,
-  getDocuments as getChromaDocuments,
-  getCollectionCount,
-  peekCollection,
-} from "./chroma-client"
-
-// Pinecone types - defined inline to avoid importing the module which has Node.js dependencies
-// For Pinecone client functions, import directly from './pinecone-client' on server-side only
+// Pinecone types are inlined here because @/lib/vector/pinecone-client uses
+// Node-only APIs and cannot be imported from browser bundles. Server code
+// should import the client directly from "./pinecone-client".
 export interface PineconeConfig {
   apiKey: string
   indexName: string
@@ -71,81 +50,6 @@ export interface PineconeIndexInfo {
     state: string
   }
 }
-
-// Qdrant client
-export {
-  type QdrantConfig,
-  type QdrantDocument,
-  type QdrantSearchResult,
-  type QdrantCollectionInfo,
-  getQdrantClient,
-  resetQdrantClient,
-  createQdrantCollection,
-  deleteQdrantCollection,
-  listQdrantCollections,
-  collectionExists as qdrantCollectionExists,
-  upsertQdrantDocuments,
-  queryQdrant,
-  deleteQdrantDocuments,
-  deleteQdrantByFilter,
-  getQdrantDocuments,
-  getQdrantCollectionInfo,
-  scrollQdrantCollection,
-} from "./qdrant-client"
-
-// Milvus client
-export {
-  type MilvusConfig,
-  type MilvusDocument,
-  type MilvusSearchResult,
-  type MilvusCollectionInfo,
-  type MilvusIndexInfo,
-  getMilvusClient,
-  resetMilvusClient,
-  milvusCollectionExists,
-  createMilvusCollection,
-  deleteMilvusCollection,
-  listMilvusCollections,
-  getMilvusCollectionInfo,
-  upsertMilvusDocuments,
-  insertMilvusDocuments,
-  queryMilvus,
-  searchMilvusByVector,
-  deleteMilvusDocuments,
-  deleteMilvusByFilter,
-  getMilvusDocuments,
-  queryMilvusByFilter,
-  countMilvusDocuments,
-  createMilvusIndex,
-  dropMilvusIndex,
-  loadMilvusCollection,
-  releaseMilvusCollection,
-  flushMilvusCollection,
-  getMilvusLoadingProgress,
-  compactMilvusCollection,
-  createMilvusPartition,
-  dropMilvusPartition,
-  listMilvusPartitions,
-  hybridSearchMilvus,
-} from "./milvus-client"
-
-// Weaviate client
-export {
-  type WeaviateConfig,
-  type WeaviateDocument,
-  type WeaviateSearchResult,
-  type WeaviateClassInfo,
-  listWeaviateClasses,
-  getWeaviateClassInfo,
-  createWeaviateClass,
-  deleteWeaviateClass,
-  upsertWeaviateDocuments,
-  deleteWeaviateDocuments,
-  getWeaviateDocuments,
-  queryWeaviate,
-  countWeaviateDocuments,
-  scrollWeaviateDocuments,
-} from "./weaviate-client"
 
 // Unified vector store interface
 export {
