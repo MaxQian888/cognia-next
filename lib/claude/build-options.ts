@@ -93,7 +93,7 @@ export interface TwinRuntimeDepsForBuild {
     apiKey: string
     baseURL?: string
   }
-  vectorBackend?: "qdrant" | "pinecone" | "milvus" | "weaviate" | "chroma"
+  vectorBackend?: "qdrant" | "pinecone" | "milvus" | "weaviate" | "chroma" | "native"
   vectorCollection?: string
 }
 

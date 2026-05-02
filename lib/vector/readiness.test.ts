@@ -17,10 +17,21 @@ jest.mock("./store", () => ({
   })),
 }))
 
+// isTauri is re-exported from @/lib/tauri through @/lib/utils.
+// We mock @/lib/utils so readiness.ts (which imports from there) can be
+// controlled per-test.
+const mockIsTauri = jest.fn<boolean, []>(() => false)
+jest.mock("@/lib/utils", () => ({
+  ...jest.requireActual("@/lib/utils"),
+  isTauri: () => mockIsTauri(),
+}))
+
 describe("verifyVectorBackendReadiness", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     resetStorageBackendReadinessRegistryForTest()
+    // Default: non-Tauri environment
+    mockIsTauri.mockReturnValue(false)
   })
 
   it("returns unconfigured when required provider config is missing", async () => {
@@ -84,5 +95,52 @@ describe("verifyVectorBackendReadiness", () => {
 
     expect(result.state).toBe("configured")
     expect(result.diagnostic?.code).toBe("auth-failed")
+  })
+
+  describe("native provider", () => {
+    const nativeConfig = {
+      provider: "native" as const,
+      embeddingConfig: { provider: "openai" as const, model: "text-embedding-3-small" },
+      embeddingApiKey: "test-key",
+      native: {},
+    }
+
+    it("native + Tauri = operational", async () => {
+      mockIsTauri.mockReturnValue(true)
+      mockListCollections.mockResolvedValue([])
+      mockCreateCollection.mockResolvedValue(undefined)
+      mockDeleteCollection.mockResolvedValue(undefined)
+
+      const result = await verifyVectorBackendReadiness(nativeConfig)
+
+      expect(result.state).toBe("operational")
+      expect(getStorageBackendReadiness("vector-native")?.state).toBe("operational")
+      expect(mockListCollections).toHaveBeenCalled()
+      expect(mockCreateCollection).toHaveBeenCalled()
+      expect(mockDeleteCollection).toHaveBeenCalled()
+    })
+
+    it("native + non-Tauri = unconfigured with configuration-error diagnostic", async () => {
+      mockIsTauri.mockReturnValue(false)
+
+      const result = await verifyVectorBackendReadiness(nativeConfig)
+
+      expect(result.state).toBe("unconfigured")
+      expect(result.diagnostic?.code).toBe("configuration-missing")
+    })
+
+    it("native + dimension mismatch on probe = reachable with roundtrip-failed code", async () => {
+      mockIsTauri.mockReturnValue(true)
+      mockListCollections.mockResolvedValue([])
+      mockCreateCollection.mockRejectedValue(
+        new Error("Dimension mismatch: collection=foo expected=1536 got=3072")
+      )
+
+      const result = await verifyVectorBackendReadiness(nativeConfig)
+
+      // "collection" in message → stage "operational" → classifyVectorError →
+      // code "prerequisite-missing", state "reachable" (from the collection branch)
+      expect(result.state).toBe("reachable")
+    })
   })
 })

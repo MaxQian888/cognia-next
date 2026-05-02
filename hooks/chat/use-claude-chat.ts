@@ -389,6 +389,14 @@ async function tryBuildTwinDeps(): Promise<
           }
         }
         break
+      case "native":
+        storeConfig = {
+          provider: "native",
+          embeddingConfig: embedding,
+          embeddingApiKey: apiKey,
+          native: {},
+        }
+        break
     }
     if (!storeConfig) return undefined
 

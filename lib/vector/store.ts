@@ -679,13 +679,18 @@ export class NativeVectorStore implements IVectorStore {
     const response = await this.invoke<
       | { id: string; score: number; payload?: Record<string, unknown> }[]
       | {
-          results: { id: string; score: number; payload?: Record<string, unknown> }[]
+          results: {
+            id: string
+            score: number
+            payload?: Record<string, unknown>
+            content?: string
+          }[]
           total: number
           offset: number
           limit: number
         }
       | null
-    >("vector_search_points", { payload: searchPayload })
+    >("vector_search_points", searchPayload)
 
     if (!response) {
       return { results: [], total: 0, offset: 0, limit: 0 }
@@ -705,7 +710,7 @@ export class NativeVectorStore implements IVectorStore {
     return {
       results: (response.results || []).map((r) => ({
         id: r.id,
-        content: (r.payload?.content as string) || "",
+        content: r.content || (r.payload?.content as string) || "",
         metadata: r.payload,
         score: r.score,
       })),
@@ -729,43 +734,10 @@ export class NativeVectorStore implements IVectorStore {
   }
 
   async scrollDocuments(
-    collectionName: string,
-    options: ScrollOptions = {}
+    _collectionName: string,
+    _options: ScrollOptions = {}
   ): Promise<ScrollResponse> {
-    const { offset, limit, filters, filterMode } = options
-
-    const response = await this.invoke<{
-      points: { id: string; vector: number[]; payload?: Record<string, unknown> }[]
-      total: number
-      offset: number
-      limit: number
-      has_more: boolean
-    }>("vector_scroll_points", {
-      payload: {
-        collection: collectionName,
-        offset,
-        limit,
-        filters: filters?.map((f) => ({
-          key: f.key,
-          value: f.value,
-          operation: f.operation,
-        })),
-        filter_mode: filterMode,
-      },
-    })
-
-    return {
-      documents: (response.points || []).map((p) => ({
-        id: p.id,
-        content: (p.payload?.content as string) || "",
-        metadata: p.payload,
-        embedding: p.vector,
-      })),
-      total: response.total,
-      offset: response.offset,
-      limit: response.limit,
-      hasMore: response.has_more,
-    }
+    throw new Error("scrollDocuments is not yet supported on the native backend")
   }
 
   async getDocuments(collectionName: string, ids: string[]): Promise<VectorDocument[]> {
@@ -792,14 +764,12 @@ export class NativeVectorStore implements IVectorStore {
   ): Promise<void> {
     const dimension = options?.dimension || this.config.embeddingConfig.dimensions || 1536
     await this.invoke("vector_create_collection", {
-      payload: {
-        name,
-        dimension,
-        metadata: options?.metadata,
-        description: options?.description,
-        embedding_model: options?.embeddingModel || this.config.embeddingConfig.model,
-        embedding_provider: options?.embeddingProvider || this.config.embeddingConfig.provider,
-      },
+      name,
+      dimension,
+      metadata: options?.metadata,
+      description: options?.description,
+      embedding_model: options?.embeddingModel || this.config.embeddingConfig.model,
+      embedding_provider: options?.embeddingProvider || this.config.embeddingConfig.provider,
     })
   }
 
@@ -807,23 +777,20 @@ export class NativeVectorStore implements IVectorStore {
     await this.invoke("vector_delete_collection", { name })
   }
 
-  async renameCollection(oldName: string, newName: string): Promise<void> {
-    await this.invoke("vector_rename_collection", { old_name: oldName, new_name: newName })
+  async renameCollection(_oldName: string, _newName: string): Promise<void> {
+    throw new Error("renameCollection is not yet supported on the native backend")
   }
 
   async truncateCollection(name: string): Promise<void> {
     await this.invoke("vector_truncate_collection", { name })
   }
 
-  async exportCollection(name: string): Promise<CollectionExport> {
-    return await this.invoke("vector_export_collection", { name })
+  async exportCollection(_name: string): Promise<CollectionExport> {
+    throw new Error("exportCollection is not yet supported on the native backend")
   }
 
-  async importCollection(data: CollectionImport, overwrite?: boolean): Promise<void> {
-    await this.invoke("vector_import_collection", {
-      import_data: data,
-      overwrite: overwrite || false,
-    })
+  async importCollection(_data: CollectionImport, _overwrite?: boolean): Promise<void> {
+    throw new Error("importCollection is not yet supported on the native backend")
   }
 
   async listCollections(): Promise<VectorCollectionInfo[]> {
@@ -879,40 +846,19 @@ export class NativeVectorStore implements IVectorStore {
   }
 
   async countDocuments(
-    collectionName: string,
-    options?: {
+    _collectionName: string,
+    _options?: {
       filter?: Record<string, unknown>
       filters?: PayloadFilter[]
       filterMode?: "and" | "or"
     }
   ): Promise<number> {
-    if (!options?.filter && (!options?.filters || options.filters.length === 0)) {
-      const info = await this.getCollectionInfo(collectionName)
-      return info.documentCount
-    }
-
-    const response = await this.scrollDocuments(collectionName, {
-      offset: 0,
-      limit: Number.MAX_SAFE_INTEGER,
-      filters: options.filters,
-      filterMode: options.filterMode,
-    })
-    return response.total
+    // TODO(commit-3+): implement via vector_search_points with top_k=1 reading the total field
+    throw new Error("countDocuments is not yet supported on the native backend")
   }
 
   async getStats(): Promise<VectorStats> {
-    const stats = await this.invoke<{
-      collection_count: number
-      total_points: number
-      storage_path: string
-      storage_size_bytes: number
-    }>("vector_stats")
-    return {
-      collectionCount: stats.collection_count,
-      totalPoints: stats.total_points,
-      storagePath: stats.storage_path,
-      storageSizeBytes: stats.storage_size_bytes,
-    }
+    throw new Error("getStats is not yet supported on the native backend")
   }
 }
 

@@ -120,7 +120,7 @@ export type ChunkingStrategyId =
   | "code"
 
 /** Vector backend identifier — must match the readiness registry. */
-export type VectorBackend = "qdrant" | "pinecone" | "milvus" | "weaviate" | "chroma"
+export type VectorBackend = "qdrant" | "pinecone" | "milvus" | "weaviate" | "chroma" | "native"
 
 /**
  * Format-specific chunk metadata. Optional fields appear only when the

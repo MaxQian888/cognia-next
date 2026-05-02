@@ -137,6 +137,16 @@ jest.mock("@/stores/artifact/artifact-store", () => ({
   useArtifactStore: { getState: () => ({ autoCreateFromContent: jest.fn() }) },
 }))
 
+const mockGetTwinRuntimeSettings = jest.fn()
+jest.mock("@/lib/db/twin-runtime-settings", () => ({
+  getTwinRuntimeSettings: () => mockGetTwinRuntimeSettings(),
+}))
+
+const mockCreateVectorStore = jest.fn()
+jest.mock("@/lib/vector/store", () => ({
+  createVectorStore: (...args: unknown[]) => mockCreateVectorStore(...args),
+}))
+
 import { useClaudeChat } from "./use-claude-chat"
 
 beforeEach(() => {
@@ -364,5 +374,39 @@ describe("useClaudeChat — actions", () => {
     renderHook(() => useClaudeChat())
     await flush()
     expect(onClaudeMessageMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("useClaudeChat — native vector backend branch", () => {
+  const mockNativeStore = { provider: "native" }
+
+  beforeEach(() => {
+    mockGetTwinRuntimeSettings.mockResolvedValue({
+      workerEnabled: true,
+      embedding: {
+        provider: "openai",
+        model: "text-embedding-3-small",
+        apiKey: "sk-test",
+      },
+      storage: {
+        vectorBackend: "native",
+      },
+    })
+    mockCreateVectorStore.mockReturnValue(mockNativeStore)
+  })
+
+  it("case 'native' builds a storeConfig with provider=native and calls createVectorStore", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello from native")
+    })
+
+    expect(mockCreateVectorStore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "native",
+        native: {},
+      })
+    )
   })
 })
