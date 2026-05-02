@@ -10,6 +10,16 @@
  * real implementation if cognia-next decides to manage multiple backends.
  */
 
+/**
+ * Identifier for a persistence/vector backend. The literal union covers the
+ * backends cognia-next ships with; the trailing `(string & {})` widening
+ * (§A-7) keeps autocomplete for those literals while accepting plugin-
+ * contributed ids without a recompile (e.g., `"plugin:my-vector-backend"`).
+ *
+ * The widening trick is the standard TypeScript pattern for "string union
+ * that's still open" — using `string` alone would erase autocomplete,
+ * `(string & {})` preserves the literal narrowing.
+ */
 export type StorageBackendId =
   | "web-dexie"
   | "vector-native"
@@ -18,6 +28,7 @@ export type StorageBackendId =
   | "vector-weaviate"
   | "vector-qdrant"
   | "vector-milvus"
+  | (string & {})
 
 export type StorageBackendCategory = "browser-persistence" | "vector-provider" | "knowledge-store"
 

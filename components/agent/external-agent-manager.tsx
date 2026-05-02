@@ -85,6 +85,7 @@ import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/ag
 import {
   EXTERNAL_AGENT_PRESETS,
   getAvailablePresets,
+  getPresetConfig,
   type ExternalAgentPresetId,
 } from "@/lib/ai/agent/external/presets"
 
@@ -375,7 +376,10 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                 </SelectTrigger>
                 <SelectContent>
                   {getAvailablePresets().map((presetId) => {
-                    const preset = EXTERNAL_AGENT_PRESETS[presetId]
+                    // Route through `getPresetConfig` so plugin-contributed
+                    // presets (registered via the §A-3 dynamic overlay)
+                    // resolve identically to the four builtin entries.
+                    const preset = getPresetConfig(presetId)
                     if (!preset) return null
                     return (
                       <SelectItem key={presetId} value={presetId}>

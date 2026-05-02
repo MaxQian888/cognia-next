@@ -1,0 +1,16 @@
+{
+  "id": "cognia-workspace-tools",
+  "name": "Workspace Tools",
+  "version": "0.1.0",
+  "description": "Filesystem and project-aware helpers for plugin authors.",
+  "type": "frontend",
+  "capabilities": ["tools"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": ["fs:read", "fs:write"],
+  "activationEvents": ["onStartup"]
+}

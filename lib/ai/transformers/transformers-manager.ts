@@ -47,6 +47,16 @@ export class TransformersManager {
   ): Promise<TransformersBatchEmbeddingResult> {
     throw new Error(TRANSFORMERS_RUNTIME_ERROR_MESSAGE)
   }
+
+  /**
+   * Reset the singleton's internal cache. The cognia-next stub doesn't
+   * cache anything — every call already throws — so this is a no-op
+   * kept for parity with Cognia's full implementation, which the test
+   * suite expects to exist.
+   */
+  reset(): void {
+    /* no-op in cognia-next; see file header */
+  }
 }
 
 let _instance: TransformersManager | null = null
@@ -54,4 +64,9 @@ let _instance: TransformersManager | null = null
 export function getTransformersManager(): TransformersManager {
   if (!_instance) _instance = new TransformersManager()
   return _instance
+}
+
+/** Test-only escape hatch — discards the singleton between specs. */
+export function __resetTransformersManagerForTest(): void {
+  _instance = null
 }

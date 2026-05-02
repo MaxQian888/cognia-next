@@ -26,3 +26,22 @@ export interface SandboxConsumptionMetadata {
   used_quick_run: boolean
   policy_profile?: string | null
 }
+
+/**
+ * Result returned by sandboxed plugin script executions. The plugin
+ * sandbox runtime returns this to the host so it can decide whether to
+ * surface stdout, propagate the error, or record the quota draw.
+ */
+export interface SandboxExecutionResult {
+  ok: boolean
+  /** Optional structured value returned by the script. */
+  value?: unknown
+  /** Free-form stdout / log lines collected during execution. */
+  logs?: string[]
+  /** Error message if `ok === false`. Never throws across the boundary. */
+  error?: string
+  /** Wall-clock duration in ms, measured around the script invocation. */
+  durationMs?: number
+  /** Consumption metadata if the host policy required preflight bookkeeping. */
+  consumption?: SandboxConsumptionMetadata
+}

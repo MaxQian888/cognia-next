@@ -5,7 +5,19 @@ import {
   createAgentFromPreset,
   isFromPreset,
   getPresetDisplayInfo,
+  registerPreset,
+  unregisterPreset,
+  unregisterPresetsByPlugin,
+  getDynamicPresetEntry,
+  __resetDynamicPresetsForTesting,
+  type ExternalAgentPresetConfig,
 } from "./presets"
+
+// Each test that exercises the §A-3 runtime overlay must clean up after
+// itself so unrelated test suites can rely on a vanilla preset list.
+afterEach(() => {
+  __resetDynamicPresetsForTesting()
+})
 
 describe("EXTERNAL_AGENT_PRESETS", () => {
   it("contains the four executable presets and a null custom slot", () => {
@@ -133,5 +145,118 @@ describe("getPresetDisplayInfo", () => {
 
   it("returns null for the custom slot", () => {
     expect(getPresetDisplayInfo("custom")).toBeNull()
+  })
+})
+
+// ============================================================================
+// §A-3 — runtime preset overlay (plugin contributions)
+// ============================================================================
+
+describe("runtime preset overlay", () => {
+  // Minimal but legal preset config used to fake plugin contributions.
+  const fakeConfig: ExternalAgentPresetConfig = {
+    name: "Fake Plugin Agent",
+    description: "Test fixture for plugin presets",
+    protocol: "acp",
+    transport: "stdio",
+    process: { command: "fake", args: [] },
+    defaultPermissionMode: "default",
+    tags: ["fake"],
+  }
+
+  it("registerPreset adds a dynamic preset that getAvailablePresets surfaces", () => {
+    expect(getAvailablePresets()).not.toContain("plugin-x")
+    registerPreset("plugin-x", fakeConfig, { pluginId: "plug" })
+    expect(getAvailablePresets()).toContain("plugin-x")
+    expect(getPresetConfig("plugin-x")?.name).toBe("Fake Plugin Agent")
+    expect(getDynamicPresetEntry("plugin-x")?.pluginId).toBe("plug")
+  })
+
+  it("registerPreset returns the previous entry when an id is re-registered", () => {
+    registerPreset("plugin-x", fakeConfig, { pluginId: "plug-1" })
+    const prev = registerPreset(
+      "plugin-x",
+      { ...fakeConfig, name: "Updated" },
+      { pluginId: "plug-2" }
+    )
+    expect(prev?.pluginId).toBe("plug-1")
+    expect(getPresetConfig("plugin-x")?.name).toBe("Updated")
+    expect(getDynamicPresetEntry("plugin-x")?.pluginId).toBe("plug-2")
+  })
+
+  it("unregisterPreset removes a single entry; idempotent second call returns false", () => {
+    registerPreset("plugin-y", fakeConfig)
+    expect(unregisterPreset("plugin-y")).toBe(true)
+    expect(unregisterPreset("plugin-y")).toBe(false)
+    expect(getPresetConfig("plugin-y")).toBeNull()
+  })
+
+  it("unregisterPresetsByPlugin only removes entries owned by that plugin", () => {
+    registerPreset("a", fakeConfig, { pluginId: "p1" })
+    registerPreset("b", fakeConfig, { pluginId: "p1" })
+    registerPreset("c", fakeConfig, { pluginId: "p2" })
+    registerPreset("d", fakeConfig) // no pluginId
+
+    const removed = unregisterPresetsByPlugin("p1")
+    expect(removed).toBe(2)
+    expect(getPresetConfig("a")).toBeNull()
+    expect(getPresetConfig("b")).toBeNull()
+    // Other plugin's entry survives.
+    expect(getPresetConfig("c")).not.toBeNull()
+    // Anonymously registered entry survives.
+    expect(getPresetConfig("d")).not.toBeNull()
+  })
+
+  it("dynamic preset shadows a static preset id (plugin-wins, fallback restored after unregister)", () => {
+    const builtinName = getPresetConfig("claude-code")!.name
+    expect(builtinName).toBeTruthy()
+
+    registerPreset(
+      "claude-code",
+      { ...fakeConfig, name: "Plugin claude-code" },
+      { pluginId: "shadower" }
+    )
+    expect(getPresetConfig("claude-code")?.name).toBe("Plugin claude-code")
+
+    // After unregistering the plugin, the static record reappears.
+    unregisterPresetsByPlugin("shadower")
+    expect(getPresetConfig("claude-code")?.name).toBe(builtinName)
+  })
+
+  it("createAgentFromPreset works for a plugin-registered preset id", () => {
+    registerPreset("plugin-z", fakeConfig, { pluginId: "plug" })
+    const cfg = createAgentFromPreset("plugin-z")
+    expect(cfg).not.toBeNull()
+    expect(cfg!.protocol).toBe("acp")
+    expect(cfg!.process?.command).toBe("fake")
+    expect(cfg!.metadata?.preset).toBe("plugin-z")
+  })
+
+  it("isFromPreset recognizes plugin-contributed preset ids", () => {
+    registerPreset("plugin-id-1", fakeConfig)
+    const cfg = createAgentFromPreset("plugin-id-1")!
+    expect(isFromPreset(cfg)).toBe("plugin-id-1")
+  })
+
+  it("getPresetDisplayInfo returns plugin-contributed display fields", () => {
+    registerPreset("plugin-disp", fakeConfig)
+    const info = getPresetDisplayInfo("plugin-disp")
+    expect(info?.name).toBe("Fake Plugin Agent")
+    expect(info?.tags).toEqual(["fake"])
+  })
+
+  it("getAvailablePresets does not duplicate when a plugin shadows a static id", () => {
+    registerPreset("codex", fakeConfig, { pluginId: "p" })
+    const ids = getAvailablePresets()
+    const codexCount = ids.filter((id) => id === "codex").length
+    expect(codexCount).toBe(1)
+  })
+
+  it("__resetDynamicPresetsForTesting clears the overlay", () => {
+    registerPreset("a", fakeConfig)
+    registerPreset("b", fakeConfig)
+    __resetDynamicPresetsForTesting()
+    expect(getPresetConfig("a")).toBeNull()
+    expect(getPresetConfig("b")).toBeNull()
   })
 })

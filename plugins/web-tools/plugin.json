@@ -1,0 +1,16 @@
+{
+  "id": "cognia-web-tools",
+  "name": "Web Tools",
+  "version": "0.1.0",
+  "description": "Browser-safe HTTP fetch and URL helpers for plugin authors.",
+  "type": "frontend",
+  "capabilities": ["tools"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": ["network:fetch"],
+  "activationEvents": ["onStartup"]
+}

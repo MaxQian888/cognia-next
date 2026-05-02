@@ -298,16 +298,51 @@ describe("updateMemberOverride", () => {
 })
 
 describe("seedBuiltInTeams", () => {
-  it("seeds the built-in team with stable id and isBuiltIn flag", async () => {
+  it("seeds every built-in with stable ids and the isBuiltIn flag", async () => {
     await seedBuiltInTeams()
-    const built = (await listTeams()).find((t) => t.isBuiltIn)
-    expect(built?.id).toBe("team_builtin_brainstorm")
+    const built = (await listTeams()).filter((t) => t.isBuiltIn)
+    const ids = built.map((t) => t.id).sort()
+    expect(ids).toEqual([
+      "team_builtin_brainstorm",
+      "team_builtin_code_review_pair",
+      "team_builtin_doc_polishers",
+      "team_builtin_research_squad",
+    ])
+    expect(built.every((t) => t.isBuiltIn === true)).toBe(true)
   })
 
   it("re-seeding doesn't introduce duplicates", async () => {
     await seedBuiltInTeams()
     await seedBuiltInTeams()
     const built = (await listTeams()).filter((t) => t.isBuiltIn)
-    expect(built.length).toBe(1)
+    expect(built.length).toBe(4)
+  })
+
+  it("supervisor-mode built-ins all reference a supervisor that is in the member list", async () => {
+    await seedBuiltInTeams()
+    const built = (await listTeams()).filter((t) => t.isBuiltIn)
+    const supervisorTeams = built.filter((t) => t.orchestration === "supervisor")
+    expect(supervisorTeams.length).toBeGreaterThan(0)
+    for (const team of supervisorTeams) {
+      expect(team.supervisorCharacterId).toBeDefined()
+      expect(team.members.some((m) => m.characterId === team.supervisorCharacterId)).toBe(true)
+    }
+  })
+
+  it("only references the 5 existing built-in character ids", async () => {
+    await seedBuiltInTeams()
+    const built = (await listTeams()).filter((t) => t.isBuiltIn)
+    const allowedIds = new Set([
+      "char_builtin_coding",
+      "char_builtin_writer",
+      "char_builtin_research",
+      "char_builtin_brainstorm",
+      "char_builtin_translator",
+    ])
+    for (const team of built) {
+      for (const member of team.members) {
+        expect(allowedIds.has(member.characterId)).toBe(true)
+      }
+    }
   })
 })

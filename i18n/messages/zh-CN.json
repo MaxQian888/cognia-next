@@ -1,4 +1,63 @@
 {
+  "agentTeamsWorkspace": {
+    "listTitle": "智能体团队",
+    "listDescription": "多智能体团队：规划、分工并并行执行。",
+    "listEmpty": "暂无团队。从下方模板开始。",
+    "newFromTemplate": "快速开始模板",
+    "openWorkspace": "打开工作区",
+    "deleteTeam": "删除团队",
+    "deleteConfirm": "确定要永久删除 \"{name}\" 吗？",
+    "createTeam": "创建团队",
+    "teamCreated": "团队 \"{name}\" 已创建。",
+    "teamDeleted": "团队 \"{name}\" 已删除。",
+    "missing": "未找到团队。",
+    "tabs": {
+      "overview": "概览",
+      "tasks": "任务",
+      "chat": "对话",
+      "activity": "活动"
+    },
+    "overview": {
+      "status": "状态",
+      "lead": "领队",
+      "teammates": "成员",
+      "tokenUsage": "Token 用量",
+      "noLead": "未指定领队",
+      "startTeam": "启动团队",
+      "abortTeam": "停止"
+    },
+    "tasks": {
+      "empty": "暂无任务。",
+      "addTask": "新建任务",
+      "title": "标题",
+      "description": "描述"
+    },
+    "chat": {
+      "empty": "暂无消息。"
+    },
+    "activity": {
+      "empty": "暂无事件。"
+    },
+    "planApproval": {
+      "title": "等待计划审批",
+      "approve": "通过",
+      "reject": "驳回",
+      "feedbackPlaceholder": "（可选）反馈给领队",
+      "noPlan": "尚未提交计划。"
+    },
+    "templates": {
+      "categories": {
+        "review": "评审",
+        "research": "研究",
+        "development": "开发",
+        "debugging": "调试",
+        "analysis": "分析",
+        "general": "通用",
+        "documentation": "文档",
+        "security": "安全"
+      }
+    }
+  },
   "canvas": {
     "title": "画布",
     "newDocument": "新建文档",

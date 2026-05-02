@@ -8,6 +8,19 @@
 
 export interface ActiveEditorContext {
   editorId: string
+  /**
+   * Discriminator that tells plugin APIs which kind of editor is
+   * focused. The canvas surface sets `"canvas"`; future Monaco hosts
+   * (e.g., ai-inspector) will register their own ids.
+   */
+  contextId?: "canvas" | "ai-inspector" | (string & {})
+  /**
+   * Live Monaco editor handle, when the host can hand one out. Typed
+   * permissively because the Monaco types aren't always available at
+   * compile time (Monaco is dynamic-imported).
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  editor?: any
   documentId?: string
   language?: string
   selection?: {

@@ -114,36 +114,120 @@ export const EXTERNAL_AGENT_PRESETS: Record<
 }
 
 // ============================================================================
+// Runtime preset overlay (§A-3)
+//
+// Plugins contribute external-agent presets through the `external-agent-preset`
+// capability. Rather than mutating the static `EXTERNAL_AGENT_PRESETS` Record
+// (which would change the closed `ExternalAgentPresetId` union and break every
+// consumer), the plugin runtime registers presets into this in-memory overlay.
+// All read paths consult both maps; the static record stays authoritative for
+// the four shipping ids so disabling a plugin never removes a builtin preset.
+//
+// Registration is idempotent: re-registering the same id replaces the previous
+// entry. Conflicts between static and dynamic ids are resolved with
+// dynamic-wins so a plugin can shadow a builtin preset (e.g., to inject a
+// preferred command path) — but the legacy static entry is preserved as the
+// fallback when the plugin is disabled.
+// ============================================================================
+
+interface RegisteredPreset {
+  config: ExternalAgentPresetConfig
+  pluginId?: string
+}
+
+const dynamicPresets = new Map<string, RegisteredPreset>()
+
+/**
+ * Register a preset at runtime. Plugins call this through the plugin manager;
+ * tests call it directly. Returns the previously registered entry (if any) so
+ * higher-level code can detect collisions.
+ */
+export function registerPreset(
+  id: string,
+  config: ExternalAgentPresetConfig,
+  opts?: { pluginId?: string }
+): RegisteredPreset | undefined {
+  const previous = dynamicPresets.get(id)
+  dynamicPresets.set(id, { config, pluginId: opts?.pluginId })
+  return previous
+}
+
+/** Drop a single dynamically registered preset. Returns true if removed. */
+export function unregisterPreset(id: string): boolean {
+  return dynamicPresets.delete(id)
+}
+
+/**
+ * Drop every dynamic preset tagged with `pluginId`. Returns the number of
+ * presets removed. Called by the plugin manager during plugin disable /
+ * uninstall so a single plugin's contributions are cleaned up in one shot.
+ */
+export function unregisterPresetsByPlugin(pluginId: string): number {
+  let removed = 0
+  for (const [id, entry] of dynamicPresets) {
+    if (entry.pluginId === pluginId) {
+      dynamicPresets.delete(id)
+      removed += 1
+    }
+  }
+  return removed
+}
+
+/**
+ * Test-only escape hatch: clear every dynamic preset so test isolation can
+ * reset the overlay without touching the static record. Production code
+ * should never need this — `unregisterPresetsByPlugin` is the supported path.
+ */
+export function __resetDynamicPresetsForTesting(): void {
+  dynamicPresets.clear()
+}
+
+/** Returns the (pluginId, config) for a dynamic preset, or undefined. */
+export function getDynamicPresetEntry(id: string): RegisteredPreset | undefined {
+  return dynamicPresets.get(id)
+}
+
+// ============================================================================
 // Preset Utilities
 // ============================================================================
 
 /**
- * Get all available preset IDs (excluding custom)
+ * Get all available preset IDs (excluding `custom`). The result merges the
+ * builtin static IDs with every dynamic id contributed by a plugin. The
+ * return type is `string[]` rather than `ExternalAgentPresetId[]` because
+ * dynamic ids fall outside the closed compile-time union.
  */
-export function getAvailablePresets(): ExternalAgentPresetId[] {
-  return (Object.keys(EXTERNAL_AGENT_PRESETS) as ExternalAgentPresetId[]).filter(
+export function getAvailablePresets(): string[] {
+  const builtins = (Object.keys(EXTERNAL_AGENT_PRESETS) as ExternalAgentPresetId[]).filter(
     (id) => id !== "custom" && EXTERNAL_AGENT_PRESETS[id] !== null
   )
+  const dynamic = Array.from(dynamicPresets.keys()).filter((id) => !builtins.includes(id as never))
+  return [...builtins, ...dynamic]
 }
 
 /**
- * Get preset configuration by ID
+ * Get preset configuration by ID. Dynamic (plugin) presets take precedence
+ * over builtin static presets so a plugin can shadow a builtin entry; if the
+ * plugin is later disabled the static entry remains as fallback.
  */
-export function getPresetConfig(presetId: ExternalAgentPresetId): ExternalAgentPresetConfig | null {
-  return EXTERNAL_AGENT_PRESETS[presetId]
+export function getPresetConfig(presetId: string): ExternalAgentPresetConfig | null {
+  const dynamic = dynamicPresets.get(presetId)
+  if (dynamic) return dynamic.config
+  return EXTERNAL_AGENT_PRESETS[presetId as ExternalAgentPresetId] ?? null
 }
 
 /**
  * Create a full agent configuration from a preset
- * @param presetId Preset identifier
+ * @param presetId Preset identifier (builtin id or plugin-registered id)
  * @param overrides Optional configuration overrides
  * @returns Full agent configuration or null if preset not found
  */
 export function createAgentFromPreset(
-  presetId: ExternalAgentPresetId,
+  presetId: string,
   overrides?: Partial<ExternalAgentConfig>
 ): ExternalAgentConfig | null {
-  const preset = EXTERNAL_AGENT_PRESETS[presetId]
+  // Route through `getPresetConfig` so plugin-contributed presets resolve too.
+  const preset = getPresetConfig(presetId)
   if (!preset) {
     return null
   }
@@ -189,20 +273,27 @@ export function createAgentFromPreset(
 }
 
 /**
- * Check if an agent was created from a preset
+ * Check if an agent was created from a preset. Returns the preset id (which
+ * may be a static `ExternalAgentPresetId` or a plugin-registered string id) if
+ * the metadata refers to any known preset, or `null` otherwise.
  */
-export function isFromPreset(config: ExternalAgentConfig): ExternalAgentPresetId | null {
-  const preset = config.metadata?.preset as ExternalAgentPresetId | undefined
-  if (preset && preset in EXTERNAL_AGENT_PRESETS) {
+export function isFromPreset(config: ExternalAgentConfig): string | null {
+  const preset = config.metadata?.preset
+  if (typeof preset !== "string") return null
+  if (preset in EXTERNAL_AGENT_PRESETS && EXTERNAL_AGENT_PRESETS[preset as ExternalAgentPresetId]) {
+    return preset
+  }
+  if (dynamicPresets.has(preset)) {
     return preset
   }
   return null
 }
 
 /**
- * Get display info for a preset (for UI)
+ * Get display info for a preset (for UI). Resolves through `getPresetConfig`
+ * so dynamic (plugin) presets surface in the same UI as builtins.
  */
-export function getPresetDisplayInfo(presetId: ExternalAgentPresetId): {
+export function getPresetDisplayInfo(presetId: string): {
   name: string
   description: string
   envVarHint?: string
@@ -210,7 +301,7 @@ export function getPresetDisplayInfo(presetId: ExternalAgentPresetId): {
   docsUrl?: string
   tags: string[]
 } | null {
-  const preset = EXTERNAL_AGENT_PRESETS[presetId]
+  const preset = getPresetConfig(presetId)
   if (!preset) return null
 
   return {

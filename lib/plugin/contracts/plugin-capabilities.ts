@@ -1,0 +1,520 @@
+import type { PluginCapability } from "@/types/plugin"
+import type { PluginPointGovernanceMode } from "./plugin-points"
+
+export type PluginCapabilitySupport = "supported" | "partial" | "experimental" | "blocked"
+
+export interface PluginCapabilityContract {
+  id: PluginCapability
+  support: PluginCapabilitySupport
+  manifestFields: readonly string[]
+  runtimeBinding: string
+  hostBindings: readonly string[]
+  typescriptSdk: readonly string[]
+  pythonSdk: readonly string[]
+  builtinContributionPaths?: readonly string[]
+  docs: string
+  requiredTests: readonly string[]
+}
+
+export type PluginContractProofStatus = "verified" | "missing_proof" | "not_applicable"
+
+export interface PluginCapabilityProofAudit {
+  id: PluginCapability
+  support: PluginCapabilitySupport
+  runtimeBinding: string
+  hostBindings: readonly string[]
+  typescriptSdk: readonly string[]
+  pythonSdk: readonly string[]
+  builtinContributionPaths: readonly string[]
+  docs: string
+  requiredTests: readonly string[]
+  missingFields: Array<
+    | "runtimeBinding"
+    | "hostBindings"
+    | "typescriptSdk"
+    | "pythonSdk"
+    | "builtinContributionPaths"
+    | "docs"
+    | "requiredTests"
+  >
+  proofStatus: PluginContractProofStatus
+}
+
+export interface PluginCapabilityDiagnostic {
+  code:
+    | "plugin.capability.unknown"
+    | "plugin.capability.partial"
+    | "plugin.capability.experimental"
+    | "plugin.capability.blocked"
+  severity: "warning" | "error"
+  capability: string
+  message: string
+  hint?: string
+  contract?: PluginCapabilityContract
+}
+
+export interface PluginCapabilityValidationOutcome {
+  allowed: boolean
+  diagnostics: PluginCapabilityDiagnostic[]
+}
+
+export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = [
+  {
+    id: "tools",
+    support: "supported",
+    manifestFields: ["tools"],
+    runtimeBinding: "context.agent.registerTool + PluginRegistry tools",
+    hostBindings: ["lib/plugin/core/registry.ts", "lib/plugin/bridge/tools-bridge.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/helpers/tool.ts",
+      "plugin-sdk/typescript/src/tools/types.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/plugin.py", "plugin-sdk/python/src/cognia/types.py"],
+    builtinContributionPaths: [
+      "plugins/ai-tools/src/index.ts",
+      "plugins/clipboard-tools/src/index.ts",
+      "plugins/docker-tools/src/index.ts",
+      "plugins/git-tools/src/index.ts",
+      "plugins/notification-tools/src/index.ts",
+      "plugins/shell-tools/src/index.ts",
+      "plugins/time-tools/src/index.ts",
+      "plugins/web-tools/src/index.ts",
+      "plugins/workspace-tools/src/index.ts",
+    ],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: [
+      "lib/plugin/core/manager.test.ts",
+      "lib/plugin/package/marketplace-install-descriptor.test.ts",
+    ],
+  },
+  {
+    id: "components",
+    support: "supported",
+    manifestFields: ["a2uiComponents"],
+    runtimeBinding: "context.a2ui.registerComponent + Plugin A2UI bridge",
+    hostBindings: ["lib/plugin/bridge/a2ui-bridge.ts", "lib/plugin/core/registry.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/a2ui/types.ts",
+      "plugin-sdk/typescript/src/context/extended.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/a2ui.py", "plugin-sdk/python/src/cognia/context.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["stores/plugin/plugin-store.test.ts"],
+  },
+  {
+    id: "modes",
+    support: "supported",
+    manifestFields: ["modes"],
+    runtimeBinding: "PluginRegistry modes",
+    hostBindings: ["lib/plugin/core/registry.ts", "lib/plugin/bridge/agent-integration.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/modes/index.ts",
+      "plugin-sdk/typescript/src/modes/types.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/modes.py", "plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/core/manager.test.ts"],
+  },
+  {
+    id: "skills",
+    support: "blocked",
+    manifestFields: [],
+    runtimeBinding: "No host skill runtime binding",
+    hostBindings: [],
+    typescriptSdk: ["plugin-sdk/typescript/cli/commands/capability-contract.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/capability_contract.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/core/validation.test.ts"],
+  },
+  {
+    id: "media",
+    support: "supported",
+    manifestFields: ["capabilities"],
+    runtimeBinding: "context.media + AI-backed media helpers",
+    hostBindings: ["lib/plugin/api/media-api.ts", "lib/plugin/core/context.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/context/extended.ts",
+      "plugin-sdk/typescript/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/api/media-api.test.ts"],
+  },
+  {
+    id: "canvas",
+    support: "supported",
+    manifestFields: ["capabilities"],
+    runtimeBinding: "context.canvas + active editor selection bridge",
+    hostBindings: ["lib/plugin/api/canvas-api.ts", "lib/plugin/core/context.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/context/extended.ts",
+      "plugin-sdk/typescript/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/api/canvas-api.test.ts"],
+  },
+  {
+    id: "ai-provider",
+    support: "supported",
+    manifestFields: ["capabilities"],
+    runtimeBinding: "context.ai + built-in provider fallback",
+    hostBindings: ["lib/plugin/api/ai-provider-api.ts", "lib/plugin/core/context.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/context/extended.ts",
+      "plugin-sdk/typescript/src/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/api/ai-provider-api.test.ts"],
+  },
+  {
+    id: "themes",
+    support: "partial",
+    manifestFields: [],
+    runtimeBinding: "Theme API surface exists without full extension lifecycle parity",
+    hostBindings: ["lib/plugin/api/theme-api.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/api/ui.ts",
+      "plugin-sdk/typescript/src/context/extended.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/core/validation.test.ts"],
+  },
+  {
+    id: "commands",
+    support: "supported",
+    manifestFields: ["commands"],
+    runtimeBinding: "PluginRegistry commands + slash command registry",
+    hostBindings: ["lib/plugin/core/manager.ts", "lib/chat/slash-command-registry.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/commands/index.ts",
+      "plugin-sdk/typescript/src/commands/types.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/plugin.py", "plugin-sdk/python/src/cognia/types.py"],
+    builtinContributionPaths: [
+      "plugins/ai-tools/src/commands/index.ts",
+      "plugins/clipboard-tools/src/index.ts",
+      "plugins/docker-tools/src/index.ts",
+      "plugins/git-tools/src/index.ts",
+      "plugins/notification-tools/src/index.ts",
+      "plugins/shell-tools/src/index.ts",
+      "plugins/time-tools/src/index.ts",
+      "plugins/web-tools/src/index.ts",
+      "plugins/workspace-tools/src/index.ts",
+    ],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/core/manager.test.ts"],
+  },
+  {
+    id: "hooks",
+    support: "supported",
+    manifestFields: [],
+    runtimeBinding: "PluginLifecycleHooks + hooks-system",
+    hostBindings: ["lib/plugin/messaging/hooks-system.ts", "lib/plugin/contracts/plugin-points.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/hooks/base.ts",
+      "plugin-sdk/typescript/src/hooks/extended.ts",
+    ],
+    pythonSdk: [
+      "plugin-sdk/python/src/cognia/decorators.py",
+      "plugin-sdk/python/src/cognia/types.py",
+    ],
+    builtinContributionPaths: [
+      "plugins/ai-tools/src/index.ts",
+      "plugins/clipboard-tools/src/index.ts",
+      "plugins/docker-tools/src/index.ts",
+      "plugins/git-tools/src/index.ts",
+      "plugins/notification-tools/src/index.ts",
+      "plugins/shell-tools/src/index.ts",
+      "plugins/time-tools/src/index.ts",
+      "plugins/web-tools/src/index.ts",
+      "plugins/workspace-tools/src/index.ts",
+    ],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/core/manager.test.ts"],
+  },
+  {
+    id: "processors",
+    support: "experimental",
+    manifestFields: [],
+    runtimeBinding: "No stable processor pipeline contract yet",
+    hostBindings: ["lib/plugin/contracts/plugin-capabilities.ts"],
+    typescriptSdk: ["plugin-sdk/typescript/cli/commands/capability-contract.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/capability_contract.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/core/validation.test.ts"],
+  },
+  {
+    id: "providers",
+    support: "experimental",
+    manifestFields: [],
+    runtimeBinding: "Provider extension integration is not production-ready",
+    hostBindings: ["lib/plugin/api/ai-provider-api.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/api/index.ts",
+      "plugin-sdk/typescript/src/context/extended.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/core/validation.test.ts"],
+  },
+  {
+    id: "exporters",
+    support: "partial",
+    manifestFields: [],
+    runtimeBinding: "Export API exists without full package/runtime parity",
+    hostBindings: ["lib/plugin/api/export-api.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/context/extended.ts",
+      "plugin-sdk/typescript/src/api/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/core/validation.test.ts"],
+  },
+  {
+    id: "importers",
+    support: "partial",
+    manifestFields: [],
+    runtimeBinding: "Import API exists without full package/runtime parity",
+    hostBindings: ["lib/plugin/core/manager.ts", "lib/plugin/package/marketplace.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/context/extended.ts",
+      "plugin-sdk/typescript/src/api/index.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/core/validation.test.ts"],
+  },
+  {
+    id: "a2ui",
+    support: "supported",
+    manifestFields: ["a2uiComponents", "a2uiTemplates"],
+    runtimeBinding: "Plugin A2UI bridge",
+    hostBindings: ["lib/plugin/bridge/a2ui-bridge.ts", "lib/plugin/core/manager.ts"],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/a2ui/index.ts",
+      "plugin-sdk/typescript/src/context/extended.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/a2ui.py", "plugin-sdk/python/src/cognia/context.py"],
+    docs: "docs/features/plugin-development.md#a2ui-integration",
+    requiredTests: ["stores/plugin/plugin-store.test.ts"],
+  },
+  {
+    id: "python",
+    support: "supported",
+    manifestFields: ["pythonMain", "pythonDependencies"],
+    runtimeBinding: "PyO3/Tauri python runtime",
+    hostBindings: ["src-tauri/src/commands/extensions/plugin.rs", "lib/plugin/core/manager.ts"],
+    typescriptSdk: ["plugin-sdk/typescript/src/context/base.ts"],
+    pythonSdk: [
+      "plugin-sdk/python/src/cognia/runtime.py",
+      "plugin-sdk/python/src/cognia/plugin.py",
+    ],
+    docs: "docs/features/plugin-development.md#plugin-types",
+    requiredTests: ["lib/plugin/core/manager.test.ts"],
+  },
+  {
+    id: "scheduler",
+    support: "supported",
+    manifestFields: ["scheduledTasks"],
+    runtimeBinding: "Plugin scheduler executor",
+    hostBindings: [
+      "lib/plugin/scheduler/scheduler-plugin-executor.ts",
+      "lib/plugin/core/manager.ts",
+    ],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/api/scheduler.ts",
+      "plugin-sdk/typescript/src/context/extended.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["plugin-sdk/typescript/src/manifest/types.test.ts"],
+  },
+  {
+    // cognia-next-specific extension. Plugins declaring this capability
+    // contribute external-agent presets (Claude Code, Codex, Gemini CLI,
+    // Cursor, Windsurf, …) that flow into the existing
+    // `EXTERNAL_AGENT_PRESETS` registry via the §A-3 runtime overlay. The
+    // plugin's manifest carries an `externalAgentPresets` array; the plugin
+    // manager calls `presets.registerPreset(id, config, {pluginId})` on
+    // enable and `unregisterPresetsByPlugin(pluginId)` on disable.
+    id: "external-agent-preset",
+    support: "supported",
+    manifestFields: ["externalAgentPresets"],
+    runtimeBinding: "context.agent.registerExternalAgentPreset + presets.registerPreset overlay",
+    hostBindings: [
+      "lib/ai/agent/external/presets.ts",
+      "lib/plugin/bridge/agent-integration.ts",
+      "components/agent/external-agent-manager.tsx",
+    ],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/api/external-agent-preset.ts",
+      "plugin-sdk/typescript/src/context/extended.ts",
+    ],
+    pythonSdk: [
+      // Python plugins can declare external-agent presets through the same
+      // manifest schema; the SDK helper is a thin pass-through to the Tauri
+      // command that mirrors the contribution into the runtime overlay.
+      "plugin-sdk/python/src/cognia_next/external_agent_presets.py",
+    ],
+    builtinContributionPaths: [
+      "plugins/claude-code-agent/src/index.ts",
+      "plugins/codex-agent/src/index.ts",
+      "plugins/gemini-cli-agent/src/index.ts",
+      "plugins/cursor-agent/src/index.ts",
+      "plugins/windsurf-agent/src/index.ts",
+    ],
+    docs: "docs/content/docs/plugins/external-agents.mdx",
+    requiredTests: ["lib/ai/agent/external/presets.test.ts"],
+  },
+] as const
+
+export const CANONICAL_PLUGIN_CAPABILITIES = PLUGIN_CAPABILITY_CONTRACTS.map(
+  (entry) => entry.id
+) as readonly PluginCapability[]
+
+const capabilityContractMap = new Map(PLUGIN_CAPABILITY_CONTRACTS.map((entry) => [entry.id, entry]))
+
+export function getPluginCapabilityContract(
+  capability: PluginCapability | string
+): PluginCapabilityContract | undefined {
+  return capabilityContractMap.get(capability as PluginCapability)
+}
+
+export function validatePluginCapabilities(
+  capabilities: readonly string[],
+  options: { governanceMode?: PluginPointGovernanceMode } = {}
+): PluginCapabilityValidationOutcome {
+  const governanceMode = options.governanceMode || "warn"
+  const diagnostics: PluginCapabilityDiagnostic[] = []
+
+  for (const capability of capabilities) {
+    const contract = getPluginCapabilityContract(capability)
+    if (!contract) {
+      diagnostics.push({
+        code: "plugin.capability.unknown",
+        severity: "error",
+        capability,
+        message: `Unknown capability "${capability}".`,
+      })
+      continue
+    }
+
+    if (contract.support === "supported") {
+      continue
+    }
+
+    if (contract.support === "blocked") {
+      diagnostics.push({
+        code: "plugin.capability.blocked",
+        severity: governanceMode === "block" ? "error" : "warning",
+        capability,
+        message: `Capability "${capability}" is blocked by the current host contract.`,
+        hint: `Remove "${capability}" from the manifest or wait until the host exposes a supported runtime binding.`,
+        contract,
+      })
+      continue
+    }
+
+    diagnostics.push({
+      code:
+        contract.support === "partial"
+          ? "plugin.capability.partial"
+          : "plugin.capability.experimental",
+      severity: "warning",
+      capability,
+      message: `Capability "${capability}" is only ${contract.support}ly supported by the current host contract.`,
+      hint: `Use "${capability}" with caution until host/runtime parity is completed.`,
+      contract,
+    })
+  }
+
+  return {
+    allowed: diagnostics.every((entry) => entry.severity !== "error"),
+    diagnostics,
+  }
+}
+
+export function auditPluginCapabilityContracts(): PluginCapabilityProofAudit[] {
+  return PLUGIN_CAPABILITY_CONTRACTS.map((contract) => {
+    const missingFields: Array<
+      | "runtimeBinding"
+      | "hostBindings"
+      | "typescriptSdk"
+      | "pythonSdk"
+      | "builtinContributionPaths"
+      | "docs"
+      | "requiredTests"
+    > = []
+    const requiresProof = contract.support === "supported"
+    const requiresBuiltinProof =
+      contract.id === "tools" || contract.id === "commands" || contract.id === "hooks"
+
+    if (requiresProof && !contract.runtimeBinding.trim()) {
+      missingFields.push("runtimeBinding")
+    }
+
+    if (
+      requiresProof &&
+      (!contract.hostBindings.length || contract.hostBindings.some((entry) => !entry.trim()))
+    ) {
+      missingFields.push("hostBindings")
+    }
+
+    if (
+      requiresProof &&
+      (!contract.typescriptSdk.length || contract.typescriptSdk.some((entry) => !entry.trim()))
+    ) {
+      missingFields.push("typescriptSdk")
+    }
+
+    if (
+      requiresProof &&
+      (!contract.pythonSdk.length || contract.pythonSdk.some((entry) => !entry.trim()))
+    ) {
+      missingFields.push("pythonSdk")
+    }
+
+    if (
+      requiresProof &&
+      requiresBuiltinProof &&
+      (!contract.builtinContributionPaths ||
+        contract.builtinContributionPaths.length === 0 ||
+        contract.builtinContributionPaths.some((entry) => !entry.trim()))
+    ) {
+      missingFields.push("builtinContributionPaths")
+    }
+
+    if (requiresProof && !contract.docs.trim()) {
+      missingFields.push("docs")
+    }
+
+    if (
+      requiresProof &&
+      (!contract.requiredTests.length || contract.requiredTests.some((entry) => !entry.trim()))
+    ) {
+      missingFields.push("requiredTests")
+    }
+
+    return {
+      id: contract.id,
+      support: contract.support,
+      runtimeBinding: contract.runtimeBinding,
+      hostBindings: contract.hostBindings,
+      typescriptSdk: contract.typescriptSdk,
+      pythonSdk: contract.pythonSdk,
+      builtinContributionPaths: contract.builtinContributionPaths || [],
+      docs: contract.docs,
+      requiredTests: contract.requiredTests,
+      missingFields,
+      proofStatus: !requiresProof
+        ? "not_applicable"
+        : missingFields.length === 0
+          ? "verified"
+          : "missing_proof",
+    }
+  })
+}

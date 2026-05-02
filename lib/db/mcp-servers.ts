@@ -26,6 +26,8 @@ export async function createMcpServer(
   partial: Pick<McpServer, "name" | "transport" | "config"> & {
     enabled?: boolean
     appsEnabled?: McpServer["appsEnabled"]
+    /** Optional plugin origin tag (§A-6). Set by the plugin manager only. */
+    pluginId?: string
   }
 ): Promise<McpServer> {
   const now = Date.now()
@@ -36,12 +38,27 @@ export async function createMcpServer(
     config: partial.config,
     enabled: partial.enabled ?? true,
     appsEnabled: partial.appsEnabled ?? {},
+    // Tag the row only when explicitly provided so user-created rows stay
+    // structurally identical to pre-port serialized data.
+    ...(partial.pluginId !== undefined ? { pluginId: partial.pluginId } : {}),
     createdAt: now,
     updatedAt: now,
   }
   await getDb().mcpServers.put(server)
   scheduleSyncFor(server.appsEnabled)
   return server
+}
+
+/**
+ * List MCP server rows owned by a single plugin. Used by the plugin manager
+ * during disable / uninstall to enumerate rows for soft-disable / deletion.
+ */
+export async function listMcpServersByPlugin(pluginId: string): Promise<McpServer[]> {
+  // `pluginId` is non-indexed (sparsely populated); the in-memory filter
+  // matches the existing pattern used by `listEnabledMcpServers`.
+  return getDb()
+    .mcpServers.filter((s) => s.pluginId === pluginId)
+    .toArray()
 }
 
 export async function updateMcpServer(

@@ -48,6 +48,11 @@ export const createCustomModeActionsSlice = (
       usageCount: 0,
       createdAt: now,
       updatedAt: now,
+      // Origin tagging — populated only when callers (the plugin manager)
+      // pass them explicitly, so existing user-created modes keep the
+      // serialized shape they had pre-port.
+      ...(mode.source !== undefined ? { source: mode.source } : {}),
+      ...(mode.pluginId !== undefined ? { pluginId: mode.pluginId } : {}),
     }
 
     set((state) => ({

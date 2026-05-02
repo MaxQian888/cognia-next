@@ -16,6 +16,7 @@ jest.mock("@/lib/claude/sync", () => ({
 import {
   listMcpServers,
   listEnabledMcpServers,
+  listMcpServersByPlugin,
   getMcpServer,
   createMcpServer,
   updateMcpServer,
@@ -80,6 +81,57 @@ describe("createMcpServer", () => {
       config: {},
     })
     expect(server.name).toBe("unnamed")
+  })
+
+  // §A-6 plugin extension: an MCP server contributed by a plugin carries
+  // through the optional `pluginId` so the manager can later soft-disable
+  // or hard-delete just that plugin's rows. User-created rows continue to
+  // omit the field entirely.
+  it("preserves pluginId when supplied at create time", async () => {
+    const server = await createMcpServer({
+      name: "from-plugin",
+      transport: "stdio",
+      config: { command: "x" },
+      pluginId: "cognia-git-tools",
+    })
+    expect(server.pluginId).toBe("cognia-git-tools")
+    const read = await getDb().mcpServers.get(server.id)
+    expect(read?.pluginId).toBe("cognia-git-tools")
+  })
+
+  it("omits pluginId for user-created rows (backwards compatibility)", async () => {
+    const server = await createMcpServer({
+      name: "user-row",
+      transport: "stdio",
+      config: { command: "x" },
+    })
+    expect(Object.prototype.hasOwnProperty.call(server, "pluginId")).toBe(false)
+  })
+
+  it("listMcpServersByPlugin returns only that plugin's rows", async () => {
+    await createMcpServer({
+      name: "g1",
+      transport: "stdio",
+      config: { command: "x" },
+      pluginId: "git-tools",
+    })
+    await createMcpServer({
+      name: "g2",
+      transport: "stdio",
+      config: { command: "x" },
+      pluginId: "git-tools",
+    })
+    await createMcpServer({
+      name: "s1",
+      transport: "stdio",
+      config: { command: "x" },
+      pluginId: "shell-tools",
+    })
+    await createMcpServer({ name: "user-row", transport: "stdio", config: { command: "x" } })
+
+    const owned = await listMcpServersByPlugin("git-tools")
+    expect(owned.map((s) => s.name).sort()).toEqual(["g1", "g2"])
+    expect(await listMcpServersByPlugin("nobody")).toEqual([])
   })
 
   it("schedules a sync only for agents with appsEnabled=true", async () => {

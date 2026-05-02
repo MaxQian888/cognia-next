@@ -26,11 +26,13 @@ import {
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
-import { useLiveQuery } from "dexie-react-hooks"
-import { listPresets, recordPresetUsage } from "@/lib/db/prompt-presets"
-import { getCharacter } from "@/lib/db/characters"
-import { listSkillsByIds } from "@/lib/db/skills"
-import { updateSession } from "@/lib/db/sessions"
+import {
+  useCharacter,
+  usePresets,
+  useSkillsByIds,
+  useUpdateSession,
+  useRecordPresetUsage,
+} from "@/lib/data-hooks/context"
 import {
   buildPresetApplicationPlan,
   type ApplyPresetStrategy,
@@ -98,16 +100,12 @@ interface FormState {
 
 export function ChatHeader({ session, messages, onOpenSettings }: Props) {
   const t = useTranslations("chat.header")
-  const presetsRaw = useLiveQuery(() => listPresets(), [])
+  const updateSession = useUpdateSession()
+  const recordPresetUsage = useRecordPresetUsage()
+  const presetsRaw = usePresets()
   const presets = useMemo(() => presetsRaw ?? [], [presetsRaw])
-  const character = useLiveQuery(
-    () => (session.characterId ? getCharacter(session.characterId) : Promise.resolve(undefined)),
-    [session.characterId]
-  )
-  const skills = useLiveQuery(
-    () => (character?.skillIds?.length ? listSkillsByIds(character.skillIds) : Promise.resolve([])),
-    [character?.skillIds?.join(",") ?? ""]
-  )
+  const character = useCharacter(session.characterId)
+  const skills = useSkillsByIds(character?.skillIds)
   const disabledSkillIds = useMemo(
     () => new Set(session.disabledSkillIds ?? []),
     [session.disabledSkillIds]

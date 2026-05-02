@@ -543,6 +543,28 @@ export interface AppSettings {
   a2uiDefaultTheme?: import("@/types/a2ui/schema").A2UIWidgetTheme
   /** LRU surface cap kept in zustand persist (default 20). */
   a2uiPersistenceLimit?: number
+
+  // =============================================================================
+  // Plugin-facing fields
+  //
+  // The plugin Theme / AI-Provider APIs read these directly from the
+  // settings store. They live alongside the rest of the appearance and
+  // provider configuration so a single Dexie write persists everything.
+  // =============================================================================
+
+  /** Active color preset. Plugin Theme API surfaces this as `colorTheme`. */
+  colorTheme?: import("@/types/plugin/plugin-extended").ColorThemePreset
+  /** User-defined custom theme palettes (UI colors, not export tokens). */
+  customThemes?: import("@/types/plugin/plugin-extended").CustomTheme[]
+  /** Currently active custom theme id; null when a preset is in use. */
+  activeCustomThemeId?: string | null
+
+  /** Active default AI provider id (e.g. "openai", "anthropic", "google"). */
+  defaultProvider?: string
+  /** Per-provider configuration (api key / base URL / default model). */
+  providerSettings?: Record<string, import("@/lib/ai/provider-consumption").ProviderSettingsEntry>
+  /** User-defined custom AI providers (e.g. self-hosted OpenAI-compatible). */
+  customProviders?: import("@/lib/ai/provider-consumption").CustomProviderDefinition[]
 }
 
 export interface BackupAutoSchedule {
@@ -677,6 +699,14 @@ export interface McpServer {
    * Cursor" or vice-versa.
    */
   appsEnabled?: Partial<Record<AgentId, boolean>>
+  /**
+   * Plugin origin (§A-6). Set by the plugin manager when an installed
+   * plugin contributes an MCP server through its `mcp` capability. Lets
+   * the runtime soft-disable / hard-delete the row when the plugin is
+   * disabled / uninstalled — purely tagging metadata, no Dexie index needed.
+   * User-created MCP rows leave this field undefined.
+   */
+  pluginId?: string
   createdAt: number
   updatedAt: number
 }

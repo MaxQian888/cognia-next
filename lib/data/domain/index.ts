@@ -46,6 +46,7 @@ export type DomainKey =
   | "canvasComments"
   | "canvasSettings"
   | "schedulerPrefs"
+  | "plugins"
 
 export interface DomainExportFile {
   version: "cognia-domain-1.0"
@@ -214,8 +215,64 @@ export const DOMAIN_TRANSFERS: DomainSpec[] = [
   }),
 ]
 
+// §A-5 — runtime overlay so plugins (and the schema-v15 plugins domain that
+// will be added once the plugin tables exist) can contribute domain transfer
+// specs at runtime. Static specs in DOMAIN_TRANSFERS take precedence so a
+// plugin cannot accidentally shadow a builtin transfer.
+interface RegisteredDomain {
+  spec: DomainSpec
+  pluginId?: string
+}
+
+const dynamicDomains: RegisteredDomain[] = []
+
+/**
+ * Register a domain transfer spec at runtime. Plugins call this through the
+ * plugin manager; tests call it directly. Only called for keys absent from
+ * the static `DOMAIN_TRANSFERS` array — registering a key that already has
+ * a static entry is allowed but the static entry wins on lookup.
+ */
+export function registerDomainTransfer(spec: DomainSpec, opts?: { pluginId?: string }): void {
+  dynamicDomains.push({ spec, pluginId: opts?.pluginId })
+}
+
+/**
+ * Drop every dynamically registered domain transfer tagged with `pluginId`.
+ * Returns the number of specs removed.
+ */
+export function unregisterDomainTransfersByPlugin(pluginId: string): number {
+  let removed = 0
+  for (let i = dynamicDomains.length - 1; i >= 0; i -= 1) {
+    if (dynamicDomains[i].pluginId === pluginId) {
+      dynamicDomains.splice(i, 1)
+      removed += 1
+    }
+  }
+  return removed
+}
+
+/** Test-only escape hatch for cleaning up the dynamic overlay between tests. */
+export function __resetDynamicDomainsForTesting(): void {
+  dynamicDomains.length = 0
+}
+
+/**
+ * Returns every domain spec available to the export/import flows: the static
+ * builtins plus any plugin-contributed specs. Used by the domain-transfer UI
+ * to render the per-domain checklist; per-domain code paths still call
+ * `getDomain(key)` for a single lookup.
+ */
+export function getAllDomainTransfers(): DomainSpec[] {
+  return [...DOMAIN_TRANSFERS, ...dynamicDomains.map((d) => d.spec)]
+}
+
 export function getDomain(key: DomainKey): DomainSpec | undefined {
-  return DOMAIN_TRANSFERS.find((d) => d.key === key)
+  // Static wins; fall through to dynamic so plugin-registered keys (e.g.,
+  // a plugin's own settings table) resolve too.
+  return (
+    DOMAIN_TRANSFERS.find((d) => d.key === key) ??
+    dynamicDomains.find((d) => d.spec.key === key)?.spec
+  )
 }
 
 /** Build an exportable JSON file for a single domain. */

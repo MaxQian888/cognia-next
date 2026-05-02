@@ -1,16 +1,23 @@
 /**
- * Plugin task executor stub.
+ * Plugin task executor (§B-2 activation).
  *
  * Cognia's plugin runtime resolves a registered task handler keyed on
- * `${pluginId}:${handler}`. cognia-next has no plugin runtime yet (see
- * `lib/plugin/index.ts`), so this executor short-circuits with a clean
- * "handler not registered" failure. The signature matches the scheduler
- * `TaskExecutor` contract so the registry call site stays unchanged once a
- * real plugin runtime lands.
+ * `${pluginId}:${handler}`. Phase 2 ports the handler registry from Cognia
+ * (`lib/plugin/scheduler/scheduler-plugin-executor.ts`) — this executor now
+ * delegates to that registry rather than short-circuiting with "not wired
+ * up". When no plugin has registered a matching handler, the executor still
+ * returns a clean failure so the scheduler can mark the task as failed and
+ * surface the diagnostic to the user.
+ *
+ * The signature, payload type, and cancellation helpers are intentionally
+ * unchanged — `lib/scheduler/task-scheduler.ts:registerTaskExecutor("plugin", …)`
+ * call sites continue to work without edits.
  */
 
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import { loggers } from "@/lib/logger"
+import { getPluginTaskHandler } from "@/lib/plugin/scheduler/scheduler-plugin-executor"
+import type { PluginTaskContext } from "@/types/plugin/plugin-scheduler"
 
 const log = loggers.scheduler
 
@@ -32,15 +39,66 @@ export async function executePluginTask(
   }
 
   const fullName = `${payload.pluginId}:${payload.handler}`
-  log.warn("Plugin scheduled task triggered, but no plugin runtime is wired up", {
-    taskId: task.id,
-    executionId: execution.id,
-    handler: fullName,
-  })
+  const handler = getPluginTaskHandler(fullName)
+  if (!handler) {
+    log.warn("Plugin scheduled task triggered, but no handler is registered", {
+      taskId: task.id,
+      executionId: execution.id,
+      handler: fullName,
+    })
+    return {
+      success: false,
+      error: `Plugin task handler not registered: ${fullName}. The contributing plugin may be disabled or uninstalled.`,
+    }
+  }
 
-  return {
-    success: false,
-    error: `Plugin task handler not found: ${fullName}. cognia-next does not ship a plugin runtime yet.`,
+  // Wire cancellation through `cancelPluginTaskExecution(executionId)`.
+  const controller = new AbortController()
+  activeExecutions.set(execution.id, controller)
+
+  try {
+    const startedAt = new Date()
+    const ctx: PluginTaskContext = {
+      taskId: task.id,
+      executionId: execution.id,
+      pluginId: payload.pluginId,
+      taskName: task.name,
+      scheduledAt: execution.scheduledFor ?? startedAt,
+      startedAt,
+      attemptNumber: (execution.retryAttempt ?? 0) + 1,
+      signal: controller.signal,
+      reportProgress: (progress, message) => {
+        // Progress is purely advisory at this layer; the scheduler doesn't
+        // record per-task progress yet, so we log it for diagnostics.
+        log.debug("Plugin task progress", {
+          executionId: execution.id,
+          progress,
+          message,
+        })
+      },
+      log: (level, message, data) => {
+        const fn = log[level] ?? log.info
+        fn.call(log, message, data)
+      },
+    }
+
+    const result = await handler(payload.args ?? {}, ctx)
+    return {
+      success: result.success,
+      output: result.output,
+      error: result.error,
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    log.error("Plugin task handler threw", {
+      taskId: task.id,
+      executionId: execution.id,
+      handler: fullName,
+      error: message,
+    })
+    return { success: false, error: message }
+  } finally {
+    activeExecutions.delete(execution.id)
   }
 }
 

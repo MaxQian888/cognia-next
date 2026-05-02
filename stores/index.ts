@@ -29,6 +29,7 @@ export {
   useCommentStore,
   useKeybindingStore,
 } from "./canvas"
+export { useVectorStore } from "./vector/vector-store"
 
 /**
  * Synthetic session-store-like surface used by ported canvas hooks.

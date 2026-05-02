@@ -24,9 +24,7 @@ import type { UIMessage } from "ai"
 import { DownloadIcon, Trash2Icon } from "lucide-react"
 import { MessageRenderer } from "./message-renderer"
 import { useChatStore } from "@/stores/chat"
-import { clearMessages } from "@/lib/db/messages"
-import { listCharacters } from "@/lib/db/characters"
-import { useLiveQuery } from "dexie-react-hooks"
+import { useCharacters, useClearMessages } from "@/lib/data-hooks/context"
 import type { Character } from "@/lib/claude/types"
 import { useCallback, useMemo } from "react"
 import { toast } from "sonner"
@@ -45,13 +43,11 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
   const t = useTranslations("chat.list")
   const lastIndex = messages.length - 1
   const sessionId = useChatStore((s) => s.activeSessionId)
+  const clearMessages = useClearMessages()
 
-  // Single Dexie subscription so renderer can resolve senderId → Character
-  // without N independent queries. Cheap: characters are 5–20 rows in practice.
-  const charactersList = useLiveQuery<Character[]>(
-    () => (typeof window === "undefined" ? Promise.resolve([]) : listCharacters()),
-    []
-  )
+  // Single subscription so renderer can resolve senderId → Character without
+  // N independent queries. Cheap: characters are 5–20 rows in practice.
+  const charactersList = useCharacters()
   const characterById = useMemo(() => {
     const map = new Map<string, Character>()
     for (const c of charactersList ?? []) map.set(c.id, c)
@@ -80,7 +76,7 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
       loggers.chat.error("clear messages failed", err, { sessionId })
       toast.error(err instanceof Error ? err.message : t("cleared"))
     }
-  }, [sessionId, t])
+  }, [sessionId, t, clearMessages])
 
   const lastAssistantId = (() => {
     for (let i = messages.length - 1; i >= 0; i--) {

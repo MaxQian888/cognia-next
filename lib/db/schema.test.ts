@@ -32,6 +32,120 @@ describe("getDb", () => {
     expect(db.canvasSessions).toBeDefined()
     expect(db.sessionState).toBeDefined()
     expect(db.tts_provider_keys).toBeDefined()
+    // §A-Schema (v15) — the five plugin tables added by the plugin port.
+    expect(db.plugins).toBeDefined()
+    expect(db.pluginPermissions).toBeDefined()
+    expect(db.pluginReviews).toBeDefined()
+    expect(db.pluginAnalytics).toBeDefined()
+    expect(db.pluginScheduledJobs).toBeDefined()
+  })
+
+  // §A-Schema migration check: Dexie auto-applies all version blocks up to
+  // the latest when the schema bumps. Verify v15 opens cleanly on a fresh
+  // database and that we can write/read a row through each new table — that
+  // proves both the index declarations and the per-row type compile.
+  it("v15 plugin tables accept inserts and reads round-trip", async () => {
+    const db = getDb()
+    const now = Date.now()
+
+    await db.plugins.put({
+      id: "p1",
+      name: "Test Plugin",
+      version: "1.0.0",
+      status: "enabled",
+      source: "builtin",
+      type: "frontend",
+      enabled: true,
+      capabilities: ["tools", "commands"],
+      path: "<builtin>/p1",
+      manifest: { id: "p1", name: "Test Plugin", version: "1.0.0" },
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    await db.pluginPermissions.put({
+      pluginId: "p1",
+      permission: "shell:execute",
+      decision: "allow",
+      grantedAt: now,
+    })
+
+    await db.pluginReviews.put({
+      id: "rev-1",
+      pluginId: "p1",
+      rating: 5,
+      title: "Great",
+      createdAt: now,
+    })
+
+    await db.pluginAnalytics.put({
+      pluginId: "p1",
+      key: "tool.git_status.invocations",
+      count: 7,
+      lastEventAt: now,
+    })
+
+    await db.pluginScheduledJobs.put({
+      id: "job-1",
+      pluginId: "p1",
+      cron: "0 * * * *",
+      handler: "syncRepo",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    expect(await db.plugins.get("p1")).toMatchObject({ name: "Test Plugin", enabled: true })
+    expect(await db.pluginPermissions.get(["p1", "shell:execute"])).toMatchObject({
+      decision: "allow",
+    })
+    expect(await db.pluginReviews.get(["p1", "rev-1"])).toMatchObject({ rating: 5 })
+    expect(await db.pluginAnalytics.get(["p1", "tool.git_status.invocations"])).toMatchObject({
+      count: 7,
+    })
+    expect(await db.pluginScheduledJobs.get("job-1")).toMatchObject({ status: "active" })
+  })
+
+  it("v15 plugin indexes drive filtered queries (multi-entry capabilities)", async () => {
+    const db = getDb()
+    const now = Date.now()
+    await db.plugins.bulkPut([
+      {
+        id: "a",
+        name: "A",
+        version: "1",
+        status: "enabled",
+        source: "builtin",
+        type: "frontend",
+        enabled: true,
+        capabilities: ["tools", "commands"],
+        path: "x",
+        manifest: {},
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: "b",
+        name: "B",
+        version: "1",
+        status: "enabled",
+        source: "builtin",
+        type: "frontend",
+        enabled: true,
+        capabilities: ["modes", "themes"],
+        path: "x",
+        manifest: {},
+        createdAt: now,
+        updatedAt: now,
+      },
+    ])
+
+    // The `*capabilities` multi-entry index supports `where("capabilities").equals(...)`
+    // queries — exactly the lookup the Settings → Plugins capability filter uses.
+    const toolsPlugins = await db.plugins.where("capabilities").equals("tools").toArray()
+    expect(toolsPlugins.map((p) => p.id)).toEqual(["a"])
+    const themesPlugins = await db.plugins.where("capabilities").equals("themes").toArray()
+    expect(themesPlugins.map((p) => p.id)).toEqual(["b"])
   })
 
   it("returns the same instance on repeat calls (memoised)", () => {

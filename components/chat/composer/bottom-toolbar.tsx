@@ -6,6 +6,7 @@
 // running token / context-window indicator.
 
 import { useTranslations } from "next-intl"
+import { useRouter } from "next/navigation"
 import {
   Context,
   ContextContent,
@@ -37,6 +38,7 @@ interface BottomToolbarProps {
 
 export function BottomToolbar({ session }: BottomToolbarProps) {
   const t = useTranslations("chat.composer.toolbar")
+  const router = useRouter()
   const messages = useChatStore((s) => s.messages)
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
@@ -82,7 +84,12 @@ export function BottomToolbar({ session }: BottomToolbarProps) {
         <WebSearchToggle />
         <AgentRuntimeSelector />
         {runtime === "claude-sdk" && (
-          <AgentModeSelector selectedModeId={modeId} onModeChange={(mode) => setModeId(mode.id)} />
+          <AgentModeSelector
+            selectedModeId={modeId}
+            onModeChange={(mode) => setModeId(mode.id)}
+            onSelectTeam={(teamId) => router.push(`/agent-teams/${teamId}`)}
+            onCreateTeam={() => router.push("/agent-teams")}
+          />
         )}
         {runtime === "external" && (
           <ExternalAgentSelector

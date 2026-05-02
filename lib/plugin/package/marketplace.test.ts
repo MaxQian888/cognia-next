@@ -1,0 +1,496 @@
+/**
+ * PluginMarketplace Tests
+ */
+
+import {
+  LocalPluginSource,
+  PluginMarketplace,
+  getPluginMarketplace,
+  resetPluginMarketplace,
+  usePluginMarketplace,
+} from "./marketplace"
+
+// Mock fetch
+global.fetch = jest.fn()
+const mockFetch = global.fetch as jest.Mock
+
+// Mock proxyFetch to delegate to global.fetch
+jest.mock("@/lib/network/proxy-fetch", () => ({
+  proxyFetch: (...args: unknown[]) =>
+    (global.fetch as jest.MockedFunction<typeof fetch>)(...(args as Parameters<typeof fetch>)),
+}))
+
+jest.mock("@/lib/native/utils", () => ({
+  isTauri: jest.fn(() => false),
+}))
+
+jest.mock("@tauri-apps/plugin-fs", () => ({
+  exists: jest.fn(),
+  readDir: jest.fn(),
+  readTextFile: jest.fn(),
+}))
+
+const { isTauri } = jest.requireMock("@/lib/native/utils") as {
+  isTauri: jest.Mock
+}
+const { exists, readDir, readTextFile } = jest.requireMock("@tauri-apps/plugin-fs") as {
+  exists: jest.Mock
+  readDir: jest.Mock
+  readTextFile: jest.Mock
+}
+
+describe("PluginMarketplace", () => {
+  let marketplace: PluginMarketplace
+
+  beforeEach(() => {
+    resetPluginMarketplace()
+    marketplace = new PluginMarketplace()
+    jest.clearAllMocks()
+    isTauri.mockReturnValue(false)
+    exists.mockResolvedValue(false)
+    readDir.mockResolvedValue([])
+    readTextFile.mockResolvedValue("")
+  })
+
+  describe("LocalPluginSource", () => {
+    it("scans a local plugin directory and returns normalized registry entries", async () => {
+      isTauri.mockReturnValue(true)
+      exists.mockResolvedValue(true)
+      readDir.mockResolvedValue([{ name: "local-one", isDirectory: true, isFile: false }])
+      readTextFile.mockResolvedValue(
+        JSON.stringify({
+          id: "local-one",
+          name: "Local One",
+          version: "1.2.0",
+          description: "Local plugin",
+          type: "frontend",
+          capabilities: ["tools"],
+          main: "index.ts",
+          author: { name: "Local Author" },
+        })
+      )
+
+      const source = new LocalPluginSource()
+      const results = await source.scan("D:/Plugins")
+
+      expect(results).toHaveLength(1)
+      expect(results[0]).toEqual(
+        expect.objectContaining({
+          id: "local-one",
+          name: "Local One",
+          version: "1.2.0",
+          latestVersion: "1.2.0",
+          source: "local",
+        })
+      )
+      expect(results[0].descriptor?.resolvedPath).toContain("local-one")
+      expect(readTextFile).toHaveBeenCalledWith("D:/Plugins/local-one/plugin.json")
+    })
+
+    it("resolves plugin-relative icon assets for local plugin entries", async () => {
+      isTauri.mockReturnValue(true)
+      exists.mockImplementation(
+        async (path: string) =>
+          path !== "D:/Plugins/local-one/manifest.json" &&
+          path !== "D:/Plugins/local-one/package.json"
+      )
+      readDir.mockResolvedValue([{ name: "local-one", isDirectory: true, isFile: false }])
+      readTextFile.mockResolvedValue(
+        JSON.stringify({
+          id: "local-one",
+          name: "Local One",
+          version: "1.2.0",
+          description: "Local plugin",
+          type: "frontend",
+          capabilities: ["tools"],
+          icon: "assets/icon.svg",
+          main: "index.ts",
+          author: { name: "Local Author" },
+        })
+      )
+
+      const source = new LocalPluginSource()
+      const results = await source.scan("D:/Plugins")
+
+      expect(results[0].icon).toBe("assets/icon.svg")
+      expect(results[0].resolvedIcon).toEqual(
+        expect.objectContaining({
+          kind: "image",
+          transport: "file",
+          src: "D:/Plugins/local-one/assets/icon.svg",
+        })
+      )
+    })
+
+    it("skips invalid local manifests without failing the full scan", async () => {
+      isTauri.mockReturnValue(true)
+      exists.mockResolvedValue(true)
+      readDir.mockResolvedValue([{ name: "bad-plugin", isDirectory: true, isFile: false }])
+      readTextFile.mockResolvedValue("{ invalid json")
+
+      const source = new LocalPluginSource()
+      const results = await source.scan("D:/Plugins")
+
+      expect(results).toEqual([])
+    })
+  })
+
+  describe("Plugin Search", () => {
+    it("should search plugins by query", async () => {
+      const mockResults = {
+        plugins: [{ id: "chat-plugin", name: "Chat Enhancement", version: "1.0.0" }],
+        total: 1,
+        hasMore: false,
+      }
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResults),
+      })
+
+      const result = await marketplace.searchPlugins({ query: "chat" })
+
+      expect(mockFetch).toHaveBeenCalled()
+      expect(result.plugins).toHaveLength(1)
+      expect(result.total).toBe(1)
+    })
+
+    it("should search with category filter", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ plugins: [], total: 0, hasMore: false }),
+      })
+
+      await marketplace.searchPlugins({
+        query: "test",
+        category: "productivity",
+      })
+
+      const calledUrl = mockFetch.mock.calls[0][0] as string
+      expect(calledUrl).toContain("category=productivity")
+    })
+
+    it("should handle search errors gracefully", async () => {
+      mockFetch.mockRejectedValueOnce(new Error("Network error"))
+
+      const consoleSpy = jest.spyOn(console, "error").mockImplementation()
+      const result = await marketplace.searchPlugins({ query: "test" })
+
+      expect(result.plugins).toEqual([])
+      expect(result.total).toBe(0)
+
+      consoleSpy.mockRestore()
+    })
+  })
+
+  describe("Featured Plugins", () => {
+    it("should fetch featured plugins", async () => {
+      const mockPlugins = {
+        plugins: [
+          { id: "plugin-1", name: "Plugin 1", version: "1.0.0" },
+          { id: "plugin-2", name: "Plugin 2", version: "2.0.0" },
+        ],
+        total: 2,
+        hasMore: false,
+      }
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockPlugins),
+      })
+
+      const result = await marketplace.getFeaturedPlugins()
+
+      expect(mockFetch).toHaveBeenCalled()
+      expect(result).toHaveLength(2)
+    })
+  })
+
+  describe("Plugin Details", () => {
+    it("should fetch plugin details", async () => {
+      const mockPlugin = {
+        id: "test-plugin",
+        name: "Test Plugin",
+        version: "1.0.0",
+        description: "A test plugin",
+      }
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockPlugin),
+      })
+
+      const result = await marketplace.getPlugin("test-plugin")
+
+      expect(result).toBeDefined()
+      expect(result?.id).toBe("test-plugin")
+    })
+
+    it("should return null for non-existent plugin", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+      })
+
+      const result = await marketplace.getPlugin("non-existent")
+
+      expect(result).toBeNull()
+    })
+  })
+
+  describe("Version Management", () => {
+    it("should fetch available versions", async () => {
+      const mockVersions = [
+        { version: "1.0.0", publishedAt: new Date(), downloadUrl: "url1" },
+        { version: "1.1.0", publishedAt: new Date(), downloadUrl: "url2" },
+      ]
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockVersions),
+      })
+
+      const result = await marketplace.getVersions("test-plugin")
+
+      expect(result).toHaveLength(2)
+      expect(result[0].version).toBe("1.0.0")
+    })
+
+    it("should return empty array on error", async () => {
+      mockFetch.mockRejectedValueOnce(new Error("Network error"))
+
+      const consoleSpy = jest.spyOn(console, "error").mockImplementation()
+      const result = await marketplace.getVersions("test-plugin")
+
+      expect(result).toEqual([])
+
+      consoleSpy.mockRestore()
+    })
+  })
+
+  describe("Categories", () => {
+    it("should fetch categories", async () => {
+      const mockCategories = [
+        { id: "productivity", name: "Productivity", count: 10 },
+        { id: "ai", name: "AI", count: 5 },
+      ]
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockCategories),
+      })
+
+      const result = await marketplace.getCategories()
+
+      expect(result).toHaveLength(2)
+      expect(result[0].id).toBe("productivity")
+    })
+  })
+
+  describe("Dependency Resolution", () => {
+    it("should resolve plugin dependencies", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            id: "main-plugin",
+            manifest: { dependencies: {} },
+          }),
+      })
+
+      const result = await marketplace.resolveDependencies("main-plugin")
+
+      expect(result.resolved).toBeDefined()
+      expect(result.missing).toBeDefined()
+    })
+
+    it("should report missing plugin", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+      })
+
+      const result = await marketplace.resolveDependencies("non-existent")
+
+      expect(result.resolved).toBe(false)
+      expect(result.missing).toContain("non-existent")
+    })
+  })
+
+  describe("Installation", () => {
+    it("should install plugin with progress callback", async () => {
+      const progressUpdates: string[] = []
+
+      // Setup progress listener
+      marketplace.onInstallProgress("test-plugin", (progress) => {
+        progressUpdates.push(progress.stage)
+      })
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ id: "test-plugin", manifest: {} }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve([{ version: "1.0.0", downloadUrl: "url" }]),
+        })
+
+      const result = await marketplace.installPlugin("test-plugin")
+
+      expect(result.success).toBe(false)
+      expect(result.errorCategory).toBe("unsupported_env")
+      expect(progressUpdates).toContain("error")
+    })
+
+    it("should emit error progress events in web environment", async () => {
+      const stages: string[] = []
+
+      marketplace.onInstallProgress("web-plugin", (progress) => {
+        stages.push(progress.stage)
+      })
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ id: "web-plugin", name: "Web Plugin", manifest: {} }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve([{ version: "1.0.0", downloadUrl: "url" }]),
+        })
+
+      await marketplace.installPlugin("web-plugin")
+
+      // Web environment: install/update is blocked without desktop runtime.
+      expect(stages).toContain("error")
+      expect(stages).not.toContain("complete")
+    })
+  })
+
+  describe("Update checks", () => {
+    it("reports updates when a local source has a newer version than the installed plugin", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            id: "local-plugin",
+            name: "Local Plugin",
+            description: "Local plugin",
+            version: "1.0.0",
+            latestVersion: "1.1.0",
+            downloads: 0,
+            rating: 0,
+            ratingCount: 0,
+            tags: [],
+            categories: [],
+            manifest: {
+              id: "local-plugin",
+              name: "Local Plugin",
+              version: "1.1.0",
+              description: "Local plugin",
+              type: "frontend",
+              capabilities: ["tools"],
+              main: "index.ts",
+            },
+            publishedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            verified: false,
+            featured: false,
+          }),
+      })
+
+      const updates = await marketplace.checkForUpdates([{ id: "local-plugin", version: "1.0.0" }])
+
+      expect(updates).toEqual([
+        {
+          id: "local-plugin",
+          currentVersion: "1.0.0",
+          latestVersion: "1.1.0",
+        },
+      ])
+    })
+  })
+
+  describe("Cache", () => {
+    it("should cache API responses", async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ id: "cached-plugin", name: "Cached" }),
+      })
+
+      // First call hits API
+      await marketplace.getPlugin("cached-plugin")
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+
+      // Second call should use cache (no additional fetch)
+      await marketplace.getPlugin("cached-plugin")
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it("should clear cache", async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ id: "cached-plugin", name: "Cached" }),
+      })
+
+      await marketplace.getPlugin("cached-plugin")
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+
+      marketplace.clearCache()
+
+      await marketplace.getPlugin("cached-plugin")
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe("Popular and Recent Plugins", () => {
+    it("should fetch popular plugins", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ plugins: [{ id: "popular" }], total: 1, hasMore: false }),
+      })
+
+      const result = await marketplace.getPopularPlugins(5)
+
+      const calledUrl = mockFetch.mock.calls[0][0] as string
+      expect(calledUrl).toContain("sort=downloads")
+      expect(result).toHaveLength(1)
+    })
+
+    it("should fetch recent plugins", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ plugins: [{ id: "recent" }], total: 1, hasMore: false }),
+      })
+
+      const result = await marketplace.getRecentPlugins(5)
+
+      const calledUrl = mockFetch.mock.calls[0][0] as string
+      expect(calledUrl).toContain("sort=updated")
+      expect(result).toHaveLength(1)
+    })
+  })
+
+  describe("Singleton", () => {
+    it("should return the same instance", () => {
+      const instance1 = getPluginMarketplace()
+      const instance2 = getPluginMarketplace()
+
+      expect(instance1).toBe(instance2)
+    })
+
+    it("should reset singleton on reset call", () => {
+      const instance1 = getPluginMarketplace()
+      resetPluginMarketplace()
+      const instance2 = getPluginMarketplace()
+
+      expect(instance1).not.toBe(instance2)
+    })
+
+    it("should provide hook for accessing marketplace", () => {
+      const result = usePluginMarketplace()
+      expect(result).toBeInstanceOf(PluginMarketplace)
+    })
+  })
+})

@@ -15,6 +15,8 @@ import { SchedulerInitializer } from "@/components/scheduler"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provider"
 import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provider"
+import { DataAdapterProvider } from "@/lib/data-hooks/context"
+import { dexieAdapter } from "@/lib/data-hooks/dexie-adapter"
 import "./globals.css"
 
 const geistSans = Geist({
@@ -55,7 +57,11 @@ export default function RootLayout({
                     <SchedulerInitializer />
                     <BackupSchedulerProvider>
                       <CanvasBridgeProvider>
-                        <A2UIDispatchProvider>{children}</A2UIDispatchProvider>
+                        <A2UIDispatchProvider>
+                          <DataAdapterProvider adapter={dexieAdapter}>
+                            {children}
+                          </DataAdapterProvider>
+                        </A2UIDispatchProvider>
                       </CanvasBridgeProvider>
                     </BackupSchedulerProvider>
                     <Toaster />

@@ -347,6 +347,100 @@ describe("Tool Utilities", () => {
       expect(result).toBe(registry)
       expect(registry.getNames()).toHaveLength(2)
     })
+
+    describe("plugin metadata + lifecycle", () => {
+      // Verifies the §A-1 extension: plugins register their tools through the
+      // same ToolRegistry as built-in tools, tagged with `source: "plugin"`
+      // and `pluginId`. Disabling a plugin must drop only that plugin's tools
+      // without touching anything else.
+
+      it("preserves source/pluginId on metadata round-trip", () => {
+        registry.register(
+          "git_status",
+          { description: "git status", inputSchema: z.object({}), execute: async () => ({}) },
+          { category: "system", source: "plugin", pluginId: "cognia-git-tools" }
+        )
+
+        const meta = registry.getMetadata("git_status")
+        expect(meta?.source).toBe("plugin")
+        expect(meta?.pluginId).toBe("cognia-git-tools")
+      })
+
+      it("treats omitted source/pluginId as builtin (backwards compatibility)", () => {
+        registry.register(
+          "WebSearch",
+          { description: "Built-in", inputSchema: z.object({}), execute: async () => ({}) },
+          { category: "search" }
+        )
+
+        const meta = registry.getMetadata("WebSearch")
+        expect(meta?.source).toBeUndefined()
+        expect(meta?.pluginId).toBeUndefined()
+      })
+
+      it("unregister(name) removes a single tool and reports success", () => {
+        registry.register(
+          "victim",
+          { description: "v", inputSchema: z.object({}), execute: async () => ({}) },
+          { category: "custom" }
+        )
+        registry.register(
+          "survivor",
+          { description: "s", inputSchema: z.object({}), execute: async () => ({}) },
+          { category: "custom" }
+        )
+
+        expect(registry.unregister("victim")).toBe(true)
+        expect(registry.get("victim")).toBeUndefined()
+        expect(registry.get("survivor")).toBeDefined()
+        // Idempotent: a second call returns false because nothing was deleted.
+        expect(registry.unregister("victim")).toBe(false)
+      })
+
+      it("unregisterByPlugin removes only that plugin's tools", () => {
+        registry.register(
+          "git_status",
+          { description: "g", inputSchema: z.object({}), execute: async () => ({}) },
+          { category: "system", source: "plugin", pluginId: "git-tools" }
+        )
+        registry.register(
+          "git_diff",
+          { description: "g", inputSchema: z.object({}), execute: async () => ({}) },
+          { category: "system", source: "plugin", pluginId: "git-tools" }
+        )
+        registry.register(
+          "shell_exec",
+          { description: "s", inputSchema: z.object({}), execute: async () => ({}) },
+          { category: "system", source: "plugin", pluginId: "shell-tools" }
+        )
+        registry.register(
+          "WebSearch",
+          { description: "w", inputSchema: z.object({}), execute: async () => ({}) },
+          { category: "search" } // builtin, no pluginId
+        )
+
+        const removed = registry.unregisterByPlugin("git-tools")
+
+        expect(removed).toBe(2)
+        expect(registry.get("git_status")).toBeUndefined()
+        expect(registry.get("git_diff")).toBeUndefined()
+        // Other plugin's tools survive.
+        expect(registry.get("shell_exec")).toBeDefined()
+        // Builtin tools survive.
+        expect(registry.get("WebSearch")).toBeDefined()
+      })
+
+      it("unregisterByPlugin returns 0 when no tools match", () => {
+        registry.register(
+          "WebSearch",
+          { description: "w", inputSchema: z.object({}), execute: async () => ({}) },
+          { category: "search" }
+        )
+
+        expect(registry.unregisterByPlugin("never-installed")).toBe(0)
+        expect(registry.get("WebSearch")).toBeDefined()
+      })
+    })
   })
 
   describe("CommonSchemas", () => {

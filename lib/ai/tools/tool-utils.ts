@@ -160,6 +160,19 @@ export interface ToolMetadata {
   rateLimit?: number
   /** Required permissions */
   requiredPermissions?: string[]
+  /**
+   * Origin of the tool. `"builtin"` for tools the host registers itself,
+   * `"plugin"` for tools contributed by an installed plugin. The plugin
+   * runtime sets this — call sites that want to render badges or filter the
+   * tool list by origin can read it via `getMetadata(name)`.
+   */
+  source?: "builtin" | "plugin"
+  /**
+   * When `source === "plugin"`, the id of the plugin that registered the
+   * tool. Set together with `source` so the runtime can bulk-unregister
+   * everything a plugin contributed via `unregisterByPlugin(pluginId)`.
+   */
+  pluginId?: string
 }
 
 /**
@@ -256,6 +269,32 @@ export class ToolRegistry {
    */
   getAllMetadata(): ToolMetadata[] {
     return Array.from(this.tools.values()).map(({ metadata }) => metadata)
+  }
+
+  /**
+   * Remove a single tool by name. Returns `true` if a tool was actually
+   * removed. Used by plugin disable to drop a tool the plugin registered
+   * without churning the entire registry.
+   */
+  unregister(name: string): boolean {
+    return this.tools.delete(name)
+  }
+
+  /**
+   * Remove every tool tagged with `metadata.pluginId === pluginId`. Returns
+   * the number of tools removed. Called by the plugin manager during
+   * disable / uninstall so a single plugin's contributions all disappear in
+   * one shot.
+   */
+  unregisterByPlugin(pluginId: string): number {
+    let removed = 0
+    for (const [name, entry] of this.tools) {
+      if (entry.metadata.pluginId === pluginId) {
+        this.tools.delete(name)
+        removed += 1
+      }
+    }
+    return removed
   }
 }
 

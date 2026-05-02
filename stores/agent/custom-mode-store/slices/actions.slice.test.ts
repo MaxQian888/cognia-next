@@ -46,6 +46,31 @@ describe("useCustomModeStore actions", () => {
     expect(created.name).toBe("New Custom Mode")
   })
 
+  // §A-2 plugin extension: a mode contributed by a plugin carries through
+  // the `source` and `pluginId` fields so the plugin manager can later
+  // bulk-remove this mode by filtering on `pluginId`. User-created modes
+  // omit both fields so the serialized shape is unchanged.
+  it("createMode preserves plugin origin when source/pluginId are passed", () => {
+    const created = useCustomModeStore.getState().createMode({
+      name: "Claude Code mode",
+      source: "plugin",
+      pluginId: "cognia-next-claude-code-agent",
+    })
+    expect(created.source).toBe("plugin")
+    expect(created.pluginId).toBe("cognia-next-claude-code-agent")
+    const stored = useCustomModeStore.getState().customModes[created.id]
+    expect(stored.source).toBe("plugin")
+    expect(stored.pluginId).toBe("cognia-next-claude-code-agent")
+  })
+
+  it("createMode omits source/pluginId for user-created modes (backwards-compat)", () => {
+    const created = useCustomModeStore.getState().createMode({ name: "Hand-rolled" })
+    // Use Object.prototype.hasOwnProperty so the assertion is precise: the
+    // fields must not be persisted at all, not merely set to `undefined`.
+    expect(Object.prototype.hasOwnProperty.call(created, "source")).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(created, "pluginId")).toBe(false)
+  })
+
   it("updateMode merges patches and bumps updatedAt", async () => {
     const created = useCustomModeStore.getState().createMode({ name: "Original" })
     const before = useCustomModeStore.getState().customModes[created.id].updatedAt

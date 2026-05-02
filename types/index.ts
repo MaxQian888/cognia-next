@@ -8,54 +8,14 @@ export * from "./agent"
 export * from "./mcp"
 export * from "./artifact"
 
+// Plugin-facing chat session/message aliases. Plugin code imports these
+// from `@/types` (the upstream Cognia surface) — they delegate to cognia-
+// next's authoritative shapes so the two stay in lockstep. `Project` /
+// `KnowledgeFile` are owned by `_compat.ts` for the same reason: a single
+// source of truth shared by plugin runtime, plugin tests, and app code.
+export type { Session, UIMessage, Project, KnowledgeFile } from "./plugin/_compat"
+
 // `Skill` is intentionally NOT re-exported here. Always import it from
 // `@/lib/claude/types` (cognia-next's authoritative shape) so we don't
 // fork the model. See `lib/skills/executor.ts` for the bridge to the
 // External Agent instruction stack.
-
-/**
- * Project stub — referenced by `lib/ai/instructions/external-agent-instruction-stack.ts`.
- * cognia-next does not yet have a Project model; we expose a minimal
- * shape so the instruction stack typechecks. Replace when a real
- * project layer is migrated.
- */
-export interface Project {
-  id: string
-  name: string
-  description?: string
-  rootDir?: string
-  customInstructions?: string
-  knowledgeBase?: unknown[]
-  metadata?: Record<string, unknown>
-}
-
-/**
- * KnowledgeFile stub — mirrors the shape used by ported parsers in
- * `lib/document/`. cognia-next's twin subsystem owns the real ingestion
- * surface (`twinSources`/`twinChunks` Dexie tables) so this type only has
- * to satisfy the literal-union references inside `lib/document/support-matrix.ts`.
- */
-export interface KnowledgeFile {
-  id: string
-  name: string
-  type:
-    | "text"
-    | "pdf"
-    | "code"
-    | "markdown"
-    | "json"
-    | "word"
-    | "excel"
-    | "csv"
-    | "html"
-    | "presentation"
-    | "rtf"
-    | "epub"
-  content: string
-  size: number
-  mimeType?: string
-  originalSize?: number
-  pageCount?: number
-  createdAt: Date
-  updatedAt: Date
-}

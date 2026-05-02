@@ -24,6 +24,14 @@ export interface CustomModeConfig extends AgentModeConfig {
   // Sharing
   isShared?: boolean
   sharedBy?: string
+  // Plugin origin — set by the plugin manager when a plugin contributes
+  // this mode via `agent.registerMode()`. `"user"` (default) covers modes
+  // created by hand in the UI; `"plugin"` modes flow through the same
+  // store but can be bulk-removed when a plugin is disabled by filtering
+  // on `pluginId`. Both fields are optional so existing serialized rows
+  // (and Zustand persist snapshots) remain valid.
+  source?: "user" | "plugin"
+  pluginId?: string
 }
 
 /**

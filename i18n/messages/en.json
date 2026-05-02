@@ -1,4 +1,63 @@
 {
+  "agentTeamsWorkspace": {
+    "listTitle": "Agent Teams",
+    "listDescription": "Multi-agent teams that plan, divide work, and execute in parallel.",
+    "listEmpty": "No teams yet. Pick a template below to get started.",
+    "newFromTemplate": "Quick start templates",
+    "openWorkspace": "Open workspace",
+    "deleteTeam": "Delete team",
+    "deleteConfirm": "Permanently delete \"{name}\"?",
+    "createTeam": "Create team",
+    "teamCreated": "Team \"{name}\" created.",
+    "teamDeleted": "Team \"{name}\" deleted.",
+    "missing": "Team not found.",
+    "tabs": {
+      "overview": "Overview",
+      "tasks": "Tasks",
+      "chat": "Chat",
+      "activity": "Activity"
+    },
+    "overview": {
+      "status": "Status",
+      "lead": "Lead",
+      "teammates": "Teammates",
+      "tokenUsage": "Token usage",
+      "noLead": "No lead assigned",
+      "startTeam": "Run team",
+      "abortTeam": "Stop"
+    },
+    "tasks": {
+      "empty": "No tasks yet.",
+      "addTask": "Add task",
+      "title": "Title",
+      "description": "Description"
+    },
+    "chat": {
+      "empty": "No messages yet."
+    },
+    "activity": {
+      "empty": "No events yet."
+    },
+    "planApproval": {
+      "title": "Plan awaiting approval",
+      "approve": "Approve",
+      "reject": "Reject",
+      "feedbackPlaceholder": "(Optional) feedback for the lead",
+      "noPlan": "No plan submitted yet."
+    },
+    "templates": {
+      "categories": {
+        "review": "Review",
+        "research": "Research",
+        "development": "Development",
+        "debugging": "Debugging",
+        "analysis": "Analysis",
+        "general": "General",
+        "documentation": "Documentation",
+        "security": "Security"
+      }
+    }
+  },
   "canvas": {
     "title": "Canvas",
     "newDocument": "New document",

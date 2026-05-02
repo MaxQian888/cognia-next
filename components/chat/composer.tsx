@@ -58,7 +58,7 @@ import {
 import { loadCustomSlashCommands } from "@/lib/slash-commands/custom"
 import { executeShell, formatShellResult } from "@/lib/shell/exec"
 import { appendMemory, type MemoryScope } from "@/lib/files/memory"
-import { updateSession } from "@/lib/db/sessions"
+import { useUpdateSession } from "@/lib/data-hooks/context"
 import { loggers } from "@/lib/logger"
 import { AttachmentPreview } from "./composer/attachment-preview"
 import { BottomToolbar } from "./composer/bottom-toolbar"
@@ -186,6 +186,7 @@ function ComposerInner(props: InnerProps) {
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
   const permissionMode = useChatStore((s) => s.permissionMode)
   const addReferencedPath = useChatStore((s) => s.addReferencedPath)
+  const updateSession = useUpdateSession()
   const cwd = props.session?.workingDir ?? null
 
   // --- Per-cwd custom slash commands ------------------------------------
@@ -211,7 +212,7 @@ function ComposerInner(props: InnerProps) {
         err: err instanceof Error ? err.message : String(err),
       })
     })
-  }, [permissionMode, props.session])
+  }, [permissionMode, props.session, updateSession])
 
   // --- Hydrate chat-store from session row on first session change -------
   const hydratedFor = useRef<string | null>(null)

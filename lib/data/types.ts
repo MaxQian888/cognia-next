@@ -94,6 +94,19 @@ export interface BackupPayloadV3 {
    * registry changes. Keyed by Zustand persist `name`.
    */
   localStorageSnapshots?: Record<string, LocalStorageSnapshot>
+  /**
+   * Plugin tables (schema v15). Additive — old envelopes that omit these
+   * fields parse identically to before. The row types are intentionally
+   * loose (`unknown[]`) at this layer so adding/changing plugin fields
+   * later doesn't ripple through the backup type. The plugin install state
+   * round-trips through these arrays under the same `applyBackupPackage`
+   * merge logic as every other domain table.
+   */
+  plugins?: unknown[]
+  pluginPermissions?: unknown[]
+  pluginReviews?: unknown[]
+  pluginAnalytics?: unknown[]
+  pluginScheduledJobs?: unknown[]
 }
 
 /** The on-disk plaintext shape. JSON-serialized verbatim. */

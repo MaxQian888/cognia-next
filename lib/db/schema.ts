@@ -24,6 +24,13 @@ import type {
 import type { A2UIAppRow, A2UISurfaceRow, A2UITemplateRow, A2UIEventHistoryRow } from "./a2ui-types"
 import { buildA2UIBridgeMcpRow, A2UI_BRIDGE_SERVER_NAME } from "@/lib/a2ui/mcp-tool-schemas"
 import type { TwinSource, TwinChunk, TwinProfile, TwinDraft, TwinJob } from "@/types/twin"
+import type {
+  PluginRow,
+  PluginPermissionRow,
+  PluginReviewRow,
+  PluginAnalyticsRow,
+  PluginScheduledJobRow,
+} from "./plugin-types"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -50,6 +57,13 @@ export class CogniaDB extends Dexie {
   twinProfile!: Table<TwinProfile, string>
   twinDrafts!: Table<TwinDraft, string>
   twinJobs!: Table<TwinJob, string>
+  // §A-Schema (v15) — plugin tables. Indexed columns are declared in the v15
+  // .stores block below; the per-row types live in `./plugin-types.ts`.
+  plugins!: Table<PluginRow, string>
+  pluginPermissions!: Table<PluginPermissionRow, [string, string]>
+  pluginReviews!: Table<PluginReviewRow, [string, string]>
+  pluginAnalytics!: Table<PluginAnalyticsRow, [string, string]>
+  pluginScheduledJobs!: Table<PluginScheduledJobRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -403,6 +417,64 @@ export class CogniaDB extends Dexie {
       twinProfile: "&id, twinId",
       twinDrafts: "&id, twinId, jobId, kind, status, [twinId+status], [twinId+kind]",
       twinJobs: "&id, twinId, status, queuedAt, [twinId+status], [twinId+kind]",
+    })
+
+    // v15 — Plugin system port. Adds 5 plugin-related tables; existing rows
+    // are untouched so no upgrade hook is needed. Indexes mirror Cognia's
+    // production schema:
+    //   * `plugins` — single-key + status/source/type filters for the
+    //     Settings → Plugins list, `lastUsedAt` for "recent" sort, `enabled`
+    //     for the activation gate, `*capabilities` (multi-entry) so the
+    //     "filter by capability" dropdown stays index-driven.
+    //   * `pluginPermissions` — composite primary key on (pluginId, permission)
+    //     so the runtime can look up a single decision in O(1) without scanning.
+    //     Side indexes on `pluginId` / `permission` / `decision` / `expiresAt`
+    //     drive the audit-log UI and TTL sweep.
+    //   * `pluginReviews` — composite primary key on (pluginId, id) lets a
+    //     single plugin carry many reviews; `rating` and `createdAt` for the
+    //     marketplace-tab sorts.
+    //   * `pluginAnalytics` — composite primary key on (pluginId, key) so
+    //     each (plugin, metric) row is unique and `lastEventAt` indexes
+    //     the "recent activity" sort.
+    //   * `pluginScheduledJobs` — single-key + `pluginId` / cron / status /
+    //     run-time filters so the scheduler executor can pull only the
+    //     active rows it needs.
+    //
+    // The new tables are empty for existing v14 installs; the migration test
+    // (Phase 1 verification) asserts every prior row survives the upgrade.
+    this.version(15).stores({
+      sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
+      messages: "id, sessionId, [sessionId+createdAt], senderId",
+      settings: "id",
+      promptPresets:
+        "id, updatedAt, isBuiltIn, isDefault, isFavorite, sortOrder, category, lastUsedAt",
+      mcpServers: "id, name, enabled",
+      characters: "id, name, updatedAt, isBuiltIn",
+      skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
+      skillResources: "id, skillId, [skillId+kind], [skillId+path], updatedAt",
+      teams: "id, name, updatedAt, isBuiltIn",
+      sessionState: "sessionId, lastReadAt",
+      trustedWorkspaces: "path, trustedAt",
+      tts_provider_keys: "id",
+      backupHistory: "id, completedAt, type, success",
+      canvasDocuments: "id, title, language, type, updatedAt, createdAt",
+      canvasVersions: "id, documentId, [documentId+createdAt], isAutoSave",
+      canvasComments: "id, documentId, [documentId+createdAt], parentId, resolvedAt",
+      canvasSessions: "id, documentId, ownerId, createdAt",
+      a2uiApps: "id, name, updatedAt, createdAt, isBuiltIn, category, isFavorite, sortOrder",
+      a2uiSurfaces: "id, appId, sessionId, updatedAt, createdAt, type",
+      a2uiTemplates: "id, name, category, updatedAt, source",
+      a2uiEventHistory: "id, surfaceId, [surfaceId+timestamp], timestamp, type",
+      twinSources: "&id, twinId, kind, format, status, fingerprint, [twinId+kind], [twinId+status]",
+      twinChunks: "&id, twinId, sourceId, vectorDocId, [twinId+sourceId], [twinId+createdAt]",
+      twinProfile: "&id, twinId",
+      twinDrafts: "&id, twinId, jobId, kind, status, [twinId+status], [twinId+kind]",
+      twinJobs: "&id, twinId, status, queuedAt, [twinId+status], [twinId+kind]",
+      plugins: "id, name, version, status, source, type, enabled, lastUsedAt, *capabilities",
+      pluginPermissions: "[pluginId+permission], pluginId, permission, decision, expiresAt",
+      pluginReviews: "[pluginId+id], pluginId, rating, createdAt",
+      pluginAnalytics: "[pluginId+key], pluginId, key, lastEventAt",
+      pluginScheduledJobs: "id, pluginId, cron, lastRunAt, nextRunAt, status",
     })
   }
 

@@ -11,12 +11,13 @@ describe("pluginManager", () => {
 })
 
 describe("getPluginEventHooks", () => {
-  it("returns empty hook arrays and noop dispatchers", () => {
+  it("returns callable noop dispatchers when no plugin is registered", () => {
+    // Phase 2 wired the real `HookDispatcher` in; the legacy
+    // `beforeSend` / `afterReceive` / `onError` arrays are no longer
+    // surfaced as state — plugins register through the dispatcher API
+    // instead. The dispatchers are still safe to call when nothing is
+    // registered, which is what cognia-next's runtime guarantees.
     const h = getPluginEventHooks()
-    expect(h.beforeSend).toEqual([])
-    expect(h.afterReceive).toEqual([])
-    expect(h.onError).toEqual([])
-    // noop dispatchers should be callable without error
     h.dispatchExternalAgentConnect()
     h.dispatchExternalAgentDisconnect()
     h.dispatchExternalAgentError()

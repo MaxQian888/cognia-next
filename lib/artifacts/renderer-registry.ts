@@ -12,10 +12,19 @@ import { loggers } from "@/lib/logger"
 export interface PluginArtifactRenderer {
   /** Stable id used for de-duplication when registered via plugin reload. */
   id: string
+  /**
+   * Plugin-facing renderer "type" tag (e.g., `"mermaid"`, `"chart"`).
+   * The plugin API surface — `lib/plugin/api/artifact-api.ts:registerRenderer` —
+   * forwards the namespaced `${pluginId}:${type}` here so the runtime can
+   * surface a stable label per registration.
+   */
+  type?: string
+  /** Human-readable label shown in renderer-aware UI. */
+  name?: string
   /** Returns true when this renderer should claim the artifact. */
   canRender(artifact: Artifact): boolean
   /** Returns the rendered React subtree. */
-  render(artifact: Artifact): ReactElement | null
+  render(artifact: Artifact, container?: HTMLElement): ReactElement | null | (() => void)
   /** Optional priority hint; higher wins when multiple renderers claim. */
   priority?: number
 }

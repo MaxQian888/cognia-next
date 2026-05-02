@@ -204,6 +204,57 @@ export async function seedBuiltInTeams(): Promise<void> {
       createdAt: now,
       updatedAt: now,
     },
+    {
+      id: "team_builtin_research_squad",
+      name: "Research Squad",
+      description:
+        "Research-led inquiry: a senior researcher coordinates an idea-generator and a documenter.",
+      avatarColor: "oklch(0.7 0.16 200)",
+      avatarEmoji: "🔬",
+      members: [
+        { characterId: "char_builtin_research", role: "Lead researcher" },
+        { characterId: "char_builtin_brainstorm", role: "Idea generator" },
+        { characterId: "char_builtin_writer", role: "Documenter" },
+      ],
+      orchestration: "supervisor",
+      supervisorCharacterId: "char_builtin_research",
+      isBuiltIn: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: "team_builtin_doc_polishers",
+      name: "Doc Polishers",
+      description: "Drafts, fact-checks, and translates documentation in one pass.",
+      avatarColor: "oklch(0.7 0.13 150)",
+      avatarEmoji: "📝",
+      members: [
+        { characterId: "char_builtin_writer", role: "Drafter" },
+        { characterId: "char_builtin_research", role: "Fact-checker" },
+        { characterId: "char_builtin_translator", role: "Localizer" },
+      ],
+      orchestration: "mention_round_robin",
+      isBuiltIn: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: "team_builtin_code_review_pair",
+      name: "Code Review Pair",
+      description:
+        "A coding lead drives the review; a research backstop pulls supporting evidence.",
+      avatarColor: "oklch(0.65 0.18 245)",
+      avatarEmoji: "👨‍💻",
+      members: [
+        { characterId: "char_builtin_coding", role: "Reviewer" },
+        { characterId: "char_builtin_research", role: "Evidence" },
+      ],
+      orchestration: "supervisor",
+      supervisorCharacterId: "char_builtin_coding",
+      isBuiltIn: true,
+      createdAt: now,
+      updatedAt: now,
+    },
   ]
   await db.teams.bulkPut(builtIns)
 }

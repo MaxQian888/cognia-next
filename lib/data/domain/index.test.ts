@@ -63,6 +63,85 @@ describe("DOMAIN_TRANSFERS", () => {
   })
 })
 
+// ============================================================================
+// §A-5 — runtime domain transfer overlay (plugin contributions)
+// ============================================================================
+
+describe("dynamic domain transfer overlay", () => {
+  // Using `require` so we don't pollute the top-level imports; this section
+  // is the only one that exercises the overlay surface.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const overlay = require("./index") as typeof import("./index")
+
+  afterEach(() => {
+    overlay.__resetDynamicDomainsForTesting()
+  })
+
+  it("registerDomainTransfer makes a plugin-contributed key resolvable", () => {
+    expect(overlay.getDomain("plug-domain" as never)).toBeUndefined()
+    overlay.registerDomainTransfer(
+      {
+        key: "plug-domain" as never,
+        labelKey: "plug",
+        read: async () => ({}),
+        defaultStrategy: "skip",
+      },
+      { pluginId: "p1" }
+    )
+    expect(overlay.getDomain("plug-domain" as never)?.labelKey).toBe("plug")
+  })
+
+  it("static DOMAIN_TRANSFERS wins when a plugin tries to shadow a builtin key", () => {
+    overlay.registerDomainTransfer(
+      {
+        key: "skills",
+        labelKey: "shadowed",
+        read: async () => ({}),
+        defaultStrategy: "skip",
+      },
+      { pluginId: "evil" }
+    )
+    // Builtin spec still wins.
+    const resolved = overlay.getDomain("skills")
+    expect(resolved?.labelKey).toBe("skills")
+  })
+
+  it("getAllDomainTransfers includes plugin contributions in addition to builtins", () => {
+    const before = overlay.getAllDomainTransfers().length
+    overlay.registerDomainTransfer(
+      {
+        key: "plug-extra" as never,
+        labelKey: "x",
+        read: async () => ({}),
+        defaultStrategy: "skip",
+      },
+      { pluginId: "p" }
+    )
+    expect(overlay.getAllDomainTransfers().length).toBe(before + 1)
+  })
+
+  it("unregisterDomainTransfersByPlugin removes only that plugin's specs", () => {
+    overlay.registerDomainTransfer(
+      { key: "a" as never, labelKey: "a", read: async () => ({}), defaultStrategy: "skip" },
+      { pluginId: "p1" }
+    )
+    overlay.registerDomainTransfer(
+      { key: "b" as never, labelKey: "b", read: async () => ({}), defaultStrategy: "skip" },
+      { pluginId: "p1" }
+    )
+    overlay.registerDomainTransfer(
+      { key: "c" as never, labelKey: "c", read: async () => ({}), defaultStrategy: "skip" },
+      { pluginId: "p2" }
+    )
+
+    const removed = overlay.unregisterDomainTransfersByPlugin("p1")
+    expect(removed).toBe(2)
+    expect(overlay.getDomain("a" as never)).toBeUndefined()
+    expect(overlay.getDomain("b" as never)).toBeUndefined()
+    expect(overlay.getDomain("c" as never)).toBeDefined()
+  })
+})
+
 describe("DOMAIN_TRANSFERS — snapshot-backed domains", () => {
   beforeEach(() => {
     if (typeof localStorage !== "undefined") localStorage.clear()

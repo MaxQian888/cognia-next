@@ -9,9 +9,8 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
-import { listCharacters } from "@/lib/db/characters"
 import type { Character } from "@/lib/claude/types"
-import { useLiveQuery } from "dexie-react-hooks"
+import { useCharacters } from "@/lib/data-hooks/context"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 
 interface Props {
@@ -28,11 +27,7 @@ interface Props {
  */
 export function CharacterPicker({ open, onOpenChange, onPick }: Props) {
   const t = useTranslations("chat.characterPicker")
-  const characters =
-    useLiveQuery<Character[]>(
-      () => (typeof window === "undefined" ? Promise.resolve([]) : listCharacters()),
-      []
-    ) ?? []
+  const characters = useCharacters() ?? []
 
   return (
     <CommandDialog

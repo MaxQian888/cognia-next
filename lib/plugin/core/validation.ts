@@ -1,0 +1,693 @@
+/**
+ * Plugin Validation - Validates plugin manifests and configurations
+ */
+
+import type {
+  PluginManifest,
+  PluginConfigSchema,
+  PluginConfigProperty,
+  PluginCapability,
+  PluginPermission,
+  PluginType,
+} from "@/types/plugin"
+import { loggers } from "./logger"
+import {
+  CANONICAL_PLUGIN_CAPABILITIES,
+  validatePluginCapabilities,
+} from "@/lib/plugin/contracts/plugin-capabilities"
+import {
+  validateActivationEvent,
+  type PluginPointGovernanceMode,
+} from "@/lib/plugin/contracts/plugin-points"
+
+// =============================================================================
+// Types
+// =============================================================================
+
+export interface ValidationError {
+  field: string
+  code: string
+  message: string
+}
+
+export interface ManifestDiagnostic extends ValidationError {
+  severity: "error" | "warning"
+  hint?: string
+}
+
+export interface ValidationResult {
+  valid: boolean
+  errors: string[]
+  warnings: string[]
+  diagnostics?: ManifestDiagnostic[]
+}
+
+export interface ConfigValidationResult {
+  valid: boolean
+  errors: ValidationError[]
+  warnings: string[]
+}
+
+export interface ManifestValidationOptions {
+  governanceMode?: PluginPointGovernanceMode
+}
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+const VALID_CAPABILITIES: PluginCapability[] = [...CANONICAL_PLUGIN_CAPABILITIES]
+
+const VALID_PERMISSIONS: PluginPermission[] = [
+  "filesystem:read",
+  "filesystem:write",
+  "network:fetch",
+  "network:websocket",
+  "clipboard:read",
+  "clipboard:write",
+  "notification",
+  "shell:execute",
+  "process:spawn",
+  "database:read",
+  "database:write",
+  "settings:read",
+  "settings:write",
+  "session:read",
+  "session:write",
+  "agent:control",
+  "python:execute",
+]
+
+const VALID_PLUGIN_TYPES: PluginType[] = ["frontend", "python", "hybrid"]
+
+const ID_PATTERN = /^[a-z0-9]([a-z0-9-_.]*[a-z0-9])?$/
+const VERSION_PATTERN = /^\d+\.\d+\.\d+(-[a-z0-9]+)?$/i
+
+// =============================================================================
+// Manifest Validation
+// =============================================================================
+
+export function validatePluginManifest(
+  manifest: unknown,
+  options: ManifestValidationOptions = {}
+): ValidationResult {
+  const diagnostics: ManifestDiagnostic[] = []
+  const governanceMode = options.governanceMode || "warn"
+
+  if (!manifest || typeof manifest !== "object") {
+    return {
+      valid: false,
+      errors: ["Manifest must be an object"],
+      warnings: [],
+      diagnostics: [
+        {
+          severity: "error",
+          field: "$",
+          code: "manifest.invalid_type",
+          message: "Manifest must be an object",
+        },
+      ],
+    }
+  }
+
+  const m = manifest as Record<string, unknown>
+  const pushError = (field: string, code: string, message: string, hint?: string): void => {
+    diagnostics.push({ severity: "error", field, code, message, hint })
+  }
+  const pushWarning = (field: string, code: string, message: string, hint?: string): void => {
+    diagnostics.push({ severity: "warning", field, code, message, hint })
+  }
+
+  // Required fields
+  if (!m.id || typeof m.id !== "string") {
+    pushError("id", "manifest.id.missing", 'Missing or invalid "id" field')
+  } else if (!ID_PATTERN.test(m.id)) {
+    pushError(
+      "id",
+      "manifest.id.invalid_format",
+      `Invalid plugin ID "${m.id}". Must be lowercase alphanumeric with hyphens/underscores/dots`
+    )
+  }
+
+  if (!m.name || typeof m.name !== "string") {
+    pushError("name", "manifest.name.missing", 'Missing or invalid "name" field')
+  } else if (m.name.length > 50) {
+    pushWarning("name", "manifest.name.long", "Plugin name exceeds 50 characters")
+  }
+
+  if (!m.version || typeof m.version !== "string") {
+    pushError("version", "manifest.version.missing", 'Missing or invalid "version" field')
+  } else if (!VERSION_PATTERN.test(m.version)) {
+    pushError(
+      "version",
+      "manifest.version.invalid_format",
+      `Invalid version "${m.version}". Must be semver format (e.g., 1.0.0)`
+    )
+  }
+
+  if (!m.description || typeof m.description !== "string") {
+    pushError(
+      "description",
+      "manifest.description.missing",
+      'Missing or invalid "description" field'
+    )
+  } else if (m.description.length > 500) {
+    pushWarning(
+      "description",
+      "manifest.description.long",
+      "Plugin description exceeds 500 characters"
+    )
+  }
+
+  if (!m.type || typeof m.type !== "string") {
+    pushError("type", "manifest.type.missing", 'Missing or invalid "type" field')
+  } else if (!VALID_PLUGIN_TYPES.includes(m.type as PluginType)) {
+    pushError(
+      "type",
+      "manifest.type.invalid",
+      `Invalid plugin type "${m.type}". Must be one of: ${VALID_PLUGIN_TYPES.join(", ")}`
+    )
+  }
+
+  if (!m.capabilities || !Array.isArray(m.capabilities)) {
+    pushError(
+      "capabilities",
+      "manifest.capabilities.missing",
+      'Missing or invalid "capabilities" field'
+    )
+  } else {
+    const declaredCapabilities: string[] = []
+    for (const cap of m.capabilities) {
+      if (typeof cap === "string") {
+        declaredCapabilities.push(cap)
+      }
+      if (!VALID_CAPABILITIES.includes(cap as PluginCapability)) {
+        pushError(
+          "capabilities",
+          "manifest.capabilities.invalid",
+          `Invalid capability "${cap}". Must be one of: ${VALID_CAPABILITIES.join(", ")}`
+        )
+      }
+    }
+
+    const capabilityOutcome = validatePluginCapabilities(declaredCapabilities, { governanceMode })
+    for (const diagnostic of capabilityOutcome.diagnostics) {
+      const code = `manifest.capabilities.${diagnostic.code}`
+      if (diagnostic.severity === "error") {
+        pushError("capabilities", code, diagnostic.message, diagnostic.hint)
+      } else {
+        pushWarning("capabilities", code, diagnostic.message, diagnostic.hint)
+      }
+    }
+  }
+
+  // Entry points validation based on type
+  if (m.type === "frontend" || m.type === "hybrid") {
+    if (!m.main || typeof m.main !== "string") {
+      if (m.type === "frontend") {
+        pushError(
+          "main",
+          "manifest.main.required",
+          'Frontend plugin must have a "main" entry point',
+          "Add a valid relative JS entry file path in `main`."
+        )
+      }
+    }
+  }
+
+  if (m.type === "python" || m.type === "hybrid") {
+    if (!m.pythonMain || typeof m.pythonMain !== "string") {
+      if (m.type === "python") {
+        pushError(
+          "pythonMain",
+          "manifest.pythonMain.required",
+          'Python plugin must have a "pythonMain" entry point',
+          "Add a valid relative Python entry file path in `pythonMain`."
+        )
+      }
+    }
+  }
+
+  // Optional fields validation
+  if (m.permissions && Array.isArray(m.permissions)) {
+    for (const perm of m.permissions) {
+      if (!VALID_PERMISSIONS.includes(perm as PluginPermission)) {
+        pushWarning(
+          "permissions",
+          "manifest.permissions.unknown",
+          `Unknown permission "${perm}"`,
+          "Use only documented permissions or ensure runtime guard supports this permission."
+        )
+      }
+    }
+  }
+
+  if (m.engines && typeof m.engines === "object") {
+    const engines = m.engines as Record<string, unknown>
+    if (engines.cognia && typeof engines.cognia !== "string") {
+      pushError(
+        "engines.cognia",
+        "manifest.engines.cognia.invalid",
+        'Invalid "engines.cognia" field'
+      )
+    }
+    if (engines.python && typeof engines.python !== "string") {
+      pushError(
+        "engines.python",
+        "manifest.engines.python.invalid",
+        'Invalid "engines.python" field'
+      )
+    }
+  }
+
+  if (m.minAppVersion !== undefined) {
+    if (typeof m.minAppVersion !== "string" || !VERSION_PATTERN.test(m.minAppVersion)) {
+      pushError(
+        "minAppVersion",
+        "manifest.minAppVersion.invalid",
+        'Invalid "minAppVersion" field. Must be semver format (e.g., 0.1.0)'
+      )
+    }
+  }
+
+  if (m.configSchema) {
+    const schemaResult = validateConfigSchema(m.configSchema)
+    for (const error of schemaResult.errors) {
+      pushError("configSchema", "manifest.configSchema.invalid", error)
+    }
+    for (const warning of schemaResult.warnings) {
+      pushWarning("configSchema", "manifest.configSchema.warning", warning)
+    }
+  }
+
+  if (m.a2uiComponents && Array.isArray(m.a2uiComponents)) {
+    for (let i = 0; i < m.a2uiComponents.length; i++) {
+      const comp = m.a2uiComponents[i] as Record<string, unknown>
+      if (!comp.type || typeof comp.type !== "string") {
+        pushError(
+          `a2uiComponents[${i}].type`,
+          "manifest.a2ui.type.missing",
+          `A2UI component at index ${i} missing "type" field`
+        )
+      }
+      if (!comp.name || typeof comp.name !== "string") {
+        pushError(
+          `a2uiComponents[${i}].name`,
+          "manifest.a2ui.name.missing",
+          `A2UI component at index ${i} missing "name" field`
+        )
+      }
+    }
+  }
+
+  if (m.tools && Array.isArray(m.tools)) {
+    for (let i = 0; i < m.tools.length; i++) {
+      const tool = m.tools[i] as Record<string, unknown>
+      if (!tool.name || typeof tool.name !== "string") {
+        pushError(
+          `tools[${i}].name`,
+          "manifest.tools.name.missing",
+          `Tool at index ${i} missing "name" field`
+        )
+      }
+      if (!tool.description || typeof tool.description !== "string") {
+        pushError(
+          `tools[${i}].description`,
+          "manifest.tools.description.missing",
+          `Tool at index ${i} missing "description" field`
+        )
+      }
+      if (tool.parametersSchema !== undefined && typeof tool.parametersSchema !== "object") {
+        pushError(
+          `tools[${i}].parametersSchema`,
+          "manifest.tools.parametersSchema.invalid",
+          `Tool at index ${i} has invalid "parametersSchema" field (must be an object)`
+        )
+      }
+    }
+  }
+
+  if (m.modes && Array.isArray(m.modes)) {
+    for (let i = 0; i < m.modes.length; i++) {
+      const mode = m.modes[i] as Record<string, unknown>
+      if (!mode.id || typeof mode.id !== "string") {
+        pushError(
+          `modes[${i}].id`,
+          "manifest.modes.id.missing",
+          `Mode at index ${i} missing "id" field`
+        )
+      }
+      if (!mode.name || typeof mode.name !== "string") {
+        pushError(
+          `modes[${i}].name`,
+          "manifest.modes.name.missing",
+          `Mode at index ${i} missing "name" field`
+        )
+      }
+      if (!mode.icon || typeof mode.icon !== "string") {
+        pushError(
+          `modes[${i}].icon`,
+          "manifest.modes.icon.missing",
+          `Mode at index ${i} missing "icon" field`
+        )
+      }
+    }
+  }
+
+  if (m.commands && Array.isArray(m.commands)) {
+    for (let i = 0; i < m.commands.length; i++) {
+      const command = m.commands[i] as Record<string, unknown>
+      if (!command.id || typeof command.id !== "string") {
+        pushError(
+          `commands[${i}].id`,
+          "manifest.commands.id.missing",
+          `Command at index ${i} missing "id" field`
+        )
+      }
+      if (!command.name || typeof command.name !== "string") {
+        pushError(
+          `commands[${i}].name`,
+          "manifest.commands.name.missing",
+          `Command at index ${i} missing "name" field`
+        )
+      }
+      if (command.description !== undefined && typeof command.description !== "string") {
+        pushError(
+          `commands[${i}].description`,
+          "manifest.commands.description.invalid",
+          `Command at index ${i} has invalid "description" field`
+        )
+      }
+      if (command.icon !== undefined && typeof command.icon !== "string") {
+        pushError(
+          `commands[${i}].icon`,
+          "manifest.commands.icon.invalid",
+          `Command at index ${i} has invalid "icon" field`
+        )
+      }
+      if (command.aliases !== undefined) {
+        if (!Array.isArray(command.aliases)) {
+          pushError(
+            `commands[${i}].aliases`,
+            "manifest.commands.aliases.invalid",
+            `Command at index ${i} has invalid "aliases" field (must be an array)`
+          )
+        } else if (!command.aliases.every((alias) => typeof alias === "string")) {
+          pushError(
+            `commands[${i}].aliases`,
+            "manifest.commands.aliases.invalid_type",
+            `Command at index ${i} has invalid "aliases" field (must contain strings)`
+          )
+        }
+      }
+    }
+  }
+
+  if (m.activationEvents !== undefined) {
+    if (!Array.isArray(m.activationEvents)) {
+      pushError(
+        "activationEvents",
+        "manifest.activationEvents.invalid_type",
+        '"activationEvents" must be an array'
+      )
+    } else {
+      for (let i = 0; i < m.activationEvents.length; i++) {
+        const event = m.activationEvents[i]
+        if (typeof event !== "string") {
+          pushError(
+            `activationEvents[${i}]`,
+            "manifest.activationEvents.invalid_item",
+            `Activation event at index ${i} must be a string`
+          )
+          continue
+        }
+
+        const outcome = validateActivationEvent(event, { governanceMode })
+        for (const diagnostic of outcome.diagnostics) {
+          const field = `activationEvents[${i}]`
+          const code = `manifest.activationEvents.${diagnostic.code}`
+          if (diagnostic.severity === "error") {
+            pushError(field, code, diagnostic.message, diagnostic.hint)
+          } else {
+            pushWarning(field, code, diagnostic.message, diagnostic.hint)
+          }
+        }
+      }
+    }
+  }
+
+  if (m.activateOnStartup !== undefined && typeof m.activateOnStartup !== "boolean") {
+    pushError(
+      "activateOnStartup",
+      "manifest.activateOnStartup.invalid_type",
+      '"activateOnStartup" must be a boolean'
+    )
+  }
+
+  const errors = diagnostics.filter((item) => item.severity === "error").map((item) => item.message)
+  const warnings = diagnostics
+    .filter((item) => item.severity === "warning")
+    .map((item) => item.message)
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+    diagnostics,
+  }
+}
+
+// =============================================================================
+// Config Schema Validation
+// =============================================================================
+
+function validateConfigSchema(schema: unknown): ValidationResult {
+  const errors: string[] = []
+  const warnings: string[] = []
+
+  if (!schema || typeof schema !== "object") {
+    return { valid: false, errors: ["Config schema must be an object"], warnings: [] }
+  }
+
+  const s = schema as Record<string, unknown>
+
+  if (s.type !== "object") {
+    errors.push('Config schema root type must be "object"')
+  }
+
+  if (s.properties && typeof s.properties === "object") {
+    const props = s.properties as Record<string, unknown>
+    for (const [key, value] of Object.entries(props)) {
+      const propResult = validateConfigProperty(key, value)
+      errors.push(...propResult.errors)
+      warnings.push(...propResult.warnings)
+    }
+  }
+
+  return { valid: errors.length === 0, errors, warnings }
+}
+
+function validateConfigProperty(name: string, prop: unknown): ValidationResult {
+  const errors: string[] = []
+  const warnings: string[] = []
+
+  if (!prop || typeof prop !== "object") {
+    errors.push(`Config property "${name}" must be an object`)
+    return { valid: false, errors, warnings }
+  }
+
+  const p = prop as Record<string, unknown>
+  const validTypes = ["string", "number", "boolean", "array", "object"]
+
+  if (!p.type || typeof p.type !== "string") {
+    errors.push(`Config property "${name}" missing "type" field`)
+  } else if (!validTypes.includes(p.type)) {
+    errors.push(`Config property "${name}" has invalid type "${p.type}"`)
+  }
+
+  if (p.type === "array" && p.items) {
+    const itemsResult = validateConfigProperty(`${name}.items`, p.items)
+    errors.push(...itemsResult.errors)
+    warnings.push(...itemsResult.warnings)
+  }
+
+  if (p.type === "object" && p.properties) {
+    const props = p.properties as Record<string, unknown>
+    for (const [key, value] of Object.entries(props)) {
+      const propResult = validateConfigProperty(`${name}.${key}`, value)
+      errors.push(...propResult.errors)
+      warnings.push(...propResult.warnings)
+    }
+  }
+
+  return { valid: errors.length === 0, errors, warnings }
+}
+
+// =============================================================================
+// Config Value Validation
+// =============================================================================
+
+export function validatePluginConfig(
+  config: Record<string, unknown>,
+  schema?: PluginConfigSchema
+): ConfigValidationResult {
+  const errors: ValidationError[] = []
+  const warnings: string[] = []
+
+  // If no schema provided, any config is valid
+  if (!schema) {
+    return { valid: true, errors: [], warnings: [] }
+  }
+
+  // Check required fields
+  if (schema.required) {
+    for (const required of schema.required) {
+      if (config[required] === undefined) {
+        errors.push({
+          field: required,
+          code: "required",
+          message: `Missing required config field: ${required}`,
+        })
+      }
+    }
+  }
+
+  // Validate each property
+  for (const [key, value] of Object.entries(config)) {
+    const propSchema = schema.properties[key]
+    if (!propSchema) {
+      warnings.push(`Unknown config field: ${key}`)
+      continue
+    }
+
+    const propErrors = validateConfigValueWithErrors(key, value, propSchema)
+    errors.push(...propErrors)
+  }
+
+  return { valid: errors.length === 0, errors, warnings }
+}
+
+function validateConfigValueWithErrors(
+  name: string,
+  value: unknown,
+  schema: PluginConfigProperty
+): ValidationError[] {
+  const errors: ValidationError[] = []
+
+  // Type check
+  const actualType = Array.isArray(value) ? "array" : typeof value
+  if (actualType !== schema.type) {
+    errors.push({
+      field: name,
+      code: "invalid_type",
+      message: `Config field "${name}" expected type "${schema.type}" but got "${actualType}"`,
+    })
+    return errors
+  }
+
+  // Enum check
+  if (schema.enum && !schema.enum.includes(value)) {
+    errors.push({
+      field: name,
+      code: "enum",
+      message: `Config field "${name}" value must be one of: ${schema.enum.join(", ")}`,
+    })
+  }
+
+  // String validations
+  if (schema.type === "string" && typeof value === "string") {
+    if (schema.minLength !== undefined && value.length < schema.minLength) {
+      errors.push({
+        field: name,
+        code: "minLength",
+        message: `Config field "${name}" must be at least ${schema.minLength} characters`,
+      })
+    }
+    if (schema.maxLength !== undefined && value.length > schema.maxLength) {
+      errors.push({
+        field: name,
+        code: "maxLength",
+        message: `Config field "${name}" must be at most ${schema.maxLength} characters`,
+      })
+    }
+    if (schema.pattern) {
+      const regex = new RegExp(schema.pattern)
+      if (!regex.test(value)) {
+        errors.push({
+          field: name,
+          code: "pattern",
+          message: `Config field "${name}" does not match pattern: ${schema.pattern}`,
+        })
+      }
+    }
+  }
+
+  // Number validations
+  if (schema.type === "number" && typeof value === "number") {
+    if (schema.minimum !== undefined && value < schema.minimum) {
+      errors.push({
+        field: name,
+        code: "minimum",
+        message: `Config field "${name}" must be at least ${schema.minimum}`,
+      })
+    }
+    if (schema.maximum !== undefined && value > schema.maximum) {
+      errors.push({
+        field: name,
+        code: "maximum",
+        message: `Config field "${name}" must be at most ${schema.maximum}`,
+      })
+    }
+  }
+
+  // Array validations
+  if (schema.type === "array" && Array.isArray(value) && schema.items) {
+    for (let i = 0; i < value.length; i++) {
+      const itemErrors = validateConfigValueWithErrors(`${name}[${i}]`, value[i], schema.items)
+      errors.push(...itemErrors)
+    }
+  }
+
+  // Object validations
+  if (
+    schema.type === "object" &&
+    typeof value === "object" &&
+    value !== null &&
+    schema.properties
+  ) {
+    for (const [key, propSchema] of Object.entries(schema.properties)) {
+      const propValue = (value as Record<string, unknown>)[key]
+      if (propValue !== undefined) {
+        const propErrors = validateConfigValueWithErrors(`${name}.${key}`, propValue, propSchema)
+        errors.push(...propErrors)
+      }
+    }
+  }
+
+  return errors
+}
+
+// =============================================================================
+// Manifest Parser
+// =============================================================================
+
+export function parseManifest(content: string): PluginManifest | null {
+  try {
+    const parsed = JSON.parse(content)
+    const validation = validatePluginManifest(parsed)
+
+    if (!validation.valid) {
+      loggers.manager.error("Invalid plugin manifest:", validation.errors)
+      return null
+    }
+
+    if (validation.warnings.length > 0) {
+      loggers.manager.warn("Plugin manifest warnings:", validation.warnings)
+    }
+
+    return parsed as PluginManifest
+  } catch (error) {
+    loggers.manager.error("Failed to parse plugin manifest:", error)
+    return null
+  }
+}

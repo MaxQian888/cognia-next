@@ -195,6 +195,11 @@ const config: Config = {
     // surface used by the agent manager so Jest can resolve the module graph.
     "^@opencode-ai/sdk/client$": "<rootDir>/__mocks__/opencode-sdk-client.js",
     "^@opencode-ai/sdk$": "<rootDir>/__mocks__/opencode-sdk-client.js",
+
+    // shiki ships ESM-only and Next.js's transformIgnorePatterns whitelist
+    // is short enough to leave it untransformed. Tests don't render real
+    // syntax highlighting, so a thin mock is sufficient.
+    "^shiki$": "<rootDir>/__mocks__/shiki.js",
   },
 
   // An array of regexp pattern strings, matched against all module paths before considered 'visible' to the module loader
@@ -300,7 +305,7 @@ const config: Config = {
   // `.pnpm/<scope>+<pkg>@<ver>/node_modules/<scope>/<pkg>` layout. Add new
   // ESM packages to the negative-lookahead alternation as they surface.
   transformIgnorePatterns: [
-    "/node_modules/(?!.*(?:@qdrant\\+|@qdrant/|@huggingface\\+|@huggingface/|chromadb|@chroma-core|@pinecone-database\\+|@pinecone-database/|weaviate-client|simple-git|onnxruntime-common))",
+    "/node_modules/(?!.*(?:@qdrant\\+|@qdrant/|@huggingface\\+|@huggingface/|chromadb|@chroma-core|@pinecone-database\\+|@pinecone-database/|weaviate-client|simple-git|onnxruntime-common|@tokenlens\\+|@tokenlens/|use-stick-to-bottom|tokenlens|shiki|@shikijs|@streamdown|streamdown|hast-util-|mdast-util-|micromark|unist-util-|vfile))",
     "\\.pnp\\.[^\\\\]+$",
   ],
 

@@ -1,8 +1,10 @@
 "use client"
 
 import { create } from "zustand"
-import type { AppSettings, BuiltinToolsConfig } from "@/lib/claude/types"
+import type { AppSettings, AppLanguage, AppTheme, BuiltinToolsConfig } from "@/lib/claude/types"
 import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin-extended"
+import type { CustomProviderDefinition, ProviderSettingsEntry } from "@/lib/ai/provider-consumption"
 import { addAlwaysAllow, getSettings, removeAlwaysAllow, saveSettings } from "@/lib/db/settings"
 import { restartSidecar, setApiKey } from "@/lib/claude/ipc"
 import { isTauri } from "@/lib/tauri"
@@ -120,6 +122,38 @@ interface SettingsState {
   addCustomSearchSource: (s: CustomSearchSource) => Promise<void>
   removeCustomSearchSource: (id: string) => Promise<void>
   setDefaultSearchSources: (ids: string[]) => Promise<void>
+
+  // ---------------------------------------------------------------------------
+  // Plugin-facing flat surface
+  //
+  // The plugin Theme / i18n / AI-provider APIs read these fields directly
+  // off `useSettingsStore.getState()`. They are derived from `settings`
+  // and kept in sync inside `applySettings()`. Setters write through to
+  // Dexie via `saveSettings`, so any update is durable.
+  // ---------------------------------------------------------------------------
+
+  theme: AppTheme
+  colorTheme: ColorThemePreset
+  language: AppLanguage
+  customThemes: CustomTheme[]
+  activeCustomThemeId: string | null
+  defaultProvider: string
+  providerSettings: Record<string, ProviderSettingsEntry>
+  customProviders: CustomProviderDefinition[]
+
+  setTheme: (mode: AppTheme) => Promise<void>
+  setColorTheme: (preset: ColorThemePreset) => Promise<void>
+  setLanguage: (language: AppLanguage) => Promise<void>
+
+  createCustomTheme: (theme: Omit<CustomTheme, "id">) => string
+  updateCustomTheme: (id: string, updates: Partial<CustomTheme>) => void
+  deleteCustomTheme: (id: string) => void
+  setActiveCustomTheme: (id: string | null) => void
+
+  setDefaultProvider: (providerId: string) => Promise<void>
+  setProviderConfig: (providerId: string, patch: Partial<ProviderSettingsEntry>) => Promise<void>
+  upsertCustomProvider: (provider: CustomProviderDefinition) => Promise<void>
+  removeCustomProvider: (providerId: string) => Promise<void>
 }
 
 const DEFAULTS: AppSettings = {
@@ -145,298 +179,453 @@ function getProvidersMap(
   return s?.searchProviders ?? { ...DEFAULT_SEARCH_PROVIDER_SETTINGS }
 }
 
-export const useSettingsStore = create<SettingsState>((set, get) => ({
-  settings: null,
-  loaded: false,
-  providerKeys: {},
+interface FlatPluginFields {
+  theme: AppTheme
+  colorTheme: ColorThemePreset
+  language: AppLanguage
+  customThemes: CustomTheme[]
+  activeCustomThemeId: string | null
+  defaultProvider: string
+  providerSettings: Record<string, ProviderSettingsEntry>
+  customProviders: CustomProviderDefinition[]
+}
 
-  load: async () => {
-    if (get().loaded) return
-    try {
-      const s = await getSettings()
-      set({ settings: s, loaded: true })
-      // Push the API key to the Rust process on first load. The user expects
-      // their previously-entered key to be active without a manual save.
-      if (s.apiKey) {
-        await syncApiKeyToTauri(s.apiKey)
+/**
+ * Project the plugin-facing flat fields out of an `AppSettings` blob.
+ * Called from every place that updates `state.settings` so plugin code
+ * reading the flat fields always sees the latest values.
+ */
+function deriveFlatPluginFields(s: AppSettings | null): FlatPluginFields {
+  return {
+    theme: s?.theme ?? "system",
+    colorTheme: s?.colorTheme ?? "default",
+    language: s?.language ?? "en",
+    customThemes: s?.customThemes ?? [],
+    activeCustomThemeId: s?.activeCustomThemeId ?? null,
+    defaultProvider: s?.defaultProvider ?? "",
+    providerSettings: s?.providerSettings ?? {},
+    customProviders: s?.customProviders ?? [],
+  }
+}
+
+export const useSettingsStore = create<SettingsState>((rawSet, get) => {
+  // Intercept every state update: if the update modifies `settings`, also
+  // re-derive the plugin-facing flat fields. This keeps the two views
+  // (nested AppSettings + plugin-flat fields) in lockstep without
+  // touching the 30+ existing call sites that only know about
+  // `set({ settings: next })`.
+  type SetArg = Partial<SettingsState> | ((state: SettingsState) => Partial<SettingsState>)
+  const set = (updater: SetArg) => {
+    rawSet((state) => {
+      const partial =
+        typeof updater === "function"
+          ? (updater as (s: SettingsState) => Partial<SettingsState>)(state)
+          : updater
+      if (partial && Object.prototype.hasOwnProperty.call(partial, "settings")) {
+        return {
+          ...partial,
+          ...deriveFlatPluginFields((partial.settings ?? state.settings) as AppSettings | null),
+        } as Partial<SettingsState>
       }
-      // Load TTS provider keys from the OS keyring (Tauri) / Dexie fallback.
-      // Failures here are non-fatal; missing keys are surfaced in the UI.
+      return partial
+    })
+  }
+  return {
+    settings: null,
+    loaded: false,
+    providerKeys: {},
+    ...deriveFlatPluginFields(null),
+
+    load: async () => {
+      if (get().loaded) return
+      try {
+        const s = await getSettings()
+        set({ settings: s, loaded: true })
+        // Push the API key to the Rust process on first load. The user expects
+        // their previously-entered key to be active without a manual save.
+        if (s.apiKey) {
+          await syncApiKeyToTauri(s.apiKey)
+        }
+        // Load TTS provider keys from the OS keyring (Tauri) / Dexie fallback.
+        // Failures here are non-fatal; missing keys are surfaced in the UI.
+        try {
+          const keys = await loadAllProviderKeys()
+          set({ providerKeys: keys })
+        } catch (err) {
+          console.warn("tts.loadAllProviderKeys failed", err)
+        }
+      } catch (err) {
+        console.error("settings.load failed", err)
+        set({ settings: DEFAULTS, loaded: true })
+      }
+    },
+
+    save: async (patch) => {
+      const next = await saveSettings(patch)
+      set({ settings: next })
+    },
+
+    toggleAlwaysAllow: async (toolName, allow) => {
+      if (allow) await addAlwaysAllow(toolName)
+      else await removeAlwaysAllow(toolName)
+      const s = await getSettings()
+      set({ settings: s })
+    },
+
+    setBuiltinToolEnabled: async (category, enabled) => {
+      const cur = get().settings ?? (await getSettings())
+      const builtinTools: BuiltinToolsConfig = {
+        ...DEFAULT_BUILTIN_TOOLS,
+        ...(cur.builtinTools ?? {}),
+        [category]: enabled,
+      }
+      const next = await saveSettings({ builtinTools })
+      set({ settings: next })
+    },
+
+    setApiKey: async (key) => {
+      const previous = get().settings?.apiKey ?? undefined
+      const trimmed = key && key.trim() ? key.trim() : undefined
+      const next = await saveSettings({ apiKey: trimmed })
+      set({ settings: next })
+      await syncApiKeyToTauri(trimmed ?? null)
+      // Only restart if the key actually changed.
+      if (previous !== trimmed && isTauri()) {
+        try {
+          await restartSidecar()
+        } catch (err) {
+          console.warn("restartSidecar failed", err)
+        }
+      }
+    },
+
+    // ---- Web search ----
+    setSearchEnabled: async (searchEnabled) => {
+      const next = await saveSettings({ searchEnabled })
+      set({ settings: next })
+    },
+    setSearchMaxResults: async (searchMaxResults) => {
+      const next = await saveSettings({ searchMaxResults })
+      set({ settings: next })
+    },
+    setSearchFallbackEnabled: async (searchFallbackEnabled) => {
+      const next = await saveSettings({ searchFallbackEnabled })
+      set({ settings: next })
+    },
+    setDefaultSearchProvider: async (defaultSearchProvider) => {
+      const next = await saveSettings({ defaultSearchProvider })
+      set({ settings: next })
+    },
+
+    setSearchProviderEnabled: async (id, enabled) => {
+      const cur = get().settings
+      const providers = getProvidersMap(cur)
+      const existing = providers[id] ?? { ...DEFAULT_SEARCH_PROVIDER_SETTINGS[id] }
+      const updated = { ...providers, [id]: { ...existing, enabled } }
+      const next = await saveSettings({ searchProviders: updated })
+      set({ settings: next })
+    },
+
+    setSearchProviderApiKey: async (id, apiKey) => {
+      const cur = get().settings
+      const providers = getProvidersMap(cur)
+      const existing = providers[id] ?? { ...DEFAULT_SEARCH_PROVIDER_SETTINGS[id] }
+      const updated = { ...providers, [id]: { ...existing, apiKey } }
+      const next = await saveSettings({ searchProviders: updated })
+      set({ settings: next })
+    },
+
+    setSearchProviderPriority: async (id, priority) => {
+      const cur = get().settings
+      const providers = getProvidersMap(cur)
+      const existing = providers[id] ?? { ...DEFAULT_SEARCH_PROVIDER_SETTINGS[id] }
+      const updated = { ...providers, [id]: { ...existing, priority } }
+      const next = await saveSettings({ searchProviders: updated })
+      set({ settings: next })
+    },
+
+    setSearchProviderSettings: async (id, patch) => {
+      const cur = get().settings
+      const providers = getProvidersMap(cur)
+      const existing = providers[id] ?? { ...DEFAULT_SEARCH_PROVIDER_SETTINGS[id] }
+      const updated = { ...providers, [id]: { ...existing, ...patch } }
+      const next = await saveSettings({ searchProviders: updated })
+      set({ settings: next })
+    },
+
+    // Default options
+    setDefaultSearchType: async (defaultSearchType) => {
+      const next = await saveSettings({ defaultSearchType })
+      set({ settings: next })
+    },
+    setDefaultSearchDepth: async (defaultSearchDepth) => {
+      const next = await saveSettings({ defaultSearchDepth })
+      set({ settings: next })
+    },
+    setDefaultSearchRecency: async (defaultSearchRecency) => {
+      const next = await saveSettings({ defaultSearchRecency })
+      set({ settings: next })
+    },
+    setDefaultSearchCountry: async (defaultSearchCountry) => {
+      const next = await saveSettings({ defaultSearchCountry })
+      set({ settings: next })
+    },
+    setDefaultSearchLanguage: async (defaultSearchLanguage) => {
+      const next = await saveSettings({ defaultSearchLanguage })
+      set({ settings: next })
+    },
+    setDefaultIncludeDomains: async (defaultIncludeDomains) => {
+      const next = await saveSettings({ defaultIncludeDomains })
+      set({ settings: next })
+    },
+    setDefaultExcludeDomains: async (defaultExcludeDomains) => {
+      const next = await saveSettings({ defaultExcludeDomains })
+      set({ settings: next })
+    },
+    setDefaultIncludeAnswer: async (defaultIncludeAnswer) => {
+      const next = await saveSettings({ defaultIncludeAnswer })
+      set({ settings: next })
+    },
+    setDefaultIncludeRawContent: async (defaultIncludeRawContent) => {
+      const next = await saveSettings({ defaultIncludeRawContent })
+      set({ settings: next })
+    },
+
+    // Cache
+    setSearchCacheEnabled: async (searchCacheEnabled) => {
+      const next = await saveSettings({ searchCacheEnabled })
+      set({ settings: next })
+    },
+    setSearchCacheTTL: async (searchCacheTTL) => {
+      const next = await saveSettings({ searchCacheTTL })
+      set({ settings: next })
+    },
+    setSearchCacheMaxEntries: async (searchCacheMaxEntries) => {
+      const next = await saveSettings({ searchCacheMaxEntries })
+      set({ settings: next })
+    },
+
+    // Safety
+    setSearchSafeSearchEnabled: async (searchSafeSearchEnabled) => {
+      const next = await saveSettings({ searchSafeSearchEnabled })
+      set({ settings: next })
+    },
+    setSearchSafeSearchLevel: async (searchSafeSearchLevel) => {
+      const next = await saveSettings({ searchSafeSearchLevel })
+      set({ settings: next })
+    },
+
+    // Source verification
+    setSourceVerificationSettings: async (sourceVerificationSettings) => {
+      const next = await saveSettings({ sourceVerificationSettings })
+      set({ settings: next })
+    },
+
+    // Usage tracking — synchronous in-memory update + best-effort persistence.
+    incrementSearchUsage: (providerId, responseTime, success) => {
+      const cur = get().settings
+      if (!cur) return
+      const stats: Record<SearchProviderType, SearchUsageEntry> =
+        cur.searchUsageStats ?? createDefaultSearchUsageStats()
+      const entry = stats[providerId] ?? createDefaultSearchUsageEntry()
+      const nextEntry: SearchUsageEntry = {
+        searchCount: entry.searchCount + 1,
+        lastUsedAt: Date.now(),
+        totalResponseTime: entry.totalResponseTime + responseTime,
+        errorCount: entry.errorCount + (success ? 0 : 1),
+      }
+      const updatedStats = { ...stats, [providerId]: nextEntry }
+      set({ settings: { ...cur, searchUsageStats: updatedStats } })
+      // Background persist; don't block the caller.
+      void saveSettings({ searchUsageStats: updatedStats }).catch((err) =>
+        console.warn("incrementSearchUsage persist failed", err)
+      )
+    },
+
+    resetSearchUsageStats: async () => {
+      const next = await saveSettings({ searchUsageStats: createDefaultSearchUsageStats() })
+      set({ settings: next })
+    },
+
+    // Custom research sources
+    addCustomSearchSource: async (source) => {
+      const cur = get().settings
+      const list = cur?.customSearchSources ?? []
+      if (list.some((s) => s.id === source.id)) return
+      const next = await saveSettings({ customSearchSources: [...list, source] })
+      set({ settings: next })
+    },
+    removeCustomSearchSource: async (id) => {
+      const cur = get().settings
+      const list = cur?.customSearchSources ?? []
+      const next = await saveSettings({
+        customSearchSources: list.filter((s) => s.id !== id),
+      })
+      set({ settings: next })
+    },
+    setDefaultSearchSources: async (defaultSearchSources) => {
+      const next = await saveSettings({ defaultSearchSources })
+      set({ settings: next })
+    },
+
+    // ---- TTS ----
+    setProviderApiKey: async (provider, key) => {
+      const trimmed = key.trim()
+      await setProviderKey(provider, trimmed)
+      set((state) => ({
+        providerKeys: {
+          ...state.providerKeys,
+          [provider]: trimmed.length > 0 ? trimmed : undefined,
+        },
+      }))
+    },
+
+    clearProviderApiKey: async (provider) => {
+      await clearProviderKey(provider)
+      set((state) => {
+        const next = { ...state.providerKeys }
+        delete next[provider]
+        return { providerKeys: next }
+      })
+    },
+
+    refreshProviderKeys: async () => {
       try {
         const keys = await loadAllProviderKeys()
         set({ providerKeys: keys })
       } catch (err) {
-        console.warn("tts.loadAllProviderKeys failed", err)
+        console.warn("refreshProviderKeys failed", err)
       }
-    } catch (err) {
-      console.error("settings.load failed", err)
-      set({ settings: DEFAULTS, loaded: true })
-    }
-  },
+    },
 
-  save: async (patch) => {
-    const next = await saveSettings(patch)
-    set({ settings: next })
-  },
+    setTtsEnabled: async (enabled) => {
+      const next = await saveSettings({ ttsEnabled: enabled })
+      set({ settings: next })
+    },
+    setTtsProvider: async (provider) => {
+      const next = await saveSettings({ ttsProvider: provider })
+      set({ settings: next })
+    },
+    setTtsAutoPlay: async (enabled) => {
+      const next = await saveSettings({ ttsAutoPlay: enabled })
+      set({ settings: next })
+    },
+    setTtsRate: async (rate) => {
+      const clamped = Math.min(10, Math.max(0.1, rate))
+      const next = await saveSettings({ ttsRate: clamped })
+      set({ settings: next })
+    },
+    setTtsPitch: async (pitch) => {
+      const clamped = Math.min(2, Math.max(0, pitch))
+      const next = await saveSettings({ ttsPitch: clamped })
+      set({ settings: next })
+    },
+    setTtsVolume: async (volume) => {
+      const clamped = Math.min(1, Math.max(0, volume))
+      const next = await saveSettings({ ttsVolume: clamped })
+      set({ settings: next })
+    },
 
-  toggleAlwaysAllow: async (toolName, allow) => {
-    if (allow) await addAlwaysAllow(toolName)
-    else await removeAlwaysAllow(toolName)
-    const s = await getSettings()
-    set({ settings: s })
-  },
+    // ---------------------------------------------------------------------------
+    // Plugin-facing setters
+    // ---------------------------------------------------------------------------
 
-  setBuiltinToolEnabled: async (category, enabled) => {
-    const cur = get().settings ?? (await getSettings())
-    const builtinTools: BuiltinToolsConfig = {
-      ...DEFAULT_BUILTIN_TOOLS,
-      ...(cur.builtinTools ?? {}),
-      [category]: enabled,
-    }
-    const next = await saveSettings({ builtinTools })
-    set({ settings: next })
-  },
+    setTheme: async (mode) => {
+      const next = await saveSettings({ theme: mode })
+      set({ settings: next })
+    },
 
-  setApiKey: async (key) => {
-    const previous = get().settings?.apiKey ?? undefined
-    const trimmed = key && key.trim() ? key.trim() : undefined
-    const next = await saveSettings({ apiKey: trimmed })
-    set({ settings: next })
-    await syncApiKeyToTauri(trimmed ?? null)
-    // Only restart if the key actually changed.
-    if (previous !== trimmed && isTauri()) {
-      try {
-        await restartSidecar()
-      } catch (err) {
-        console.warn("restartSidecar failed", err)
-      }
-    }
-  },
+    setColorTheme: async (preset) => {
+      const next = await saveSettings({ colorTheme: preset })
+      set({ settings: next })
+    },
 
-  // ---- Web search ----
-  setSearchEnabled: async (searchEnabled) => {
-    const next = await saveSettings({ searchEnabled })
-    set({ settings: next })
-  },
-  setSearchMaxResults: async (searchMaxResults) => {
-    const next = await saveSettings({ searchMaxResults })
-    set({ settings: next })
-  },
-  setSearchFallbackEnabled: async (searchFallbackEnabled) => {
-    const next = await saveSettings({ searchFallbackEnabled })
-    set({ settings: next })
-  },
-  setDefaultSearchProvider: async (defaultSearchProvider) => {
-    const next = await saveSettings({ defaultSearchProvider })
-    set({ settings: next })
-  },
+    setLanguage: async (language) => {
+      const next = await saveSettings({ language })
+      set({ settings: next })
+    },
 
-  setSearchProviderEnabled: async (id, enabled) => {
-    const cur = get().settings
-    const providers = getProvidersMap(cur)
-    const existing = providers[id] ?? { ...DEFAULT_SEARCH_PROVIDER_SETTINGS[id] }
-    const updated = { ...providers, [id]: { ...existing, enabled } }
-    const next = await saveSettings({ searchProviders: updated })
-    set({ settings: next })
-  },
+    createCustomTheme: (theme) => {
+      const cur = get().settings
+      const id = `customtheme_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+      const list = cur?.customThemes ?? []
+      const newTheme: CustomTheme = { ...theme, id }
+      const updated = [...list, newTheme]
+      set({ settings: { ...(cur ?? DEFAULTS), customThemes: updated } })
+      void saveSettings({ customThemes: updated }).catch((err) =>
+        console.warn("createCustomTheme persist failed", err)
+      )
+      return id
+    },
 
-  setSearchProviderApiKey: async (id, apiKey) => {
-    const cur = get().settings
-    const providers = getProvidersMap(cur)
-    const existing = providers[id] ?? { ...DEFAULT_SEARCH_PROVIDER_SETTINGS[id] }
-    const updated = { ...providers, [id]: { ...existing, apiKey } }
-    const next = await saveSettings({ searchProviders: updated })
-    set({ settings: next })
-  },
+    updateCustomTheme: (id, updates) => {
+      const cur = get().settings
+      const list = cur?.customThemes ?? []
+      const idx = list.findIndex((t) => t.id === id)
+      if (idx < 0) return
+      const next = [...list]
+      next[idx] = { ...next[idx], ...updates, id: next[idx].id }
+      set({ settings: { ...(cur ?? DEFAULTS), customThemes: next } })
+      void saveSettings({ customThemes: next }).catch((err) =>
+        console.warn("updateCustomTheme persist failed", err)
+      )
+    },
 
-  setSearchProviderPriority: async (id, priority) => {
-    const cur = get().settings
-    const providers = getProvidersMap(cur)
-    const existing = providers[id] ?? { ...DEFAULT_SEARCH_PROVIDER_SETTINGS[id] }
-    const updated = { ...providers, [id]: { ...existing, priority } }
-    const next = await saveSettings({ searchProviders: updated })
-    set({ settings: next })
-  },
+    deleteCustomTheme: (id) => {
+      const cur = get().settings
+      const list = cur?.customThemes ?? []
+      const next = list.filter((t) => t.id !== id)
+      if (next.length === list.length) return
+      const activeCustomThemeId =
+        cur?.activeCustomThemeId === id ? null : (cur?.activeCustomThemeId ?? null)
+      set({
+        settings: {
+          ...(cur ?? DEFAULTS),
+          customThemes: next,
+          activeCustomThemeId,
+        },
+      })
+      void saveSettings({ customThemes: next, activeCustomThemeId }).catch((err) =>
+        console.warn("deleteCustomTheme persist failed", err)
+      )
+    },
 
-  setSearchProviderSettings: async (id, patch) => {
-    const cur = get().settings
-    const providers = getProvidersMap(cur)
-    const existing = providers[id] ?? { ...DEFAULT_SEARCH_PROVIDER_SETTINGS[id] }
-    const updated = { ...providers, [id]: { ...existing, ...patch } }
-    const next = await saveSettings({ searchProviders: updated })
-    set({ settings: next })
-  },
+    setActiveCustomTheme: (id) => {
+      const cur = get().settings
+      set({ settings: { ...(cur ?? DEFAULTS), activeCustomThemeId: id } })
+      void saveSettings({ activeCustomThemeId: id }).catch((err) =>
+        console.warn("setActiveCustomTheme persist failed", err)
+      )
+    },
 
-  // Default options
-  setDefaultSearchType: async (defaultSearchType) => {
-    const next = await saveSettings({ defaultSearchType })
-    set({ settings: next })
-  },
-  setDefaultSearchDepth: async (defaultSearchDepth) => {
-    const next = await saveSettings({ defaultSearchDepth })
-    set({ settings: next })
-  },
-  setDefaultSearchRecency: async (defaultSearchRecency) => {
-    const next = await saveSettings({ defaultSearchRecency })
-    set({ settings: next })
-  },
-  setDefaultSearchCountry: async (defaultSearchCountry) => {
-    const next = await saveSettings({ defaultSearchCountry })
-    set({ settings: next })
-  },
-  setDefaultSearchLanguage: async (defaultSearchLanguage) => {
-    const next = await saveSettings({ defaultSearchLanguage })
-    set({ settings: next })
-  },
-  setDefaultIncludeDomains: async (defaultIncludeDomains) => {
-    const next = await saveSettings({ defaultIncludeDomains })
-    set({ settings: next })
-  },
-  setDefaultExcludeDomains: async (defaultExcludeDomains) => {
-    const next = await saveSettings({ defaultExcludeDomains })
-    set({ settings: next })
-  },
-  setDefaultIncludeAnswer: async (defaultIncludeAnswer) => {
-    const next = await saveSettings({ defaultIncludeAnswer })
-    set({ settings: next })
-  },
-  setDefaultIncludeRawContent: async (defaultIncludeRawContent) => {
-    const next = await saveSettings({ defaultIncludeRawContent })
-    set({ settings: next })
-  },
+    setDefaultProvider: async (providerId) => {
+      const next = await saveSettings({ defaultProvider: providerId })
+      set({ settings: next })
+    },
 
-  // Cache
-  setSearchCacheEnabled: async (searchCacheEnabled) => {
-    const next = await saveSettings({ searchCacheEnabled })
-    set({ settings: next })
-  },
-  setSearchCacheTTL: async (searchCacheTTL) => {
-    const next = await saveSettings({ searchCacheTTL })
-    set({ settings: next })
-  },
-  setSearchCacheMaxEntries: async (searchCacheMaxEntries) => {
-    const next = await saveSettings({ searchCacheMaxEntries })
-    set({ settings: next })
-  },
+    setProviderConfig: async (providerId, patch) => {
+      const cur = get().settings
+      const map = { ...(cur?.providerSettings ?? {}) }
+      map[providerId] = { ...(map[providerId] ?? {}), ...patch }
+      const next = await saveSettings({ providerSettings: map })
+      set({ settings: next })
+    },
 
-  // Safety
-  setSearchSafeSearchEnabled: async (searchSafeSearchEnabled) => {
-    const next = await saveSettings({ searchSafeSearchEnabled })
-    set({ settings: next })
-  },
-  setSearchSafeSearchLevel: async (searchSafeSearchLevel) => {
-    const next = await saveSettings({ searchSafeSearchLevel })
-    set({ settings: next })
-  },
+    upsertCustomProvider: async (provider) => {
+      const cur = get().settings
+      const list = cur?.customProviders ?? []
+      const idx = list.findIndex((p) => p.id === provider.id)
+      const updated =
+        idx >= 0 ? list.map((p) => (p.id === provider.id ? provider : p)) : [...list, provider]
+      const next = await saveSettings({ customProviders: updated })
+      set({ settings: next })
+    },
 
-  // Source verification
-  setSourceVerificationSettings: async (sourceVerificationSettings) => {
-    const next = await saveSettings({ sourceVerificationSettings })
-    set({ settings: next })
-  },
-
-  // Usage tracking — synchronous in-memory update + best-effort persistence.
-  incrementSearchUsage: (providerId, responseTime, success) => {
-    const cur = get().settings
-    if (!cur) return
-    const stats: Record<SearchProviderType, SearchUsageEntry> =
-      cur.searchUsageStats ?? createDefaultSearchUsageStats()
-    const entry = stats[providerId] ?? createDefaultSearchUsageEntry()
-    const nextEntry: SearchUsageEntry = {
-      searchCount: entry.searchCount + 1,
-      lastUsedAt: Date.now(),
-      totalResponseTime: entry.totalResponseTime + responseTime,
-      errorCount: entry.errorCount + (success ? 0 : 1),
-    }
-    const updatedStats = { ...stats, [providerId]: nextEntry }
-    set({ settings: { ...cur, searchUsageStats: updatedStats } })
-    // Background persist; don't block the caller.
-    void saveSettings({ searchUsageStats: updatedStats }).catch((err) =>
-      console.warn("incrementSearchUsage persist failed", err)
-    )
-  },
-
-  resetSearchUsageStats: async () => {
-    const next = await saveSettings({ searchUsageStats: createDefaultSearchUsageStats() })
-    set({ settings: next })
-  },
-
-  // Custom research sources
-  addCustomSearchSource: async (source) => {
-    const cur = get().settings
-    const list = cur?.customSearchSources ?? []
-    if (list.some((s) => s.id === source.id)) return
-    const next = await saveSettings({ customSearchSources: [...list, source] })
-    set({ settings: next })
-  },
-  removeCustomSearchSource: async (id) => {
-    const cur = get().settings
-    const list = cur?.customSearchSources ?? []
-    const next = await saveSettings({
-      customSearchSources: list.filter((s) => s.id !== id),
-    })
-    set({ settings: next })
-  },
-  setDefaultSearchSources: async (defaultSearchSources) => {
-    const next = await saveSettings({ defaultSearchSources })
-    set({ settings: next })
-  },
-
-  // ---- TTS ----
-  setProviderApiKey: async (provider, key) => {
-    const trimmed = key.trim()
-    await setProviderKey(provider, trimmed)
-    set((state) => ({
-      providerKeys: {
-        ...state.providerKeys,
-        [provider]: trimmed.length > 0 ? trimmed : undefined,
-      },
-    }))
-  },
-
-  clearProviderApiKey: async (provider) => {
-    await clearProviderKey(provider)
-    set((state) => {
-      const next = { ...state.providerKeys }
-      delete next[provider]
-      return { providerKeys: next }
-    })
-  },
-
-  refreshProviderKeys: async () => {
-    try {
-      const keys = await loadAllProviderKeys()
-      set({ providerKeys: keys })
-    } catch (err) {
-      console.warn("refreshProviderKeys failed", err)
-    }
-  },
-
-  setTtsEnabled: async (enabled) => {
-    const next = await saveSettings({ ttsEnabled: enabled })
-    set({ settings: next })
-  },
-  setTtsProvider: async (provider) => {
-    const next = await saveSettings({ ttsProvider: provider })
-    set({ settings: next })
-  },
-  setTtsAutoPlay: async (enabled) => {
-    const next = await saveSettings({ ttsAutoPlay: enabled })
-    set({ settings: next })
-  },
-  setTtsRate: async (rate) => {
-    const clamped = Math.min(10, Math.max(0.1, rate))
-    const next = await saveSettings({ ttsRate: clamped })
-    set({ settings: next })
-  },
-  setTtsPitch: async (pitch) => {
-    const clamped = Math.min(2, Math.max(0, pitch))
-    const next = await saveSettings({ ttsPitch: clamped })
-    set({ settings: next })
-  },
-  setTtsVolume: async (volume) => {
-    const clamped = Math.min(1, Math.max(0, volume))
-    const next = await saveSettings({ ttsVolume: clamped })
-    set({ settings: next })
-  },
-}))
+    removeCustomProvider: async (providerId) => {
+      const cur = get().settings
+      const list = cur?.customProviders ?? []
+      const next = await saveSettings({ customProviders: list.filter((p) => p.id !== providerId) })
+      set({ settings: next })
+    },
+  }
+})
