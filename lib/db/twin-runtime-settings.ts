@@ -11,6 +11,7 @@
  */
 
 import { getDb } from "./schema"
+import { isTauri } from "@/lib/tauri"
 import { DEFAULT_TWIN_RUNTIME_SETTINGS, type TwinRuntimeSettings } from "@/types/twin"
 
 const TWIN_RUNTIME_ID = "twin-runtime"
@@ -39,21 +40,42 @@ function settingsTable() {
   }
 }
 
+/**
+ * Derives the default vectorBackend at runtime rather than at module
+ * import time.  isTauri() is falsy in SSR / static-export builds, so
+ * DEFAULT_TWIN_RUNTIME_SETTINGS.storage.vectorBackend stays "qdrant" as the
+ * web baseline and this function is the only call site that flips to
+ * "native" for fresh desktop users.
+ */
+function derivedVectorBackendDefault(): TwinRuntimeSettings["storage"]["vectorBackend"] {
+  return isTauri() ? "native" : DEFAULT_TWIN_RUNTIME_SETTINGS.storage.vectorBackend
+}
+
 export async function getTwinRuntimeSettings(): Promise<TwinRuntimeSettings> {
   const row = await settingsTable().get(TWIN_RUNTIME_ID)
   if (isTwinRuntimeRow(row)) {
     // Defensive merge — a stored row from an older release may be missing
     // newly-added fields; we backfill from the defaults instead of crashing
     // on a partial payload.
+    const storageDefault = {
+      ...DEFAULT_TWIN_RUNTIME_SETTINGS.storage,
+      vectorBackend: derivedVectorBackendDefault(),
+    }
     return {
       ...DEFAULT_TWIN_RUNTIME_SETTINGS,
       ...row.payload,
-      storage: { ...DEFAULT_TWIN_RUNTIME_SETTINGS.storage, ...row.payload.storage },
+      storage: { ...storageDefault, ...row.payload.storage },
       embedding: { ...DEFAULT_TWIN_RUNTIME_SETTINGS.embedding, ...row.payload.embedding },
       llm: { ...DEFAULT_TWIN_RUNTIME_SETTINGS.llm, ...row.payload.llm },
     }
   }
-  return { ...DEFAULT_TWIN_RUNTIME_SETTINGS }
+  return {
+    ...DEFAULT_TWIN_RUNTIME_SETTINGS,
+    storage: {
+      ...DEFAULT_TWIN_RUNTIME_SETTINGS.storage,
+      vectorBackend: derivedVectorBackendDefault(),
+    },
+  }
 }
 
 export async function saveTwinRuntimeSettings(payload: TwinRuntimeSettings): Promise<void> {
