@@ -184,6 +184,8 @@ beforeEach(() => {
   chatState.setPendingCommandOverrides.mockClear()
   subscribers.length = 0
   settingsSubscribers.length = 0
+  mockGetTwinRuntimeSettings.mockReset()
+  mockCreateVectorStore.mockReset()
 })
 
 async function flush() {
@@ -406,6 +408,7 @@ describe("useClaudeChat — native vector backend branch", () => {
       expect.objectContaining({
         provider: "native",
         native: {},
+        embeddingConfig: expect.objectContaining({ provider: "openai" }),
       })
     )
   })

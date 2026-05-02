@@ -637,6 +637,9 @@ export class NativeVectorStore implements IVectorStore {
     query: string,
     options: SearchOptions = {}
   ): Promise<VectorSearchResult[]> {
+    if (!this.isInTauri()) {
+      throw new Error("Native vector store is only available in Tauri environment")
+    }
     const queryEmbedding = await generateEmbedding(
       query,
       this.config.embeddingConfig,
@@ -725,6 +728,9 @@ export class NativeVectorStore implements IVectorStore {
     query: string,
     options: SearchOptions = {}
   ): Promise<SearchResponse> {
+    if (!this.isInTauri()) {
+      throw new Error("Native vector store is only available in Tauri environment")
+    }
     const queryEmbedding = await generateEmbedding(
       query,
       this.config.embeddingConfig,

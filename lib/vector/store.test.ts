@@ -158,15 +158,6 @@ describe("NativeVectorStore", () => {
     })
   })
 
-  describe("renameCollection", () => {
-    it("throws not-yet-supported error", async () => {
-      await expect(store.renameCollection("old-name", "new-name")).rejects.toThrow(
-        "renameCollection is not yet supported on the native backend"
-      )
-      expect(mockInvoke).not.toHaveBeenCalled()
-    })
-  })
-
   describe("truncateCollection", () => {
     it("truncates collection", async () => {
       mockInvoke.mockResolvedValue(true)
@@ -176,28 +167,6 @@ describe("NativeVectorStore", () => {
       expect(mockInvoke).toHaveBeenCalledWith("vector_truncate_collection", {
         name: "test-collection",
       })
-    })
-  })
-
-  describe("exportCollection", () => {
-    it("throws not-yet-supported error", async () => {
-      await expect(store.exportCollection("test-collection")).rejects.toThrow(
-        "exportCollection is not yet supported on the native backend"
-      )
-      expect(mockInvoke).not.toHaveBeenCalled()
-    })
-  })
-
-  describe("importCollection", () => {
-    it("throws not-yet-supported error", async () => {
-      const mockImportData: CollectionImport = {
-        meta: { name: "test", documentCount: 0 },
-        points: [],
-      }
-      await expect(store.importCollection(mockImportData, true)).rejects.toThrow(
-        "importCollection is not yet supported on the native backend"
-      )
-      expect(mockInvoke).not.toHaveBeenCalled()
     })
   })
 
@@ -760,18 +729,21 @@ describe("NativeVectorStore", () => {
       await expect(store.scrollDocuments!("col")).rejects.toThrow(
         "scrollDocuments is not yet supported on the native backend"
       )
+      expect(mockInvoke).not.toHaveBeenCalled()
     })
 
     it("renameCollection throws", async () => {
       await expect(store.renameCollection!("a", "b")).rejects.toThrow(
         "renameCollection is not yet supported on the native backend"
       )
+      expect(mockInvoke).not.toHaveBeenCalled()
     })
 
     it("exportCollection throws", async () => {
       await expect(store.exportCollection!("col")).rejects.toThrow(
         "exportCollection is not yet supported on the native backend"
       )
+      expect(mockInvoke).not.toHaveBeenCalled()
     })
 
     it("importCollection throws", async () => {
@@ -779,18 +751,21 @@ describe("NativeVectorStore", () => {
       await expect(store.importCollection!(data)).rejects.toThrow(
         "importCollection is not yet supported on the native backend"
       )
+      expect(mockInvoke).not.toHaveBeenCalled()
     })
 
     it("getStats throws", async () => {
       await expect(store.getStats!()).rejects.toThrow(
         "getStats is not yet supported on the native backend"
       )
+      expect(mockInvoke).not.toHaveBeenCalled()
     })
 
     it("countDocuments throws", async () => {
       await expect(store.countDocuments!("col")).rejects.toThrow(
         "countDocuments is not yet supported on the native backend"
       )
+      expect(mockInvoke).not.toHaveBeenCalled()
     })
   })
 })
