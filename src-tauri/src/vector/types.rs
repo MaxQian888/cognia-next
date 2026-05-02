@@ -11,7 +11,6 @@
 //! `lib/vector/store.ts:428-442`.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// A point stored in a collection.
 ///
@@ -101,45 +100,6 @@ pub struct Filter {
     #[serde(default)]
     pub value: serde_json::Value,
     pub operation: FilterOp,
-}
-
-/// `vector_search_points` request payload (kept here for completeness;
-/// the actual command takes flat args in `commands.rs`).
-// TODO(commit-2): remove or use after the JS side flattens its payload wrappers.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SearchRequest {
-    pub collection: String,
-    pub vector: Vec<f32>,
-    pub top_k: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub score_threshold: Option<f32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub offset: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub limit: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub filters: Option<Vec<Filter>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub filter_mode: Option<FilterMode>,
-}
-
-/// `vector_create_collection` request payload (also flattened in
-/// `commands.rs`; kept here for parity with the spec).
-// TODO(commit-2): remove or use after the JS side flattens its payload wrappers.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateCollectionRequest {
-    pub name: String,
-    pub dimension: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub embedding_model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub embedding_provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<HashMap<String, serde_json::Value>>,
 }
 
 /// `vector_search_points` response. `total` is populated for callers that

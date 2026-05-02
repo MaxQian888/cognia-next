@@ -12,6 +12,8 @@
  * - Pinecone (serverless)
  * - Qdrant (local and cloud)
  * - Milvus (self-hosted and Zilliz Cloud)
+ * - Weaviate (self-hosted and cloud)
+ * - Native (Tauri-local sqlite-vec)
  */
 
 // Embedding utilities

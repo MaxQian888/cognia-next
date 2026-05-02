@@ -806,20 +806,22 @@ export class NativeVectorStore implements IVectorStore {
         dimension: number
         metadata?: Record<string, unknown>
         document_count?: number
-        created_at?: number
-        updated_at?: number
+        created_at?: string
+        updated_at?: string
         description?: string
         embedding_model?: string
         embedding_provider?: string
       }[]
     >("vector_list_collections")
+    const parseTimestamp = (s: string | undefined): number | undefined =>
+      s ? Date.parse(s) || undefined : undefined
     return (list || []).map((c) => ({
       name: c.name,
       documentCount: c.document_count ?? 0,
       dimension: c.dimension,
       metadata: c.metadata,
-      createdAt: c.created_at,
-      updatedAt: c.updated_at,
+      createdAt: parseTimestamp(c.created_at),
+      updatedAt: parseTimestamp(c.updated_at),
       description: c.description,
       embeddingModel: c.embedding_model,
       embeddingProvider: c.embedding_provider,
@@ -832,19 +834,21 @@ export class NativeVectorStore implements IVectorStore {
       dimension: number
       metadata?: Record<string, unknown>
       document_count?: number
-      created_at?: number
-      updated_at?: number
+      created_at?: string
+      updated_at?: string
       description?: string
       embedding_model?: string
       embedding_provider?: string
     }>("vector_get_collection", { name })
+    const parseTimestamp = (s: string | undefined): number | undefined =>
+      s ? Date.parse(s) || undefined : undefined
     return {
       name: info.name,
       documentCount: info.document_count ?? 0,
       dimension: info.dimension,
       metadata: info.metadata,
-      createdAt: info.created_at,
-      updatedAt: info.updated_at,
+      createdAt: parseTimestamp(info.created_at),
+      updatedAt: parseTimestamp(info.updated_at),
       description: info.description,
       embeddingModel: info.embedding_model,
       embeddingProvider: info.embedding_provider,

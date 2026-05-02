@@ -90,5 +90,5 @@ libsystemd = "0.7"
 syslog = "7"
 
 [dev-dependencies]
-# Unit tests for the scheduler metadata store create temp sqlite DBs.
+# Unit tests for the scheduler + vector subsystems create temp sqlite DBs.
 tempfile = "3"
