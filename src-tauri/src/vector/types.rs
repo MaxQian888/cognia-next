@@ -105,6 +105,7 @@ pub struct Filter {
 
 /// `vector_search_points` request payload (kept here for completeness;
 /// the actual command takes flat args in `commands.rs`).
+// TODO(commit-2): remove or use after the JS side flattens its payload wrappers.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchRequest {
@@ -125,6 +126,7 @@ pub struct SearchRequest {
 
 /// `vector_create_collection` request payload (also flattened in
 /// `commands.rs`; kept here for parity with the spec).
+// TODO(commit-2): remove or use after the JS side flattens its payload wrappers.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateCollectionRequest {

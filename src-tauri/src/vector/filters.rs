@@ -96,7 +96,7 @@ pub fn build_where(filters: &[Filter], mode: FilterMode) -> (String, Vec<Value>)
     }
 
     let fragment = if clauses.len() == 1 {
-        clauses.into_iter().next().unwrap()
+        clauses.remove(0)
     } else {
         format!("({})", clauses.join(joiner))
     };
@@ -170,15 +170,13 @@ fn contains_clause(
     path: &str,
     negate: bool,
 ) -> (String, Vec<Value>) {
-    if value.is_array() {
+    if let Some(arr) = value.as_array() {
         // Match if ANY element of payload[k] equals value (or all elements;
         // for "contains" we look for membership of any item in the array).
         // The conventional interpretation: payload[k] is an array, and we
         // check whether `value` is in it. If `value` is itself an array,
         // we test whether any of its elements is in payload[k].
-        let needles: Vec<Value> = value
-            .as_array()
-            .unwrap()
+        let needles: Vec<Value> = arr
             .iter()
             .map(json_to_sql_value)
             .collect();
