@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { invoke } from "@tauri-apps/api/core"
-import { appDataDir } from "@tauri-apps/api/path"
 import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -380,11 +379,13 @@ function NativeBackendFields({ settings }: { settings: TwinRuntimeSettings }) {
   const [testCode, setTestCode] = useState<string | undefined>(undefined)
 
   const handleOpenFolder = async () => {
+    if (!isTauri()) return
     try {
+      const { appDataDir, join } = await import("@tauri-apps/api/path")
       const base = await appDataDir()
       // Reveal the vectors.sqlite file — the OS file manager will highlight
       // the file inside its containing folder (cognia/).
-      const filePath = `${base}cognia/vectors.sqlite`
+      const filePath = await join(base, "cognia", "vectors.sqlite")
       await revealInExplorer(filePath)
     } catch {
       // No-op: if Tauri isn't available or the path doesn't exist yet, silently
@@ -471,7 +472,9 @@ function NativeBackendFields({ settings }: { settings: TwinRuntimeSettings }) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void handleReset()}>Confirm reset</AlertDialogAction>
+            <AlertDialogAction variant="destructive" onClick={() => void handleReset()}>
+              Confirm reset
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

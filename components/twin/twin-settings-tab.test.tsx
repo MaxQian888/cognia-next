@@ -33,7 +33,8 @@ jest.mock("@tauri-apps/api/core", () => ({
 }))
 
 jest.mock("@tauri-apps/api/path", () => ({
-  appDataDir: jest.fn().mockResolvedValue("C:/Users/test/AppData/Roaming/"),
+  appDataDir: jest.fn().mockResolvedValue("C:\\Users\\test\\AppData\\Roaming"),
+  join: jest.fn(async (...parts: string[]) => parts.join("\\")),
 }))
 
 jest.mock("sonner", () => ({
@@ -219,7 +220,7 @@ describe("TwinSettingsTab — native vector backend", () => {
 
     await waitFor(() => {
       expect(mockedInvoke).toHaveBeenCalledWith("vector_reset_store")
-      expect(mockedToast.success).toHaveBeenCalled()
+      expect(mockedToast.success).toHaveBeenCalledWith(expect.stringContaining("Reload"))
     })
   })
 
