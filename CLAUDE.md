@@ -233,6 +233,7 @@ See `docs/content/docs/adr/0003-employee-digital-twin.md` for the full ADR.
 
 - **Always use pnpm** (lockfile present); run `pnpm install` from repo root to install all workspaces
 - **Tauri production builds require static export**: `next.config.ts` (main app) has `output: "export"` — do not remove it
+- **Native vector store is sqlite-vec backed**: data lives at `<app_data>/cognia/vectors.sqlite`. Web mode forces a cloud backend (the native option is hidden in the Twin settings tab when `!isTauri()`).
 - **Docs does NOT use static export**: `docs/next.config.ts` is full server mode — keep them separate
 - **Rust toolchain**: Requires v1.77.2+ for Tauri builds
 - **Docs `.source/` is generated**: run `pnpm docs:dev` or `pnpm docs:build` once before TypeScript resolves `collections/server`
