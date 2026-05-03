@@ -2161,7 +2161,22 @@
         "allVerified": "全部 implemented 契约均已通过验证。",
         "colId": "ID",
         "colKind": "类型",
-        "colMissing": "缺失字段"
+        "colMissing": "缺失字段",
+        "diagnostics": {
+          "title": "插件运行诊断",
+          "hint": "来自治理、静默失败、运行时检查的实时信号。错误默认展开；仅含警告的分组保持折叠。",
+          "filterAll": "全部",
+          "filterErrors": "错误",
+          "filterWarnings": "警告",
+          "clearAll": "清除全部",
+          "clearAllConfirm": "确定清除所有诊断？此操作无法撤销。",
+          "clearAllConfirmTitle": "清除所有运行时诊断？",
+          "confirm": "确认",
+          "cancel": "取消",
+          "clearForPlugin": "清除",
+          "empty": "暂无运行时问题记录。",
+          "countBadge": "{count, plural, other {# 条问题}}"
+        }
       },
       "policy": {
         "governance": "治理模式",

@@ -27,10 +27,36 @@ import type {
 } from "@/types/plugin"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import { validatePluginManifest } from "@/lib/plugin"
+import type { PluginPointGovernanceMode } from "@/lib/plugin/contracts/plugin-points"
 import { buildExtensionDescriptor } from "@/lib/plugin/core/descriptor"
 import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { loggers } from "@/lib/logger"
 import { resolvePluginIcon } from "@/lib/plugin/icon"
+
+const PLUGIN_POLICY_STORAGE_KEY = "cognia.plugins.policy"
+
+/**
+ * Resolve the active plugin-point governance mode without creating a
+ * circular import on `lib/plugin/core/manager`. Honours the
+ * `COGNIA_PLUGIN_POINT_GOVERNANCE_MODE` env override first, then the
+ * persisted policy in `localStorage`, then defaults to `"warn"`.
+ */
+function resolvePluginPointGovernanceMode(): PluginPointGovernanceMode {
+  const fromEnv =
+    typeof process !== "undefined" ? process.env?.COGNIA_PLUGIN_POINT_GOVERNANCE_MODE : undefined
+  if (fromEnv === "warn" || fromEnv === "block") {
+    return fromEnv
+  }
+  if (typeof window === "undefined") return "warn"
+  try {
+    const raw = window.localStorage.getItem(PLUGIN_POLICY_STORAGE_KEY)
+    if (!raw) return "warn"
+    const parsed = JSON.parse(raw) as { governance?: unknown }
+    return parsed?.governance === "block" ? "block" : "warn"
+  } catch {
+    return "warn"
+  }
+}
 
 const log = loggers.plugin
 
@@ -881,8 +907,9 @@ export const usePluginStore = create<PluginState>()(
             directory: pluginDirectory,
           })
 
+          const governanceMode = resolvePluginPointGovernanceMode()
           const validResults = results.filter((r) => {
-            const validation = validatePluginManifest(r.manifest)
+            const validation = validatePluginManifest(r.manifest, { governanceMode })
             return validation.valid
           })
 

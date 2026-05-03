@@ -97,8 +97,8 @@ function that returns a `PluginDefinition`.
 ### 5. Plugin point contracts
 
 - 30 `CANONICAL_EXTENSION_POINTS` (27 implemented + 3 deprecated aliases)
-- 102 `CANONICAL_HOOK_POINTS`
-- 11 `CANONICAL_ACTIVATION_PATTERNS`
+- 108 `CANONICAL_HOOK_POINTS`
+- 10 `CANONICAL_ACTIVATION_PATTERNS`
 
 The mapping from each contract to the host file that consumes it is
 maintained in `lib/plugin/contracts/extension-point-consumers.md`. The
@@ -185,6 +185,39 @@ locale, mirroring the structure 1:1).
   commands, secure storage, configSchema-driven config).
 - Adding a new SDK lifecycle event surface in the future is mechanical
   — `adapter-hooks.ts` is the only file that needs to grow.
+
+## Follow-up (2026-05)
+
+A consistency closeout cleared five debts left after the original
+implementation:
+
+1. **Stub removal** — `lib/plugin/index.ts` no longer ships a fallback
+   `pluginManager` or duplicate `validatePluginManifest`. The single
+   canonical validator lives at `lib/plugin/core/validation.ts` and is
+   re-exported from the package entry. `stores/plugin/plugin-store.ts`
+   now passes the active `governanceMode`, closing a silent gap where
+   runtime-synced manifests skipped contract validation.
+2. **Silent-catch policy** — 12 `catch { /* ignore */ }` sites switched
+   to `recordSilentFailure`, which writes to the diagnostics store
+   only when the failure is unexpected (i.e. desktop-mode Tauri
+   invoke failure rather than expected web-mode unavailability).
+   `PluginPointDiagnostic` widened to accept a new `"runtime"`
+   `pointKind` and a `"plugin.silent-failure"` code so silent-failure
+   entries flow through the same store as governance diagnostics.
+3. **Diagnostics panel** — Audit sub-tab grew a live "Plugin runtime
+   diagnostics" panel powered by `subscribePluginPointDiagnostics`,
+   with severity filtering and per-plugin clear actions.
+4. **IPC byte-size correctness** — `messaging/ipc.ts` now measures
+   real UTF-8 byte length instead of UTF-16 code units, fixing a
+   silent oversize-passthrough bug for non-ASCII payloads.
+5. **Doc drift** — hook point count corrected from 102 to 108,
+   activation patterns from 11 to 10, matching `plugin-points.ts`.
+
+The Tauri backend gap (31 `plugin_*` invoke calls without Rust
+handlers) is intentionally deferred to ADR 0007. Until that lands,
+desktop users will see silent-failure diagnostics for every
+backend-bound operation — the noisy panel is the work-item registry
+for the next cycle.
 
 ## References
 

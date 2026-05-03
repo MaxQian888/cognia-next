@@ -55,7 +55,10 @@ import {
   validateHookPoint,
   type PluginPointGovernanceMode,
 } from "@/lib/plugin/contracts/plugin-points"
-import { recordPluginPointDiagnostic } from "@/lib/plugin/contracts/diagnostics-store"
+import {
+  recordPluginPointDiagnostic,
+  recordSilentFailure,
+} from "@/lib/plugin/contracts/diagnostics-store"
 import { getBrowserBuiltinRegistry } from "./browser-builtin-registry"
 
 // =============================================================================
@@ -1447,8 +1450,16 @@ export class PluginManager {
   ): Promise<void> {
     try {
       await invoke("plugin_set_state", { pluginId, status })
-    } catch {
-      // Best effort: backend may be unavailable in web mode.
+    } catch (error) {
+      recordSilentFailure(
+        pluginId,
+        {
+          site: "manager.syncBackendStatus",
+          message: `Failed to sync plugin status to backend (${status}).`,
+          expected: !canUseTauriInvoke(),
+        },
+        error
+      )
     }
   }
 
@@ -1470,10 +1481,19 @@ export class PluginManager {
       for (const permission of granted) {
         permissionSet.add(permission)
       }
-    } catch {
-      // Ignore when backend permission list is unavailable.
+    } catch (error) {
+      recordSilentFailure(
+        pluginId,
+        {
+          site: "manager.revokePluginPermissions.list",
+          message: "Could not enumerate granted permissions; revoking declared set only.",
+          expected: !canUseTauriInvoke(),
+        },
+        error
+      )
     }
 
+    const revokeFailures: Array<{ permission: string; error: unknown }> = []
     for (const permission of permissionSet) {
       try {
         await invoke("plugin_permission_revoke", {
@@ -1482,9 +1502,22 @@ export class PluginManager {
             permission,
           },
         })
-      } catch {
-        // Ignore if backend is unavailable or permission was never granted.
+      } catch (error) {
+        revokeFailures.push({ permission, error })
       }
+    }
+    if (revokeFailures.length > 0) {
+      recordSilentFailure(
+        pluginId,
+        {
+          site: "manager.revokePluginPermissions.revoke",
+          message: `Failed to revoke ${revokeFailures.length} permission(s) on backend: ${revokeFailures
+            .map((f) => f.permission)
+            .join(", ")}.`,
+          expected: !canUseTauriInvoke(),
+        },
+        revokeFailures[0].error
+      )
     }
   }
 
@@ -1502,8 +1535,16 @@ export class PluginManager {
     if (plugin && plugin.manifest.type !== "frontend") {
       try {
         await this.unloadPythonPlugin(pluginId)
-      } catch {
-        // Ignore if python runtime is unavailable.
+      } catch (error) {
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "manager.deactivatePluginRuntime.python.unload",
+            message: "Failed to unload Python plugin module.",
+            expected: !canUseTauriInvoke(),
+          },
+          error
+        )
       }
     }
 

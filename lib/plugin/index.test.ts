@@ -1,41 +1,30 @@
-import { pluginManager, getPluginEventHooks, getPluginLifecycleHooks } from "./index"
+import { getPluginEventHooks, getPluginLifecycleHooks, validatePluginManifest } from "./index"
+import * as core from "./core/validation"
+import * as hooksSystem from "./messaging/hooks-system"
 
-describe("pluginManager", () => {
-  it("list() returns []", () => {
-    expect(pluginManager.list()).toEqual([])
+describe("lib/plugin barrel re-exports", () => {
+  it("validatePluginManifest is the canonical core validator", () => {
+    expect(validatePluginManifest).toBe(core.validatePluginManifest)
   })
 
-  it("get(any) returns undefined", () => {
-    expect(pluginManager.get("any")).toBeUndefined()
+  it("getPluginEventHooks / getPluginLifecycleHooks are the canonical hook factories", () => {
+    expect(getPluginEventHooks).toBe(hooksSystem.getPluginEventHooks)
+    expect(getPluginLifecycleHooks).toBe(hooksSystem.getPluginLifecycleHooks)
   })
-})
 
-describe("getPluginEventHooks", () => {
-  it("returns callable noop dispatchers when no plugin is registered", () => {
-    // Phase 2 wired the real `HookDispatcher` in; the legacy
-    // `beforeSend` / `afterReceive` / `onError` arrays are no longer
-    // surfaced as state — plugins register through the dispatcher API
-    // instead. The dispatchers are still safe to call when nothing is
-    // registered, which is what cognia-next's runtime guarantees.
-    const h = getPluginEventHooks()
-    h.dispatchExternalAgentConnect()
-    h.dispatchExternalAgentDisconnect()
-    h.dispatchExternalAgentError()
-    h.dispatchExternalAgentExecutionStart()
-    h.dispatchExternalAgentExecutionComplete()
-    h.dispatchArtifactCreate()
-    h.dispatchArtifactUpdate()
-    h.dispatchArtifactDelete()
-    h.dispatchArtifactOpen()
-    h.dispatchArtifactClose()
+  it("getPluginEventHooks() returns the real PluginEventHooks instance", () => {
+    expect(getPluginEventHooks()).toBeInstanceOf(hooksSystem.PluginEventHooks)
   })
-})
 
-describe("getPluginLifecycleHooks", () => {
-  it("returns no-op scheduled task dispatchers", () => {
-    const h = getPluginLifecycleHooks()
-    h.dispatchOnScheduledTaskStart("t", "e")
-    h.dispatchOnScheduledTaskComplete("t", "e", { success: true })
-    h.dispatchOnScheduledTaskError("t", "e", new Error("fail"))
+  it("getPluginLifecycleHooks() returns the real PluginLifecycleHooks instance", () => {
+    expect(getPluginLifecycleHooks()).toBeInstanceOf(hooksSystem.PluginLifecycleHooks)
+  })
+
+  it("validatePluginManifest accepts governance options", () => {
+    const result = validatePluginManifest(
+      { id: "test.plugin", name: "Test", version: "1.0.0", type: "frontend" },
+      { governanceMode: "warn" }
+    )
+    expect(result).toEqual(expect.objectContaining({ valid: expect.any(Boolean) }))
   })
 })

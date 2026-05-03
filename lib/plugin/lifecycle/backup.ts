@@ -6,6 +6,8 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { loggers } from "../core/logger"
+import { recordSilentFailure } from "../contracts/diagnostics-store"
+import { canUseTauriInvoke } from "@/lib/native/utils"
 import { usePluginStore } from "@/stores/plugin"
 
 // =============================================================================
@@ -108,8 +110,16 @@ export class PluginBackupManager {
         return
       }
       localStorage.setItem(this.getIndexStorageKey(), JSON.stringify(index))
-    } catch {
-      // ignore storage write failures
+    } catch (error) {
+      recordSilentFailure(
+        "<backup-index>",
+        {
+          site: "backup.writeIndexToStorage",
+          message: "Plugin backup index persistence skipped (storage unavailable).",
+          expected: false,
+        },
+        error
+      )
     }
   }
 
@@ -167,8 +177,16 @@ export class PluginBackupManager {
       try {
         const raw = await readTextFile(manifestPath)
         manifest = JSON.parse(raw) as Record<string, unknown>
-      } catch {
-        // ignore missing manifest in backup
+      } catch (error) {
+        recordSilentFailure(
+          "<backup-inspect>",
+          {
+            site: "backup.inspectBackup.readManifest",
+            message: "Backup directory has no readable plugin.json (older backups are normal).",
+            expected: true,
+          },
+          error
+        )
       }
 
       return {
@@ -470,8 +488,16 @@ export class PluginBackupManager {
         try {
           await invoke("plugin_backup_delete", { path: oldest.path })
           deleted++
-        } catch {
-          // Ignore deletion errors
+        } catch (error) {
+          recordSilentFailure(
+            pluginId,
+            {
+              site: "backup.cleanupOldBackups.delete",
+              message: `Failed to delete old backup at ${oldest.path}.`,
+              expected: !canUseTauriInvoke(),
+            },
+            error
+          )
         }
       }
     }

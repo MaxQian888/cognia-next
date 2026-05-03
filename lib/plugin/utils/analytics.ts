@@ -3,6 +3,8 @@
  * Tracks plugin usage, performance, and provides learning insights
  */
 
+import { recordSilentFailure } from "../contracts/diagnostics-store"
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -92,8 +94,16 @@ class PluginAnalyticsStore {
       if (typeof localStorage !== "undefined") {
         return localStorage.getItem(key)
       }
-    } catch {
-      // ignore localStorage failure
+    } catch (error) {
+      recordSilentFailure(
+        "<analytics>",
+        {
+          site: "analytics.readPersistedValue",
+          message: "Plugin analytics persistence read fell back to memory (storage unavailable).",
+          expected: false,
+        },
+        error
+      )
     }
     return this.memoryPersistence.get(key) ?? null
   }
@@ -104,8 +114,16 @@ class PluginAnalyticsStore {
         localStorage.setItem(key, value)
         return
       }
-    } catch {
-      // ignore localStorage failure
+    } catch (error) {
+      recordSilentFailure(
+        "<analytics>",
+        {
+          site: "analytics.writePersistedValue",
+          message: "Plugin analytics persistence fell back to memory (storage unavailable).",
+          expected: false,
+        },
+        error
+      )
     }
     this.memoryPersistence.set(key, value)
   }
@@ -115,8 +133,16 @@ class PluginAnalyticsStore {
       if (typeof localStorage !== "undefined") {
         localStorage.removeItem(key)
       }
-    } catch {
-      // ignore localStorage failure
+    } catch (error) {
+      recordSilentFailure(
+        "<analytics>",
+        {
+          site: "analytics.removePersistedValue",
+          message: "Plugin analytics persistence delete skipped (storage unavailable).",
+          expected: false,
+        },
+        error
+      )
     }
     this.memoryPersistence.delete(key)
   }
@@ -266,8 +292,16 @@ class PluginAnalyticsStore {
         lastUpdated: Date.now(),
       }
       this.writePersistedValue(this.persistKey, JSON.stringify(data))
-    } catch {
-      // Ignore persistence errors
+    } catch (error) {
+      recordSilentFailure(
+        "<analytics>",
+        {
+          site: "analytics.persist",
+          message: "Plugin analytics serialization failed; stats not persisted this cycle.",
+          expected: false,
+        },
+        error
+      )
     }
   }
 
@@ -276,8 +310,16 @@ class PluginAnalyticsStore {
     this.stats.clear()
     try {
       this.removePersistedValue(this.persistKey)
-    } catch {
-      // Ignore
+    } catch (error) {
+      recordSilentFailure(
+        "<analytics>",
+        {
+          site: "analytics.clear",
+          message: "Plugin analytics persistence clear failed (already cleared in memory).",
+          expected: false,
+        },
+        error
+      )
     }
   }
 }

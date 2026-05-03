@@ -10,7 +10,7 @@
  * these definitions to avoid contract drift.
  */
 
-export type PluginPointKind = "ui-slot" | "hook" | "activation"
+export type PluginPointKind = "ui-slot" | "hook" | "activation" | "runtime"
 export type PluginPointStability = "stable" | "experimental" | "deprecated"
 export type PluginPointStatus = "implemented" | "virtual" | "deprecated"
 export type PluginPointGovernanceMode = "warn" | "block"
@@ -50,6 +50,7 @@ export interface PluginPointDiagnostic {
     | "plugin.point.alias"
     | "plugin.point.virtual"
     | "plugin.point.permission_denied"
+    | "plugin.silent-failure"
   severity: "warning" | "error"
   message: string
   pointKind: PluginPointKind

@@ -421,7 +421,11 @@ export class PluginIPC {
   }
 
   private validateMessage(data: unknown): void {
-    const size = JSON.stringify(data).length
+    const serialized = JSON.stringify(data)
+    const size =
+      typeof Buffer !== "undefined"
+        ? Buffer.byteLength(serialized, "utf8")
+        : new Blob([serialized]).size
     if (size > this.config.maxMessageSize) {
       throw new Error(`Message size ${size} exceeds maximum ${this.config.maxMessageSize}`)
     }

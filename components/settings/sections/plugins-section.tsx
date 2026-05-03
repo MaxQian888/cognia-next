@@ -76,6 +76,7 @@ import {
 import { PluginMarketplace } from "@/components/plugins/plugin-marketplace"
 import { PluginScheduledJobs } from "@/components/plugins/plugin-scheduled-jobs"
 import { PluginDevtoolsPanel } from "@/components/plugins/plugin-devtools-panel"
+import { PluginPointDiagnosticsPanel } from "@/components/plugins/plugin-point-diagnostics-panel"
 
 const PLUGINS_TAB_PARAM = "pluginsTab"
 
@@ -521,53 +522,57 @@ function AuditTab() {
   const total = audit.length
 
   return (
-    <Card className="p-4 space-y-4">
-      <div className="space-y-1">
-        <h3 className="text-sm font-semibold">{t("title")}</h3>
-        <p className="text-xs text-muted-foreground">{t("hint")}</p>
-      </div>
+    <div className="space-y-4">
+      <Card className="p-4 space-y-4">
+        <div className="space-y-1">
+          <h3 className="text-sm font-semibold">{t("title")}</h3>
+          <p className="text-xs text-muted-foreground">{t("hint")}</p>
+        </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="secondary" className="text-xs">
-          {t("badgeTotal", { count: total })}
-        </Badge>
-        <Badge variant="outline" className="text-xs gap-1">
-          <CheckCircle2Icon className="size-3" />
-          {t("badgeVerified", { count: verified })}
-        </Badge>
-        {missing.length > 0 && (
-          <Badge variant="destructive" className="text-xs gap-1">
-            <CircleAlertIcon className="size-3" />
-            {t("badgeMissing", { count: missing.length })}
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary" className="text-xs">
+            {t("badgeTotal", { count: total })}
           </Badge>
-        )}
-      </div>
+          <Badge variant="outline" className="text-xs gap-1">
+            <CheckCircle2Icon className="size-3" />
+            {t("badgeVerified", { count: verified })}
+          </Badge>
+          {missing.length > 0 && (
+            <Badge variant="destructive" className="text-xs gap-1">
+              <CircleAlertIcon className="size-3" />
+              {t("badgeMissing", { count: missing.length })}
+            </Badge>
+          )}
+        </div>
 
-      {missing.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("allVerified")}</p>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("colId")}</TableHead>
-              <TableHead>{t("colKind")}</TableHead>
-              <TableHead>{t("colMissing")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {missing.map((entry) => (
-              <TableRow key={`${entry.kind}:${entry.id}`}>
-                <TableCell className="font-mono text-xs">{entry.id}</TableCell>
-                <TableCell className="text-xs">{entry.kind}</TableCell>
-                <TableCell className="text-xs text-destructive">
-                  {entry.missingFields.join(", ")}
-                </TableCell>
+        {missing.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t("allVerified")}</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("colId")}</TableHead>
+                <TableHead>{t("colKind")}</TableHead>
+                <TableHead>{t("colMissing")}</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
-    </Card>
+            </TableHeader>
+            <TableBody>
+              {missing.map((entry) => (
+                <TableRow key={`${entry.kind}:${entry.id}`}>
+                  <TableCell className="font-mono text-xs">{entry.id}</TableCell>
+                  <TableCell className="text-xs">{entry.kind}</TableCell>
+                  <TableCell className="text-xs text-destructive">
+                    {entry.missingFields.join(", ")}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </Card>
+
+      <PluginPointDiagnosticsPanel />
+    </div>
   )
 }
 

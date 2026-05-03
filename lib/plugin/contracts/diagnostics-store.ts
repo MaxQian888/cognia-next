@@ -4,6 +4,7 @@
  * unified view per plugin.
  */
 
+import { loggers } from "../core/logger"
 import type { PluginPointDiagnostic } from "./plugin-points"
 
 const diagnosticsByPlugin = new Map<string, PluginPointDiagnostic[]>()
@@ -60,4 +61,38 @@ export function subscribePluginPointDiagnostics(listener: () => void): () => voi
 
 export function getPluginPointDiagnosticsRevision(): number {
   return revision
+}
+
+export interface SilentFailureContext {
+  /** Call-site identifier, e.g. "manager.syncBackendStatus". */
+  site: string
+  /** Short, user-readable description. */
+  message: string
+  /**
+   * Whether the failure is structurally expected. Web mode without a
+   * Tauri backend → true (debug log only). Desktop runtime failure → false
+   * (warn log + diagnostics-store entry surfaced in the Audit panel).
+   */
+  expected: boolean
+}
+
+export function recordSilentFailure(
+  pluginId: string,
+  ctx: SilentFailureContext,
+  error: unknown
+): void {
+  const errMsg = error instanceof Error ? error.message : String(error)
+  if (ctx.expected) {
+    loggers.manager.debug(`[silent:${ctx.site}] ${ctx.message}`, errMsg)
+    return
+  }
+  loggers.manager.warn(`[silent:${ctx.site}] ${ctx.message}`, errMsg)
+  recordPluginPointDiagnostic(pluginId, {
+    code: "plugin.silent-failure",
+    severity: "warning",
+    message: ctx.message,
+    pointKind: "runtime",
+    pointId: ctx.site,
+    hint: errMsg,
+  })
 }
