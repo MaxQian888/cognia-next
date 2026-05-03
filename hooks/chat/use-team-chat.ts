@@ -12,6 +12,8 @@ import {
   sendPrompt,
 } from "@/lib/claude/ipc"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import { tryBuildTwinDeps, type TwinDepsForBuild } from "@/lib/twin/runtime/build-deps"
+import { generateEmbedding } from "@/lib/ai/embedding/embedding"
 import {
   buildSupervisorRoster,
   parseDispatches,
@@ -177,6 +179,22 @@ export function useTeamChat() {
     const userText = asPlainText(content)
     lastUserContentRef.current.set(sessionId, content)
 
+    // Embed the user message ONCE per turn so twin-bound members can share the
+    // same query vector rather than each paying an individual embed call.
+    let turnTwinDeps: TwinDepsForBuild | undefined
+    let turnEmbedding: number[] | undefined
+    if (userText.trim()) {
+      turnTwinDeps = await tryBuildTwinDeps()
+      if (turnTwinDeps) {
+        try {
+          const result = await generateEmbedding(userText, turnTwinDeps.embedding)
+          turnEmbedding = result.embedding
+        } catch {
+          turnEmbedding = undefined // resolver falls back to per-member embed
+        }
+      }
+    }
+
     // 1. Persist the user turn first, tagging it as a "user" sender.
     if (!skipPersistUserTurn) {
       const userMsg = withMetadata(makeUserMessage(content), {
@@ -217,6 +235,9 @@ export function useTeamChat() {
           turnId,
           interruptedRef,
           resolvers: resolvers.current,
+          turnTwinDeps,
+          turnEmbedding,
+          turnUserMessage: userText,
         })
       } else {
         const targets = routeTurn(team, members, userText)
@@ -236,6 +257,9 @@ export function useTeamChat() {
           turnId,
           interruptedRef,
           resolvers: resolvers.current,
+          turnTwinDeps,
+          turnEmbedding,
+          turnUserMessage: userText,
         })
       }
     } finally {
@@ -362,6 +386,12 @@ interface RunCommonArgs {
   turnId: string
   interruptedRef: React.MutableRefObject<boolean>
   resolvers: ResolverMap
+  /** Pre-built twin runtime deps shared across all members for this turn. */
+  turnTwinDeps?: TwinDepsForBuild
+  /** Pre-computed query embedding for the user message; avoids N×embed cost. */
+  turnEmbedding?: number[]
+  /** Plain-text user message forwarded to resolveSendOptions for twin RAG. */
+  turnUserMessage?: string
 }
 
 interface RunLinearArgs extends RunCommonArgs {
@@ -380,6 +410,9 @@ async function runLinearTurn(args: RunLinearArgs): Promise<void> {
     turnId,
     interruptedRef,
     resolvers,
+    turnTwinDeps,
+    turnEmbedding,
+    turnUserMessage,
   } = args
 
   for (const character of targets) {
@@ -406,6 +439,9 @@ async function runLinearTurn(args: RunLinearArgs): Promise<void> {
         sub,
         sendContent: args.content,
         resolvers,
+        turnTwinDeps,
+        turnEmbedding,
+        turnUserMessage,
       })
       useUIStore.getState().setMemberStatus(sessionId, character.id, "idle")
     } catch (err) {
@@ -419,8 +455,19 @@ async function runLinearTurn(args: RunLinearArgs): Promise<void> {
 // ---- Supervisor orchestration --------------------------------------------
 
 async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
-  const { session, sessionId, team, members, memberByCharId, turnId, interruptedRef, resolvers } =
-    args
+  const {
+    session,
+    sessionId,
+    team,
+    members,
+    memberByCharId,
+    turnId,
+    interruptedRef,
+    resolvers,
+    turnTwinDeps,
+    turnEmbedding,
+    turnUserMessage,
+  } = args
 
   if (!team.supervisorCharacterId) {
     useChatStore.getState().setError("Supervisor team has no supervisor configured")
@@ -475,6 +522,9 @@ async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
         messageMetadata: { supervisorRound: round },
         postProcessText: round === 2 ? (text) => stripDispatches(text) : undefined,
         resolvers,
+        turnTwinDeps,
+        turnEmbedding,
+        turnUserMessage,
       })
 
       useUIStore.getState().setMemberStatus(sessionId, supervisor.id, "idle")
@@ -515,6 +565,9 @@ async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
           sub: dSub,
           sendContent: `Dispatch from supervisor:\n${d.task}`,
           resolvers,
+          turnTwinDeps,
+          turnEmbedding,
+          turnUserMessage,
         })
         useUIStore.getState().setMemberStatus(sessionId, target.id, "idle")
         const reply = await readLastAssistantText(sessionId, target.id)
@@ -563,6 +616,12 @@ interface RunMemberArgs {
    */
   postProcessText?: (text: string) => string
   resolvers: ResolverMap
+  /** Pre-built twin runtime deps shared across all members for this turn. */
+  turnTwinDeps?: TwinDepsForBuild
+  /** Pre-computed query embedding for the user message; avoids N×embed cost. */
+  turnEmbedding?: number[]
+  /** Plain-text user message forwarded to resolveSendOptions for twin RAG. */
+  turnUserMessage?: string
 }
 
 async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
@@ -578,6 +637,9 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
     messageMetadata,
     postProcessText,
     resolvers,
+    turnTwinDeps,
+    turnEmbedding,
+    turnUserMessage,
   } = args
 
   const referencedPaths = useChatStore
@@ -589,6 +651,9 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
     appSettings: useSettingsStore.getState().settings,
     memberOverride: memberByCharId.get(character.id),
     referencedPaths,
+    twinDeps: turnTwinDeps,
+    twinUserMessage: turnUserMessage,
+    precomputedQueryEmbedding: turnEmbedding,
   })
   const transcript = await buildTranscript(sessionId, character.id, members, session.scratchpad)
   const finalSystemPrompt = [baseOpts.systemPrompt, promptAddendum, transcript]
