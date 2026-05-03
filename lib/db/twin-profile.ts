@@ -57,14 +57,38 @@ export async function setVoiceSummary(twinId: string, voiceSummary: string): Pro
   await setTwinProfile({ ...profile, voiceSummary })
 }
 
+export interface AppendStyleSamplesOptions {
+  /**
+   * Optional async function that maps a sample's `summary` to an embedding.
+   * When provided, every sample's `embedding` is populated before persistence.
+   * Failures are swallowed per-sample (the field stays `undefined` and the
+   * runtime lazy-backfills next time).
+   */
+  embeddingFn?: (summary: string) => Promise<number[]>
+}
+
 export async function appendStyleSamples(
   twinId: string,
-  samples: StyleSample[]
+  samples: StyleSample[],
+  options: AppendStyleSamplesOptions = {}
 ): Promise<TwinProfile> {
   const profile = await ensureTwinProfile(twinId)
+  let enriched = samples
+  if (options.embeddingFn) {
+    const fn = options.embeddingFn
+    enriched = await Promise.all(
+      samples.map(async (s) => {
+        try {
+          return { ...s, embedding: await fn(s.summary) }
+        } catch {
+          return s
+        }
+      })
+    )
+  }
   const merged: TwinProfile = {
     ...profile,
-    styleSamples: [...profile.styleSamples, ...samples],
+    styleSamples: [...profile.styleSamples, ...enriched],
     updatedAt: Date.now(),
   }
   await getDb().twinProfile.put(merged)

@@ -312,6 +312,93 @@ describe("twinProfile CRUD", () => {
     expect(profile?.voiceSummary).toContain("Pragmatic")
   })
 
+  it("appendStyleSamples writes embeddings when an embeddingFn is provided", async () => {
+    const fn = jest.fn(async (text: string) => (text === "summary one" ? [0.1, 0.2] : [0.3, 0.4]))
+    await appendStyleSamples(
+      "twin_alice",
+      [
+        {
+          id: "s1",
+          contextLabel: "test",
+          original: "original one",
+          summary: "summary one",
+          sourceChunkId: "c1",
+          tone: ["concise"],
+          addedAt: 1,
+          addedBy: "distill",
+        },
+        {
+          id: "s2",
+          contextLabel: "test",
+          original: "original two",
+          summary: "summary two",
+          sourceChunkId: "c2",
+          tone: ["warm"],
+          addedAt: 2,
+          addedBy: "distill",
+        },
+      ],
+      { embeddingFn: fn }
+    )
+    expect(fn).toHaveBeenCalledTimes(2)
+    const profile = await getTwinProfile("twin_alice")
+    expect(profile?.styleSamples[0].embedding).toEqual([0.1, 0.2])
+    expect(profile?.styleSamples[1].embedding).toEqual([0.3, 0.4])
+  })
+
+  it("appendStyleSamples writes no embedding when embeddingFn is omitted", async () => {
+    await appendStyleSamples("twin_alice", [
+      {
+        id: "s3",
+        contextLabel: "test",
+        original: "original",
+        summary: "x",
+        sourceChunkId: "c3",
+        tone: [],
+        addedAt: 3,
+        addedBy: "distill",
+      },
+    ])
+    const profile = await getTwinProfile("twin_alice")
+    expect(profile?.styleSamples.find((s) => s.id === "s3")?.embedding).toBeUndefined()
+  })
+
+  it("appendStyleSamples persists samples even when embeddingFn rejects per-sample", async () => {
+    const fn = jest.fn(async (text: string) => {
+      if (text === "ok-summary") return [0.5, 0.5]
+      throw new Error("embed failed")
+    })
+    await appendStyleSamples(
+      "twin_alice",
+      [
+        {
+          id: "s4",
+          contextLabel: "test",
+          original: "original ok",
+          summary: "ok-summary",
+          sourceChunkId: "c4",
+          tone: [],
+          addedAt: 4,
+          addedBy: "distill",
+        },
+        {
+          id: "s5",
+          contextLabel: "test",
+          original: "original broken",
+          summary: "broken",
+          sourceChunkId: "c5",
+          tone: [],
+          addedAt: 5,
+          addedBy: "distill",
+        },
+      ],
+      { embeddingFn: fn }
+    )
+    const profile = await getTwinProfile("twin_alice")
+    expect(profile?.styleSamples.find((s) => s.id === "s4")?.embedding).toEqual([0.5, 0.5])
+    expect(profile?.styleSamples.find((s) => s.id === "s5")?.embedding).toBeUndefined()
+  })
+
   it("appendStyleSamples / appendPlaybooks / appendDecisions accumulate without dedupe", async () => {
     await appendStyleSamples("twin_alice", [
       {
