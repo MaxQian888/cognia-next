@@ -237,4 +237,22 @@ describe("applyTwinContext", () => {
     expect(store.searchByEmbedding).not.toHaveBeenCalled()
     expect(result.applied?.metadata.retrievedChunkIds).toEqual([])
   })
+
+  it("skips internal embed when precomputedQueryEmbedding is provided", async () => {
+    const generateEmbeddingMock = jest.requireMock("@/lib/ai/embedding/embedding")
+      .generateEmbedding as jest.Mock
+    generateEmbeddingMock.mockClear()
+    const character = makeCharacter({ twinId: "twin_alice" })
+    const result = await applyTwinContext({
+      character,
+      userMessage: "what did Alice say last month?",
+      precomputedQueryEmbedding: [0.1, 0.2, 0.3],
+      deps: {
+        store: makeFakeStore(),
+        embedding: { provider: "openai", model: "text-embedding-3-small", apiKey: "k" },
+      },
+    })
+    expect(generateEmbeddingMock).not.toHaveBeenCalled()
+    expect(result.degraded).toBe(false)
+  })
 })

@@ -45,6 +45,12 @@ export interface ApplyTwinContextInput {
   character: Character
   /** The latest user-message text. */
   userMessage: string
+  /**
+   * Optional pre-embedded query vector. Team chat passes this in once per
+   * turn so all twin-bound members share a single embed call. When provided,
+   * the runtime skips `generateEmbedding(userMessage)`.
+   */
+  precomputedQueryEmbedding?: number[]
   deps: ApplyTwinContextDeps
 }
 
@@ -98,12 +104,12 @@ export async function applyTwinContext(
   const profile = await getTwinProfile(character.twinId)
   const collection = deps.vectorCollection ?? vectorCollectionName(character.twinId)
 
-  let queryEmbedding: number[] | null = null
+  let queryEmbedding: number[] | null = input.precomputedQueryEmbedding ?? null
   let degraded = false
   let degradedReason: string | undefined
 
   // Embed the user message — needed by both the RAG and style passes.
-  if (settings.enableRag || settings.enableStyleFewShot) {
+  if (!queryEmbedding && (settings.enableRag || settings.enableStyleFewShot)) {
     try {
       const result = await generateEmbedding(userMessage, deps.embedding)
       queryEmbedding = result.embedding
