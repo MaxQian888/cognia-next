@@ -79,6 +79,26 @@ describe("tryBuildTwinDeps", () => {
     expect((await tryBuildTwinDeps())?.vectorBackend).toBe("chroma")
   })
 
+  it("builds chroma deps in server mode (serverUrl path)", async () => {
+    getTwinRuntimeSettings.mockResolvedValue(
+      settings({
+        storage: {
+          vectorBackend: "chroma",
+          chroma: { mode: "server", serverUrl: "http://chroma:8000" },
+        },
+      })
+    )
+    const deps = await tryBuildTwinDeps()
+    expect(deps?.vectorBackend).toBe("chroma")
+    expect(createVectorStore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "chroma",
+        chromaServerUrl: "http://chroma:8000",
+        chromaMode: "server",
+      })
+    )
+  })
+
   it("builds native deps without further config", async () => {
     getTwinRuntimeSettings.mockResolvedValue(settings({ storage: { vectorBackend: "native" } }))
     expect((await tryBuildTwinDeps())?.vectorBackend).toBe("native")

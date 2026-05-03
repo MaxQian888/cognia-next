@@ -1,8 +1,8 @@
 import { getTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
 import { createVectorStore } from "@/lib/vector/store"
-import type { resolveSendOptions } from "@/lib/claude/build-options"
+import type { TwinRuntimeDepsForBuild } from "@/lib/claude/build-options"
 
-export type TwinDepsForBuild = NonNullable<Parameters<typeof resolveSendOptions>[0]["twinDeps"]>
+export type TwinDepsForBuild = TwinRuntimeDepsForBuild
 
 /**
  * Best-effort twin deps loader. Pulls runtime settings + builds a vector
