@@ -1,9 +1,20 @@
 # Plugin system consistency closeout
 
 **Date**: 2026-05-03
-**Status**: Draft — pending review
+**Status**: Implemented (2026-05-03, commit `d2ca056`)
 **Builds on**: ADR 0006 (Plugin system completion, 2026-05)
 **Out of scope (future ADR)**: 0007 — Tauri backend handlers for the 31 missing `plugin_*` Rust commands
+
+> **Implementation note (2026-05-03):** Step 6 (`getState()` extraction)
+> turned out to be a no-op — the audit's "20 sites" were already at
+> method-top in `core/manager.ts`; no method called `getState()` more
+> than once, so there was no drift to fix. Step 5's "de-duplicated
+> stringify" optimization was also dropped because `validateMessage`
+> doesn't pass `serialized` downstream — only the byte-size correction
+> shipped. `PluginPointKind` widened with `"runtime"` and
+> `PluginPointDiagnostic.code` widened with `"plugin.silent-failure"`
+> so silent-failure entries reuse the existing diagnostics-store
+> transport. Final coverage: 100% on both new files.
 
 ---
 
