@@ -71,6 +71,12 @@ export interface BuildOptionsContext {
    * `twinDeps` or `character.twinId` is missing.
    */
   twinUserMessage?: string
+  /**
+   * Pre-embedded vector for `twinUserMessage`. When provided, the twin runtime
+   * skips its own embed call. Used by team chat to share one embed across
+   * multiple twin-bound members per turn.
+   */
+  precomputedQueryEmbedding?: number[]
 }
 
 /**
@@ -225,6 +231,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       const result = await applyTwinContext({
         character,
         userMessage: ctx.twinUserMessage,
+        precomputedQueryEmbedding: ctx.precomputedQueryEmbedding,
         deps: ctx.twinDeps as Parameters<typeof applyTwinContext>[0]["deps"],
       })
       if (result.applied) {
