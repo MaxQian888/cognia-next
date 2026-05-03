@@ -405,7 +405,7 @@ export function PresetEditor({
       </div>
 
       {/* --- Tool whitelists ---------------------------------------- */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1">
           <Label className="text-xs">
             {safeT("editor.allowedTools", "Allowed tools (comma-separated)")}
@@ -516,7 +516,7 @@ export function PresetEditor({
       </div>
 
       {/* --- Flags row -------------------------------------------- */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
           <span>
             <span className="block">{safeT("editor.setDefault", "Set as default")}</span>

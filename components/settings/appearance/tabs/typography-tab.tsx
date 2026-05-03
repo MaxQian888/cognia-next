@@ -1,9 +1,11 @@
 "use client"
 
-import { useTheme } from "next-themes"
+// Font scale, language and reduce-motion toggles. The original
+// appearance-section had these inline; we keep the same controls here so
+// users can find them without learning the new layout.
+
 import { useTranslations } from "next-intl"
 import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
   Select,
   SelectContent,
@@ -13,13 +15,13 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppFontScale, AppLanguage, AppTheme } from "@/lib/claude/types"
-import { PaletteIcon } from "lucide-react"
+import type { AppFontScale, AppLanguage } from "@/lib/claude/types"
+import { responsiveSelectClass } from "@/lib/utils"
 
 const FONT_SCALES: { value: AppFontScale; label: string }[] = [
   { value: "xs", label: "XS · 14px" },
   { value: "sm", label: "S · 15px" },
-  { value: "md", label: "M · 16px (default)" },
+  { value: "md", label: "M · 16px" },
   { value: "lg", label: "L · 17px" },
   { value: "xl", label: "XL · 18px" },
 ]
@@ -29,47 +31,16 @@ const LANGUAGES: { value: AppLanguage; label: string }[] = [
   { value: "zh-CN", label: "简体中文" },
 ]
 
-export function AppearanceSection() {
+export function TypographyTab() {
   const t = useTranslations("settings.appearance")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
-  const { setTheme } = useTheme()
-
-  const theme: AppTheme = settings?.theme ?? "system"
   const fontScale: AppFontScale = settings?.fontScale ?? "md"
   const language: AppLanguage = settings?.language ?? "en"
   const reduceMotion = Boolean(settings?.reduceMotion)
 
   return (
     <div className="space-y-6">
-      <div className="space-y-1">
-        <Label className="flex items-center gap-2">
-          <PaletteIcon className="size-4" />
-          {t("title")}
-        </Label>
-        <p className="text-xs text-muted-foreground">{t("description")}</p>
-      </div>
-
-      <div className="space-y-2">
-        <Label className="text-xs">{t("themeLabel")}</Label>
-        <RadioGroup
-          value={theme}
-          onValueChange={(v) => {
-            const next = v as AppTheme
-            setTheme(next)
-            void save({ theme: next })
-          }}
-          className="flex gap-4"
-        >
-          {(["light", "dark", "system"] as AppTheme[]).map((opt) => (
-            <label key={opt} className="flex cursor-pointer items-center gap-2 text-sm">
-              <RadioGroupItem value={opt} id={`theme-${opt}`} />
-              {t(`theme.${opt}`)}
-            </label>
-          ))}
-        </RadioGroup>
-      </div>
-
       <div className="space-y-2">
         <Label className="text-xs">{t("fontScaleLabel")}</Label>
         <Select
@@ -78,7 +49,7 @@ export function AppearanceSection() {
             void save({ fontScale: v as AppFontScale })
           }}
         >
-          <SelectTrigger className="w-64">
+          <SelectTrigger className={responsiveSelectClass}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -100,7 +71,7 @@ export function AppearanceSection() {
             void save({ language: v as AppLanguage })
           }}
         >
-          <SelectTrigger className="w-64">
+          <SelectTrigger className={responsiveSelectClass}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -123,6 +94,7 @@ export function AppearanceSection() {
           onCheckedChange={(checked) => {
             void save({ reduceMotion: checked })
           }}
+          aria-label={t("reduceMotionLabel")}
         />
       </div>
     </div>

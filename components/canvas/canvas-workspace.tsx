@@ -9,7 +9,6 @@
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { CanvasErrorBoundary } from "./canvas-error-boundary"
 import { CanvasPanel } from "./canvas-panel"
-import { CanvasSidePanels } from "./canvas-side-panels"
 import { CanvasEmptyState } from "./canvas-empty-state"
 
 export function CanvasWorkspace() {
@@ -18,7 +17,7 @@ export function CanvasWorkspace() {
 
   return (
     <CanvasErrorBoundary>
-      {hasDocuments ? <CanvasPanel sidePanel={<CanvasSidePanels />} /> : <CanvasEmptyState />}
+      {hasDocuments ? <CanvasPanel /> : <CanvasEmptyState />}
     </CanvasErrorBoundary>
   )
 }

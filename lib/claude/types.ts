@@ -365,6 +365,31 @@ export interface AppSettings {
    * keyring via `tauri-plugin-stronghold` or similar.
    */
   apiKey?: string
+  /**
+   * Optional Anthropic-compatible base URL. Set when the user is talking to a
+   * proxy / alternative endpoint such as Kimi, DeepSeek, Qwen, or any
+   * CCSwitch-managed provider. Forwarded to the sidecar as
+   * `ANTHROPIC_BASE_URL`; empty/unset means the SDK uses the official endpoint.
+   */
+  apiBaseUrl?: string
+  /**
+   * Identifier of the provider currently in use. `"local"` means the user
+   * pasted their own key in the API key section; `"ccswitch:<id>"` means the
+   * key/baseUrl was sourced from a CCSwitch provider record. Powers the
+   * "active" badge and drift detection in Settings → CCSwitch.
+   */
+  activeProviderId?: string
+  /**
+   * CCSwitch interop preferences. Drives the Settings → CCSwitch section.
+   * `defaultPropagation` is the pre-selected list of external agents in the
+   * "Use here & in…" provider-switch dialog; the user can still adjust per
+   * switch.
+   */
+  ccswitchSync?: {
+    enabled: boolean
+    watchDb: boolean
+    defaultPropagation: AgentId[]
+  }
   /** Last time the auto-updater check ran (ms since epoch). Daily debounce. */
   lastUpdateCheckAt?: number
   /** UI theme; "system" follows OS preference. */
@@ -375,6 +400,11 @@ export interface AppSettings {
   language?: AppLanguage
   /** Disable non-essential animations and transitions. */
   reduceMotion?: boolean
+  /**
+   * Tauri webview zoom level (1.0 = 100%). Persisted across launches and
+   * applied at boot via `<WebviewZoomBootstrap />`. Range 0.5..2.0.
+   */
+  webviewZoom?: number
   /** Forward-compat opt-in for future telemetry; never wired in v1. */
   telemetryEnabled?: boolean
   /** BCP-47 language tag for the composer's voice-input controls. */
@@ -561,10 +591,34 @@ export interface AppSettings {
 
   /** Active default AI provider id (e.g. "openai", "anthropic", "google"). */
   defaultProvider?: string
-  /** Per-provider configuration (api key / base URL / default model). */
-  providerSettings?: Record<string, import("@/lib/ai/provider-consumption").ProviderSettingsEntry>
-  /** User-defined custom AI providers (e.g. self-hosted OpenAI-compatible). */
-  customProviders?: import("@/lib/ai/provider-consumption").CustomProviderDefinition[]
+  /**
+   * Per-provider configuration. Stores the full `UserProviderSettings`
+   * shape (api key, base URL, model list, key rotation, OAuth state,
+   * health metrics) used by the providers settings UI. The lean
+   * `ProviderSettingsEntry` consumed by the plugin/embedding resolver is
+   * derived via `lib/ai/providers/provider-persistence:toProviderSettingsEntry`.
+   */
+  providerSettings?: Record<string, import("@/types/provider/provider").UserProviderSettings>
+  /**
+   * User-defined custom AI providers (self-hosted, proxies). Stored as the
+   * extended `CustomProviderSettings` so the providers UI can edit
+   * per-model metadata. The resolver-facing `CustomProviderDefinition[]`
+   * is derived via `provider-persistence:customSettingsToDefinitions`.
+   */
+  customProviders?: import("@/types/provider/provider").CustomProviderSettings[]
+  /** Per-(provider:model) usage entries powering the cost tab. */
+  providerUsageStats?: Record<string, import("@/types/provider/provider").ProviderModelUsageEntry[]>
+  /** UI preferences for the providers settings page (filter, sort, view mode). */
+  providerUIPreferences?: import("@/types/provider/provider").ProviderUIPreferences
+  /** Whether the user dismissed the first-time providers onboarding banner. */
+  providerOnboardingDismissed?: boolean
+
+  // ---- Appearance (background, wallpapers, custom CSS, VSCode imports) ----
+  background?: import("@/types/appearance").BackgroundSettings
+  wallpapers?: import("@/types/appearance").Wallpaper[]
+  customCss?: string
+  customCssEnabled?: boolean
+  importedVscodeThemes?: import("@/types/appearance").ImportedThemeRecord[]
 }
 
 export interface BackupAutoSchedule {

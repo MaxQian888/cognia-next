@@ -7,11 +7,15 @@
  * implementations so the dock has parity with Cognia's canvas surface.
  */
 
+import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
 import { Lightbulb, History as HistoryIcon, MessageSquare, Users, Play } from "lucide-react"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useCanvasLayoutStore, type CanvasRightTab } from "@/stores/canvas/canvas-layout-store"
 import { SuggestionsPanel } from "./suggestions-panel"
 import { VersionHistoryPanel } from "./version-history-panel"
 import { CommentPanel } from "./comment-panel"
@@ -19,78 +23,129 @@ import { CollaborationPanel } from "./collaboration-panel"
 import { CodeExecutionPanel } from "./code-execution-panel"
 import { useCanvasCodeExecution } from "@/hooks/canvas"
 
+export const CANVAS_SIDE_PANELS_ICON_ONLY_BREAKPOINT = 280
+
 export function CanvasSidePanels() {
   const t = useTranslations("canvas.panels")
   const activeId = useArtifactStore((s) => s.activeCanvasId)
+  const activeRightTab = useCanvasLayoutStore((s) => s.activeRightTab)
+  const setActiveRightTab = useCanvasLayoutStore((s) => s.setActiveRightTab)
+
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [iconOnly, setIconOnly] = useState(false)
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+      setIconOnly(entry.contentRect.width < CANVAS_SIDE_PANELS_ICON_ONLY_BREAKPOINT)
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
 
   if (!activeId) {
     return (
-      <div className="flex h-full items-center justify-center p-4 text-center text-xs text-muted-foreground">
+      <div
+        ref={containerRef}
+        className="flex h-full items-center justify-center p-4 text-center text-xs text-muted-foreground"
+      >
         {t("emptyHint", { default: "Open a document to see suggestions, history and comments." })}
       </div>
     )
   }
 
   return (
-    <Tabs defaultValue="suggestions" className="flex h-full flex-col">
-      <TabsList className="flex h-auto w-full justify-start gap-0 rounded-none border-b bg-muted/30 p-0">
-        <PanelTab
-          value="suggestions"
-          icon={<Lightbulb className="size-3.5" />}
-          label={t("suggestions", { default: "Suggestions" })}
-        />
-        <PanelTab
-          value="history"
-          icon={<HistoryIcon className="size-3.5" />}
-          label={t("history", { default: "History" })}
-        />
-        <PanelTab
-          value="comments"
-          icon={<MessageSquare className="size-3.5" />}
-          label={t("comments", { default: "Comments" })}
-        />
-        <PanelTab
-          value="collaboration"
-          icon={<Users className="size-3.5" />}
-          label={t("collaboration", { default: "Collab" })}
-        />
-        <PanelTab
-          value="execution"
-          icon={<Play className="size-3.5" />}
-          label={t("execution", { default: "Run" })}
-        />
-      </TabsList>
+    <div ref={containerRef} className="flex h-full min-h-0 flex-col">
+      <Tabs
+        value={activeRightTab}
+        onValueChange={(value) => setActiveRightTab(value as CanvasRightTab)}
+        className="flex h-full min-h-0 flex-col"
+      >
+        <TabsList className="flex h-auto w-full justify-start gap-0 rounded-none border-b bg-muted/30 p-0">
+          <PanelTab
+            value="suggestions"
+            icon={<Lightbulb className="size-3.5" />}
+            label={t("suggestions", { default: "Suggestions" })}
+            iconOnly={iconOnly}
+          />
+          <PanelTab
+            value="history"
+            icon={<HistoryIcon className="size-3.5" />}
+            label={t("history", { default: "History" })}
+            iconOnly={iconOnly}
+          />
+          <PanelTab
+            value="comments"
+            icon={<MessageSquare className="size-3.5" />}
+            label={t("comments", { default: "Comments" })}
+            iconOnly={iconOnly}
+          />
+          <PanelTab
+            value="collaboration"
+            icon={<Users className="size-3.5" />}
+            label={t("collaboration", { default: "Collab" })}
+            iconOnly={iconOnly}
+          />
+          <PanelTab
+            value="execution"
+            icon={<Play className="size-3.5" />}
+            label={t("execution", { default: "Run" })}
+            iconOnly={iconOnly}
+          />
+        </TabsList>
 
-      <TabsContent value="suggestions" className="m-0 flex-1 min-h-0 overflow-hidden">
-        <SuggestionsHost documentId={activeId} />
-      </TabsContent>
-      <TabsContent value="history" className="m-0 flex-1 min-h-0 overflow-hidden">
-        <HistoryHost documentId={activeId} />
-      </TabsContent>
-      <TabsContent value="comments" className="m-0 flex-1 min-h-0 overflow-hidden">
-        <CommentsHost documentId={activeId} />
-      </TabsContent>
-      <TabsContent value="collaboration" className="m-0 flex-1 min-h-0 overflow-hidden">
-        <CollaborationHost documentId={activeId} />
-      </TabsContent>
-      <TabsContent value="execution" className="m-0 flex-1 min-h-0 overflow-hidden">
-        <ExecutionHost documentId={activeId} />
-      </TabsContent>
-    </Tabs>
+        <TabsContent value="suggestions" className="m-0 flex-1 min-h-0 overflow-hidden">
+          <SuggestionsHost documentId={activeId} />
+        </TabsContent>
+        <TabsContent value="history" className="m-0 flex-1 min-h-0 overflow-hidden">
+          <HistoryHost documentId={activeId} />
+        </TabsContent>
+        <TabsContent value="comments" className="m-0 flex-1 min-h-0 overflow-hidden">
+          <CommentsHost documentId={activeId} />
+        </TabsContent>
+        <TabsContent value="collaboration" className="m-0 flex-1 min-h-0 overflow-hidden">
+          <CollaborationHost documentId={activeId} />
+        </TabsContent>
+        <TabsContent value="execution" className="m-0 flex-1 min-h-0 overflow-hidden">
+          <ExecutionHost documentId={activeId} />
+        </TabsContent>
+      </Tabs>
+    </div>
   )
 }
 
-function PanelTab({ value, icon, label }: { value: string; icon: React.ReactNode; label: string }) {
-  return (
+interface PanelTabProps {
+  value: string
+  icon: React.ReactNode
+  label: string
+  iconOnly: boolean
+}
+
+function PanelTab({ value, icon, label, iconOnly }: PanelTabProps) {
+  const trigger = (
     <TabsTrigger
       value={value}
-      className="h-9 flex-1 rounded-none border-b-2 border-transparent px-2 text-xs data-[state=active]:border-primary data-[state=active]:bg-background"
+      aria-label={label}
+      className={cn(
+        "h-9 flex-1 rounded-none border-b-2 border-transparent text-xs data-[state=active]:border-primary data-[state=active]:bg-background",
+        iconOnly ? "px-1" : "px-2"
+      )}
     >
-      <span className="flex items-center gap-1.5">
+      <span className="flex items-center justify-center gap-1.5">
         {icon}
-        <span className="truncate">{label}</span>
+        {!iconOnly && <span className="truncate">{label}</span>}
       </span>
     </TabsTrigger>
+  )
+  if (!iconOnly) return trigger
+  return (
+    <Tooltip delayDuration={300}>
+      <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
   )
 }
 

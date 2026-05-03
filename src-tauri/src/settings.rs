@@ -100,6 +100,35 @@ pub fn read_claude_effective_settings(cwd: Option<String>) -> Result<EffectiveSe
     })
 }
 
+/// Apply CCSwitch-style env updates to a parsed settings root. `Some(v)`
+/// sets / overwrites a key; `None` (and empty strings) remove it. Every
+/// other top-level field is preserved verbatim. Pure — no I/O.
+fn merge_env_updates(
+    mut root: serde_json::Map<String, Value>,
+    env_updates: HashMap<String, Option<String>>,
+) -> serde_json::Map<String, Value> {
+    let mut env_obj = match root.remove("env") {
+        Some(Value::Object(m)) => m,
+        _ => serde_json::Map::new(),
+    };
+    for (k, v) in env_updates {
+        match v {
+            Some(value) if !value.is_empty() => {
+                env_obj.insert(k, Value::String(value));
+            }
+            _ => {
+                env_obj.remove(&k);
+            }
+        }
+    }
+    if env_obj.is_empty() {
+        root.remove("env");
+    } else {
+        root.insert("env".to_string(), Value::Object(env_obj));
+    }
+    root
+}
+
 fn read_settings_at(path: &Path) -> Result<Option<ClaudeSettings>, String> {
     if !path.is_file() {
         return Ok(None);
@@ -109,6 +138,104 @@ fn read_settings_at(path: &Path) -> Result<Option<ClaudeSettings>, String> {
     let parsed: ClaudeSettings =
         serde_json::from_str(&raw).map_err(|e| format!("parse {}: {}", path.display(), e))?;
     Ok(Some(parsed))
+}
+
+/// Result of writing to a Claude settings file.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeSettingsWriteResult {
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backup_path: Option<String>,
+}
+
+/// Patch the `env` block in `~/.claude/settings.json`. Used by the
+/// CCSwitch provider-switch flow when the user opts to propagate the
+/// switch to Claude Code (so subsequent `claude` CLI invocations see the
+/// new ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL).
+///
+/// Semantics:
+///   - `env_updates[key] = Some(v)` → set / overwrite
+///   - `env_updates[key] = None`    → remove the key (e.g., clearing
+///     ANTHROPIC_BASE_URL when switching to the official endpoint)
+///
+/// Every other top-level field (model, permissions, hooks, mcpServers,
+/// unknown keys in `extra`) is preserved verbatim. The file is written
+/// atomically (temp + rename); a `.bak.<ts>` is left alongside the
+/// original.
+#[tauri::command]
+pub fn write_claude_settings_env(
+    env_updates: HashMap<String, Option<String>>,
+) -> Result<ClaudeSettingsWriteResult, String> {
+    let home = dirs::home_dir().ok_or_else(|| "no home dir".to_string())?;
+    let dir = home.join(".claude");
+    let path = dir.join("settings.json");
+
+    // The agent must already be installed — we don't auto-create the
+    // `.claude` directory because that would silently materialize a
+    // settings file for users who haven't set up Claude Code at all.
+    if !dir.exists() {
+        return Err(format!(
+            "Claude Code is not installed (missing {}). Install Claude Code first.",
+            dir.display()
+        ));
+    }
+
+    let root: serde_json::Map<String, Value> = if path.is_file() {
+        let raw = std::fs::read_to_string(&path)
+            .map_err(|e| format!("read {}: {}", path.display(), e))?;
+        if raw.trim().is_empty() {
+            serde_json::Map::new()
+        } else {
+            match serde_json::from_str::<Value>(&raw) {
+                Ok(Value::Object(m)) => m,
+                Ok(_) => {
+                    return Err(format!(
+                        "{} is not a JSON object — refusing to overwrite",
+                        path.display()
+                    ))
+                }
+                Err(e) => return Err(format!("parse {}: {}", path.display(), e)),
+            }
+        }
+    } else {
+        serde_json::Map::new()
+    };
+
+    let merged = merge_env_updates(root, env_updates);
+    let serialized =
+        serde_json::to_string_pretty(&Value::Object(merged)).map_err(|e| format!("serialize: {}", e))?;
+    let serialized = format!("{}\n", serialized);
+
+    // Atomic write with backup, mirroring `agents::io::write_file`.
+    let backup_path = if path.exists() {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let bp = path.with_extension(format!("json.bak.{}", ts));
+        std::fs::copy(&path, &bp).map_err(|e| format!("backup: {}", e))?;
+        Some(bp.to_string_lossy().into_owned())
+    } else {
+        None
+    };
+    let tmp_path = path.with_extension("json.tmp");
+    {
+        use std::io::Write as _;
+        let mut f = std::fs::File::create(&tmp_path).map_err(|e| format!("create tmp: {}", e))?;
+        f.write_all(serialized.as_bytes())
+            .map_err(|e| format!("write tmp: {}", e))?;
+        f.sync_all().ok();
+    }
+    std::fs::rename(&tmp_path, &path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp_path);
+        format!("rename into place: {}", e)
+    })?;
+
+    Ok(ClaudeSettingsWriteResult {
+        path: path.to_string_lossy().into_owned(),
+        backup_path,
+    })
 }
 
 /// Shallow per-top-level-key merge. Each key takes the highest-precedence
@@ -197,5 +324,90 @@ mod tests {
         let s: ClaudeSettings = serde_json::from_str(raw).unwrap();
         assert_eq!(s.model.as_deref(), Some("sonnet"));
         assert_eq!(s.extra.get("customThing"), Some(&json!({"x": 1})));
+    }
+
+    fn root_with(env: Value, extra: &[(&str, Value)]) -> serde_json::Map<String, Value> {
+        let mut m = serde_json::Map::new();
+        m.insert("env".to_string(), env);
+        for (k, v) in extra {
+            m.insert((*k).to_string(), v.clone());
+        }
+        m
+    }
+
+    fn updates(pairs: &[(&str, Option<&str>)]) -> HashMap<String, Option<String>> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), v.map(String::from)))
+            .collect()
+    }
+
+    #[test]
+    fn merge_env_updates_inserts_into_empty() {
+        let merged = merge_env_updates(
+            serde_json::Map::new(),
+            updates(&[("ANTHROPIC_API_KEY", Some("sk-x"))]),
+        );
+        assert_eq!(
+            merged.get("env"),
+            Some(&json!({ "ANTHROPIC_API_KEY": "sk-x" }))
+        );
+    }
+
+    #[test]
+    fn merge_env_updates_preserves_other_keys() {
+        let mut root = serde_json::Map::new();
+        root.insert("model".to_string(), json!("sonnet"));
+        root.insert("permissions".to_string(), json!({ "ask": [] }));
+        root.insert("env".to_string(), json!({ "OTHER": "stays" }));
+
+        let merged = merge_env_updates(root, updates(&[("ANTHROPIC_API_KEY", Some("sk-y"))]));
+
+        assert_eq!(merged.get("model"), Some(&json!("sonnet")));
+        assert_eq!(merged.get("permissions"), Some(&json!({ "ask": [] })));
+        let env = merged.get("env").and_then(Value::as_object).unwrap();
+        assert_eq!(env.get("OTHER"), Some(&json!("stays")));
+        assert_eq!(env.get("ANTHROPIC_API_KEY"), Some(&json!("sk-y")));
+    }
+
+    #[test]
+    fn merge_env_updates_removes_on_none() {
+        let root = root_with(
+            json!({ "ANTHROPIC_BASE_URL": "https://old", "KEEP": "yes" }),
+            &[],
+        );
+        let merged = merge_env_updates(root, updates(&[("ANTHROPIC_BASE_URL", None)]));
+        let env = merged.get("env").and_then(Value::as_object).unwrap();
+        assert!(env.get("ANTHROPIC_BASE_URL").is_none());
+        assert_eq!(env.get("KEEP"), Some(&json!("yes")));
+    }
+
+    #[test]
+    fn merge_env_updates_removes_on_empty_string() {
+        let root = root_with(json!({ "X": "v" }), &[]);
+        let merged = merge_env_updates(root, updates(&[("X", Some(""))]));
+        // Empty string treated like None — env block becomes empty and is dropped.
+        assert!(merged.get("env").is_none());
+    }
+
+    #[test]
+    fn merge_env_updates_drops_empty_env_block() {
+        let root = root_with(json!({ "X": "v" }), &[("model", json!("sonnet"))]);
+        let merged = merge_env_updates(root, updates(&[("X", None)]));
+        assert!(merged.get("env").is_none());
+        assert_eq!(merged.get("model"), Some(&json!("sonnet")));
+    }
+
+    #[test]
+    fn merge_env_updates_replaces_non_object_env() {
+        // If a previous (broken) writer left a non-object `env`, treat it as
+        // absent rather than refusing to update.
+        let mut root = serde_json::Map::new();
+        root.insert("env".to_string(), json!("garbage"));
+        let merged = merge_env_updates(root, updates(&[("ANTHROPIC_API_KEY", Some("sk-z"))]));
+        assert_eq!(
+            merged.get("env"),
+            Some(&json!({ "ANTHROPIC_API_KEY": "sk-z" }))
+        );
     }
 }

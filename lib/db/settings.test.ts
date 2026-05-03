@@ -25,6 +25,40 @@ describe("getSettings", () => {
     expect(s.searchProviders).toBeDefined()
   })
 
+  it("fills appearance defaults when missing", async () => {
+    const s = await getSettings()
+    expect(s.background).toEqual({
+      enabled: false,
+      activeId: null,
+      scope: "all",
+      blurPx: 0,
+      opacity: 1,
+      position: "cover",
+    })
+    expect(s.wallpapers).toEqual([])
+    expect(s.customCss).toBe("")
+    expect(s.customCssEnabled).toBe(false)
+    expect(s.importedVscodeThemes).toEqual([])
+  })
+
+  it("merges background defaults under a partial saved row", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      background: { enabled: true, activeId: "wp-1", scope: "chat" },
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+    const s = await getSettings()
+    // Persisted fields win.
+    expect(s.background?.enabled).toBe(true)
+    expect(s.background?.activeId).toBe("wp-1")
+    expect(s.background?.scope).toBe("chat")
+    // Missing nested fields filled from defaults.
+    expect(s.background?.blurPx).toBe(0)
+    expect(s.background?.opacity).toBe(1)
+    expect(s.background?.position).toBe("cover")
+  })
+
   it("merges defaults under a partially-populated row (forward compat)", async () => {
     // Write only the bare minimum to simulate an older install that didn't
     // know about searchProviders.

@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState, useEffect } from "react"
 import { useTranslations } from "next-intl"
 import { SearchIcon, XIcon } from "lucide-react"
 import {
@@ -43,7 +43,11 @@ export function SettingsSidebar({ activeSection, onSelect, searchQuery, onSearch
   const t = useTranslations()
   const { state, setOpenMobile } = useSidebar()
   const isCollapsed = state === "collapsed"
-  const desktopAvailable = isTauri()
+  const [desktopAvailable, setDesktopAvailable] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(() => setDesktopAvailable(isTauri()), 0)
+    return () => clearTimeout(timer)
+  }, [])
 
   const navItems = useMemo(
     () => SETTINGS_NAV.filter((item) => !item.desktopOnly || desktopAvailable),

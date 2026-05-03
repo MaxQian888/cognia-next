@@ -12,6 +12,7 @@
  * if/when the artifact store grows the matching surfaces.
  */
 
+export { CanvasShell } from "./canvas-shell"
 export { CanvasWorkspace } from "./canvas-workspace"
 export { CanvasPanel } from "./canvas-panel"
 export { CanvasDocumentRail } from "./canvas-document-rail"

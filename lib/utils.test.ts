@@ -1,4 +1,4 @@
-import { cn, formatVideoTime, formatDurationShort, isTauri } from "./utils"
+import { cn, formatVideoTime, formatDurationShort, isTauri, responsiveSelectClass } from "./utils"
 
 describe("cn", () => {
   it("merges tailwind classes and resolves conflicts", () => {
@@ -75,5 +75,15 @@ describe("isTauri re-export", () => {
     expect(typeof isTauri).toBe("function")
     // In jsdom without window.__TAURI_INTERNALS__ this is always false.
     expect(isTauri()).toBe(false)
+  })
+})
+
+describe("responsiveSelectClass", () => {
+  it("starts mobile-full and locks at 16rem on sm+", () => {
+    expect(responsiveSelectClass).toBe("w-full sm:w-64")
+  })
+  it("plays nicely with cn() — extra classes win conflicts via twMerge", () => {
+    expect(cn(responsiveSelectClass, "h-7")).toBe("w-full sm:w-64 h-7")
+    expect(cn(responsiveSelectClass, "w-32")).toBe("sm:w-64 w-32")
   })
 })

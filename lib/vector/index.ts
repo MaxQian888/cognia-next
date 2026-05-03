@@ -81,3 +81,19 @@ export {
 } from "./store"
 
 export { verifyVectorBackendReadiness } from "./readiness"
+
+/**
+ * Read the on-disk size (bytes) of the native sqlite-vec store, including
+ * its WAL/SHM siblings. Returns 0 when not running inside Tauri or when the
+ * native store failed to initialise — never throws, since the storage
+ * breakdown panel is purely informational.
+ */
+export async function getNativeVectorStoreSize(): Promise<number> {
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return 0
+  try {
+    const { invoke } = await import("@tauri-apps/api/core")
+    return await invoke<number>("vector_get_store_size", {})
+  } catch {
+    return 0
+  }
+}

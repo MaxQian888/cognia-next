@@ -1,0 +1,27 @@
+{
+  "id": "cognia-screenshot",
+  "name": "Screenshot",
+  "version": "0.1.0",
+  "description": "Capture a screen / window image and copy it to the clipboard or hand it back to the agent.",
+  "type": "frontend",
+  "capabilities": ["tools", "commands"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": ["clipboard:write", "media:image:write"],
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "partial",
+      "entrypoint": "src/index.ts",
+      "hint": "Browser builds prompt for getDisplayMedia permission; some browsers gate this behind HTTPS."
+    },
+    "desktop": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  }
+}

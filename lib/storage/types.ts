@@ -21,6 +21,7 @@ export type StorageCategory =
   | "trustedWorkspace"
   | "ttsKey"
   | "backupHistory"
+  | "vector"
   | "system"
   | "other"
 

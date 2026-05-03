@@ -110,7 +110,7 @@ export function McpBridgeTab() {
           </div>
         </CardHeader>
         <CardContent className="space-y-2">
-          <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
             <div className="rounded-md border px-3 py-2">
               <div className="text-xs text-muted-foreground">{t("status.toolsCount")}</div>
               <div className="text-base font-mono">{A2UI_BRIDGE_TOOLS.length}</div>

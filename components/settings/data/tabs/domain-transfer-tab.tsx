@@ -126,18 +126,18 @@ function DomainRow({ domain, labelKey }: { domain: DomainKey; labelKey: string }
   }
 
   return (
-    <li className="flex items-center justify-between gap-3 px-3 py-2">
+    <li className="flex flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">{t(`domain.${labelKey}.title` as never)}</p>
         <p className="truncate text-[11px] text-muted-foreground">
           {t(`domain.${labelKey}.body` as never)}
         </p>
       </div>
-      <div className="flex shrink-0 gap-1.5">
+      <div className="flex w-full shrink-0 gap-1.5 sm:w-auto">
         <Button
           variant="outline"
           size="sm"
-          className="h-8 text-xs"
+          className="h-8 flex-1 text-xs sm:flex-none"
           onClick={() => void onExport()}
           disabled={busy}
         >
@@ -147,7 +147,7 @@ function DomainRow({ domain, labelKey }: { domain: DomainKey; labelKey: string }
         <DomainImportDialog
           domain={domain}
           trigger={
-            <Button variant="outline" size="sm" className="h-8 text-xs">
+            <Button variant="outline" size="sm" className="h-8 flex-1 text-xs sm:flex-none">
               <UploadIcon className="mr-1 size-3.5" />
               {t("domain.importRow")}
             </Button>

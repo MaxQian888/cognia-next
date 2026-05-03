@@ -1,11 +1,11 @@
 "use client"
 
-// Tabbed shell for the A2UI settings section. Mirrors `data/data-section.tsx`
-// — useSyncExternalStore + a scoped `?a2uiTab=` URL param so deep-links land
-// on the right pane.
+// Tabbed shell for the A2UI settings section. The active tab is reflected
+// in the URL via a scoped `?a2uiTab=` param so deep-links land on the right
+// pane.
 
-import { useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
+import { useRouter, useSearchParams } from "next/navigation"
 import { BlocksIcon } from "lucide-react"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -25,33 +25,18 @@ function isA2UITab(value: string | null): value is A2UITabId {
   return !!value && (TAB_IDS as string[]).includes(value)
 }
 
-const noopSubscribe = () => () => {}
-
-function readTabFromUrl(): A2UITabId {
-  if (typeof window === "undefined") return "overview"
-  const params = new URLSearchParams(window.location.search)
-  const requested = params.get(A2UI_TAB_PARAM)
-  return isA2UITab(requested) ? requested : "overview"
-}
-
 export function A2UISection() {
   const t = useTranslations("settings.a2ui")
-  const initialTab = useSyncExternalStore(
-    noopSubscribe,
-    readTabFromUrl,
-    () => "overview" as A2UITabId
-  )
-  const [userTab, setUserTab] = useState<A2UITabId | null>(null)
-  const activeTab = userTab ?? initialTab
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const requested = searchParams.get(A2UI_TAB_PARAM)
+  const activeTab: A2UITabId = isA2UITab(requested) ? requested : "overview"
 
   const onTabChange = (value: string) => {
     if (!isA2UITab(value)) return
-    setUserTab(value)
-    if (typeof window !== "undefined") {
-      const url = new URL(window.location.href)
-      url.searchParams.set(A2UI_TAB_PARAM, value)
-      window.history.replaceState({}, "", url.toString())
-    }
+    const next = new URLSearchParams(searchParams.toString())
+    next.set(A2UI_TAB_PARAM, value)
+    router.replace(`?${next.toString()}`, { scroll: false })
   }
 
   return (

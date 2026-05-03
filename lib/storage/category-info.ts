@@ -78,6 +78,13 @@ export const CATEGORY_INFO: Record<StorageCategory, CategoryDescriptor> = {
     defaultName: "Backup history",
     tables: ["backupHistory"],
   },
+  vector: {
+    i18nKey: "vector",
+    defaultName: "Vector store",
+    // Backed by the native sqlite-vec file at <app_data>/cognia/vectors.sqlite,
+    // not by a Dexie table. Populated by storage-manager via Tauri only.
+    tables: [],
+  },
   system: {
     i18nKey: "system",
     defaultName: "System",

@@ -1,0 +1,233 @@
+"use client"
+
+// Rich card replacing the table row in the InstalledTab. Surfaces version,
+// capability chips, permission count, status, signature status, and an
+// action menu (open / configure / enable-disable / uninstall). Mirrors the
+// shape of `components/skills/skill-card.tsx` so future shared treatments
+// (drag/drop, multi-select) port cleanly.
+
+import { useTranslations } from "next-intl"
+import {
+  MoreHorizontalIcon,
+  PowerIcon,
+  Trash2Icon,
+  SettingsIcon,
+  ShieldCheckIcon,
+  AlertTriangleIcon,
+  CircleAlertIcon,
+  RotateCcwIcon,
+} from "lucide-react"
+import type { PluginRow } from "@/lib/db/plugin-types"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { cn } from "@/lib/utils"
+import { PluginSignatureBadge, type SignatureState } from "./plugin-signature-badge"
+
+interface Props {
+  plugin: PluginRow
+  selected: boolean
+  onToggleSelect: (id: string) => void
+  onOpen: (id: string) => void
+  onConfigure: (id: string) => void
+  onToggleEnabled: (plugin: PluginRow) => void
+  onUninstall: (plugin: PluginRow) => void
+  onReviewPermissions: (id: string) => void
+  onRollback?: (id: string) => void
+}
+
+export function PluginCard({
+  plugin,
+  selected,
+  onToggleSelect,
+  onOpen,
+  onConfigure,
+  onToggleEnabled,
+  onUninstall,
+  onReviewPermissions,
+  onRollback,
+}: Props) {
+  const t = useTranslations("plugins.card")
+  const status = plugin.status
+  const errored = status === "error"
+  const isLoading = status === "loading" || status === "enabling" || status === "updating"
+  const permissionCount = (plugin.manifest as { permissions?: string[] })?.permissions?.length ?? 0
+  const dangerousPermissions = (
+    (plugin.manifest as { permissions?: string[] })?.permissions ?? []
+  ).filter(
+    (p) =>
+      p === "shell:execute" ||
+      p === "process:spawn" ||
+      p === "python:execute" ||
+      p === "filesystem:write"
+  )
+  const signatureState: SignatureState = (() => {
+    const sig = (plugin.manifest as { signature?: { verified?: boolean; failed?: boolean } })
+      ?.signature
+    if (sig?.verified) return "verified"
+    if (sig?.failed) return "failed"
+    return "unverified"
+  })()
+  const updateAvailable = !!(plugin.manifest as { updateAvailable?: boolean })?.updateAvailable
+
+  return (
+    <Card
+      className={cn(
+        // `h-full` keeps every card in the responsive grid the same height,
+        // so action menus and metadata footers line up at the bottom even
+        // when descriptions vary in length.
+        "group relative flex h-full flex-col gap-2 p-3 transition-colors hover:border-primary/40",
+        selected && "border-primary",
+        !plugin.enabled && "opacity-70",
+        errored && "border-destructive/50"
+      )}
+      data-plugin-id={plugin.id}
+    >
+      <div className="flex items-start gap-2">
+        <Checkbox
+          checked={selected}
+          onCheckedChange={() => onToggleSelect(plugin.id)}
+          className="mt-0.5"
+          aria-label={`Select ${plugin.name}`}
+        />
+        <button
+          type="button"
+          className="flex-1 min-w-0 text-left"
+          onClick={() => onOpen(plugin.id)}
+        >
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="font-medium truncate">{plugin.name}</span>
+            <span className="text-xs text-muted-foreground shrink-0">v{plugin.version}</span>
+            {updateAvailable && (
+              <Badge variant="secondary" className="text-xs shrink-0">
+                {t("updateBadge")}
+              </Badge>
+            )}
+          </div>
+          <div className="text-xs text-muted-foreground truncate mt-0.5">{plugin.id}</div>
+        </button>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="size-7 shrink-0">
+              <MoreHorizontalIcon className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => onOpen(plugin.id)}>
+              {t("openDetails")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onConfigure(plugin.id)}>
+              <SettingsIcon className="mr-2 size-3.5" />
+              {t("configure")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onReviewPermissions(plugin.id)}>
+              <ShieldCheckIcon className="mr-2 size-3.5" />
+              {t("reviewPermissions")}
+            </DropdownMenuItem>
+            {onRollback && (
+              <DropdownMenuItem onClick={() => onRollback(plugin.id)}>
+                <RotateCcwIcon className="mr-2 size-3.5" />
+                {t("rollback")}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => onToggleEnabled(plugin)}>
+              <PowerIcon className="mr-2 size-3.5" />
+              {plugin.enabled ? t("disable") : t("enable")}
+            </DropdownMenuItem>
+            <DropdownMenuItem variant="destructive" onClick={() => onUninstall(plugin)}>
+              <Trash2Icon className="mr-2 size-3.5" />
+              {t("uninstall")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1">
+        {plugin.capabilities.slice(0, 4).map((cap) => (
+          <Badge key={cap} variant="outline" className="text-xs">
+            {cap}
+          </Badge>
+        ))}
+        {plugin.capabilities.length > 4 && (
+          <Badge variant="outline" className="text-xs">
+            +{plugin.capabilities.length - 4}
+          </Badge>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="text-xs">
+            {plugin.source}
+          </Badge>
+          <PluginSignatureBadge state={signatureState} compact />
+          {permissionCount > 0 && (
+            <span className="flex items-center gap-1">
+              <ShieldCheckIcon className="size-3" />
+              {t("permissionCount", { count: permissionCount })}
+              {dangerousPermissions.length > 0 && (
+                <AlertTriangleIcon className="size-3 text-destructive" />
+              )}
+            </span>
+          )}
+        </div>
+        <StatusPill status={status} enabled={plugin.enabled} loading={isLoading} />
+      </div>
+
+      {errored && plugin.error && (
+        <div className="flex items-start gap-1 text-xs text-destructive">
+          <CircleAlertIcon className="size-3 mt-0.5 shrink-0" />
+          <span className="line-clamp-2">{plugin.error}</span>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function StatusPill({
+  status,
+  enabled,
+  loading,
+}: {
+  status: string
+  enabled: boolean
+  loading: boolean
+}) {
+  const t = useTranslations("plugins.card.status")
+  if (status === "error") {
+    return (
+      <Badge variant="destructive" className="text-xs">
+        {t("error")}
+      </Badge>
+    )
+  }
+  if (loading) {
+    return (
+      <Badge variant="outline" className="text-xs">
+        {t("loading")}
+      </Badge>
+    )
+  }
+  if (!enabled) {
+    return (
+      <Badge variant="outline" className="text-xs">
+        {t("disabled")}
+      </Badge>
+    )
+  }
+  return (
+    <Badge variant="secondary" className="text-xs">
+      {t("enabled")}
+    </Badge>
+  )
+}

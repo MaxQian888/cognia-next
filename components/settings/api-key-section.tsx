@@ -5,11 +5,13 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { useSettingsStore } from "@/stores/settings"
-import { EyeIcon, EyeOffIcon, KeyRoundIcon } from "lucide-react"
+import { ArrowLeftRightIcon, EyeIcon, EyeOffIcon, KeyRoundIcon } from "lucide-react"
 import { useEffect, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import { createLogger } from "@/lib/logger"
+import { isTauri } from "@/lib/tauri"
 
 const log = createLogger("settings.apiKey")
 
@@ -18,9 +20,18 @@ export function ApiKeySection() {
   const settings = useSettingsStore((s) => s.settings)
   const setApiKey = useSettingsStore((s) => s.setApiKey)
 
+  const setProviderConfig = useSettingsStore((s) => s.setProviderConfig)
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [draft, setDraft] = useState(settings?.apiKey ?? "")
   const [show, setShow] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  const goToCcswitch = () => {
+    const next = new URLSearchParams(searchParams.toString())
+    next.set("section", "ccswitch")
+    router.replace(`/settings?${next.toString()}`, { scroll: false })
+  }
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -30,7 +41,13 @@ export function ApiKeySection() {
   const handleSave = async () => {
     setSaving(true)
     try {
+      // Phase C.5: write through to BOTH the legacy `AppSettings.apiKey`
+      // (for the existing chat path) AND the new providers map slot for
+      // Anthropic (so the providers settings page reflects this key).
+      // This keeps the two surfaces in lock-step until the legacy field
+      // is retired.
       await setApiKey(draft)
+      await setProviderConfig("anthropic", { apiKey: draft || undefined })
       log.info("api_key_saved", { keySet: Boolean(draft) })
       toast.success(draft ? t("savedAndRestarted") : t("cleared"))
     } catch (err) {
@@ -46,6 +63,7 @@ export function ApiKeySection() {
     setSaving(true)
     try {
       await setApiKey(null)
+      await setProviderConfig("anthropic", { apiKey: undefined })
       log.info("api_key_cleared")
       toast.success(t("cleared"))
     } catch (err) {
@@ -106,6 +124,19 @@ export function ApiKeySection() {
         <AlertTitle className="text-sm">{t("privacyTitle")}</AlertTitle>
         <AlertDescription className="text-xs">{t("privacyBody")}</AlertDescription>
       </Alert>
+
+      {isTauri() && (
+        <Alert variant="default" className="border-dashed">
+          <ArrowLeftRightIcon className="size-4" />
+          <AlertTitle className="text-sm">{t("ccswitchHintTitle")}</AlertTitle>
+          <AlertDescription className="text-xs flex items-center justify-between gap-2">
+            <span className="flex-1 min-w-0">{t("ccswitchHintBody")}</span>
+            <Button variant="outline" size="sm" onClick={goToCcswitch} className="shrink-0">
+              {t("ccswitchHintAction")}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
     </div>
   )
 }

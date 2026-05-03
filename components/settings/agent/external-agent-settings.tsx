@@ -65,6 +65,12 @@ import {
   getExternalAgentEcosystemReadiness,
   getExternalAgentExecutionBlockReason,
 } from "@/lib/ai/agent/external/config-normalizer"
+import {
+  getAvailablePresets,
+  getPresetConfig,
+  getPresetDisplayInfo,
+  isFromPreset,
+} from "@/lib/ai/agent/external/presets"
 import type {
   ExternalAgentConnectionStatus,
   CreateExternalAgentInput,
@@ -149,15 +155,50 @@ interface AgentEditorDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   editingAgentId?: string | null
+  /**
+   * Optional preset id to seed the dialog with when opened from the
+   * quick-start gallery. Empty string means "manual configuration".
+   */
+  initialPreset?: string
   onSave: (data: CreateExternalAgentInput) => void
 }
 
-function AgentEditorDialog({ open, onOpenChange, editingAgentId, onSave }: AgentEditorDialogProps) {
+function AgentEditorDialog({
+  open,
+  onOpenChange,
+  editingAgentId,
+  initialPreset,
+  onSave,
+}: AgentEditorDialogProps) {
   const t = useTranslations("externalAgent.settings")
   const tCommon = useTranslations("common")
   const { getAgent } = useExternalAgentStore()
 
+  // Quick-start preset selector — mirrors the chat-side AddAgentDialog pattern
+  // in `components/agent/external-agent-manager.tsx`. Picking a preset fills
+  // the form fields and stamps `metadata.preset` on save so `isFromPreset()`
+  // can later badge the row.
+  const [selectedPreset, setSelectedPreset] = useState<string>(initialPreset ?? "")
+
   const [formData, setFormData] = useState<AgentFormData>(() => {
+    // Quick-start gallery: open with the preset's defaults so the user only
+    // has to tweak env vars / cwd before saving.
+    if (!editingAgentId && initialPreset && initialPreset !== "custom") {
+      const preset = getPresetConfig(initialPreset)
+      if (preset) {
+        return {
+          ...DEFAULT_FORM_DATA,
+          name: preset.name,
+          protocol: preset.protocol,
+          transport: preset.transport,
+          processCommand: preset.process?.command ?? "",
+          processArgs: preset.process?.args.join(" ") ?? "",
+          networkEndpoint: preset.network?.endpoint ?? "",
+          defaultPermissionMode: preset.defaultPermissionMode,
+          description: preset.description,
+        }
+      }
+    }
     if (!editingAgentId) {
       return DEFAULT_FORM_DATA
     }
@@ -252,10 +293,47 @@ function AgentEditorDialog({ open, onOpenChange, editingAgentId, onSave }: Agent
       }
     }
 
+    if (selectedPreset && selectedPreset !== "custom") {
+      const preset = getPresetConfig(selectedPreset)
+      input.metadata = {
+        preset: selectedPreset,
+        ecosystemAdapterId: preset?.adapterId,
+        ecosystemSurfaceId: preset?.surfaceId,
+        ecosystemSupportTier: preset?.supportTier,
+        ecosystemDocsUrl: preset?.docsUrl,
+      }
+    }
+
     onSave(input)
     onOpenChange(false)
     setFormData(DEFAULT_FORM_DATA)
-  }, [formData, onSave, onOpenChange, t])
+    setSelectedPreset("")
+  }, [formData, selectedPreset, onSave, onOpenChange, t])
+
+  // Preset picker — keep tightly aligned with the chat-side AddAgentDialog
+  // pattern. When a real preset is chosen, prefill the form fields so the user
+  // only edits the truly variable bits (cwd, env keys). Choosing "" or
+  // "custom" leaves the form alone.
+  const handlePresetChange = useCallback(
+    (presetId: string) => {
+      setSelectedPreset(presetId)
+      if (!presetId || presetId === "custom") return
+      const preset = getPresetConfig(presetId)
+      if (!preset) return
+      setFormData((current) => ({
+        ...current,
+        name: preset.name,
+        protocol: preset.protocol,
+        transport: preset.transport,
+        processCommand: preset.process?.command || current.processCommand,
+        processArgs: preset.process?.args.join(" ") || current.processArgs,
+        networkEndpoint: preset.network?.endpoint || current.networkEndpoint,
+        defaultPermissionMode: preset.defaultPermissionMode,
+        description: preset.description,
+      }))
+    },
+    [setFormData]
+  )
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -266,6 +344,38 @@ function AgentEditorDialog({ open, onOpenChange, editingAgentId, onSave }: Agent
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
+          {/* Quick start preset — only shown when creating, not when editing,
+              to avoid silently overwriting hand-tuned fields. */}
+          {!editingAgentId && (
+            <div className="grid gap-2" data-testid="preset-picker">
+              <Label>{t("quickStartPreset")}</Label>
+              <Select value={selectedPreset || "custom"} onValueChange={handlePresetChange}>
+                <SelectTrigger>
+                  <SelectValue placeholder={t("selectPresetOrCustom")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {getAvailablePresets().map((presetId) => {
+                    const preset = getPresetConfig(presetId)
+                    if (!preset) return null
+                    return (
+                      <SelectItem key={presetId} value={presetId}>
+                        <div className="flex items-center gap-2">
+                          <span>{preset.name}</span>
+                          {preset.tags.length > 0 && (
+                            <span className="text-xs text-muted-foreground">
+                              ({preset.tags.slice(0, 3).join(", ")})
+                            </span>
+                          )}
+                        </div>
+                      </SelectItem>
+                    )
+                  })}
+                  <SelectItem value="custom">{t("customConfiguration")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           {/* Name */}
           <div className="grid gap-2">
             <Label htmlFor="name">{t("agentName")}</Label>
@@ -431,7 +541,7 @@ function AgentEditorDialog({ open, onOpenChange, editingAgentId, onSave }: Agent
               placeholder={DEFAULT_TIMEOUT_MS}
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="retryMaxRetries">{t("maxRetries")}</Label>
               <Input
@@ -457,7 +567,7 @@ function AgentEditorDialog({ open, onOpenChange, editingAgentId, onSave }: Agent
               />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="retryMaxDelayMs">{t("maxRetryDelayMs")}</Label>
               <Input
@@ -512,6 +622,102 @@ function AgentEditorDialog({ open, onOpenChange, editingAgentId, onSave }: Agent
 }
 
 // =============================================================================
+// Preset Gallery Card
+// =============================================================================
+
+interface PresetGalleryCardProps {
+  disabled: boolean
+  onPick: (presetId: string) => void
+}
+
+function PresetGalleryCard({ disabled, onPick }: PresetGalleryCardProps) {
+  const t = useTranslations("externalAgent.settings")
+  const [showExperimental, setShowExperimental] = useState(false)
+
+  const presets = getAvailablePresets()
+    .map((id) => ({ id, config: getPresetConfig(id) }))
+    .filter(
+      (entry): entry is { id: string; config: NonNullable<ReturnType<typeof getPresetConfig>> } =>
+        entry.config !== null
+    )
+    .filter(({ config }) => showExperimental || config.supportTier !== "documented-only")
+
+  return (
+    <Card data-testid="preset-gallery-card">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle>{t("quickStartTitle")}</CardTitle>
+            <CardDescription>{t("quickStartDescription")}</CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="show-experimental-presets" className="text-xs">
+              {t("showExperimental")}
+            </Label>
+            <Switch
+              id="show-experimental-presets"
+              checked={showExperimental}
+              onCheckedChange={setShowExperimental}
+              disabled={disabled}
+            />
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {presets.length === 0 ? (
+          <p className="text-xs text-muted-foreground">{t("presetGalleryEmpty")}</p>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {presets.map(({ id, config }) => (
+              <Card key={id} data-testid={`preset-card-${id}`} className="space-y-2 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-1">
+                  <p className="text-sm font-medium">{config.name}</p>
+                  {config.supportTier && (
+                    <Badge
+                      variant={
+                        config.supportTier === "documented-only"
+                          ? "destructive"
+                          : config.supportTier === "guided"
+                            ? "secondary"
+                            : "outline"
+                      }
+                      className="text-[10px]"
+                    >
+                      {config.supportTier}
+                    </Badge>
+                  )}
+                </div>
+                <p className="line-clamp-3 text-xs text-muted-foreground">{config.description}</p>
+                {config.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {config.tags.slice(0, 3).map((tag) => (
+                      <Badge key={tag} variant="outline" className="text-[10px]">
+                        {tag}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                <div className="flex justify-end">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onPick(id)}
+                    disabled={disabled}
+                    data-testid={`preset-pick-${id}`}
+                  >
+                    {t("useThisPreset")}
+                  </Button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// =============================================================================
 // Main Settings Component
 // =============================================================================
 
@@ -557,6 +763,10 @@ export function ExternalAgentSettings() {
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set())
+  // Preset id seeded into the AgentEditorDialog when opening from the
+  // quick-start gallery. Empty when the user opens the manual "Add agent"
+  // button.
+  const [selectedPresetForNew, setSelectedPresetForNew] = useState<string>("")
 
   // Get agents
   const agents = getAllAgents()
@@ -709,7 +919,7 @@ export function ExternalAgentSettings() {
               }
               disabled={!enabled}
             >
-              <SelectTrigger className="w-[180px]">
+              <SelectTrigger className="w-full sm:w-[180px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -734,7 +944,7 @@ export function ExternalAgentSettings() {
               onValueChange={(value) => setChatFailurePolicy(value as "fallback" | "strict")}
               disabled={!enabled}
             >
-              <SelectTrigger className="w-[220px]">
+              <SelectTrigger className="w-full sm:w-[220px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -746,6 +956,19 @@ export function ExternalAgentSettings() {
         </CardContent>
       </Card>
 
+      {/* Quick-start preset gallery — surfaces the four shipping presets +
+          any plugin-contributed presets. Picking a card opens the editor with
+          the form pre-filled, so the user only edits the truly variable bits
+          (env, cwd, custom args). */}
+      <PresetGalleryCard
+        disabled={!enabled}
+        onPick={(presetId) => {
+          setSelectedPresetForNew(presetId)
+          setEditingAgentId(null)
+          setEditorOpen(true)
+        }}
+      />
+
       {/* Agent List */}
       <Card>
         <CardHeader>
@@ -756,6 +979,7 @@ export function ExternalAgentSettings() {
             </div>
             <Button
               onClick={() => {
+                setSelectedPresetForNew("")
                 setEditingAgentId(null)
                 setEditorOpen(true)
               }}
@@ -778,7 +1002,7 @@ export function ExternalAgentSettings() {
               </EmptyHeader>
             </Empty>
           ) : (
-            <ScrollArea className="max-h-[400px]">
+            <ScrollArea className="max-h-[min(400px,60vh)]">
               <div className="space-y-3">
                 {agents.map((agent) => {
                   const status = getConnectionStatus(agent.id)
@@ -801,18 +1025,23 @@ export function ExternalAgentSettings() {
                         ? "secondary"
                         : "outline"
 
+                  const fromPresetId = isFromPreset(agent)
+                  const fromPresetName = fromPresetId
+                    ? getPresetDisplayInfo(fromPresetId)?.name
+                    : null
+
                   return (
                     <Collapsible
                       key={agent.id}
                       open={isExpanded}
                       onOpenChange={() => toggleExpanded(agent.id)}
                     >
-                      <div className="border rounded-lg p-4">
+                      <div className="border rounded-lg p-4" data-testid={`agent-row-${agent.id}`}>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
                             <ConnectionStatusIcon status={status} />
                             <div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
                                 <span className="font-medium">{agent.name}</span>
                                 <Badge variant="outline" className="text-xs">
                                   {agent.protocol.toUpperCase()}
@@ -823,6 +1052,15 @@ export function ExternalAgentSettings() {
                                 {supportTier && (
                                   <Badge variant={supportTierVariant} className="text-xs">
                                     {supportTier}
+                                  </Badge>
+                                )}
+                                {fromPresetName && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-xs"
+                                    data-testid={`agent-from-preset-${agent.id}`}
+                                  >
+                                    {t("fromPreset", { name: fromPresetName })}
                                   </Badge>
                                 )}
                               </div>
@@ -880,7 +1118,7 @@ export function ExternalAgentSettings() {
 
                         <CollapsibleContent className="mt-4 pt-4 border-t space-y-4">
                           {/* Agent Details */}
-                          <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
                             <div>
                               <span className="text-muted-foreground">{t("transport")}:</span>
                               <span className="ml-2">{agent.transport}</span>
@@ -1019,10 +1257,14 @@ export function ExternalAgentSettings() {
 
       {/* Agent Editor Dialog */}
       <AgentEditorDialog
-        key={`agent-editor-${editingAgentId ?? "new"}-${editorOpen ? "open" : "closed"}`}
+        key={`agent-editor-${editingAgentId ?? "new"}-${selectedPresetForNew || "manual"}-${editorOpen ? "open" : "closed"}`}
         open={editorOpen}
-        onOpenChange={setEditorOpen}
+        onOpenChange={(next) => {
+          setEditorOpen(next)
+          if (!next) setSelectedPresetForNew("")
+        }}
         editingAgentId={editingAgentId}
+        initialPreset={editingAgentId ? "" : selectedPresetForNew}
         onSave={editingAgentId ? handleUpdateAgent : handleAddAgent}
       />
 

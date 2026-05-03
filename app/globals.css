@@ -120,6 +120,29 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /* No global scrollbar inside the desktop shell. The DiscordShell sets
+     `data-app-shell` on <body> while it's mounted; the docs site and any
+     standalone routes opt out by simply not setting the attribute. */
+  html,
+  body {
+    height: 100%;
+  }
+  body[data-app-shell="true"] {
+    overflow: hidden;
+  }
+
+  /* Window-blur dim. WindowFocusTracker writes data-window-focused on the
+     <html> root; everything tagged [data-app-chrome] (title bar / status bar /
+     resize handles) recedes when the user clicks away. */
+  html[data-window-focused="false"] [data-app-chrome] {
+    opacity: 0.7;
+    transition: opacity 120ms ease-out;
+  }
+  html[data-window-focused="true"] [data-app-chrome] {
+    opacity: 1;
+    transition: opacity 120ms ease-out;
+  }
 }
 
 /* Honor the user's reduce-motion preference. SettingsSyncProvider toggles
@@ -132,4 +155,82 @@ html[data-reduce-motion="true"] *::after {
   animation-iteration-count: 1 !important;
   transition-duration: 1ms !important;
   scroll-behavior: auto !important;
+}
+
+/* -------------------------------------------------------------------------
+   Appearance: wallpaper layer.
+
+   `<BackgroundApplier />` writes `body[data-bg-enabled="true"]` plus the
+   `--app-bg-*` custom properties. We render the active wallpaper as a
+   fixed-positioned `::before` pseudo-element that sits behind every
+   subtree. Using a pseudo (rather than a real `body { background:... }`)
+   keeps the page bg color intact, lets us animate `opacity` / `filter`
+   independently of children, and means a half-applied state never
+   blanks the UI.
+
+   Scope-narrowed wallpapers (chat / canvas / sidebar) re-emit the same
+   layer inside the named subtree's container. Each scope-bearing
+   container opts in via `[data-bg-target]` so the rule is local — see
+   the `BackgroundLayer` styles below.
+------------------------------------------------------------------------- */
+:root {
+  --app-bg-image: none;
+  --app-bg-blur: 0px;
+  --app-bg-opacity: 1;
+  --app-bg-position: center;
+  --app-bg-size: cover;
+  --app-bg-repeat: no-repeat;
+}
+
+body[data-bg-enabled="true"]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: var(--app-bg-image);
+  background-position: var(--app-bg-position);
+  background-size: var(--app-bg-size);
+  background-repeat: var(--app-bg-repeat);
+  filter: blur(var(--app-bg-blur));
+  opacity: var(--app-bg-opacity);
+  transition:
+    opacity 200ms linear,
+    filter 200ms linear;
+}
+
+/* Scope narrowing: when the user picks a scope other than "all", scoped
+   regions (chat panel / canvas / sidebar) absorb the layer instead of the
+   body. The matching subtree opts in with `data-bg-target` so unrelated
+   panels stay clean. */
+body[data-bg-enabled="true"][data-bg-scope="chat"]::before,
+body[data-bg-enabled="true"][data-bg-scope="canvas"]::before,
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]::before {
+  display: none;
+}
+
+[data-bg-target] {
+  position: relative;
+  isolation: isolate;
+}
+[data-bg-target]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  display: none;
+}
+body[data-bg-enabled="true"][data-bg-scope="chat"] [data-bg-target="chat"]::before,
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"]::before,
+body[data-bg-enabled="true"][data-bg-scope="sidebar"] [data-bg-target="sidebar"]::before,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target]::before,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target]::before {
+  display: block;
+  background-image: var(--app-bg-image);
+  background-position: var(--app-bg-position);
+  background-size: var(--app-bg-size);
+  background-repeat: var(--app-bg-repeat);
+  filter: blur(var(--app-bg-blur));
+  opacity: var(--app-bg-opacity);
 }

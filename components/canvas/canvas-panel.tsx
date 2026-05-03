@@ -16,9 +16,20 @@ import dynamic from "next/dynamic"
 import type { editor as MonacoEditor } from "monaco-editor"
 import { useTheme } from "next-themes"
 import { useTranslations } from "next-intl"
-import { Loader2, Save, Wand2, Bug, Sparkles, HelpCircle, Languages } from "lucide-react"
+import {
+  Loader2,
+  Save,
+  Wand2,
+  Bug,
+  Sparkles,
+  HelpCircle,
+  Languages,
+  MoreHorizontal,
+  Minimize2,
+  Maximize2,
+  Lightbulb,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
@@ -50,8 +61,6 @@ const MonacoEditorView = dynamic(() => import("@monaco-editor/react").then((mod)
 
 interface CanvasPanelProps {
   className?: string
-  /** Optional: the side panel content rendered to the right of the editor. */
-  sidePanel?: React.ReactNode
 }
 
 function EditorLoading() {
@@ -64,9 +73,13 @@ function EditorLoading() {
   )
 }
 
-export function CanvasPanel({ className, sidePanel }: CanvasPanelProps) {
+export function CanvasPanel({ className }: CanvasPanelProps) {
   const t = useTranslations("canvas")
-  const documents = useArtifactStore((s) => Object.values(s.canvasDocuments) as CanvasDocument[])
+  const canvasDocuments = useArtifactStore((s) => s.canvasDocuments)
+  const documents = useMemo(
+    () => Object.values(canvasDocuments) as CanvasDocument[],
+    [canvasDocuments]
+  )
   const activeId = useArtifactStore((s) => s.activeCanvasId)
   const setActive = useArtifactStore((s) => s.setActiveCanvas)
   const updateDoc = useArtifactStore((s) => s.updateCanvasDocument)
@@ -248,93 +261,82 @@ export function CanvasPanel({ className, sidePanel }: CanvasPanelProps) {
   }, [create, setActive, t])
 
   return (
-    <div className={cn("flex h-full min-h-0 flex-1 overflow-hidden", className)}>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <CanvasDocumentTabs
-          documents={documents}
-          activeDocumentId={activeId}
-          onSelectDocument={setActive}
-          onCloseDocument={(id) => {
-            if (activeId === id) {
-              const next = documents.find((d) => d.id !== id)
-              setActive(next?.id ?? null)
-            }
-          }}
-          onCreateDocument={onCreate}
-          onRenameDocument={(id, title) => updateDoc(id, { title, updatedAt: new Date() })}
-          onDuplicateDocument={(id) => {
-            const src = documents.find((d) => d.id === id)
-            if (!src) return
-            const dupId = create({
-              title: `${src.title} ${t("copySuffix")}`,
-              content: src.content,
-              language: src.language,
-              type: src.type,
-            })
-            setActive(dupId)
-          }}
-          onDeleteDocument={(id) => {
-            remove(id)
-            if (activeId === id) setActive(null)
-          }}
-        />
+    <div className={cn("flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden", className)}>
+      <CanvasDocumentTabs
+        documents={documents}
+        activeDocumentId={activeId}
+        onSelectDocument={setActive}
+        onCloseDocument={(id) => {
+          if (activeId === id) {
+            const next = documents.find((d) => d.id !== id)
+            setActive(next?.id ?? null)
+          }
+        }}
+        onCreateDocument={onCreate}
+        onRenameDocument={(id, title) => updateDoc(id, { title, updatedAt: new Date() })}
+        onDuplicateDocument={(id) => {
+          const src = documents.find((d) => d.id === id)
+          if (!src) return
+          const dupId = create({
+            title: `${src.title} ${t("copySuffix")}`,
+            content: src.content,
+            language: src.language,
+            type: src.type,
+          })
+          setActive(dupId)
+        }}
+        onDeleteDocument={(id) => {
+          remove(id)
+          if (activeId === id) setActive(null)
+        }}
+      />
 
-        <ActionToolbar
-          activeDocLanguage={activeDoc?.language ?? "markdown"}
-          isText={activeDoc?.type === "text"}
-          onAction={runAction}
-          onTriggerSuggestions={triggerSuggestions}
-          running={actions.running}
-          onSaveVersion={() => activeDoc && saveVersion(activeDoc.id, "manual")}
-          onFormat={handleFormat}
-        />
+      <ActionToolbar
+        activeDocLanguage={activeDoc?.language ?? "markdown"}
+        isText={activeDoc?.type === "text"}
+        onAction={runAction}
+        onTriggerSuggestions={triggerSuggestions}
+        running={actions.running}
+        onSaveVersion={() => activeDoc && saveVersion(activeDoc.id, "manual")}
+        onFormat={handleFormat}
+      />
 
-        <div className="relative min-h-0 flex-1">
-          {activeDoc ? (
-            <Suspense fallback={<EditorLoading />}>
-              <MonacoEditorView
-                key={activeDoc.id}
-                language={activeDoc.language}
-                value={activeDoc.content}
-                onChange={handleEditorChange}
-                onMount={(editor, monaco) => {
-                  editorRef.current = editor
-                  monacoSetup.onMount(editor, monaco)
-                }}
-                options={
-                  monacoSetup.editorOptions as MonacoEditor.IStandaloneEditorConstructionOptions
-                }
-                theme={resolvedMonacoTheme}
-              />
-            </Suspense>
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              {t("empty.subtitle", { default: "Select or create a document to start." })}
-            </div>
-          )}
-          {(actions.running || suggestions.running) && (
-            <div className="pointer-events-none absolute right-3 top-2 flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs shadow">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              {actions.running
-                ? t("running", { default: "AI working…" })
-                : t("suggesting", { default: "Suggesting…" })}
-            </div>
-          )}
-        </div>
-        {actions.error && (
-          <div className="border-t bg-destructive/5 p-2 text-xs text-destructive">
-            {actions.error}
+      <div className="relative min-h-0 flex-1">
+        {activeDoc ? (
+          <Suspense fallback={<EditorLoading />}>
+            <MonacoEditorView
+              key={activeDoc.id}
+              language={activeDoc.language}
+              value={activeDoc.content}
+              onChange={handleEditorChange}
+              onMount={(editor, monaco) => {
+                editorRef.current = editor
+                monacoSetup.onMount(editor, monaco)
+              }}
+              options={
+                monacoSetup.editorOptions as MonacoEditor.IStandaloneEditorConstructionOptions
+              }
+              theme={resolvedMonacoTheme}
+            />
+          </Suspense>
+        ) : (
+          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+            {t("empty.subtitle", { default: "Select or create a document to start." })}
+          </div>
+        )}
+        {(actions.running || suggestions.running) && (
+          <div className="pointer-events-none absolute right-3 top-2 flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs shadow">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            {actions.running
+              ? t("running", { default: "AI working…" })
+              : t("suggesting", { default: "Suggesting…" })}
           </div>
         )}
       </div>
-
-      {sidePanel && (
-        <>
-          <Separator orientation="vertical" />
-          <aside className="w-[300px] shrink-0 overflow-hidden">
-            <ScrollArea className="h-full">{sidePanel}</ScrollArea>
-          </aside>
-        </>
+      {actions.error && (
+        <div className="border-t bg-destructive/5 p-2 text-xs text-destructive">
+          {actions.error}
+        </div>
       )}
     </div>
   )
@@ -363,7 +365,7 @@ function ActionToolbar({
 }: ActionToolbarProps) {
   const t = useTranslations("canvas.actions")
   return (
-    <div className="flex flex-wrap items-center gap-1 border-b bg-muted/20 px-2 py-1.5">
+    <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap border-b bg-muted/20 px-2 py-1.5 [scrollbar-width:thin]">
       <ActionButton
         icon={<Wand2 className="size-3.5" />}
         label={t("review")}
@@ -382,28 +384,15 @@ function ActionToolbar({
         onClick={() => void onAction("improve")}
         disabled={running}
       />
-      <ActionButton
-        icon={<HelpCircle className="size-3.5" />}
-        label={t("explain")}
-        onClick={() => void onAction("explain")}
-        disabled={running}
-      />
-      <ActionButton
-        icon={<Sparkles className="size-3.5" />}
-        label={t("simplify")}
-        onClick={() => void onAction("simplify")}
-        disabled={running}
-      />
-      <ActionButton
-        icon={<Sparkles className="size-3.5" />}
-        label={t("expand")}
-        onClick={() => void onAction("expand")}
-        disabled={running}
-      />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" disabled={running}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 shrink-0 gap-1 px-2 text-xs"
+            disabled={running}
+          >
             <Languages className="size-3.5" /> {t("translate")}
           </Button>
         </DropdownMenuTrigger>
@@ -419,14 +408,44 @@ function ActionToolbar({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Separator orientation="vertical" className="mx-1 h-5" />
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Tooltip delayDuration={300}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 shrink-0"
+                disabled={running}
+                aria-label={t("more", { default: "More" })}
+              >
+                <MoreHorizontal className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("more", { default: "More" })}</TooltipContent>
+          </Tooltip>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={() => void onAction("explain")} disabled={running}>
+            <HelpCircle className="mr-2 size-3.5" />
+            {t("explain")}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void onAction("simplify")} disabled={running}>
+            <Minimize2 className="mr-2 size-3.5" />
+            {t("simplify")}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void onAction("expand")} disabled={running}>
+            <Maximize2 className="mr-2 size-3.5" />
+            {t("expand")}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onTriggerSuggestions} disabled={running}>
+            <Lightbulb className="mr-2 size-3.5" />
+            {t("suggest", { default: "Suggest" })}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
-      <ActionButton
-        icon={<Sparkles className="size-3.5" />}
-        label={t("suggest", { default: "Suggest" })}
-        onClick={onTriggerSuggestions}
-        disabled={running}
-      />
+      <Separator orientation="vertical" className="mx-1 h-5" />
 
       <ActionButton
         icon={<Save className="size-3.5" />}
@@ -459,7 +478,7 @@ function ActionButton({ icon, label, onClick, disabled }: ActionButtonProps) {
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 gap-1 px-2 text-xs"
+          className="h-7 shrink-0 gap-1 px-2 text-xs"
           onClick={onClick}
           disabled={disabled}
         >

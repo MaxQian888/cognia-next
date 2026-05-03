@@ -1,0 +1,11 @@
+{
+  "title": "Architecture Decisions",
+  "pages": [
+    "0001-backup-schema-v3",
+    "0002-scheduler-full-agent-resolution",
+    "0003-employee-digital-twin",
+    "0004-vector-native-backend",
+    "0005-remote-control",
+    "0006-plugin-system"
+  ]
+}

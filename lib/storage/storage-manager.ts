@@ -7,6 +7,7 @@
 // neither — `getStats` is an on-demand walk of the Dexie schema.
 
 import { getDb } from "@/lib/db/schema"
+import { getNativeVectorStoreSize } from "@/lib/vector"
 import { categoryForTable, CATEGORY_INFO, defaultDisplayName } from "./category-info"
 import type {
   StorageCategory,
@@ -152,9 +153,33 @@ export class StorageManagerImpl {
   formatBytes = formatBytes
 
   async getStats(): Promise<StorageStats> {
-    const [total, byCategory] = await Promise.all([readQuota(), buildBreakdown()])
+    const [total, byCategory, vectorBytes] = await Promise.all([
+      readQuota(),
+      buildBreakdown(),
+      getNativeVectorStoreSize(),
+    ])
     const localStorageBytes = readLocalStorageBytes()
+    // IDB usage excludes the native vector store — it lives in a separate
+    // sqlite file in the Tauri data dir, not inside IndexedDB.
     const indexedDBBytes = byCategory.reduce<number>((sum, cat) => sum + cat.totalSize, 0)
+
+    if (vectorBytes > 0) {
+      const vectorBucket = byCategory.find((c) => c.category === "vector")
+      if (vectorBucket) {
+        vectorBucket.totalSize = vectorBytes
+        vectorBucket.itemCount = 1
+        vectorBucket.sources = ["vectors.sqlite"]
+      } else {
+        byCategory.push({
+          category: "vector",
+          displayName: defaultDisplayName("vector"),
+          itemCount: 1,
+          totalSize: vectorBytes,
+          sources: ["vectors.sqlite"],
+        })
+      }
+      byCategory.sort((a, b) => b.totalSize - a.totalSize)
+    }
 
     return {
       total,

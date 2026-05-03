@@ -4,7 +4,27 @@ import { create } from "zustand"
 import type { AppSettings, AppLanguage, AppTheme, BuiltinToolsConfig } from "@/lib/claude/types"
 import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin-extended"
+import type { BackgroundSettings, ImportedThemeRecord, Wallpaper } from "@/types/appearance"
+import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 import type { CustomProviderDefinition, ProviderSettingsEntry } from "@/lib/ai/provider-consumption"
+import type {
+  CustomModelMetadata,
+  CustomProviderSettings,
+  ProviderModelUsageEntry,
+  ProviderUIPreferences,
+  UserProviderSettings,
+} from "@/types/provider/provider"
+
+// Re-export rich provider types so existing components that import them
+// from "@/stores/settings/settings-store" (matching Cognia's pattern)
+// resolve cleanly without rewiring every component.
+export type {
+  CustomModelMetadata,
+  CustomProviderSettings,
+  ProviderModelUsageEntry,
+  ProviderUIPreferences,
+  UserProviderSettings,
+}
 import { addAlwaysAllow, getSettings, removeAlwaysAllow, saveSettings } from "@/lib/db/settings"
 import { restartSidecar, setApiKey } from "@/lib/claude/ipc"
 import { isTauri } from "@/lib/tauri"
@@ -138,8 +158,11 @@ interface SettingsState {
   customThemes: CustomTheme[]
   activeCustomThemeId: string | null
   defaultProvider: string
-  providerSettings: Record<string, ProviderSettingsEntry>
-  customProviders: CustomProviderDefinition[]
+  providerSettings: Record<string, UserProviderSettings>
+  customProviders: CustomProviderSettings[]
+  providerUsageStats: Record<string, ProviderModelUsageEntry[]>
+  providerUIPreferences: ProviderUIPreferences
+  providerOnboardingDismissed: boolean
 
   setTheme: (mode: AppTheme) => Promise<void>
   setColorTheme: (preset: ColorThemePreset) => Promise<void>
@@ -151,9 +174,87 @@ interface SettingsState {
   setActiveCustomTheme: (id: string | null) => void
 
   setDefaultProvider: (providerId: string) => Promise<void>
-  setProviderConfig: (providerId: string, patch: Partial<ProviderSettingsEntry>) => Promise<void>
-  upsertCustomProvider: (provider: CustomProviderDefinition) => Promise<void>
+  setProviderConfig: (providerId: string, patch: Partial<UserProviderSettings>) => Promise<void>
+  /** Cognia-compatible alias for `setProviderConfig`. */
+  updateProviderSettings: (
+    providerId: string,
+    patch: Partial<UserProviderSettings>
+  ) => Promise<void>
+  upsertCustomProvider: (provider: CustomProviderSettings) => Promise<void>
+  /**
+   * Add a new custom provider (returns its id).
+   *
+   * Accepts a partial shape — `id` is auto-generated when missing,
+   * `providerId` mirrors `id`, and a few `UserProviderSettings`
+   * fields default to safe values. This matches Cognia's component
+   * call sites which pass only the user-entered fields.
+   */
+  addCustomProvider: (provider: {
+    customName: string
+    baseURL: string
+    apiKey: string
+    apiProtocol: import("@/types/provider/provider").ApiProtocol
+    customModels: string[]
+    defaultModel?: string
+    enabled?: boolean
+    customModelMetadata?: Record<string, import("@/types/provider/provider").CustomModelMetadata>
+    discoveredModels?: import("@/types/provider/provider").ProviderModelDiscoveryEntry[]
+    discoveredModelsLastFetched?: number
+    id?: string
+  }) => Promise<string>
+  /** Patch an existing custom provider by id. */
+  updateCustomProvider: (
+    providerId: string,
+    patch: Partial<CustomProviderSettings>
+  ) => Promise<void>
   removeCustomProvider: (providerId: string) => Promise<void>
+  /** Append a usage entry for a provider/model pair (for the cost tab). */
+  recordProviderUsage: (
+    providerId: string,
+    modelId: string,
+    entry: ProviderModelUsageEntry
+  ) => Promise<void>
+  setProviderUIPreferences: (patch: Partial<ProviderUIPreferences>) => Promise<void>
+  dismissProviderOnboarding: () => Promise<void>
+  /** Patch provider-level inference defaults (temperature, max tokens, …). */
+  setProviderInferenceDefaults: (
+    providerId: string,
+    patch: Partial<NonNullable<UserProviderSettings["inferenceDefaults"]>>
+  ) => Promise<void>
+  /** Set a single provider-specific parameter value (reasoning_effort, …). */
+  setProviderSpecificParam: (providerId: string, key: string, value: unknown) => Promise<void>
+  /** Patch connection params (timeout, retries, concurrency limit). */
+  setProviderConnectionParams: (
+    providerId: string,
+    patch: Partial<NonNullable<UserProviderSettings["connectionParams"]>>
+  ) => Promise<void>
+  /** Set a single advanced parameter value (response format, seed, …). */
+  setProviderAdvancedParam: (providerId: string, key: string, value: unknown) => Promise<void>
+  /** Reset all params to undefined for a provider. */
+  resetProviderParams: (providerId: string) => Promise<void>
+  /** Cognia-compatible alias for `setProviderConfig` (unscoped). */
+  setProviderSettings: (providerId: string, patch: Partial<UserProviderSettings>) => Promise<void>
+
+  // ---------------------------------------------------------------------------
+  // Appearance: wallpapers, background, custom CSS, VSCode imports.
+  // Flat-projected for cheap component subscription.
+  // ---------------------------------------------------------------------------
+
+  background: BackgroundSettings
+  wallpapers: Wallpaper[]
+  customCss: string
+  customCssEnabled: boolean
+  importedVscodeThemes: ImportedThemeRecord[]
+
+  setBackground: (patch: Partial<BackgroundSettings>) => Promise<void>
+  addWallpaper: (wallpaper: Wallpaper) => Promise<void>
+  updateWallpaper: (id: string, patch: Partial<Wallpaper>) => Promise<void>
+  deleteWallpaper: (id: string) => Promise<void>
+  setActiveWallpaper: (id: string | null) => Promise<void>
+  setCustomCss: (css: string) => Promise<void>
+  setCustomCssEnabled: (enabled: boolean) => Promise<void>
+  addImportedTheme: (record: ImportedThemeRecord) => Promise<void>
+  removeImportedTheme: (customThemeId: string) => Promise<void>
 }
 
 const DEFAULTS: AppSettings = {
@@ -186,8 +287,21 @@ interface FlatPluginFields {
   customThemes: CustomTheme[]
   activeCustomThemeId: string | null
   defaultProvider: string
-  providerSettings: Record<string, ProviderSettingsEntry>
-  customProviders: CustomProviderDefinition[]
+  providerSettings: Record<string, UserProviderSettings>
+  customProviders: CustomProviderSettings[]
+  providerUsageStats: Record<string, ProviderModelUsageEntry[]>
+  providerUIPreferences: ProviderUIPreferences
+  providerOnboardingDismissed: boolean
+  background: BackgroundSettings
+  wallpapers: Wallpaper[]
+  customCss: string
+  customCssEnabled: boolean
+  importedVscodeThemes: ImportedThemeRecord[]
+}
+
+const DEFAULT_PROVIDER_UI_PREFERENCES: ProviderUIPreferences = {
+  statusFilter: "all",
+  sortBy: "name",
 }
 
 /**
@@ -205,6 +319,17 @@ function deriveFlatPluginFields(s: AppSettings | null): FlatPluginFields {
     defaultProvider: s?.defaultProvider ?? "",
     providerSettings: s?.providerSettings ?? {},
     customProviders: s?.customProviders ?? [],
+    providerUsageStats: s?.providerUsageStats ?? {},
+    providerUIPreferences: {
+      ...DEFAULT_PROVIDER_UI_PREFERENCES,
+      ...(s?.providerUIPreferences ?? {}),
+    },
+    providerOnboardingDismissed: s?.providerOnboardingDismissed ?? false,
+    background: { ...DEFAULT_BACKGROUND_SETTINGS, ...(s?.background ?? {}) },
+    wallpapers: s?.wallpapers ?? [],
+    customCss: s?.customCss ?? "",
+    customCssEnabled: s?.customCssEnabled ?? false,
+    importedVscodeThemes: s?.importedVscodeThemes ?? [],
   }
 }
 
@@ -601,14 +726,56 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     setDefaultProvider: async (providerId) => {
       const next = await saveSettings({ defaultProvider: providerId })
       set({ settings: next })
+      // Phase D wiring: push the newly-selected provider's credentials to
+      // the sidecar so the next chat send uses them. Sidecar does an atomic
+      // env restart via `claude_set_provider_env` (Rust). Skipped on web.
+      if (isTauri()) {
+        const cfg =
+          next.providerSettings?.[providerId] ??
+          next.customProviders?.find((p) => p.id === providerId)
+        try {
+          const { setProviderEnv } = await import("@/lib/claude/ipc")
+          await setProviderEnv(cfg?.apiKey ?? null, cfg?.baseURL ?? null)
+        } catch (err) {
+          console.warn("setProviderEnv failed", err)
+        }
+      }
     },
 
     setProviderConfig: async (providerId, patch) => {
       const cur = get().settings
+      const existing =
+        cur?.providerSettings?.[providerId] ??
+        ({
+          providerId,
+          enabled: false,
+          defaultModel: "",
+        } as UserProviderSettings)
       const map = { ...(cur?.providerSettings ?? {}) }
-      map[providerId] = { ...(map[providerId] ?? {}), ...patch }
+      map[providerId] = { ...existing, ...patch, providerId }
       const next = await saveSettings({ providerSettings: map })
       set({ settings: next })
+      // If this is the active default provider AND the patch touched
+      // `apiKey` or `baseURL`, push the change to the sidecar so the next
+      // chat turn picks it up without requiring a default-provider switch.
+      if (
+        isTauri() &&
+        next.defaultProvider === providerId &&
+        ("apiKey" in patch || "baseURL" in patch)
+      ) {
+        const cfg = map[providerId]
+        try {
+          const { setProviderEnv } = await import("@/lib/claude/ipc")
+          await setProviderEnv(cfg?.apiKey ?? null, cfg?.baseURL ?? null)
+        } catch (err) {
+          console.warn("setProviderEnv failed", err)
+        }
+      }
+    },
+
+    updateProviderSettings: async (providerId, patch) => {
+      // Cognia-compatible alias — components written for Cognia call this.
+      await get().setProviderConfig(providerId, patch)
     },
 
     upsertCustomProvider: async (provider) => {
@@ -621,10 +788,216 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       set({ settings: next })
     },
 
+    addCustomProvider: async (provider) => {
+      const id = provider.id || `custom-${Date.now().toString(36)}`
+      const full: CustomProviderSettings = {
+        // UserProviderSettings base
+        providerId: id,
+        defaultModel: provider.defaultModel ?? provider.customModels[0] ?? "",
+        enabled: provider.enabled ?? true,
+        apiKey: provider.apiKey,
+        baseURL: provider.baseURL,
+        // CustomProviderSettings extension
+        id,
+        isCustom: true,
+        name: provider.customName,
+        customName: provider.customName,
+        customModels: provider.customModels,
+        customModelMetadata: provider.customModelMetadata,
+        apiProtocol: provider.apiProtocol,
+        models: provider.customModels,
+        discoveredModels: provider.discoveredModels,
+        discoveredModelsLastFetched: provider.discoveredModelsLastFetched,
+      }
+      await get().upsertCustomProvider(full)
+      return id
+    },
+
+    updateCustomProvider: async (providerId, patch) => {
+      const cur = get().settings
+      const list = cur?.customProviders ?? []
+      const idx = list.findIndex((p) => p.id === providerId)
+      if (idx < 0) return
+      const updated = [...list]
+      updated[idx] = { ...updated[idx], ...patch, id: providerId, isCustom: true }
+      const next = await saveSettings({ customProviders: updated })
+      set({ settings: next })
+    },
+
     removeCustomProvider: async (providerId) => {
       const cur = get().settings
       const list = cur?.customProviders ?? []
       const next = await saveSettings({ customProviders: list.filter((p) => p.id !== providerId) })
+      set({ settings: next })
+    },
+
+    recordProviderUsage: async (providerId, modelId, entry) => {
+      const cur = get().settings
+      const stats = { ...(cur?.providerUsageStats ?? {}) }
+      const key = `${providerId}:${modelId}`
+      const list = stats[key] ?? []
+      // Cap retained history at 500 newest entries per (provider:model) pair
+      // so the singleton row doesn't grow without bound.
+      const trimmed = [...list, entry].slice(-500)
+      stats[key] = trimmed
+      const next = await saveSettings({ providerUsageStats: stats })
+      set({ settings: next })
+    },
+
+    setProviderUIPreferences: async (patch) => {
+      const cur = get().settings
+      const merged: ProviderUIPreferences = {
+        ...DEFAULT_PROVIDER_UI_PREFERENCES,
+        ...(cur?.providerUIPreferences ?? {}),
+        ...patch,
+      }
+      const next = await saveSettings({ providerUIPreferences: merged })
+      set({ settings: next })
+    },
+
+    dismissProviderOnboarding: async () => {
+      const next = await saveSettings({ providerOnboardingDismissed: true })
+      set({ settings: next })
+    },
+
+    setProviderInferenceDefaults: async (providerId, patch) => {
+      const cur = get().settings?.providerSettings?.[providerId]
+      const merged = { ...(cur?.inferenceDefaults ?? {}), ...patch }
+      await get().setProviderConfig(providerId, { inferenceDefaults: merged })
+    },
+
+    setProviderSpecificParam: async (providerId, key, value) => {
+      const cur = get().settings?.providerSettings?.[providerId]
+      const params = { ...(cur?.providerSpecificParams ?? {}) }
+      if (value === undefined || value === null || value === "") {
+        delete params[key]
+      } else {
+        params[key] = value
+      }
+      await get().setProviderConfig(providerId, { providerSpecificParams: params })
+    },
+
+    setProviderConnectionParams: async (providerId, patch) => {
+      const cur = get().settings?.providerSettings?.[providerId]
+      const merged = { ...(cur?.connectionParams ?? {}), ...patch }
+      await get().setProviderConfig(providerId, { connectionParams: merged })
+    },
+
+    setProviderAdvancedParam: async (providerId, key, value) => {
+      const cur = get().settings?.providerSettings?.[providerId]
+      const params = { ...(cur?.advancedParams ?? {}) }
+      if (value === undefined || value === null || value === "") {
+        delete params[key]
+      } else {
+        params[key] = value
+      }
+      await get().setProviderConfig(providerId, { advancedParams: params })
+    },
+
+    resetProviderParams: async (providerId) => {
+      await get().setProviderConfig(providerId, {
+        inferenceDefaults: undefined,
+        providerSpecificParams: undefined,
+        connectionParams: undefined,
+        advancedParams: undefined,
+      })
+    },
+
+    setProviderSettings: async (providerId, patch) => {
+      // Cognia compatibility: same as `setProviderConfig`/`updateProviderSettings`.
+      await get().setProviderConfig(providerId, patch)
+    },
+
+    // ---------------------------------------------------------------------------
+    // Appearance setters
+    // ---------------------------------------------------------------------------
+
+    setBackground: async (patch) => {
+      const cur = get().settings
+      const merged: BackgroundSettings = {
+        ...DEFAULT_BACKGROUND_SETTINGS,
+        ...(cur?.background ?? {}),
+        ...patch,
+      }
+      const next = await saveSettings({ background: merged })
+      set({ settings: next })
+    },
+
+    addWallpaper: async (wallpaper) => {
+      const cur = get().settings
+      const list = cur?.wallpapers ?? []
+      if (list.some((w) => w.id === wallpaper.id)) return
+      const next = await saveSettings({ wallpapers: [...list, wallpaper] })
+      set({ settings: next })
+    },
+
+    updateWallpaper: async (id, patch) => {
+      const cur = get().settings
+      const list = cur?.wallpapers ?? []
+      const idx = list.findIndex((w) => w.id === id)
+      if (idx < 0) return
+      const updated = [...list]
+      updated[idx] = { ...updated[idx], ...patch, id: updated[idx].id }
+      const next = await saveSettings({ wallpapers: updated })
+      set({ settings: next })
+    },
+
+    deleteWallpaper: async (id) => {
+      const cur = get().settings
+      const list = cur?.wallpapers ?? []
+      const target = list.find((w) => w.id === id)
+      // Built-in wallpapers cannot be deleted; ignore silently so callers
+      // don't have to special-case them.
+      if (!target || target.builtin) return
+      const filtered = list.filter((w) => w.id !== id)
+      // If the deleted wallpaper was active, clear the activeId so the
+      // applier reverts to no-background instead of dangling on a missing id.
+      const background = { ...DEFAULT_BACKGROUND_SETTINGS, ...(cur?.background ?? {}) }
+      const patch: Partial<AppSettings> = { wallpapers: filtered }
+      if (background.activeId === id) {
+        patch.background = { ...background, activeId: null, enabled: false }
+      }
+      const next = await saveSettings(patch)
+      set({ settings: next })
+    },
+
+    setActiveWallpaper: async (id) => {
+      const cur = get().settings
+      const background = { ...DEFAULT_BACKGROUND_SETTINGS, ...(cur?.background ?? {}) }
+      // Activating a wallpaper auto-enables the background; passing null
+      // disables it. This matches the "single switch" mental model in the UI.
+      const next = await saveSettings({
+        background: { ...background, activeId: id, enabled: id !== null },
+      })
+      set({ settings: next })
+    },
+
+    setCustomCss: async (css) => {
+      const next = await saveSettings({ customCss: css })
+      set({ settings: next })
+    },
+
+    setCustomCssEnabled: async (enabled) => {
+      const next = await saveSettings({ customCssEnabled: enabled })
+      set({ settings: next })
+    },
+
+    addImportedTheme: async (record) => {
+      const cur = get().settings
+      const list = cur?.importedVscodeThemes ?? []
+      const filtered = list.filter((r) => r.customThemeId !== record.customThemeId)
+      const next = await saveSettings({
+        importedVscodeThemes: [...filtered, record],
+      })
+      set({ settings: next })
+    },
+
+    removeImportedTheme: async (customThemeId) => {
+      const cur = get().settings
+      const list = cur?.importedVscodeThemes ?? []
+      const next = await saveSettings({
+        importedVscodeThemes: list.filter((r) => r.customThemeId !== customThemeId),
+      })
       set({ settings: next })
     },
   }

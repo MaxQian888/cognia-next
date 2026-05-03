@@ -51,6 +51,7 @@ function ExportBlock() {
   const t = useTranslations("settings.data")
   const [includeSessions, setIncludeSessions] = useState(false)
   const [includeApiKey, setIncludeApiKey] = useState(false)
+  const [includeBuiltIns, setIncludeBuiltIns] = useState(false)
   const [encryption, setEncryption] = useState<EncryptionMode>("plaintext")
   const [passphrase, setPassphrase] = useState("")
   const { run, busy } = useFullBackup()
@@ -63,12 +64,14 @@ function ExportBlock() {
     loggers.export.info("full_backup_initiated", {
       includeSessions,
       includeApiKey,
+      includeBuiltIns,
       encryption,
       passphraseSet: Boolean(passphrase),
     })
     const result = await run({
       includeSessions,
       includeApiKey,
+      includeBuiltIns,
       encryption,
       passphrase,
     })
@@ -113,6 +116,15 @@ function ExportBlock() {
             <span className="font-medium">{t("includeApiKey")}</span>
             <span className="block text-[11px] text-muted-foreground">
               {t("includeApiKeyHint")}
+            </span>
+          </span>
+        </label>
+        <label className="flex items-start gap-2 text-sm">
+          <Switch checked={includeBuiltIns} onCheckedChange={setIncludeBuiltIns} />
+          <span>
+            <span className="font-medium">{t("includeBuiltIns")}</span>
+            <span className="block text-[11px] text-muted-foreground">
+              {t("includeBuiltInsHint")}
             </span>
           </span>
         </label>

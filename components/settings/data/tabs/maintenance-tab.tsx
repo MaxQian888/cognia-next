@@ -198,8 +198,8 @@ function PrivacyBlock() {
         <ShieldIcon className="size-4" />
         <Label className="text-sm">{t("privacyTitle")}</Label>
       </div>
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="min-w-0 flex-1">
           <p className="text-sm font-medium">{t("telemetryLabel")}</p>
           <p className="text-xs text-muted-foreground">{t("telemetryHint")}</p>
         </div>

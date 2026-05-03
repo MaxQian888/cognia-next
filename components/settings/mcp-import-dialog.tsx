@@ -186,7 +186,7 @@ export function McpImportDialog({ trigger, onImported }: ImportDialogProps) {
         {trigger ?? (
           <Button size="sm" variant="outline" disabled={!isTauri()}>
             <DownloadIcon className="mr-1.5 size-3.5" />
-            {tRoot("import")}
+            {tRoot("importLabel")}
           </Button>
         )}
       </DialogTrigger>

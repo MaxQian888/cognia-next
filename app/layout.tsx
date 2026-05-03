@@ -15,6 +15,7 @@ import { SchedulerInitializer } from "@/components/scheduler"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provider"
 import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provider"
+import { BackgroundApplier } from "@/lib/appearance"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import { dexieAdapter } from "@/lib/data-hooks/dexie-adapter"
 import "./globals.css"
@@ -47,6 +48,7 @@ export default function RootLayout({
           defaultTheme="system"
           enableSystem
           disableTransitionOnChange
+          scriptProps={{ suppressHydrationWarning: true }}
         >
           <LocaleGate>
             <SettingsSyncProvider>
@@ -59,6 +61,9 @@ export default function RootLayout({
                       <CanvasBridgeProvider>
                         <A2UIDispatchProvider>
                           <DataAdapterProvider adapter={dexieAdapter}>
+                            {/* Keeps body[data-bg-*] + the cognia user-css */}
+                            {/* style tag in sync with the appearance store. */}
+                            <BackgroundApplier />
                             {children}
                           </DataAdapterProvider>
                         </A2UIDispatchProvider>

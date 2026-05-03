@@ -131,11 +131,16 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    // Inject the user-supplied Anthropic API key, if any. The sidecar reads
-    // `process.env.ANTHROPIC_API_KEY` and forwards it to the SDK.
+    // Inject the user-supplied Anthropic provider env, if any. The sidecar
+    // reads `process.env.ANTHROPIC_API_KEY` (and optionally `ANTHROPIC_BASE_URL`,
+    // for CCSwitch-style proxy providers like Kimi / DeepSeek) and forwards
+    // both to the SDK.
     if let Some(api_key_state) = app.try_state::<ApiKeyState>() {
         if let Some(key) = api_key_state.get().await {
             cmd.env("ANTHROPIC_API_KEY", key);
+        }
+        if let Some(url) = api_key_state.get_base_url().await {
+            cmd.env("ANTHROPIC_BASE_URL", url);
         }
     }
 

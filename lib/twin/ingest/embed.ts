@@ -10,11 +10,10 @@
  * the un-redacted chunk row in Dexie.
  */
 
-import { generateEmbeddings } from "@/lib/ai/embedding/embedding"
-import type { ProviderName } from "@/types/provider/provider"
+import { generateEmbeddings, type EmbeddingProviderName } from "@/lib/ai/embedding/embedding"
 
 export interface EmbeddingConfig {
-  provider: ProviderName
+  provider: EmbeddingProviderName
   model: string
   apiKey: string
   baseURL?: string

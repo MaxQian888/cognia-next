@@ -104,7 +104,7 @@ export function SearchProviderCompare() {
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label className="text-xs">{tc("providerA")}</Label>
             <Select value={providerA} onValueChange={(v) => setProviderA(v as SearchProviderType)}>
@@ -154,7 +154,7 @@ export function SearchProviderCompare() {
         {error && <p className="text-xs text-destructive">{error}</p>}
 
         {(resultA || resultB) && (
-          <div className="grid grid-cols-2 gap-3 pt-2 border-t">
+          <div className="grid grid-cols-1 gap-3 pt-2 border-t sm:grid-cols-2">
             <CompareResultColumn providerId={providerA} result={resultA} t={tc} />
             <CompareResultColumn providerId={providerB} result={resultB} t={tc} />
           </div>

@@ -1,0 +1,46 @@
+{
+  "id": "cognia-clipboard-history",
+  "name": "Clipboard History",
+  "version": "0.1.0",
+  "description": "Persist a rolling clipboard history (encrypted) and surface helpers to retrieve recent entries.",
+  "type": "frontend",
+  "capabilities": ["tools", "commands"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": ["clipboard:read", "settings:read", "settings:write"],
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "desktop": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "maxEntries": {
+        "type": "number",
+        "default": 50,
+        "description": "Maximum number of clipboard entries to retain."
+      },
+      "privacyMode": {
+        "type": "boolean",
+        "default": false,
+        "description": "When true, do not persist entries — only surface the most recent in-memory."
+      },
+      "pollIntervalMs": {
+        "type": "number",
+        "default": 0,
+        "description": "Polling interval (ms). 0 disables automatic capture; entries are then only added by explicit tool / slash-command calls."
+      }
+    }
+  }
+}

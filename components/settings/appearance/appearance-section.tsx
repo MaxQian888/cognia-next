@@ -1,0 +1,98 @@
+"use client"
+
+// Tabbed shell for the Appearance settings section. Mirrors the
+// `data-section.tsx` pattern (URL-driven active tab, scrollable tabs
+// strip on narrow screens).
+
+import { useTranslations } from "next-intl"
+import { useRouter, useSearchParams } from "next/navigation"
+import { PaletteIcon } from "lucide-react"
+import { Label } from "@/components/ui/label"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ThemeTab } from "./tabs/theme-tab"
+import { TypographyTab } from "./tabs/typography-tab"
+import { WallpaperTab } from "./tabs/wallpaper-tab"
+import { CustomThemeTab } from "./tabs/custom-theme-tab"
+import { VscodeImportTab } from "./tabs/vscode-import-tab"
+import { AdvancedTab } from "./tabs/advanced-tab"
+
+const APPEARANCE_TAB_PARAM = "appearanceTab"
+
+export type AppearanceTabId =
+  | "theme"
+  | "wallpaper"
+  | "custom"
+  | "import"
+  | "typography"
+  | "advanced"
+
+const TAB_IDS: AppearanceTabId[] = [
+  "theme",
+  "wallpaper",
+  "custom",
+  "import",
+  "typography",
+  "advanced",
+]
+
+function isAppearanceTab(value: string | null): value is AppearanceTabId {
+  return !!value && (TAB_IDS as string[]).includes(value)
+}
+
+export function AppearanceSection() {
+  const t = useTranslations("settings.appearance")
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const requested = searchParams.get(APPEARANCE_TAB_PARAM)
+  const activeTab: AppearanceTabId = isAppearanceTab(requested) ? requested : "theme"
+
+  const onTabChange = (value: string) => {
+    if (!isAppearanceTab(value)) return
+    const next = new URLSearchParams(searchParams.toString())
+    next.set(APPEARANCE_TAB_PARAM, value)
+    router.replace(`?${next.toString()}`, { scroll: false })
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="space-y-1">
+        <Label className="flex items-center gap-2">
+          <PaletteIcon className="size-4" />
+          {t("title")}
+        </Label>
+        <p className="text-xs text-muted-foreground">{t("description")}</p>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={onTabChange}>
+        <div className="-mx-1 overflow-x-auto px-1">
+          <TabsList className="w-max">
+            <TabsTrigger value="theme">{t("tabs.theme")}</TabsTrigger>
+            <TabsTrigger value="wallpaper">{t("tabs.wallpaper")}</TabsTrigger>
+            <TabsTrigger value="custom">{t("tabs.custom")}</TabsTrigger>
+            <TabsTrigger value="import">{t("tabs.import")}</TabsTrigger>
+            <TabsTrigger value="typography">{t("tabs.typography")}</TabsTrigger>
+            <TabsTrigger value="advanced">{t("tabs.advanced")}</TabsTrigger>
+          </TabsList>
+        </div>
+        <TabsContent value="theme" className="mt-4">
+          <ThemeTab />
+        </TabsContent>
+        <TabsContent value="wallpaper" className="mt-4">
+          <WallpaperTab />
+        </TabsContent>
+        <TabsContent value="custom" className="mt-4">
+          <CustomThemeTab />
+        </TabsContent>
+        <TabsContent value="import" className="mt-4">
+          <VscodeImportTab />
+        </TabsContent>
+        <TabsContent value="typography" className="mt-4">
+          <TypographyTab />
+        </TabsContent>
+        <TabsContent value="advanced" className="mt-4">
+          <AdvancedTab />
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}

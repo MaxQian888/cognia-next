@@ -12,6 +12,14 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+const routerPush = jest.fn()
+const routerReplace = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: routerPush, replace: routerReplace, back: jest.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => "/",
+}))
+
 jest.mock("@/lib/logger", () => ({
   loggers: {
     shell: {
@@ -147,9 +155,7 @@ jest.mock("@/components/artifacts/artifact-panel", () => ({
   ArtifactPanel: () => <div data-testid="artifact-panel" />,
 }))
 jest.mock("@/components/canvas", () => ({
-  CanvasDocumentRail: () => null,
-  CanvasWorkspace: () => null,
-  CanvasSidePanels: () => null,
+  CanvasShell: () => <div data-testid="canvas-shell" />,
 }))
 jest.mock("@/components/desktop/onboarding-dialog", () => ({
   OnboardingDialog: ({ open }: { open: boolean }) =>
@@ -158,9 +164,17 @@ jest.mock("@/components/desktop/onboarding-dialog", () => ({
 jest.mock("@/components/desktop/title-bar", () => ({
   TitleBar: () => <div data-testid="title-bar" />,
 }))
-jest.mock("@/components/chat/settings-dialog", () => ({
-  SettingsDialog: ({ open, defaultTab }: { open: boolean; defaultTab: string }) =>
-    open ? <div data-testid={`settings-${defaultTab}`} /> : null,
+jest.mock("@/components/desktop/status-bar", () => ({
+  StatusBar: () => <div data-testid="status-bar" />,
+}))
+jest.mock("@/components/desktop/window-focus-tracker", () => ({
+  WindowFocusTracker: () => null,
+}))
+jest.mock("@/components/desktop/window-resize-edges", () => ({
+  WindowResizeEdges: () => <div data-testid="resize-edges" />,
+}))
+jest.mock("@/components/desktop/zoom-shortcuts", () => ({
+  ZoomShortcuts: () => null,
 }))
 jest.mock("@/components/chat/tool-approval-dialog", () => ({
   ToolApprovalDialog: () => null,
@@ -180,6 +194,8 @@ beforeEach(() => {
   })
   clearPendingSettings.mockReset()
   loadSettings.mockClear()
+  routerPush.mockReset()
+  routerReplace.mockReset()
   sessionsRef.current = []
   activeSessionId = null
   selectedGuild = { kind: "dm" }
@@ -187,27 +203,28 @@ beforeEach(() => {
   pendingSettingsRequestRef.current = null
 })
 
-test("renders title bar, guild rail, channel list, and command palette", () => {
+test("renders title bar, status bar, guild rail, channel list, and command palette", () => {
   render(<DiscordShell />)
   expect(screen.getByTestId("title-bar")).toBeInTheDocument()
+  expect(screen.getByTestId("status-bar")).toBeInTheDocument()
   expect(screen.getByTestId("guild-create-team")).toBeInTheDocument()
 })
 
-test("clicking the rail's Create-team button opens Settings → Teams (no toast)", async () => {
+test("clicking the rail's Create-team button routes to Settings → Teams", async () => {
   render(<DiscordShell />)
   await act(async () => {
     screen.getByTestId("guild-create-team").click()
   })
-  await waitFor(() => expect(screen.getByTestId("settings-teams")).toBeInTheDocument())
+  await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/settings?section=teams"))
   expect(logInfo).toHaveBeenCalledWith("create-team click → settings")
 })
 
-test("clicking guild settings button opens Settings dialog with general tab", async () => {
+test("clicking guild settings button routes to /settings", async () => {
   render(<DiscordShell />)
   await act(async () => {
     screen.getByTestId("guild-open-settings").click()
   })
-  await waitFor(() => expect(screen.getByTestId("settings-general")).toBeInTheDocument())
+  await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/settings"))
 })
 
 test("auto-selects a matching session on first render and logs", async () => {
@@ -252,10 +269,23 @@ test("switching to a team session adjusts the guild filter via guildFromSession"
 test("opens settings via deep-link when pendingSettingsRequest is set", async () => {
   pendingSettingsRequestRef.current = { tab: "skills", nonce: 1 }
   render(<DiscordShell />)
-  await waitFor(() => expect(screen.getByTestId("settings-skills")).toBeInTheDocument())
+  await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/settings?section=skills"))
   expect(clearPendingSettings).toHaveBeenCalled()
   expect(logInfo).toHaveBeenCalledWith(
     "open settings via deep-link",
     expect.objectContaining({ tab: "skills" })
   )
+})
+
+test("sets data-app-shell on body while mounted", () => {
+  const { unmount } = render(<DiscordShell />)
+  expect(document.body.getAttribute("data-app-shell")).toBe("true")
+  unmount()
+  expect(document.body.getAttribute("data-app-shell")).toBeNull()
+})
+
+test("mounts the resize edges and removes them on unmount", () => {
+  const { unmount, container } = render(<DiscordShell />)
+  expect(container.querySelector("[data-testid='resize-edges']")).not.toBeNull()
+  unmount()
 })

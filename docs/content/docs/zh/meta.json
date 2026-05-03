@@ -1,0 +1,20 @@
+{
+  "title": "中文",
+  "pages": [
+    "index",
+    "getting-started",
+    "architecture",
+    "runtime-and-tauri",
+    "sidecar-and-claude-sdk",
+    "chat-and-skills",
+    "employee-twin",
+    "vector-store",
+    "backup-and-data",
+    "scheduler",
+    "plugin-system",
+    "storage",
+    "theming-and-i18n",
+    "development",
+    "deployment"
+  ]
+}

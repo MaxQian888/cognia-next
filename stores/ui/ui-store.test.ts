@@ -195,6 +195,7 @@ describe("useUIStore", () => {
         selectedGuild: { kind: "team", teamId: "t1" },
         showMemberList: false,
         scratchpadCollapsed: { ts1: true },
+        sidebarCollapsed: false,
       })
       // Transient fields explicitly excluded
       expect(parsed.state.memberStatus).toBeUndefined()

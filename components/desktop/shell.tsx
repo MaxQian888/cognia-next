@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import { ChatPane } from "@/components/chat/chat-view"
 import { CharacterPicker } from "@/components/chat/character-picker"
 import { CommandPalette } from "@/components/desktop/command-palette"
@@ -8,10 +9,13 @@ import { GuildRail } from "@/components/desktop/guild-rail"
 import { ChannelList } from "@/components/desktop/channel-list"
 import { MemberList } from "@/components/desktop/member-list"
 import { ArtifactPanel } from "@/components/artifacts/artifact-panel"
-import { CanvasDocumentRail, CanvasWorkspace, CanvasSidePanels } from "@/components/canvas"
+import { CanvasShell } from "@/components/canvas"
 import { OnboardingDialog } from "@/components/desktop/onboarding-dialog"
+import { StatusBar } from "@/components/desktop/status-bar"
 import { TitleBar } from "@/components/desktop/title-bar"
-import { SettingsDialog } from "@/components/chat/settings-dialog"
+import { WindowFocusTracker } from "@/components/desktop/window-focus-tracker"
+import { WindowResizeEdges } from "@/components/desktop/window-resize-edges"
+import { ZoomShortcuts } from "@/components/desktop/zoom-shortcuts"
 import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
 import type { ComposerHandle } from "@/components/chat/composer"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
@@ -40,6 +44,7 @@ const log = loggers.shell
  * that the inner panes stay narrow and focused.
  */
 export function DiscordShell() {
+  const router = useRouter()
   const { sessions, activeSessionId, select, create, remove, rename } = useSessions()
   const directChat = useClaudeChat()
   const teamChat = useTeamChat()
@@ -52,9 +57,8 @@ export function DiscordShell() {
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
   const pendingSettingsRequest = useUIStore((s) => s.pendingSettingsRequest)
   const clearPendingSettings = useUIStore((s) => s.clearPendingSettings)
+  const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
 
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsTab, setSettingsTab] = useState<string>("general")
   const [lastErrorShown, setLastErrorShown] = useState<string | null>(null)
   const [characterPickerOpen, setCharacterPickerOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
@@ -70,6 +74,15 @@ export function DiscordShell() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true)
     void whenSeeded()
+  }, [])
+
+  // No-scroll guarantee. Setting `data-app-shell` on <body> turns on the
+  // `overflow:hidden` rule defined in globals.css. Removed on unmount so
+  // standalone routes (docs, /settings sub-pages) keep their own behavior.
+  useEffect(() => {
+    if (typeof document === "undefined") return
+    document.body.setAttribute("data-app-shell", "true")
+    return () => document.body.removeAttribute("data-app-shell")
   }, [])
 
   useEffect(() => {
@@ -150,8 +163,7 @@ export function DiscordShell() {
 
   const openSettings = (tab?: string) => {
     log.info("open settings", { tab: tab ?? "general" })
-    setSettingsTab(tab ?? "general")
-    setSettingsOpen(true)
+    router.push(tab ? `/settings?section=${tab}` : "/settings")
   }
 
   // Honor open-settings requests coming from the tray, app menu, or
@@ -160,7 +172,7 @@ export function DiscordShell() {
   useEffect(() => {
     if (!pendingSettingsRequest) return
     log.info("open settings via deep-link", { tab: pendingSettingsRequest.tab })
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
     openSettings(pendingSettingsRequest.tab)
     clearPendingSettings()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -212,60 +224,61 @@ export function DiscordShell() {
   }
 
   return (
-    <div className="flex h-screen w-full flex-col bg-background text-foreground">
+    <div className="relative flex h-screen w-full flex-col bg-background text-foreground">
+      <WindowFocusTracker />
+      <WindowResizeEdges />
+      <ZoomShortcuts />
       <TitleBar />
       <div className="flex flex-1 overflow-hidden">
         <GuildRail onCreateTeam={handleCreateTeam} onOpenSettings={() => openSettings()} />
         {isCanvasGuild ? (
-          <CanvasDocumentRail />
+          mounted ? (
+            <CanvasShell />
+          ) : null
         ) : (
-          <ChannelList
-            sessions={sessions}
-            activeSessionId={activeSessionId}
-            onSelect={handleSwitchToSession}
-            onNewDirect={() => void handleNewDirect()}
-            onNewTeamConversation={(id) => void handleNewTeamConversation(id)}
-            onDelete={(id) => void remove(id)}
-            onRename={(id, title) => void rename(id, title)}
-          />
-        )}
+          <>
+            {!sidebarCollapsed && (
+              <ChannelList
+                sessions={sessions}
+                activeSessionId={activeSessionId}
+                onSelect={handleSwitchToSession}
+                onNewDirect={() => void handleNewDirect()}
+                onNewTeamConversation={(id) => void handleNewTeamConversation(id)}
+                onDelete={(id) => void remove(id)}
+                onRename={(id, title) => void rename(id, title)}
+              />
+            )}
 
-        <main className="relative flex flex-1 flex-col overflow-hidden">
-          {!mounted ? null : isCanvasGuild ? (
-            <CanvasWorkspace />
-          ) : !isTauri() ? (
-            <DesktopOnlyBanner />
-          ) : (
-            <ChatPane
-              activeSession={activeSession}
-              onSend={send}
-              onStop={stop}
-              onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
-              onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
-              onCreate={handleNewDirect}
-              onUseSample={(text) => void send(text)}
-              onOpenSettings={openSettings}
-              composerRef={composerRef}
-            />
-          )}
-        </main>
+            <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+              {!mounted ? null : !isTauri() ? (
+                <DesktopOnlyBanner />
+              ) : (
+                <ChatPane
+                  activeSession={activeSession}
+                  onSend={send}
+                  onStop={stop}
+                  onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
+                  onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
+                  onCreate={handleNewDirect}
+                  onUseSample={(text) => void send(text)}
+                  onOpenSettings={openSettings}
+                  composerRef={composerRef}
+                />
+              )}
+            </main>
 
-        {isCanvasGuild ? (
-          <aside className="hidden w-[300px] shrink-0 border-l md:block">
-            <CanvasSidePanels />
-          </aside>
-        ) : (
-          isTeamSession && (
-            <MemberList
-              teamSessionId={activeSession?.id ?? null}
-              teamId={activeSession?.teamId ?? null}
-              onMention={(c) => {
-                composerRef.current?.insertMention(c.name)
-              }}
-            />
-          )
+            {isTeamSession && (
+              <MemberList
+                teamSessionId={activeSession?.id ?? null}
+                teamId={activeSession?.teamId ?? null}
+                onMention={(c) => {
+                  composerRef.current?.insertMention(c.name)
+                }}
+              />
+            )}
+            <ArtifactPanel />
+          </>
         )}
-        {!isCanvasGuild && <ArtifactPanel />}
       </div>
 
       <CharacterPicker
@@ -310,8 +323,8 @@ export function DiscordShell() {
           pendingApproval ? respondToApproval(pendingApproval, decision) : Promise.resolve()
         }
       />
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} defaultTab={settingsTab} />
       {mounted && <CommandPalette onOpenSettings={openSettings} />}
+      <StatusBar />
     </div>
   )
 }

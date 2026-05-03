@@ -62,6 +62,19 @@ export async function setApiKey(key: string | null): Promise<void> {
   await invoke("claude_set_api_key", { key })
 }
 
+/**
+ * Replace the Anthropic provider env (api key + optional base URL) atomically.
+ * Used by the CCSwitch provider-switch flow so the sidecar restart sees a
+ * coherent (key, base-url) pair rather than a half-switched state.
+ *
+ * Pass `null` for either field to clear it. Empty strings are treated as null
+ * by the Rust side.
+ */
+export async function setProviderEnv(apiKey: string | null, baseUrl: string | null): Promise<void> {
+  ensureTauri()
+  await invoke("claude_set_provider_env", { apiKey, baseUrl })
+}
+
 export async function hasApiKey(): Promise<boolean> {
   ensureTauri()
   return invoke<boolean>("claude_has_api_key")

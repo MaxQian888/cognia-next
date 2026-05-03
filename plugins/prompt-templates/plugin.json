@@ -1,0 +1,26 @@
+{
+  "id": "cognia-prompt-templates",
+  "name": "Prompt Templates",
+  "version": "0.1.0",
+  "description": "User-managed prompt templates surfaced as slash commands. /template-add, /template, /template-remove, /template-list.",
+  "type": "frontend",
+  "capabilities": ["commands"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": ["settings:read", "settings:write"],
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "desktop": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  }
+}

@@ -1,0 +1,256 @@
+---
+title: 调度器
+description: 跨平台调度器，把任务从应用内 cron 提升到原生 OS 调度（Windows Task Scheduler、launchd、systemd）。
+---
+
+# 调度器
+
+<Status variant="stable" />
+
+<TLDR>
+  双层调度器 —— 应用内 cron 循环负责"只在 Cognia 打开时才需要跑"的任务，
+  原生提升路径把选中的任务镜像到 Windows Task Scheduler / launchd / systemd，
+  应用关闭时也能触发。
+</TLDR>
+
+<StatGrid>
+  <Stat label="trigger 类型" value="4" hint="cron · interval · once · event" />
+  <Stat label="内置 executor" value="6" hint="claude-send · shell · script · backup · twin · plugin" />
+  <Stat label="原生平台" value="3" hint="Windows · macOS · Linux" />
+  <Stat label="历史上限" value="200" hint="每任务" />
+</StatGrid>
+
+Cognia 自带的调度器子系统跑在两层：
+
+- **应用内层** —— `lib/scheduler/` 在应用运行时按 cron 触发任务。
+- **原生层** —— `src-tauri/src/scheduler/` 把任务"提升"给 OS 调度器（Windows Task Scheduler、macOS launchd、Linux systemd），让任务在 Cognia 关闭时也能触发。
+
+提升按任务粒度可选：轻任务留在应用内；重任务或要求后台运行的走原生。
+
+完整设计原由参见 [ADR-0002](../adr/0002-scheduler-full-agent-resolution)。
+
+## 代码位置
+
+```
+lib/scheduler/
+  index.ts                       # 公共 API
+  task-scheduler.ts              # 核心调度循环
+  scheduler-db.ts                # Dexie 表（jobs、history）
+  cron-parser.ts                 # 5/6 字段 cron 表达式
+  trigger-normalizer.ts          # UI 输入 → cron / interval / once
+  promote-to-system.ts           # 把任务交给原生层
+  task-templates.ts              # 可复用任务模板
+  format-utils.ts                # 把调度渲染成 UI 字符串（"每周一 9:00"）
+  tab-lock.ts                    # 单 tab worker 选举
+  errors.ts
+  conversational-task-authoring.ts  # LLM 辅助任务创建
+  conversational-task-intent.ts
+  notification-integration.ts    # 成功 / 失败通知
+  event-integration.ts
+  script-executor.ts             # 安全执行用户脚本
+  executors/                     # 内置执行器实现
+
+src-tauri/src/scheduler/
+  mod.rs
+  service.rs                     # 跨平台 Service trait
+  windows.rs                     # Windows Task Scheduler（PowerShell）
+  macos.rs                       # launchd（plist + launchctl）
+  linux.rs                       # systemd（.timer + .service unit）
+  metadata_store.rs              # sqlite 元数据，便于恢复
+  commands.rs                    # #[tauri::command] 封装
+  types.rs
+  error.rs
+
+components/scheduler/            # 工作台 UI
+app/scheduler/                   # 工作台路由
+```
+
+## 任务模型
+
+<TypeTable
+  type={{
+    id: { description: "稳定唯一标识。", type: "string", required: true },
+    name: { description: "显示名。", type: "string", required: true },
+    description: { description: "可选说明。", type: "string" },
+    trigger: {
+      description: "何时运行 —— 判别联合（见下）。",
+      type: "Trigger",
+      required: true,
+    },
+    executor: {
+      description: "做什么 —— 判别联合（见下）。",
+      type: "Executor",
+      required: true,
+    },
+    enabled: {
+      description: "false 时触发点直接跳过。",
+      type: "boolean",
+      required: true,
+    },
+    promoted: {
+      description: "true 时任务镜像到原生 OS 调度器。",
+      type: "boolean",
+      default: "false",
+    },
+    createdAt: { description: "ISO-8601 创建时间。", type: "string", required: true },
+    updatedAt: { description: "ISO-8601 最近更新时间。", type: "string", required: true },
+  }}
+/>
+
+`Trigger` 与 `Executor` 形态：
+
+```ts
+type Trigger =
+  | { type: "cron"; expression: string; timezone?: string }
+  | { type: "interval"; everyMs: number }
+  | { type: "once"; runAt: string }
+  | { type: "event"; eventName: string }
+
+type Executor =
+  | { type: "claude-send"; characterId: string; messageTemplate: string }
+  | { type: "shell"; command: string; cwd?: string }
+  | { type: "script"; language: "js"; code: string }
+  | { type: "backup"; folder: string }
+  | { type: "twin-ingest"; sourceId: string }
+  | { type: "twin-distill"; twinId: string }
+  | { type: "plugin"; pluginId: string; jobId: string }
+```
+
+完整类型在 `lib/scheduler/`。增加新执行器 = 增加判别联合分支 + 在 `executors/` 加实现。
+
+## Cron 解析器
+
+`lib/scheduler/cron-parser.ts` 实现 5 / 6 字段 cron 解析（6 字段时含秒）。特性：
+
+- 标准通配符（`*`、`,`、`-`、`/`）。
+- 命名星期（`MON`、`TUE`……）。
+- 命名月份（`JAN`……）。
+- 时区感知（trigger 的 `timezone` 字段；默认系统本地）。
+
+解析器产出 `next(after: Date)` 迭代器。调度循环调 `next()` 计算下次触发时间，sleep 到点，运行执行器，循环。
+
+## 应用内 vs 原生
+
+```mermaid
+flowchart TB
+  T[ScheduledTask · Dexie<br/>promoted: false / true]
+  T -->|promoted = false| InApp[应用内循环<br/>lib/scheduler/task-scheduler]
+  T -->|promoted = true| Native[原生调度器<br/>src-tauri/src/scheduler/]
+
+  InApp --> InAppNote[仅在应用打开时运行<br/>tab-lock.ts 保证单 tab]
+
+  Native --> WIN[Windows<br/>Task Scheduler<br/>via PowerShell]
+  Native --> MAC[macOS<br/>launchd<br/>plist + launchctl]
+  Native --> LIN[Linux<br/>systemd<br/>.timer + .service]
+
+  WIN --> CLI[cognia.exe --task task-id]
+  MAC --> CLI
+  LIN --> CLI
+  CLI --> Exec((执行器))
+
+  classDef task fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
+  classDef inApp fill:#064e3b,stroke:#10b981,color:#a7f3d0
+  classDef native fill:#7c2d12,stroke:#fb923c,color:#fed7aa
+  classDef platform fill:#312e81,stroke:#818cf8,color:#e0e7ff
+  classDef terminal fill:#0f172a,stroke:#475569,color:#cbd5e1
+  class T task
+  class InApp,InAppNote inApp
+  class Native native
+  class WIN,MAC,LIN platform
+  class CLI,Exec terminal
+```
+
+任务默认 `promoted: false`。用户在工作台手动提升；提升时合成：
+
+- **Windows** —— 一个指向 `cognia.exe --workspace <id> --task <task-id>` 的 Task Scheduler 条目。
+- **macOS** —— `~/Library/LaunchAgents/` 中的 launchd `.plist`。
+- **Linux** —— `~/.config/systemd/user/` 中的 systemd `.timer` + `.service` 单元对。
+
+`metadata_store.rs` 维护任务 UUID 与原生 task ID（PowerShell 任务名、plist label、systemd unit name）之间的映射。任务删除时元数据存储也会清理对应原生条目。
+
+## Tab 锁
+
+`lib/scheduler/tab-lock.ts` 保证**有且仅有一个 tab** 跑应用内循环：
+
+- Dexie（`schedulerLock`）中有一行心跳，每 5 秒更新一次。
+- 启动时每个 tab 检查：如心跳老于 15 秒，认领锁；否则等待。
+- 持有 tab 关闭/崩溃后，下一个 tab 在 15 秒内接管。
+
+避免用户在多个窗口打开 Cognia 时重复触发。
+
+## 对话式任务创作
+
+`conversational-task-authoring.ts` 与 `conversational-task-intent.ts` 让用户用自然语言描述调度（"每个工作日 9 点发一份站会提醒"），LLM 输出一个 `ScheduledTask` JSON。意图抽取器拉出结构化字段；创作 agent 补默认值并校验。
+
+工作台的"AI 创建"面板使用这一能力。
+
+## 执行器
+
+内置执行器：
+
+| 执行器 | 位置 |
+| --- | --- |
+| `claude-send` | `executors/claude-send.ts` —— 通过 `claude_send` 发模板化消息 |
+| `shell` | `executors/shell.ts` → `lib/native/local-runtime.ts` → `src-tauri/src/shell.rs`；受信任工作区白名单守护 |
+| `script` | `executors/script.ts` → `script-executor.ts`（`lib/sandbox/` 沙箱化 JS） |
+| `backup` | `executors/backup.ts` —— 调 `lib/data/build-package` + 加密 |
+| `twin-ingest` / `twin-distill` | `executors/twin-*.ts` —— 入队孪生 worker |
+| `plugin` | `executors/plugin.ts` —— 触发插件的定时任务（见 [插件系统](./plugin-system)） |
+
+每个执行器返回：
+
+```ts
+interface ExecutorResult {
+  status: "success" | "failure"
+  output?: string
+  error?: string
+  durationMs: number
+}
+```
+
+结果写入 `schedulerHistory`（每任务最多 200 行）。
+
+## 通知
+
+`notification-integration.ts` 监听调度器历史事件流，并：
+
+- 每次运行 toast（可配，默认"仅错误"）。
+- 失败时发原生 OS 通知（`tauri-plugin-notification`）。
+- 菜单 / 系统托盘有未读失败时显示徽章。
+
+## 事件触发
+
+任务也可以在应用事件触发（如"每次新建会话"）。`event-integration.ts` 订阅事件总线，触发匹配的任务。
+
+## 工作台 UI
+
+路由：`app/scheduler/`。组件：`components/scheduler/`。Tab：
+
+- **任务** —— 列表，含快速 开/关 / 提升 / 立即运行 / 删除。
+- **历史** —— 跨所有任务的运行历史，按状态过滤。
+- **模板** —— 来自 `task-templates.ts` 的预定义模板（如"每日备份"、"每周重新蒸馏孪生"）。
+- **创作** —— "AI 创建"面板。
+
+## 在哪里入手
+
+| 目标 | 文件 |
+| --- | --- |
+| 加新执行器 | `lib/scheduler/executors/<name>.ts` 并注册 |
+| 加新 trigger 类型 | `lib/scheduler/cron-parser.ts`（或新解析器）、`trigger-normalizer.ts` |
+| 支持新原生平台 | `src-tauri/src/scheduler/<platform>.rs` |
+| 调整对话式创作 | `conversational-task-authoring.ts` |
+
+## 测试
+
+- `lib/scheduler/cron-parser.test.ts` —— cron 表达式覆盖。
+- `task-scheduler.test.ts` —— fake-timers 驱动的循环模拟。
+- `tab-lock.test.ts` —— 多 tab 竞争。
+- 原生层在 `src-tauri/tests/` 有集成测试，建临时 DB 并验证元数据往返。
+
+## 下一篇
+
+<Cards>
+  <Card title="插件系统" href="./plugin-system" description="插件可注册自己的定时任务" />
+  <Card title="备份 & 数据传输" href="./backup-and-data" description="备份调度构建在这些原语上" />
+  <Card title="ADR-0002" href="../adr/0002-scheduler-full-agent-resolution" description="为什么应用内 vs 原生分层" />
+</Cards>

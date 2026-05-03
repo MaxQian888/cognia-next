@@ -35,3 +35,12 @@ export function formatDurationShort(ms: number | null | undefined): string {
 
 // Re-export for code copied from upstream that imports `isTauri` from `@/lib/utils`.
 export { isTauri } from "./tauri"
+
+/**
+ * Tailwind class for SelectTrigger / Combobox / fixed-width form controls
+ * inside settings panels. Mobile-first: `w-full` keeps the trigger from
+ * overflowing on narrow screens; `sm:w-64` restores the historical 256px
+ * layout once we have room for it. Reach for this whenever you'd be
+ * tempted to write `className="w-64"`.
+ */
+export const responsiveSelectClass = "w-full sm:w-64"

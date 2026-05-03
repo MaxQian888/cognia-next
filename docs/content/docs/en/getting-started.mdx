@@ -1,0 +1,230 @@
+---
+title: Getting Started
+description: Install Cognia from source, run it in web mode and desktop mode, and verify everything works.
+---
+
+# Getting Started
+
+This page walks you from a fresh clone to a working web dev server **and** a working Tauri desktop window. Allow ~15 minutes for the first run; subsequent runs are seconds.
+
+## Prerequisites
+
+| Tool | Version | Why |
+| --- | --- | --- |
+| **Node.js** | ≥ 20.x | Next.js 16 / React 19 runtime |
+| **pnpm** | ≥ 10.x | Single lockfile across the monorepo (`pnpm-workspace.yaml`) |
+| **Rust** | ≥ 1.77.2 | Tauri 2.9 compilation |
+| **C/C++ toolchain** | platform-specific | Tauri compiles native extensions (sqlite-vec, …) |
+
+Platform-specific notes:
+
+<Tabs groupId="os" persist items={["Windows", "macOS", "Linux"]}>
+  <Tab value="Windows">
+    Install **Visual Studio Build Tools** (with the "Desktop development with C++" workload).
+    **WebView2 Runtime** is preinstalled on Windows 11; on Windows 10 install it from
+    [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/).
+  </Tab>
+  <Tab value="macOS">
+    Install Xcode Command Line Tools:
+
+    ```bash
+    xcode-select --install
+    ```
+
+    No further setup needed for Apple Silicon or Intel Macs.
+  </Tab>
+  <Tab value="Linux">
+    Install GTK / WebKitGTK / libsoup. See the
+    [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your distro.
+
+    On Ubuntu / Debian:
+
+    ```bash
+    sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
+        libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+    ```
+  </Tab>
+</Tabs>
+
+Verify:
+
+```bash
+node --version    # v20.x or newer
+pnpm --version    # 10.x or newer
+rustc --version   # 1.77.2 or newer
+cargo --version
+```
+
+## Clone and install
+
+<Steps>
+  <Step>
+    ### Clone the repository
+
+    ```bash
+    git clone https://github.com/MaxQian888/cognia-next.git
+    cd cognia-next
+    ```
+  </Step>
+  <Step>
+    ### Install workspace dependencies
+
+    ```bash
+    pnpm install
+    ```
+
+    This installs **two packages** in one shot:
+
+    - The root package (`cognia-next`) — Next.js app + Tauri frontend.
+    - The docs package (`docs/`) — Fumadocs documentation site.
+
+    Both share `pnpm-lock.yaml` at the repo root.
+  </Step>
+  <Step>
+    ### Implicit setup
+
+    The first install also runs:
+
+    - `prepare` script → installs Husky git hooks (commit-msg with commitlint, pre-commit with lint-staged).
+    - `predev` / `prebuild` → `node scripts/copy-monaco-assets.mjs` copies Monaco editor assets into `public/`.
+  </Step>
+  <Step>
+    ### (Optional) install sidecar dependencies
+
+    The Node sidecar lives at `sidecar/` and is **outside** the workspace because it ships as a Tauri resource.
+    Install its deps separately if you plan to run it directly:
+
+    ```bash
+    cd sidecar
+    pnpm install
+    cd ..
+    ```
+  </Step>
+</Steps>
+
+## Run in web mode
+
+```bash
+pnpm dev
+```
+
+Opens Next.js dev server at [http://localhost:3000](http://localhost:3000). Web mode is suitable for:
+
+- UI development on components that don't depend on Tauri APIs.
+- Writing tests.
+- Quick iteration without paying the Rust compile cost.
+
+In web mode, code paths that call `invoke()` are gated by `isTauri()` (`lib/tauri.ts`); they no-op in the browser. The native vector store option is hidden in twin settings (cloud backends only).
+
+## Run in desktop mode
+
+```bash
+pnpm tauri dev
+```
+
+This runs `beforeDevCommand: pnpm dev` in parallel, then compiles and launches the Tauri window. The first compile takes minutes (downloads + compiles ~300 Rust crates); subsequent runs are seconds.
+
+If the window opens, the install is good. From here you can:
+
+- Resize, drag, minimize — window state is persisted by `tauri-plugin-window-state`.
+- `Ctrl/Cmd+Q` quits cleanly; the sidecar is killed by the lifecycle handler in `src-tauri/src/lib.rs`.
+- Open DevTools from the system tray (debug builds only).
+
+## Verify the toolchain
+
+```bash
+pnpm tauri info
+```
+
+Reports:
+
+- Tauri CLI version, Rust version, OS info.
+- Whether all required Tauri plugins are present.
+- WebView2 / WebKitGTK version.
+
+If any line shows ❌, fix it before continuing.
+
+## First-time gotchas
+
+<Accordions type="single">
+  <Accordion title="`Cannot find module 'collections/server'`" id="collections-server">
+    The docs package needs `pnpm docs:dev` (or `pnpm docs:build`) to run **once**
+    so fumadocs-mdx generates `docs/.source/`. Without that folder, TypeScript
+    can't resolve the `collections/server` alias used in `docs/lib/source.ts`.
+
+    ```bash
+    pnpm docs:dev   # leave running, or Ctrl+C after the first compile
+    ```
+  </Accordion>
+  <Accordion title="Sidecar fails to start (no credentials)" id="sidecar-credentials">
+    The sidecar reads its credentials from the same sources Claude Code uses
+    (`ANTHROPIC_API_KEY`, OAuth token in `~/.claude/`). On a fresh machine with
+    no Claude Code login, it will start but every `claude_send` returns "no credentials".
+
+    Either:
+
+    - Set `ANTHROPIC_API_KEY` in `.env.local`, **or**
+    - Run `claude login` (the official Claude Code CLI) once to populate `~/.claude/`.
+  </Accordion>
+  <Accordion title="Port 3000 already in use" id="port-3000">
+    <Tabs groupId="os" persist items={["Windows", "macOS / Linux"]}>
+      <Tab value="Windows">
+        ```powershell
+        netstat -ano | findstr :3000
+        taskkill /PID <PID> /F
+        ```
+      </Tab>
+      <Tab value="macOS / Linux">
+        ```bash
+        lsof -ti:3000 | xargs kill -9
+        ```
+      </Tab>
+    </Tabs>
+
+    You can also pass `PORT=3010 pnpm dev` and update `tauri.conf.json` → `build.devUrl` accordingly.
+  </Accordion>
+  <Accordion title="Rust compile errors" id="rust-errors">
+    ```bash
+    rustup update stable
+    cd src-tauri && cargo clean && cd ..
+    pnpm tauri dev
+    ```
+
+    <Callout type="warn" title="sqlite-vec compile fails">
+      If you see `error: failed to run custom build command for sqlite-vec ...`,
+      your C compiler is missing — install the platform toolchain from the
+      prerequisites above.
+    </Callout>
+  </Accordion>
+</Accordions>
+
+## Common scripts
+
+```bash
+pnpm dev            # Next.js web dev (port 3000)
+pnpm tauri dev      # Desktop dev mode
+
+pnpm build          # Static export → out/
+pnpm tauri build    # Desktop installer
+
+pnpm test           # Jest
+pnpm test:coverage  # Jest with coverage report (≥90% gate)
+pnpm typecheck      # tsc --noEmit
+pnpm lint           # ESLint
+pnpm format         # Prettier write
+
+pnpm docs:dev       # Fumadocs (port 3001)
+```
+
+See [Development](./development) for the full reference.
+
+## Next steps
+
+<Cards>
+  <Card title="Architecture" href="./architecture" description="Skim the layered design before going deeper." />
+  <Card title="Runtime & Tauri" href="./runtime-and-tauri" description="If you'll be touching native code." />
+  <Card title="Sidecar & Claude Agent SDK" href="./sidecar-and-claude-sdk" description="The Node host that runs the SDK." />
+  <Card title="Chat & Skills" href="./chat-and-skills" description="If you'll be working on the AI surfaces." />
+  <Card title="Employee Digital Twin" href="./employee-twin" description="The deepest customisation surface." />
+  <Card title="Development workflow" href="./development" description="Daily-loop scripts, conventions, testing." />
+</Cards>

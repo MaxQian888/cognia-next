@@ -25,7 +25,12 @@ export { cosineSimilarity as aiCosineSimilarity } from "ai"
  * Embedding-specific provider names (superset of chat providers)
  * Includes providers that only support embeddings
  */
-export type EmbeddingProviderName = ProviderName | "azure" | "amazon-bedrock" | "voyage"
+export type EmbeddingProviderName =
+  | ProviderName
+  | "azure"
+  | "amazon-bedrock"
+  | "voyage"
+  | "transformersjs"
 
 /**
  * Provider-specific options for embedding models

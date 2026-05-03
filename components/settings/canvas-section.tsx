@@ -564,7 +564,7 @@ function ExecutionTab({ settings }: SectionProps) {
           }
           disabled={!desktop}
         >
-          <SelectTrigger className="w-64 text-xs">
+          <SelectTrigger className="w-full text-xs sm:w-64">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -655,7 +655,7 @@ function ThemeTab({ settings }: SectionProps) {
             set({ theme: v })
           }}
         >
-          <SelectTrigger className="w-64 text-xs">
+          <SelectTrigger className="w-full text-xs sm:w-64">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

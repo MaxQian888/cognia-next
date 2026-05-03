@@ -197,13 +197,13 @@ function HistoryRow({ row }: { row: BackupHistoryRow }) {
         {t(`overview.encryption.${encryptionKey(row.encryption)}` as never)}
       </TableCell>
       <TableCell className="text-xs">{formatBytes(row.sizeBytes)}</TableCell>
-      <TableCell>
+      <TableCell className="max-w-[8rem] sm:max-w-[12rem]">
         {row.success ? (
           <CheckCircle2Icon className="size-4 text-green-500" aria-label={t("overview.success")} />
         ) : (
-          <span className="flex items-center gap-1 text-xs text-destructive">
-            <XCircleIcon className="size-4" />
-            <span className="truncate" title={row.errorMessage ?? ""}>
+          <span className="flex min-w-0 items-center gap-1 text-xs text-destructive">
+            <XCircleIcon className="size-4 shrink-0" />
+            <span className="min-w-0 truncate" title={row.errorMessage ?? ""}>
               {row.errorMessage ?? t("overview.failed")}
             </span>
           </span>

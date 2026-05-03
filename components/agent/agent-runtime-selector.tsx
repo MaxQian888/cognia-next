@@ -38,13 +38,13 @@ export function AgentRuntimeSelector({ className }: Props) {
   const runtime = useAgentRuntimeStore((s) => s.runtime)
   const setRuntime = useAgentRuntimeStore((s) => s.setRuntime)
   const externalAgentId = useAgentRuntimeStore((s) => s.externalAgentId)
-  const externalAgents = useExternalAgentStore((s) => s.getAllAgents())
+  const externalAgentName = useExternalAgentStore((s) =>
+    externalAgentId ? s.agents[externalAgentId]?.name : undefined
+  )
 
   const Icon = runtime === "external" ? PlugZapIcon : BotIcon
   const label =
-    runtime === "external"
-      ? (externalAgents.find((a) => a.id === externalAgentId)?.name ?? t("externalUnconfigured"))
-      : t("claudeSdk")
+    runtime === "external" ? (externalAgentName ?? t("externalUnconfigured")) : t("claudeSdk")
 
   return (
     <DropdownMenu>

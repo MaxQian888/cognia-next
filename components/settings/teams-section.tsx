@@ -742,7 +742,7 @@ function MemberOverrideCard({ character, member, mcpServers, onPatch }: MemberOv
         <span className="text-sm font-medium">{character.name}</span>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div className="space-y-1">
           <Label className="text-[11px]">{tEditor("role")}</Label>
           <Input

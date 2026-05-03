@@ -5,8 +5,8 @@
 // `?dataTab=` param (separate from `?section=` which the outer settings shell
 // owns) so deep-linking lands on the right pane.
 
-import { useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
+import { useRouter, useSearchParams } from "next/navigation"
 import { DatabaseIcon } from "lucide-react"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -22,36 +22,18 @@ function isDataTab(value: string | null): value is DataTabId {
   return !!value && (TAB_IDS as string[]).includes(value)
 }
 
-const noopSubscribe = () => () => {}
-
-function readTabFromUrl(): DataTabId {
-  const params = new URLSearchParams(window.location.search)
-  const requested = params.get(DATA_TAB_PARAM)
-  return isDataTab(requested) ? requested : "overview"
-}
-
 export function DataSection() {
   const t = useTranslations("settings.data")
-  // Hydrate from `?dataTab=` via useSyncExternalStore (no setState-in-effect),
-  // then track local mutations through `userTab`. In embedded mode (settings
-  // dialog) the URL is shared with the host page; we use a scoped param name
-  // to avoid clobbering the outer `?section=`.
-  const initialTab = useSyncExternalStore(
-    noopSubscribe,
-    readTabFromUrl,
-    () => "overview" as DataTabId
-  )
-  const [userTab, setUserTab] = useState<DataTabId | null>(null)
-  const activeTab = userTab ?? initialTab
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const requested = searchParams.get(DATA_TAB_PARAM)
+  const activeTab: DataTabId = isDataTab(requested) ? requested : "overview"
 
   const onTabChange = (value: string) => {
     if (!isDataTab(value)) return
-    setUserTab(value)
-    if (typeof window !== "undefined") {
-      const url = new URL(window.location.href)
-      url.searchParams.set(DATA_TAB_PARAM, value)
-      window.history.replaceState({}, "", url.toString())
-    }
+    const next = new URLSearchParams(searchParams.toString())
+    next.set(DATA_TAB_PARAM, value)
+    router.replace(`?${next.toString()}`, { scroll: false })
   }
 
   return (
@@ -65,12 +47,14 @@ export function DataSection() {
       </div>
 
       <Tabs value={activeTab} onValueChange={onTabChange}>
-        <TabsList>
-          <TabsTrigger value="overview">{t("tabs.overview")}</TabsTrigger>
-          <TabsTrigger value="backup">{t("tabs.backup")}</TabsTrigger>
-          <TabsTrigger value="domain">{t("tabs.domain")}</TabsTrigger>
-          <TabsTrigger value="maintenance">{t("tabs.maintenance")}</TabsTrigger>
-        </TabsList>
+        <div className="-mx-1 overflow-x-auto px-1">
+          <TabsList className="w-max">
+            <TabsTrigger value="overview">{t("tabs.overview")}</TabsTrigger>
+            <TabsTrigger value="backup">{t("tabs.backup")}</TabsTrigger>
+            <TabsTrigger value="domain">{t("tabs.domain")}</TabsTrigger>
+            <TabsTrigger value="maintenance">{t("tabs.maintenance")}</TabsTrigger>
+          </TabsList>
+        </div>
         <TabsContent value="overview" className="mt-4">
           <DataOverviewTab />
         </TabsContent>

@@ -11,6 +11,7 @@ import { useTranslations } from "next-intl"
 import {
   BotIcon,
   CogIcon,
+  DatabaseIcon,
   FileCodeIcon,
   FileTextIcon,
   HistoryIcon,
@@ -46,6 +47,7 @@ const CATEGORY_ICONS: Record<StorageCategory, LucideIcon> = {
   trustedWorkspace: ShieldIcon,
   ttsKey: KeyRoundIcon,
   backupHistory: HistoryIcon,
+  vector: DatabaseIcon,
   system: CogIcon,
   other: MoreHorizontalIcon,
 }
@@ -63,6 +65,7 @@ const CATEGORY_COLORS: Record<StorageCategory, string> = {
   trustedWorkspace: "bg-rose-500",
   ttsKey: "bg-pink-500",
   backupHistory: "bg-teal-500",
+  vector: "bg-violet-500",
   system: "bg-slate-500",
   other: "bg-zinc-500",
 }
@@ -145,21 +148,21 @@ export function StorageBreakdown({
         )}
       </div>
 
-      <div className="flex flex-wrap gap-2 text-[10px]">
+      <div className="flex flex-wrap gap-x-2 gap-y-1 text-[10px]">
         {topCategories.map((cat) => {
           const Icon = CATEGORY_ICONS[cat.category]
           return (
-            <div key={cat.category} className="flex items-center gap-1">
-              <div className={cn("size-2 rounded-full", CATEGORY_COLORS[cat.category])} />
-              <Icon className="size-3 text-muted-foreground" />
-              <span>{cat.displayName}</span>
+            <div key={cat.category} className="flex min-w-0 items-center gap-1">
+              <div className={cn("size-2 shrink-0 rounded-full", CATEGORY_COLORS[cat.category])} />
+              <Icon className="size-3 shrink-0 text-muted-foreground" />
+              <span className="truncate">{cat.displayName}</span>
             </div>
           )
         })}
         {otherTotal > 0 && (
-          <div className="flex items-center gap-1">
-            <div className="size-2 rounded-full bg-zinc-400" />
-            <span>{t("other")}</span>
+          <div className="flex min-w-0 items-center gap-1">
+            <div className="size-2 shrink-0 rounded-full bg-zinc-400" />
+            <span className="truncate">{t("other")}</span>
           </div>
         )}
       </div>

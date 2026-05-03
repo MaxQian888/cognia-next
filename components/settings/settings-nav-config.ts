@@ -27,6 +27,7 @@ import {
   PencilRulerIcon,
   WrenchIcon,
   BlocksIcon,
+  ArrowLeftRightIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
@@ -34,6 +35,8 @@ export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observ
 export type SettingsSectionId =
   | "general"
   | "api-key"
+  | "providers"
+  | "ccswitch"
   | "agents"
   | "agent-modes"
   | "tools"
@@ -82,6 +85,21 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "apiKey",
     group: "ai",
     icon: KeyRoundIcon,
+  },
+  {
+    id: "providers",
+    labelKey: "providers",
+    descriptionKey: "providers",
+    group: "ai",
+    icon: ServerCogIcon,
+  },
+  {
+    id: "ccswitch",
+    labelKey: "ccswitch",
+    descriptionKey: "ccswitch",
+    group: "ai",
+    icon: ArrowLeftRightIcon,
+    desktopOnly: true,
   },
   {
     id: "agents",
@@ -254,6 +272,38 @@ export const SETTINGS_GROUP_ORDER: SettingsGroup[] = [
 export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
   general: ["defaults", "model", "system prompt", "permission"],
   "api-key": ["anthropic", "key", "secret", "claude"],
+  providers: [
+    "providers",
+    "openai",
+    "anthropic",
+    "google",
+    "gemini",
+    "mistral",
+    "ollama",
+    "openrouter",
+    "deepseek",
+    "groq",
+    "cohere",
+    "api key",
+    "base url",
+    "custom provider",
+    "model list",
+  ],
+  ccswitch: [
+    "cc-switch",
+    "ccswitch",
+    "subscription",
+    "provider",
+    "switch",
+    "kimi",
+    "deepseek",
+    "moonshot",
+    "qwen",
+    "订阅",
+    "切换",
+    "供应商",
+    "服务商",
+  ],
   agents: [
     "external",
     "claude code",

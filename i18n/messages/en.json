@@ -73,6 +73,10 @@
     "copySuffix": "(Copy)",
     "executionFailedDefault": "Execution failed",
     "anonymousParticipant": "Anonymous",
+    "errorTitle": "Canvas crashed",
+    "errorDescription": "Something went wrong while rendering the editor. You can retry, or copy the error details to report it.",
+    "tryAgain": "Try again",
+    "copyError": "Copy error",
     "actions": {
       "review": "Review",
       "fix": "Fix",
@@ -84,7 +88,16 @@
       "format": "Format",
       "suggest": "Suggest",
       "saveVersion": "Save version",
-      "run": "Run"
+      "run": "Run",
+      "more": "More"
+    },
+    "shell": {
+      "openDocuments": "Open documents",
+      "openTools": "Open tools",
+      "expandLeft": "Show document rail",
+      "expandRight": "Show tools rail",
+      "collapseLeft": "Hide document rail",
+      "collapseRight": "Hide tools rail"
     },
     "panels": {
       "suggestions": "Suggestions",
@@ -567,8 +580,8 @@
     }
   },
   "page": {
-    "title": "React Quick Starter",
-    "subtitle": "Next.js 16 + Tauri 2.9 + Tailwind v4 + shadcn/ui",
+    "title": "Cognia",
+    "subtitle": "Desktop client for Claude Code · Next.js 16 + Tauri 2.9",
     "instructionEdit": "Get started by editing",
     "instructionSave": "Save and see your changes instantly.",
     "deployNow": "Deploy now",
@@ -724,7 +737,15 @@
     "providers": "Search providers",
     "providersDescription": "Configure API keys for each provider",
     "filterProviders": "Filter providers…",
-    "features": "Features",
+    "features": {
+      "aiAnswer": "AI Answer",
+      "news": "News",
+      "images": "Images",
+      "academic": "Academic",
+      "recencyFilter": "Recency",
+      "domainFilter": "Domain filter",
+      "contentExtraction": "Content extraction"
+    },
     "enableAll": "Enable all",
     "disableAll": "Disable all",
     "reset": "Reset",
@@ -742,14 +763,7 @@
     "googleCxHelp": "Required for Google Custom Search",
     "priority": "Priority",
     "higherPriority": "Higher priority",
-    "lowerPriority": "Lower priority",
-    "features.aiAnswer": "AI Answer",
-    "features.news": "News",
-    "features.images": "Images",
-    "features.academic": "Academic",
-    "features.recencyFilter": "Recency",
-    "features.domainFilter": "Domain filter",
-    "features.contentExtraction": "Content extraction"
+    "lowerPriority": "Lower priority"
   },
   "searchDefaults": {
     "title": "Default options",
@@ -831,12 +845,14 @@
     "title": "Source verification",
     "description": "Score search results by credibility before injecting into chat.",
     "verificationMode": "Mode",
-    "mode.ask": "Ask",
-    "mode.askDesc": "Show a confirmation dialog",
-    "mode.auto": "Auto",
-    "mode.autoDesc": "Auto-verify silently",
-    "mode.disabled": "Off",
-    "mode.disabledDesc": "Skip verification entirely",
+    "mode": {
+      "ask": "Ask",
+      "askDesc": "Show a confirmation dialog",
+      "auto": "Auto",
+      "autoDesc": "Auto-verify silently",
+      "disabled": "Off",
+      "disabledDesc": "Skip verification entirely"
+    },
     "minimumThreshold": "Minimum credibility",
     "loose": "Loose",
     "strict": "Strict",
@@ -893,8 +909,11 @@
     "title": "Settings",
     "description": "Configure defaults, your API key, prompt presets, MCP servers and more.",
     "close": "Close",
+    "backToChat": "Back to chat",
     "searchPlaceholder": "Search settings…",
     "noSettingsFound": "No settings match your search.",
+    "customModes": "Custom Agent Modes",
+    "customModesDesc": "Create and manage custom agent modes with specific tools, prompts, and behaviors.",
     "groupAi": "AI Core",
     "groupExtensions": "Extensions",
     "groupInterface": "Interface",
@@ -905,8 +924,10 @@
       "general": "General",
       "appearance": "Appearance",
       "apiKey": "API key",
+      "ccswitch": "CCSwitch",
       "agents": "Agents",
       "agentModes": "Agent modes",
+      "agentTeams": "Agent teams",
       "tools": "Tools",
       "search": "Web search",
       "speech": "Speech",
@@ -923,14 +944,19 @@
       "desktop": "Desktop",
       "about": "About",
       "scheduledTasks": "Scheduled Tasks",
-      "a2ui": "A2UI"
+      "a2ui": "A2UI",
+      "plugins": "Plugins",
+      "remoteControl": "Remote Control",
+      "providers": "Providers"
     },
     "descriptions": {
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
       "appearance": "Theme, font scale, language and motion.",
       "apiKey": "Anthropic API key (used by the local sidecar).",
+      "ccswitch": "Reuse providers, MCP servers, prompts and skills from CCSwitch — switch the active subscription with one click.",
       "agents": "External agents — Claude Code CLI, Codex, Gemini CLI, Cursor and any custom command speaking ACP / OpenCode / HTTP.",
       "agentModes": "Built-in and custom agent modes — system prompt, tool list, output format and live preview presets.",
+      "agentTeams": "Multi-agent team templates — manager-worker, parallel specialists, research squad. Browse built-ins, duplicate to fork, or create new templates.",
       "tools": "Built-in shell, filesystem, git, process and environment tools — global on/off, risk levels, and always-allow management.",
       "search": "Web search providers (Tavily, Brave, Bing, Google, Perplexity, Exa…), defaults, cache, safety and source verification.",
       "speech": "Voice input (STT) language and microphone, plus read-aloud (TTS) provider, voice and auto-play.",
@@ -947,7 +973,10 @@
       "desktop": "Tauri-only window, autostart and tray behavior.",
       "about": "Version, build info and credits.",
       "scheduledTasks": "Configure cron-style automation, agent permissions, and resource limits",
-      "a2ui": "Agent-to-UI mini-apps, runtime defaults, MCP bridge, and debugger."
+      "a2ui": "Agent-to-UI mini-apps, runtime defaults, MCP bridge, and debugger.",
+      "plugins": "Browse, install, configure, and govern plugins. Review permissions, scheduled jobs, devtools, and contract audits.",
+      "remoteControl": "Local HTTP listener for inbound triggers, plus webhook signing and custom headers for outbound calls.",
+      "providers": "AI provider API keys, models, and connection settings."
     },
     "canvas": {
       "title": "Canvas",
@@ -1001,17 +1030,130 @@
     "appearance": {
       "title": "Appearance",
       "description": "Tune the look and feel of the app. Changes are saved instantly.",
+      "tabs": {
+        "theme": "Theme",
+        "wallpaper": "Wallpaper",
+        "custom": "Custom theme",
+        "import": "Import",
+        "typography": "Typography",
+        "advanced": "Advanced"
+      },
       "themeLabel": "Theme",
       "theme": {
         "light": "Light",
         "dark": "Dark",
         "system": "Follow system"
       },
+      "colorPresetLabel": "Color preset",
+      "colorPresets": {
+        "default": "Default",
+        "ocean": "Ocean",
+        "forest": "Forest",
+        "sunset": "Sunset",
+        "lavender": "Lavender",
+        "rose": "Rose",
+        "slate": "Slate",
+        "amber": "Amber"
+      },
       "fontScaleLabel": "Font size",
       "fontScaleHint": "Scales the entire UI. Defaults to 16px.",
       "languageLabel": "Language",
       "reduceMotionLabel": "Reduce motion",
-      "reduceMotionHint": "Disables non-essential animations and transitions."
+      "reduceMotionHint": "Disables non-essential animations and transitions.",
+      "wallpaper": {
+        "title": "Wallpaper",
+        "description": "Apply an image, gradient, or solid color as the background. Built-in presets are pre-loaded; uploads stay on your device.",
+        "enabledLabel": "Enable background",
+        "scopeLabel": "Apply to",
+        "scopeAll": "Whole app",
+        "scopeChat": "Chat panel",
+        "scopeCanvas": "Canvas panel",
+        "scopeSidebar": "Sidebar",
+        "scopeGlobal": "Global",
+        "blurLabel": "Blur",
+        "opacityLabel": "Opacity",
+        "positionLabel": "Position",
+        "positionCover": "Cover",
+        "positionContain": "Contain",
+        "positionTile": "Tile",
+        "positionCenter": "Center",
+        "uploadHint": "Drop an image here or browse",
+        "dropHint": "Drop an image here, or click below",
+        "browse": "Browse files",
+        "uploading": "Uploading…",
+        "formats": "PNG, JPEG, WebP, GIF, AVIF · up to 32 MB",
+        "invalidType": "Unsupported file type. Use PNG, JPEG, WebP, GIF or AVIF.",
+        "tooLarge": "File is too large (max 32 MB).",
+        "deleteLabel": "Delete wallpaper",
+        "noActive": "No wallpaper selected.",
+        "galleryTitle": "Gallery",
+        "addCustom": "Custom",
+        "gradient": {
+          "title": "Build a gradient",
+          "start": "Start",
+          "end": "End",
+          "angle": "Angle",
+          "namePlaceholder": "Gradient name",
+          "save": "Add to gallery"
+        }
+      },
+      "customTheme": {
+        "title": "Custom theme",
+        "description": "Edit the cognia color tokens directly. Active custom themes override the color preset.",
+        "namePlaceholder": "Theme name",
+        "newButton": "New theme",
+        "saveButton": "Save",
+        "updateButton": "Update",
+        "deleteButton": "Delete",
+        "activateButton": "Apply",
+        "deactivateButton": "Use color preset",
+        "darkLabel": "Dark variant",
+        "savedLabel": "Saved themes",
+        "noSaved": "No custom themes yet.",
+        "previewLabel": "Live preview",
+        "tokens": {
+          "background": "Background",
+          "foreground": "Foreground",
+          "primary": "Primary",
+          "primaryForeground": "Primary text",
+          "secondary": "Secondary",
+          "secondaryForeground": "Secondary text",
+          "accent": "Accent",
+          "accentForeground": "Accent text",
+          "muted": "Muted",
+          "mutedForeground": "Muted text",
+          "card": "Card",
+          "cardForeground": "Card text",
+          "border": "Border",
+          "ring": "Ring",
+          "destructive": "Destructive",
+          "destructiveForeground": "Destructive text"
+        }
+      },
+      "vscode": {
+        "title": "Import VSCode themes",
+        "description": "Drop in a VSCode color theme JSON or a .vsix package. Only color tokens are read — extension code is ignored.",
+        "drop": "Drop a .json or .vsix file here",
+        "browse": "Browse files",
+        "selectThemes": "Select themes to import",
+        "importButton": "Import",
+        "cancelButton": "Cancel",
+        "imported": "Imported {count, plural, one {# theme} other {# themes}}.",
+        "errorParse": "Could not parse theme file.",
+        "errorVsix": "Could not read .vsix package.",
+        "noThemes": "No themes found in this package.",
+        "manifestTitle": "Imported from VSCode",
+        "removeButton": "Remove",
+        "history": "History"
+      },
+      "advanced": {
+        "title": "Custom CSS",
+        "description": "Inject your own CSS into the app. Remote @import / url(http) statements are stripped on save. Use carefully — bad CSS can hide UI elements.",
+        "enabledLabel": "Enable custom CSS",
+        "placeholder": "/* your CSS here */\nbody '{' letter-spacing: 0.2px; '}'",
+        "removed": "Removed {count, plural, one {# remote rule} other {# remote rules}} on save.",
+        "saveButton": "Save"
+      }
     },
     "data": {
       "title": "Data & privacy",
@@ -1289,6 +1431,7 @@
           "trustedWorkspace": "Trusted workspaces",
           "ttsKey": "TTS keys",
           "backupHistory": "Backup history",
+          "vector": "Vector store",
           "system": "System",
           "other": "Other"
         }
@@ -1367,6 +1510,9 @@
       "summaryBuiltIns": "Built-ins preserved",
       "summaryLocalStorage": "External-state restored",
       "summaryLocalStorageRestored": "Rolled back after error",
+      "summaryLsWritten": "Written ({count})",
+      "summaryLsSkipped": "Skipped ({count})",
+      "summaryLsErrors": "Errors ({count})",
       "summarySyncResults": "Agent re-projection",
       "syncResults": {
         "title": "Re-projection of MCP servers to external agents",
@@ -1382,26 +1528,50 @@
           "title": "External agents",
           "body": "ClaudeCode, Cursor, Codex, Gemini, …"
         },
-        "customModes": { "title": "Custom modes", "body": "User-defined chat modes." },
+        "customModes": {
+          "title": "Custom modes",
+          "body": "User-defined chat modes."
+        },
         "agentTeams": {
           "title": "Agent team workspace",
           "body": "Templates and workspace layout."
         },
-        "agentRuntime": { "title": "Active agent", "body": "Last-active agent / mode." },
-        "customThemes": { "title": "Custom themes", "body": "User-saved color palettes." },
-        "artifacts": { "title": "Artifacts", "body": "Generated artifacts and history." },
-        "a2uiSurfaces": { "title": "A2UI surfaces", "body": "Active surface registry." },
+        "agentRuntime": {
+          "title": "Active agent",
+          "body": "Last-active agent / mode."
+        },
+        "customThemes": {
+          "title": "Custom themes",
+          "body": "User-saved color palettes."
+        },
+        "artifacts": {
+          "title": "Artifacts",
+          "body": "Generated artifacts and history."
+        },
+        "a2uiSurfaces": {
+          "title": "A2UI surfaces",
+          "body": "Active surface registry."
+        },
         "canvasKeybindings": {
           "title": "Canvas keybindings",
           "body": "Keyboard shortcut overrides."
         },
-        "canvasComments": { "title": "Canvas comments cache", "body": "Document→comments cache." },
-        "canvasSettings": { "title": "Canvas settings", "body": "Canvas preferences." },
+        "canvasComments": {
+          "title": "Canvas comments cache",
+          "body": "Document→comments cache."
+        },
+        "canvasSettings": {
+          "title": "Canvas settings",
+          "body": "Canvas preferences."
+        },
         "schedulerPrefs": {
           "title": "Scheduler preferences",
           "body": "Scheduler tab preferences."
         },
-        "uiPreferences": { "title": "UI layout", "body": "Window layout preferences." }
+        "uiPreferences": {
+          "title": "UI layout",
+          "body": "Window layout preferences."
+        }
       },
       "reset": "Reset",
       "exportTitle": "Export",
@@ -1413,6 +1583,8 @@
       "includeSessionsHint": "Adds every chat session and message to the export. Can be large.",
       "includeApiKey": "Include API key",
       "includeApiKeyHint": "Embeds the Anthropic API key in plain text. Only do this for trusted backups.",
+      "includeBuiltIns": "Include built-in characters / skills / teams",
+      "includeBuiltInsHint": "Off by default — built-ins are re-seeded on import. Turn on to capture user-edited overrides of built-in items.",
       "importTitle": "Import",
       "importHint": "Reads a previously-exported JSON file and merges it into your local data. Built-in characters / skills / teams are never overwritten.",
       "importButton": "Choose file…",
@@ -1475,7 +1647,10 @@
       "savedAndRestarted": "API key saved. Sidecar restarted.",
       "cleared": "API key cleared.",
       "privacyTitle": "Privacy note",
-      "privacyBody": "The key is stored as plaintext in your browser's IndexedDB. Anyone with disk access to your user profile can read it. A future release will move this into your OS keyring."
+      "privacyBody": "The key is stored as plaintext in your browser's IndexedDB. Anyone with disk access to your user profile can read it. A future release will move this into your OS keyring.",
+      "ccswitchHintTitle": "Switching providers?",
+      "ccswitchHintBody": "If you use CCSwitch to manage multiple Anthropic-compatible providers (Kimi, DeepSeek, Qwen, …), import them into cognia-next and hot-swap with one click.",
+      "ccswitchHintAction": "Open CCSwitch"
     },
     "general": {
       "defaultModel": "Default model",
@@ -1618,6 +1793,37 @@
         "moveUp": "Move {name} up",
         "moveDown": "Move {name} down"
       }
+    },
+    "agentTeams": {
+      "title": "Agent team templates",
+      "description": "Built-in and user-created multi-agent team templates. Click Use to instantiate a team in the workspace, Duplicate to fork a built-in into an editable copy, or New template to start from scratch.",
+      "newTemplate": "New template",
+      "useTemplate": "Use template",
+      "create": "Create",
+      "save": "Save",
+      "edit": "Edit",
+      "delete": "Delete",
+      "duplicate": "Duplicate",
+      "builtIn": "Built-in",
+      "builtInReadOnly": "Built-in templates are read-only — duplicate first.",
+      "removeTitle": "Remove template?",
+      "removeBody": "\"{name}\" will be removed. Existing teams created from this template are unaffected.",
+      "addedToast": "Added \"{name}\".",
+      "updatedToast": "Updated \"{name}\".",
+      "removedToast": "Removed \"{name}\".",
+      "duplicatedToast": "Duplicated as \"{name}\".",
+      "useAria": "Use template {name}",
+      "editAria": "Edit template {name}",
+      "duplicateAria": "Duplicate template {name}",
+      "deleteAria": "Delete template {name}",
+      "teammateCount": "{count, plural, =0 {No teammates} =1 {# teammate} other {# teammates}}",
+      "nameRequired": "Template name is required.",
+      "editorName": "Name",
+      "editorNamePlaceholder": "Research squad",
+      "editorDescription": "Description",
+      "editorDescriptionPlaceholder": "What this team is for…",
+      "editorCategory": "Category",
+      "teammateEditNote": "{count, plural, =0 {No teammates yet — edit teammates from the workspace after creation.} =1 {# teammate carried over from the source template — edit them in the workspace.} other {# teammates carried over from the source template — edit them in the workspace.}}"
     },
     "teams": {
       "title": "Teams",
@@ -1876,6 +2082,195 @@
         "empty": "No events match the current filter.",
         "selectHint": "Select an event to inspect its payload.",
         "confirmClear": "Clear all event history?"
+      }
+    },
+    "plugins": {
+      "title": "Plugins",
+      "description": "Browse, install, configure, and govern plugins. Review their permissions, scheduled jobs, devtools, and contract audits.",
+      "subTabs": {
+        "overview": "Overview",
+        "installed": "Installed",
+        "marketplace": "Marketplace",
+        "permissions": "Permissions",
+        "scheduled": "Scheduled",
+        "devtools": "Devtools",
+        "audit": "Audit",
+        "settings": "Settings"
+      },
+      "statusBadge": {
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "error": "Error"
+      },
+      "overview": {
+        "badgeTotal": "{count} total",
+        "badgeEnabled": "{count} enabled",
+        "badgeLoading": "{count} loading",
+        "badgeError": "{count} errored",
+        "hint": "Manage your installed plugins, browse the marketplace, and review which extensions are running.",
+        "manageButton": "Open plugins"
+      },
+      "installed": {
+        "loading": "Loading installed plugins…",
+        "empty": "No plugins installed yet.",
+        "browseMarketplace": "Browse marketplace",
+        "colName": "Name",
+        "colVersion": "Version",
+        "colSource": "Source",
+        "colStatus": "Status",
+        "colCapabilities": "Capabilities",
+        "openFullManagement": "Open full management"
+      },
+      "marketplace": {
+        "title": "Marketplace",
+        "hint": "Search and install plugins from the unified marketplace. Skill and plugin entries share one storefront — installs are routed by entry type.",
+        "openButton": "Open marketplace"
+      },
+      "permissions": {
+        "hint": "Permissions declared in a plugin's manifest are granted silently at install. Optional permissions and runtime requests prompt you for confirmation. Dangerous permissions are highlighted.",
+        "dangerousLabel": "Dangerous",
+        "grantedTo": "{count} plugins",
+        "groups": {
+          "filesystem": "Filesystem",
+          "network": "Network",
+          "clipboard": "Clipboard",
+          "media": "Media",
+          "database": "Database",
+          "settings": "Settings",
+          "session": "Session",
+          "dangerous": "Dangerous"
+        }
+      },
+      "scheduled": {
+        "title": "Scheduled jobs",
+        "hint": "Plugin-contributed scheduled jobs share the same governance surface as other scheduled tasks. Open the scheduler to manage cron, intervals, and confirmation policies.",
+        "openSchedulerButton": "Open scheduler"
+      },
+      "devtools": {
+        "title": "Plugin devtools",
+        "hint": "Inspect the live message bus, hook history, sandbox state, and trigger hot reload for plugins under development.",
+        "gateHint": "Plugin devtools are only available in development builds. Run `pnpm dev` or set developer mode to access.",
+        "openButton": "Open devtools"
+      },
+      "audit": {
+        "title": "Contract audit",
+        "hint": "Each implemented extension point, hook, and activation pattern carries a binding, docs link, and required test list. Verified entries pass; missing_proof entries indicate contract drift that should be fixed.",
+        "badgeTotal": "{count} contracts",
+        "badgeVerified": "{count} verified",
+        "badgeMissing": "{count} missing proof",
+        "allVerified": "All implemented contracts are verified.",
+        "colId": "ID",
+        "colKind": "Kind",
+        "colMissing": "Missing"
+      },
+      "policy": {
+        "governance": "Governance mode",
+        "governanceHint": "Warn lets unknown points pass with a diagnostic; Block rejects them outright.",
+        "governanceWarn": "Warn",
+        "governanceBlock": "Block",
+        "signatureRequired": "Require signed plugins",
+        "signatureRequiredHint": "Refuse to load plugins without a verified publisher signature.",
+        "autoUpdate": "Auto-update plugins",
+        "autoUpdateHint": "Apply marketplace updates automatically when available.",
+        "rateLimitsNote": "Rate limits and sandbox defaults are configured globally and visible per-plugin in /plugins."
+      }
+    },
+    "remoteControl": {
+      "title": "Remote Control",
+      "description": "Trigger scheduler tasks from outside cognia, and sign / customize outbound webhook deliveries.",
+      "tabs": {
+        "overview": "Overview",
+        "inbound": "Inbound",
+        "outbound": "Outbound",
+        "events": "Events"
+      },
+      "overview": {
+        "statusActive": "Active on {endpoint}",
+        "statusInactive": "Inactive",
+        "statusDesktopOnly": "Inbound listener is desktop-only. Outbound + Events still work in the web build.",
+        "endpointUrlLabel": "Endpoint URL",
+        "lastCallAt": "Last call",
+        "lastCallNever": "No calls yet",
+        "totalCallsLabel": "Total calls",
+        "sendTestEvent": "Emit a custom test event",
+        "testEventDispatched": "Test event dispatched.",
+        "recentCallsHeading": "Recent inbound calls",
+        "noRecentCalls": "No inbound calls recorded yet.",
+        "openSchedulerLink": "Open scheduler"
+      },
+      "inbound": {
+        "desktopOnlyNotice": "Inbound triggers run on the desktop runtime only. Open cognia as a desktop app to enable a local listener.",
+        "enabled": "Enable inbound listener",
+        "enabledHelp": "Starts a local 127.0.0.1 HTTP server bound to the chosen port.",
+        "enabledRequiresToken": "Generate a bearer token before enabling the listener.",
+        "port": "Port",
+        "portHelp": "Loopback port between 1024 and 65535. Default 47821.",
+        "token": "Bearer token",
+        "tokenHidden": "Token hidden — click reveal to view.",
+        "generateToken": "Generate token",
+        "rotateToken": "Rotate",
+        "copyToken": "Copy",
+        "tokenRevealHide": "Hide",
+        "tokenRevealShow": "Reveal",
+        "tokenCopied": "Token copied to clipboard.",
+        "allowlist": "Allowlist (CIDR / IPv4)",
+        "allowlistHelp": "Default 127.0.0.1/32. Add LAN ranges (e.g. 10.0.0.0/24) only if you really need off-loopback access.",
+        "allowlistAdd": "Add",
+        "allowlistPlaceholder": "192.168.1.0/24",
+        "allowlistEmpty": "Entry must not be empty.",
+        "allowlistInvalid": "Use IPv4 or IPv4 CIDR (e.g. 10.0.0.0/24).",
+        "nonLoopbackWarning": "Non-loopback entry detected — anything on this network can hit the listener if they have the bearer token.",
+        "rateLimit": "Rate limit (req/min)",
+        "rateLimitHelp": "Requests above the limit get HTTP 429. Default 60.",
+        "endpointUrl": "Endpoint URL",
+        "copyEndpoint": "Copy URL",
+        "testInbound": "Test inbound listener",
+        "testSucceeded": "Inbound listener responded with 200.",
+        "testFailed": "Inbound test failed: {error}",
+        "startError": "Failed to start listener: {error}",
+        "stopError": "Failed to stop listener: {error}"
+      },
+      "outbound": {
+        "heading": "Outbound webhook signing",
+        "description": "Optional HMAC-SHA256 signature added to every outbound webhook delivery. Receivers can verify the request actually came from this cognia install.",
+        "signingSecret": "Signing secret",
+        "signingSecretHelp": "Stored in the OS keyring on desktop. Webhooks then carry an X-Cognia-Signature: sha256=<hex> header.",
+        "secretSet": "A signing secret is configured.",
+        "secretMissing": "No signing secret set.",
+        "setSecret": "Save secret",
+        "clearSecret": "Clear",
+        "secretPlaceholder": "Enter a strong shared secret",
+        "secretSaved": "Signing secret saved.",
+        "secretCleared": "Signing secret cleared.",
+        "secretSaveError": "Failed to save secret: {error}",
+        "defaultHeaders": "Default headers",
+        "defaultHeadersHelp": "Sent with every outbound webhook delivery. Content-Type is always application/json and cannot be overridden.",
+        "addHeader": "Add header",
+        "headerName": "Header name",
+        "headerValue": "Value",
+        "removeHeader": "Remove",
+        "retryConfigHeading": "Delivery limits (read-only)",
+        "retryConfigSummary": "Retries: {retries}, base delay {baseDelayMs} ms, request timeout {timeoutMs} ms.",
+        "perTaskHint": "Per-task webhook URLs are configured on each scheduled task in the Scheduler page."
+      },
+      "events": {
+        "heading": "Scheduler event types",
+        "description": "Built-in event types you can subscribe to with an event-triggered task. The ‘Emit test’ buttons fire a synthetic payload through the same path an inbound POST /events would take.",
+        "emitTest": "Emit test",
+        "testEventDispatched": "Event dispatched.",
+        "types": {
+          "sessionCreated": "A new chat session was created.",
+          "sessionCompleted": "A chat session ended.",
+          "sessionDeleted": "A chat session was deleted.",
+          "syncStarted": "A sync run started.",
+          "syncCompleted": "A sync run completed successfully.",
+          "syncFailed": "A sync run failed.",
+          "backupNeeded": "Backup interval elapsed and a new backup is due.",
+          "backupCompleted": "A backup run finished successfully.",
+          "workflowCompleted": "A scheduled workflow finished.",
+          "agentCompleted": "An agent task finished.",
+          "custom": "Free-form event — typically posted from external tooling."
+        }
       }
     }
   },
@@ -2297,10 +2692,614 @@
     },
     "back": "Back"
   },
+  "plugins": {
+    "title": "Plugins",
+    "description": "Browse, install, configure, and govern the plugins running inside Cognia. Inspect their permissions, scheduled jobs, analytics, and devtools — full marketplace search and installation flows are available here.",
+    "tabs": {
+      "installed": "Installed",
+      "browse": "Browse",
+      "configure": "Configure",
+      "permissions": "Permissions",
+      "scheduled": "Scheduled",
+      "analytics": "Analytics",
+      "devtools": "Devtools"
+    },
+    "installed": {
+      "loading": "Loading installed plugins…",
+      "empty": "No plugins installed yet.",
+      "browseMarketplace": "Browse marketplace",
+      "countTotal": "{count} total",
+      "countEnabled": "{count} enabled",
+      "countErrored": "{count} errored",
+      "countLoading": "{count} loading",
+      "countUpdates": "{count} update available",
+      "searchPlaceholder": "Search by name or id…",
+      "colName": "Name",
+      "colVersion": "Version",
+      "colSource": "Source",
+      "colStatus": "Status",
+      "colCapabilities": "Caps"
+    },
+    "browse": {
+      "loading": "Loading marketplace…",
+      "error": "Marketplace error: {message}",
+      "searchPlaceholder": "Search the marketplace…",
+      "emptySection": "Nothing to show in this section.",
+      "installing": "Installing…",
+      "install": "Install",
+      "section": {
+        "featured": "Featured",
+        "popular": "Popular",
+        "recent": "Recent"
+      }
+    },
+    "permissions": {
+      "title": "Permissions",
+      "hint": "Permissions a plugin declares in its manifest are auto-granted at install. Optional and runtime-requested permissions prompt the user. Dangerous permissions (shell:execute, process:spawn, python:execute, filesystem:write) are highlighted.",
+      "holders": "{count} holders",
+      "loading": "Loading plugin permissions…",
+      "emptyAll": "No plugins are installed yet.",
+      "noPermissions": "No installed plugin currently uses any permission.",
+      "dangerousSection": "Sensitive permissions",
+      "normalSection": "Standard permissions",
+      "bulkHeading": "Per-plugin review",
+      "reviewAria": "Review permissions for {name}",
+      "col": {
+        "permission": "Permission",
+        "holders": "Holders",
+        "plugins": "Plugins"
+      },
+      "groups": {
+        "filesystem": "Filesystem",
+        "network": "Network",
+        "clipboard": "Clipboard",
+        "media": "Media",
+        "database": "Database",
+        "settings": "Settings",
+        "session": "Session",
+        "dangerous": "Dangerous"
+      }
+    },
+    "analytics": {
+      "loading": "Loading analytics…",
+      "empty": "No analytics events have been recorded yet.",
+      "colPlugin": "Plugin",
+      "colTotalEvents": "Total",
+      "colLastEvent": "Last event",
+      "colDistinctKeys": "Keys"
+    },
+    "configure": {
+      "title": "Configure",
+      "hint": "Open any plugin's configuration form. Plugins without a manifest.configSchema cannot be configured here.",
+      "loading": "Loading plugins…",
+      "empty": "No plugins are installed yet.",
+      "emptyFiltered": "No plugins match this search.",
+      "search": "Search plugins…",
+      "action": "Configure",
+      "actionAria": "Configure {name}",
+      "col": {
+        "plugin": "Plugin",
+        "version": "Version",
+        "state": "State",
+        "action": ""
+      },
+      "state": {
+        "configured": "Configured",
+        "unconfigured": "Not configured",
+        "noSchema": "No schema"
+      }
+    },
+    "scheduled": {
+      "title": "Scheduled jobs",
+      "hint": "Plugin-contributed scheduled jobs are governed alongside other scheduled tasks. The shared treatment lives in the scheduler section.",
+      "openSchedulerButton": "Open scheduler"
+    },
+    "devtools": {
+      "title": "Plugin devtools",
+      "hint": "Inspect the live message bus, hook history, sandbox state, and trigger hot reload.",
+      "gateHint": "Plugin devtools are only available in development builds."
+    },
+    "signature": {
+      "verified": "Verified",
+      "verifiedTooltip": "Publisher signature verified.",
+      "unverified": "Unverified",
+      "unverifiedTooltip": "This plugin does not carry a verified publisher signature.",
+      "failed": "Signature failed",
+      "failedTooltip": "Signature verification failed — review before enabling.",
+      "unknown": "Unknown",
+      "unknownTooltip": "Signature state could not be determined."
+    },
+    "card": {
+      "openDetails": "Open details",
+      "configure": "Configure",
+      "reviewPermissions": "Review permissions",
+      "rollback": "Rollback…",
+      "disable": "Disable",
+      "enable": "Enable",
+      "uninstall": "Uninstall",
+      "permissionCount": "{count, plural, =0 {no permissions} =1 {1 permission} other {# permissions}}",
+      "updateBadge": "Update available",
+      "status": {
+        "error": "Error",
+        "loading": "Loading…",
+        "disabled": "Disabled",
+        "enabled": "Enabled"
+      }
+    },
+    "delete": {
+      "title": "Uninstall plugin?",
+      "body": "\"{name}\" will be removed from your installed plugins. This action can be reversed by re-installing the plugin.",
+      "cascadeLabel": "Also wipe stored data",
+      "cascadeHint": "Remove this plugin's saved configuration, analytics counters, and scheduled jobs as well.",
+      "cancel": "Cancel",
+      "confirm": "Uninstall"
+    },
+    "detail": {
+      "tabOverview": "Overview",
+      "tabManifest": "Manifest",
+      "tabCapabilities": "Capabilities",
+      "tabPermissions": "Permissions",
+      "tabLifecycle": "Lifecycle",
+      "tabOperations": "Operations",
+      "tabAnalytics": "Analytics",
+      "metaId": "ID",
+      "metaVersion": "Version",
+      "metaSource": "Source",
+      "metaType": "Type",
+      "metaStatus": "Status",
+      "metaAuthor": "Author",
+      "metaLicense": "License",
+      "metaHomepage": "Homepage",
+      "metaRepository": "Repository",
+      "metaError": "Last error",
+      "metaCreatedAt": "Installed at",
+      "metaUpdatedAt": "Last updated",
+      "metaLastUsedAt": "Last used",
+      "rollback": "Rollback…",
+      "rollbackAria": "Rollback {name}",
+      "emptyCapabilities": "This plugin declares no capabilities.",
+      "contributes": "Contributes",
+      "activation": "Activation events",
+      "declared": "Manifest-declared permissions",
+      "declaredEmpty": "No permissions declared.",
+      "optional": "Optional permissions",
+      "optionalEmpty": "No optional permissions.",
+      "dependencies": "Dependencies",
+      "notFound": "Plugin not found."
+    },
+    "permissionReview": {
+      "description": "Review what this plugin declared, what's currently granted, and adjust at runtime. Dangerous permissions are highlighted.",
+      "colPermission": "Permission",
+      "colDeclared": "Manifest",
+      "colOptional": "Optional",
+      "colGranted": "Granted",
+      "colActions": "",
+      "empty": "This plugin doesn't declare or hold any permissions.",
+      "auditLogTitle": "Recent audit events",
+      "auditEmpty": "No audit events for this plugin yet.",
+      "revokeAll": "Revoke all",
+      "close": "Close",
+      "grant": "Grant",
+      "revoke": "Revoke"
+    },
+    "configForm": {
+      "description": "Settings declared in the plugin's manifest.configSchema. Save to apply the new values on next activation.",
+      "noSchema": "This plugin doesn't declare a configuration schema. Its raw config is shown below for reference.",
+      "loading": "Loading plugin configuration…",
+      "save": "Save",
+      "saving": "Saving…",
+      "cancel": "Cancel",
+      "close": "Close"
+    },
+    "panel": {
+      "totalBadge": "{count} total",
+      "filteredBadge": "{count} shown",
+      "searchPlaceholder": "Search plugins…",
+      "filtersButton": "Filters",
+      "categoriesButton": "Categories"
+    },
+    "toolbar": {
+      "install": "Install",
+      "fromFile": "From file…",
+      "fromUrl": "From URL…",
+      "fromUrlPrompt": "Plugin manifest URL",
+      "fromFileSourceLabel": "Local files ({count})",
+      "checkUpdates": "Check for updates",
+      "syncRegistry": "Sync registry",
+      "syncRegistryAria": "Refresh marketplace registry and check installed plugins for updates",
+      "fromUrlDialog": {
+        "title": "Install from URL",
+        "description": "Provide a direct link to a plugin manifest (plugin.json). The manifest will be staged for review before installation.",
+        "label": "Manifest URL",
+        "placeholder": "https://example.com/plugin.json",
+        "submit": "Fetch",
+        "cancel": "Cancel",
+        "emptyError": "Please enter a URL.",
+        "error": "Failed to fetch manifest: {message}"
+      }
+    },
+    "grid": {
+      "loading": "Loading plugins…",
+      "emptyAll": "No plugins installed yet.",
+      "emptyFiltered": "No plugins match the current filters.",
+      "browseMarketplace": "Browse marketplace"
+    },
+    "marketplaceCard": {
+      "install": "Install",
+      "installing": "Installing…",
+      "uninstall": "Uninstall",
+      "uninstalling": "Uninstalling…",
+      "dangerous": "Dangerous"
+    },
+    "marketplaceDetail": {
+      "author": "Author",
+      "license": "License",
+      "capabilities": "Capabilities",
+      "homepage": "Homepage",
+      "repository": "Repository",
+      "declared": "Declared permissions",
+      "optional": "Optional permissions",
+      "dependencies": "Dependencies",
+      "install": "Install",
+      "installing": "Installing…",
+      "uninstall": "Uninstall",
+      "uninstalling": "Uninstalling…"
+    },
+    "marketplace": {
+      "loading": "Loading marketplace…",
+      "error": "Marketplace error: {message}",
+      "retry": "Retry",
+      "searchPlaceholder": "Search the marketplace…",
+      "emptySection": "Nothing in this section yet.",
+      "sections": {
+        "all": "All",
+        "featured": "Featured",
+        "popular": "Popular",
+        "recent": "Recent"
+      }
+    },
+    "batchActions": {
+      "ariaLabel": "Batch actions",
+      "selected": "{count} selected",
+      "enableAll": "Enable all",
+      "disableAll": "Disable all",
+      "refresh": "Refresh",
+      "uninstall": "Uninstall",
+      "clearSelection": "Clear selection"
+    },
+    "filterSheet": {
+      "title": "Plugin filters",
+      "description": "Narrow the installed list by capability, permission, source, or status.",
+      "query": "Search",
+      "queryPlaceholder": "name, id, description…",
+      "capability": "Capability",
+      "permission": "Permission",
+      "source": "Source",
+      "status": "Status",
+      "signedOnly": "Signed only",
+      "hasUpdate": "Has update",
+      "sort": "Sort by",
+      "sortMode": {
+        "name": "Name",
+        "updated": "Last updated",
+        "usage": "Last used",
+        "rating": "Rating"
+      },
+      "any": "Any",
+      "reset": "Reset",
+      "apply": "Apply"
+    },
+    "import": {
+      "title": "Import plugin",
+      "description": "Confirm the entries staged from {source} before installing.",
+      "errorsTitle": "{count} parse errors",
+      "emptyDrafts": "Nothing to import — all files failed to parse.",
+      "importing": "Importing…",
+      "confirm": "Install {count}",
+      "cancel": "Cancel"
+    },
+    "conflict": {
+      "title": "Conflicts detected for {id}",
+      "description": "Review the conflicts below before continuing.",
+      "highCount": "{count} high",
+      "mediumCount": "{count} medium",
+      "lowCount": "{count} low",
+      "relatedPlugin": "Related plugin:",
+      "abort": "Abort",
+      "continue": "Continue anyway"
+    },
+    "update": {
+      "title": "Plugin updates",
+      "description": "Updates fetched from the marketplace.",
+      "availableCount": "{count} available",
+      "recheck": "Re-check",
+      "checking": "Checking…",
+      "upToDate": "All plugins are up to date.",
+      "install": "Install",
+      "installAll": "Install all",
+      "close": "Close"
+    },
+    "rollback": {
+      "title": "Rollback history",
+      "description": "Restore a previous version captured before an update.",
+      "empty": "No snapshots have been recorded yet.",
+      "canNotRollback": "No prior version of this plugin can be rolled back to.",
+      "currentVersion": "Currently on v{version}",
+      "hasBackups": "{count} versions available",
+      "desktopOnlyHint": "Rollbacks run through the native bridge and are only available in the desktop build.",
+      "rollback": "Rollback",
+      "rollbackAria": "Rollback to v{version}",
+      "rollbackFailed": "Rollback failed.",
+      "rollingBack": "Rolling back…",
+      "close": "Close"
+    },
+    "backup": {
+      "title": "Backups",
+      "create": "Create backup",
+      "creating": "Creating…",
+      "createFailed": "Backup failed.",
+      "restore": "Restore",
+      "delete": "Delete",
+      "desktopOnlyHint": "Backups run through the native bridge and are only writable in the desktop build.",
+      "empty": "No backups yet."
+    },
+    "scheduledJobs": {
+      "loading": "Loading scheduled jobs…",
+      "empty": "No plugin-contributed scheduled jobs yet.",
+      "openScheduler": "Open scheduler",
+      "countTotal": "{count} jobs",
+      "colPlugin": "Plugin",
+      "colHandler": "Handler",
+      "colCron": "Schedule",
+      "colStatus": "Status",
+      "colNextRun": "Next run",
+      "colLastRun": "Last run",
+      "status": {
+        "active": "Active",
+        "paused": "Paused",
+        "error": "Error"
+      }
+    },
+    "devtoolsPanel": {
+      "title": "Plugin devtools",
+      "gateHint": "Plugin devtools are only available in development builds. Enable developer mode to access them.",
+      "enableDeveloperMode": "Enable developer mode",
+      "refresh": "Refresh",
+      "clear": "Clear",
+      "tabs": {
+        "logs": "Logs",
+        "bus": "Message bus",
+        "hooks": "Hook history",
+        "profiler": "Profiler",
+        "hotReload": "Hot reload",
+        "inspect": "Inspect"
+      },
+      "logs": {
+        "empty": "No logs captured."
+      },
+      "bus": {
+        "empty": "No bus events.",
+        "desktopOnly": "The dev-server message bus is only available in the desktop build."
+      },
+      "hooks": {
+        "empty": "No hook activity."
+      },
+      "profiler": {
+        "selectPlugin": "Select a plugin",
+        "refresh": "Refresh",
+        "totalOps": "Operations",
+        "avgDuration": "Average duration",
+        "maxDuration": "Max duration",
+        "emptyAll": "No installed plugins to profile yet.",
+        "emptyForPlugin": "No measurements recorded for this plugin yet."
+      },
+      "hotReload": {
+        "hint": "Trigger a fresh load of a plugin without reinstalling.",
+        "watching": "Watching",
+        "idle": "Idle",
+        "reload": "Reload",
+        "reloading": "Reloading…",
+        "reloadAll": "Reload all",
+        "reloadAria": "Reload {name}",
+        "emptyPlugins": "No plugins installed.",
+        "historyTitle": "Recent reloads",
+        "historyEmpty": "No reload history yet.",
+        "ok": "ok",
+        "failed": "failed"
+      },
+      "inspect": {
+        "refresh": "Refresh",
+        "loading": "Inspecting plugins…",
+        "empty": "No plugins are loaded.",
+        "colPlugin": "Plugin",
+        "colStatus": "Status",
+        "colHooks": "Hooks",
+        "colTools": "Tools",
+        "colCommands": "Commands",
+        "colError": "Error",
+        "error": "error"
+      }
+    },
+    "dependencyGraph": {
+      "title": "Dependency graph",
+      "loading": "Resolving dependencies…",
+      "root": "root",
+      "missing": "missing",
+      "unresolved": "Unresolved",
+      "cyclesTitle": "{count} dependency cycles",
+      "conflictsTitle": "{count} conflicts",
+      "warningsTitle": "{count} warnings"
+    },
+    "resourceManager": {
+      "title": "Resource usage",
+      "noLimits": "This plugin has no rate limits configured."
+    },
+    "analyticsPanel": {
+      "loading": "Loading analytics…",
+      "empty": "No analytics events yet.",
+      "summaryEvents": "Total events",
+      "summaryKeys": "Distinct keys",
+      "summaryErrors": "Errors",
+      "colPlugin": "Plugin",
+      "colEvents": "Events",
+      "colKeys": "Keys",
+      "colLastEvent": "Last event"
+    },
+    "discovery": {
+      "title": "Featured plugins",
+      "loading": "Loading featured plugins…",
+      "empty": "No featured plugins to highlight right now.",
+      "install": "Install",
+      "installing": "Installing…"
+    },
+    "categorySidebar": {
+      "all": "All capabilities",
+      "capability": {
+        "tools": "Tools",
+        "components": "Components",
+        "modes": "Modes",
+        "themes": "Themes",
+        "commands": "Commands",
+        "hooks": "Hooks",
+        "media": "Media",
+        "canvas": "Canvas",
+        "ai-provider": "AI provider",
+        "scheduler": "Scheduler",
+        "exporters": "Exporters",
+        "importers": "Importers",
+        "python": "Python",
+        "agentPresets": "Agent presets"
+      }
+    }
+  },
+  "ccswitch": {
+    "title": "CCSwitch",
+    "description": "Read providers, MCP servers, prompts and skills from your local CCSwitch installation. Switching a provider here updates cognia-next's bundled SDK and (optionally) propagates to selected external agents.",
+    "tabs": {
+      "overview": "Overview",
+      "providers": "Providers",
+      "mcp": "MCP servers",
+      "prompts": "Prompts",
+      "skills": "Skills",
+      "sync": "Sync settings"
+    },
+    "counts": {
+      "providers": "Providers",
+      "mcpServers": "MCP",
+      "prompts": "Prompts",
+      "skills": "Skills"
+    },
+    "agents": {
+      "claude-code": "Claude Code (~/.claude/settings.json)",
+      "claude-desktop": "Claude Desktop",
+      "codex": "Codex",
+      "gemini": "Gemini CLI"
+    },
+    "overview": {
+      "webModeTitle": "Desktop only",
+      "webModeBody": "CCSwitch interop reads a local SQLite database. Run cognia-next in desktop mode (`pnpm tauri dev`) to use this section.",
+      "errorTitle": "Could not read CCSwitch's database",
+      "notFoundTitle": "CCSwitch not detected",
+      "notFoundBody": "We couldn't find ~/.cc-switch/cc-switch.db. Install CCSwitch and add at least one provider, then come back.",
+      "detectedTitle": "CCSwitch detected",
+      "detectedBody": "cognia-next will read this database read-only. CCSwitch remains the editor.",
+      "dbPath": "Database",
+      "recheck": "Re-check",
+      "activeTitle": "Active in cognia-next",
+      "activeBody": "The provider whose API key + base URL match cognia-next's current settings.",
+      "noActive": "No CCSwitch provider matches",
+      "noActiveBody": "cognia-next is using a manually-entered API key, or a provider whose key/URL don't match any CCSwitch record.",
+      "driftTitle": "Drift detected",
+      "driftBody": "cognia-next and at least one external agent disagree on the active provider. Pick one in the Providers tab to reconcile."
+    },
+    "providers": {
+      "headerHint": "CCSwitch is the editor for these records — go back to CCSwitch to add, rename or delete.",
+      "refresh": "Refresh",
+      "errorTitle": "Could not list providers",
+      "emptyTitle": "No providers in CCSwitch",
+      "emptyBody": "Add a provider in CCSwitch first.",
+      "officialEndpoint": "Official Anthropic endpoint",
+      "activeBadge": "Active",
+      "useHere": "Use here",
+      "useHereAndIn": "Use here & in…",
+      "model": "Model"
+    },
+    "mcp": {
+      "headerHint": "Selected MCP servers are imported into cognia-next's MCP store using the existing 'skip / overwrite / duplicate' semantics.",
+      "errorTitle": "Could not list MCP servers",
+      "emptyTitle": "No MCP servers in CCSwitch",
+      "emptyBody": "CCSwitch's mcp_servers table is empty.",
+      "listTitle": "MCP servers in CCSwitch",
+      "strategyTitle": "On name collision",
+      "strategyBody": "When a server with the same name already exists in cognia-next.",
+      "strategy": {
+        "skip": "Keep existing",
+        "skipDesc": "Don't touch existing rows. Recommended.",
+        "overwrite": "Overwrite",
+        "overwriteDesc": "Replace command/args/url with CCSwitch's values.",
+        "duplicate": "Duplicate",
+        "duplicateDesc": "Add the import with a ' (imported)' suffix on the name."
+      },
+      "importBtn": "Import {count, plural, =0 {nothing} =1 {1 server} other {# servers}}",
+      "importing": "Importing…",
+      "resultSummary": "Imported {imported}, updated {updated}, skipped {skipped}, errored {errored}."
+    },
+    "prompts": {
+      "headerHint": "Each selected prompt becomes a new cognia-next prompt preset (category 'custom').",
+      "errorTitle": "Could not list prompts",
+      "emptyTitle": "No prompts in CCSwitch",
+      "emptyBody": "CCSwitch's prompts table is empty.",
+      "listTitle": "Prompts in CCSwitch",
+      "importBtn": "Import {count, plural, =0 {nothing} =1 {1 prompt} other {# prompts}}",
+      "importing": "Importing…",
+      "resultSummary": "Imported {imported}, errored {errored}."
+    },
+    "skills": {
+      "headerHint": "Skills with inline content become new cognia-next skills. Rows pointing at an external file (greyed) need to be re-imported via Settings → Skills.",
+      "errorTitle": "Could not list skills",
+      "emptyTitle": "No skills in CCSwitch",
+      "emptyBody": "CCSwitch's skills table is empty.",
+      "listTitle": "Skills in CCSwitch",
+      "externalBadge": "external file",
+      "importBtn": "Import {count, plural, =0 {nothing} =1 {1 skill} other {# skills}}",
+      "importing": "Importing…",
+      "resultSummary": "Imported {imported}, skipped {skipped}, errored {errored}."
+    },
+    "sync": {
+      "flagsTitle": "CCSwitch interop",
+      "flagsBody": "Master toggle and refresh behaviour for the CCSwitch section.",
+      "enabledLabel": "Enable CCSwitch integration",
+      "enabledBody": "When off, the section is hidden from the sidebar and no IPC is issued.",
+      "watchDbLabel": "Re-check on focus",
+      "watchDbBody": "Re-poll cc-switch.db whenever the cognia-next window regains focus, so the active provider badge stays fresh.",
+      "propagationTitle": "Default propagation",
+      "propagationBody": "These agents are pre-checked when you open the 'Use here & in…' dialog. Per-switch selection still wins.",
+      "save": "Save",
+      "saving": "Saving…"
+    },
+    "dialog": {
+      "title": "Switch provider",
+      "body": "Review what the switch will change before confirming.",
+      "bodyFor": "Switch to {name}. Review what changes before confirming.",
+      "cogniaSection": "Cognia-next",
+      "agentsSection": "Also write to",
+      "apiKey": "API key",
+      "baseUrl": "Base URL",
+      "willRestart": "The bundled SDK sidecar will be restarted so the new env takes effect.",
+      "noChange": "Cognia-next's API key and base URL already match this provider — no sidecar restart needed.",
+      "willWrite": "Will write to {count, plural, =1 {1 agent file} other {# agent files}}.",
+      "notYetSupported": "not yet supported",
+      "cancel": "Cancel",
+      "confirm": "Apply switch",
+      "close": "Close",
+      "cogniaApplied": "Cognia-next updated."
+    }
+  },
   "mcp": {
     "title": "MCP servers",
     "description": "Model Context Protocol servers exposed to Claude on every turn. Toggle individually; disabled servers stay configured but inactive.",
     "addServer": "Add server",
+    "importLabel": "Import",
     "import": {
       "title": "Import MCP servers",
       "pickAgent": "Pick an agent to read its mcpServers config from.",
@@ -2557,8 +3556,7 @@
       "copyLogEntry": "Copy log entry",
       "focusTraceMenu": "Focus on this trace",
       "focusSessionMenu": "Focus on this session",
-      "viewDetailsMenu": "View details",
-      "back": "Back"
+      "viewDetailsMenu": "View details"
     },
     "dashboard": {
       "noData": "No log data available for visualization",
@@ -2853,6 +3851,8 @@
     "more": "More",
     "remove": "Remove",
     "dismiss": "Dismiss",
+    "import": "Import",
+    "export": "Export",
     "loading": "Loading…"
   },
   "externalAgent": {
@@ -2978,7 +3978,16 @@
       "connected": "Connected successfully",
       "disconnected": "Disconnected successfully",
       "connectionFailed": "Connection failed",
-      "disconnectFailed": "Failed to disconnect"
+      "disconnectFailed": "Failed to disconnect",
+      "quickStartTitle": "Quick start from preset",
+      "quickStartDescription": "Pick a preset to instantiate an external agent with sensible defaults. You can customize fields after.",
+      "useThisPreset": "Use this preset",
+      "fromPreset": "From preset: {name}",
+      "showExperimental": "Show experimental",
+      "presetGalleryEmpty": "No presets available.",
+      "quickStartPreset": "Quick start preset",
+      "selectPresetOrCustom": "Select a preset or configure manually",
+      "customConfiguration": "Custom configuration"
     }
   },
   "tools": {
@@ -3109,6 +4118,9 @@
     "createModeDesc": "Define a custom agent mode with tailored tools, prompts, and behavior.",
     "editMode": "Edit Custom Mode",
     "editModeDesc": "Update the configuration of this custom mode.",
+    "builtIn": "Built-in",
+    "builtInReadOnly": "Built-in modes can't be edited. Duplicate to customize.",
+    "builtInsAvailableHint": "Built-in modes are listed below — duplicate any to start customizing.",
     "create": "Create",
     "defaultName": "New Custom Mode",
     "modeGenerationFailed": "Failed to generate mode from description",
@@ -3198,6 +4210,37 @@
       "fallbackName": "Custom Mode"
     }
   },
+  "customModeSettings": {
+    "modeDuplicated": "Mode duplicated",
+    "modeDeleted": "Mode deleted",
+    "modeExported": "Mode exported",
+    "exportedModes": "Exported {count} modes",
+    "importedModes": "Imported {count} modes",
+    "importedMode": "Imported mode \"{name}\"",
+    "failedToImportMode": "Failed to import mode",
+    "invalidFileFormat": "Invalid file format",
+    "failedToParseFile": "Failed to parse file",
+    "deletedModes": "Deleted {count} modes",
+    "searchModes": "Search modes…",
+    "allCategories": "All categories",
+    "sortByName": "Sort by name",
+    "sortByCreated": "Sort by created",
+    "sortByUpdated": "Sort by updated",
+    "sortByMostUsed": "Sort by most used",
+    "selected": "{count} selected",
+    "clear": "Clear",
+    "selectAll": "Select all",
+    "deleteSelected": "Delete selected",
+    "noCustomModesYet": "No custom modes yet",
+    "noModesMatchFilters": "No modes match the filters",
+    "createFirstModeDesc": "Create your first custom mode to get started.",
+    "createFirstMode": "Create first mode",
+    "noDescription": "No description",
+    "tools": "{count} tools",
+    "usedTimes": "Used {count} times",
+    "duplicate": "Duplicate",
+    "deleteConfirmDesc": "This action cannot be undone. The custom mode will be permanently removed."
+  },
   "scheduler": {
     "title": "Task Scheduler",
     "subtitle": "Manage automated tasks and workflows",
@@ -3271,7 +4314,70 @@
     "noExecutions": "No executions yet",
     "executionConfig": "Execution Config",
     "notificationConfig": "Notifications",
-    "payload": "Payload",
+    "payload": {
+      "prompt": "Prompt",
+      "promptPlaceholder": "What should the agent do?",
+      "character": "Character",
+      "characterPlaceholder": "Select a character",
+      "characterNone": "No character",
+      "skill": "Skill",
+      "skillPlaceholder": "Select a skill",
+      "skillNone": "No additional skill",
+      "agentMode": "Agent mode",
+      "modeUseRuntime": "Use the active mode at run time",
+      "modeNone": "No mode (raw character + skills)",
+      "modeBuiltIn": "built-in",
+      "modeCustom": "custom",
+      "model": "Model",
+      "modelPlaceholder": "claude-opus-4-7",
+      "effort": "Effort",
+      "effortUseDefault": "Use default",
+      "maxTurns": "Max turns",
+      "maxTurnsPlaceholder": "1–100",
+      "team": "Team",
+      "teamPlaceholder": "Select a team",
+      "teamNone": "Direct session (no team)",
+      "teamHelp": "When set, the scheduler creates a team-kind session and lets the team router fan out to members.",
+      "sessionId": "Existing session id",
+      "sessionIdPlaceholder": "leave empty to create a new one",
+      "sessionTitle": "Session title (new sessions only)",
+      "sessionTitlePlaceholder": "Defaults to \"{name} (scheduled)\"",
+      "permissionMode": "Permission mode",
+      "tools": {
+        "heading": "Tool whitelist / blocklist",
+        "allowedHeading": "Allowed tools (unioned with character / mode / skill tools)",
+        "allowedHelp": "Use built-in tool names like Read, Write, Bash. MCP tools follow the mcp__server__tool convention.",
+        "disallowedHeading": "Disallowed tools",
+        "disallowedHelp": "Replaces the character's disallow list when set."
+      },
+      "mcp": {
+        "heading": "MCP servers"
+      },
+      "builtinToolsHeading": "Sidecar built-in tools (per-task overrides)",
+      "additionalDirectories": {
+        "heading": "Additional directories"
+      },
+      "appendSystemPromptHeading": "Append system prompt",
+      "appendSystemPromptHelp": "Concatenated AFTER the resolved system prompt — useful for run-specific reminders without rewriting the character.",
+      "externalAgent": {
+        "agentId": "External agent",
+        "agentIdPlaceholder": "Select or paste an agent id",
+        "noAgentsHelp": "No external agents are configured yet. Configure them in Settings → External Agents first.",
+        "cwd": "Working directory",
+        "cwdPlaceholder": "/path/to/project",
+        "timeoutMs": "Timeout (ms)",
+        "timeoutMsPlaceholder": "Defaults to task timeout"
+      },
+      "errors": {
+        "promptRequired": "Prompt is required",
+        "characterIdRequired": "Character is required for agent tasks",
+        "skillIdRequired": "Skill is required for skill tasks",
+        "agentIdRequired": "External agent is required"
+      },
+      "webhookUrl": "Webhook URL",
+      "webhookUrlPlaceholder": "https://example.com/webhook",
+      "webhookUrlInvalid": "Webhook URL must start with http:// or https://"
+    },
     "payloadDescription": "Data passed to the task executor",
     "noSchedule": "No schedule",
     "overdue": "Overdue",
@@ -3339,11 +4445,14 @@
       }
     },
     "tools": {
-      "customLabel": "Custom tool names",
-      "addCustomLabel": "Add custom tool",
-      "addCustomPlaceholder": "e.g. mcp__notion__search",
-      "add": "Add",
-      "remove": "Remove"
+      "createSuccess": "Scheduled task created successfully",
+      "createFailed": "Failed to create scheduled task",
+      "listEmpty": "No scheduled tasks found",
+      "manageSuccess": "Task operation completed",
+      "manageFailed": "Task operation failed",
+      "reminderCreated": "Reminder created successfully",
+      "promoteSuccess": "Task promoted to system service",
+      "promoteFailed": "Failed to promote task"
     },
     "mcp": {
       "modes": {
@@ -3369,67 +4478,25 @@
       "remove": "Remove",
       "add": "Add directory"
     },
-    "payload": {
-      "prompt": "Prompt",
-      "promptPlaceholder": "What should the agent do?",
-      "character": "Character",
-      "characterPlaceholder": "Select a character",
-      "characterNone": "No character",
-      "skill": "Skill",
-      "skillPlaceholder": "Select a skill",
-      "skillNone": "No additional skill",
-      "agentMode": "Agent mode",
-      "modeUseRuntime": "Use the active mode at run time",
-      "modeNone": "No mode (raw character + skills)",
-      "modeBuiltIn": "built-in",
-      "modeCustom": "custom",
-      "model": "Model",
-      "modelPlaceholder": "claude-opus-4-7",
-      "effort": "Effort",
-      "effortUseDefault": "Use default",
-      "maxTurns": "Max turns",
-      "maxTurnsPlaceholder": "1–100",
-      "team": "Team",
-      "teamPlaceholder": "Select a team",
-      "teamNone": "Direct session (no team)",
-      "teamHelp": "When set, the scheduler creates a team-kind session and lets the team router fan out to members.",
-      "sessionId": "Existing session id",
-      "sessionIdPlaceholder": "leave empty to create a new one",
-      "sessionTitle": "Session title (new sessions only)",
-      "sessionTitlePlaceholder": "Defaults to \"{name} (scheduled)\"",
-      "permissionMode": "Permission mode",
-      "tools": {
-        "heading": "Tool whitelist / blocklist",
-        "allowedHeading": "Allowed tools (unioned with character / mode / skill tools)",
-        "allowedHelp": "Use built-in tool names like Read, Write, Bash. MCP tools follow the mcp__server__tool convention.",
-        "disallowedHeading": "Disallowed tools",
-        "disallowedHelp": "Replaces the character's disallow list when set."
-      },
-      "mcp": {
-        "heading": "MCP servers"
-      },
-      "builtinToolsHeading": "Sidecar built-in tools (per-task overrides)",
-      "additionalDirectories": {
-        "heading": "Additional directories"
-      },
-      "appendSystemPromptHeading": "Append system prompt",
-      "appendSystemPromptHelp": "Concatenated AFTER the resolved system prompt — useful for run-specific reminders without rewriting the character.",
-      "externalAgent": {
-        "agentId": "External agent",
-        "agentIdPlaceholder": "Select or paste an agent id",
-        "noAgentsHelp": "No external agents are configured yet. Configure them in Settings → External Agents first.",
-        "cwd": "Working directory",
-        "cwdPlaceholder": "/path/to/project",
-        "timeoutMs": "Timeout (ms)",
-        "timeoutMsPlaceholder": "Defaults to task timeout"
-      },
-      "errors": {
-        "promptRequired": "Prompt is required",
-        "characterIdRequired": "Character is required for agent tasks",
-        "skillIdRequired": "Skill is required for skill tasks",
-        "agentIdRequired": "External agent is required"
-      }
+    "eventSource": "Event source filter (optional)",
+    "eventSourcePlaceholder": "leave empty to fire on every source",
+    "eventSourceHelp": "When set, the task only runs if the event was emitted from this source.",
+    "eventTypeCustomLabel": "Custom event type…",
+    "eventTypePresetLabel": "Built-in event type",
+    "eventTypePresets": {
+      "session:created": "Session created",
+      "session:completed": "Session completed",
+      "session:deleted": "Session deleted",
+      "sync:started": "Sync started",
+      "sync:completed": "Sync completed",
+      "sync:failed": "Sync failed",
+      "backup:needed": "Backup needed",
+      "backup:completed": "Backup completed",
+      "workflow:completed": "Workflow completed",
+      "agent:completed": "Agent completed",
+      "custom": "Custom"
     },
+    "testWebhookFailed": "Webhook test failed",
     "triggerTypes": {
       "cron": "Schedule (Cron)",
       "interval": "Interval",
@@ -3676,6 +4743,82 @@
       "maxTasksPerSource": "Max tasks per source",
       "maxConcurrentExecutions": "Max concurrent executions"
     },
+    "settings": {
+      "signedBadge": "Signed",
+      "status": {
+        "title": "Runtime status",
+        "description": "Live indicators for the in-app scheduler loop",
+        "running": "Running",
+        "idle": "Idle",
+        "stopped": "Stopped",
+        "uninitialized": "Not initialised",
+        "tabLeader": "Tab leader",
+        "tabLeaderThis": "This tab",
+        "tabLeaderOther": "Other tab",
+        "tabLeaderUnknown": "—",
+        "activeTotal": "{active} active / {total} total",
+        "openScheduler": "Open Scheduler"
+      },
+      "defaults": {
+        "title": "Defaults for new tasks",
+        "description": "These values become the starting point when a new task is created. Each task form can still override them.",
+        "trigger": {
+          "title": "Trigger",
+          "timezone": "Default timezone",
+          "timezoneHelp": "Used for cron / interval / once triggers when a new task does not specify one."
+        },
+        "notification": {
+          "title": "Notifications",
+          "onStart": "Notify on task start",
+          "onComplete": "Notify on success",
+          "onError": "Notify on failure",
+          "channels": "Default channels",
+          "channelDesktop": "Desktop",
+          "channelToast": "Toast",
+          "channelWebhook": "Webhook",
+          "webhookUrl": "Default webhook URL",
+          "webhookUrlPlaceholder": "https://example.com/hook",
+          "testCta": "Test {channel}",
+          "testSuccess": "{channel} test succeeded",
+          "testFailure": "{channel} test failed: {error}",
+          "desktopOnlyHint": "Desktop notifications only fire in the desktop build."
+        },
+        "execution": {
+          "title": "Execution config",
+          "timeout": "Timeout (seconds)",
+          "maxRetries": "Max retries",
+          "retryDelay": "Retry delay (ms)",
+          "maxMissed": "Max missed runs to replay",
+          "runMissed": "Run missed schedules on startup",
+          "allowConcurrent": "Allow concurrent executions"
+        }
+      },
+      "system": {
+        "title": "System scheduler",
+        "description": "Native OS-level scheduler integration (Task Scheduler / launchd / systemd).",
+        "unavailableOnWeb": "Native scheduler integration is available in the desktop build only.",
+        "backendAvailable": "Backend available",
+        "backendUnavailable": "Backend unavailable",
+        "elevated": "Elevated",
+        "notElevated": "Standard privileges",
+        "requestElevation": "Request elevation",
+        "elevationGranted": "Elevation granted",
+        "elevationDenied": "Elevation request denied",
+        "pendingCount": "{count, plural, one {# pending confirmation} other {# pending confirmations}}",
+        "openPending": "View",
+        "nativeTasksCount": "{count, plural, one {# native task} other {# native tasks}}",
+        "manageCta": "Manage native tasks"
+      },
+      "signing": {
+        "title": "Webhook signing",
+        "description": "Outbound webhooks can be signed with HMAC-SHA256 so receivers can verify authenticity.",
+        "enabled": "Outbound webhooks are signed with the X-Cognia-Signature header.",
+        "disabled": "Outbound webhooks are not signed. Receivers cannot verify authenticity.",
+        "webOnly": "Web sessions cannot sign outbound webhooks — the signing secret is stored in the OS keyring.",
+        "manageSecret": "Manage signing secret",
+        "loading": "Checking signing status…"
+      }
+    },
     "promote": {
       "title": "Promote to System Service",
       "description": "Register this task as an OS-level service",
@@ -3685,16 +4828,6 @@
       "confirmDescription": "This will register the task with the operating system scheduler. The task will run even when Cognia is not open.",
       "success": "Task promoted to system service successfully",
       "failed": "Failed to promote task to system service"
-    },
-    "tools": {
-      "createSuccess": "Scheduled task created successfully",
-      "createFailed": "Failed to create scheduled task",
-      "listEmpty": "No scheduled tasks found",
-      "manageSuccess": "Task operation completed",
-      "manageFailed": "Task operation failed",
-      "reminderCreated": "Reminder created successfully",
-      "promoteSuccess": "Task promoted to system service",
-      "promoteFailed": "Failed to promote task"
     },
     "slashCommand": {
       "description": "Create a scheduled task or reminder"
@@ -3879,7 +5012,106 @@
       "minimize": "Minimize",
       "maximize": "Maximize",
       "restore": "Restore",
-      "close": "Close"
+      "close": "Close",
+      "appName": "Cognia",
+      "separator": " — ",
+      "searchPlaceholder": "Search or run command…",
+      "kbdHint": "Ctrl+K",
+      "openMenus": "Open menus",
+      "alwaysOnTop": "Always on top"
+    },
+    "menu": {
+      "file": {
+        "label": "File",
+        "newChat": "New Chat",
+        "openWorkspace": "Open Workspace…",
+        "openSettings": "Settings…",
+        "openLogs": "Open Logs",
+        "quit": "Quit Cognia"
+      },
+      "edit": {
+        "label": "Edit",
+        "undo": "Undo",
+        "redo": "Redo",
+        "cut": "Cut",
+        "copy": "Copy",
+        "paste": "Paste",
+        "selectAll": "Select All",
+        "find": "Find…"
+      },
+      "view": {
+        "label": "View",
+        "commandPalette": "Command Palette…",
+        "toggleSidebar": "Toggle Sidebar",
+        "reload": "Reload",
+        "openLogs": "Open Logs",
+        "toggleFullscreen": "Toggle Full Screen",
+        "zoomIn": "Zoom In",
+        "zoomOut": "Zoom Out",
+        "zoomReset": "Reset Zoom"
+      },
+      "go": {
+        "label": "Go",
+        "dms": "Direct Messages",
+        "canvas": "Canvas",
+        "twin": "Twin Workbench",
+        "logs": "Logs",
+        "settings": "Settings"
+      },
+      "window": {
+        "label": "Window",
+        "alwaysOnTop": "Always on Top",
+        "minimize": "Minimize",
+        "maximize": "Maximize",
+        "restore": "Restore",
+        "close": "Close"
+      },
+      "help": {
+        "label": "Help",
+        "documentation": "Documentation",
+        "about": "About Cognia"
+      },
+      "shortcut": {
+        "cmdOrCtrlN": "Ctrl+N",
+        "cmdOrCtrlO": "Ctrl+O",
+        "cmdOrCtrlR": "Ctrl+R",
+        "cmdOrCtrlComma": "Ctrl+,",
+        "cmdOrCtrlB": "Ctrl+B",
+        "cmdOrCtrlF": "Ctrl+F",
+        "cmdOrCtrlPlus": "Ctrl+=",
+        "cmdOrCtrlMinus": "Ctrl+-",
+        "cmdOrCtrl0": "Ctrl+0",
+        "cmdOrCtrlShiftL": "Ctrl+Shift+L",
+        "cmdOrCtrlShiftP": "Ctrl+Shift+P",
+        "f11": "F11"
+      }
+    },
+    "statusBar": {
+      "tauri": "Desktop",
+      "web": "Web",
+      "noSession": "No session",
+      "permissionMode": "Permission",
+      "permissionDefault": "Default",
+      "permissionPlan": "Plan",
+      "permissionAcceptEdits": "Auto-accept",
+      "permissionBypass": "Bypass",
+      "streaming": "Streaming",
+      "awaitingApproval": "Awaiting approval",
+      "error": "Error",
+      "idle": "Idle",
+      "openLogs": "Open logs",
+      "toggleSidebar": "Toggle sidebar",
+      "openCommandPalette": "Open command palette",
+      "themeLight": "Light theme",
+      "themeDark": "Dark theme",
+      "themeSystem": "System theme",
+      "themeNext": "Switch theme",
+      "zoom": "Zoom",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out",
+      "zoomReset": "Reset zoom",
+      "locale": "Language",
+      "switchLocale": "Switch language"
     }
   },
   "a2ui": {
@@ -4197,5 +5429,843 @@
       "systemInfo": "Platform, arch, node version, cpu, memory, uptime, hostname.",
       "shellExecuteAdvanced": "Run a single program with argv, gated by allowlist + blocklist + dangerous-pattern guard. Always requires approval."
     }
+  },
+  "providers": {
+    "title": "AI Providers",
+    "apiKey": "API Key",
+    "apiKeyPlaceholder": "Enter your API key",
+    "baseUrl": "Base URL",
+    "test": "Test",
+    "testing": "Testing...",
+    "testConnection": "Test Connection",
+    "connectionSuccess": "Connection successful",
+    "connectionFailed": "Connection failed",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "availableModels": "Available Models",
+    "getApiKey": "Get your API key from",
+    "dashboard": "Dashboard",
+    "localProvider": "Local",
+    "local": "Local",
+    "customProviders": "Custom Providers",
+    "addCustomProvider": "Add Custom Provider",
+    "addProvider": "Add Provider",
+    "providerName": "Provider Name",
+    "models": "Models",
+    "modelsCount": "models",
+    "total": "total",
+    "defaultModel": "Default Model",
+    "selectModel": "Select model",
+    "modelsPlaceholder": "Enter model names (comma-separated)",
+    "emptyStateTitle": "No AI Providers Configured",
+    "emptyStateDescription": "Add your first AI provider to start chatting with language models. You can configure OpenAI, Anthropic, Google, and more.",
+    "importSettings": "Import Settings",
+    "securityTitle": "Security Notice",
+    "securityDescription": "Your API keys are stored locally in your browser and never sent to our servers.",
+    "ollamaURL": "Ollama URL",
+    "ollamaHint": "Make sure Ollama is running locally.",
+    "openaiCompatible": "OpenAI Compatible",
+    "customProvidersDescription": "Add custom API providers with OpenAI, Anthropic, or Gemini protocol.",
+    "customProviderDescription": "Configure a custom API provider with your preferred protocol.",
+    "apiProtocol": "API Protocol",
+    "selectProtocol": "Select protocol",
+    "protocolOpenAIDesc": "OpenAI-compatible API (most common)",
+    "protocolAnthropicDesc": "Anthropic Claude API format",
+    "protocolGeminiDesc": "Google Gemini API format",
+    "apiProtocolHint": "Choose the API protocol that matches your provider's implementation.",
+    "editCustomProvider": "Edit Custom Provider",
+    "providerNamePlaceholder": "My Provider",
+    "baseURL": "Base URL",
+    "baseURLHint": "Use a proxy URL or self-hosted endpoint. Leave empty for default.",
+    "customBaseURL": "Custom Base URL",
+    "baseURLPlaceholder": "https://api.example.com/v1",
+    "modelPlaceholder": "Enter model name",
+    "modelsHint": "Click on a model to set it as default. Click the X to remove.",
+    "modelSettings": "Model Settings",
+    "contextLength": "Context Length",
+    "maxOutputTokens": "Max Output Tokens",
+    "inputPricing": "Input Pricing",
+    "outputPricing": "Output Pricing",
+    "default": "default",
+    "error": "Error",
+    "confirmDeleteProvider": "Delete this provider?",
+    "testAllProviders": "Test All Providers",
+    "dismissSecurityAlert": "Dismiss Security Alert",
+    "testResults": "Test Results",
+    "passed": "passed",
+    "failed": "failed",
+    "passedCount": "{count} passed",
+    "failedCount": "{count} failed",
+    "testingProviders": "Testing providers... {progress}%",
+    "providersConfigured": "{count} providers configured",
+    "codingPackageMcpTitle": "Coding Package MCP",
+    "codingPackageMcpMinimaxHint": "MiniMax coding plans use a local MCP command launched with uvx.",
+    "codingPackageMcpZhipuHint": "GLM coding plans include one local Vision MCP server plus remote Search, Reader, and ZRead MCP endpoints.",
+    "codingPackageMcpManualHint": "You can still add or edit MCP servers manually from MCP Settings.",
+    "codingPackageMcpBlockedDisabled": "Enable this provider before setting up coding-package MCP servers.",
+    "codingPackageMcpBlockedCredential": "Add a provider API key before setting up coding-package MCP servers.",
+    "codingPackageMcpBlockedModel": "Switch the default model from {model} to a {package} model before enabling coding-package MCP servers.",
+    "codingPackageMcpAddAndConnect": "Add & Connect",
+    "codingPackageMcpConnect": "Connect",
+    "codingPackageMcpConnected": "Connected",
+    "codingPackageMcpUnavailable": "Unavailable",
+    "codingPackageMcpLocalBadge": "Local",
+    "codingPackageMcpRemoteBadge": "Remote",
+    "codingPackageMcpSetupSuccess": "{name} is ready.",
+    "codingPackageMcpSetupFailed": "Failed to set up the coding-package MCP server.",
+    "noProvidersFound": "No providers found matching your filters.",
+    "noCustomProviders": "No custom providers yet.",
+    "invalidBaseUrl": "Invalid base URL.",
+    "routing": "Routing Strategy",
+    "healthMonitoring": "Health Monitoring",
+    "presets": "Presets",
+    "quickAdd": {
+      "title": "Quick Add Provider",
+      "customProvider": "Add Custom Provider",
+      "advancedWizard": "Advanced Wizard →",
+      "wizard": "Advanced Wizard →"
+    },
+    "addCustom": "Custom",
+    "quickAddProvider": "Quick Add Provider",
+    "quickAddDescription": "Select a pre-configured provider to add quickly with just your API key.",
+    "enterApiKeyForProvider": "Enter your API key to complete the setup.",
+    "searchProviders": "Search providers...",
+    "chinaProviders": "China",
+    "globalProviders": "Global",
+    "proxyServices": "Proxy",
+    "popular": "Popular",
+    "clickToSetDefault": "Click to set default",
+    "openai": "OpenAI",
+    "openaiDescription": "GPT-4o, GPT-4 Turbo, and more",
+    "anthropic": "Anthropic",
+    "anthropicDescription": "Claude 4 Sonnet, Claude 4 Opus",
+    "google": "Google AI",
+    "googleDescription": "Gemini 2.0 Flash, Gemini 1.5 Pro",
+    "deepseek": "DeepSeek",
+    "deepseekDescription": "DeepSeek Chat, DeepSeek Reasoner",
+    "groq": "Groq",
+    "groqDescription": "Ultra-fast inference with Llama 3.3",
+    "mistral": "Mistral AI",
+    "mistralDescription": "Mistral Large, Mistral Small",
+    "ollama": "Ollama (Local)",
+    "ollamaDescription": "Run models locally with Ollama",
+    "ollamaUrlPlaceholder": "http://localhost:11434",
+    "ollamaConnected": "Connected",
+    "ollamaDisconnected": "Not connected",
+    "ollamaModels": "Local Models",
+    "ollamaInstalledModels": "Installed Models",
+    "ollamaNoModels": "No models installed. Pull a model to get started.",
+    "ollamaNotRunning": "Ollama is not running",
+    "ollamaStartHint": "Start Ollama with",
+    "ollamaPullPlaceholder": "Enter model name (e.g., llama3.2, qwen2.5)",
+    "ollamaPopularModels": "Popular Models",
+    "ollamaDeleteTitle": "Delete Model",
+    "ollamaDeleteDescription": "Are you sure you want to delete {model}? This action cannot be undone.",
+    "localProvidersTitle": "Local Providers",
+    "localProvidersDescription": "Run AI models locally on your machine",
+    "lmstudio": "LM Studio",
+    "lmstudioDescription": "Desktop app for running local LLMs",
+    "llamacpp": "llama.cpp Server",
+    "llamacppDescription": "High-performance C++ inference server",
+    "llamafile": "llamafile",
+    "llamafileDescription": "Single-file executable LLM server",
+    "vllm": "vLLM",
+    "vllmDescription": "High-throughput GPU inference engine",
+    "localai": "LocalAI",
+    "localaiDescription": "Self-hosted OpenAI alternative",
+    "jan": "Jan",
+    "janDescription": "Open-source ChatGPT alternative",
+    "textgenwebui": "Text Generation WebUI",
+    "textgenwebuiDescription": "Gradio web UI with OpenAI API",
+    "koboldcpp": "KoboldCpp",
+    "koboldcppDescription": "Easy-to-use llama.cpp fork",
+    "tabbyapi": "TabbyAPI",
+    "tabbyapiDescription": "Exllamav2 API server",
+    "oauth": "OAuth",
+    "oauthLogin": "Quick Login",
+    "oauthConnected": "Connected",
+    "oauthDisconnectHint": "Click to disconnect OAuth",
+    "oauthLoginHint": "Login with {provider} to get API key automatically",
+    "oauthNoCode": "No authorization code received",
+    "export": "Export",
+    "import": "Import",
+    "exportTitle": "Export Provider Settings",
+    "exportDescription": "Export your provider configurations to a JSON file",
+    "exportWarning": "API keys will be included only if you check the option below. Handle with care.",
+    "includeApiKeys": "Include API keys (not recommended for sharing)",
+    "exportNow": "Export",
+    "importTitle": "Import Provider Settings",
+    "importFrom": "Exported on {date}",
+    "importSuccess": "Settings imported successfully!",
+    "importProviderCount": "{count} provider settings",
+    "importCustomCount": "{count} custom providers",
+    "importConflictWarning": "{count} conflict(s) detected with existing settings",
+    "importErrors": {
+      "invalidPayloadObject": "Invalid import payload. Expected a JSON object.",
+      "missingVersion": "Invalid import payload. Missing numeric version.",
+      "missingExportedAt": "Invalid import payload. Missing exportedAt timestamp.",
+      "missingProviders": "Invalid import payload. At least one of providerSettings/customProviders is required.",
+      "invalidProviderSettings": "Invalid settings for provider \"{providerId}\".",
+      "invalidProviderBaseUrlProtocol": "Invalid baseURL protocol for provider \"{providerId}\".",
+      "invalidProviderBaseUrl": "Invalid baseURL for provider \"{providerId}\".",
+      "invalidCustomProviderPayload": "Invalid custom provider payload for \"{providerId}\".",
+      "customProviderMissingName": "Custom provider \"{providerId}\" is missing customName.",
+      "customProviderMissingBaseUrl": "Custom provider \"{providerId}\" is missing baseURL.",
+      "invalidCustomProviderBaseUrlProtocol": "Invalid baseURL protocol for custom provider \"{providerId}\".",
+      "invalidCustomProviderBaseUrl": "Invalid baseURL for custom provider \"{providerId}\".",
+      "invalidFileFormat": "Invalid file format. Please select a valid export file.",
+      "dropValidJson": "Please drop a valid JSON file.",
+      "importFailedRetry": "Failed to import settings. Please try again."
+    },
+    "importNow": "Import",
+    "cancel": "Cancel",
+    "valid": "Valid",
+    "custom": "Custom",
+    "builtin": "Built-in",
+    "differentSettings": "Different",
+    "exists": "Exists",
+    "conflictResolution": "Conflict Resolution",
+    "overwrite": "Overwrite",
+    "selectProviders": "Select Providers to Export",
+    "selectAll": "Select All",
+    "merge": "Merge",
+    "overwriteDesc": "Replace existing settings with imported values",
+    "skipDesc": "Keep existing settings and skip conflicting imports",
+    "mergeDesc": "Merge settings but keep existing API keys",
+    "filterAll": "All",
+    "filterVision": "Vision",
+    "filterTools": "Tools",
+    "filterReasoning": "Reasoning",
+    "searchModels": "Search models...",
+    "modelSelectionDescription": "Search, filter, and enable the models available for this provider.",
+    "fetchModels": "Fetch",
+    "lastFetched": "Last fetched",
+    "modelsSelected": "{count} models selected",
+    "confirmSelection": "Confirm",
+    "addSelected": "Add Selected",
+    "noModelsFound": "No models found",
+    "capabilityImageGen": "Image Generation",
+    "capabilityEmbedding": "Embedding",
+    "capabilityReranking": "Reranking",
+    "capabilityVideo": "Video",
+    "contextWindowHint": "Recommended: 32000 tokens for optimal performance",
+    "providersSelected": "providers selected",
+    "modelsTotal": "models total",
+    "exportFormat": "Export Format",
+    "apiKeyWarning": "Warning: API keys will be included in the export. Handle the file securely.",
+    "dropFileHere": "Drop file here or click to browse",
+    "healthStatus": "Health Status",
+    "latency": "Latency",
+    "quotaUsage": "Quota Usage",
+    "rateLimitRemaining": "Rate Limit",
+    "requests": "requests",
+    "circuitBreaker": "Circuit Breaker",
+    "circuitOpen": "Circuit Open",
+    "circuitHalfOpen": "Circuit Half-Open",
+    "resetCircuit": "Reset Circuit",
+    "availability": "Availability",
+    "neverChecked": "Never checked",
+    "justNow": "Just now",
+    "minutesAgo": "{count}m ago",
+    "hoursAgo": "{count}h ago",
+    "status": {
+      "healthy": "Healthy",
+      "degraded": "Degraded",
+      "error": "Error",
+      "unknown": "Unknown"
+    },
+    "xai": "xAI (Grok)",
+    "xaiDescription": "Grok 3, Grok 3 Mini",
+    "togetherai": "Together AI",
+    "togetheraiDescription": "Fast inference for open source models",
+    "openrouter": "OpenRouter",
+    "openrouterDescription": "Access 200+ models with OAuth login",
+    "cohere": "Cohere",
+    "cohereDescription": "Command R+, enterprise RAG",
+    "fireworks": "Fireworks AI",
+    "fireworksDescription": "Ultra-fast compound AI",
+    "cerebras": "Cerebras",
+    "cerebrasDescription": "Fastest inference with custom AI chips",
+    "sambanova": "SambaNova",
+    "sambanovaDescription": "Enterprise AI with free tier",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "configured": "Configured",
+    "notConfigured": "Not Configured",
+    "ready": "Ready",
+    "verificationStale": "Verification Stale",
+    "verificationStaleShort": "Stale",
+    "verificationStaleHint": "Configuration changed after last successful verification. Re-verify to continue.",
+    "verificationLimited": "Verification Limited",
+    "verificationLimitedShort": "Limited",
+    "verificationLimitedHint": "Authoritative verification could not be completed in this runtime.",
+    "notSet": "Not Set",
+    "optional": "Optional",
+    "active": "Active",
+    "running": "Running",
+    "provider": "Provider",
+    "context": "Context",
+    "features": "Features",
+    "pricing": "Pricing",
+    "actions": "Actions",
+    "pricingVaries": "Pricing varies",
+    "allModels": "All Models",
+    "pricingPerMillion": "Pricing (per 1M tokens)",
+    "quickActions": "Quick Actions",
+    "setupChecklistTitle": "Setup Checklist",
+    "setupStepCredential": "Add credentials",
+    "setupStepBaseUrl": "Configure endpoint",
+    "setupStepDefaultModel": "Select default model",
+    "setupStepVerification": "Verify connection",
+    "fixNow": "Fix Now",
+    "resolveNextStep": "Resolve Next Step",
+    "importEquivalentCustomProvider": "Import matching custom provider",
+    "configureApiKey": "Configure API Key",
+    "selectAllProviders": "Select all providers",
+    "selectedCount": "{count} selected",
+    "testSelected": "Test Selected",
+    "retryFailed": "Retry Failed",
+    "enableSelected": "Enable Selected",
+    "disableSelected": "Disable Selected",
+    "clearSelection": "Clear",
+    "batchOperationVerifyEnabled": "Verify enabled",
+    "batchOperationVerifySelected": "Verify selected",
+    "batchOperationRetryFailed": "Retry failed",
+    "batchNoEligibleProviders": "No visible and eligible providers are available for this operation.",
+    "selectProviderRow": "Select provider",
+    "managementWebUI": "Management WebUI",
+    "openWebUI": "Open WebUI",
+    "webUIDescription": "Access the CLIProxyAPI management interface for advanced configuration",
+    "clickRefreshToTest": "Click refresh to test connection",
+    "clickRefreshToLoad": "Click refresh to load models",
+    "modelsAvailableThrough": "Models available through this provider",
+    "configDescription": "Configure server host, port, and advanced settings",
+    "routingStrategy": "Routing Strategy",
+    "roundRobin": "Round Robin",
+    "fillFirst": "Fill First",
+    "random": "Random",
+    "leastUsed": "Least Used",
+    "routingHint": "How credentials are selected for requests",
+    "requestRetries": "Request Retries",
+    "maxRetryInterval": "Max Retry Interval (s)",
+    "quotaExceeded": "Quota Exceeded Behavior",
+    "autoSwitchProject": "Auto-switch Project",
+    "autoSwitchPreview": "Auto-switch to Preview Model",
+    "keepaliveInterval": "Keepalive Interval (s)",
+    "bootstrapRetries": "Bootstrap Retries",
+    "managementKey": "Management Key (Optional)",
+    "managementKeyPlaceholder": "Enter management key...",
+    "managementKeyHint": "Required for accessing advanced management features",
+    "apiKeyRotation": "API Key Rotation",
+    "keysCount": "{count} key",
+    "keysCountPlural": "{count} keys",
+    "keys": "keys",
+    "strategy": "Strategy",
+    "rotationStrategies": {
+      "roundRobin": "Round Robin",
+      "random": "Random",
+      "leastUsed": "Least Used"
+    },
+    "multiKeyHint": "Add multiple keys to enable rotation for rate limit distribution.",
+    "addMultipleKeysHint": "Add multiple keys to enable rotation for rate limit distribution",
+    "manageModels": "Manage Models",
+    "providerModels": "{provider} Models",
+    "installedModels": "Installed Models",
+    "popularModels": "Popular Models",
+    "noModelsInstalled": "No models installed",
+    "pullModelHint": "Pull a model to get started",
+    "pullModelPlaceholder": "Pull a model (e.g., llama3.2)",
+    "deleteModel": "Delete Model",
+    "deleteModelConfirm": "Are you sure you want to delete {model}? This action cannot be undone.",
+    "stopModel": "Stop model",
+    "capabilityChat": "Chat",
+    "capabilityStream": "Stream",
+    "capabilityVision": "Vision",
+    "capabilityTools": "Tools",
+    "capabilityEmbed": "Embed",
+    "capabilityAudio": "Audio",
+    "getDashboard": "Get API Key",
+    "viewDocs": "Documentation",
+    "invalidKeyFormat": "API key format may be invalid",
+    "oauthExpired": "Token Expired",
+    "oauthExpiredHint": "Your OAuth token has expired. Click to re-authenticate.",
+    "oauthExpiringSoonHint": "Token expires soon. Consider re-authenticating.",
+    "quickSetup": "Quick Setup",
+    "browseModels": "Browse Models",
+    "manageInstalledModels": "Manage installed models for {provider}",
+    "recommended": "Recommended",
+    "recommendedDesc": "Easy to install and use",
+    "advanced": "Advanced",
+    "advancedDesc": "More control and customization",
+    "specialized": "Specialized",
+    "specializedDesc": "For specific use cases",
+    "setupWizard": {
+      "download": "Download",
+      "install": "Install",
+      "configure": "Configure",
+      "verifyStep": "Verify",
+      "complete": "Complete",
+      "downloadInstructions": "Download the installer from the official website",
+      "downloadProvider": "Download {provider}",
+      "installationSteps": "Installation Steps",
+      "afterInstallation": "After installation, start the server:",
+      "configurationTitle": "Configuration",
+      "defaultPort": "Default port: {port}",
+      "pullFirstModel": "Pull your first model:",
+      "pullModelSize": "This downloads a 2GB model. Larger models need more disk space.",
+      "verifyConnection": "Verify Connection",
+      "verifyConnectionDesc": "Make sure {provider} is running and accessible",
+      "completeSetup": "Complete Setup",
+      "setupComplete": "Setup Complete!",
+      "providerReady": "{provider} is ready to use"
+    },
+    "modelManager": {
+      "title": "Model Manager",
+      "installedCount": "{installed} of {total} models installed",
+      "settings": "Settings",
+      "downloadSettings": "Download Settings",
+      "downloadSettingsDesc": "Configure proxy and download sources",
+      "autoDetectProxy": "Auto-detect Proxy",
+      "autoDetectProxyDesc": "Automatically detect and use system proxy settings",
+      "proxyUrl": "Proxy URL",
+      "usingProxy": "Using proxy: {url}",
+      "preferredSources": "Preferred Sources",
+      "downloadTimeout": "Download Timeout",
+      "timeout1min": "1 minute",
+      "timeout3min": "3 minutes",
+      "timeout5min": "5 minutes",
+      "timeout10min": "10 minutes",
+      "noModelsInCategory": "No models available in this category"
+    },
+    "openrouterSettings": {
+      "credits": "OpenRouter Credits",
+      "total": "Total",
+      "used": "Used",
+      "remaining": "Remaining",
+      "alwaysUse": "Always Use",
+      "alwaysUseHint": "Prefer this provider key whenever it is available.",
+      "clickRefreshToLoadCredits": "Click refresh to load credits",
+      "byok": "Bring Your Own Keys (BYOK)",
+      "byokDescription": "Use your own provider API keys for 5% discount on model costs",
+      "addProviderKey": "Add Provider Key",
+      "selectProvider": "Select provider",
+      "keyName": "Key name (optional)",
+      "addKey": "Add Key",
+      "learnMoreByok": "Learn more about BYOK",
+      "providerOrdering": "Provider Ordering",
+      "providerOrderingDescription": "Control the order in which providers are used for model routing",
+      "enableProviderOrdering": "Enable Provider Ordering",
+      "allowFallbacks": "Allow Fallbacks",
+      "allowFallbacksDesc": "If disabled, only your BYOK keys will be used",
+      "providerOrder": "Provider Order",
+      "providerOrderPlaceholder": "e.g., Amazon Bedrock, Google Vertex AI, Azure",
+      "providerOrderHint": "Comma-separated list of provider names in order of preference",
+      "appAttribution": "App Attribution",
+      "appAttributionDesc": "Optional headers for leaderboard ranking",
+      "siteUrl": "Site URL",
+      "siteName": "Site Name"
+    },
+    "keyManagement": {
+      "title": "API Key Management",
+      "description": "Manage API keys programmatically using OpenRouter's provisioning API",
+      "provisioningApiKey": "Provisioning API Key",
+      "provisioningKeyHint": "Create a provisioning key at OpenRouter dashboard",
+      "createNewKey": "Create New API Key",
+      "createKey": "Create API Key",
+      "createKeyDesc": "Create a new API key for use with OpenRouter",
+      "keyCreatedSuccess": "API Key Created Successfully",
+      "keyCreatedHint": "Copy this key now. You won't be able to see it again.",
+      "creditLimit": "Credit Limit (optional)",
+      "creditLimitHint": "Maximum credits this key can use",
+      "limitResetPeriod": "Limit Reset Period",
+      "noReset": "No reset",
+      "daily": "Daily",
+      "weekly": "Weekly",
+      "monthly": "Monthly",
+      "noKeysFound": "No API keys found. Create one to get started."
+    },
+    "splitView": "Split View",
+    "tabProviders": "Providers",
+    "tabRouting": "Routing",
+    "tabHealth": "Health",
+    "tabPresets": "Presets",
+    "selectProviderToConfigure": "Select a provider to configure",
+    "noProviderSelected": "No provider selected",
+    "noProviderSelectedHint": "Choose a provider from the list to view and edit its configuration.",
+    "endpointPreview": "API Endpoint",
+    "endpointPreviewHint": "The actual URL that will be called",
+    "autoFetchModels": "Auto-Fetch Models",
+    "fetchingModels": "Fetching models...",
+    "modelsRefreshed": "Models refreshed",
+    "addModel": "Add Model",
+    "addModelPlaceholder": "Enter model ID (e.g. gpt-4o)",
+    "removeModel": "Remove",
+    "setAsDefault": "Set as Default",
+    "backToList": "Back",
+    "modelCapabilityVision": "Vision",
+    "modelCapabilityTools": "Tools",
+    "modelCapabilityAudio": "Audio",
+    "modelCapabilityReasoning": "Reasoning",
+    "modelCount": "{count} models",
+    "providerOn": "ON",
+    "providerOff": "OFF",
+    "credentials": "Credentials",
+    "modelManagement": "Model Management",
+    "noModelsConfigured": "No models configured for this provider.",
+    "fetchModelsFromApi": "Fetch models from API",
+    "modelAdded": "Model added",
+    "modelRemoved": "Model removed",
+    "defaultModelUpdated": "Default model updated",
+    "onboardingTitle": "Get started by configuring a provider below",
+    "onboardingDescription": "Enter your API key for any provider to start using AI models. Most popular providers offer free tiers.",
+    "onboardingQuickSetup": "Quick Setup",
+    "dismissOnboarding": "Dismiss",
+    "operationsTitle": "Batch Operations",
+    "advancedSettings": "Advanced Settings",
+    "securityBannerShort": "API keys are stored locally and never sent to our servers.",
+    "addCustomShort": "Custom",
+    "sidebar": {
+      "searchPlaceholder": "Search providers...",
+      "addButton": "Add",
+      "modelCompare": "Model Compare",
+      "stats": "{total} providers · {active} connected"
+    },
+    "tabs": {
+      "config": "Config",
+      "models": "Models",
+      "cost": "Cost",
+      "advanced": "Advanced"
+    },
+    "detailPanel": {
+      "emptyTitle": "No Provider Selected",
+      "emptyDescription": "Select a provider to configure, or add a new one",
+      "testButton": "Test",
+      "modelsAvailable": "{count} models available",
+      "connectionOk": "Connected · {latency}ms · Last test: {time}",
+      "connected": "Connected",
+      "connectionFailed": "Error",
+      "notConfigured": "Not configured"
+    },
+    "configTab": {
+      "apiKeyLabel": "API Key",
+      "apiKeyPlaceholder": "Enter your API key",
+      "showKey": "Show key",
+      "hideKey": "Hide key",
+      "baseURLLabel": "Base URL",
+      "baseURLOptional": "Optional",
+      "baseURLPlaceholder": "https://api.example.com/v1",
+      "defaultModelLabel": "Default Model",
+      "selectModel": "Select model",
+      "getApiKey": "Get API Key →",
+      "connectionStatus": "Connection Status",
+      "connectionSuccess": "Connected",
+      "connectionFailed": "Connection failed",
+      "latency": "Latency",
+      "lastTested": "Last tested",
+      "keyRotation": "Key Rotation",
+      "keyRotationEnabled": "Enable rotation",
+      "rotationStrategy": "Rotation Strategy",
+      "strategyRoundRobin": "Round Robin",
+      "strategyRandom": "Random",
+      "strategyLeastUsed": "Least Used",
+      "roundRobin": "Round Robin",
+      "random": "Random",
+      "leastUsed": "Least Used",
+      "addKey": "Add Key",
+      "removeKey": "Remove"
+    },
+    "modelsTab": {
+      "searchPlaceholder": "Search models...",
+      "refreshModels": "Refresh Model List",
+      "selectAll": "Select All",
+      "deselectAll": "Deselect All",
+      "batchEnable": "Enable Selected",
+      "batchDisable": "Disable Selected",
+      "contextWindow": "Context",
+      "noModels": "No models found"
+    },
+    "costTab": {
+      "monthlyTotal": "Monthly Cost",
+      "monthlyCost": "Monthly Cost",
+      "totalCalls": "Total Calls",
+      "avgCost": "Avg Cost/Call",
+      "avgCostPerCall": "Avg Cost/Call",
+      "tokenUsage": "Token Usage",
+      "totalTokens": "Total Tokens",
+      "emptyTitle": "No Usage Data",
+      "emptyDescription": "Usage statistics will appear here once you start making API calls through this provider.",
+      "modelName": "Model",
+      "callCount": "Calls",
+      "inputTokens": "Input Tokens",
+      "outputTokens": "Output Tokens",
+      "estimatedCost": "Est. Cost",
+      "last7Days": "Last 7 Days",
+      "last30Days": "Last 30 Days",
+      "noData": "No usage data yet"
+    },
+    "comparison": {
+      "title": "Model Comparison",
+      "back": "Back",
+      "maxReached": "Max 4 models selected",
+      "addModel": "Add Model",
+      "selectModels": "Select up to 4 models to compare",
+      "emptyTitle": "No Models Selected",
+      "emptyDescription": "Click \"Add Model\" to select models for comparison.",
+      "provider": "Provider",
+      "contextWindow": "Context Window",
+      "maxOutput": "Max Output",
+      "textGen": "Text Generation",
+      "textGeneration": "Text Generation",
+      "vision": "Vision",
+      "codeGen": "Code Generation",
+      "codeGeneration": "Code Generation",
+      "functionCalling": "Function Calling",
+      "streaming": "Streaming",
+      "avgLatency": "Avg Latency",
+      "availability": "Availability",
+      "inputPrice": "Input Price",
+      "outputPrice": "Output Price",
+      "noPrice": "N/A",
+      "costPer1k": "Est. Cost/1K calls",
+      "estCostPer1K": "Est. Cost/1K calls",
+      "recommendation": "Recommendation",
+      "bestValue": "Best value: {model}"
+    },
+    "wizard": {
+      "title": "Add Provider",
+      "step1Title": "Select Provider",
+      "step1Desc": "Choose a provider to configure",
+      "step2Title": "Configure Credentials",
+      "step2Desc": "Enter your API key and endpoint",
+      "step3Title": "Select Models",
+      "step3Desc": "Choose which models to enable",
+      "step4Title": "Test Connection",
+      "step4Desc": "Verify everything works",
+      "selectProvider": "Provider",
+      "credentials": "Credentials",
+      "models": "Models",
+      "test": "Test",
+      "selectProviderHint": "Choose a provider to get started. You can configure the API key in the next step.",
+      "searchProviders": "Search providers...",
+      "noProviders": "No providers found.",
+      "configureCredentials": "Configure Credentials",
+      "docs": "Docs",
+      "apiKey": "API Key",
+      "apiKeyPlaceholder": "Enter your API key",
+      "apiKeyHint": "Your API key is stored locally and never sent to our servers.",
+      "baseURL": "Base URL",
+      "baseURLPlaceholder": "https://api.example.com/v1",
+      "baseURLHint": "Optional. Leave blank to use the provider's default endpoint.",
+      "selectModels": "Select Models",
+      "selectModelsHint": "Choose the models you want to enable for this provider.",
+      "loadingModels": "Loading models...",
+      "default": "Default",
+      "setDefault": "Set Default",
+      "noModels": "No models available for this provider.",
+      "testConnection": "Test Connection",
+      "testConnectionHint": "Verify that your credentials are correct and the provider is reachable.",
+      "testing": "Testing connection...",
+      "testSuccess": "Connection successful!",
+      "latency": "Latency",
+      "testFailed": "Connection failed",
+      "troubleshoot1": "Check that your API key is correct and has not expired.",
+      "troubleshoot2": "Ensure the base URL is correct if you configured a custom endpoint.",
+      "troubleshoot3": "Check your network connection and firewall settings.",
+      "waitingForTest": "Waiting to run connection test...",
+      "back": "Back",
+      "cancel": "Cancel",
+      "next": "Next",
+      "finish": "Finish",
+      "testingConnection": "Testing connection...",
+      "troubleshooting": "Troubleshooting Tips"
+    }
+  },
+  "providerParams": {
+    "tabTitle": "Parameters",
+    "tabDescription": "Configure inference and provider-specific parameters",
+    "inference": "Inference Parameters",
+    "providerSpecific": "Provider-Specific",
+    "connection": {
+      "timeout": {
+        "label": "Request Timeout",
+        "description": "Maximum time to wait for a response (ms)."
+      },
+      "maxRetries": {
+        "label": "Max Retries",
+        "description": "Number of retry attempts on failure."
+      },
+      "retryDelay": {
+        "label": "Retry Delay",
+        "description": "Delay between retries (ms)."
+      }
+    },
+    "advanced": "Advanced Options",
+    "resetAll": "Reset All to Defaults",
+    "resetConfirm": "Reset all parameters to their default values?",
+    "sourceSession": "Session override",
+    "sourceProvider": "Provider default",
+    "sourceGlobal": "Global default",
+    "temperature": {
+      "label": "Temperature",
+      "description": "Controls randomness. Lower = more focused, higher = more creative."
+    },
+    "maxTokens": {
+      "label": "Max Tokens",
+      "description": "Maximum number of tokens in the response."
+    },
+    "topP": {
+      "label": "Top P",
+      "description": "Nucleus sampling. Consider tokens with top_p probability mass."
+    },
+    "frequencyPenalty": {
+      "label": "Frequency Penalty",
+      "description": "Reduces repetition by penalizing frequently used tokens."
+    },
+    "presencePenalty": {
+      "label": "Presence Penalty",
+      "description": "Encourages new topics by penalizing tokens that already appeared."
+    },
+    "openai": {
+      "reasoningEffort": {
+        "label": "Reasoning Effort",
+        "description": "How much effort the model puts into reasoning (o-series models only).",
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High"
+      },
+      "responseFormat": {
+        "label": "Response Format",
+        "description": "Force the model to output in a specific format.",
+        "text": "Text",
+        "jsonObject": "JSON Object"
+      },
+      "seed": {
+        "label": "Seed",
+        "description": "Fixed seed for reproducible outputs."
+      },
+      "logprobs": {
+        "label": "Log Probabilities",
+        "description": "Include token log probabilities in the response."
+      },
+      "store": {
+        "label": "Store Completions",
+        "description": "Store completions for future reference."
+      }
+    },
+    "anthropic": {
+      "thinking": {
+        "enabled": {
+          "label": "Extended Thinking",
+          "description": "Enable Claude's extended thinking capability for complex reasoning."
+        },
+        "budgetTokens": {
+          "label": "Thinking Budget",
+          "description": "Maximum tokens allocated for thinking (1024-128000)."
+        }
+      }
+    },
+    "google": {
+      "safetySettings": {
+        "label": "Safety Settings",
+        "description": "Content safety filtering levels.",
+        "none": "No restriction",
+        "low": "Low restriction",
+        "medium": "Medium restriction",
+        "high": "High restriction",
+        "harassment": {
+          "label": "Harassment",
+          "description": "Filter harassment content."
+        },
+        "hateSpeech": {
+          "label": "Hate Speech",
+          "description": "Filter hate speech content."
+        },
+        "sexuallyExplicit": {
+          "label": "Sexually Explicit",
+          "description": "Filter sexually explicit content."
+        },
+        "dangerousContent": {
+          "label": "Dangerous Content",
+          "description": "Filter dangerous content."
+        }
+      },
+      "groundingEnabled": {
+        "label": "Grounding / Web Search",
+        "description": "Enable Google Search grounding for responses."
+      }
+    },
+    "deepseek": {
+      "enableReasoning": {
+        "label": "Enable Reasoning",
+        "description": "Enable deep thinking for complex tasks."
+      }
+    },
+    "xai": {
+      "searchEnabled": {
+        "label": "Web Search",
+        "description": "Allow Grok to search the web."
+      }
+    },
+    "mistral": {
+      "safePrompt": {
+        "label": "Safe Prompt",
+        "description": "Inject a safety prompt before the conversation."
+      }
+    },
+    "ollama": {
+      "numCtx": {
+        "label": "Context Size",
+        "description": "Size of the context window (tokens)."
+      },
+      "numPredict": {
+        "label": "Max Predict",
+        "description": "Maximum tokens to predict."
+      },
+      "repeatPenalty": {
+        "label": "Repeat Penalty",
+        "description": "Penalty for repeating tokens."
+      },
+      "mirostat": {
+        "label": "Mirostat Sampling",
+        "description": "Mirostat sampling mode for perplexity control.",
+        "disabled": "Disabled",
+        "mirostat1": "Mirostat 1",
+        "mirostat2": "Mirostat 2"
+      },
+      "numGpu": {
+        "label": "GPU Layers",
+        "description": "Number of layers to offload to GPU."
+      },
+      "numThread": {
+        "label": "Threads",
+        "description": "Number of threads for computation."
+      },
+      "keepAlive": {
+        "label": "Keep Alive",
+        "description": "How long to keep the model loaded (e.g., '5m', '1h')."
+      }
+    },
+    "togetherAi": {
+      "repetitionPenalty": {
+        "label": "Repetition Penalty",
+        "description": "Penalty for repeating tokens."
+      },
+      "topK": {
+        "label": "Top K",
+        "description": "Limit token selection to top K candidates."
+      }
+    },
+    "cohere": {
+      "k": {
+        "label": "Top K",
+        "description": "Limit token selection to top K candidates."
+      },
+      "connectors": {
+        "label": "Web Search",
+        "description": "Enable web search connector."
+      }
+    },
+    "invalidJson": "Invalid JSON format",
+    "outOfRange": "Value must be between {min} and {max}"
   }
 }

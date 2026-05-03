@@ -22,7 +22,11 @@ import { LANGUAGE_OPTIONS } from "@/lib/canvas/constants"
 
 export function CanvasDocumentRail() {
   const t = useTranslations("canvas")
-  const documents = useArtifactStore((s) => Object.values(s.canvasDocuments) as CanvasDocument[])
+  const canvasDocuments = useArtifactStore((s) => s.canvasDocuments)
+  const documents = useMemo(
+    () => Object.values(canvasDocuments) as CanvasDocument[],
+    [canvasDocuments]
+  )
   const activeId = useArtifactStore((s) => s.activeCanvasId)
   const setActive = useArtifactStore((s) => s.setActiveCanvas)
   const create = useArtifactStore((s) => s.createCanvasDocument)
@@ -42,7 +46,7 @@ export function CanvasDocumentRail() {
   }, [documents, query, langFilter])
 
   return (
-    <aside className="hidden h-full w-64 shrink-0 flex-col border-r bg-muted/30 md:flex">
+    <aside className="flex h-full w-full min-w-0 flex-col overflow-hidden border-r bg-muted/30">
       <header className="flex items-center justify-between gap-2 px-3 py-2">
         <h2 className="text-sm font-semibold">{t("title", { default: "Canvas" })}</h2>
         <Tooltip delayDuration={300}>

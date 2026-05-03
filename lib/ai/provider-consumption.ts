@@ -58,10 +58,44 @@ export interface ProviderSettingsSnapshot {
   customProviders: CustomProviderDefinition[]
 }
 
+/** Convert a rich custom-provider row to the resolver-facing shape. */
+function richToDefinition(rich: RichCustomProviderEntry): CustomProviderDefinition {
+  // `apiProtocol` uses 'gemini' but the resolver wants 'google'.
+  let protocol: CustomProviderDefinition["protocol"] | undefined = rich.protocol
+  if (!protocol && rich.apiProtocol) {
+    protocol = rich.apiProtocol === "gemini" ? "google" : rich.apiProtocol
+  }
+  return {
+    id: rich.id,
+    name: (rich as { name?: string }).name ?? rich.id,
+    protocol,
+    baseURL: rich.baseURL,
+    apiKey: rich.apiKey,
+    defaultModel: rich.defaultModel,
+  }
+}
+
+/**
+ * Looser shape for `customProviders` — accepts either the lean
+ * `CustomProviderDefinition` or the rich `CustomProviderSettings` shape
+ * stored in `AppSettings`. The resolver only reads `id`, `apiKey`,
+ * `baseURL`, `defaultModel`, and `protocol`/`apiProtocol`, all of which
+ * exist on both shapes.
+ */
+export interface RichCustomProviderEntry {
+  id: string
+  /** Either form of the protocol field — converted in `resolveOne`. */
+  protocol?: "openai" | "anthropic" | "google" | "mistral" | "cohere"
+  apiProtocol?: "openai" | "anthropic" | "gemini"
+  baseURL?: string
+  apiKey?: string
+  defaultModel?: string
+}
+
 export interface ProviderSettingsSnapshotInput {
   defaultProvider: string | undefined
   providerSettings: Record<string, ProviderSettingsEntry> | undefined
-  customProviders: CustomProviderDefinition[] | undefined
+  customProviders: RichCustomProviderEntry[] | undefined
 }
 
 export type FeatureRouteProfile = "general-text" | "embedding" | "vision" | "capability-bound"
@@ -158,7 +192,7 @@ export function createProviderSettingsSnapshot(
   return {
     defaultProvider: input.defaultProvider,
     providers: { ...(input.providerSettings ?? {}) },
-    customProviders: [...(input.customProviders ?? [])],
+    customProviders: (input.customProviders ?? []).map(richToDefinition),
   }
 }
 

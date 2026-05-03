@@ -1,0 +1,288 @@
+---
+title: 运行时模型 & Tauri 集成
+description: Web/桌面 双运行时如何工作，如何添加新的 IPC 命令，以及保护用户的安全边界。
+---
+
+# 运行时模型 & Tauri 集成
+
+Cognia 的同一份 React 代码同时支持两种运行模式：
+
+- **Web 模式** —— `pnpm dev` 在浏览器中打开 [http://localhost:3000](http://localhost:3000)。
+- **桌面模式** —— `pnpm tauri dev` 在 Tauri webview 中打开，具有完整 OS 访问权限。
+
+绝大多数组件在两种模式下表现一致；少数差异通过 `lib/tauri.ts` 抹平。
+
+## `isTauri()` 守卫
+
+```ts
+// lib/tauri.ts
+export function isTauri(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+}
+```
+
+用它守护任何会调 Rust 命令的代码路径：
+
+```tsx
+import { isTauri, openExternal } from "@/lib/tauri"
+
+function ExternalLink({ href, children }: Props) {
+  if (isTauri()) {
+    return <button onClick={() => openExternal(href)}>{children}</button>
+  }
+  return <a href={href} target="_blank" rel="noreferrer">{children}</a>
+}
+```
+
+在 SSR（Next.js 服务端组件）中，`isTauri()` 始终返回 `false`，因为 `window` 不存在。依赖 Tauri 的 UI 应包在客户端组件里（`"use client"`）。
+
+## `isTauri()` 与 IPC 桥的协作
+
+```mermaid
+flowchart LR
+  Comp[React 组件] --> Gate{isTauri()?}
+  Gate -->|true| Wrap[lib/tauri.ts 封装]
+  Gate -->|false| Web[Web 兜底路径]
+  Wrap --> Inv[invoke 'cmd_name', args]
+  Inv -->|stdio| Rust[#[tauri::command]<br/>Rust 处理函数]
+  Rust --> Wrap
+  Wrap --> Comp
+
+  classDef comp fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
+  classDef gate fill:#312e81,stroke:#a78bfa,color:#ede9fe
+  classDef wrap fill:#064e3b,stroke:#10b981,color:#a7f3d0
+  classDef rust fill:#7c2d12,stroke:#fb923c,color:#fed7aa
+  class Comp,Web comp
+  class Gate gate
+  class Wrap,Inv wrap
+  class Rust rust
+```
+
+## "唯一调用点"规则
+
+**只有 `lib/tauri.ts` 及其 `lib/tauri/` 子模块允许调用 `invoke()`。** 每个 Rust 命令都必须有一个类型化封装：
+
+```ts
+// lib/tauri.ts
+export async function greet(name: string): Promise<string> {
+  return invoke<string>("greet", { name })
+}
+```
+
+为什么这样规定：
+
+- 唯一一处可以加请求校验、错误映射、遥测。
+- 业务代码保持可移植 —— 测试中容易 mock。
+- Rust API 重构只动 `lib/tauri.ts` 一处。
+
+代码评审时如果发现 `invoke()` 出现在这个文件夹之外，请把它搬回来。
+
+## 添加新的 IPC 命令
+
+<Steps>
+  <Step>
+    ### 在 Rust 中定义命令
+
+    写在 `src-tauri/src/commands.rs`（或领域子模块如 `src-tauri/src/scheduler/commands.rs`）：
+
+    ```rust
+    #[tauri::command]
+    pub async fn my_command(arg: String) -> Result<String, String> {
+        Ok(format!("got {arg}"))
+    }
+    ```
+
+    <Callout type="info" title="约定">
+      - 返回 `Result<T, E>`，让 Tauri 把错误序列化成 JS 可以 `catch` 的字符串。
+      - 参数用 `String` 不用 `&str` —— Tauri 自己持有缓冲区。
+      - 长任务用 `tauri::Window` 参数发进度事件。
+    </Callout>
+  </Step>
+  <Step>
+    ### 在 `lib.rs` 中注册
+
+    ```rust
+    .invoke_handler(tauri::generate_handler![
+        commands::greet,
+        commands::my_command,
+        // ...
+    ])
+    ```
+  </Step>
+  <Step>
+    ### 在 `lib/tauri.ts` 中加类型封装
+
+    ```ts
+    export async function myCommand(arg: string): Promise<string> {
+      return invoke<string>("my_command", { arg })
+    }
+    ```
+
+    如果该领域调用很多，可以放到 `lib/tauri/` 下的子模块
+    （例如调度器相关全部放 `lib/tauri/scheduler.ts`）。
+  </Step>
+  <Step>
+    ### 写测试
+
+    <Tabs groupId="lang" persist items={["TypeScript", "Rust"]}>
+      <Tab value="TypeScript">
+        同名 `lib/tauri.test.ts`。Mock `@tauri-apps/api/core`：
+
+        ```ts
+        jest.mock("@tauri-apps/api/core", () => ({
+          invoke: jest.fn(),
+        }))
+        ```
+
+        然后断言封装传入了正确的命令名与参数。
+      </Tab>
+      <Tab value="Rust">
+        同文件 `#[cfg(test)] mod tests {}` 块：
+
+        ```rust
+        #[cfg(test)]
+        mod tests {
+            use super::*;
+            #[tokio::test]
+            async fn handles_basic_input() {
+                let r = my_command("hello".into()).await.unwrap();
+                assert_eq!(r, "got hello");
+            }
+        }
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+</Steps>
+
+## Tauri 配置（`src-tauri/tauri.conf.json`）
+
+关键字段：
+
+```jsonc
+{
+  "productName": "Cognia",
+  "version": "0.1.0",
+  "identifier": "com.reactquickstarter.desktop",
+  "build": {
+    "frontendDist": "../out",
+    "devUrl": "http://localhost:3000",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Cognia",
+        "label": "main",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "decorations": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; ..."
+    }
+  },
+  "plugins": {
+    "deep-link": { "desktop": { "schemes": ["cognia"] } },
+    "cli": { /* CLI 参数定义 */ },
+    "updater": { "active": false }
+  }
+}
+```
+
+### 关于 bundle identifier
+
+<Callout type="error" title="不要在没有迁移方案的情况下重命名">
+  `identifier` 是 `com.reactquickstarter.desktop` —— 历史遗留值。Tauri 用它推导
+  **每用户应用数据目录**。修改它会让所有已安装用户的设置、向量库、聊天历史变成孤儿数据。
+
+  **99% 的贡献者请让 `identifier` 保持原样。**
+</Callout>
+
+按平台的每用户数据目录：
+
+| 平台 | 路径 |
+| --- | --- |
+| Windows | `%APPDATA%\com.reactquickstarter.desktop\` |
+| macOS | `~/Library/Application Support/com.reactquickstarter.desktop/` |
+| Linux | `~/.local/share/com.reactquickstarter.desktop/` |
+
+如果一定要改，请规划迁移：
+
+<Steps>
+  <Step>### 首次启动时同时读取新旧两个 identifier 的目录</Step>
+  <Step>### 把数据复制到新目录</Step>
+  <Step>### 在 `settings` 中标记迁移已完成，避免重复执行</Step>
+</Steps>
+
+### Content Security Policy（CSP）
+
+`app.security.csp` 决定 webview 允许加载什么。当前策略允许 `'self'`、`wasm-unsafe-eval`（Monaco）、`blob:`（worker 与 iframe）、内联样式（Tailwind）。
+
+新增浏览器端的 HTTPS 来源（如模型供应商、遥测端点、OAuth 提供方）时，请把来源加入 `connect-src`，否则生产构建会静默拦截请求。
+
+```jsonc
+"csp": "... connect-src 'self' ipc: http://ipc.localhost ws: wss: https://api.example.com; ..."
+```
+
+### 窗口外观
+
+`decorations: false` + `titleBarStyle: "Overlay"` + `hiddenTitle: true` 让 Cognia 自绘标题栏。拖动区由 CSS 设定（`-webkit-app-region: drag`），关闭/最小化/最大化按钮由 React 绘制（见 `components/desktop/`）。
+
+## 已使用的 Tauri 插件
+
+均在 `src-tauri/src/lib.rs` 注册。每个都有对应的 `tauri-allowlist` 条目（`src-tauri/capabilities/default.json`），限制 JS 侧能做什么。
+
+| 插件 | 用途 |
+| --- | --- |
+| `single-instance` | 第二次启动时聚焦既有窗口并转发参数（CLI workspace 路径、deep-link URL）。 |
+| `deep-link` | 注册 `cognia://` URL 协议。Mac/Linux 把 URL 当作启动参数；Windows 借 single-instance 转发。 |
+| `autostart` | 可选"开机自启"。默认关闭。 |
+| `global-shortcut` | 注册系统级快捷键，由用户配置。 |
+| `cli` | 解析 `--workspace <path>` 与 `-n`（新建会话）启动参数。 |
+| `store` | 持久化 Rust 侧关心的设置（JS 侧用 Dexie）。 |
+| `updater` | 默认禁用（详见 `src-tauri/UPDATER.md`）。 |
+| `dialog`、`fs`、`notification`、`clipboard-manager`、`opener`、`os`、`process` | 标准 OS 访问。 |
+| `log`、`window-state` | 日志、窗口位置/大小持久化。 |
+
+按 Tauri 文档要求，single-instance 钩子必须**最先**注册：
+
+```rust
+builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+    // 聚焦既有窗口、转发参数
+}));
+```
+
+## 生命周期与关闭
+
+`src-tauri/src/lib.rs` 接线：
+
+- **应用就绪** —— 初始化 `SidecarState`（懒加载，第一次 `claude_send` 时才启动）、注册 hooks、安排 readiness ping。
+- **窗口关闭** —— 退出前先 `kill_sidecar`，避免遗留 Node 进程。
+- **single-instance 第二次启动** —— 聚焦既有窗口、转发 `args` 与 `cwd`。
+
+新增长任务原生子系统时，请在 `lib.rs` 里注册，并在 `RunEvent::ExitRequested` 时清理。
+
+## 权限模型
+
+Cognia 采用**默认 allow-list** 策略（Tauri 2 capability）。`src-tauri/capabilities/` 下的 capability 文件定义了哪些 API 对哪些 window label 可见。默认策略：
+
+- 仅 `main` 窗口可访问 Tauri API。
+- 文件系统操作仅限定根（`$APPDATA`、`$DOWNLOADS` 等）；裸路径会被拒绝。
+- shell 执行经过 `lib/native/local-runtime.ts` + `src-tauri/src/shell.rs`，仅在受信任工作区（`lib/db/trusted-workspaces.ts`）允许的范围内放行。
+
+插件在自身清单中申请额外权限（见 [插件系统](./plugin-system)）。
+
+## 下一篇
+
+<Cards>
+  <Card title="Sidecar & Claude SDK" href="./sidecar-and-claude-sdk" description="Node sidecar 协议详解" />
+  <Card title="插件系统" href="./plugin-system" description="插件如何申请权限" />
+  <Card title="架构" href="./architecture" description="本页所属的 4 层视图" />
+</Cards>

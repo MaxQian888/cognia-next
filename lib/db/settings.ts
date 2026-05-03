@@ -6,6 +6,7 @@ import {
   DEFAULT_SOURCE_VERIFICATION_SETTINGS,
   createDefaultSearchUsageStats,
 } from "@/lib/search/types"
+import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 import { getDb } from "./schema"
 
 const SINGLETON_ID = "singleton" as const
@@ -19,6 +20,13 @@ const DEFAULTS: AppSettings = {
   alwaysAllowTools: [],
   builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
   apiKey: undefined,
+  apiBaseUrl: undefined,
+  activeProviderId: undefined,
+  ccswitchSync: {
+    enabled: true,
+    watchDb: true,
+    defaultPropagation: [],
+  },
   lastUpdateCheckAt: undefined,
   theme: "system",
   fontScale: "md",
@@ -84,6 +92,13 @@ const DEFAULTS: AppSettings = {
   searchUsageStats: createDefaultSearchUsageStats(),
   customSearchSources: [],
   defaultSearchSources: [],
+
+  // Appearance defaults
+  background: { ...DEFAULT_BACKGROUND_SETTINGS },
+  wallpapers: [],
+  customCss: "",
+  customCssEnabled: false,
+  importedVscodeThemes: [],
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -98,6 +113,11 @@ export async function getSettings(): Promise<AppSettings> {
     // shipped without `builtinTools.shellAdvanced` would otherwise drop the
     // default when we eventually add it.
     builtinTools: mergeBuiltinTools(row.builtinTools),
+    background: { ...DEFAULT_BACKGROUND_SETTINGS, ...(row.background ?? {}) },
+    wallpapers: row.wallpapers ?? [],
+    customCss: row.customCss ?? "",
+    customCssEnabled: row.customCssEnabled ?? false,
+    importedVscodeThemes: row.importedVscodeThemes ?? [],
     id: SINGLETON_ID,
   }
 }

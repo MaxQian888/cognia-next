@@ -770,3 +770,231 @@ describe("fallback branches (existing-map-missing-id and friends)", () => {
     expect(ipc.setApiKey).toHaveBeenCalledWith(null)
   })
 })
+
+// ----------------------------------------------------------------------------
+// Appearance setters
+// ----------------------------------------------------------------------------
+
+describe("appearance setters", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { DEFAULT_BACKGROUND_SETTINGS } = require("@/types/appearance") as {
+    DEFAULT_BACKGROUND_SETTINGS: {
+      enabled: boolean
+      activeId: string | null
+      scope: "all" | "global" | "chat" | "canvas" | "sidebar"
+      blurPx: number
+      opacity: number
+      position: "cover" | "contain" | "tile" | "center"
+    }
+  }
+
+  type Wallpaper = {
+    id: string
+    name: string
+    kind: "image" | "gradient" | "color"
+    builtin: boolean
+    createdAt: number
+    source: { kind: "gradient"; css: string } | { kind: "color"; value: string }
+  }
+
+  const wp = (id: string, builtin = false): Wallpaper => ({
+    id,
+    name: id,
+    kind: "gradient",
+    builtin,
+    createdAt: 1,
+    source: { kind: "gradient", css: "linear-gradient(0deg, #fff, #000)" },
+  })
+
+  it("setBackground merges patch into the saved row", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ background: { ...DEFAULT_BACKGROUND_SETTINGS } }),
+    })
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({ background: patch.background })
+    )
+    await act(async () => {
+      await useSettingsStore.getState().setBackground({ blurPx: 8, opacity: 0.7 })
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      background: { ...DEFAULT_BACKGROUND_SETTINGS, blurPx: 8, opacity: 0.7 },
+    })
+  })
+
+  it("addWallpaper ignores duplicates by id", async () => {
+    const existing = wp("a")
+    useSettingsStore.setState({ settings: baseSettings({ wallpapers: [existing] }) })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings({ wallpapers: [existing] }))
+    await act(async () => {
+      await useSettingsStore.getState().addWallpaper(existing)
+    })
+    expect(dbSettings.saveSettings).not.toHaveBeenCalled()
+  })
+
+  it("addWallpaper appends a new wallpaper", async () => {
+    useSettingsStore.setState({ settings: baseSettings({ wallpapers: [] }) })
+    const incoming = wp("b")
+    dbSettings.saveSettings.mockResolvedValue(baseSettings({ wallpapers: [incoming] }))
+    await act(async () => {
+      await useSettingsStore.getState().addWallpaper(incoming)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ wallpapers: [incoming] })
+  })
+
+  it("updateWallpaper merges into the matching row, preserving id", async () => {
+    const existing = wp("a")
+    useSettingsStore.setState({ settings: baseSettings({ wallpapers: [existing] }) })
+    dbSettings.saveSettings.mockImplementation(async (p) =>
+      baseSettings({ wallpapers: p.wallpapers })
+    )
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .updateWallpaper("a", { name: "renamed", id: "ignored" } as Partial<Wallpaper>)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      wallpapers: [{ ...existing, name: "renamed" }],
+    })
+  })
+
+  it("updateWallpaper is a no-op when id is unknown", async () => {
+    useSettingsStore.setState({ settings: baseSettings({ wallpapers: [wp("a")] }) })
+    await act(async () => {
+      await useSettingsStore.getState().updateWallpaper("missing", { name: "x" })
+    })
+    expect(dbSettings.saveSettings).not.toHaveBeenCalled()
+  })
+
+  it("deleteWallpaper refuses built-in wallpapers", async () => {
+    const builtin = wp("preset", true)
+    useSettingsStore.setState({ settings: baseSettings({ wallpapers: [builtin] }) })
+    await act(async () => {
+      await useSettingsStore.getState().deleteWallpaper("preset")
+    })
+    expect(dbSettings.saveSettings).not.toHaveBeenCalled()
+  })
+
+  it("deleteWallpaper clears active background when the deleted one was active", async () => {
+    const a = wp("a")
+    const b = wp("b")
+    useSettingsStore.setState({
+      settings: baseSettings({
+        wallpapers: [a, b],
+        background: {
+          ...DEFAULT_BACKGROUND_SETTINGS,
+          enabled: true,
+          activeId: "a",
+        },
+      }),
+    })
+    dbSettings.saveSettings.mockImplementation(async (p) => baseSettings(p))
+    await act(async () => {
+      await useSettingsStore.getState().deleteWallpaper("a")
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      wallpapers: [b],
+      background: { ...DEFAULT_BACKGROUND_SETTINGS, activeId: null, enabled: false },
+    })
+  })
+
+  it("deleteWallpaper without active match only filters the list", async () => {
+    const a = wp("a")
+    const b = wp("b")
+    useSettingsStore.setState({
+      settings: baseSettings({
+        wallpapers: [a, b],
+        background: { ...DEFAULT_BACKGROUND_SETTINGS, activeId: "b", enabled: true },
+      }),
+    })
+    dbSettings.saveSettings.mockImplementation(async (p) => baseSettings(p))
+    await act(async () => {
+      await useSettingsStore.getState().deleteWallpaper("a")
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ wallpapers: [b] })
+  })
+
+  it("setActiveWallpaper enables background when given an id", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ background: { ...DEFAULT_BACKGROUND_SETTINGS } }),
+    })
+    dbSettings.saveSettings.mockImplementation(async (p) => baseSettings(p))
+    await act(async () => {
+      await useSettingsStore.getState().setActiveWallpaper("wp-1")
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      background: { ...DEFAULT_BACKGROUND_SETTINGS, activeId: "wp-1", enabled: true },
+    })
+  })
+
+  it("setActiveWallpaper(null) disables background", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({
+        background: { ...DEFAULT_BACKGROUND_SETTINGS, activeId: "x", enabled: true },
+      }),
+    })
+    dbSettings.saveSettings.mockImplementation(async (p) => baseSettings(p))
+    await act(async () => {
+      await useSettingsStore.getState().setActiveWallpaper(null)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      background: { ...DEFAULT_BACKGROUND_SETTINGS, activeId: null, enabled: false },
+    })
+  })
+
+  it("setCustomCss + setCustomCssEnabled save through", async () => {
+    useSettingsStore.setState({ settings: baseSettings() })
+    dbSettings.saveSettings.mockImplementation(async (p) => baseSettings(p))
+    await act(async () => {
+      await useSettingsStore.getState().setCustomCss("body { color: red; }")
+      await useSettingsStore.getState().setCustomCssEnabled(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenNthCalledWith(1, {
+      customCss: "body { color: red; }",
+    })
+    expect(dbSettings.saveSettings).toHaveBeenNthCalledWith(2, { customCssEnabled: true })
+  })
+
+  it("addImportedTheme replaces an existing record for the same customThemeId", async () => {
+    const r1 = {
+      customThemeId: "ct-1",
+      sourceName: "old",
+      sourceVariant: "dark" as const,
+      importedAt: 1,
+      origin: { kind: "json" as const, fileName: "a.json" },
+    }
+    const r2 = { ...r1, sourceName: "new", importedAt: 2 }
+    useSettingsStore.setState({ settings: baseSettings({ importedVscodeThemes: [r1] }) })
+    dbSettings.saveSettings.mockImplementation(async (p) => baseSettings(p))
+    await act(async () => {
+      await useSettingsStore.getState().addImportedTheme(r2)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ importedVscodeThemes: [r2] })
+  })
+
+  it("removeImportedTheme filters by customThemeId", async () => {
+    const records = [
+      {
+        customThemeId: "ct-1",
+        sourceName: "a",
+        sourceVariant: "light" as const,
+        importedAt: 1,
+        origin: { kind: "json" as const, fileName: "a.json" },
+      },
+      {
+        customThemeId: "ct-2",
+        sourceName: "b",
+        sourceVariant: "dark" as const,
+        importedAt: 2,
+        origin: { kind: "json" as const, fileName: "b.json" },
+      },
+    ]
+    useSettingsStore.setState({ settings: baseSettings({ importedVscodeThemes: records }) })
+    dbSettings.saveSettings.mockImplementation(async (p) => baseSettings(p))
+    await act(async () => {
+      await useSettingsStore.getState().removeImportedTheme("ct-1")
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      importedVscodeThemes: [records[1]],
+    })
+  })
+})

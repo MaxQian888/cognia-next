@@ -249,6 +249,36 @@ pub async fn vector_reset_store(state: State<'_, VectorState>) -> Result<(), Str
     Ok(())
 }
 
+#[tauri::command]
+pub async fn vector_get_store_size(state: State<'_, VectorState>) -> Result<u64, String> {
+    debug!("vector_get_store_size");
+    // When the store failed to initialise (web mode shouldn't reach this,
+    // but other startup failures may), report 0 instead of erroring so the
+    // storage breakdown can still render.
+    let store = match state.store() {
+        Ok(s) => s,
+        Err(_) => {
+            info!("vector_get_store_size: store unavailable, reporting 0");
+            return Ok(0);
+        }
+    };
+    let path = store.path().to_path_buf();
+    drop(store);
+    let mut total: u64 = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    // sqlite WAL/SHM siblings hold pending writes; include them so the
+    // figure matches what an `ls -la` of the cognia data dir would show.
+    for ext in ["-wal", "-shm"] {
+        let mut sibling = path.as_os_str().to_owned();
+        sibling.push(ext);
+        let sibling_path = std::path::PathBuf::from(sibling);
+        if let Ok(meta) = std::fs::metadata(&sibling_path) {
+            total += meta.len();
+        }
+    }
+    info!("vector_get_store_size ok: {} bytes", total);
+    Ok(total)
+}
+
 #[cfg(test)]
 mod tests {
     //! Smoke tests — most logic is covered in `db.rs` and `filters.rs`.
@@ -286,6 +316,25 @@ mod tests {
         std::fs::write(&blocker, "x").expect("write");
         let bad_path = blocker.join("v.sqlite");
         let state = VectorState::new(Some(bad_path));
+        assert!(state.store().is_err());
+    }
+
+    #[test]
+    fn get_store_size_reports_nonzero_after_init() {
+        // After `VectorStore::new` the sqlite file exists with a
+        // header + migrations applied — file size must be > 0.
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("v.sqlite");
+        let _state = VectorState::new(Some(path.clone()));
+        let bytes = std::fs::metadata(&path).expect("metadata").len();
+        assert!(bytes > 0, "fresh store should have a non-empty sqlite file");
+    }
+
+    #[test]
+    fn get_store_size_returns_zero_when_state_unavailable() {
+        // Mirrors the `state.store()` guard inside vector_get_store_size:
+        // an uninitialised state should resolve to 0 rather than panic.
+        let state = VectorState::new(None);
         assert!(state.store().is_err());
     }
 

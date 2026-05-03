@@ -791,6 +791,11 @@ export class NativeVectorStore implements IVectorStore {
     await this.invoke("vector_truncate_collection", { name })
   }
 
+  async getStoreSize(): Promise<number> {
+    if (!this.isInTauri()) return 0
+    return await this.invoke<number>("vector_get_store_size", {})
+  }
+
   async exportCollection(_name: string): Promise<CollectionExport> {
     throw new Error("exportCollection is not yet supported on the native backend")
   }

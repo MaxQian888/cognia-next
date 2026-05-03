@@ -2,6 +2,7 @@ mod a2ui_bridge;
 mod agents;
 mod api_key;
 mod canvas;
+mod ccswitch;
 mod claude;
 mod commands;
 mod external_agent;
@@ -14,6 +15,7 @@ mod shell;
 mod skills;
 mod tts;
 mod vector;
+mod wallpaper;
 
 mod window_behavior;
 
@@ -38,12 +40,29 @@ use tauri_plugin_deep_link::DeepLinkExt;
 
 /// Push a fresh Anthropic API key into the in-process store. The frontend
 /// triggers a sidecar restart afterwards via `claude_restart_sidecar`.
+///
+/// Kept as a thin compat wrapper around `set_provider` so any caller that
+/// hasn't migrated to `claude_set_provider_env` yet still works. Leaves the
+/// existing `ANTHROPIC_BASE_URL` (if set) untouched.
 #[tauri::command]
 async fn claude_set_api_key(
     state: State<'_, ApiKeyState>,
     key: Option<String>,
 ) -> Result<(), String> {
     state.set(key).await;
+    Ok(())
+}
+
+/// Replace the Anthropic provider env (api key + optional base URL) atomically.
+/// Used by the CCSwitch provider-switch flow so the sidecar restart sees a
+/// coherent pair instead of an api-key/base-url straddling two providers.
+#[tauri::command]
+async fn claude_set_provider_env(
+    state: State<'_, ApiKeyState>,
+    api_key: Option<String>,
+    base_url: Option<String>,
+) -> Result<(), String> {
+    state.set_provider(api_key, base_url).await;
     Ok(())
 }
 
@@ -167,7 +186,13 @@ pub fn run() {
             claude::mcp_test::test_mcp_server,
             agents::commands::read_agent_config,
             agents::commands::write_agent_config,
+            ccswitch::commands::ccswitch_status,
+            ccswitch::commands::ccswitch_list_providers,
+            ccswitch::commands::ccswitch_list_mcp_servers,
+            ccswitch::commands::ccswitch_list_prompts,
+            ccswitch::commands::ccswitch_list_skills,
             claude_set_api_key,
+            claude_set_provider_env,
             claude_has_api_key,
             claude_restart_sidecar,
             canvas::python_exec::canvas_run_python,
@@ -195,6 +220,7 @@ pub fn run() {
             settings::read_claude_project_settings,
             settings::read_claude_local_settings,
             settings::read_claude_effective_settings,
+            settings::write_claude_settings_env,
             shell::shell_exec,
             tts::keyring::tts_keyring_get,
             tts::keyring::tts_keyring_set,
@@ -258,7 +284,13 @@ pub fn run() {
             vector::commands::vector_search_points,
             vector::commands::vector_truncate_collection,
             vector::commands::vector_reset_store,
+            vector::commands::vector_get_store_size,
             a2ui_bridge::commands::a2ui_bridge_runtime_paths,
+            wallpaper::commands::wallpaper_save,
+            wallpaper::commands::wallpaper_list,
+            wallpaper::commands::wallpaper_delete,
+            wallpaper::commands::wallpaper_resolve_path,
+            wallpaper::commands::wallpaper_read_data_url,
         ])
         .setup(|app| {
             // Bootstrap native logging in *all* builds. Installs tauri-plugin-log

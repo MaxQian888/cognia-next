@@ -36,6 +36,14 @@ interface UIState {
   setShowMemberList: (visible: boolean) => void
 
   /**
+   * VSCode-style sidebar collapse. Drives the ChannelList visibility and the
+   * status-bar toggle. Persisted across reloads.
+   */
+  sidebarCollapsed: boolean
+  toggleSidebar: () => void
+  setSidebarCollapsed: (collapsed: boolean) => void
+
+  /**
    * Per-team-session collapsed state for the Shared notes (scratchpad) panel
    * in the right rail. Default expanded; persisted so the choice sticks.
    */
@@ -93,6 +101,10 @@ export const useUIStore = create<UIState>()(
 
       showMemberList: true,
       setShowMemberList: (visible) => set({ showMemberList: visible }),
+
+      sidebarCollapsed: false,
+      toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+      setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
 
       scratchpadCollapsed: {},
       setScratchpadCollapsed: (sessionId, collapsed) =>
@@ -156,6 +168,7 @@ export const useUIStore = create<UIState>()(
         selectedGuild: s.selectedGuild,
         showMemberList: s.showMemberList,
         scratchpadCollapsed: s.scratchpadCollapsed,
+        sidebarCollapsed: s.sidebarCollapsed,
       }),
     }
   )

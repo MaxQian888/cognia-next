@@ -17,7 +17,7 @@ import { useChatStore } from "@/stores/chat"
 import { handleCost, handleStatus } from "./actions/diagnostics"
 import { handleReset, handleResume, handleSessions } from "./actions/sessions"
 
-/** Names of the tabs inside SettingsDialog. */
+/** Names of the sections in the Settings page (URL `?section=` values). */
 export type SettingsTab =
   | "general"
   | "appearance"

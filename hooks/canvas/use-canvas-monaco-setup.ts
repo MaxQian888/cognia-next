@@ -8,7 +8,7 @@
  * separate suggestions panel so this hook is just the editor wiring.
  */
 
-import { useCallback, useEffect, useRef } from "react"
+import { useCallback, useEffect, useMemo, useRef } from "react"
 import type { editor as MonacoEditor } from "monaco-editor"
 import { useTheme } from "next-themes"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
@@ -32,7 +32,9 @@ export function useCanvasMonacoSetup(opts: UseCanvasMonacoSetupOptions = {}) {
   const themePref = useCanvasSettingsStore((s) => s.settings.theme)
   const { resolvedTheme } = useTheme()
 
-  const editorOptions = useCanvasSettingsStore((s) => s.getEditorOptions())
+  const getEditorOptions = useCanvasSettingsStore((s) => s.getEditorOptions)
+  const editorSettings = useCanvasSettingsStore((s) => s.settings.editor)
+  const editorOptions = useMemo(() => getEditorOptions(), [getEditorOptions, editorSettings])
 
   const onMount = useCallback(
     (editor: MonacoEditor.IStandaloneCodeEditor, monaco: typeof import("monaco-editor")) => {

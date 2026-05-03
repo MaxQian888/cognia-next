@@ -1,47 +1,136 @@
 "use client"
 
-import { Suspense, useEffect, useMemo, useState } from "react"
+import { Suspense, useState } from "react"
+import dynamic from "next/dynamic"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { ChevronRightIcon, XIcon } from "lucide-react"
+import { ArrowLeftIcon, ChevronRightIcon } from "lucide-react"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { Skeleton } from "@/components/ui/skeleton"
 import { SettingsSidebar } from "./settings-sidebar"
 import { SETTINGS_NAV, type SettingsSectionId } from "./settings-nav-config"
-import { ApiKeySection } from "./api-key-section"
-import { SearchSettings } from "./search/search-settings"
-import { AppearanceSection } from "./appearance-section"
-import { CharactersSection } from "./characters-section"
-import { TeamsSection } from "./teams-section"
-import { PromptPresetsSection } from "./prompt-presets-section"
-import { McpServersSection } from "./mcp-servers-section"
-import { DataSection } from "./data/data-section"
-import { ScheduledTasksSection } from "./scheduled-tasks-section"
-import { DesktopSection } from "./desktop-section"
-import { AboutSection } from "./about-section"
-import { GeneralSection } from "./general-section"
-import { A2UISection } from "./a2ui-section"
-import { SkillsLinkCard } from "./sections/skills-link-card"
-import { SpeechSection } from "./speech-section"
-import { LogsSection } from "./sections/logs-section"
-import { DiagnosticsSection } from "./sections/diagnostics-section"
-import ExternalAgentSettings from "./agent/external-agent-settings"
-import { CustomModeSettings } from "./agent/custom-mode-settings"
-import { ArtifactsSection } from "./artifacts-section"
-import { CanvasSection } from "./canvas-section"
-import { ToolSettingsSection } from "./tools"
+
+const SectionLoading = () => (
+  <div className="space-y-4" aria-busy="true" aria-label="Loading section">
+    <Skeleton className="h-7 w-1/3" />
+    <Skeleton className="h-4 w-2/3" />
+    <Skeleton className="h-32 w-full" />
+    <Skeleton className="h-24 w-full" />
+  </div>
+)
+
+const ApiKeySection = dynamic(() => import("./api-key-section").then((m) => m.ApiKeySection), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
+const ProvidersSection = dynamic(
+  () => import("./provider/provider-settings").then((m) => m.ProviderSettings),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const SearchSettings = dynamic(
+  () => import("./search/search-settings").then((m) => m.SearchSettings),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const AppearanceSection = dynamic(() => import("./appearance").then((m) => m.AppearanceSection), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
+const CharactersSection = dynamic(
+  () => import("./characters-section").then((m) => m.CharactersSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const TeamsSection = dynamic(() => import("./teams-section").then((m) => m.TeamsSection), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
+const PromptPresetsSection = dynamic(
+  () => import("./prompt-presets-section").then((m) => m.PromptPresetsSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const McpServersSection = dynamic(
+  () => import("./mcp-servers-section").then((m) => m.McpServersSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const DataSection = dynamic(() => import("./data/data-section").then((m) => m.DataSection), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
+const ScheduledTasksSection = dynamic(
+  () => import("./scheduled-tasks-section").then((m) => m.ScheduledTasksSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const DesktopSection = dynamic(() => import("./desktop-section").then((m) => m.DesktopSection), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
+const AboutSection = dynamic(() => import("./about-section").then((m) => m.AboutSection), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
+const GeneralSection = dynamic(() => import("./general-section").then((m) => m.GeneralSection), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
+const A2UISection = dynamic(() => import("./a2ui-section").then((m) => m.A2UISection), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
+const PluginsSection = dynamic(
+  () => import("./sections/plugins-section").then((m) => m.PluginsSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const SkillsLinkCard = dynamic(
+  () => import("./sections/skills-link-card").then((m) => m.SkillsLinkCard),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const SpeechSection = dynamic(() => import("./speech-section").then((m) => m.SpeechSection), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
+const LogsSection = dynamic(() => import("./sections/logs-section").then((m) => m.LogsSection), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
+const DiagnosticsSection = dynamic(
+  () => import("./sections/diagnostics-section").then((m) => m.DiagnosticsSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const ExternalAgentSettings = dynamic(() => import("./agent/external-agent-settings"), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
+const CustomModeSettings = dynamic(
+  () => import("./agent/custom-mode-settings").then((m) => m.CustomModeSettings),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const AgentTeamTemplatesSection = dynamic(
+  () => import("./agent/agent-team-templates-section").then((m) => m.AgentTeamTemplatesSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const ArtifactsSection = dynamic(
+  () => import("./artifacts-section").then((m) => m.ArtifactsSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const CanvasSection = dynamic(() => import("./canvas-section").then((m) => m.CanvasSection), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
+const ToolSettingsSection = dynamic(
+  () => import("./tools/tool-settings-section").then((m) => m.ToolSettingsSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const RemoteControlSection = dynamic(
+  () => import("./remote-control/remote-control-section").then((m) => m.RemoteControlSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const CcswitchSection = dynamic(
+  () => import("./ccswitch/ccswitch-section").then((m) => m.CcswitchSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 
 interface Props {
-  /** Initial section to render. Updated when the URL `?section=` changes. */
-  defaultSection?: SettingsSectionId
-  /**
-   * When set, the shell renders without a top-of-page <html> wrapper or
-   * back-to-home button — used inside the settings Sheet host.
-   */
-  embedded?: boolean
-  /** Optional handler for the close (×) button when embedded inside a sheet. */
-  onClose?: () => void
   /** Renders an actions menu (e.g., Reset/Export/Import) in the header. */
   actions?: React.ReactNode
 }
@@ -52,69 +141,38 @@ function isSection(value: string | null): value is SettingsSectionId {
   return value !== null && VALID_SECTIONS.has(value as SettingsSectionId)
 }
 
-export function SettingsShell({
-  defaultSection = "general",
-  embedded = false,
-  onClose,
-  actions,
-}: Props) {
+export function SettingsShell({ actions }: Props = {}) {
   return (
     <Suspense fallback={<SettingsShellFallback />}>
-      <SettingsShellInner
-        defaultSection={defaultSection}
-        embedded={embedded}
-        onClose={onClose}
-        actions={actions}
-      />
+      <SettingsShellInner actions={actions} />
     </Suspense>
   )
 }
 
-function SettingsShellInner({
-  defaultSection,
-  embedded,
-  onClose,
-  actions,
-}: Required<Pick<Props, "defaultSection" | "embedded">> & Pick<Props, "onClose" | "actions">) {
+function SettingsShellInner({ actions }: Props) {
   const t = useTranslations("settings")
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [searchQuery, setSearchQuery] = useState("")
-  const [activeSection, setActiveSection] = useState<SettingsSectionId>(defaultSection)
 
-  // Hydrate from URL `?section=` when running as a real route. In embedded
-  // mode the host owns the section (passed in via defaultSection).
-  useEffect(() => {
-    if (embedded) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setActiveSection(defaultSection)
-      return
-    }
-    if (typeof window === "undefined") return
-    const params = new URLSearchParams(window.location.search)
-    const requested = params.get("section")
-    if (isSection(requested)) {
-      setActiveSection(requested)
-    }
-  }, [defaultSection, embedded])
+  const requested = searchParams.get("section")
+  const activeSection: SettingsSectionId = isSection(requested) ? requested : "general"
 
   const handleSectionSelect = (section: SettingsSectionId) => {
-    setActiveSection(section)
-    if (!embedded && typeof window !== "undefined") {
-      const url = new URL(window.location.href)
-      url.searchParams.set("section", section)
-      window.history.replaceState({}, "", url.toString())
-    }
+    const next = new URLSearchParams(searchParams.toString())
+    next.set("section", section)
+    router.replace(`/settings?${next.toString()}`, { scroll: false })
   }
 
-  const activeItem = useMemo(
-    () => SETTINGS_NAV.find((item) => item.id === activeSection),
-    [activeSection]
-  )
+  const goHome = () => router.push("/")
+
+  const activeItem = SETTINGS_NAV.find((item) => item.id === activeSection)
 
   return (
     <SidebarProvider
       defaultOpen
-      className={cn("flex h-full overflow-hidden", embedded ? "min-h-[600px]" : "h-svh")}
-      style={{ "--sidebar-width": "16rem" } as React.CSSProperties}
+      className="flex h-dvh overflow-hidden"
+      style={{ "--sidebar-width": "15rem" } as React.CSSProperties}
     >
       <SettingsSidebar
         activeSection={activeSection}
@@ -124,7 +182,16 @@ function SettingsShellInner({
       />
 
       <SidebarInset className="flex flex-col min-w-0 h-full overflow-hidden">
-        <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3 z-10">
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 z-10">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0"
+            onClick={goHome}
+            aria-label={t("backToChat")}
+          >
+            <ArrowLeftIcon className="h-4 w-4" />
+          </Button>
           <SidebarTrigger />
           <div className="flex items-center gap-1.5 flex-1 min-w-0">
             <h1 className="text-base font-semibold">{t("title")}</h1>
@@ -138,23 +205,12 @@ function SettingsShellInner({
             )}
           </div>
           {actions}
-          {embedded && onClose && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={onClose}
-              aria-label={t("close")}
-            >
-              <XIcon className="h-4 w-4" />
-            </Button>
-          )}
         </header>
 
         <ScrollArea className="flex-1 min-h-0">
-          <div className="p-4 lg:p-6" data-settings-panel>
-            <div className="mx-auto max-w-5xl animate-in fade-in slide-in-from-bottom-2 duration-200">
-              <SectionContent section={activeSection} onClose={onClose ?? (() => {})} />
+          <div className="p-3 sm:p-4 md:p-5 lg:p-6" data-settings-panel>
+            <div className="mx-auto w-full max-w-5xl animate-in fade-in slide-in-from-bottom-2 duration-200">
+              <SectionContent section={activeSection} onClose={goHome} />
             </div>
           </div>
         </ScrollArea>
@@ -169,10 +225,16 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <GeneralSection onClose={onClose} />
     case "api-key":
       return <ApiKeySection />
+    case "providers":
+      return <ProvidersSection />
+    case "ccswitch":
+      return <CcswitchSection />
     case "agents":
       return <ExternalAgentSettings />
     case "agent-modes":
       return <CustomModeSettings />
+    case "agent-teams":
+      return <AgentTeamTemplatesSection />
     case "tools":
       return <ToolSettingsSection />
     case "search":
@@ -197,10 +259,14 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <McpServersSection />
     case "a2ui":
       return <A2UISection />
+    case "plugins":
+      return <PluginsSection onClose={onClose} />
     case "data":
       return <DataSection />
     case "scheduled-tasks":
       return <ScheduledTasksSection />
+    case "remote-control":
+      return <RemoteControlSection />
     case "logs":
       return <LogsSection onClose={onClose} />
     case "diagnostics":

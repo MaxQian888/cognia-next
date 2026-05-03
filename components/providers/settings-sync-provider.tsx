@@ -4,6 +4,7 @@ import { useEffect } from "react"
 import { useTheme } from "next-themes"
 import { useSettingsStore } from "@/stores/settings"
 import type { AppFontScale } from "@/lib/claude/types"
+import { applyZoom, DEFAULT_ZOOM } from "@/lib/tauri/webview-zoom"
 
 const FONT_SIZE_PX: Record<AppFontScale, number> = {
   xs: 14,
@@ -45,7 +46,17 @@ export function SettingsSyncProvider({ children }: { children: React.ReactNode }
     } else {
       document.documentElement.removeAttribute("data-reduce-motion")
     }
-  }, [loaded, settings?.theme, settings?.fontScale, settings?.reduceMotion, setTheme, settings])
+
+    void applyZoom(settings.webviewZoom ?? DEFAULT_ZOOM)
+  }, [
+    loaded,
+    settings?.theme,
+    settings?.fontScale,
+    settings?.reduceMotion,
+    settings?.webviewZoom,
+    setTheme,
+    settings,
+  ])
 
   return <>{children}</>
 }

@@ -13,6 +13,16 @@ import { formatDuration } from "./format-utils"
 // Logger
 const log = loggers.scheduler
 
+/**
+ * Default retry / timeout limits applied to outbound webhook deliveries.
+ * Surfaced read-only in the Remote Control settings UI.
+ */
+export const WEBHOOK_DELIVERY_LIMITS = {
+  retries: 3,
+  baseDelayMs: 1000,
+  timeoutMs: 10_000,
+} as const
+
 type TaskEventType = "start" | "progress" | "complete" | "error"
 
 /**

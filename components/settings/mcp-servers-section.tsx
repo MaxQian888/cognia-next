@@ -418,7 +418,7 @@ function McpPresetGalleryDialog({
                 {t("noMatch")}
               </p>
             ) : (
-              <div className="grid max-h-[55vh] grid-cols-2 gap-2 overflow-y-auto pr-1">
+              <div className="grid max-h-[55vh] grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
                 {presets.map((p) => {
                   const taken = existingNames.includes(p.id.toLowerCase())
                   return (
@@ -928,7 +928,7 @@ function ServerEditor({ initial, onCancel, onSave }: EditorProps) {
 
   return (
     <Card className="space-y-3 p-3">
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div className="space-y-1">
           <Label className="text-xs">Name</Label>
           <Input placeholder="filesystem" value={name} onChange={(e) => setName(e.target.value)} />

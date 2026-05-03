@@ -1,0 +1,42 @@
+/**
+ * Plugin UI barrel — full M5C export surface.
+ */
+
+export { PluginPanel } from "./plugin-panel"
+export { PluginPanelProvider, usePluginPanel } from "./plugin-panel-context"
+export { PluginPanelHeader } from "./plugin-panel-header"
+export { PluginPanelTabs } from "./plugin-panel-tabs"
+export { PluginPanelToolbar } from "./plugin-panel-toolbar"
+export { PluginPanelGrid } from "./plugin-panel-grid"
+export { PluginCard } from "./plugin-card"
+export { PluginCategorySidebar } from "./plugin-category-sidebar"
+export { PluginBatchActionsBar } from "./plugin-batch-actions-bar"
+export { PluginFilterSheet } from "./plugin-filter-sheet"
+export { PluginSignatureBadge, type SignatureState } from "./plugin-signature-badge"
+export { PluginDetail } from "./plugin-detail"
+export { PluginDetailPanel } from "./plugin-detail-panel"
+export { PluginDeleteDialog } from "./plugin-delete-dialog"
+export { PluginPermissionReview } from "./plugin-permission-review"
+export { PluginConfigForm } from "./plugin-config-form"
+export { PluginExtensionSlot } from "./plugin-extension-slot"
+export { PluginMarketplace } from "./plugin-marketplace"
+export { PluginMarketplaceCard } from "./plugin-marketplace-card"
+export { PluginMarketplaceDetail } from "./plugin-marketplace-detail"
+export { PluginImportDialog } from "./plugin-import-dialog"
+export { PluginConflictDialog } from "./plugin-conflict-dialog"
+export { PluginUpdateDialog, __resetPluginUpdateClientForTests } from "./plugin-update-dialog"
+export { PluginRollbackDialog, __resetPluginRollbackClientForTests } from "./plugin-rollback-dialog"
+export { PluginBackupPanel, __resetPluginBackupClientForTests } from "./plugin-backup-panel"
+export {
+  PluginDependencyGraph,
+  __resetPluginDependencyResolverForTests,
+} from "./plugin-dependency-graph"
+export { PluginDevtoolsPanel } from "./plugin-devtools-panel"
+export { PluginScheduledJobs } from "./plugin-scheduled-jobs"
+export { PluginResourceManager } from "./plugin-resource-manager"
+export { PluginAnalytics } from "./plugin-analytics"
+export { PluginDiscovery } from "./plugin-discovery"
+export { PluginConfigureTab, deriveConfigState } from "./plugin-configure-tab"
+export { PluginPermissionsTab } from "./plugin-permissions-tab"
+export { PluginInstallFromUrlDialog } from "./plugin-install-from-url-dialog"
+export { PluginCategorySheet } from "./plugin-category-sheet"
