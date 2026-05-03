@@ -10,10 +10,11 @@ import "fake-indexeddb/auto"
 // Mock the embedding module before any imports that reach into it.
 // `applyTwinContext` calls `generateEmbedding` for the user message; the
 // helper below lets each test pin the resolved value or trigger a reject.
-let mockEmbeddingResult: { embedding: number[] } | Error = { embedding: [0.1, 0.2, 0.3] }
+let mockEmbeddingResult: { embedding: number[] } | Error | string = { embedding: [0.1, 0.2, 0.3] }
 jest.mock("@/lib/ai/embedding/embedding", () => ({
   generateEmbedding: jest.fn(async () => {
     if (mockEmbeddingResult instanceof Error) throw mockEmbeddingResult
+    if (typeof mockEmbeddingResult === "string") throw mockEmbeddingResult
     return { ...mockEmbeddingResult, usage: undefined }
   }),
   generateEmbeddings: jest.fn(async () => ({ embeddings: [], usage: undefined })),
@@ -97,7 +98,7 @@ function mockEmbedding(returnValue: number[] = FAKE_EMBEDDING) {
   mockEmbeddingResult = { embedding: returnValue }
 }
 
-function mockEmbeddingFailure(error: Error) {
+function mockEmbeddingFailure(error: Error | string) {
   mockEmbeddingResult = error
 }
 
@@ -236,5 +237,68 @@ describe("applyTwinContext", () => {
     })
     expect(store.searchByEmbedding).not.toHaveBeenCalled()
     expect(result.applied?.metadata.retrievedChunkIds).toEqual([])
+  })
+
+  it("degrades with 'embed-failed: unknown' when embed rejects with a non-Error value", async () => {
+    // Mock embedding to reject with a string instead of Error instance
+    mockEmbeddingResult = "non-error rejection"
+    const result = await applyTwinContext({
+      character: makeCharacter(),
+      userMessage: "anything",
+      deps: baseDeps,
+    })
+    expect(result.degraded).toBe(true)
+    expect(result.degradedReason).toBe("embed-failed: unknown")
+    expect(result.applied?.systemPrompt).toContain("You are Twin Alice.")
+  })
+
+  it("degrades with 'retrieve-failed: unknown' when vector store rejects with a non-Error value", async () => {
+    mockEmbedding()
+    const store: IVectorStore = {
+      provider: "qdrant",
+      addDocuments: jest.fn(async () => undefined),
+      updateDocuments: jest.fn(async () => undefined),
+      deleteDocuments: jest.fn(async () => undefined),
+      searchDocuments: jest.fn(async () => []),
+      searchByEmbedding: jest.fn(async () => {
+        // Reject with non-Error value
+        throw "vector-store-error-string"
+      }),
+      getDocuments: jest.fn(async () => []),
+      createCollection: jest.fn(async () => undefined),
+      deleteCollection: jest.fn(async () => undefined),
+      listCollections: jest.fn(async () => []),
+      getCollectionInfo: jest.fn(async () => ({ name: "x", documentCount: 0 })),
+    }
+    const result = await applyTwinContext({
+      character: makeCharacter(),
+      userMessage: "anything",
+      deps: { ...baseDeps, store },
+    })
+    expect(result.degraded).toBe(true)
+    expect(result.degradedReason).toBe("retrieve-failed: unknown")
+    expect(result.applied?.systemPrompt).toContain("You are Twin Alice.")
+  })
+
+  it("falls back to twinId for twinName when character.name is empty", async () => {
+    mockEmbedding()
+    const character = makeCharacter({ name: "" })
+    const result = await applyTwinContext({
+      character,
+      userMessage: "hello",
+      deps: baseDeps,
+    })
+    expect(result.applied?.systemPrompt).toContain("You are twin_alice.")
+  })
+
+  it("falls back to twinId for twinName when character.name is undefined", async () => {
+    mockEmbedding()
+    const character = makeCharacter({ name: undefined })
+    const result = await applyTwinContext({
+      character,
+      userMessage: "hello",
+      deps: baseDeps,
+    })
+    expect(result.applied?.systemPrompt).toContain("You are twin_alice.")
   })
 })
