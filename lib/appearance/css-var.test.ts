@@ -11,6 +11,10 @@ describe("themeKeyToCssVar", () => {
   ])("converts %s -> %s", (input, expected) => {
     expect(themeKeyToCssVar(input)).toBe(expected)
   })
+
+  it("does not produce a triple-dash for PascalCase", () => {
+    expect(themeKeyToCssVar("Primary")).toBe("--primary")
+  })
 })
 
 describe("CSS_VAR_KEYS", () => {

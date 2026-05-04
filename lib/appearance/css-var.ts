@@ -7,7 +7,9 @@ import { THEME_COLOR_KEYS } from "./vscode-theme/token-mapping"
  * camel→kebab transform; the `app/globals.css` variable names match.
  */
 export function themeKeyToCssVar(key: keyof ThemeColors | string): string {
-  const kebab = key.replace(/([A-Z])/g, "-$1").toLowerCase()
+  // Use a positive lookbehind via the captured lowercase char so we never
+  // match at position 0 — `Primary` would otherwise become `---primary`.
+  const kebab = key.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase()
   return `--${kebab}`
 }
 
