@@ -412,6 +412,10 @@ export interface ThemeColors {
   sidebarForeground: string
   sidebarPrimary: string
   sidebarBorder: string
+  sidebarPrimaryForeground: string
+  sidebarAccent: string
+  sidebarAccentForeground: string
+  sidebarRing: string
 }
 
 /**

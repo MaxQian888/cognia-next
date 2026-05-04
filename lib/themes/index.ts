@@ -61,6 +61,10 @@ const NEUTRAL_LIGHT: ThemeColors = {
   sidebarForeground: "#0f172a",
   sidebarPrimary: "#3b82f6",
   sidebarBorder: "#e2e8f0",
+  sidebarPrimaryForeground: "#ffffff",
+  sidebarAccent: "#f1f5f9",
+  sidebarAccentForeground: "#0f172a",
+  sidebarRing: "#3b82f6",
 }
 
 const NEUTRAL_DARK: ThemeColors = {
@@ -87,6 +91,10 @@ const NEUTRAL_DARK: ThemeColors = {
   sidebarForeground: "#f1f5f9",
   sidebarPrimary: "#60a5fa",
   sidebarBorder: "#1e293b",
+  sidebarPrimaryForeground: "#0b1220",
+  sidebarAccent: "#1e293b",
+  sidebarAccentForeground: "#f1f5f9",
+  sidebarRing: "#60a5fa",
 }
 
 const PRESETS: Record<ColorThemePreset, PresetPair> = {

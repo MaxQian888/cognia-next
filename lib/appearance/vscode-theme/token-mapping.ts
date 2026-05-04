@@ -79,6 +79,14 @@ export const VSCODE_COLOR_MAP: Record<keyof ThemeColors, readonly string[]> = {
   sidebarForeground: ["sideBar.foreground", "activityBar.foreground"],
   sidebarPrimary: ["activityBarBadge.background", "list.activeSelectionBackground"],
   sidebarBorder: ["sideBar.border", "activityBar.border"],
+  sidebarPrimaryForeground: ["activityBarBadge.foreground", "list.activeSelectionForeground"],
+  sidebarAccent: ["list.hoverBackground", "list.inactiveSelectionBackground"],
+  sidebarAccentForeground: [
+    "list.hoverForeground",
+    "list.inactiveSelectionForeground",
+    "foreground",
+  ],
+  sidebarRing: ["focusBorder", "list.focusOutline"],
 }
 
 /** All ThemeColors keys, ordered exactly as we want them in the UI editor. */
@@ -106,6 +114,10 @@ export const THEME_COLOR_KEYS: readonly (keyof ThemeColors)[] = [
   "sidebarForeground",
   "sidebarPrimary",
   "sidebarBorder",
+  "sidebarPrimaryForeground",
+  "sidebarAccent",
+  "sidebarAccentForeground",
+  "sidebarRing",
 ] as const
 
 /**
@@ -141,6 +153,10 @@ export const DEFAULT_FALLBACKS: { light: ThemeColors; dark: ThemeColors } = {
     sidebarForeground: "#0f172a",
     sidebarPrimary: "#3b82f6",
     sidebarBorder: "#e2e8f0",
+    sidebarPrimaryForeground: "#ffffff",
+    sidebarAccent: "#f1f5f9",
+    sidebarAccentForeground: "#0f172a",
+    sidebarRing: "#3b82f6",
   },
   dark: {
     primary: "#60a5fa",
@@ -166,5 +182,9 @@ export const DEFAULT_FALLBACKS: { light: ThemeColors; dark: ThemeColors } = {
     sidebarForeground: "#f1f5f9",
     sidebarPrimary: "#60a5fa",
     sidebarBorder: "#1e293b",
+    sidebarPrimaryForeground: "#0b1220",
+    sidebarAccent: "#1e293b",
+    sidebarAccentForeground: "#f1f5f9",
+    sidebarRing: "#60a5fa",
   },
 }

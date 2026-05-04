@@ -1,5 +1,13 @@
 import { DEFAULT_FALLBACKS, THEME_COLOR_KEYS, VSCODE_COLOR_MAP } from "./token-mapping"
 
+/**
+ * Number of cognia ThemeColors slots — kept in lockstep with
+ * the CSS variables declared in `app/globals.css`. Bumping this
+ * is a deliberate design decision; the constant lives here so the
+ * sanity test below explains *why* the count is what it is.
+ */
+const EXPECTED_THEME_KEY_COUNT = 27
+
 describe("VSCODE_COLOR_MAP", () => {
   it("covers every cognia ThemeColors key", () => {
     for (const key of THEME_COLOR_KEYS) {
@@ -44,7 +52,7 @@ describe("THEME_COLOR_KEYS", () => {
     expect(fromList).toEqual(fromMap)
   })
 
-  it("has 23 entries — the full cognia surface set", () => {
-    expect(THEME_COLOR_KEYS.length).toBe(23)
+  it("has the full cognia surface set", () => {
+    expect(THEME_COLOR_KEYS.length).toBe(EXPECTED_THEME_KEY_COUNT)
   })
 })
