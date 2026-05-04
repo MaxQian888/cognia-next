@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { CopyIcon, KeyRoundIcon, RefreshCwIcon } from "lucide-react"
+import { CircleIcon, CopyIcon, KeyRoundIcon, RefreshCwIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -37,6 +37,13 @@ import { generateToken } from "@/lib/external-bridge/token"
 import { listMcpAuditLog } from "@/lib/db/mcp-audit-log"
 import { getDb } from "@/lib/db/schema"
 import {
+  getMcpServerStatus,
+  startMcpServer,
+  stopMcpServer,
+  type McpServerStatus,
+} from "@/lib/external-bridge/tauri-control"
+import { isTauri } from "@/lib/tauri"
+import {
   ALL_BRIDGE_SCOPES,
   DEFAULT_EXTERNAL_BRIDGE_SETTINGS,
   type BridgeScope,
@@ -45,6 +52,38 @@ import {
 
 /** Phase 1 disables user-repo scopes (M3 in plan). */
 const PHASE_1_DISABLED_SCOPES: BridgeScope[] = ["wiki:user-repo", "rag:user-repo"]
+
+/**
+ * Default sidecar binary location. Phase 2 plugin packaging owns the real
+ * distribution path; for Phase 1 we expect the user (or the dev workflow)
+ * to drop a built `cognia-mcp.js` here. The Rust side surfaces a clear
+ * error if the file is missing.
+ */
+function resolveSidecarPath(): string {
+  return "${HOME}/.cognia/cognia-mcp.js"
+}
+
+/** Tiny status indicator used in the ServerStatusCard header. */
+function ServerStatusBadge({ status, desktop }: { status: McpServerStatus; desktop: boolean }) {
+  if (!desktop) {
+    return (
+      <span className="text-[10px] uppercase text-muted-foreground" title="Desktop-only">
+        web
+      </span>
+    )
+  }
+  return status.running ? (
+    <span className="flex items-center gap-1 text-[10px] uppercase text-emerald-500">
+      <CircleIcon className="h-2 w-2 fill-current" />
+      live
+    </span>
+  ) : (
+    <span className="flex items-center gap-1 text-[10px] uppercase text-muted-foreground">
+      <CircleIcon className="h-2 w-2 fill-current" />
+      idle
+    </span>
+  )
+}
 
 const SCOPE_DESCRIPTIONS: Record<BridgeScope, string> = {
   "wiki:cognia": "Public Cognia code wiki — safe to expose.",
@@ -110,10 +149,66 @@ function ServerStatusCard({
 }) {
   const [showToken, setShowToken] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [serverStatus, setServerStatus] = useState<McpServerStatus>({
+    running: false,
+    port: null,
+    startedAt: null,
+  })
+  const desktop = isTauri()
+
+  // Poll the Rust HTTP server status every 3 s while the section is mounted —
+  // covers external `mcp_server_stop` triggers (e.g. Tauri shutdown handler)
+  // without a full page reload.
+  useEffect(() => {
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const refresh = async () => {
+      try {
+        const status = await getMcpServerStatus()
+        if (!cancelled) setServerStatus(status)
+      } catch {
+        // swallow — web mode + desktop init races both fall here
+      }
+      if (!cancelled) timer = setTimeout(refresh, 3000)
+    }
+    void refresh()
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [])
 
   const onToggleEnabled = useCallback(
-    (enabled: boolean) => onChange({ ...settings, enabled }),
-    [settings, onChange]
+    async (enabled: boolean) => {
+      const next: ExternalBridgeSettings = { ...settings, enabled }
+      // Generate a token on first enable so the HTTP transport works out of
+      // the box (stdio doesn't need it but the server requires one regardless).
+      if (enabled && !next.bearerToken) {
+        next.bearerToken = await generateToken()
+        next.tokenRotatedAt = Date.now()
+      }
+      onChange(next)
+      // Drive the Rust HTTP server. Web mode silently no-ops via the wrapper.
+      if (!desktop) return
+      try {
+        if (enabled) {
+          const port = await startMcpServer({
+            port: next.httpPort ?? 0,
+            token: next.bearerToken!,
+            settings: next,
+            sidecarPath: resolveSidecarPath(),
+          })
+          onChange({ ...next, httpPort: port })
+          toast.success(`MCP HTTP server listening on 127.0.0.1:${port}`)
+        } else {
+          await stopMcpServer()
+          toast.success("MCP server stopped.")
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [settings, onChange, desktop]
   )
 
   const onRotateToken = useCallback(async () => {
@@ -142,6 +237,7 @@ function ServerStatusCard({
           <span className="flex items-center gap-2">
             <KeyRoundIcon className="h-4 w-4" />
             MCP server
+            <ServerStatusBadge status={serverStatus} desktop={desktop} />
           </span>
           <Switch
             checked={settings.enabled}
@@ -151,7 +247,9 @@ function ServerStatusCard({
         </CardTitle>
         <CardDescription className="text-xs">
           {settings.enabled
-            ? "Server is on. External agents matching the scopes below can connect."
+            ? serverStatus.running && serverStatus.port !== null
+              ? `HTTP transport listening on 127.0.0.1:${serverStatus.port}.`
+              : "Stdio transport active. Tauri HTTP server is offline — toggle off and on to restart."
             : "Server is off. No external traffic accepted."}
         </CardDescription>
       </CardHeader>
