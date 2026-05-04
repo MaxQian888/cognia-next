@@ -7,6 +7,7 @@ import { ThemeProvider } from "next-themes"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LocaleGate } from "@/components/providers/locale-gate"
+import { SettingsHydrator } from "@/components/providers/settings-hydrator"
 import { SettingsSyncProvider } from "@/components/providers/settings-sync-provider"
 import { TauriProvider } from "@/components/providers/tauri-provider"
 import { LoggerProvider } from "@/components/providers/logger-provider"
@@ -50,6 +51,7 @@ export default function RootLayout({
           disableTransitionOnChange
           scriptProps={{ suppressHydrationWarning: true }}
         >
+          <SettingsHydrator />
           <LocaleGate>
             <SettingsSyncProvider>
               <TauriProvider>
