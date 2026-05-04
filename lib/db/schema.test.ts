@@ -451,6 +451,240 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
     })
   })
 
+  it("v16 upgrade hook migrates customThemes[].colors to tokens.{light,dark}", async () => {
+    // Open Dexie at v15 (before the dual-variant rewrite), seed the singleton
+    // settings row with a legacy customTheme, close, then re-open through the
+    // production schema. The v16 upgrade hook should walk the blob and
+    // promote the legacy `{colors, isDark}` pair to `{tokens, baseVariant}`
+    // while leaving the legacy fields in place for rollback safety.
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    legacy.version(15).stores({
+      sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
+      messages: "id, sessionId, [sessionId+createdAt], senderId",
+      settings: "id",
+      promptPresets:
+        "id, updatedAt, isBuiltIn, isDefault, isFavorite, sortOrder, category, lastUsedAt",
+      mcpServers: "id, name, enabled",
+      characters: "id, name, updatedAt, isBuiltIn",
+      skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
+      skillResources: "id, skillId, [skillId+kind], [skillId+path], updatedAt",
+      teams: "id, name, updatedAt, isBuiltIn",
+      sessionState: "sessionId, lastReadAt",
+      trustedWorkspaces: "path, trustedAt",
+      tts_provider_keys: "id",
+      backupHistory: "id, completedAt, type, success",
+      canvasDocuments: "id, title, language, type, updatedAt, createdAt",
+      canvasVersions: "id, documentId, [documentId+createdAt], isAutoSave",
+      canvasComments: "id, documentId, [documentId+createdAt], parentId, resolvedAt",
+      canvasSessions: "id, documentId, ownerId, createdAt",
+      a2uiApps: "id, name, updatedAt, createdAt, isBuiltIn, category, isFavorite, sortOrder",
+      a2uiSurfaces: "id, appId, sessionId, updatedAt, createdAt, type",
+      a2uiTemplates: "id, name, category, updatedAt, source",
+      a2uiEventHistory: "id, surfaceId, [surfaceId+timestamp], timestamp, type",
+      twinSources: "&id, twinId, kind, format, status, fingerprint, [twinId+kind], [twinId+status]",
+      twinChunks: "&id, twinId, sourceId, vectorDocId, [twinId+sourceId], [twinId+createdAt]",
+      twinProfile: "&id, twinId",
+      twinDrafts: "&id, twinId, jobId, kind, status, [twinId+status], [twinId+kind]",
+      twinJobs: "&id, twinId, status, queuedAt, [twinId+status], [twinId+kind]",
+      plugins: "id, name, version, status, source, type, enabled, lastUsedAt, *capabilities",
+      pluginPermissions: "[pluginId+permission], pluginId, permission, decision, expiresAt",
+      pluginReviews: "[pluginId+id], pluginId, rating, createdAt",
+      pluginAnalytics: "[pluginId+key], pluginId, key, lastEventAt",
+      pluginScheduledJobs: "id, pluginId, cron, lastRunAt, nextRunAt, status",
+    })
+    await legacy.open()
+    await legacy.table("settings").put({
+      id: "singleton",
+      customThemes: [
+        {
+          id: "legacy-1",
+          name: "Legacy Theme",
+          isDark: true,
+          colors: {
+            background: "#0b0b0b",
+            foreground: "#ffffff",
+            primary: "#ff00ff",
+            primaryForeground: "#000000",
+            secondary: "#222222",
+            secondaryForeground: "#dddddd",
+            accent: "#00ffff",
+            accentForeground: "#000000",
+            muted: "#1a1a1a",
+            mutedForeground: "#aaaaaa",
+            card: "#101010",
+            cardForeground: "#fafafa",
+            popover: "#0d0d0d",
+            popoverForeground: "#fafafa",
+            input: "#222222",
+            border: "#333333",
+            ring: "#ff00ff",
+            destructive: "#ff4040",
+            destructiveForeground: "#ffffff",
+            sidebar: "#0a0a0a",
+            sidebarForeground: "#fafafa",
+            sidebarPrimary: "#ff00ff",
+            sidebarBorder: "#222222",
+          },
+        },
+      ],
+    })
+    legacy.close()
+
+    // Re-open through the production schema — v16 upgrade hook fires.
+    const db = getDb()
+    await db.open()
+    const row = (await db.settings.get("singleton" as never)) as unknown as {
+      customThemes?: Array<Record<string, unknown>>
+    }
+    const t = row?.customThemes?.[0] as Record<string, unknown> | undefined
+    expect(t).toBeDefined()
+    expect(t?.baseVariant).toBe("dark")
+    expect(t?.derivedVariant).toBe("light")
+    const tokens = t?.tokens as { light: Record<string, string>; dark: Record<string, string> }
+    expect(tokens).toBeDefined()
+    // The dark side carries the original palette verbatim.
+    expect(tokens.dark.primary).toBe("#ff00ff")
+    expect(tokens.dark.background).toBe("#0b0b0b")
+    // The light side was synthesized via OKLCH derivation; we don't pin a
+    // specific value (Task 6 owns the algorithm), only that something was
+    // produced for each of the originally-defined keys.
+    expect(typeof tokens.light.primary).toBe("string")
+    expect(tokens.light.primary.length).toBeGreaterThan(0)
+    expect(typeof tokens.light.background).toBe("string")
+    // Legacy fields preserved for one-release rollback safety.
+    expect(t?.colors).toBeDefined()
+    expect(t?.isDark).toBe(true)
+  })
+
+  it("v16 upgrade hook is idempotent — already-migrated rows untouched", async () => {
+    // A row that already carries the dual-variant shape must be left alone
+    // (no re-derivation, no overwriting hand-edited tokens). We seed with
+    // a sentinel `light.primary` value the OKLCH derivation would never
+    // produce, then assert it survives intact.
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    legacy.version(15).stores({
+      sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
+      messages: "id, sessionId, [sessionId+createdAt], senderId",
+      settings: "id",
+      promptPresets:
+        "id, updatedAt, isBuiltIn, isDefault, isFavorite, sortOrder, category, lastUsedAt",
+      mcpServers: "id, name, enabled",
+      characters: "id, name, updatedAt, isBuiltIn",
+      skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
+      skillResources: "id, skillId, [skillId+kind], [skillId+path], updatedAt",
+      teams: "id, name, updatedAt, isBuiltIn",
+      sessionState: "sessionId, lastReadAt",
+      trustedWorkspaces: "path, trustedAt",
+      tts_provider_keys: "id",
+      backupHistory: "id, completedAt, type, success",
+      canvasDocuments: "id, title, language, type, updatedAt, createdAt",
+      canvasVersions: "id, documentId, [documentId+createdAt], isAutoSave",
+      canvasComments: "id, documentId, [documentId+createdAt], parentId, resolvedAt",
+      canvasSessions: "id, documentId, ownerId, createdAt",
+      a2uiApps: "id, name, updatedAt, createdAt, isBuiltIn, category, isFavorite, sortOrder",
+      a2uiSurfaces: "id, appId, sessionId, updatedAt, createdAt, type",
+      a2uiTemplates: "id, name, category, updatedAt, source",
+      a2uiEventHistory: "id, surfaceId, [surfaceId+timestamp], timestamp, type",
+      twinSources: "&id, twinId, kind, format, status, fingerprint, [twinId+kind], [twinId+status]",
+      twinChunks: "&id, twinId, sourceId, vectorDocId, [twinId+sourceId], [twinId+createdAt]",
+      twinProfile: "&id, twinId",
+      twinDrafts: "&id, twinId, jobId, kind, status, [twinId+status], [twinId+kind]",
+      twinJobs: "&id, twinId, status, queuedAt, [twinId+status], [twinId+kind]",
+      plugins: "id, name, version, status, source, type, enabled, lastUsedAt, *capabilities",
+      pluginPermissions: "[pluginId+permission], pluginId, permission, decision, expiresAt",
+      pluginReviews: "[pluginId+id], pluginId, rating, createdAt",
+      pluginAnalytics: "[pluginId+key], pluginId, key, lastEventAt",
+      pluginScheduledJobs: "id, pluginId, cron, lastRunAt, nextRunAt, status",
+    })
+    await legacy.open()
+    await legacy.table("settings").put({
+      id: "singleton",
+      customThemes: [
+        {
+          id: "already-migrated",
+          name: "Modern",
+          baseVariant: "light",
+          derivedVariant: "dark",
+          tokens: {
+            light: { primary: "#sentinel-light", background: "#fff" },
+            dark: { primary: "#sentinel-dark", background: "#000" },
+          },
+          // No `colors`/`isDark` — already on the new shape.
+        },
+      ],
+    })
+    legacy.close()
+
+    const db = getDb()
+    await db.open()
+    const row = (await db.settings.get("singleton" as never)) as unknown as {
+      customThemes?: Array<Record<string, unknown>>
+    }
+    const t = row?.customThemes?.[0] as Record<string, unknown> | undefined
+    const tokens = t?.tokens as { light: Record<string, string>; dark: Record<string, string> }
+    // Sentinel values must survive — proves the hook short-circuited.
+    expect(tokens.light.primary).toBe("#sentinel-light")
+    expect(tokens.dark.primary).toBe("#sentinel-dark")
+    expect(t?.baseVariant).toBe("light")
+    expect(t?.derivedVariant).toBe("dark")
+  })
+
+  it("v16 upgrade hook tolerates a settings row with no customThemes field", async () => {
+    // Defensive: the singleton row may exist before any custom theme has
+    // been created. The hook must not crash on `customThemes === undefined`.
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    legacy.version(15).stores({
+      sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
+      messages: "id, sessionId, [sessionId+createdAt], senderId",
+      settings: "id",
+      promptPresets:
+        "id, updatedAt, isBuiltIn, isDefault, isFavorite, sortOrder, category, lastUsedAt",
+      mcpServers: "id, name, enabled",
+      characters: "id, name, updatedAt, isBuiltIn",
+      skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
+      skillResources: "id, skillId, [skillId+kind], [skillId+path], updatedAt",
+      teams: "id, name, updatedAt, isBuiltIn",
+      sessionState: "sessionId, lastReadAt",
+      trustedWorkspaces: "path, trustedAt",
+      tts_provider_keys: "id",
+      backupHistory: "id, completedAt, type, success",
+      canvasDocuments: "id, title, language, type, updatedAt, createdAt",
+      canvasVersions: "id, documentId, [documentId+createdAt], isAutoSave",
+      canvasComments: "id, documentId, [documentId+createdAt], parentId, resolvedAt",
+      canvasSessions: "id, documentId, ownerId, createdAt",
+      a2uiApps: "id, name, updatedAt, createdAt, isBuiltIn, category, isFavorite, sortOrder",
+      a2uiSurfaces: "id, appId, sessionId, updatedAt, createdAt, type",
+      a2uiTemplates: "id, name, category, updatedAt, source",
+      a2uiEventHistory: "id, surfaceId, [surfaceId+timestamp], timestamp, type",
+      twinSources: "&id, twinId, kind, format, status, fingerprint, [twinId+kind], [twinId+status]",
+      twinChunks: "&id, twinId, sourceId, vectorDocId, [twinId+sourceId], [twinId+createdAt]",
+      twinProfile: "&id, twinId",
+      twinDrafts: "&id, twinId, jobId, kind, status, [twinId+status], [twinId+kind]",
+      twinJobs: "&id, twinId, status, queuedAt, [twinId+status], [twinId+kind]",
+      plugins: "id, name, version, status, source, type, enabled, lastUsedAt, *capabilities",
+      pluginPermissions: "[pluginId+permission], pluginId, permission, decision, expiresAt",
+      pluginReviews: "[pluginId+id], pluginId, rating, createdAt",
+      pluginAnalytics: "[pluginId+key], pluginId, key, lastEventAt",
+      pluginScheduledJobs: "id, pluginId, cron, lastRunAt, nextRunAt, status",
+    })
+    await legacy.open()
+    await legacy.table("settings").put({ id: "singleton", colorTheme: "default" })
+    legacy.close()
+
+    const db = getDb()
+    await expect(db.open()).resolves.toBeDefined()
+    const row = (await db.settings.get("singleton" as never)) as unknown as {
+      customThemes?: unknown
+      colorTheme?: string
+    }
+    expect(row?.colorTheme).toBe("default")
+    // No customThemes field was created; the hook should leave the row alone.
+    expect(row?.customThemes).toBeUndefined()
+  })
+
   it("v12 upgrade hook fills preset defaults on legacy rows", async () => {
     const Dexie = (await import("dexie")).default
     const legacy = new Dexie("cognia-claude")
