@@ -10,6 +10,7 @@ import type { BackgroundSettings, Wallpaper } from "@/types/appearance"
 /** Body data attributes the appearance module owns. globals.css selectors key off these. */
 const ATTR_ENABLED = "data-bg-enabled"
 const ATTR_SCOPE = "data-bg-scope"
+const ATTR_SCRIM = "data-bg-scrim"
 
 /** CSS variables the body::before pseudo-element reads. */
 const VAR_IMAGE = "--app-bg-image"
@@ -90,6 +91,7 @@ async function applyBackground(args: ApplyArgs): Promise<void> {
   if (!background.enabled || !background.activeId) {
     body.setAttribute(ATTR_ENABLED, "false")
     body.removeAttribute(ATTR_SCOPE)
+    clearScrim(body)
     onApplied(null)
     return
   }
@@ -99,6 +101,7 @@ async function applyBackground(args: ApplyArgs): Promise<void> {
   if (!wallpaper) {
     body.setAttribute(ATTR_ENABLED, "false")
     body.removeAttribute(ATTR_SCOPE)
+    clearScrim(body)
     onApplied(null)
     return
   }
@@ -133,13 +136,54 @@ async function applyBackground(args: ApplyArgs): Promise<void> {
   // omit `background-size: cover` for color/gradient sources (where it's
   // a no-op but causes confusion in devtools).
   body.setAttribute("data-bg-kind", isImageSource ? "image" : wallpaper.source.kind)
+
+  // Text-protection scrim — only image wallpapers below 0.5 opacity need
+  // the bottom-up gradient. Gradients and colors have honest opacity and
+  // don't merit the extra layer.
+  applyScrim(body, {
+    needsScrim: isImageSource && background.opacity < 0.5,
+    scope: background.scope,
+  })
+
   onApplied(cssValue)
+}
+
+/** Removes the scrim attribute from <body> and every scope target. */
+function clearScrim(body: HTMLElement): void {
+  body.removeAttribute(ATTR_SCRIM)
+  document.querySelectorAll("[data-bg-target]").forEach((el) => {
+    el.removeAttribute(ATTR_SCRIM)
+  })
+}
+
+/**
+ * Applies (or clears) the `data-bg-scrim` attribute on the appropriate
+ * element(s) for the active scope. Always resets first so toggling
+ * scope/opacity/kind cleanly migrates the attribute.
+ */
+function applyScrim(
+  body: HTMLElement,
+  args: { needsScrim: boolean; scope: BackgroundSettings["scope"] }
+): void {
+  clearScrim(body)
+  if (!args.needsScrim) return
+  if (args.scope === "all") {
+    body.setAttribute(ATTR_SCRIM, "true")
+    return
+  }
+  // scope=global matches any [data-bg-target] (mirrors the CSS rule);
+  // chat / canvas / sidebar narrow to that exact target.
+  const selector = args.scope === "global" ? "[data-bg-target]" : `[data-bg-target="${args.scope}"]`
+  document.querySelectorAll(selector).forEach((el) => {
+    el.setAttribute(ATTR_SCRIM, "true")
+  })
 }
 
 /** Exposed for tests. */
 export const __INTERNALS__ = {
   ATTR_ENABLED,
   ATTR_SCOPE,
+  ATTR_SCRIM,
   VAR_IMAGE,
   VAR_BLUR,
   VAR_OPACITY,

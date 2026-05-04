@@ -57,8 +57,11 @@ const wallpaper = (id: string, source: Wallpaper["source"], builtin = false): Wa
 beforeEach(() => {
   document.body.removeAttribute(__INTERNALS__.ATTR_ENABLED)
   document.body.removeAttribute(__INTERNALS__.ATTR_SCOPE)
+  document.body.removeAttribute(__INTERNALS__.ATTR_SCRIM)
   document.body.removeAttribute("data-bg-kind")
   document.body.removeAttribute("style")
+  // Clear any scope target nodes a prior test may have appended.
+  document.querySelectorAll("[data-bg-target]").forEach((el) => el.remove())
   jest.clearAllMocks()
   settingsModule.__setStoreState({
     background: { ...DEFAULT_BACKGROUND_SETTINGS },
@@ -67,6 +70,16 @@ beforeEach(() => {
     customCssEnabled: false,
   })
 })
+
+const imageWp = (id: string): Wallpaper =>
+  wallpaper(id, {
+    kind: "image",
+    storage: "data-url",
+    dataUrl: "data:image/png;base64,xx",
+    mime: "image/png",
+    width: 10,
+    height: 10,
+  })
 
 describe("BackgroundApplier", () => {
   it("disables the background when no active wallpaper", async () => {
@@ -182,6 +195,156 @@ describe("BackgroundApplier", () => {
     expect(warnSpy).toHaveBeenCalled()
     expect(document.body.getAttribute(__INTERNALS__.ATTR_ENABLED)).toBe("false")
     warnSpy.mockRestore()
+  })
+
+  it("sets data-bg-scrim on body when image wallpaper at low opacity with scope=all", async () => {
+    const wp = imageWp("wp-img")
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(data:image/png;base64,xx)")
+    settingsModule.__setStoreState({
+      background: {
+        ...DEFAULT_BACKGROUND_SETTINGS,
+        enabled: true,
+        activeId: "wp-img",
+        scope: "all",
+        opacity: 0.3,
+      },
+      wallpapers: [wp],
+    })
+    await act(async () => {
+      render(<BackgroundApplier />)
+    })
+    expect(document.body.getAttribute(__INTERNALS__.ATTR_SCRIM)).toBe("true")
+  })
+
+  it("does NOT set data-bg-scrim when wallpaper kind is gradient or color", async () => {
+    const wp = wallpaper("wp-grad", { kind: "gradient", css: "linear-gradient(0,red,blue)" })
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("linear-gradient(0,red,blue)")
+    settingsModule.__setStoreState({
+      background: {
+        ...DEFAULT_BACKGROUND_SETTINGS,
+        enabled: true,
+        activeId: "wp-grad",
+        scope: "all",
+        opacity: 0.3,
+      },
+      wallpapers: [wp],
+    })
+    await act(async () => {
+      render(<BackgroundApplier />)
+    })
+    expect(document.body.getAttribute(__INTERNALS__.ATTR_SCRIM)).toBeNull()
+  })
+
+  it("does NOT set data-bg-scrim when image opacity is 0.5 or above", async () => {
+    const wp = imageWp("wp-img-hi")
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(...)")
+    settingsModule.__setStoreState({
+      background: {
+        ...DEFAULT_BACKGROUND_SETTINGS,
+        enabled: true,
+        activeId: "wp-img-hi",
+        scope: "all",
+        opacity: 0.5,
+      },
+      wallpapers: [wp],
+    })
+    await act(async () => {
+      render(<BackgroundApplier />)
+    })
+    expect(document.body.getAttribute(__INTERNALS__.ATTR_SCRIM)).toBeNull()
+  })
+
+  it("clears data-bg-scrim when wallpaper is disabled", async () => {
+    const wp = imageWp("wp-img")
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(...)")
+    // Pre-stamp body + a stale scope target so we exercise the cleanup path.
+    document.body.setAttribute(__INTERNALS__.ATTR_SCRIM, "true")
+    const stale = document.createElement("div")
+    stale.setAttribute("data-bg-target", "chat")
+    stale.setAttribute(__INTERNALS__.ATTR_SCRIM, "true")
+    document.body.appendChild(stale)
+
+    settingsModule.__setStoreState({
+      background: {
+        ...DEFAULT_BACKGROUND_SETTINGS,
+        enabled: false,
+        activeId: null,
+      },
+      wallpapers: [wp],
+    })
+    await act(async () => {
+      render(<BackgroundApplier />)
+    })
+    expect(document.body.getAttribute(__INTERNALS__.ATTR_SCRIM)).toBeNull()
+    expect(stale.getAttribute(__INTERNALS__.ATTR_SCRIM)).toBeNull()
+  })
+
+  it("clears data-bg-scrim when activeId is missing", async () => {
+    document.body.setAttribute(__INTERNALS__.ATTR_SCRIM, "true")
+    settingsModule.__setStoreState({
+      background: { ...DEFAULT_BACKGROUND_SETTINGS, enabled: true, activeId: "missing" },
+      wallpapers: [],
+    })
+    await act(async () => {
+      render(<BackgroundApplier />)
+    })
+    expect(document.body.getAttribute(__INTERNALS__.ATTR_SCRIM)).toBeNull()
+  })
+
+  it("sets data-bg-scrim on the matching scope target for scope=chat", async () => {
+    const wp = imageWp("wp-chat")
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(...)")
+    const chatTarget = document.createElement("div")
+    chatTarget.setAttribute("data-bg-target", "chat")
+    document.body.appendChild(chatTarget)
+    const sidebarTarget = document.createElement("div")
+    sidebarTarget.setAttribute("data-bg-target", "sidebar")
+    document.body.appendChild(sidebarTarget)
+
+    settingsModule.__setStoreState({
+      background: {
+        ...DEFAULT_BACKGROUND_SETTINGS,
+        enabled: true,
+        activeId: "wp-chat",
+        scope: "chat",
+        opacity: 0.3,
+      },
+      wallpapers: [wp],
+    })
+    await act(async () => {
+      render(<BackgroundApplier />)
+    })
+    expect(chatTarget.getAttribute(__INTERNALS__.ATTR_SCRIM)).toBe("true")
+    expect(sidebarTarget.getAttribute(__INTERNALS__.ATTR_SCRIM)).toBeNull()
+    expect(document.body.getAttribute(__INTERNALS__.ATTR_SCRIM)).toBeNull()
+  })
+
+  it("sets data-bg-scrim on every [data-bg-target] for scope=global", async () => {
+    const wp = imageWp("wp-global")
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(...)")
+    const a = document.createElement("div")
+    a.setAttribute("data-bg-target", "chat")
+    document.body.appendChild(a)
+    const b = document.createElement("div")
+    b.setAttribute("data-bg-target", "canvas")
+    document.body.appendChild(b)
+
+    settingsModule.__setStoreState({
+      background: {
+        ...DEFAULT_BACKGROUND_SETTINGS,
+        enabled: true,
+        activeId: "wp-global",
+        scope: "global",
+        opacity: 0.2,
+      },
+      wallpapers: [wp],
+    })
+    await act(async () => {
+      render(<BackgroundApplier />)
+    })
+    expect(a.getAttribute(__INTERNALS__.ATTR_SCRIM)).toBe("true")
+    expect(b.getAttribute(__INTERNALS__.ATTR_SCRIM)).toBe("true")
+    expect(document.body.getAttribute(__INTERNALS__.ATTR_SCRIM)).toBeNull()
   })
 
   it("renders nothing visible", async () => {

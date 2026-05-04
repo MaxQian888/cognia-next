@@ -234,3 +234,34 @@ body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target]::before {
   filter: blur(var(--app-bg-blur));
   opacity: var(--app-bg-opacity);
 }
+
+/* ----------------------------------------------------------------------
+   Text-protection scrim.
+
+   When a low-opacity image wallpaper is active, BackgroundApplier sets
+   data-bg-scrim="true" on the active scope target (or on body for
+   scope=all). This rule renders a subtle bottom-up gradient using
+   --background so text columns stay legible without obscuring the image.
+
+   Only kicks in for image-kind wallpapers below 0.5 opacity — gradient
+   and color wallpapers have honest opacity behaviour and don't need it.
+---------------------------------------------------------------------- */
+[data-bg-target][data-bg-scrim="true"]::after,
+body[data-bg-scrim="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    color-mix(in oklch, var(--background) 50%, transparent) 100%
+  );
+  /* Sit between the wallpaper layer (z-index -1) and DOM content (z-index auto)
+     so text stays on top. */
+  z-index: 0;
+}
+body[data-bg-scrim="true"]::after {
+  /* Body's scrim is fixed-positioned to match the fixed body::before wallpaper. */
+  position: fixed;
+}
