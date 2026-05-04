@@ -33,7 +33,7 @@
     "@ai-sdk/google": "^3.0.66",
     "@ai-sdk/mistral": "^3.0.32",
     "@ai-sdk/openai": "^3.0.55",
-    "@ai-sdk/react": "^3.0.170",
+    "@ai-sdk/react": "^3.0.176",
     "@babel/parser": "^7.29.2",
     "@babel/types": "^7.29.0",
     "@base-ui/react": "^1.4.1",
