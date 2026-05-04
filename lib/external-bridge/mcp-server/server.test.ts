@@ -1,0 +1,186 @@
+/**
+ * Coverage for the MCP server skeleton — exercises tool registration +
+ * the gate→handler→envelope dispatch using the SDK's in-memory transport.
+ */
+
+import "fake-indexeddb/auto"
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
+import { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createWikiArticle } from "@/lib/db/wiki-articles"
+import { listMcpAuditLog } from "@/lib/db/mcp-audit-log"
+import type { ExternalBridgeSettings } from "@/types/wiki"
+import { buildMcpServer, __TESTING__ } from "./server"
+
+function settings(overrides: Partial<ExternalBridgeSettings> = {}): ExternalBridgeSettings {
+  return {
+    enabled: overrides.enabled ?? true,
+    enabledScopes: overrides.enabledScopes ?? ["wiki:cognia", "rag:cognia"],
+    bearerToken: overrides.bearerToken,
+    httpPort: overrides.httpPort,
+    tokenRotatedAt: overrides.tokenRotatedAt,
+  }
+}
+
+async function makeWiredPair(currentSettings: ExternalBridgeSettings | undefined) {
+  const server = buildMcpServer({ settingsGetter: async () => currentSettings })
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair()
+  await server.connect(serverTransport)
+  const client = new Client({ name: "test-client", version: "0.0.1" })
+  await client.connect(clientTransport)
+  return { server, client }
+}
+
+beforeEach(async () => {
+  await getDb().delete()
+  __resetDbForTesting()
+  getDb()
+  await whenSeeded()
+})
+
+describe("buildMcpServer — tool registration", () => {
+  // Note: `client.listTools()` round-trips through zod-to-json-schema which
+  // hits a known compat issue with @modelcontextprotocol/sdk 1.29 +
+  // zod 4.3 (`_zod undefined`). We instead verify each tool is callable —
+  // an unknown tool would raise a different error, so a successful (or
+  // gated) callTool proves the tool is registered.
+  it.each(["wiki_search", "wiki_read", "rag_search", "runtime_query"])(
+    "registers %s and accepts a call",
+    async (toolName) => {
+      const { client } = await makeWiredPair(
+        settings({
+          enabledScopes: ["wiki:cognia", "rag:cognia", "runtime:skills"],
+        })
+      )
+      const args =
+        toolName === "wiki_search"
+          ? { query: "" }
+          : toolName === "wiki_read"
+            ? { slug: "anything" }
+            : toolName === "rag_search"
+              ? { query: "anything" }
+              : { entityType: "skill", op: "list" }
+      const result = await client.callTool({ name: toolName, arguments: args })
+      expect(result).toBeDefined()
+      expect(Array.isArray((result as { content?: unknown[] }).content)).toBe(true)
+      await client.close()
+    }
+  )
+})
+
+describe("buildMcpServer — wiki_search dispatch", () => {
+  it("returns a structured result when the gate allows the call", async () => {
+    await createWikiArticle({
+      slug: "lib-foo",
+      title: "lib/foo overview",
+      module: "lib/foo",
+      scope: "cognia-self",
+      pageRank: 0.5,
+      summary: "summary",
+      sectionIds: [],
+      sourceRefs: [],
+      contentMd: "body",
+      embedding: [],
+      generatorVersion: "v1",
+      fileHashes: {},
+    })
+    const { client } = await makeWiredPair(settings())
+    const result = await client.callTool({
+      name: "wiki_search",
+      arguments: { query: "" },
+    })
+    expect(result.isError).not.toBe(true)
+    const structured = (result as { structuredContent?: { results: { slug: string }[] } })
+      .structuredContent
+    expect(structured?.results.map((r) => r.slug)).toContain("lib-foo")
+    await client.close()
+  })
+
+  it("returns an error envelope when the scope is OFF", async () => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: [] }))
+    const result = await client.callTool({
+      name: "wiki_search",
+      arguments: { query: "anything" },
+    })
+    expect(result.isError).toBe(true)
+    await client.close()
+  })
+
+  it("returns error envelope when settings is undefined (default deny)", async () => {
+    const { client } = await makeWiredPair(undefined)
+    const result = await client.callTool({
+      name: "wiki_search",
+      arguments: { query: "anything" },
+    })
+    expect(result.isError).toBe(true)
+    await client.close()
+  })
+})
+
+describe("buildMcpServer — wiki_read dispatch", () => {
+  it("returns an error envelope when slug is unknown", async () => {
+    const { client } = await makeWiredPair(settings())
+    const result = await client.callTool({
+      name: "wiki_read",
+      arguments: { slug: "ghost-slug" },
+    })
+    const structured = (result as { structuredContent?: { error?: string } }).structuredContent
+    expect(structured?.error).toMatch(/not found/)
+    await client.close()
+  })
+})
+
+describe("buildMcpServer — runtime_query gate", () => {
+  it("denies runtime_query when the entity scope is OFF", async () => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: ["wiki:cognia"] }))
+    const result = await client.callTool({
+      name: "runtime_query",
+      arguments: { entityType: "skill", op: "list" },
+    })
+    expect(result.isError).toBe(true)
+    await client.close()
+  })
+
+  it("allows runtime_query when the matching scope is ON", async () => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: ["runtime:skills"] }))
+    const result = await client.callTool({
+      name: "runtime_query",
+      arguments: { entityType: "skill", op: "list" },
+    })
+    expect(result.isError).not.toBe(true)
+    await client.close()
+  })
+})
+
+describe("audit log integration", () => {
+  it("writes a row for every dispatched tool call", async () => {
+    const { client } = await makeWiredPair(settings())
+    await client.callTool({ name: "wiki_search", arguments: { query: "" } })
+    await client.callTool({ name: "wiki_search", arguments: { query: "anything" } })
+    const log = await listMcpAuditLog()
+    expect(log.length).toBeGreaterThanOrEqual(2)
+    const calls = log.filter((r) => r.tool === "wiki_search")
+    expect(calls.length).toBeGreaterThanOrEqual(2)
+    await client.close()
+  })
+
+  it("records denials with the deny reason", async () => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: [] }))
+    await client.callTool({ name: "wiki_search", arguments: { query: "x" } })
+    const log = await listMcpAuditLog({ deniedOnly: true })
+    expect(log.length).toBeGreaterThanOrEqual(1)
+    expect(log[0].reason).toBeTruthy()
+    await client.close()
+  })
+})
+
+describe("internal helpers", () => {
+  it("mapEntityToScope covers every runtime entity type", () => {
+    expect(__TESTING__.mapEntityToScope("skill")).toBe("runtime:skills")
+    expect(__TESTING__.mapEntityToScope("character")).toBe("runtime:characters")
+    expect(__TESTING__.mapEntityToScope("twin")).toBe("runtime:twins")
+    expect(__TESTING__.mapEntityToScope("plugin")).toBe("runtime:plugins")
+    expect(__TESTING__.mapEntityToScope("agent-team")).toBe("runtime:agent-teams")
+    expect(__TESTING__.mapEntityToScope("nope")).toBe("n/a")
+  })
+})
