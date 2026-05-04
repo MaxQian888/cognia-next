@@ -40,7 +40,7 @@ export interface ParseJsonOptions {
 
 export interface ParsedTheme {
   /** Ready-to-store CustomTheme; `id` will be assigned by the store on insert. */
-  theme: Omit<CustomTheme, "id">
+  theme: Omit<CustomTheme, "id" | "colors"> & { colors: ThemeColors }
   /** True when the input had no `colors` table at all (still a valid theme). */
   emptyColors: boolean
   /** Number of cognia color slots that were filled directly from VSCode keys. */
@@ -175,7 +175,8 @@ export function vscodeThemeToCustomTheme(
 
   const name = options.nameHint ?? source.name ?? "Imported Theme"
   return {
-    theme: { name, isDark, colors: out },
+    // The derivation block above guarantees all 27 ThemeColors keys are filled.
+    theme: { name, isDark, colors: out as ThemeColors },
     emptyColors,
     matchedCount: matched,
   }

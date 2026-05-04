@@ -92,6 +92,11 @@ export function CustomThemeTab() {
     })
   }
 
+  // TODO(Phase 5 Task 18): rewrite to populate tokens.{light, dark} directly.
+  // Currently writes the legacy {colors, isDark} shape, which becomes stale
+  // after the v16 migration normalizes existing rows to dual-variant.
+  // resolveActiveThemeColors reads `tokens` first, so user edits made via
+  // this tab won't take effect until Task 18 lands.
   const handleSave = () => {
     if (!draft.name.trim()) return
     if (draft.id) {

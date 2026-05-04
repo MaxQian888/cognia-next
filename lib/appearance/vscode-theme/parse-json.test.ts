@@ -97,15 +97,15 @@ describe("vscodeThemeToCustomTheme", () => {
       },
     })
     expect(out.matchedCount).toBeGreaterThanOrEqual(8)
-    expect(out.theme.colors!.background).toBe("#0b0d10")
-    expect(out.theme.colors!.foreground).toBe("#e6edf3")
-    expect(out.theme.colors!.primary).toBe("#1f6feb")
-    expect(out.theme.colors!.primaryForeground).toBe("#ffffff")
-    expect(out.theme.colors!.border).toBe("#30363d")
-    expect(out.theme.colors!.accent).toBe("#1c2128")
-    expect(out.theme.colors!.accentForeground).toBe("#e6edf3")
-    expect(out.theme.colors!.ring).toBe("#388bfd")
-    expect(out.theme.colors!.destructive).toBe("#f85149")
+    expect(out.theme.colors.background).toBe("#0b0d10")
+    expect(out.theme.colors.foreground).toBe("#e6edf3")
+    expect(out.theme.colors.primary).toBe("#1f6feb")
+    expect(out.theme.colors.primaryForeground).toBe("#ffffff")
+    expect(out.theme.colors.border).toBe("#30363d")
+    expect(out.theme.colors.accent).toBe("#1c2128")
+    expect(out.theme.colors.accentForeground).toBe("#e6edf3")
+    expect(out.theme.colors.ring).toBe("#388bfd")
+    expect(out.theme.colors.destructive).toBe("#f85149")
   })
 
   it("strips alpha from 8-digit hex values", () => {
@@ -115,7 +115,7 @@ describe("vscodeThemeToCustomTheme", () => {
         "editor.background": "#11223380",
       },
     })
-    expect(out.theme.colors!.background).toBe("#112233")
+    expect(out.theme.colors.background).toBe("#112233")
   })
 
   it("derives missing tokens from bg/fg when possible", () => {
@@ -127,10 +127,10 @@ describe("vscodeThemeToCustomTheme", () => {
       },
     })
     // muted should be lightened bg
-    expect(out.theme.colors!.muted).not.toBe("#222222")
-    expect(out.theme.colors!.muted).toMatch(/^#[0-9a-f]{6}$/i)
+    expect(out.theme.colors.muted).not.toBe("#222222")
+    expect(out.theme.colors.muted).toMatch(/^#[0-9a-f]{6}$/i)
     // ring falls back to fallback.ring (since no primary mapped)
-    expect(out.theme.colors!.ring).toMatch(/^#[0-9a-f]{6}$/i)
+    expect(out.theme.colors.ring).toMatch(/^#[0-9a-f]{6}$/i)
   })
 
   it("flags themes with no colors object", () => {
@@ -138,7 +138,7 @@ describe("vscodeThemeToCustomTheme", () => {
     expect(out.emptyColors).toBe(true)
     expect(out.matchedCount).toBe(0)
     // It still returns a usable theme (everything came from fallbacks).
-    expect(out.theme.colors!.background).toBe("#ffffff")
+    expect(out.theme.colors.background).toBe("#ffffff")
   })
 
   it("ignores invalid hex values", () => {
@@ -148,9 +148,9 @@ describe("vscodeThemeToCustomTheme", () => {
         "button.background": "#aa0",
       },
     })
-    expect(out.theme.colors!.background).not.toBe("not-a-color")
+    expect(out.theme.colors.background).not.toBe("not-a-color")
     // 3-digit hex was accepted (parseHex handles short form).
-    expect(out.theme.colors!.primary).toMatch(/^#[0-9a-f]{6}$/i)
+    expect(out.theme.colors.primary).toMatch(/^#[0-9a-f]{6}$/i)
   })
 })
 
@@ -159,7 +159,7 @@ describe("importVscodeThemeJson", () => {
     const text = `{\n "name": "T",\n "type": "dark",\n "colors": { "editor.background": "#101010" }\n}`
     const out = importVscodeThemeJson(text)
     expect(out.theme.name).toBe("T")
-    expect(out.theme.colors!.background).toBe("#101010")
+    expect(out.theme.colors.background).toBe("#101010")
   })
 
   it("throws on invalid JSON", () => {
@@ -198,7 +198,7 @@ describe("integration: real theme snapshot", () => {
     expect(out.matchedCount).toBeGreaterThanOrEqual(8)
     expect(out.theme.name).toBe("One Dark Pro")
     expect(out.theme.isDark).toBe(true)
-    expect(out.theme.colors!.background).toBe("#282c34")
-    expect(out.theme.colors!.primary).toBe("#4d78cc")
+    expect(out.theme.colors.background).toBe("#282c34")
+    expect(out.theme.colors.primary).toBe("#4d78cc")
   })
 })

@@ -437,7 +437,11 @@ export interface CustomTheme {
   baseVariant?: "light" | "dark"
   /** Both variant palettes. The `derivedVariant` was filled by the algorithm. */
   tokens?: { light: ThemeColors; dark: ThemeColors }
-  /** Marks which side was auto-derived (vs hand-edited or imported). */
+  /**
+   * Marks which side was auto-derived (vs hand-edited or imported).
+   * Set by the v16 migration (Task 8) when promoting legacy rows, and by the
+   * VSCode import path (Task 9) when one variant is filled by deriveOppositeVariant.
+   */
   derivedVariant?: "light" | "dark"
 
   // ----- Legacy single-set fields (kept one release for migration safety) -----
