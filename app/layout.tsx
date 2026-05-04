@@ -68,7 +68,9 @@ export default function RootLayout({
                             {/* style tag in sync with the appearance store. */}
                             <BackgroundApplier />
                             <CustomThemeApplier />
-                            {children}
+                            <div data-bg-target="global" className="contents">
+                              {children}
+                            </div>
                           </DataAdapterProvider>
                         </A2UIDispatchProvider>
                       </CanvasBridgeProvider>

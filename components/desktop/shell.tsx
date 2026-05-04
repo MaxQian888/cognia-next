@@ -249,7 +249,10 @@ export function DiscordShell() {
               />
             )}
 
-            <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+            <main
+              className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
+              data-bg-target="chat"
+            >
               {!mounted ? null : !isTauri() ? (
                 <DesktopOnlyBanner />
               ) : (
