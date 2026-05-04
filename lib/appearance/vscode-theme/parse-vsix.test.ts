@@ -113,7 +113,7 @@ describe("readVsix", () => {
     expect(out.themes[0].label).toBe("Has File")
   })
 
-  it("returns a parseable manifest for a happy-path VSIX", async () => {
+  it("returns a fully-parsed manifest for a happy-path VSIX", async () => {
     const buf = await buildVsixBuffer({
       themes: [
         { label: "Sample Dark", uiTheme: "vs-dark", path: "themes/dark.json" },
@@ -125,11 +125,44 @@ describe("readVsix", () => {
     expect(out.name).toBe("publisher.ext")
     expect(out.version).toBe("1.2.3")
     expect(out.themes.map((t) => t.label)).toEqual(["Sample Dark", "Sample Light"])
-    const dark = await out.themes[0].parse()
+    // Eager-parsed: every entry already carries a populated ParsedTheme
+    // — no closure to invoke, no zip buffer to keep alive. This is the
+    // root-cause fix for the "VSIX entry vanished" GC race (ADR 0007 D1).
+    const dark = out.themes[0].parsed
     expect(dark.theme.isDark).toBe(true)
     expect(dark.theme.name).toBe("Sample Dark")
-    const light = await out.themes[1].parse()
+    expect(dark.theme.colors.background).toBeDefined()
+    const light = out.themes[1].parsed
     expect(light.theme.isDark).toBe(false)
+    expect(light.theme.colors.background).toBeDefined()
+  })
+
+  it("skips themes that fail to parse but keeps successful siblings", async () => {
+    const zip = new JSZip()
+    zip.file(
+      "extension/package.json",
+      JSON.stringify({
+        name: "ext",
+        contributes: {
+          themes: [
+            { label: "Good", path: "themes/good.json" },
+            { label: "Broken", path: "themes/broken.json" },
+          ],
+        },
+      })
+    )
+    zip.file("extension/themes/good.json", SAMPLE_THEME_JSON)
+    // Body is valid JSON but the importer rejects empty objects.
+    zip.file("extension/themes/broken.json", "this is not json at all")
+    const buf = await zip.generateAsync({ type: "uint8array" })
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const out = await readVsix(buf)
+      expect(out.themes.map((t) => t.label)).toEqual(["Good"])
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("themes/broken.json"))
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 
   it("falls back to path when label is missing", async () => {

@@ -1164,7 +1164,9 @@
         "noThemes": "No themes found in this package.",
         "manifestTitle": "Imported from VSCode",
         "removeButton": "Remove",
-        "history": "History"
+        "history": "History",
+        "errorTitle": "Import failed",
+        "timeout": "Parsing timed out — the file may be corrupt. Try a smaller .vsix."
       },
       "advanced": {
         "title": "Custom CSS",

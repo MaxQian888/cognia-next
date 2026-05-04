@@ -153,25 +153,29 @@ describe("VscodeImportTab", () => {
   })
 
   it("shows VSIX picker, then imports selected themes on confirm", async () => {
+    // After Phase 3 / Task 11 every entry carries a pre-parsed
+    // `parsed: ParsedTheme` field — no `parse: () => Promise<...>`
+    // closure for the picker to await. This kills the GC race that
+    // produced "VSIX entry vanished" in production.
     const themeB = {
       label: "B",
       uiTheme: "vs-dark",
       path: "themes/b.json",
-      parse: jest.fn().mockResolvedValue({
+      parsed: {
         theme: { name: "B", colors: {}, isDark: true },
         emptyColors: false,
         matchedCount: 3,
-      }),
+      },
     }
     const themeA = {
       label: "A",
       uiTheme: "vs",
       path: "themes/a.json",
-      parse: jest.fn().mockResolvedValue({
+      parsed: {
         theme: { name: "A", colors: {}, isDark: false },
         emptyColors: false,
         matchedCount: 3,
-      }),
+      },
     }
     appearance.readVsix.mockResolvedValue({
       displayName: "Pack",
@@ -195,7 +199,7 @@ describe("VscodeImportTab", () => {
     expect(setActive).toHaveBeenCalled()
   })
 
-  it("renders an error message when JSON parsing fails", async () => {
+  it("renders a destructive Alert when JSON parsing fails", async () => {
     appearance.importVscodeThemeJson.mockImplementation(() => {
       throw new Error("Invalid VSCode theme JSON")
     })
@@ -206,6 +210,50 @@ describe("VscodeImportTab", () => {
       fireEvent.change(input, { target: { files: [file] } })
     })
     await waitFor(() => expect(screen.getByText(/Invalid VSCode theme JSON/i)).toBeInTheDocument())
+    // The error is rendered inside the destructive Alert (errorTitle
+    // i18n key) — distinct from the previous bare `<p>` that was easy
+    // to miss.
+    expect(screen.getByText("errorTitle")).toBeInTheDocument()
+  })
+
+  it("surfaces readVsix errors through the destructive Alert", async () => {
+    appearance.readVsix.mockRejectedValue(new Error("Could not unzip VSIX: corrupt file"))
+    render(<VscodeImportTab />)
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    const file = new File([new Uint8Array([0])], "bad.vsix", {
+      type: "application/octet-stream",
+    })
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } })
+    })
+    await waitFor(() => expect(screen.getByText("errorTitle")).toBeInTheDocument())
+    expect(screen.getByText(/Could not unzip VSIX: corrupt file/)).toBeInTheDocument()
+  })
+
+  it("times out a hung parse and shows the timeout message after 30s", async () => {
+    jest.useFakeTimers()
+    try {
+      // Never-resolving readVsix — simulates JSZip hanging on a
+      // malformed file. Without the 30s timeout the spinner would
+      // stay on forever (root cause D1).
+      appearance.readVsix.mockReturnValue(new Promise<never>(() => {}))
+      render(<VscodeImportTab />)
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement
+      const file = new File([new Uint8Array([0])], "hang.vsix", {
+        type: "application/octet-stream",
+      })
+      await act(async () => {
+        fireEvent.change(input, { target: { files: [file] } })
+      })
+      // Fast-forward past the 30s parse-phase timeout.
+      await act(async () => {
+        jest.advanceTimersByTime(31_000)
+      })
+      expect(screen.getByText("errorTitle")).toBeInTheDocument()
+      expect(screen.getByText("timeout")).toBeInTheDocument()
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it("renders without infinite re-renders when settings is empty", () => {

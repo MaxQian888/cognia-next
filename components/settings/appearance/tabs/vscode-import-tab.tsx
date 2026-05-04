@@ -8,8 +8,9 @@
 // automatically. We also append an `ImportedThemeRecord` to keep
 // provenance for the UI.
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
@@ -19,7 +20,6 @@ import {
   readVsix,
   type ParsedTheme,
   type VsixManifest,
-  type VsixThemeReady,
 } from "@/lib/appearance"
 import { deriveOppositeVariant } from "@/lib/appearance/derive-variant"
 import { useSettingsStore } from "@/stores/settings"
@@ -37,13 +37,34 @@ type Stage =
   | { kind: "idle" }
   | { kind: "loading" }
   | { kind: "vsix-pick"; manifest: VsixManifest; selected: Set<number>; vsixName: string }
-  | { kind: "error"; message: string }
   | { kind: "done"; importedCount: number }
+
+/**
+ * Hard ceiling on the parse phase. JSZip on a sufficiently large or
+ * malformed buffer can hang without ever rejecting; without this the
+ * spinner stays on forever and the user has no way to recover except
+ * reloading the page. 30 s is comfortably more than a normal 10 MB
+ * VSIX needs (sub-second on a laptop) but short enough that a hang is
+ * obvious.
+ */
+const PARSE_TIMEOUT_MS = 30_000
 
 export function VscodeImportTab() {
   const t = useTranslations("settings.appearance.vscode")
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [stage, setStage] = useState<Stage>({ kind: "idle" })
+  // Top-level error surfaced via a destructive Alert. Lives outside
+  // `Stage` so it survives the loading → vsix-pick transition and so
+  // the picker can also write to it (a per-theme failure during the
+  // commit loop must be visible without losing the picker context).
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(
+    () => () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    },
+    []
+  )
 
   const createCustomTheme = useSettingsStore((s) => s.createCustomTheme)
   const setActive = useSettingsStore((s) => s.setActiveCustomTheme)
@@ -57,6 +78,12 @@ export function VscodeImportTab() {
 
   const handleFile = async (file: File) => {
     setStage({ kind: "loading" })
+    setError(null)
+    if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    timeoutRef.current = setTimeout(() => {
+      setError(t("timeout"))
+      setStage({ kind: "idle" })
+    }, PARSE_TIMEOUT_MS)
     try {
       if (file.name.toLowerCase().endsWith(".vsix")) {
         const buf = new Uint8Array(await file.arrayBuffer())
@@ -80,7 +107,13 @@ export function VscodeImportTab() {
       await setActive(id)
       setStage({ kind: "done", importedCount: 1 })
     } catch (err) {
-      setStage({ kind: "error", message: (err as Error).message })
+      setError((err as Error).message)
+      setStage({ kind: "idle" })
+    } finally {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
     }
   }
 
@@ -127,14 +160,16 @@ export function VscodeImportTab() {
     if (stage.kind !== "vsix-pick") return
     const { manifest, selected, vsixName } = stage
     setStage({ kind: "loading" })
+    setError(null)
     try {
       let imported = 0
       let lastId: string | null = null
       for (let idx = 0; idx < manifest.themes.length; idx += 1) {
         if (!selected.has(idx)) continue
-        const entry: VsixThemeReady = manifest.themes[idx]
-        const parsed = await entry.parse()
-        const id = await commitTheme(parsed, {
+        const entry = manifest.themes[idx]
+        // `entry.parsed` is populated eagerly by `readVsix` — no zip
+        // closure to GC out from under us, no async work per pick.
+        const id = await commitTheme(entry.parsed, {
           kind: "vsix",
           vsixName,
           themePath: entry.path,
@@ -145,7 +180,8 @@ export function VscodeImportTab() {
       if (lastId) await setActive(lastId)
       setStage({ kind: "done", importedCount: imported })
     } catch (err) {
-      setStage({ kind: "error", message: (err as Error).message })
+      setError((err as Error).message)
+      setStage({ kind: "idle" })
     }
   }
 
@@ -159,6 +195,13 @@ export function VscodeImportTab() {
       <div>
         <p className="text-xs text-muted-foreground">{t("description")}</p>
       </div>
+
+      {error && (
+        <Alert variant="destructive">
+          <AlertTitle>{t("errorTitle")}</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
 
       <div
         onDragOver={(e) => e.preventDefault()}
@@ -196,7 +239,6 @@ export function VscodeImportTab() {
           <Loader2Icon className="size-3 animate-spin" />…
         </p>
       )}
-      {stage.kind === "error" && <p className="text-xs text-destructive">{stage.message}</p>}
       {stage.kind === "done" && (
         <p className="text-xs text-muted-foreground">
           {t("imported", { count: stage.importedCount })}
