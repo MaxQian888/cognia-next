@@ -1,5 +1,9 @@
+import fs from "node:fs"
+import path from "node:path"
 import JSZip from "jszip"
 import { MAX_VSIX_BYTES, normalizeRelPath, readVsix, uiThemeToVariant } from "./parse-vsix"
+
+const fixtureDir = path.join(__dirname, "__fixtures__")
 
 const SAMPLE_THEME_JSON = JSON.stringify({
   name: "Sample",
@@ -205,5 +209,33 @@ describe("readVsix", () => {
     const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
     const out = await readVsix(ab as ArrayBuffer)
     expect(out.themes.length).toBe(1)
+  })
+})
+
+// Real-fixture edge cases — three pre-built .vsix files committed under
+// __fixtures__/. Pinned against the Task 11 top-level error wrapping so
+// the import-tab UI always renders a recognizable error string. We hand
+// the raw Buffer (a Node Uint8Array subclass) directly to readVsix —
+// converting to ArrayBuffer first trips a cross-realm `instanceof` check
+// inside JSZip when running under jsdom.
+describe("VSIX edge cases (real fixtures)", () => {
+  it("dracula.vsix produces at least one parsed theme", async () => {
+    const buf = fs.readFileSync(path.join(fixtureDir, "dracula.vsix"))
+    const arr = new Uint8Array(buf)
+    const result = await readVsix(arr)
+    expect(result.themes.length).toBeGreaterThan(0)
+    expect(result.themes[0].parsed.theme.colors.background).toMatch(/^#/)
+  })
+
+  it("no-themes.vsix throws a recognizable error", async () => {
+    const buf = fs.readFileSync(path.join(fixtureDir, "no-themes.vsix"))
+    const arr = new Uint8Array(buf)
+    await expect(readVsix(arr)).rejects.toThrow(/does not contribute/i)
+  })
+
+  it("corrupt.vsix throws a recognizable error", async () => {
+    const buf = fs.readFileSync(path.join(fixtureDir, "corrupt.vsix"))
+    const arr = new Uint8Array(buf)
+    await expect(readVsix(arr)).rejects.toThrow(/unzip|VSIX|Failed/i)
   })
 })

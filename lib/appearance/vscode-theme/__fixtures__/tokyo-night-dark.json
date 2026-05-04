@@ -1,0 +1,30 @@
+{
+  "type": "dark",
+  "colors": {
+    "editor.background": "#1a1b26",
+    "editor.foreground": "#a9b1d6",
+    "button.background": "#7aa2f7",
+    "button.foreground": "#1a1b26",
+    "list.activeSelectionBackground": "#283457",
+    "list.activeSelectionForeground": "#7aa2f7",
+    "list.hoverBackground": "#1a1b26",
+    "sideBar.background": "#16161e",
+    "sideBar.foreground": "#a9b1d6",
+    "sideBar.border": "#101014",
+    "activityBar.background": "#16161e",
+    "activityBar.foreground": "#787c99",
+    "activityBarBadge.background": "#7aa2f7",
+    "activityBarBadge.foreground": "#1a1b26",
+    "editorWidget.background": "#16161e",
+    "input.background": "#1a1b26",
+    "input.foreground": "#a9b1d6",
+    "input.border": "#101014",
+    "focusBorder": "#7aa2f7",
+    "errorForeground": "#f7768e",
+    "descriptionForeground": "#a9b1d6cc",
+    "tab.activeBackground": "#1a1b26",
+    "tab.inactiveBackground": "#16161e",
+    "panel.background": "#16161e",
+    "panel.border": "#16161e"
+  }
+}

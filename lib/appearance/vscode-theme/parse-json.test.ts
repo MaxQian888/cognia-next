@@ -1,3 +1,5 @@
+import fs from "node:fs"
+import path from "node:path"
 import {
   importVscodeThemeJson,
   parseVscodeJson,
@@ -5,6 +7,8 @@ import {
   vscodeThemeToCustomTheme,
 } from "./parse-json"
 import { THEME_COLOR_KEYS } from "./token-mapping"
+
+const fixtureDir = path.join(__dirname, "__fixtures__")
 
 describe("stripJsonComments", () => {
   it("strips line and block comments", () => {
@@ -237,5 +241,28 @@ describe("integration: real theme snapshot", () => {
     expect(out.theme.isDark).toBe(true)
     expect(out.theme.colors.background).toBe("#282c34")
     expect(out.theme.colors.primary).toBe("#4d78cc")
+  })
+})
+
+// Real-world VSCode palettes (synthetic from canonical references — the
+// upstream theme repos either ship YAML/TS sources or built artifacts >50KB).
+// These pin the Task 10 fallback-order fix against representative data:
+// every colors output must populate all 27 ThemeColors keys, and the
+// hardcoded blue accent fallback must NOT appear for any real palette.
+describe("real VSCode themes parse without errors", () => {
+  it.each(["dracula", "one-dark-pro", "tokyo-night-dark", "github-light-default"])("%s", (name) => {
+    const text = fs.readFileSync(path.join(fixtureDir, `${name}.json`), "utf8")
+    const result = importVscodeThemeJson(text)
+    // Background and foreground are always populated.
+    expect(result.theme.colors.background).toMatch(/^(#|oklch\()/)
+    expect(result.theme.colors.foreground).toMatch(/^(#|oklch\()/)
+    // No accent should be the hardcoded blue fallback after Task 10.
+    expect(result.theme.colors.accent).not.toBe("#60a5fa")
+    expect(result.theme.colors.accent).not.toBe("#3b82f6")
+    // All 27 keys populated.
+    for (const key of THEME_COLOR_KEYS) {
+      expect(result.theme.colors[key]).toBeDefined()
+      expect(result.theme.colors[key].length).toBeGreaterThan(0)
+    }
   })
 })
