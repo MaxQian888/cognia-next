@@ -104,6 +104,54 @@ describe("VscodeImportTab", () => {
     expect(setActive).toHaveBeenCalledWith("ct-new")
   })
 
+  it("commits an imported theme with dual-variant tokens", async () => {
+    appearance.importVscodeThemeJson.mockReturnValue({
+      theme: {
+        name: "Solar",
+        // Non-empty palette so deriveOppositeVariant has something to flip.
+        colors: { background: "#101012", foreground: "#f5f5f5" },
+        isDark: true,
+      },
+      emptyColors: false,
+      matchedCount: 2,
+    })
+    render(<VscodeImportTab />)
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    const file = new File([JSON.stringify({ name: "Solar" })], "solar.json", {
+      type: "application/json",
+    })
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } })
+    })
+    await waitFor(() =>
+      expect(createCustomTheme).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Solar",
+          baseVariant: "dark",
+          derivedVariant: "light",
+          tokens: expect.objectContaining({
+            light: expect.any(Object),
+            dark: expect.any(Object),
+          }),
+          // Legacy fields still present for rollback safety:
+          isDark: true,
+          colors: expect.any(Object),
+        })
+      )
+    )
+    // The base side preserves the parsed input verbatim; the opposite side
+    // is derived, so it must differ from the source values.
+    const payload = createCustomTheme.mock.calls[0][0] as {
+      tokens: { light: Record<string, string>; dark: Record<string, string> }
+    }
+    expect(payload.tokens.dark).toEqual({
+      background: "#101012",
+      foreground: "#f5f5f5",
+    })
+    expect(payload.tokens.light.background).not.toBe("#101012")
+    expect(payload.tokens.light.foreground).not.toBe("#f5f5f5")
+  })
+
   it("shows VSIX picker, then imports selected themes on confirm", async () => {
     const themeB = {
       label: "B",

@@ -21,9 +21,10 @@ import {
   type VsixManifest,
   type VsixThemeReady,
 } from "@/lib/appearance"
+import { deriveOppositeVariant } from "@/lib/appearance/derive-variant"
 import { useSettingsStore } from "@/stores/settings"
 import type { ImportedThemeRecord } from "@/types/appearance"
-import type { CustomTheme } from "@/types/plugin/plugin-extended"
+import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin-extended"
 import { cn } from "@/lib/utils"
 
 // Stable empty fallbacks. Selectors that return a fresh `[]` on every call
@@ -87,7 +88,31 @@ export function VscodeImportTab() {
     parsed: ParsedTheme,
     origin: ImportedThemeRecord["origin"]
   ): Promise<string> => {
-    const id = createCustomTheme(parsed.theme)
+    // The parser still returns the legacy single-variant shape
+    // (`{ name, isDark, colors }`) on purpose — keeping the OKLCH math out
+    // of `parse-json.ts`. We do the legacy → dual-variant conversion here,
+    // at the commit boundary, so newly-imported rows land in the v16
+    // shape without going through the migration.
+    const baseVariant: "light" | "dark" = parsed.theme.isDark ? "dark" : "light"
+    const opposite: "light" | "dark" = baseVariant === "dark" ? "light" : "dark"
+    // The dynamic-key indexing makes TS infer `Partial<{ light, dark }>`
+    // even though both keys are always assigned, hence the cast.
+    const tokens = {
+      [baseVariant]: parsed.theme.colors,
+      [opposite]: deriveOppositeVariant(parsed.theme.colors, baseVariant),
+    } as { light: ThemeColors; dark: ThemeColors }
+
+    const id = createCustomTheme({
+      name: parsed.theme.name,
+      baseVariant,
+      derivedVariant: opposite,
+      tokens,
+      // Legacy fields are written too so a one-release rollback to v15
+      // (which only reads `colors`/`isDark`) still finds usable data —
+      // matches the rollback contract documented in Task 8.
+      isDark: parsed.theme.isDark,
+      colors: parsed.theme.colors,
+    })
     await addImportedTheme({
       customThemeId: id,
       sourceName: parsed.theme.name,
