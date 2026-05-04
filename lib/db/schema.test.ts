@@ -38,6 +38,76 @@ describe("getDb", () => {
     expect(db.pluginReviews).toBeDefined()
     expect(db.pluginAnalytics).toBeDefined()
     expect(db.pluginScheduledJobs).toBeDefined()
+    // v17 — External Bridge (LLM Wiki + MCP audit) tables.
+    expect(db.wikiArticles).toBeDefined()
+    expect(db.wikiSections).toBeDefined()
+    expect(db.wikiManifest).toBeDefined()
+    expect(db.mcpAuditLog).toBeDefined()
+  })
+
+  // §A-Schema migration check for v17: tables open cleanly on a fresh
+  // database (Dexie auto-applies all version blocks up to 17). Verify
+  // round-trips through each new table to prove the per-row type compiles
+  // and the declared indexes accept inserts.
+  it("v17 wiki + audit tables accept inserts and reads round-trip", async () => {
+    const db = getDb()
+    const now = Date.now()
+
+    await db.wikiArticles.put({
+      id: "wka_1",
+      slug: "lib-foo",
+      title: "lib/foo overview",
+      module: "lib/foo",
+      scope: "cognia-self",
+      pageRank: 0.42,
+      summary: "summary",
+      sectionIds: ["wks_1"],
+      sourceRefs: [{ filePath: "lib/foo/index.ts", lineStart: 1, lineEnd: 10, sha: "abc" }],
+      contentMd: "# heading\n\nbody",
+      embedding: [0.1, 0.2],
+      generatedAt: now,
+      generatorVersion: "v1",
+      fileHashes: { "lib/foo/index.ts": "abc" },
+    })
+
+    await db.wikiSections.put({
+      id: "wks_1",
+      articleId: "wka_1",
+      sectionIndex: 0,
+      headingPath: ["overview"],
+      bodyMd: "section",
+      sourceRefs: [],
+    })
+
+    await db.wikiManifest.put({
+      scope: "cognia-self",
+      fileHashes: { "lib/foo/index.ts": "abc" },
+      lastBuildAt: now,
+      articleCount: 1,
+      generatorVersion: "v1",
+    })
+
+    await db.mcpAuditLog.put({
+      id: "mau_1",
+      ts: now,
+      tool: "wiki_search",
+      scope: "wiki:cognia",
+      allowed: true,
+      latencyMs: 5,
+    })
+
+    expect(await db.wikiArticles.get("wka_1")).toMatchObject({ slug: "lib-foo" })
+    expect(await db.wikiSections.get("wks_1")).toMatchObject({ articleId: "wka_1" })
+    expect(await db.wikiManifest.get("cognia-self")).toMatchObject({ articleCount: 1 })
+    expect(await db.mcpAuditLog.get("mau_1")).toMatchObject({ tool: "wiki_search" })
+
+    // Composite index on `wikiArticles[scope+module]` drives the wiki_search
+    // module-filter path — verify the composite key returns the row.
+    const byModule = await db.wikiArticles
+      .where(["scope", "module"])
+      .equals(["cognia-self", "lib/foo"])
+      .toArray()
+    expect(byModule).toHaveLength(1)
   })
 
   // §A-Schema migration check: Dexie auto-applies all version blocks up to

@@ -64,6 +64,7 @@ export type SettingsSectionId =
   | "data"
   | "scheduled-tasks"
   | "remote-control"
+  | "external-bridge"
   | "logs"
   | "diagnostics"
   | "desktop"
@@ -292,6 +293,13 @@ export const SETTINGS_NAV: NavItem[] = [
     group: "system",
     icon: RadioTowerIcon,
     desktopOnly: true,
+  },
+  {
+    id: "external-bridge",
+    labelKey: "externalBridge",
+    descriptionKey: "externalBridge",
+    group: "system",
+    icon: WebhookIcon,
   },
   {
     id: "desktop",
@@ -639,6 +647,19 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "trigger",
     "远程控制",
     "外部触发",
+  ],
+  "external-bridge": [
+    "external-bridge",
+    "external bridge",
+    "mcp",
+    "mcp server",
+    "wiki",
+    "claude code",
+    "cursor",
+    "cline",
+    "外部桥接",
+    "插件桥",
+    "知识对外",
   ],
   desktop: ["tauri", "tray", "autostart", "window"],
   about: ["version", "build", "credits"],

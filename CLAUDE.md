@@ -220,6 +220,57 @@ subsystem lives entirely under `lib/twin/`, `types/twin/`, and
 
 See `docs/content/docs/adr/0003-employee-digital-twin.md` for the full ADR.
 
+## External Bridge (LLM Wiki + MCP server)
+
+cognia-next exposes its own knowledge — generated code wikis, RAG over
+those wikis, and runtime entities (skills/characters/twins/plugins/
+agent-teams) — to external coding agents (Claude Code, Cursor, Cline,
+Codex) via a Model Context Protocol (MCP) server. The bridge lives
+under `lib/external-bridge/` + `lib/wiki/` and is fully OptIn — every
+scope defaults to OFF except the public-code wiki + RAG.
+
+- **Schema (v17)**: 4 new Dexie tables —
+  - `wikiArticles` (slug-keyed, scope-filtered, page-rank-sorted)
+  - `wikiSections` (split out for partial reload + rag_search)
+  - `wikiManifest` (per-scope Merkle map + build metadata)
+  - `mcpAuditLog` (capped 5000 newest)
+- **Wiki indexer** (`lib/wiki/orchestrator.ts:rebuildWiki`): walks
+  `lib/`/`app`/`components`/`hooks`/`types`, hashes files, diffs vs the
+  manifest, then drives 4 sub-agents — `RepoMapAgent` (size-heuristic
+  pageRank; full PageRank deferred to Phase 2), `ModuleArticleAgent`
+  (one LLM call per module), `CrossRefAgent` (rewrites backtick paths
+  to `[[slug]]` links), `IndexPageAgent` (top-level index page).
+  Reuses `lib/twin/ingest/chunk.ts:prepareChunks` (code chunker) and
+  `lib/twin/distill/llm.ts:LlmClient`.
+- **MCP server** (`lib/external-bridge/mcp-server/`): 4 tools
+  (`wiki_search`, `wiki_read`, `rag_search`, `runtime_query`) + 3
+  resource families (`cognia://wiki/<slug>`, `cognia://skill/<id>`,
+  `cognia://character/<id>`). Built on `@modelcontextprotocol/sdk` v1.29.
+  `standalone-entry.ts` is the node CLI entry that the Tauri sidecar
+  spawns; the Phase 2 plugin packaging will reuse it as the bundled
+  binary.
+- **Permission gate** (`lib/external-bridge/permission-gate.ts`): every
+  call goes through `checkScope` against `AppSettings.externalBridge.
+enabledScopes` before the handler runs. Denials get MCP error
+  envelopes; every call (allowed or denied) writes to `mcpAuditLog`
+  via `audit-log.ts`.
+- **HTTP transport (R1 decision)**: HTTP MCP server runs in **Tauri
+  Rust (axum/hyper)** under `src-tauri/src/mcp_server/`, NOT as a
+  Next.js `app/api/mcp` route — `output: "export"` precludes API
+  routes. Phase 1 ships stdio only; HTTP lands when the Rust path is
+  wired (M3 in the plan).
+- **Markdown export** (`lib/wiki/exporter.ts`): write `wikiArticles` to
+  `docs/content/docs/wiki/<scope>/<slug>.mdx` plus an `index.mdx`.
+  Exporter is fs-abstract via the `WriteFs` interface so the Tauri
+  plugin-fs path and the test in-memory map share one code path.
+- **Settings UI**:
+  `components/settings/external-bridge/external-bridge-section.tsx`
+  is a tab under Settings → System (`?section=external-bridge`).
+  Renders 4 cards — server status + token, scope toggles (9 scopes),
+  setup snippet (stdio / HTTP), audit log table.
+
+See `docs/content/docs/adr/0008-external-bridge.md` for the full ADR.
+
 ## Testing Standards
 
 - **Coverage requirement**: every source file must reach **≥90% test coverage** (lines, branches, functions). Verify with `pnpm test:coverage`.

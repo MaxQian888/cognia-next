@@ -713,6 +713,18 @@ export interface AppSettings {
   customCss?: string
   customCssEnabled?: boolean
   importedVscodeThemes?: import("@/types/appearance").ImportedThemeRecord[]
+
+  // ---- External Bridge / MCP server (schema v17, Phase 1) ----
+  /**
+   * Configuration for the External Bridge MCP server that exposes Cognia's
+   * wiki / RAG / runtime entities to outside coding agents (Claude Code,
+   * Cursor, Cline, etc.). When `undefined`, the server is OFF.
+   *
+   * Permission gate semantics: the `enabledScopes` whitelist is checked on
+   * every MCP call; scopes not in the list are denied with MCP error -32602.
+   * Default install ships with only `wiki:cognia` + `rag:cognia` enabled.
+   */
+  externalBridge?: import("@/types/wiki").ExternalBridgeSettings
 }
 
 export interface BackupAutoSchedule {
