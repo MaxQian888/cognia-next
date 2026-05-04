@@ -9,6 +9,8 @@ mod external_agent;
 mod files;
 mod hooks;
 mod logging;
+mod mcp_server;
+mod remote_control;
 mod scheduler;
 mod settings;
 mod shell;
@@ -168,6 +170,7 @@ pub fn run() {
         .manage(claude::SidecarState::new())
         .manage(ApiKeyState::new())
         .manage(WindowBehavior::new())
+        .manage(mcp_server::McpServerState::new())
         .manage(external_agent::commands::ExternalAgentState::default())
         .manage(external_agent::commands::AcpTerminalState::default())
         .manage(scheduler::SchedulerState::new(
@@ -294,6 +297,10 @@ pub fn run() {
             wallpaper::commands::wallpaper_delete,
             wallpaper::commands::wallpaper_resolve_path,
             wallpaper::commands::wallpaper_read_data_url,
+            mcp_server::commands::mcp_server_start,
+            mcp_server::commands::mcp_server_stop,
+            mcp_server::commands::mcp_server_restart,
+            mcp_server::commands::mcp_server_status,
         ])
         .setup(|app| {
             // Bootstrap native logging in *all* builds. Installs tauri-plugin-log
