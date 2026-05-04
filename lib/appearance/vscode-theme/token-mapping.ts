@@ -55,7 +55,11 @@ export const VSCODE_COLOR_MAP: Record<keyof ThemeColors, readonly string[]> = {
     "tab.inactiveForeground",
   ],
 
-  card: ["editorGroup.dropBackground", "panel.background", "editor.background"],
+  // `editorGroup.dropBackground` is omitted on purpose — it's a transient
+  // drag-overlay color that themes typically define with embedded alpha,
+  // which produces saturated tints once the alpha is stripped. Stick to
+  // surfaces that themes intend to be opaque.
+  card: ["panel.background", "editor.background"],
   cardForeground: ["editorWidget.foreground", "foreground"],
 
   popover: ["editorWidget.background", "dropdown.background", "quickInput.background"],
