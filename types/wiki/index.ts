@@ -1,0 +1,230 @@
+/**
+ * LLM Wiki — type model for the External Bridge.
+ *
+ * Four Dexie tables back the wiki subsystem (see `lib/db/schema.ts` v17):
+ *
+ *   • `wikiArticles` — generated module-level articles (Markdown + sections + sourceRefs)
+ *   • `wikiSections` — split-out section bodies for partial updates / per-section RAG
+ *   • `wikiManifest` — Merkle table of file SHA-256s + per-scope build metadata
+ *   • `mcpAuditLog` — capped log (5000 newest) of every MCP call routed through the bridge
+ *
+ * Wiki articles are produced by `lib/wiki/orchestrator.ts` which drives:
+ *   1. file-walker → enumerate code files in a scope
+ *   2. merkle diff vs `wikiManifest.fileHashes`
+ *   3. Twin ingest pipeline (chunk + embed) using a synthetic `twinId = "repo:<scope>"`
+ *   4. wiki agents (RepoMap → ModuleArticle → CrossRef → IndexPage)
+ *   5. write to `wikiArticles` + `wikiSections`, update `wikiManifest`
+ *
+ * The MCP server (`lib/external-bridge/mcp-server`) consumes wiki rows via the
+ * `wiki_search` / `wiki_read` handlers; its calls are recorded in `mcpAuditLog`.
+ */
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scope — drives indexing target + permission gate.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A wiki scope identifies WHAT is being indexed. Phase 1 ships only
+ * `cognia-self`; `user-repo` lands in Phase 3 and `runtime` in Phase 4.
+ */
+export type WikiScope = "cognia-self" | "user-repo" | "runtime"
+
+/**
+ * Permission scope for the MCP bridge — one knob per (capability × content)
+ * combination, default OFF except `wiki:cognia` and `rag:cognia`. The Settings
+ * UI renders one toggle per value here.
+ */
+export type BridgeScope =
+  | "wiki:cognia"
+  | "wiki:user-repo"
+  | "rag:cognia"
+  | "rag:user-repo"
+  | "runtime:skills"
+  | "runtime:characters"
+  | "runtime:twins"
+  | "runtime:plugins"
+  | "runtime:agent-teams"
+
+export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
+  "wiki:cognia",
+  "wiki:user-repo",
+  "rag:cognia",
+  "rag:user-repo",
+  "runtime:skills",
+  "runtime:characters",
+  "runtime:twins",
+  "runtime:plugins",
+  "runtime:agent-teams",
+] as const
+
+/** Scopes enabled by default for a fresh install. Public-code wiki + RAG only. */
+export const DEFAULT_ENABLED_SCOPES: readonly BridgeScope[] = ["wiki:cognia", "rag:cognia"] as const
+
+// ─────────────────────────────────────────────────────────────────────────────
+// External Bridge settings — persisted on AppSettings.externalBridge.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Persisted configuration for the External Bridge MCP server. Lives on
+ * `AppSettings.externalBridge`. When the parent field is `undefined`, the
+ * server is treated as OFF — there is no implicit "enable on first use".
+ */
+export interface ExternalBridgeSettings {
+  /** Master switch — when false, neither stdio nor HTTP transports are spawned. */
+  enabled: boolean
+  /**
+   * Bearer token for the HTTP transport. 64-char hex (32 random bytes).
+   * Always overwritten in full on rotation; old token never lingers.
+   * Stored as plaintext because IndexedDB is already user-local and we don't
+   * have a key-management story for v1; revisit when the bridge supports
+   * remote network access.
+   */
+  bearerToken?: string
+  /**
+   * Whitelisted scopes — every MCP call's tool/handler maps to exactly one
+   * scope, and the call is denied if the scope is not present here.
+   */
+  enabledScopes: BridgeScope[]
+  /** Last-assigned localhost port for the HTTP transport. */
+  httpPort?: number
+  /** ISO timestamp of the most recent token rotation, for audit. */
+  tokenRotatedAt?: number
+}
+
+export const DEFAULT_EXTERNAL_BRIDGE_SETTINGS: ExternalBridgeSettings = {
+  enabled: false,
+  enabledScopes: [...DEFAULT_ENABLED_SCOPES],
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wiki article — the user-facing knowledge unit.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Provenance pointer — what source file/range a wiki article (or section) was
+ * derived from. Mirrors `TwinChunkMetadata.{filePath,lineStart,lineEnd}` so
+ * downstream UIs can render "jump to source" breadcrumbs without a second
+ * lookup.
+ */
+export interface WikiSourceRef {
+  filePath: string
+  lineStart: number
+  lineEnd: number
+  /** SHA-256 of the source file at the moment the article was generated. */
+  sha: string
+}
+
+/**
+ * One section of a wiki article — a heading-rooted Markdown subtree. Stored
+ * separately in `wikiSections` so the orchestrator can do partial regeneration
+ * without rewriting the whole article.
+ */
+export interface WikiSection {
+  id: string
+  /** FK → wikiArticles.id */
+  articleId: string
+  /** 0-based ordering within the article. */
+  sectionIndex: number
+  /** Heading breadcrumb, e.g. ["ingest", "chunk"]. */
+  headingPath: string[]
+  /** Markdown body — raw, no front-matter. */
+  bodyMd: string
+  /** Sources cited in this section (subset of article-level sourceRefs). */
+  sourceRefs: WikiSourceRef[]
+}
+
+/**
+ * A wiki article — one per "module" (file or directory). The exporter writes
+ * the full `contentMd` to `docs/content/docs/wiki/<scope>/<slug>.mdx`; the MCP
+ * `wiki_read` tool returns the same content.
+ */
+export interface WikiArticle {
+  id: string
+  /** URL-safe identifier, e.g. "lib-twin-ingest-chunk". Unique within scope. */
+  slug: string
+  /** Human-readable title, e.g. "lib/twin/ingest/chunk.ts — Format-aware chunking". */
+  title: string
+  /** Module path the article describes, e.g. "lib/twin/ingest". */
+  module: string
+  scope: WikiScope
+  /**
+   * PageRank score from RepoMapAgent. 0..1, used as a tie-breaker in
+   * wiki_search; the bulk of search ranking comes from semantic similarity
+   * against `embedding` plus BM25 over `title + summary`.
+   */
+  pageRank: number
+  /** 1–2 paragraph summary returned by `wiki_search` (no need to fetch full body). */
+  summary: string
+  /** Section ids in render order (FK → wikiSections.id[]). */
+  sectionIds: string[]
+  /** Article-level cited sources (union of all section sourceRefs). */
+  sourceRefs: WikiSourceRef[]
+  /** Full Markdown body (heading + summary + sections concatenated). */
+  contentMd: string
+  /**
+   * Article-level embedding for `wiki_search`. Stored as `number[]` because
+   * Dexie/IndexedDB can't reliably round-trip TypedArrays across browsers.
+   */
+  embedding: number[]
+  generatedAt: number
+  /**
+   * Stamps the orchestrator version that produced this article. The
+   * orchestrator uses this to invalidate articles produced by older versions
+   * during a rebuild.
+   */
+  generatorVersion: string
+  /**
+   * Hashes of every source file that contributed to this article. Used by
+   * the Merkle differ: an article is considered "fresh" iff every entry here
+   * still matches the current on-disk SHA-256.
+   */
+  fileHashes: Record<string, string>
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wiki manifest — per-scope build metadata + Merkle table.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One row per scope. Stores the full Merkle map (file path → SHA-256 at last
+ * build) plus aggregate metadata for the Settings UI status panel.
+ */
+export interface WikiManifest {
+  /** Primary key — one of the `WikiScope` values. */
+  scope: WikiScope
+  /** Map of filePath → sha256 at the time of the last successful build. */
+  fileHashes: Record<string, string>
+  /** Epoch ms of the last successful (full or incremental) build completion. */
+  lastBuildAt: number
+  /** Total `wikiArticles` rows currently associated with this scope. */
+  articleCount: number
+  /** Generator version stamp — same value lands on each `wikiArticles.generatorVersion`. */
+  generatorVersion: string
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MCP audit log — capped 5000-row record of every bridge call.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One row per MCP request the bridge processes. The Settings UI renders the
+ * newest 50 in a table; the `mcpAuditLog.ts` CRUD module enforces the 5000-row
+ * cap by trimming the oldest when a write would exceed it.
+ */
+export interface McpAuditLogRow {
+  id: string
+  /** Epoch ms when the request was received. */
+  ts: number
+  /** Tool or method name, e.g. "wiki_search" / "tools/list" / "resources/read". */
+  tool: string
+  /** Permission scope checked for this call (or "n/a" for protocol-level methods). */
+  scope: BridgeScope | "n/a"
+  /** Whether the permission gate allowed the call. */
+  allowed: boolean
+  /** Wall-clock latency in milliseconds (handler dispatch → response written). */
+  latencyMs: number
+  /** Optional human-readable reason for `allowed=false` (e.g. "scope OFF"). */
+  reason?: string
+  /** Optional error message (when allowed=true but handler threw). */
+  errorMessage?: string
+}

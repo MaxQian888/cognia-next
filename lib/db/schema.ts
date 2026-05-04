@@ -31,6 +31,7 @@ import type {
   PluginAnalyticsRow,
   PluginScheduledJobRow,
 } from "./plugin-types"
+import type { WikiArticle, WikiSection, WikiManifest, McpAuditLogRow } from "@/types/wiki"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -64,6 +65,14 @@ export class CogniaDB extends Dexie {
   pluginReviews!: Table<PluginReviewRow, [string, string]>
   pluginAnalytics!: Table<PluginAnalyticsRow, [string, string]>
   pluginScheduledJobs!: Table<PluginScheduledJobRow, string>
+  // v17 — External Bridge (LLM Wiki) tables. Wiki articles are addressed by
+  // slug (unique within scope); the manifest is keyed by `scope` so each
+  // (scope, build) pair is one row. The audit log is capped at 5000 newest
+  // rows by `lib/db/mcp-audit-log.ts`.
+  wikiArticles!: Table<WikiArticle, string>
+  wikiSections!: Table<WikiSection, string>
+  wikiManifest!: Table<WikiManifest, string>
+  mcpAuditLog!: Table<McpAuditLogRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -563,6 +572,58 @@ export class CogniaDB extends Dexie {
             }
           })
       })
+
+    // v17 — External Bridge (LLM Wiki + MCP server) tables. Pure additions;
+    // no upgrade hook needed (existing rows aren't touched). Indexes match the
+    // hot paths in `lib/external-bridge/handlers/*` and `lib/wiki/*`:
+    //   • `wikiArticles`  — `&slug` is unique within table (we treat the
+    //     slug as the primary lookup key, but use a separate `id` so we can
+    //     reuse Dexie's `id` convention from twin tables); `[scope+module]`
+    //     drives `wiki_search` filter; `pageRank` is a tie-breaker but
+    //     hybrid scoring runs in memory.
+    //   • `wikiSections`  — by `articleId` for partial reload; `[articleId+sectionIndex]`
+    //     for in-order render.
+    //   • `wikiManifest`  — keyed by `scope` (one row per scope).
+    //   • `mcpAuditLog`   — by `ts` for newest-first listing; `tool` for
+    //     filter; `allowed` for "show only denied" view in Settings.
+    this.version(17).stores({
+      sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
+      messages: "id, sessionId, [sessionId+createdAt], senderId",
+      settings: "id",
+      promptPresets:
+        "id, updatedAt, isBuiltIn, isDefault, isFavorite, sortOrder, category, lastUsedAt",
+      mcpServers: "id, name, enabled",
+      characters: "id, name, updatedAt, isBuiltIn",
+      skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
+      skillResources: "id, skillId, [skillId+kind], [skillId+path], updatedAt",
+      teams: "id, name, updatedAt, isBuiltIn",
+      sessionState: "sessionId, lastReadAt",
+      trustedWorkspaces: "path, trustedAt",
+      tts_provider_keys: "id",
+      backupHistory: "id, completedAt, type, success",
+      canvasDocuments: "id, title, language, type, updatedAt, createdAt",
+      canvasVersions: "id, documentId, [documentId+createdAt], isAutoSave",
+      canvasComments: "id, documentId, [documentId+createdAt], parentId, resolvedAt",
+      canvasSessions: "id, documentId, ownerId, createdAt",
+      a2uiApps: "id, name, updatedAt, createdAt, isBuiltIn, category, isFavorite, sortOrder",
+      a2uiSurfaces: "id, appId, sessionId, updatedAt, createdAt, type",
+      a2uiTemplates: "id, name, category, updatedAt, source",
+      a2uiEventHistory: "id, surfaceId, [surfaceId+timestamp], timestamp, type",
+      twinSources: "&id, twinId, kind, format, status, fingerprint, [twinId+kind], [twinId+status]",
+      twinChunks: "&id, twinId, sourceId, vectorDocId, [twinId+sourceId], [twinId+createdAt]",
+      twinProfile: "&id, twinId",
+      twinDrafts: "&id, twinId, jobId, kind, status, [twinId+status], [twinId+kind]",
+      twinJobs: "&id, twinId, status, queuedAt, [twinId+status], [twinId+kind]",
+      plugins: "id, name, version, status, source, type, enabled, lastUsedAt, *capabilities",
+      pluginPermissions: "[pluginId+permission], pluginId, permission, decision, expiresAt",
+      pluginReviews: "[pluginId+id], pluginId, rating, createdAt",
+      pluginAnalytics: "[pluginId+key], pluginId, key, lastEventAt",
+      pluginScheduledJobs: "id, pluginId, cron, lastRunAt, nextRunAt, status",
+      wikiArticles: "&id, &slug, scope, module, pageRank, generatedAt, [scope+module]",
+      wikiSections: "&id, articleId, [articleId+sectionIndex]",
+      wikiManifest: "&scope, lastBuildAt",
+      mcpAuditLog: "&id, ts, tool, allowed, [tool+ts]",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
