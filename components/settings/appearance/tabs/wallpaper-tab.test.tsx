@@ -178,6 +178,55 @@ describe("WallpaperTab", () => {
     expect(setBackground).toHaveBeenCalledWith({ opacity: 0.4 })
   })
 
+  it("renders 5 scope cards with role=radio", async () => {
+    await act(async () => {
+      render(<WallpaperTab />)
+    })
+    const cards = screen.getAllByRole("radio")
+    expect(cards.length).toBe(5)
+  })
+
+  it("clicking a scope card calls setBackground({ scope })", async () => {
+    await act(async () => {
+      render(<WallpaperTab />)
+    })
+    fireEvent.click(screen.getByRole("radio", { name: /scope\.chat\.label/i }))
+    expect(setBackground).toHaveBeenCalledWith(expect.objectContaining({ scope: "chat" }))
+  })
+
+  it("hovering a scope card sets data-bg-preview on <html>; mouseLeave clears it", async () => {
+    await act(async () => {
+      render(<WallpaperTab />)
+    })
+    const card = screen.getByRole("radio", { name: /scope\.sidebar\.label/i })
+    fireEvent.mouseEnter(card)
+    expect(document.documentElement.getAttribute("data-bg-preview")).toBe("sidebar")
+    fireEvent.mouseLeave(card)
+    expect(document.documentElement.getAttribute("data-bg-preview")).toBeNull()
+  })
+
+  it("focus on a scope card sets data-bg-preview; blur clears it", async () => {
+    await act(async () => {
+      render(<WallpaperTab />)
+    })
+    const card = screen.getByRole("radio", { name: /scope\.canvas\.label/i })
+    fireEvent.focus(card)
+    expect(document.documentElement.getAttribute("data-bg-preview")).toBe("canvas")
+    fireEvent.blur(card)
+    expect(document.documentElement.getAttribute("data-bg-preview")).toBeNull()
+  })
+
+  it("marks the active scope card with aria-checked=true", async () => {
+    storeState.background = { ...DEFAULT_BACKGROUND_SETTINGS, scope: "global" }
+    await act(async () => {
+      render(<WallpaperTab />)
+    })
+    const active = screen.getByRole("radio", { name: /scope\.global\.label/i })
+    expect(active.getAttribute("aria-checked")).toBe("true")
+    const other = screen.getByRole("radio", { name: /scope\.chat\.label/i })
+    expect(other.getAttribute("aria-checked")).toBe("false")
+  })
+
   it("uploads a file: saveImage → addWallpaper → setActiveWallpaper", async () => {
     appearance.saveImage.mockResolvedValue({
       source: {

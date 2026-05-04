@@ -1121,6 +1121,29 @@
           "warn": "Below WCAG AA — text may be hard to read",
           "fail": "Text nearly unreadable. Lower opacity to restore contrast.",
           "autoFix": "Auto-fix"
+        },
+        "scope": {
+          "legend": "Background scope",
+          "all": {
+            "label": "Whole app",
+            "desc": "Everything including sidebar"
+          },
+          "global": {
+            "label": "Main content",
+            "desc": "Excludes sidebar"
+          },
+          "chat": {
+            "label": "Chat area",
+            "desc": "Only the chat panel"
+          },
+          "canvas": {
+            "label": "Canvas",
+            "desc": "Workbench / canvas only"
+          },
+          "sidebar": {
+            "label": "Sidebar",
+            "desc": "Navigation rail only"
+          }
         }
       },
       "customTheme": {

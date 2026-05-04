@@ -30,20 +30,76 @@ import type {
   WallpaperPosition,
   WallpaperSource,
 } from "@/types/appearance"
-import { responsiveSelectClass } from "@/lib/utils"
+import { cn, responsiveSelectClass } from "@/lib/utils"
 import { WallpaperCard } from "../components/wallpaper-card"
 import { WallpaperUploader, type UploadedWallpaper } from "../components/wallpaper-uploader"
 import { GradientBuilder } from "../components/gradient-builder"
 
-const SCOPES: BackgroundScope[] = ["all", "global", "chat", "canvas", "sidebar"]
 const POSITIONS: WallpaperPosition[] = ["cover", "contain", "tile", "center"]
 
-const SCOPE_LABEL_KEY: Record<BackgroundScope, string> = {
-  all: "scopeAll",
-  global: "scopeGlobal",
-  chat: "scopeChat",
-  canvas: "scopeCanvas",
-  sidebar: "scopeSidebar",
+interface ScopeCardSpec {
+  scope: BackgroundScope
+  labelKey: string
+  descriptionKey: string
+  highlight: { x: number; y: number; width: number; height: number }
+}
+
+// Layout: 100x60 viewBox represents the app shell.
+//   sidebar at x=0..20, y=0..60     (left rail, full height)
+//   main content at x=20..100, y=0..60
+//   chat at x=20..80, y=0..60       (main except canvas)
+//   canvas at x=80..100, y=0..60    (right side)
+const SCOPE_CARDS: ScopeCardSpec[] = [
+  {
+    scope: "all",
+    labelKey: "scope.all.label",
+    descriptionKey: "scope.all.desc",
+    highlight: { x: 0, y: 0, width: 100, height: 60 },
+  },
+  {
+    scope: "global",
+    labelKey: "scope.global.label",
+    descriptionKey: "scope.global.desc",
+    highlight: { x: 20, y: 0, width: 80, height: 60 },
+  },
+  {
+    scope: "chat",
+    labelKey: "scope.chat.label",
+    descriptionKey: "scope.chat.desc",
+    highlight: { x: 20, y: 0, width: 60, height: 60 },
+  },
+  {
+    scope: "canvas",
+    labelKey: "scope.canvas.label",
+    descriptionKey: "scope.canvas.desc",
+    highlight: { x: 80, y: 0, width: 20, height: 60 },
+  },
+  {
+    scope: "sidebar",
+    labelKey: "scope.sidebar.label",
+    descriptionKey: "scope.sidebar.desc",
+    highlight: { x: 0, y: 0, width: 20, height: 60 },
+  },
+]
+
+function ScopeMockup({ highlight }: { highlight: ScopeCardSpec["highlight"] }) {
+  return (
+    <svg
+      viewBox="0 0 100 60"
+      className="block h-12 w-full rounded border border-border"
+      aria-hidden="true"
+    >
+      <rect width="100" height="60" fill="var(--muted)" />
+      <rect
+        x={highlight.x}
+        y={highlight.y}
+        width={highlight.width}
+        height={highlight.height}
+        fill="var(--primary)"
+        opacity="0.85"
+      />
+    </svg>
+  )
 }
 
 const POSITION_LABEL_KEY: Record<WallpaperPosition, string> = {
@@ -178,26 +234,60 @@ export function WallpaperTab() {
         />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2">
-          <Label className="text-xs">{t("scopeLabel")}</Label>
-          <Select
-            value={background.scope}
-            onValueChange={(v) => void setBackground({ scope: v as BackgroundScope })}
-          >
-            <SelectTrigger className={responsiveSelectClass}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {SCOPES.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {t(SCOPE_LABEL_KEY[s])}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      <div className="space-y-2">
+        <Label className="text-xs">{t("scopeLabel")}</Label>
+        <div
+          className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5"
+          role="radiogroup"
+          aria-label={t("scope.legend")}
+        >
+          {SCOPE_CARDS.map((card) => {
+            const active = background.scope === card.scope
+            return (
+              <button
+                key={card.scope}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                aria-label={t(card.labelKey)}
+                data-active={active}
+                className={cn(
+                  "rounded border p-2 text-left transition",
+                  "data-[active=true]:border-primary data-[active=true]:bg-primary/5",
+                  "hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                )}
+                onClick={() => void setBackground({ scope: card.scope })}
+                onMouseEnter={() => {
+                  if (typeof document !== "undefined") {
+                    document.documentElement.setAttribute("data-bg-preview", card.scope)
+                  }
+                }}
+                onMouseLeave={() => {
+                  if (typeof document !== "undefined") {
+                    document.documentElement.removeAttribute("data-bg-preview")
+                  }
+                }}
+                onFocus={() => {
+                  if (typeof document !== "undefined") {
+                    document.documentElement.setAttribute("data-bg-preview", card.scope)
+                  }
+                }}
+                onBlur={() => {
+                  if (typeof document !== "undefined") {
+                    document.documentElement.removeAttribute("data-bg-preview")
+                  }
+                }}
+              >
+                <ScopeMockup highlight={card.highlight} />
+                <div className="mt-1 text-xs font-medium">{t(card.labelKey)}</div>
+                <div className="text-[10px] text-muted-foreground">{t(card.descriptionKey)}</div>
+              </button>
+            )
+          })}
         </div>
+      </div>
 
+      <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
           <Label className="text-xs">{t("positionLabel")}</Label>
           <Select

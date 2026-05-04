@@ -265,3 +265,21 @@ body[data-bg-scrim="true"]::after {
   /* Body's scrim is fixed-positioned to match the fixed body::before wallpaper. */
   position: fixed;
 }
+
+/* Hover preview from the wallpaper-tab scope picker. The user hovers a
+   scope card and we outline the matching region(s) in the live app so
+   they understand what the scope means before committing. */
+html[data-bg-preview="chat"] [data-bg-target="chat"],
+html[data-bg-preview="canvas"] [data-bg-target="canvas"],
+html[data-bg-preview="sidebar"] [data-bg-target="sidebar"] {
+  outline: 2px dashed color-mix(in oklch, var(--primary) 70%, transparent);
+  outline-offset: -2px;
+}
+html[data-bg-preview="global"] [data-bg-target] {
+  outline: 2px dashed color-mix(in oklch, var(--primary) 70%, transparent);
+  outline-offset: -2px;
+}
+html[data-bg-preview="all"] [data-bg-target] {
+  outline: 2px dashed color-mix(in oklch, var(--primary) 70%, transparent);
+  outline-offset: -2px;
+}

@@ -1100,6 +1100,29 @@
           "warn": "低于 WCAG AA 标准 — 文字可能难以阅读",
           "fail": "文字几乎无法辨认，请降低不透明度以恢复对比度。",
           "autoFix": "一键修复"
+        },
+        "scope": {
+          "legend": "背景作用范围",
+          "all": {
+            "label": "整个应用",
+            "desc": "包含侧栏在内的全部界面"
+          },
+          "global": {
+            "label": "主内容区",
+            "desc": "不含侧栏"
+          },
+          "chat": {
+            "label": "聊天区",
+            "desc": "仅聊天面板"
+          },
+          "canvas": {
+            "label": "画布",
+            "desc": "仅工作台 / 画布"
+          },
+          "sidebar": {
+            "label": "侧栏",
+            "desc": "仅导航侧栏"
+          }
         }
       },
       "customTheme": {
