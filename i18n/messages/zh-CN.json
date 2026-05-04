@@ -1139,6 +1139,23 @@
         "savedLabel": "已保存的主题",
         "noSaved": "还没有自定义主题。",
         "previewLabel": "实时预览",
+        "actions": {
+          "export": "导出",
+          "import": "导入主题 JSON"
+        },
+        "import": {
+          "success": "主题已导入。",
+          "failure": "导入失败：{message}"
+        },
+        "audit": {
+          "allPass": "对比度：全部通过",
+          "failuresCount": "{count} / {total} 组对未通过 WCAG AA",
+          "lowContrast": "对比度不足",
+          "saveWarningTitle": "对比度不足的主题",
+          "saveWarningBody": "有 {count} 组颜色对未通过 WCAG AA 对比度检查。仍然保存？",
+          "cancel": "取消",
+          "saveAnyway": "仍然保存"
+        },
         "tokens": {
           "background": "背景",
           "foreground": "前景",

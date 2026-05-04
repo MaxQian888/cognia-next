@@ -1160,6 +1160,23 @@
         "savedLabel": "Saved themes",
         "noSaved": "No custom themes yet.",
         "previewLabel": "Live preview",
+        "actions": {
+          "export": "Export",
+          "import": "Import theme JSON"
+        },
+        "import": {
+          "success": "Theme imported.",
+          "failure": "Import failed: {message}"
+        },
+        "audit": {
+          "allPass": "Contrast: all pairs pass",
+          "failuresCount": "{count} of {total} pairs fail WCAG AA",
+          "lowContrast": "Low contrast",
+          "saveWarningTitle": "Low-contrast theme",
+          "saveWarningBody": "{count, plural, one {# pair fails} other {# pairs fail}} the WCAG AA contrast check. Save anyway?",
+          "cancel": "Cancel",
+          "saveAnyway": "Save anyway"
+        },
         "tokens": {
           "background": "Background",
           "foreground": "Foreground",
