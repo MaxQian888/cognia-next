@@ -71,6 +71,12 @@ tokio-tungstenite = { version = "0.24", default-features = false, features = ["r
 uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
 
+# MCP HTTP server — axum for the inbound listener, subtle for constant-time
+# bearer-token comparison, tower-http for body-size limits.
+axum = { version = "0.8", features = ["macros"] }
+subtle = "2"
+tower-http = { version = "0.6", features = ["limit"] }
+
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-window-state = "2"
 tauri-plugin-global-shortcut = "2"
