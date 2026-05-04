@@ -26,6 +26,7 @@ export function CustomThemeApplier(): null {
 
   useEffect(() => {
     if (typeof document === "undefined") return
+    if (!resolvedTheme) return // next-themes still hydrating; effect will re-run when settled
     const root = document.documentElement
     const variant: "light" | "dark" = resolvedTheme === "light" ? "light" : "dark"
     const resolved = resolveActiveThemeColors({

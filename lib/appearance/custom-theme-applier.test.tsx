@@ -140,16 +140,40 @@ describe("CustomThemeApplier", () => {
       expect(html.style.getPropertyValue("--background")).toBe("#0b0b0b")
     })
 
+    // Spy on removeProperty BEFORE deactivation so the assertions prove cleanup
+    // actually ran (rather than relying on beforeEach's pre-emptive wipe).
+    const removeSpy = jest.spyOn(html.style, "removeProperty")
+
     // Now deactivate.
     await act(async () => {
       useSettingsStore.setState({ activeCustomThemeId: null })
     })
     await waitFor(() => {
-      expect(html.style.getPropertyValue("--background")).toBe("")
+      expect(removeSpy).toHaveBeenCalled()
     })
     for (const cssVar of CSS_VAR_KEYS) {
+      expect(removeSpy).toHaveBeenCalledWith(cssVar)
       expect(html.style.getPropertyValue(cssVar)).toBe("")
     }
+    removeSpy.mockRestore()
+    result?.unmount()
+  })
+
+  it("does not call removeProperty when no custom theme was ever active", async () => {
+    // Default state from beforeEach: no active custom theme.
+    const removeSpy = jest.spyOn(document.documentElement.style, "removeProperty")
+    let result: ReturnType<typeof render> | undefined
+    await act(async () => {
+      result = render(<CustomThemeApplier />)
+    })
+    // Toggle a non-custom-theme dependency to force the effect to re-run while
+    // still in the !isCustom && !lastApplied.current branch.
+    await act(async () => {
+      useSettingsStore.setState({ colorTheme: "ocean" })
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(removeSpy).not.toHaveBeenCalled()
+    removeSpy.mockRestore()
     result?.unmount()
   })
 })
