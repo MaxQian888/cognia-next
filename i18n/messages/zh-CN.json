@@ -1094,6 +1094,12 @@
           "angle": "角度",
           "namePlaceholder": "渐变名称",
           "save": "加入图库"
+        },
+        "opacity": {
+          "contrastLabel": "估算文字对比度",
+          "warn": "低于 WCAG AA 标准 — 文字可能难以阅读",
+          "fail": "文字几乎无法辨认，请降低不透明度以恢复对比度。",
+          "autoFix": "一键修复"
         }
       },
       "customTheme": {

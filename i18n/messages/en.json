@@ -1115,6 +1115,12 @@
           "angle": "Angle",
           "namePlaceholder": "Gradient name",
           "save": "Add to gallery"
+        },
+        "opacity": {
+          "contrastLabel": "Estimated text contrast",
+          "warn": "Below WCAG AA — text may be hard to read",
+          "fail": "Text nearly unreadable. Lower opacity to restore contrast.",
+          "autoFix": "Auto-fix"
         }
       },
       "customTheme": {

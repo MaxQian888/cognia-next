@@ -126,6 +126,58 @@ describe("WallpaperTab", () => {
     expect(screen.getByText("gradient.title")).toBeInTheDocument()
   })
 
+  it("renders an OK contrast chip for a color wallpaper at low opacity", async () => {
+    storeState.background = {
+      ...DEFAULT_BACKGROUND_SETTINGS,
+      activeId: "preset-mock",
+      opacity: 0,
+    }
+    await act(async () => {
+      render(<WallpaperTab />)
+    })
+    const chip = screen.getByTestId("wallpaper-contrast-chip")
+    expect(chip.textContent).toMatch(/^OK\s/)
+    // No auto-fix in OK band.
+    expect(screen.queryByText("opacity.autoFix")).not.toBeInTheDocument()
+    // No warn/fail descriptive text.
+    expect(screen.queryByText("opacity.warn")).not.toBeInTheDocument()
+    expect(screen.queryByText("opacity.fail")).not.toBeInTheDocument()
+  })
+
+  it("flips to FAIL on an image wallpaper at high opacity and auto-fix lowers it to 0.4", async () => {
+    appearance.withBuiltinPresets.mockImplementationOnce((arr: Wallpaper[] | undefined) => [
+      {
+        id: "img-mock",
+        name: "Image Mock",
+        kind: "image",
+        builtin: true,
+        createdAt: 0,
+        source: {
+          kind: "image",
+          storage: "data-url",
+          dataUrl: "data:image/png;base64,iVBORw0KGgo=",
+          mime: "image/png",
+          width: 1,
+          height: 1,
+        },
+      },
+      ...(arr ?? []),
+    ])
+    storeState.background = {
+      ...DEFAULT_BACKGROUND_SETTINGS,
+      activeId: "img-mock",
+      opacity: 0.95,
+    }
+    await act(async () => {
+      render(<WallpaperTab />)
+    })
+    const chip = screen.getByTestId("wallpaper-contrast-chip")
+    expect(chip.textContent).toMatch(/^FAIL\s/)
+    expect(screen.getByText("opacity.fail")).toBeInTheDocument()
+    fireEvent.click(screen.getByText("opacity.autoFix"))
+    expect(setBackground).toHaveBeenCalledWith({ opacity: 0.4 })
+  })
+
   it("uploads a file: saveImage → addWallpaper → setActiveWallpaper", async () => {
     appearance.saveImage.mockResolvedValue({
       source: {
