@@ -150,26 +150,52 @@ export function vscodeThemeToCustomTheme(
     }
   }
 
-  // Derive missing fields from background/foreground when possible. We
-  // pick simple rules so the result is stable: foregrounds get a readable
-  // text color, surfaces get a slight tint of the background.
+  // Derive missing fields from background/foreground when possible. The
+  // derivation comes BEFORE the hardcoded `DEFAULT_FALLBACKS` palette so
+  // a minimalist VSCode theme that only sets bg/fg ends up with derived
+  // colors that match its mood, not blue accents from our defaults.
   const bg = out.background ?? fallback.background
   const fg = out.foreground ?? readableForeground(bg)
   out.background ??= bg
   out.foreground ??= fg
 
+  // Surface colors: derive from bg with small tints/shades.
   if (!out.muted) out.muted = isDark ? lighten(bg, 0.06) : darken(bg, 0.04)
   if (!out.card) out.card = isDark ? lighten(bg, 0.04) : bg
+  if (!out.popover) out.popover = isDark ? lighten(bg, 0.05) : bg
+  if (!out.input) out.input = isDark ? lighten(bg, 0.07) : darken(bg, 0.05)
+  if (!out.sidebar) out.sidebar = isDark ? lighten(bg, 0.02) : darken(bg, 0.02)
+
+  // Foreground colors: derive from fg with subtle adjustments.
   if (!out.cardForeground) out.cardForeground = fg
+  if (!out.popoverForeground) out.popoverForeground = fg
+  if (!out.sidebarForeground) out.sidebarForeground = fg
   if (!out.mutedForeground) out.mutedForeground = isDark ? darken(fg, 0.25) : lighten(fg, 0.25)
+  if (!out.secondaryForeground) out.secondaryForeground = fg
+
+  // Borders: subtle bg-derived values.
   if (!out.border) out.border = isDark ? lighten(bg, 0.1) : darken(bg, 0.08)
-  if (!out.ring) out.ring = out.primary ?? fallback.ring
+  if (!out.sidebarBorder) out.sidebarBorder = out.border
+
+  // Accents/primary: derive from primary if matched. Only fall back to the
+  // hardcoded palette when neither bg/fg nor primary are usable.
+  const accentSource = out.primary ?? out.foreground
+  if (!out.accent) out.accent = accentSource
+  if (!out.accentForeground) out.accentForeground = readableForeground(out.accent)
+  if (!out.ring) out.ring = out.primary ?? accentSource ?? fallback.ring
+  if (!out.sidebarPrimary) out.sidebarPrimary = out.primary ?? fallback.primary
+  if (!out.sidebarPrimaryForeground)
+    out.sidebarPrimaryForeground = readableForeground(out.sidebarPrimary)
+  if (!out.sidebarAccent)
+    out.sidebarAccent = out.muted ?? (isDark ? lighten(bg, 0.06) : darken(bg, 0.04))
+  if (!out.sidebarAccentForeground)
+    out.sidebarAccentForeground = readableForeground(out.sidebarAccent)
+  if (!out.sidebarRing) out.sidebarRing = out.ring ?? out.primary ?? fallback.ring
+
+  // Last-resort hardcoded fallbacks for tokens that have no source at all.
   if (!out.primary) out.primary = fallback.primary
   if (!out.primaryForeground) out.primaryForeground = readableForeground(out.primary)
   if (!out.secondary) out.secondary = isDark ? lighten(bg, 0.05) : darken(bg, 0.03)
-  if (!out.secondaryForeground) out.secondaryForeground = fg
-  if (!out.accent) out.accent = out.primary
-  if (!out.accentForeground) out.accentForeground = readableForeground(out.accent)
   if (!out.destructive) out.destructive = fallback.destructive
   if (!out.destructiveForeground) out.destructiveForeground = readableForeground(out.destructive)
 

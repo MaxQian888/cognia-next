@@ -4,6 +4,7 @@ import {
   stripJsonComments,
   vscodeThemeToCustomTheme,
 } from "./parse-json"
+import { THEME_COLOR_KEYS } from "./token-mapping"
 
 describe("stripJsonComments", () => {
   it("strips line and block comments", () => {
@@ -129,8 +130,44 @@ describe("vscodeThemeToCustomTheme", () => {
     // muted should be lightened bg
     expect(out.theme.colors.muted).not.toBe("#222222")
     expect(out.theme.colors.muted).toMatch(/^#[0-9a-f]{6}$/i)
-    // ring falls back to fallback.ring (since no primary mapped)
+    // ring derives from the foreground (via accentSource) instead of the
+    // hardcoded blue fallback now that derivation runs first.
     expect(out.theme.colors.ring).toMatch(/^#[0-9a-f]{6}$/i)
+    expect(out.theme.colors.ring).not.toBe("#60a5fa")
+  })
+
+  it("does NOT use the hardcoded blue primary when theme provides bg/fg but no button.background", () => {
+    // A minimalist VSCode theme with only bg/fg defined.
+    const json = JSON.stringify({
+      type: "dark",
+      colors: {
+        "editor.background": "#1a1a2e",
+        "editor.foreground": "#eaeaea",
+      },
+    })
+    const parsed = importVscodeThemeJson(json)
+    // The hardcoded primary fallback is #60a5fa (dark) / #3b82f6 (light).
+    // With derivation-first, ring/accent now derive from foreground rather
+    // than the hardcoded blue ring/accent in DEFAULT_FALLBACKS.
+    expect(parsed.theme.colors.ring).not.toBe("#60a5fa")
+    expect(parsed.theme.colors.accent).not.toBe("#60a5fa")
+    // Sidebar derives from bg/fg, not the hardcoded dark sidebar value.
+    expect(parsed.theme.colors.sidebar).not.toBe("#0f172a")
+  })
+
+  it("populates all 27 ThemeColors keys (no holes after derivation)", () => {
+    const json = JSON.stringify({
+      type: "dark",
+      colors: {
+        "editor.background": "#0b1220",
+        "editor.foreground": "#f1f5f9",
+      },
+    })
+    const parsed = importVscodeThemeJson(json)
+    for (const key of THEME_COLOR_KEYS) {
+      expect(parsed.theme.colors[key]).toBeDefined()
+      expect(parsed.theme.colors[key].length).toBeGreaterThan(0)
+    }
   })
 
   it("flags themes with no colors object", () => {
