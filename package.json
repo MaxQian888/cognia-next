@@ -82,7 +82,7 @@
     "date-fns": "^4.1.0",
     "dexie": "^4.4.2",
     "dexie-react-hooks": "^4.4.0",
-    "dompurify": "^3.3.3",
+    "dompurify": "^3.4.2",
     "embla-carousel-react": "^8.6.0",
     "gray-matter": "^4.0.3",
     "html2canvas": "^1.4.1",
