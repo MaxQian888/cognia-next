@@ -43,4 +43,8 @@ describe("THEME_COLOR_KEYS", () => {
     const fromList = [...THEME_COLOR_KEYS].sort()
     expect(fromList).toEqual(fromMap)
   })
+
+  it("has 23 entries — the full cognia surface set", () => {
+    expect(THEME_COLOR_KEYS.length).toBe(23)
+  })
 })

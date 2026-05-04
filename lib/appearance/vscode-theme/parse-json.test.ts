@@ -90,8 +90,8 @@ describe("vscodeThemeToCustomTheme", () => {
         "button.background": "#1f6feb",
         "button.foreground": "#ffffff",
         "panel.border": "#30363d",
-        "tab.activeBackground": "#161b22",
-        "tab.activeForeground": "#e6edf3",
+        "list.activeSelectionBackground": "#1c2128",
+        "list.activeSelectionForeground": "#e6edf3",
         focusBorder: "#388bfd",
         errorForeground: "#f85149",
       },
@@ -102,7 +102,7 @@ describe("vscodeThemeToCustomTheme", () => {
     expect(out.theme.colors.primary).toBe("#1f6feb")
     expect(out.theme.colors.primaryForeground).toBe("#ffffff")
     expect(out.theme.colors.border).toBe("#30363d")
-    expect(out.theme.colors.accent).toBe("#161b22")
+    expect(out.theme.colors.accent).toBe("#1c2128")
     expect(out.theme.colors.accentForeground).toBe("#e6edf3")
     expect(out.theme.colors.ring).toBe("#388bfd")
     expect(out.theme.colors.destructive).toBe("#f85149")

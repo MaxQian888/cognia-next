@@ -50,10 +50,17 @@ const NEUTRAL_LIGHT: ThemeColors = {
   mutedForeground: "#64748b",
   card: "#ffffff",
   cardForeground: "#0f172a",
+  popover: "#ffffff",
+  popoverForeground: "#0f172a",
+  input: "#e2e8f0",
   border: "#e2e8f0",
   ring: "#3b82f6",
   destructive: "#ef4444",
   destructiveForeground: "#ffffff",
+  sidebar: "#f8fafc",
+  sidebarForeground: "#0f172a",
+  sidebarPrimary: "#3b82f6",
+  sidebarBorder: "#e2e8f0",
 }
 
 const NEUTRAL_DARK: ThemeColors = {
@@ -69,10 +76,17 @@ const NEUTRAL_DARK: ThemeColors = {
   mutedForeground: "#94a3b8",
   card: "#0f172a",
   cardForeground: "#f1f5f9",
+  popover: "#0f172a",
+  popoverForeground: "#f1f5f9",
+  input: "#1e293b",
   border: "#1e293b",
   ring: "#60a5fa",
   destructive: "#f87171",
   destructiveForeground: "#0b1220",
+  sidebar: "#0f172a",
+  sidebarForeground: "#f1f5f9",
+  sidebarPrimary: "#60a5fa",
+  sidebarBorder: "#1e293b",
 }
 
 const PRESETS: Record<ColorThemePreset, PresetPair> = {

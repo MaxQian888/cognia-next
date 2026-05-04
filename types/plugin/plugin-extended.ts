@@ -401,10 +401,17 @@ export interface ThemeColors {
   mutedForeground: string
   card: string
   cardForeground: string
+  popover: string
+  popoverForeground: string
+  input: string
   border: string
   ring: string
   destructive: string
   destructiveForeground: string
+  sidebar: string
+  sidebarForeground: string
+  sidebarPrimary: string
+  sidebarBorder: string
 }
 
 /**
