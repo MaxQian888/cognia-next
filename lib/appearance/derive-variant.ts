@@ -69,6 +69,10 @@ export function deriveTokenColor(
     return emitOklch(1 - l, c, h)
   }
 
+  // Asymmetric by design: L=0.5 maps to L_new=0.6, not 0.5. An already-mid
+  // accent in a light theme should get *brighter* in dark mode for visibility,
+  // not the same lightness. The 0.4..0.8 output range keeps accents readable
+  // against both pure-black and pure-white surfaces.
   const newL = ACCENT_LIGHTNESS_BASE + ACCENT_LIGHTNESS_RANGE * (1 - l)
   const newC = targetVariant === "dark" ? c * DARK_CHROMA_ATTENUATION : c
   return emitOklch(newL, newC, h)
@@ -76,8 +80,10 @@ export function deriveTokenColor(
 
 /**
  * Derive the opposite-variant `ThemeColors` palette from a single source set.
- * Each token is independently derived; consumers may post-process for
- * contrast enforcement (Task 13 ships `enforceReadable`).
+ * Each token is independently derived. **High-contrast seeds (ratio >= ~7)
+ * preserve AA in the derived pair; low-contrast seeds (ratio < ~5) may drop
+ * below AA after derivation** — callers that need a guaranteed-readable
+ * result should run `enforceReadable` from `./contrast` (added in Task 13).
  */
 export function deriveOppositeVariant(
   source: ThemeColors,

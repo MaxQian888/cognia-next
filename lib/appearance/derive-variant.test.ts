@@ -41,12 +41,10 @@ describe("deriveTokenColor (single token)", () => {
   it("flips lightness for neutral colors (white -> near-black)", () => {
     const dark = deriveTokenColor("#ffffff", "light", "dark")
     expect(dark.startsWith("oklch(")).toBe(true)
-    // White has L=1; flipped to L=0 produces a near-black; format: "oklch(0% ...)" or similar.
-    // Just assert the lightness is below 0.2.
-    const m = dark.match(/oklch\(([0-9.]+%?)/)
+    // culori's formatCss emits oklch(L c h) with decimal lightness (not percent)
+    const m = dark.match(/^oklch\(([0-9.]+)\s/)
     expect(m).not.toBeNull()
-    const raw = m![1]
-    const l = parseFloat(raw) / (raw.includes("%") ? 100 : 1)
+    const l = parseFloat(m![1])
     expect(l).toBeLessThan(0.2)
   })
 
@@ -62,9 +60,10 @@ describe("deriveTokenColor (single token)", () => {
 
   it("attenuates chroma in dark mode for saturated colors", () => {
     const dark = deriveTokenColor("#ff0000", "light", "dark")
-    const m = dark.match(/oklch\([0-9.%]+ ([0-9.]+)/)
+    // culori's formatCss emits oklch(L c h) with decimal numbers separated by spaces.
+    const m = dark.match(/^oklch\(([0-9.]+)\s+([0-9.]+)\s/)
     expect(m).not.toBeNull()
-    const c = parseFloat(m![1])
+    const c = parseFloat(m![2])
     // Original chroma ~0.25 for pure red; derived should be slightly less (×0.92).
     expect(c).toBeLessThan(0.25)
     expect(c).toBeGreaterThan(0.18)
@@ -90,20 +89,58 @@ describe("deriveOppositeVariant (whole palette)", () => {
     }
   })
 
-  it("derived foreground/background pair has WCAG >= 4.5:1 contrast", () => {
-    // Start with a high-contrast light palette; derive dark; verify contrast preserved.
+  it("preserves WCAG >= 4.5 contrast for high-contrast seeds (paired bg/fg)", () => {
+    // Strong starting contrast (ratio ~21) survives the lightness flip.
     const seed = buildTokens({ background: "#ffffff", foreground: "#0f172a" })
     const dark = deriveOppositeVariant(seed, "light")
     expect(wcagContrast(dark.foreground, dark.background)).toBeGreaterThanOrEqual(4.5)
   })
 
+  it("can drop below WCAG AA for low-contrast seeds — known limitation, Task 13 enforceReadable will fix", () => {
+    // Real-world muted seed; derived pair has ratio ~4.4, below 4.5.
+    const seed = buildTokens({ background: "#f8fafc", foreground: "#475569" })
+    const dark = deriveOppositeVariant(seed, "light")
+    const ratio = wcagContrast(dark.foreground, dark.background)
+    // Document the actual behavior so Task 13 can detect when this is fixed.
+    expect(ratio).toBeLessThan(4.5)
+    expect(ratio).toBeGreaterThan(3) // still readable as warn-level, just not AA
+  })
+
   it("derived from dark seed produces a light palette (background lightness > 0.5)", () => {
     const darkSeed = buildTokens({ background: "#0b1220", foreground: "#f1f5f9" })
     const light = deriveOppositeVariant(darkSeed, "dark")
-    const m = light.background.match(/oklch\(([0-9.]+%?)/)
+    const m = light.background.match(/^oklch\(([0-9.]+)\s/)
     expect(m).not.toBeNull()
-    const raw = m![1]
-    const l = parseFloat(raw) / (raw.includes("%") ? 100 : 1)
-    expect(l).toBeGreaterThan(0.5)
+    expect(parseFloat(m![1])).toBeGreaterThan(0.5)
+  })
+})
+
+describe("deriveTokenColor (edge cases)", () => {
+  it("strips alpha from rrggbbaa input and returns valid oklch", () => {
+    // Alpha is dropped because culori's parser ignores it for opaque conversion.
+    // The output should be a valid oklch() string.
+    const result = deriveTokenColor("#ff000080", "light", "dark")
+    expect(result.startsWith("oklch(")).toBe(true)
+  })
+
+  it("accepts oklch() input directly", () => {
+    const result = deriveTokenColor("oklch(0.5 0.1 250)", "light", "dark")
+    expect(result.startsWith("oklch(")).toBe(true)
+  })
+
+  it("accepts named colors (red)", () => {
+    const result = deriveTokenColor("red", "light", "dark")
+    expect(result.startsWith("oklch(")).toBe(true)
+  })
+
+  it("triple-flip is NOT idempotent due to dark-mode chroma attenuation", () => {
+    // Document the deliberate non-idempotency so future maintainers don't
+    // try to "fix" it.
+    const start = "#3b82f6"
+    const dark = deriveTokenColor(start, "light", "dark")
+    const light = deriveTokenColor(dark, "dark", "light")
+    const dark2 = deriveTokenColor(light, "light", "dark")
+    // Chroma drifts on each dark-mode pass via DARK_CHROMA_ATTENUATION.
+    expect(dark).not.toBe(dark2)
   })
 })
