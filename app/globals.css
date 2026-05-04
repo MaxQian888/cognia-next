@@ -234,3 +234,52 @@ body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target]::before {
   filter: blur(var(--app-bg-blur));
   opacity: var(--app-bg-opacity);
 }
+
+/* ----------------------------------------------------------------------
+   Text-protection scrim.
+
+   When a low-opacity image wallpaper is active, BackgroundApplier sets
+   data-bg-scrim="true" on the active scope target (or on body for
+   scope=all). This rule renders a subtle bottom-up gradient using
+   --background so text columns stay legible without obscuring the image.
+
+   Only kicks in for image-kind wallpapers below 0.5 opacity — gradient
+   and color wallpapers have honest opacity behaviour and don't need it.
+---------------------------------------------------------------------- */
+[data-bg-target][data-bg-scrim="true"]::after,
+body[data-bg-scrim="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    color-mix(in oklch, var(--background) 50%, transparent) 100%
+  );
+  /* Sit between the wallpaper layer (z-index -1) and DOM content (z-index auto)
+     so text stays on top. */
+  z-index: 0;
+}
+body[data-bg-scrim="true"]::after {
+  /* Body's scrim is fixed-positioned to match the fixed body::before wallpaper. */
+  position: fixed;
+}
+
+/* Hover preview from the wallpaper-tab scope picker. The user hovers a
+   scope card and we outline the matching region(s) in the live app so
+   they understand what the scope means before committing. */
+html[data-bg-preview="chat"] [data-bg-target="chat"],
+html[data-bg-preview="canvas"] [data-bg-target="canvas"],
+html[data-bg-preview="sidebar"] [data-bg-target="sidebar"] {
+  outline: 2px dashed color-mix(in oklch, var(--primary) 70%, transparent);
+  outline-offset: -2px;
+}
+html[data-bg-preview="global"] [data-bg-target] {
+  outline: 2px dashed color-mix(in oklch, var(--primary) 70%, transparent);
+  outline-offset: -2px;
+}
+html[data-bg-preview="all"] [data-bg-target] {
+  outline: 2px dashed color-mix(in oklch, var(--primary) 70%, transparent);
+  outline-offset: -2px;
+}

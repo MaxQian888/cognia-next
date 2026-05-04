@@ -476,6 +476,93 @@ export class CogniaDB extends Dexie {
       pluginAnalytics: "[pluginId+key], pluginId, key, lastEventAt",
       pluginScheduledJobs: "id, pluginId, cron, lastRunAt, nextRunAt, status",
     })
+
+    // v16 — Dual-variant CustomTheme migration. The settings table schema
+    // itself doesn't change between v15 and v16 — `customThemes` is a
+    // JSON-typed field inside the singleton row, not its own table. The
+    // upgrade hook walks each theme and rewrites the legacy `{colors, isDark}`
+    // pair to `{tokens: {light, dark}, baseVariant, derivedVariant}`,
+    // deriving the opposite variant via OKLCH math (Task 6 — `deriveOppositeVariant`).
+    //
+    // The legacy fields are preserved on each row for one release so a
+    // rollback to v15 doesn't lose data. They will be pruned in a future
+    // version once the dual-variant shape has been live for at least one
+    // release cycle. The hook is idempotent — already-migrated rows
+    // (those with `tokens.light` populated) are skipped.
+    this.version(16)
+      .stores({
+        // SAME as v15. The settings table schema doesn't change; only the
+        // blob shape inside the singleton row does.
+        sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
+        messages: "id, sessionId, [sessionId+createdAt], senderId",
+        settings: "id",
+        promptPresets:
+          "id, updatedAt, isBuiltIn, isDefault, isFavorite, sortOrder, category, lastUsedAt",
+        mcpServers: "id, name, enabled",
+        characters: "id, name, updatedAt, isBuiltIn",
+        skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
+        skillResources: "id, skillId, [skillId+kind], [skillId+path], updatedAt",
+        teams: "id, name, updatedAt, isBuiltIn",
+        sessionState: "sessionId, lastReadAt",
+        trustedWorkspaces: "path, trustedAt",
+        tts_provider_keys: "id",
+        backupHistory: "id, completedAt, type, success",
+        canvasDocuments: "id, title, language, type, updatedAt, createdAt",
+        canvasVersions: "id, documentId, [documentId+createdAt], isAutoSave",
+        canvasComments: "id, documentId, [documentId+createdAt], parentId, resolvedAt",
+        canvasSessions: "id, documentId, ownerId, createdAt",
+        a2uiApps: "id, name, updatedAt, createdAt, isBuiltIn, category, isFavorite, sortOrder",
+        a2uiSurfaces: "id, appId, sessionId, updatedAt, createdAt, type",
+        a2uiTemplates: "id, name, category, updatedAt, source",
+        a2uiEventHistory: "id, surfaceId, [surfaceId+timestamp], timestamp, type",
+        twinSources:
+          "&id, twinId, kind, format, status, fingerprint, [twinId+kind], [twinId+status]",
+        twinChunks: "&id, twinId, sourceId, vectorDocId, [twinId+sourceId], [twinId+createdAt]",
+        twinProfile: "&id, twinId",
+        twinDrafts: "&id, twinId, jobId, kind, status, [twinId+status], [twinId+kind]",
+        twinJobs: "&id, twinId, status, queuedAt, [twinId+status], [twinId+kind]",
+        plugins: "id, name, version, status, source, type, enabled, lastUsedAt, *capabilities",
+        pluginPermissions: "[pluginId+permission], pluginId, permission, decision, expiresAt",
+        pluginReviews: "[pluginId+id], pluginId, rating, createdAt",
+        pluginAnalytics: "[pluginId+key], pluginId, key, lastEventAt",
+        pluginScheduledJobs: "id, pluginId, cron, lastRunAt, nextRunAt, status",
+      })
+      .upgrade(async (tx) => {
+        // Lazy-import to avoid loading the OKLCH derivation code (and its
+        // ~25 KB culori dep) on the cold path of every db open. Most users
+        // never hit this branch — the import only fires during the one-time
+        // upgrade transaction.
+        const { deriveOppositeVariant } = await import("@/lib/appearance/derive-variant")
+        await tx
+          .table("settings")
+          .toCollection()
+          .modify((row: Record<string, unknown>) => {
+            const themes = (row.customThemes ?? []) as Array<Record<string, unknown>>
+            for (const t of themes) {
+              // Idempotent: skip rows that have already been migrated.
+              if (t.tokens && (t.tokens as { light?: unknown }).light) continue
+              if (!t.colors) continue
+              const baseVariant: "light" | "dark" = t.isDark ? "dark" : "light"
+              const opposite: "light" | "dark" = baseVariant === "dark" ? "light" : "dark"
+              const single = t.colors as Record<string, string>
+              t.baseVariant = baseVariant
+              t.derivedVariant = opposite
+              // The legacy `colors` blob is `Partial<ThemeColors>` — older
+              // rows may have missing keys. `deriveOppositeVariant` walks
+              // `Object.entries(source)` so it handles partial inputs without
+              // surfacing `undefined` keys; cast through `unknown` to bypass
+              // the strict `ThemeColors` shape check.
+              t.tokens = {
+                [baseVariant]: single,
+                [opposite]: deriveOppositeVariant(
+                  single as unknown as Parameters<typeof deriveOppositeVariant>[0],
+                  baseVariant
+                ),
+              }
+              // Preserve `colors` and `isDark` for one release for rollback safety.
+            }
+          })
+      })
   }
 
   sessionState!: Table<SessionStateRow, string>

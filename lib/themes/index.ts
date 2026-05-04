@@ -50,10 +50,21 @@ const NEUTRAL_LIGHT: ThemeColors = {
   mutedForeground: "#64748b",
   card: "#ffffff",
   cardForeground: "#0f172a",
+  popover: "#ffffff",
+  popoverForeground: "#0f172a",
+  input: "#e2e8f0",
   border: "#e2e8f0",
   ring: "#3b82f6",
   destructive: "#ef4444",
   destructiveForeground: "#ffffff",
+  sidebar: "#f8fafc",
+  sidebarForeground: "#0f172a",
+  sidebarPrimary: "#3b82f6",
+  sidebarBorder: "#e2e8f0",
+  sidebarPrimaryForeground: "#ffffff",
+  sidebarAccent: "#f1f5f9",
+  sidebarAccentForeground: "#0f172a",
+  sidebarRing: "#3b82f6",
 }
 
 const NEUTRAL_DARK: ThemeColors = {
@@ -69,10 +80,21 @@ const NEUTRAL_DARK: ThemeColors = {
   mutedForeground: "#94a3b8",
   card: "#0f172a",
   cardForeground: "#f1f5f9",
+  popover: "#0f172a",
+  popoverForeground: "#f1f5f9",
+  input: "#1e293b",
   border: "#1e293b",
   ring: "#60a5fa",
   destructive: "#f87171",
   destructiveForeground: "#0b1220",
+  sidebar: "#0f172a",
+  sidebarForeground: "#f1f5f9",
+  sidebarPrimary: "#60a5fa",
+  sidebarBorder: "#1e293b",
+  sidebarPrimaryForeground: "#0b1220",
+  sidebarAccent: "#1e293b",
+  sidebarAccentForeground: "#f1f5f9",
+  sidebarRing: "#60a5fa",
 }
 
 const PRESETS: Record<ColorThemePreset, PresetPair> = {
@@ -123,9 +145,16 @@ export interface ResolvedTheme {
  * Resolve the colors that should currently be showing.
  *
  * If a custom theme is active and present in `customThemes`, its
- * `colors` win (with any unspecified field falling back to the preset
+ * tokens win (with any unspecified field falling back to the preset
  * neutral palette for the right light/dark mode). Otherwise the
  * preset's pair is used directly.
+ *
+ * Phase 2 introduced a dual-variant `tokens.{light, dark}` shape on
+ * `CustomTheme`. Newly saved rows always carry it; older rows still
+ * use the legacy single `colors` + `isDark` pair. This function
+ * prefers the new shape and only consults the legacy fields when
+ * `tokens` is absent — so unmigrated rows keep working while Task 8
+ * ships the Dexie v16 migration.
  */
 export function resolveActiveThemeColors(args: ResolveActiveThemeArgs): ResolvedTheme {
   const { colorTheme, resolvedTheme, activeCustomThemeId, customThemes } = args
@@ -135,14 +164,27 @@ export function resolveActiveThemeColors(args: ResolveActiveThemeArgs): Resolved
   if (activeCustomThemeId) {
     const custom = customThemes.find((t) => t.id === activeCustomThemeId)
     if (custom) {
+      // Prefer the new dual-variant shape; fall back to legacy single
+      // `colors`. The legacy path returns undefined when the row's
+      // `isDark` doesn't match the active resolved theme — in that
+      // case we fall through to the preset baseline (no overrides).
+      const customColors =
+        custom.tokens?.[resolvedTheme] ??
+        (custom.isDark === (resolvedTheme === "dark") ? custom.colors : undefined)
+
+      // Baseline: prefer new `baseVariant`, fall back to legacy `isDark`.
+      const variantHint =
+        custom.baseVariant ??
+        (custom.isDark === true ? "dark" : custom.isDark === false ? "light" : undefined)
       const baseline =
-        custom.isDark === true
+        variantHint === "dark"
           ? presetPair.dark
-          : custom.isDark === false
+          : variantHint === "light"
             ? presetPair.light
             : presetColors
+
       return {
-        colors: { ...baseline, ...custom.colors },
+        colors: { ...baseline, ...(customColors ?? {}) },
         themeSource: "custom",
       }
     }

@@ -1058,6 +1058,13 @@
         "typography": "Typography",
         "advanced": "Advanced"
       },
+      "reset": {
+        "button": "Reset appearance",
+        "title": "Reset appearance settings?",
+        "body": "This will clear all custom themes, custom CSS, and background settings. Your uploaded wallpaper images will be preserved.",
+        "cancel": "Cancel",
+        "confirm": "Reset"
+      },
       "themeLabel": "Theme",
       "theme": {
         "light": "Light",
@@ -1115,6 +1122,35 @@
           "angle": "Angle",
           "namePlaceholder": "Gradient name",
           "save": "Add to gallery"
+        },
+        "opacity": {
+          "contrastLabel": "Estimated text contrast",
+          "warn": "Below WCAG AA — text may be hard to read",
+          "fail": "Text nearly unreadable. Lower opacity to restore contrast.",
+          "autoFix": "Auto-fix"
+        },
+        "scope": {
+          "legend": "Background scope",
+          "all": {
+            "label": "Whole app",
+            "desc": "Everything including sidebar"
+          },
+          "global": {
+            "label": "Main content",
+            "desc": "Excludes sidebar"
+          },
+          "chat": {
+            "label": "Chat area",
+            "desc": "Only the chat panel"
+          },
+          "canvas": {
+            "label": "Canvas",
+            "desc": "Workbench / canvas only"
+          },
+          "sidebar": {
+            "label": "Sidebar",
+            "desc": "Navigation rail only"
+          }
         }
       },
       "customTheme": {
@@ -1131,6 +1167,23 @@
         "savedLabel": "Saved themes",
         "noSaved": "No custom themes yet.",
         "previewLabel": "Live preview",
+        "actions": {
+          "export": "Export",
+          "import": "Import theme JSON"
+        },
+        "import": {
+          "success": "Theme imported.",
+          "failure": "Import failed: {message}"
+        },
+        "audit": {
+          "allPass": "Contrast: all pairs pass",
+          "failuresCount": "{count} of {total} pairs fail WCAG AA",
+          "lowContrast": "Low contrast",
+          "saveWarningTitle": "Low-contrast theme",
+          "saveWarningBody": "{count, plural, one {# pair fails} other {# pairs fail}} the WCAG AA contrast check. Save anyway?",
+          "cancel": "Cancel",
+          "saveAnyway": "Save anyway"
+        },
         "tokens": {
           "background": "Background",
           "foreground": "Foreground",
@@ -1164,7 +1217,14 @@
         "noThemes": "No themes found in this package.",
         "manifestTitle": "Imported from VSCode",
         "removeButton": "Remove",
-        "history": "History"
+        "history": "History",
+        "errorTitle": "Import failed",
+        "timeout": "Parsing timed out — the file may be corrupt. Try a smaller .vsix.",
+        "legend": "VSCode-inspired presets",
+        "variant": {
+          "light": "Light",
+          "dark": "Dark"
+        }
       },
       "advanced": {
         "title": "Custom CSS",

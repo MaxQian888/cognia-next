@@ -65,7 +65,7 @@ function CanvasDesktopShell() {
   const panelRight = clampedRight * scale
 
   return (
-    <div className="relative flex w-full flex-1 min-h-0 overflow-hidden">
+    <div className="relative flex w-full flex-1 min-h-0 overflow-hidden" data-bg-target="canvas">
       {leftCollapsed && (
         <Tooltip delayDuration={300}>
           <TooltipTrigger asChild>
@@ -164,7 +164,7 @@ function CanvasMobileShell() {
   const setMobileRightOpen = useCanvasLayoutStore((s) => s.setMobileRightOpen)
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col">
+    <div className="flex flex-1 min-h-0 flex-col" data-bg-target="canvas">
       <div className="flex items-center justify-between border-b bg-background/80 px-2 py-1 backdrop-blur">
         <Sheet open={mobileLeftOpen} onOpenChange={setMobileLeftOpen}>
           <SheetTrigger asChild>

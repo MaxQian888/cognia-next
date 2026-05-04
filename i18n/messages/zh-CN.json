@@ -1037,6 +1037,13 @@
         "typography": "字体",
         "advanced": "高级"
       },
+      "reset": {
+        "button": "重置外观",
+        "title": "确认重置外观设置？",
+        "body": "将清空所有自定义主题、自定义 CSS、和背景设置。已上传的壁纸图片不会被删除。",
+        "cancel": "取消",
+        "confirm": "重置"
+      },
       "themeLabel": "主题",
       "theme": {
         "light": "浅色",
@@ -1094,6 +1101,35 @@
           "angle": "角度",
           "namePlaceholder": "渐变名称",
           "save": "加入图库"
+        },
+        "opacity": {
+          "contrastLabel": "估算文字对比度",
+          "warn": "低于 WCAG AA 标准 — 文字可能难以阅读",
+          "fail": "文字几乎无法辨认，请降低不透明度以恢复对比度。",
+          "autoFix": "一键修复"
+        },
+        "scope": {
+          "legend": "背景作用范围",
+          "all": {
+            "label": "整个应用",
+            "desc": "包含侧栏在内的全部界面"
+          },
+          "global": {
+            "label": "主内容区",
+            "desc": "不含侧栏"
+          },
+          "chat": {
+            "label": "聊天区",
+            "desc": "仅聊天面板"
+          },
+          "canvas": {
+            "label": "画布",
+            "desc": "仅工作台 / 画布"
+          },
+          "sidebar": {
+            "label": "侧栏",
+            "desc": "仅导航侧栏"
+          }
         }
       },
       "customTheme": {
@@ -1110,6 +1146,23 @@
         "savedLabel": "已保存的主题",
         "noSaved": "还没有自定义主题。",
         "previewLabel": "实时预览",
+        "actions": {
+          "export": "导出",
+          "import": "导入主题 JSON"
+        },
+        "import": {
+          "success": "主题已导入。",
+          "failure": "导入失败：{message}"
+        },
+        "audit": {
+          "allPass": "对比度：全部通过",
+          "failuresCount": "{count} / {total} 组对未通过 WCAG AA",
+          "lowContrast": "对比度不足",
+          "saveWarningTitle": "对比度不足的主题",
+          "saveWarningBody": "有 {count} 组颜色对未通过 WCAG AA 对比度检查。仍然保存？",
+          "cancel": "取消",
+          "saveAnyway": "仍然保存"
+        },
         "tokens": {
           "background": "背景",
           "foreground": "前景",
@@ -1143,7 +1196,14 @@
         "noThemes": "包内没有主题。",
         "manifestTitle": "已从 VSCode 导入",
         "removeButton": "移除",
-        "history": "历史"
+        "history": "历史",
+        "errorTitle": "导入失败",
+        "timeout": "解析超时，可能是文件损坏。请尝试更小的 .vsix 文件。",
+        "legend": "VSCode 风格预设",
+        "variant": {
+          "light": "浅色",
+          "dark": "深色"
+        }
       },
       "advanced": {
         "title": "自定义 CSS",

@@ -62,6 +62,7 @@ export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
     <aside
       className="hidden h-full w-16 shrink-0 flex-col items-center border-r bg-muted/40 py-2 md:flex"
       aria-label={t("label")}
+      data-bg-target="sidebar"
     >
       <RailButton
         active={isDmActive}

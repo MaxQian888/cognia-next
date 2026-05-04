@@ -9,6 +9,8 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -21,26 +23,83 @@ import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { useSettingsStore } from "@/stores/settings"
 import { withBuiltinPresets, saveImage, deleteImage, makeWallpaper } from "@/lib/appearance"
+import { wcagContrast } from "@/lib/appearance/contrast"
 import type {
   BackgroundScope,
   Wallpaper,
   WallpaperPosition,
   WallpaperSource,
 } from "@/types/appearance"
-import { responsiveSelectClass } from "@/lib/utils"
+import { cn, responsiveSelectClass } from "@/lib/utils"
 import { WallpaperCard } from "../components/wallpaper-card"
 import { WallpaperUploader, type UploadedWallpaper } from "../components/wallpaper-uploader"
 import { GradientBuilder } from "../components/gradient-builder"
 
-const SCOPES: BackgroundScope[] = ["all", "global", "chat", "canvas", "sidebar"]
 const POSITIONS: WallpaperPosition[] = ["cover", "contain", "tile", "center"]
 
-const SCOPE_LABEL_KEY: Record<BackgroundScope, string> = {
-  all: "scopeAll",
-  global: "scopeGlobal",
-  chat: "scopeChat",
-  canvas: "scopeCanvas",
-  sidebar: "scopeSidebar",
+interface ScopeCardSpec {
+  scope: BackgroundScope
+  labelKey: string
+  descriptionKey: string
+  highlight: { x: number; y: number; width: number; height: number }
+}
+
+// Layout: 100x60 viewBox represents the app shell.
+//   sidebar at x=0..20, y=0..60     (left rail, full height)
+//   main content at x=20..100, y=0..60
+//   chat at x=20..80, y=0..60       (main except canvas)
+//   canvas at x=80..100, y=0..60    (right side)
+const SCOPE_CARDS: ScopeCardSpec[] = [
+  {
+    scope: "all",
+    labelKey: "scope.all.label",
+    descriptionKey: "scope.all.desc",
+    highlight: { x: 0, y: 0, width: 100, height: 60 },
+  },
+  {
+    scope: "global",
+    labelKey: "scope.global.label",
+    descriptionKey: "scope.global.desc",
+    highlight: { x: 20, y: 0, width: 80, height: 60 },
+  },
+  {
+    scope: "chat",
+    labelKey: "scope.chat.label",
+    descriptionKey: "scope.chat.desc",
+    highlight: { x: 20, y: 0, width: 60, height: 60 },
+  },
+  {
+    scope: "canvas",
+    labelKey: "scope.canvas.label",
+    descriptionKey: "scope.canvas.desc",
+    highlight: { x: 80, y: 0, width: 20, height: 60 },
+  },
+  {
+    scope: "sidebar",
+    labelKey: "scope.sidebar.label",
+    descriptionKey: "scope.sidebar.desc",
+    highlight: { x: 0, y: 0, width: 20, height: 60 },
+  },
+]
+
+function ScopeMockup({ highlight }: { highlight: ScopeCardSpec["highlight"] }) {
+  return (
+    <svg
+      viewBox="0 0 100 60"
+      className="block h-12 w-full rounded border border-border"
+      aria-hidden="true"
+    >
+      <rect width="100" height="60" fill="var(--muted)" />
+      <rect
+        x={highlight.x}
+        y={highlight.y}
+        width={highlight.width}
+        height={highlight.height}
+        fill="var(--primary)"
+        opacity="0.85"
+      />
+    </svg>
+  )
 }
 
 const POSITION_LABEL_KEY: Record<WallpaperPosition, string> = {
@@ -52,6 +111,55 @@ const POSITION_LABEL_KEY: Record<WallpaperPosition, string> = {
 
 function nanoId(): string {
   return `wp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+/**
+ * Model the contrast loss caused by the wallpaper layer. Image-kind wallpapers
+ * are treated as worst-case noise (asymptote toward 1.5:1 at full opacity)
+ * because we don't sample dominant colours at runtime; gradient/colour
+ * wallpapers get a gentler half-strength penalty since their tone is at least
+ * mostly uniform.
+ */
+export function effectiveContrast(staticRatio: number, opacity: number, isImage: boolean): number {
+  const clamped = Math.max(0, Math.min(1, opacity))
+  if (isImage) {
+    const worst = 1.5
+    return staticRatio * (1 - clamped) + worst * clamped
+  }
+  return staticRatio * (1 - clamped * 0.5)
+}
+
+function bandRatio(ratio: number): "ok" | "warn" | "fail" {
+  if (ratio >= 4.5) return "ok"
+  if (ratio >= 3) return "warn"
+  return "fail"
+}
+
+/**
+ * Compute the live readability verdict for the wallpaper opacity guard. Reads
+ * `--foreground` and `--background` from `<html>` directly because the
+ * effective text colour depends on the active theme, which lives in CSS-only
+ * state. Returns null on SSR.
+ */
+export function computeOpacityVerdict(
+  activeKind: "image" | "gradient" | "color" | null,
+  opacity: number
+): { level: "ok" | "warn" | "fail"; ratio: number } | null {
+  if (typeof window === "undefined") return null
+  const cs = getComputedStyle(document.documentElement)
+  const fg = cs.getPropertyValue("--foreground").trim() || "#000000"
+  const bg = cs.getPropertyValue("--background").trim() || "#ffffff"
+  let baseRatio: number
+  try {
+    baseRatio = wcagContrast(fg, bg)
+  } catch {
+    // culori may not parse a CSS variable that resolves to e.g. "oklch(...)"
+    // in some test environments; fall back to a high static ratio so we
+    // don't flash a fail chip when the theme itself is fine.
+    baseRatio = 21
+  }
+  const ratio = effectiveContrast(baseRatio, opacity, activeKind === "image")
+  return { level: bandRatio(ratio), ratio }
 }
 
 export function WallpaperTab() {
@@ -66,6 +174,8 @@ export function WallpaperTab() {
   const [busyError, setBusyError] = useState<string | null>(null)
 
   const gallery = withBuiltinPresets(userWallpapers)
+  const activeWallpaper = gallery.find((w) => w.id === background.activeId) ?? null
+  const verdict = computeOpacityVerdict(activeWallpaper?.kind ?? null, background.opacity)
 
   const handleUpload = async (file: UploadedWallpaper) => {
     try {
@@ -124,26 +234,60 @@ export function WallpaperTab() {
         />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2">
-          <Label className="text-xs">{t("scopeLabel")}</Label>
-          <Select
-            value={background.scope}
-            onValueChange={(v) => void setBackground({ scope: v as BackgroundScope })}
-          >
-            <SelectTrigger className={responsiveSelectClass}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {SCOPES.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {t(SCOPE_LABEL_KEY[s])}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      <div className="space-y-2">
+        <Label className="text-xs">{t("scopeLabel")}</Label>
+        <div
+          className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5"
+          role="radiogroup"
+          aria-label={t("scope.legend")}
+        >
+          {SCOPE_CARDS.map((card) => {
+            const active = background.scope === card.scope
+            return (
+              <button
+                key={card.scope}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                aria-label={t(card.labelKey)}
+                data-active={active}
+                className={cn(
+                  "rounded border p-2 text-left transition",
+                  "data-[active=true]:border-primary data-[active=true]:bg-primary/5",
+                  "hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                )}
+                onClick={() => void setBackground({ scope: card.scope })}
+                onMouseEnter={() => {
+                  if (typeof document !== "undefined") {
+                    document.documentElement.setAttribute("data-bg-preview", card.scope)
+                  }
+                }}
+                onMouseLeave={() => {
+                  if (typeof document !== "undefined") {
+                    document.documentElement.removeAttribute("data-bg-preview")
+                  }
+                }}
+                onFocus={() => {
+                  if (typeof document !== "undefined") {
+                    document.documentElement.setAttribute("data-bg-preview", card.scope)
+                  }
+                }}
+                onBlur={() => {
+                  if (typeof document !== "undefined") {
+                    document.documentElement.removeAttribute("data-bg-preview")
+                  }
+                }}
+              >
+                <ScopeMockup highlight={card.highlight} />
+                <div className="mt-1 text-xs font-medium">{t(card.labelKey)}</div>
+                <div className="text-[10px] text-muted-foreground">{t(card.descriptionKey)}</div>
+              </button>
+            )
+          })}
         </div>
+      </div>
 
+      <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
           <Label className="text-xs">{t("positionLabel")}</Label>
           <Select
@@ -189,6 +333,39 @@ export function WallpaperTab() {
             onValueChange={(v) => void setBackground({ opacity: (v[0] ?? 0) / 100 })}
             aria-label={t("opacityLabel")}
           />
+          {verdict && (
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <Badge
+                variant={
+                  verdict.level === "ok"
+                    ? "default"
+                    : verdict.level === "warn"
+                      ? "outline"
+                      : "destructive"
+                }
+                aria-label={t("opacity.contrastLabel")}
+                data-testid="wallpaper-contrast-chip"
+              >
+                {verdict.level.toUpperCase()} {verdict.ratio.toFixed(1)}:1
+              </Badge>
+              {verdict.level !== "ok" && (
+                <span className="text-xs text-muted-foreground">
+                  {verdict.level === "warn" ? t("opacity.warn") : t("opacity.fail")}
+                </span>
+              )}
+              {verdict.level === "fail" && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    void setBackground({ opacity: 0.4 })
+                  }}
+                >
+                  {t("opacity.autoFix")}
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

@@ -37,15 +37,15 @@ export const VSCODE_COLOR_MAP: Record<keyof ThemeColors, readonly string[]> = {
   secondaryForeground: ["panel.border", "tab.inactiveForeground", "foreground"],
 
   accent: [
-    "tab.activeBackground",
     "list.activeSelectionBackground",
     "list.focusBackground",
+    "editor.selectionBackground",
     "editorLink.activeForeground",
   ],
   accentForeground: [
-    "tab.activeForeground",
     "list.activeSelectionForeground",
     "list.focusForeground",
+    "tab.activeForeground",
   ],
 
   muted: ["editor.lineHighlightBackground", "input.background", "editorWidget.background"],
@@ -55,8 +55,17 @@ export const VSCODE_COLOR_MAP: Record<keyof ThemeColors, readonly string[]> = {
     "tab.inactiveForeground",
   ],
 
-  card: ["editorWidget.background", "panel.background", "sideBar.background", "editor.background"],
-  cardForeground: ["editorWidget.foreground", "sideBar.foreground", "foreground"],
+  // `editorGroup.dropBackground` is omitted on purpose — it's a transient
+  // drag-overlay color that themes typically define with embedded alpha,
+  // which produces saturated tints once the alpha is stripped. Stick to
+  // surfaces that themes intend to be opaque.
+  card: ["panel.background", "editor.background"],
+  cardForeground: ["editorWidget.foreground", "foreground"],
+
+  popover: ["editorWidget.background", "dropdown.background", "quickInput.background"],
+  popoverForeground: ["editorWidget.foreground", "dropdown.foreground", "foreground"],
+
+  input: ["input.background", "editorWidget.background"],
 
   border: [
     "panel.border",
@@ -69,6 +78,19 @@ export const VSCODE_COLOR_MAP: Record<keyof ThemeColors, readonly string[]> = {
 
   destructive: ["errorForeground", "editorError.foreground", "inputValidation.errorBorder"],
   destructiveForeground: ["editor.background"],
+
+  sidebar: ["sideBar.background", "activityBar.background"],
+  sidebarForeground: ["sideBar.foreground", "activityBar.foreground"],
+  sidebarPrimary: ["activityBarBadge.background", "list.activeSelectionBackground"],
+  sidebarBorder: ["sideBar.border", "activityBar.border"],
+  sidebarPrimaryForeground: ["activityBarBadge.foreground", "list.activeSelectionForeground"],
+  sidebarAccent: ["list.hoverBackground", "list.inactiveSelectionBackground"],
+  sidebarAccentForeground: [
+    "list.hoverForeground",
+    "list.inactiveSelectionForeground",
+    "foreground",
+  ],
+  sidebarRing: ["focusBorder", "list.focusOutline"],
 }
 
 /** All ThemeColors keys, ordered exactly as we want them in the UI editor. */
@@ -85,10 +107,21 @@ export const THEME_COLOR_KEYS: readonly (keyof ThemeColors)[] = [
   "mutedForeground",
   "card",
   "cardForeground",
+  "popover",
+  "popoverForeground",
+  "input",
   "border",
   "ring",
   "destructive",
   "destructiveForeground",
+  "sidebar",
+  "sidebarForeground",
+  "sidebarPrimary",
+  "sidebarBorder",
+  "sidebarPrimaryForeground",
+  "sidebarAccent",
+  "sidebarAccentForeground",
+  "sidebarRing",
 ] as const
 
 /**
@@ -113,10 +146,21 @@ export const DEFAULT_FALLBACKS: { light: ThemeColors; dark: ThemeColors } = {
     mutedForeground: "#64748b",
     card: "#ffffff",
     cardForeground: "#0f172a",
+    popover: "#ffffff",
+    popoverForeground: "#0f172a",
+    input: "#e2e8f0",
     border: "#e2e8f0",
     ring: "#3b82f6",
     destructive: "#ef4444",
     destructiveForeground: "#ffffff",
+    sidebar: "#f8fafc",
+    sidebarForeground: "#0f172a",
+    sidebarPrimary: "#3b82f6",
+    sidebarBorder: "#e2e8f0",
+    sidebarPrimaryForeground: "#ffffff",
+    sidebarAccent: "#f1f5f9",
+    sidebarAccentForeground: "#0f172a",
+    sidebarRing: "#3b82f6",
   },
   dark: {
     primary: "#60a5fa",
@@ -131,9 +175,20 @@ export const DEFAULT_FALLBACKS: { light: ThemeColors; dark: ThemeColors } = {
     mutedForeground: "#94a3b8",
     card: "#0f172a",
     cardForeground: "#f1f5f9",
+    popover: "#0f172a",
+    popoverForeground: "#f1f5f9",
+    input: "#1e293b",
     border: "#1e293b",
     ring: "#60a5fa",
     destructive: "#f87171",
     destructiveForeground: "#0b1220",
+    sidebar: "#0f172a",
+    sidebarForeground: "#f1f5f9",
+    sidebarPrimary: "#60a5fa",
+    sidebarBorder: "#1e293b",
+    sidebarPrimaryForeground: "#0b1220",
+    sidebarAccent: "#1e293b",
+    sidebarAccentForeground: "#f1f5f9",
+    sidebarRing: "#60a5fa",
   },
 }

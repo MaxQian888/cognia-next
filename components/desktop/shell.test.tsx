@@ -289,3 +289,9 @@ test("mounts the resize edges and removes them on unmount", () => {
   expect(container.querySelector("[data-testid='resize-edges']")).not.toBeNull()
   unmount()
 })
+
+test("marks the chat <main> region as a scope-target for chat backgrounds", () => {
+  const { container } = render(<DiscordShell />)
+  const main = container.querySelector("main[data-bg-target='chat']")
+  expect(main).not.toBeNull()
+})
