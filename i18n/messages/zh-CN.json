@@ -1037,6 +1037,13 @@
         "typography": "字体",
         "advanced": "高级"
       },
+      "reset": {
+        "button": "重置外观",
+        "title": "确认重置外观设置？",
+        "body": "将清空所有自定义主题、自定义 CSS、和背景设置。已上传的壁纸图片不会被删除。",
+        "cancel": "取消",
+        "confirm": "重置"
+      },
       "themeLabel": "主题",
       "theme": {
         "light": "浅色",

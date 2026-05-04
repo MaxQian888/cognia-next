@@ -1058,6 +1058,13 @@
         "typography": "Typography",
         "advanced": "Advanced"
       },
+      "reset": {
+        "button": "Reset appearance",
+        "title": "Reset appearance settings?",
+        "body": "This will clear all custom themes, custom CSS, and background settings. Your uploaded wallpaper images will be preserved.",
+        "cancel": "Cancel",
+        "confirm": "Reset"
+      },
       "themeLabel": "Theme",
       "theme": {
         "light": "Light",

@@ -4,11 +4,25 @@
 // `data-section.tsx` pattern (URL-driven active tab, scrollable tabs
 // strip on narrow screens).
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { useRouter, useSearchParams } from "next/navigation"
 import { PaletteIcon } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useSettingsStore } from "@/stores/settings/settings-store"
+import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 import { ThemeTab } from "./tabs/theme-tab"
 import { TypographyTab } from "./tabs/typography-tab"
 import { WallpaperTab } from "./tabs/wallpaper-tab"
@@ -46,11 +60,29 @@ export function AppearanceSection() {
   const requested = searchParams.get(APPEARANCE_TAB_PARAM)
   const activeTab: AppearanceTabId = isAppearanceTab(requested) ? requested : "theme"
 
+  const save = useSettingsStore((s) => s.save)
+  const [showReset, setShowReset] = useState(false)
+
   const onTabChange = (value: string) => {
     if (!isAppearanceTab(value)) return
     const next = new URLSearchParams(searchParams.toString())
     next.set(APPEARANCE_TAB_PARAM, value)
     router.replace(`?${next.toString()}`, { scroll: false })
+  }
+
+  // Wallpapers (user-uploaded image library) is intentionally preserved.
+  // It contains binary content the user added; resetting "appearance settings"
+  // shouldn't destroy that. Users can delete individual wallpapers from the
+  // wallpaper tab if they want to.
+  async function handleReset() {
+    await save({
+      customThemes: [],
+      activeCustomThemeId: null,
+      customCss: "",
+      customCssEnabled: false,
+      background: { ...DEFAULT_BACKGROUND_SETTINGS },
+    })
+    setShowReset(false)
   }
 
   return (
@@ -64,15 +96,20 @@ export function AppearanceSection() {
       </div>
 
       <Tabs value={activeTab} onValueChange={onTabChange}>
-        <div className="-mx-1 overflow-x-auto px-1">
-          <TabsList className="w-max">
-            <TabsTrigger value="theme">{t("tabs.theme")}</TabsTrigger>
-            <TabsTrigger value="wallpaper">{t("tabs.wallpaper")}</TabsTrigger>
-            <TabsTrigger value="custom">{t("tabs.custom")}</TabsTrigger>
-            <TabsTrigger value="import">{t("tabs.import")}</TabsTrigger>
-            <TabsTrigger value="typography">{t("tabs.typography")}</TabsTrigger>
-            <TabsTrigger value="advanced">{t("tabs.advanced")}</TabsTrigger>
-          </TabsList>
+        <div className="flex items-center justify-between gap-2">
+          <div className="-mx-1 flex-1 overflow-x-auto px-1">
+            <TabsList className="w-max">
+              <TabsTrigger value="theme">{t("tabs.theme")}</TabsTrigger>
+              <TabsTrigger value="wallpaper">{t("tabs.wallpaper")}</TabsTrigger>
+              <TabsTrigger value="custom">{t("tabs.custom")}</TabsTrigger>
+              <TabsTrigger value="import">{t("tabs.import")}</TabsTrigger>
+              <TabsTrigger value="typography">{t("tabs.typography")}</TabsTrigger>
+              <TabsTrigger value="advanced">{t("tabs.advanced")}</TabsTrigger>
+            </TabsList>
+          </div>
+          <Button type="button" variant="outline" size="sm" onClick={() => setShowReset(true)}>
+            {t("reset.button")}
+          </Button>
         </div>
         <TabsContent value="theme" className="mt-4">
           <ThemeTab />
@@ -93,6 +130,19 @@ export function AppearanceSection() {
           <AdvancedTab />
         </TabsContent>
       </Tabs>
+
+      <AlertDialog open={showReset} onOpenChange={setShowReset}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("reset.title")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("reset.body")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("reset.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleReset}>{t("reset.confirm")}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
