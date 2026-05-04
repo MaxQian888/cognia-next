@@ -125,7 +125,7 @@
     "vaul": "^1.1.2",
     "weaviate-client": "^3.13.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
-    "yaml": "^2.8.3",
+    "yaml": "^2.8.4",
     "zod": "^4.3.6",
     "zustand": "^5.0.12"
   },
