@@ -11,8 +11,9 @@ import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { useSettingsStore } from "@/stores/settings"
 import type { AppTheme } from "@/lib/claude/types"
-import type { ColorThemePreset } from "@/types/plugin/plugin-extended"
+import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin-extended"
 import { COLOR_PRESETS } from "@/lib/themes"
+import { BUILT_IN_VSCODE_THEMES } from "@/lib/appearance/built-in-vscode-themes"
 import { cn } from "@/lib/utils"
 
 const PRESET_SWATCHES: Record<ColorThemePreset, { light: string; dark: string }> = {
@@ -31,6 +32,7 @@ export function ThemeTab() {
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const setActiveCustom = useSettingsStore((s) => s.setActiveCustomTheme)
+  const createCustomTheme = useSettingsStore((s) => s.createCustomTheme)
   const { setTheme } = useTheme()
   const theme: AppTheme = settings?.theme ?? "system"
   const colorTheme: ColorThemePreset = settings?.colorTheme ?? "default"
@@ -95,6 +97,55 @@ export function ThemeTab() {
           </p>
         )}
       </div>
+
+      <section className="space-y-2">
+        <h3 className="text-sm font-medium">{t("vscode.legend")}</h3>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {BUILT_IN_VSCODE_THEMES.map((preset) => {
+            const swatchVariant = preset.baseVariant ?? "dark"
+            const swatchSet = preset.tokens?.[swatchVariant]
+            return (
+              <button
+                key={preset.name}
+                type="button"
+                className={cn(
+                  "rounded border p-2 text-left transition",
+                  "hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                )}
+                onClick={() => {
+                  // `createCustomTheme` accepts `Omit<CustomTheme, "id">`, which
+                  // is exactly the shape of a built-in preset. The cast keeps
+                  // TS happy with the readonly array element.
+                  const id = createCustomTheme(preset as Omit<CustomTheme, "id">)
+                  setActiveCustom(id)
+                }}
+              >
+                <div className="flex gap-1">
+                  <span
+                    className="h-4 w-4 rounded"
+                    style={{ background: swatchSet?.background }}
+                    aria-hidden
+                  />
+                  <span
+                    className="h-4 w-4 rounded"
+                    style={{ background: swatchSet?.primary }}
+                    aria-hidden
+                  />
+                  <span
+                    className="h-4 w-4 rounded"
+                    style={{ background: swatchSet?.accent }}
+                    aria-hidden
+                  />
+                </div>
+                <div className="mt-1 text-xs font-medium">{preset.name}</div>
+                <div className="text-[10px] text-muted-foreground">
+                  {t(`vscode.variant.${swatchVariant}`)}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      </section>
     </div>
   )
 }

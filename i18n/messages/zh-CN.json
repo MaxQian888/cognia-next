@@ -1191,7 +1191,12 @@
         "removeButton": "移除",
         "history": "历史",
         "errorTitle": "导入失败",
-        "timeout": "解析超时，可能是文件损坏。请尝试更小的 .vsix 文件。"
+        "timeout": "解析超时，可能是文件损坏。请尝试更小的 .vsix 文件。",
+        "legend": "VSCode 风格预设",
+        "variant": {
+          "light": "浅色",
+          "dark": "深色"
+        }
       },
       "advanced": {
         "title": "自定义 CSS",

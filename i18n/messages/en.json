@@ -1212,7 +1212,12 @@
         "removeButton": "Remove",
         "history": "History",
         "errorTitle": "Import failed",
-        "timeout": "Parsing timed out — the file may be corrupt. Try a smaller .vsix."
+        "timeout": "Parsing timed out — the file may be corrupt. Try a smaller .vsix.",
+        "legend": "VSCode-inspired presets",
+        "variant": {
+          "light": "Light",
+          "dark": "Dark"
+        }
       },
       "advanced": {
         "title": "Custom CSS",

@@ -12,6 +12,7 @@ jest.mock("next-intl", () => ({
 
 const save = jest.fn()
 const setActiveCustom = jest.fn()
+const createCustomTheme = jest.fn(() => "ct_new")
 const storeState: { settings: Partial<AppSettings> } = { settings: {} }
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: jest.fn((selector: (s: unknown) => unknown) =>
@@ -19,6 +20,7 @@ jest.mock("@/stores/settings", () => ({
       settings: storeState.settings,
       save,
       setActiveCustomTheme: setActiveCustom,
+      createCustomTheme,
     })
   ),
 }))
@@ -29,6 +31,8 @@ beforeEach(() => {
   setTheme.mockClear()
   save.mockClear()
   setActiveCustom.mockClear()
+  createCustomTheme.mockClear()
+  createCustomTheme.mockReturnValue("ct_new")
   storeState.settings = { theme: "system", colorTheme: "default", activeCustomThemeId: null }
 })
 
@@ -76,5 +80,24 @@ describe("ThemeTab", () => {
     })
     expect(setActiveCustom).toHaveBeenCalledWith(null)
     expect(save).toHaveBeenCalledWith({ colorTheme: "forest" })
+  })
+
+  it("renders a section with all 4 built-in VSCode-style presets", () => {
+    render(<ThemeTab />)
+    expect(screen.getByText("Dracula")).toBeInTheDocument()
+    expect(screen.getByText("One Dark Pro")).toBeInTheDocument()
+    expect(screen.getByText("Tokyo Night Dark")).toBeInTheDocument()
+    expect(screen.getByText("GitHub Light Default")).toBeInTheDocument()
+  })
+
+  it("clicking a built-in preset creates and activates a custom theme", () => {
+    render(<ThemeTab />)
+    act(() => {
+      fireEvent.click(screen.getByText("Dracula"))
+    })
+    expect(createCustomTheme).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Dracula", baseVariant: "dark" })
+    )
+    expect(setActiveCustom).toHaveBeenCalledWith("ct_new")
   })
 })
