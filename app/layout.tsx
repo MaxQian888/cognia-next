@@ -17,6 +17,7 @@ import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler
 import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provider"
 import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provider"
 import { BackgroundApplier } from "@/lib/appearance"
+import { CustomThemeApplier } from "@/lib/appearance/custom-theme-applier"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import { dexieAdapter } from "@/lib/data-hooks/dexie-adapter"
 import "./globals.css"
@@ -66,6 +67,7 @@ export default function RootLayout({
                             {/* Keeps body[data-bg-*] + the cognia user-css */}
                             {/* style tag in sync with the appearance store. */}
                             <BackgroundApplier />
+                            <CustomThemeApplier />
                             {children}
                           </DataAdapterProvider>
                         </A2UIDispatchProvider>
