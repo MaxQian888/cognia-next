@@ -342,6 +342,9 @@ importers:
       '@types/cheerio':
         specifier: ^1.0.0
         version: 1.0.0
+      '@types/culori':
+        specifier: ^4.0.1
+        version: 4.0.1
       '@types/d3':
         specifier: ^7.4.3
         version: 7.4.3
@@ -3614,6 +3617,9 @@ packages:
   '@types/cheerio@1.0.0':
     resolution: {integrity: sha512-zAaImHWoh5RY2CLgU2mvg3bl2k3F65B0N5yphuII3ythFLPmJhL7sj1RDu6gSxcgqHlETbr/lhA2OBY+WF1fXQ==}
     deprecated: This is a stub types definition. cheerio provides its own type definitions, so you do not need this installed.
+
+  '@types/culori@4.0.1':
+    resolution: {integrity: sha512-43M51r/22CjhbOXyGT361GZ9vncSVQ39u62x5eJdBQFviI8zWp2X5jzqg7k4M6PVgDQAClpy2bUe2dtwEgEDVQ==}
 
   '@types/d3-array@3.2.2':
     resolution: {integrity: sha512-hOLWVbm7uRza0BYXpIIW5pxfrKe0W+D5lrFiAEYR+pb6w3N2SwSMaJbXdUfSEv+dT4MfHBLtn5js0LAWaO6otw==}
@@ -12524,6 +12530,8 @@ snapshots:
   '@types/cheerio@1.0.0':
     dependencies:
       cheerio: 1.2.0
+
+  '@types/culori@4.0.1': {}
 
   '@types/d3-array@3.2.2': {}
 
