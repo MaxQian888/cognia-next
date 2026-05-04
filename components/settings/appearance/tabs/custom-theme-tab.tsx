@@ -62,11 +62,15 @@ export function CustomThemeTab() {
     if (draft.id) {
       const found = themes.find((th) => th.id === draft.id)
       if (found) {
+        // Phase 2: prefer the new dual-variant `tokens` shape; fall back
+        // to legacy single `colors` for unmigrated rows.
+        const variant = found.baseVariant ?? (found.isDark ? "dark" : "light")
+        const sourceColors = found.tokens?.[variant] ?? found.colors ?? {}
         setDraft({
           id: found.id,
           name: found.name,
-          colors: { ...found.colors },
-          isDark: found.isDark,
+          colors: { ...sourceColors },
+          isDark: variant === "dark",
         })
       }
     }
@@ -76,7 +80,16 @@ export function CustomThemeTab() {
   const isExisting = Boolean(draft.id)
 
   const handleSelect = (theme: CustomTheme) => {
-    setDraft({ id: theme.id, name: theme.name, colors: { ...theme.colors }, isDark: theme.isDark })
+    // Phase 2: prefer the new dual-variant `tokens` shape; legacy rows
+    // still ship a single `colors` set keyed by `isDark`.
+    const variant = theme.baseVariant ?? (theme.isDark ? "dark" : "light")
+    const sourceColors = theme.tokens?.[variant] ?? theme.colors ?? {}
+    setDraft({
+      id: theme.id,
+      name: theme.name,
+      colors: { ...sourceColors },
+      isDark: variant === "dark",
+    })
   }
 
   const handleSave = () => {
@@ -199,7 +212,14 @@ export function CustomThemeTab() {
                 >
                   <span
                     className="inline-block size-3 rounded-full border"
-                    style={{ background: th.colors.primary ?? "#888" }}
+                    style={{
+                      // Phase 2: read from the new `tokens` shape first;
+                      // fall back to legacy `colors`.
+                      background:
+                        (th.baseVariant ?? (th.isDark ? "dark" : "light")) === "dark"
+                          ? (th.tokens?.dark.primary ?? th.colors?.primary ?? "#888")
+                          : (th.tokens?.light.primary ?? th.colors?.primary ?? "#888"),
+                    }}
                   />
                   {th.name}
                 </button>

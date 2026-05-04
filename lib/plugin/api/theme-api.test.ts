@@ -434,7 +434,10 @@ describe("Theme API", () => {
       const handler = jest.fn()
       const unsubscribe = api.onThemeChange(handler)
 
-      mockCustomThemes[0].colors.primary = "#123456"
+      // `colors` is optional on CustomTheme post-Phase-2 — the row was
+      // pushed with a populated `colors` so the non-null assertion is
+      // safe here.
+      mockCustomThemes[0].colors!.primary = "#123456"
       mockSubscribers.forEach((callback) =>
         callback({
           theme: mockTheme,

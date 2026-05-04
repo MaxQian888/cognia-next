@@ -107,18 +107,23 @@ export function createThemeAPI(pluginId: string): PluginThemeAPI {
 
     registerCustomTheme: (theme: Omit<CustomTheme, "id">): string => {
       const store = useSettingsStore.getState()
-      // Ensure required color fields are present
+      // Ensure required color fields are present.
+      // Phase 2: `colors` is optional on CustomTheme — coerce to {} when
+      // a plugin omits it. The new `tokens` shape is preferred at read
+      // time but we keep the legacy single-set write path here until
+      // Task 9 migrates plugin authors to the dual-variant shape.
+      const incoming = theme.colors ?? {}
       const themeWithDefaults = {
         name: theme.name,
-        isDark: theme.isDark,
+        isDark: theme.isDark ?? false,
         colors: {
-          ...theme.colors,
-          primary: theme.colors.primary || "#3b82f6",
-          secondary: theme.colors.secondary || "#64748b",
-          accent: theme.colors.accent || "#3b82f6",
-          background: theme.colors.background || "#ffffff",
-          foreground: theme.colors.foreground || "#0f172a",
-          muted: theme.colors.muted || "#f1f5f9",
+          ...incoming,
+          primary: incoming.primary || "#3b82f6",
+          secondary: incoming.secondary || "#64748b",
+          accent: incoming.accent || "#3b82f6",
+          background: incoming.background || "#ffffff",
+          foreground: incoming.foreground || "#0f172a",
+          muted: incoming.muted || "#f1f5f9",
         },
       }
       const id = store.createCustomTheme(themeWithDefaults)
@@ -134,15 +139,16 @@ export function createThemeAPI(pluginId: string): PluginThemeAPI {
       if (updates.isDark !== undefined) storeUpdates.isDark = updates.isDark
       if (updates.colors) {
         const existing = store.customThemes.find((theme) => theme.id === id)
+        const existingColors = existing?.colors ?? {}
         storeUpdates.colors = {
-          ...(existing?.colors ?? {}),
+          ...existingColors,
           ...updates.colors,
-          primary: updates.colors.primary || existing?.colors.primary || "#3b82f6",
-          secondary: updates.colors.secondary || existing?.colors.secondary || "#64748b",
-          accent: updates.colors.accent || existing?.colors.accent || "#3b82f6",
-          background: updates.colors.background || existing?.colors.background || "#ffffff",
-          foreground: updates.colors.foreground || existing?.colors.foreground || "#0f172a",
-          muted: updates.colors.muted || existing?.colors.muted || "#f1f5f9",
+          primary: updates.colors.primary || existingColors.primary || "#3b82f6",
+          secondary: updates.colors.secondary || existingColors.secondary || "#64748b",
+          accent: updates.colors.accent || existingColors.accent || "#3b82f6",
+          background: updates.colors.background || existingColors.background || "#ffffff",
+          foreground: updates.colors.foreground || existingColors.foreground || "#0f172a",
+          muted: updates.colors.muted || existingColors.muted || "#f1f5f9",
         }
       }
       store.updateCustomTheme(id, storeUpdates)
