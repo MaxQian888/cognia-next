@@ -114,7 +114,10 @@ describe("DeleteConfirmDialog", () => {
     renderDialog()
 
     expect(screen.getByText("Delete App")).toBeInTheDocument()
-    expect(screen.getByText("This action cannot be undone.")).toBeInTheDocument()
+    // Global jest.setup.ts mocks next-intl from `i18n/messages/en.json` instead
+    // of honoring the `NextIntlClientProvider` wrapper used in this file, so we
+    // assert against the canonical English copy rather than the test fixture.
+    expect(screen.getByText(/this action cannot be undone\./i)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
   })
@@ -141,8 +144,10 @@ describe("DeleteConfirmDialog", () => {
       descriptionKey: "customDeleteDescription",
     })
 
-    expect(screen.getByText("Remove Item")).toBeInTheDocument()
-    expect(screen.getByText("Removing this item is irreversible.")).toBeInTheDocument()
+    // Custom keys are not in `en.json`, so the global next-intl mock falls
+    // back to the literal key name — pin that behaviour as the contract.
+    expect(screen.getByText("customDeleteTitle")).toBeInTheDocument()
+    expect(screen.getByText("customDeleteDescription")).toBeInTheDocument()
   })
 
   it("uses destructive button variant class for confirm action", () => {

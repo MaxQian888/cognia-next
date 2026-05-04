@@ -105,8 +105,8 @@ Cognia 支持用户自定义主题 —— 覆盖 CSS 变量的 JSON 块。它们
     },
     "dark": {
       // ...
-    }
-  }
+    },
+  },
 }
 ```
 
@@ -226,13 +226,13 @@ t("greeting", { name: "Alice" })
 
 ## 在哪里入手
 
-| 目标 | 文件 |
-| --- | --- |
-| 调默认主题 token | `app/globals.css` |
-| 加内置自定义主题 | `lib/themes/` |
-| 加翻译 | `i18n/messages/{en,zh-CN}.json`，组件用 `useTranslations` |
-| 加新 locale | 新 JSON + 在 `lib/i18n/` 注册 + 设置 UI |
-| 加新图表色板 | `app/globals.css`（`--chart-*` token） |
+| 目标             | 文件                                                      |
+| ---------------- | --------------------------------------------------------- |
+| 调默认主题 token | `app/globals.css`                                         |
+| 加内置自定义主题 | `lib/themes/`                                             |
+| 加翻译           | `i18n/messages/{en,zh-CN}.json`，组件用 `useTranslations` |
+| 加新 locale      | 新 JSON + 在 `lib/i18n/` 注册 + 设置 UI                   |
+| 加新图表色板     | `app/globals.css`（`--chart-*` token）                    |
 
 ## 测试
 
@@ -243,5 +243,9 @@ t("greeting", { name: "Alice" })
 
 <Cards>
   <Card title="开发工作流" href="./development" description="日常脚本、约定、测试" />
-  <Card title="备份 & 数据传输" href="./backup-and-data" description="自定义主题通过域传输系统导出/导入" />
+  <Card
+    title="备份 & 数据传输"
+    href="./backup-and-data"
+    description="自定义主题通过域传输系统导出/导入"
+  />
 </Cards>

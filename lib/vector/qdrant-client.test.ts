@@ -171,11 +171,9 @@ describe("listQdrantCollections", () => {
     resetQdrantClient()
     client = getQdrantClient(mockConfig.url)
     jest.clearAllMocks()
-
     ;(client.getCollections as jest.Mock).mockResolvedValue({
       collections: [{ name: "collection1" }, { name: "collection2" }],
     })
-
     ;(client.getCollection as jest.Mock).mockResolvedValue({
       indexed_vectors_count: 100,
       points_count: 100,
@@ -334,7 +332,6 @@ describe("queryQdrant", () => {
     resetQdrantClient()
     client = getQdrantClient(mockConfig.url)
     jest.clearAllMocks()
-
     ;(client.query as jest.Mock).mockResolvedValue({
       points: [
         { id: "doc1", score: 0.95, payload: { content: "result 1" } },
@@ -467,7 +464,6 @@ describe("getQdrantDocuments", () => {
     resetQdrantClient()
     client = getQdrantClient(mockConfig.url)
     jest.clearAllMocks()
-
     ;(client.retrieve as jest.Mock).mockResolvedValue([
       {
         id: "doc1",
@@ -499,7 +495,6 @@ describe("getQdrantCollectionInfo", () => {
     resetQdrantClient()
     client = getQdrantClient(mockConfig.url)
     jest.clearAllMocks()
-
     ;(client.getCollection as jest.Mock).mockResolvedValue({
       indexed_vectors_count: 100,
       points_count: 100,
@@ -534,7 +529,6 @@ describe("scrollQdrantCollection", () => {
     resetQdrantClient()
     client = getQdrantClient(mockConfig.url)
     jest.clearAllMocks()
-
     ;(client.scroll as jest.Mock).mockResolvedValue({
       points: [
         { id: "doc1", payload: { content: "content 1" } },

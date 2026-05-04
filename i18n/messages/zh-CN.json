@@ -138,6 +138,20 @@
     }
   },
   "chat": {
+    "subagentPart": {
+      "title": "子代理",
+      "openInWorkspace": "在工作区打开",
+      "noLogsYet": "暂无日志 — 子代理正在初始化。",
+      "durationMs": "{ms}ms"
+    },
+    "agentTeamDispatch": {
+      "title": "调度",
+      "supervisor": "监督者",
+      "openMember": "打开该成员"
+    },
+    "slashCommand": {
+      "ranSlashCommand": "执行了斜杠命令"
+    },
     "header": {
       "untitledSession": "（未命名）",
       "noApiKey": "未配置 API Key",
@@ -928,11 +942,14 @@
       "agents": "外部代理",
       "agentModes": "代理模式",
       "agentTeams": "代理团队",
+      "hooks": "钩子",
+      "slashCommands": "斜杠命令",
       "tools": "内置工具",
       "search": "联网搜索",
       "speech": "语音",
       "characters": "角色",
       "skills": "技能",
+      "subagents": "子代理",
       "teams": "团队",
       "presets": "预设",
       "artifacts": "作品",
@@ -957,11 +974,14 @@
       "agents": "外部代理 — Claude Code CLI、Codex、Gemini CLI、Cursor，以及任何使用 ACP / OpenCode / HTTP 协议的自定义命令。",
       "agentModes": "内置与自定义代理模式 — 系统提示词、工具列表、输出格式与实时预览预设。",
       "agentTeams": "多代理团队模板 — 经理-工作者、并行专家、研究小组。可浏览内置模板、复制为自定义副本，或新建模板。",
+      "hooks": "生命周期钩子（~/.claude/settings.json）。21 种事件 × 匹配器 × 命令或 webhook 处理器。整文档原样写回，不会丢失未识别字段。",
+      "slashCommands": "内置、自定义、插件贡献的斜杠命令统一浏览,可搜索并将命令复制到聊天输入框。",
       "tools": "内置 shell、文件系统、git、进程与环境工具 — 全局开关、风险等级与「始终允许」管理。",
       "search": "联网搜索 provider（Tavily、Brave、Bing、Google、Perplexity、Exa…）、默认参数、缓存、安全与来源验证。",
       "speech": "语音输入（STT）的语言与麦克风，朗读（TTS）的提供商、音色与自动播放。",
       "characters": "复用的角色，可独立配置模型与技能。",
       "skills": "拼接到系统提示词的可复用指令片段。",
+      "subagents": "子代理模板与实时运行状态 — 由父代理派生专注子任务（搜索、代码评审、内容生成、数据分析等）。",
       "teams": "多角色协作 — 轮询 / 主管 / 手动。",
       "presets": "可复用的会话配置 — 系统提示词加上模型、工具、MCP 与技能覆盖。",
       "artifacts": "把代码、HTML、React、SVG、Mermaid、图表、数学公式与 Jupyter 笔记本自动汇总到侧边面板工作区。",
@@ -1824,6 +1844,116 @@
       "editorDescriptionPlaceholder": "说明该团队适用场景…",
       "editorCategory": "类别",
       "teammateEditNote": "{count, plural, =0 {尚无队友 — 创建后可在工作区中编辑队友。} other {从源模板继承了 # 个队友 — 可在工作区中继续编辑。}}"
+    },
+    "slashCommands": {
+      "title": "斜杠命令",
+      "description": "统一浏览全部命令源 — 内置动作、`.claude/commands/*.md` 模板、插件贡献的命令。点击播放图标可将 `/<名称>` 复制到剪贴板。",
+      "filterPlaceholder": "按名称或描述筛选…",
+      "builtin": "内置 ({count})",
+      "custom": "自定义 ({count})",
+      "plugin": "插件 ({count})",
+      "scope": {
+        "builtin": "内置",
+        "user": "用户",
+        "project": "项目",
+        "plugin": "插件 · {id}"
+      },
+      "scanning": "正在扫描 .claude/commands…",
+      "emptyBuiltin": "没有匹配。",
+      "emptyCustom": "在 ~/.claude/commands 或 .claude/commands 下未发现自定义命令。",
+      "emptyCustomWeb": "自定义命令扫描仅在桌面端可用。",
+      "emptyPlugin": "暂无插件贡献的命令。",
+      "try": "复制到剪贴板",
+      "copiedToClipboard": "已复制 `/{name} ` 到剪贴板。",
+      "typeIntoComposer": "在聊天输入框中键入 `/{name}` 即可运行。",
+      "openInEditor": "在编辑器中打开"
+    },
+    "subagents": {
+      "title": "子代理",
+      "description": "由父代理派生的子代理模板与实时运行状态。模板会持久化保存,运行时数据为内存级,重启后清空。",
+      "tabs": {
+        "templates": "模板",
+        "runtime": "运行时"
+      },
+      "templates": {
+        "title": "模板",
+        "description": "内置与用户自建的子代理模板。内置模板只读 — 先复制再编辑。",
+        "newTemplate": "新建模板",
+        "create": "创建",
+        "save": "保存",
+        "edit": "编辑",
+        "duplicate": "复制",
+        "builtIn": "内置",
+        "builtInReadOnly": "内置模板只读 — 请先复制",
+        "removeTitle": "删除模板?",
+        "removeBody": "\"{name}\" 将被删除。",
+        "addedToast": "已添加 \"{name}\"。",
+        "updatedToast": "已更新 \"{name}\"。",
+        "removedToast": "已删除 \"{name}\"。",
+        "duplicatedToast": "已复制为 \"{name}\"。",
+        "editAria": "编辑模板 {name}",
+        "duplicateAria": "复制模板 {name}",
+        "deleteAria": "删除模板 {name}",
+        "nameRequired": "请填写模板名称。",
+        "editorName": "名称",
+        "editorNamePlaceholder": "网络调研",
+        "editorDescription": "描述",
+        "editorCategory": "类别",
+        "editorTaskTemplate": "任务模板",
+        "editorTaskTemplatePlaceholder": "调研以下主题：{{topic}}"
+      },
+      "runtime": {
+        "title": "运行时",
+        "description": "当前正在执行的子代理及其最近一次活动。orchestrator 触发事件时实时更新。",
+        "emptyTitle": "当前没有运行中的子代理。",
+        "emptyBody": "由活跃会话派发的子代理会显示在这里。运行时数据存于内存,重启后清空。",
+        "parent": "父代理：{id}",
+        "duration": "{ms}ms"
+      }
+    },
+    "hooks": {
+      "title": "生命周期钩子",
+      "description": "在生命周期事件触发时运行 shell 命令或调用 webhook。配置写入 ~/.claude/settings.json (用户作用域) 或项目下的 .claude/settings.json。整份配置原样回写,未识别的字段会被保留。",
+      "scope": {
+        "user": "用户",
+        "project": "项目",
+        "local": "本地"
+      },
+      "addGroup": "新建分组",
+      "noGroupsForEvent": "{event} 事件下还没有任何分组,点击\"新建分组\"添加 matcher。",
+      "save": "保存",
+      "saving": "正在保存…",
+      "saved": "已保存。",
+      "saveError": "保存失败：{detail}",
+      "loadError": "读取设置失败：{detail}",
+      "revert": "还原",
+      "group": {
+        "matcherLabel": "Matcher",
+        "matcherPlaceholder": "Bash|Write 或 .* (留空匹配所有)",
+        "matcherHint": "工具名正则、用 | 分隔的备选项,或留空 / '*' 匹配所有。",
+        "matcherInvalid": "正则无效：{detail}",
+        "removeAria": "移除该分组",
+        "emptyHandlers": "尚无处理器 — 点击下方按钮添加。",
+        "addHandler": "新建处理器"
+      },
+      "handler": {
+        "typeLabel": "类型",
+        "typeCommand": "命令",
+        "typeWebhook": "Webhook",
+        "removeAria": "移除处理器",
+        "commandLabel": "Shell 命令",
+        "commandPlaceholder": "echo \"$CLAUDE_TOOL_NAME 已运行\"",
+        "urlLabel": "URL",
+        "urlPlaceholder": "https://example.com/hook",
+        "headersLabel": "请求头",
+        "headersAdd": "新建头部",
+        "headersEmpty": "暂无自定义头部。",
+        "headerKeyPlaceholder": "X-Custom",
+        "headerValuePlaceholder": "value",
+        "headerRemoveAria": "移除头部",
+        "timeoutLabel": "超时 (ms)",
+        "timeoutPlaceholder": "5000"
+      }
     },
     "teams": {
       "title": "团队",
@@ -5877,6 +6007,7 @@
       "setupComplete": "设置完成！",
       "providerReady": "{provider} 已准备就绪"
     },
+    "serverUrl": "服务器 URL",
     "modelManager": {
       "title": "模型管理器",
       "installedCount": "已安装 {installed}/{total} 个模型",

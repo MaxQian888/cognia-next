@@ -9,8 +9,8 @@ description: Schema v3 备份格式（AES-GCM 加密）、定时自动备份、�
 
 <TLDR>
   AES-GCM 加密、含完整性校验的备份，包格式为 **v3**。每设备自动密钥（无需密码）
-  或用户密码（可移植）。六种按域传输（技能、MCP、预设、角色、团队、主题）
-  只搬一个切片。ChatGPT / Claude / Gemini 导入器把外部导出映射到 Cognia 的聊天形态。
+  或用户密码（可移植）。六种按域传输（技能、MCP、预设、角色、团队、主题） 只搬一个切片。ChatGPT /
+  Claude / Gemini 导入器把外部导出映射到 Cognia 的聊天形态。
 </TLDR>
 
 <StatGrid>
@@ -56,9 +56,9 @@ lib/db/backup-history.ts     # backupHistory 表（限 50 行）
 interface BackupPackageV3 {
   manifest: {
     schemaVersion: 3
-    createdAt: string         // ISO-8601
+    createdAt: string // ISO-8601
     appVersion: string
-    integrity: string         // payload 的 SHA-256
+    integrity: string // payload 的 SHA-256
     flags: {
       includesSessions: boolean
       includesApiKey: boolean
@@ -72,7 +72,7 @@ interface BackupPackageV3 {
     teams: Team[]
     promptPresets: SystemPromptPreset[]
     mcpServers: McpServer[]
-    twin?: TwinExport         // sources + profile（默认不含 chunk）
+    twin?: TwinExport // sources + profile（默认不含 chunk）
     canvas?: CanvasExport
     settings: AppSettings
   }
@@ -155,11 +155,11 @@ interface EncryptedEnvelopeV1 {
     algorithm: "pbkdf2"
     hash: "sha256"
     iterations: 600_000
-    salt: string             // base64
+    salt: string // base64
   }
-  iv: string                  // base64
-  ciphertext: string          // base64
-  manifest: BackupPackageV3["manifest"]   // 未加密的 manifest 副本
+  iv: string // base64
+  ciphertext: string // base64
+  manifest: BackupPackageV3["manifest"] // 未加密的 manifest 副本
 }
 ```
 
@@ -191,10 +191,10 @@ const pkg = await buildBackupPackage({
 
 `applyBackupPackage(pkg, opts)` 用三种合并策略之一写入 Dexie：
 
-| 策略 | 行为 |
-| --- | --- |
-| `skip` | 跳过已存在 ID 的行。 |
-| `overwrite` | 覆盖已存在的行。 |
+| 策略        | 行为                      |
+| ----------- | ------------------------- |
+| `skip`      | 跳过已存在 ID 的行。      |
+| `overwrite` | 覆盖已存在的行。          |
 | `duplicate` | 把冲突的行重新分配新 ID。 |
 
 内置行始终保留（导入器跳过它们）。
@@ -270,20 +270,20 @@ flowchart TB
 
 `lib/data/domain/index.ts` 导出 `DOMAIN_TRANSFERS` —— 按域注册的传输模块列表：
 
-| 域 | 文件 | 备注 |
-| --- | --- | --- |
-| 技能 | `domain/skills.ts` | 单技能或整个库 |
-| MCP 服务器 | `domain/mcp.ts` | 适合分享工具配置 |
-| 提示预设 | `domain/prompt-presets.ts` | |
-| 角色 | `domain/characters.ts` | 孪生绑定按 ID 保留 |
-| 团队 | `domain/teams.ts` | 团队成员在导入时按角色名重新解析 |
-| 主题 | `domain/theme.ts` | 自定义主题 JSON |
+| 域         | 文件                       | 备注                             |
+| ---------- | -------------------------- | -------------------------------- |
+| 技能       | `domain/skills.ts`         | 单技能或整个库                   |
+| MCP 服务器 | `domain/mcp.ts`            | 适合分享工具配置                 |
+| 提示预设   | `domain/prompt-presets.ts` |                                  |
+| 角色       | `domain/characters.ts`     | 孪生绑定按 ID 保留               |
+| 团队       | `domain/teams.ts`          | 团队成员在导入时按角色名重新解析 |
+| 主题       | `domain/theme.ts`          | 自定义主题 JSON                  |
 
 API：
 
 ```ts
-const blob = await buildDomainExport("skills")           // → Blob
-await applyDomainImport("skills", file, "overwrite")     // 策略
+const blob = await buildDomainExport("skills") // → Blob
+await applyDomainImport("skills", file, "overwrite") // 策略
 ```
 
 每个域传输都有同名 `<key>.test.ts`。
@@ -292,11 +292,11 @@ await applyDomainImport("skills", file, "overwrite")     // 策略
 
 `lib/data/import-registry.ts` 把第三方导出文件分发到对应导入器：
 
-| 导入器 | 来源 |
-| --- | --- |
+| 导入器              | 来源                                     |
+| ------------------- | ---------------------------------------- |
 | `chatgpt-import.ts` | ChatGPT 导出 ZIP（`conversations.json`） |
-| `claude-import.ts` | Claude.ai 聊天导出 |
-| `gemini-import.ts` | Google Gemini takeout |
+| `claude-import.ts`  | Claude.ai 聊天导出                       |
+| `gemini-import.ts`  | Google Gemini takeout                    |
 
 每个导入器：
 
@@ -327,11 +327,11 @@ await applyDomainImport("skills", file, "overwrite")     // 策略
 
 ## 在哪里入手
 
-| 目标 | 文件 |
-| --- | --- |
-| 加新域传输 | `lib/data/domain/<name>.ts`，在 `index.ts` 注册 |
-| 加第三方导入 | `lib/data/importers/<name>.ts`，在 `import-registry.ts` 注册 |
-| 调整调度间隔 | `lib/data/scheduler.ts` |
+| 目标            | 文件                                                                           |
+| --------------- | ------------------------------------------------------------------------------ |
+| 加新域传输      | `lib/data/domain/<name>.ts`，在 `index.ts` 注册                                |
+| 加第三方导入    | `lib/data/importers/<name>.ts`，在 `import-registry.ts` 注册                   |
+| 调整调度间隔    | `lib/data/scheduler.ts`                                                        |
 | 升级备份 schema | 新建 `BackupPackageV4` 类型，在 `migrate.ts` 加 v3→v4，更新 `build-package.ts` |
 
 ## 测试
@@ -345,5 +345,9 @@ await applyDomainImport("skills", file, "overwrite")     // 策略
 <Cards>
   <Card title="存储" href="./storage" description="底层 Dexie schema" />
   <Card title="调度器" href="./scheduler" description="备份调度构建在其上的通用调度原语" />
-  <Card title="ADR-0001" href="../adr/0001-backup-schema-v3" description="为什么 schema v3 是现在这个形状" />
+  <Card
+    title="ADR-0001"
+    href="../adr/0001-backup-schema-v3"
+    description="为什么 schema v3 是现在这个形状"
+  />
 </Cards>

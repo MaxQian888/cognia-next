@@ -129,7 +129,11 @@ function CanvasDesktopShell() {
           defaultSize={panelCenter}
           minSize={CANVAS_SHELL_CENTER_MIN}
         >
-          <div className="flex h-full min-h-0 overflow-hidden">
+          {/* Pixel-based safety floor to complement the percentage-based
+              `minSize` on the Resizable panel — keeps the editor usable on
+              very wide windows where the percentage clamp could allow the
+              center pane to compress past a comfortable width. */}
+          <div className="flex h-full min-h-0 min-w-[480px] overflow-hidden">
             <CanvasWorkspace />
           </div>
         </ResizablePanel>

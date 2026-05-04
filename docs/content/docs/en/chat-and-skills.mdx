@@ -9,14 +9,14 @@ The chat workspace is Cognia's largest user-facing surface. It is built around f
 
 ## Concepts at a glance
 
-| Concept | Owns | Persisted in |
-| --- | --- | --- |
-| **Session** | A conversation thread (title, model, last update) | `sessions` table |
-| **Message** | A single user / assistant / tool turn | `messages` table |
-| **Character** | A reusable persona (system prompt, model preset, tone, optional twin binding) | `characters` table |
-| **Skill** | A reusable capability (prompts, MCP servers, tool allow-list, resources) | `skills`, `skillResources` tables |
-| **Team** | A multi-character routing configuration (delegates between characters) | `teams` table |
-| **MCP server** | A tool / resource provider plugged into Claude | `mcpServers` table |
+| Concept        | Owns                                                                          | Persisted in                      |
+| -------------- | ----------------------------------------------------------------------------- | --------------------------------- |
+| **Session**    | A conversation thread (title, model, last update)                             | `sessions` table                  |
+| **Message**    | A single user / assistant / tool turn                                         | `messages` table                  |
+| **Character**  | A reusable persona (system prompt, model preset, tone, optional twin binding) | `characters` table                |
+| **Skill**      | A reusable capability (prompts, MCP servers, tool allow-list, resources)      | `skills`, `skillResources` tables |
+| **Team**       | A multi-character routing configuration (delegates between characters)        | `teams` table                     |
+| **MCP server** | A tool / resource provider plugged into Claude                                | `mcpServers` table                |
 
 All persisted in Dexie (IndexedDB); types live in `lib/claude/types.ts`.
 
@@ -141,7 +141,8 @@ A `Skill` is a packaged capability that can be enabled per-character or per-sess
       type: "string[]",
     },
     toolAllowList: {
-      description: "Restrict tool calls to this allowlist (intersection if multiple skills set it).",
+      description:
+        "Restrict tool calls to this allowlist (intersection if multiple skills set it).",
       type: "string[]",
     },
     resources: {
@@ -185,7 +186,7 @@ A `Team` orchestrates multiple characters in one session:
 interface Team {
   id: string
   name: string
-  members: TeamMember[]   // characterId + role + delegation rules
+  members: TeamMember[] // characterId + role + delegation rules
   routingStrategy: "round-robin" | "first-best" | "router-character"
   // ...
 }
@@ -266,22 +267,38 @@ Each surface has a renderer in `components/chat/` that consumes events from its 
 
 ## Where to start contributing
 
-| Goal | Files |
-| --- | --- |
-| Add a new chat-input action | `components/chat/`, `lib/chat/`, `lib/claude/build-options.ts` |
-| Add a new built-in character | `lib/db/preset-built-ins.ts` |
-| Add a new built-in skill | `lib/db/preset-built-ins.ts`, `lib/skills/` |
-| Add a new MCP preset | `lib/claude/mcp-presets.ts` |
-| Add a new export format | `lib/export/`, `components/chat/dialogs/` |
-| Tweak twin behaviour | See [Employee Digital Twin](./employee-twin) |
+| Goal                         | Files                                                          |
+| ---------------------------- | -------------------------------------------------------------- |
+| Add a new chat-input action  | `components/chat/`, `lib/chat/`, `lib/claude/build-options.ts` |
+| Add a new built-in character | `lib/db/preset-built-ins.ts`                                   |
+| Add a new built-in skill     | `lib/db/preset-built-ins.ts`, `lib/skills/`                    |
+| Add a new MCP preset         | `lib/claude/mcp-presets.ts`                                    |
+| Add a new export format      | `lib/export/`, `components/chat/dialogs/`                      |
+| Tweak twin behaviour         | See [Employee Digital Twin](./employee-twin)                   |
 
 ## Related
 
 <Cards>
-  <Card title="Sidecar & Claude SDK" href="./sidecar-and-claude-sdk" description="The Node host that handles claude_send." />
-  <Card title="Employee Digital Twin" href="./employee-twin" description="The deepest character / send-time customisation surface." />
-  <Card title="Plugin system" href="./plugin-system" description="How plugins extend skills / characters / MCP." />
-  <Card title="Storage" href="./storage" description="The Dexie tables that back chat / characters / skills / teams." />
+  <Card
+    title="Sidecar & Claude SDK"
+    href="./sidecar-and-claude-sdk"
+    description="The Node host that handles claude_send."
+  />
+  <Card
+    title="Employee Digital Twin"
+    href="./employee-twin"
+    description="The deepest character / send-time customisation surface."
+  />
+  <Card
+    title="Plugin system"
+    href="./plugin-system"
+    description="How plugins extend skills / characters / MCP."
+  />
+  <Card
+    title="Storage"
+    href="./storage"
+    description="The Dexie tables that back chat / characters / skills / teams."
+  />
 </Cards>
 
 ## Next

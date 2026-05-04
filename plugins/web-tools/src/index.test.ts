@@ -49,7 +49,7 @@ describe("web-tools (built-in)", () => {
   })
 
   it("web_fetch returns body / status from a successful request", async () => {
-    ;(globalThis as { fetch: jest.Mock }).fetch = jest.fn(async () => ({
+    ;(globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn(async () => ({
       ok: true,
       status: 200,
       headers: new Map([["content-type", "text/plain"]]),
@@ -68,7 +68,7 @@ describe("web-tools (built-in)", () => {
   })
 
   it("web_fetch traps fetch errors", async () => {
-    ;(globalThis as { fetch: jest.Mock }).fetch = jest.fn(async () => {
+    ;(globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn(async () => {
       throw new Error("boom")
     })
     const { ctx, tools } = makeCtx()
@@ -78,7 +78,7 @@ describe("web-tools (built-in)", () => {
   })
 
   it("web_download falls back to a browser <a> when not in Tauri", async () => {
-    ;(globalThis as { fetch: jest.Mock }).fetch = jest.fn(async () => ({
+    ;(globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn(async () => ({
       ok: true,
       arrayBuffer: async () => new ArrayBuffer(8),
     }))

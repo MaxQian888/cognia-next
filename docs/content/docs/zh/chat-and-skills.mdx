@@ -9,14 +9,14 @@ description: 会话、消息、角色、技能、团队、MCP 服务器如何组
 
 ## 概念速览
 
-| 概念 | 内容 | 持久化在 |
-| --- | --- | --- |
-| **Session（会话）** | 一条对话线（标题、模型、最近更新时间） | `sessions` 表 |
-| **Message（消息）** | 一次 user / assistant / tool 轮次 | `messages` 表 |
-| **Character（角色）** | 可复用的人格（系统提示、模型预设、语气、可选孪生绑定） | `characters` 表 |
-| **Skill（技能）** | 可复用的能力（提示、MCP 服务器、工具白名单、资源） | `skills`、`skillResources` 表 |
-| **Team（团队）** | 多角色路由配置（在角色之间委派） | `teams` 表 |
-| **MCP 服务器** | 接入 Claude 的工具/资源提供方 | `mcpServers` 表 |
+| 概念                  | 内容                                                   | 持久化在                      |
+| --------------------- | ------------------------------------------------------ | ----------------------------- |
+| **Session（会话）**   | 一条对话线（标题、模型、最近更新时间）                 | `sessions` 表                 |
+| **Message（消息）**   | 一次 user / assistant / tool 轮次                      | `messages` 表                 |
+| **Character（角色）** | 可复用的人格（系统提示、模型预设、语气、可选孪生绑定） | `characters` 表               |
+| **Skill（技能）**     | 可复用的能力（提示、MCP 服务器、工具白名单、资源）     | `skills`、`skillResources` 表 |
+| **Team（团队）**      | 多角色路由配置（在角色之间委派）                       | `teams` 表                    |
+| **MCP 服务器**        | 接入 Claude 的工具/资源提供方                          | `mcpServers` 表               |
 
 均持久化在 Dexie（IndexedDB）；类型在 `lib/claude/types.ts`。
 
@@ -187,7 +187,7 @@ sequenceDiagram
 interface Team {
   id: string
   name: string
-  members: TeamMember[]   // characterId + role + 委派规则
+  members: TeamMember[] // characterId + role + 委派规则
   routingStrategy: "round-robin" | "first-best" | "router-character"
   // ...
 }
@@ -268,19 +268,23 @@ HTML 形式使用 `lib/themes/` 渲染当前主题；用户也可以加载自定
 
 ## 在哪里入手
 
-| 目标 | 文件 |
-| --- | --- |
+| 目标               | 文件                                                           |
+| ------------------ | -------------------------------------------------------------- |
 | 加新的聊天输入动作 | `components/chat/`、`lib/chat/`、`lib/claude/build-options.ts` |
-| 加新的内置角色 | `lib/db/preset-built-ins.ts` |
-| 加新的内置技能 | `lib/db/preset-built-ins.ts`、`lib/skills/` |
-| 加新的 MCP 预设 | `lib/claude/mcp-presets.ts` |
-| 加新的导出格式 | `lib/export/`、`components/chat/dialogs/` |
-| 调整孪生行为 | 见 [员工数字孪生](./employee-twin) |
+| 加新的内置角色     | `lib/db/preset-built-ins.ts`                                   |
+| 加新的内置技能     | `lib/db/preset-built-ins.ts`、`lib/skills/`                    |
+| 加新的 MCP 预设    | `lib/claude/mcp-presets.ts`                                    |
+| 加新的导出格式     | `lib/export/`、`components/chat/dialogs/`                      |
+| 调整孪生行为       | 见 [员工数字孪生](./employee-twin)                             |
 
 ## 相关
 
 <Cards>
-  <Card title="Sidecar & Claude SDK" href="./sidecar-and-claude-sdk" description="处理 claude_send 的 Node 主机" />
+  <Card
+    title="Sidecar & Claude SDK"
+    href="./sidecar-and-claude-sdk"
+    description="处理 claude_send 的 Node 主机"
+  />
   <Card title="员工数字孪生" href="./employee-twin" description="最深的角色 / 发送时定制层" />
   <Card title="插件系统" href="./plugin-system" description="插件如何扩展技能 / 角色 / MCP" />
   <Card title="存储" href="./storage" description="支撑聊天 / 角色 / 技能 / 团队的 Dexie 表" />

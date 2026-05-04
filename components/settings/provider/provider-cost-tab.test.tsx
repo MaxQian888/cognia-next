@@ -30,19 +30,43 @@ jest.mock("next-intl", () => ({
 
 // ── Store mock ────────────────────────────────────────────────────────────────
 
-const mockUsageStats = {
-  openai: {
-    "gpt-4o": {
-      callCount: 100,
-      inputTokens: 500000,
-      outputTokens: 200000,
-      dailyStats: {
-        "2026-04-10": { calls: 30, inputTokens: 150000, outputTokens: 60000 },
-        "2026-04-11": { calls: 40, inputTokens: 200000, outputTokens: 80000 },
-        "2026-04-12": { calls: 30, inputTokens: 150000, outputTokens: 60000 },
-      },
-    },
-  },
+// cognia-next stores usage as a flat record keyed `${providerId}:${modelId}`
+// with values of `ProviderModelUsageEntry[]`. Build 100 entries (3 days, totals
+// 500_000 prompt + 200_000 completion) so the source's aggregate matches the
+// shape the tests assert against.
+function makeUsageEntries(): Array<{
+  at: string
+  modelId: string
+  promptTokens: number
+  completionTokens: number
+  estimatedCost: number
+  ok: boolean
+}> {
+  const days = [
+    { date: "2026-04-10", calls: 30, prompt: 150000, completion: 60000 },
+    { date: "2026-04-11", calls: 40, prompt: 200000, completion: 80000 },
+    { date: "2026-04-12", calls: 30, prompt: 150000, completion: 60000 },
+  ]
+  const entries = []
+  for (const d of days) {
+    const promptPerCall = d.prompt / d.calls
+    const completionPerCall = d.completion / d.calls
+    for (let i = 0; i < d.calls; i++) {
+      entries.push({
+        at: `${d.date}T00:00:00.000Z`,
+        modelId: "gpt-4o",
+        promptTokens: promptPerCall,
+        completionTokens: completionPerCall,
+        estimatedCost: (promptPerCall * 2.5 + completionPerCall * 10) / 1_000_000,
+        ok: true,
+      })
+    }
+  }
+  return entries
+}
+
+const mockUsageStats: Record<string, ReturnType<typeof makeUsageEntries>> = {
+  "openai:gpt-4o": makeUsageEntries(),
 }
 
 jest.mock("@/stores", () => ({

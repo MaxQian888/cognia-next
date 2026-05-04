@@ -15,15 +15,8 @@
 //   { type: "ready" }
 //   { type: "log",                level, message }
 
-import { query } from "@anthropic-ai/claude-agent-sdk"
-import { randomUUID } from "node:crypto"
 import readline from "node:readline"
-import {
-  buildCogniaToolsServer,
-  namesForDisabledCategories,
-  SERVER_NAME as BUILTIN_SERVER_NAME,
-} from "./builtin-tools/index.mjs"
-import { buildA2UIBridgeServer, SERVER_NAME as A2UI_SERVER_NAME } from "./a2ui-tools/index.mjs"
+import { dispatch } from "./dispatch/index.mjs"
 
 // ---- IO helpers -----------------------------------------------------------
 
@@ -53,233 +46,27 @@ function log(level, message) {
 /** @type {Map<string, Session>} */
 const sessions = new Map()
 
-// ---- Streaming input async-iterable ---------------------------------------
-
-function makeInputStream() {
-  /** @type {Array<any>} */
-  const queue = []
-  /** @type {Array<{resolve: (v: any) => void}>} */
-  const waiters = []
-  let closed = false
-
-  const push = (item) => {
-    if (closed) return
-    if (waiters.length > 0) {
-      waiters.shift().resolve({ value: item, done: false })
-    } else {
-      queue.push(item)
-    }
-  }
-
-  const close = () => {
-    closed = true
-    while (waiters.length > 0) {
-      waiters.shift().resolve({ value: undefined, done: true })
-    }
-  }
-
-  const iterable = {
-    [Symbol.asyncIterator]() {
-      return {
-        next() {
-          if (queue.length > 0) {
-            return Promise.resolve({ value: queue.shift(), done: false })
-          }
-          if (closed) {
-            return Promise.resolve({ value: undefined, done: true })
-          }
-          return new Promise((resolve) => waiters.push({ resolve }))
-        },
-        return() {
-          close()
-          return Promise.resolve({ value: undefined, done: true })
-        },
-      }
-    },
-  }
-
-  return { iterable, push, close }
-}
-
 // ---- Session lifecycle ----------------------------------------------------
 
 function startSession(sessionId, firstPrompt, sendOptions = {}) {
-  const inputStream = makeInputStream()
-  /** @type {Map<string, {resolve: (r: any) => void}>} */
-  const pendingApprovals = new Map()
-
-  // Build options — caller passes user-supplied bits (model, system prompt, cwd, etc.).
-  // Resume / fork: the SDK takes a single `resume` field (session id) and a
-  // `forkSession` boolean. We accept them as two separate inputs for clarity;
-  // Rust validates they're mutually exclusive.
-  const resumeId = sendOptions.resumeSessionId ?? sendOptions.forkFromSessionId
-  const isFork = sendOptions.forkFromSessionId != null
-
-  // Built-in cognia-tools MCP server: the parent passes a `builtinTools`
-  // category-toggle blob (sidecar protocol, not an SDK option). We build an
-  // in-process MCP server with the enabled categories' tools and merge it
-  // into options.mcpServers below. User-supplied entries win on collision so
-  // an explicit override (e.g., the user added a server named "cognia-tools"
-  // themselves) is always respected.
-  const builtinEnabled = sendOptions.builtinTools
-  const builtinServer = buildCogniaToolsServer({ enabled: builtinEnabled })
-  const baseUserServers = sendOptions.mcpServers ?? {}
-  const withBuiltins = builtinServer
-    ? Object.prototype.hasOwnProperty.call(baseUserServers, BUILTIN_SERVER_NAME)
-      ? (() => {
-          log(
-            "warn",
-            `user-defined mcp server '${BUILTIN_SERVER_NAME}' shadows built-in tools — keeping user's`
-          )
-          return baseUserServers
-        })()
-      : { ...baseUserServers, [BUILTIN_SERVER_NAME]: builtinServer }
-    : { ...baseUserServers }
-
-  // A2UI bridge: always-on in-process MCP server that lets the model paint
-  // interactive surfaces via 4 tools. The user can still shadow it by
-  // declaring an mcpServer with the same name.
-  const a2uiServer = buildA2UIBridgeServer({ sessionId, emit })
-  const mergedMcpServers = Object.prototype.hasOwnProperty.call(withBuiltins, A2UI_SERVER_NAME)
-    ? (() => {
-        log(
-          "warn",
-          `user-defined mcp server '${A2UI_SERVER_NAME}' shadows built-in a2ui-bridge — keeping user's`
-        )
-        return withBuiltins
-      })()
-    : { ...withBuiltins, [A2UI_SERVER_NAME]: a2uiServer }
-
-  // Defence-in-depth: if a category is off, push its tool names onto
-  // disallowedTools so even a stray reference (e.g., from a stale cached
-  // system prompt or a misconfigured character) is rejected at the SDK
-  // boundary in addition to never being registered.
-  const disallowed = new Set(sendOptions.disallowedTools ?? [])
-  if (builtinEnabled !== undefined) {
-    for (const name of namesForDisabledCategories(builtinEnabled)) {
-      disallowed.add(name)
-    }
-  }
-
-  const options = {
-    cwd: sendOptions.cwd,
-    model: sendOptions.model,
-    fallbackModel: sendOptions.fallbackModel,
-    systemPrompt: sendOptions.systemPrompt,
-    appendSystemPrompt: sendOptions.appendSystemPrompt,
-    allowedTools: sendOptions.allowedTools,
-    disallowedTools: disallowed.size > 0 ? [...disallowed] : sendOptions.disallowedTools,
-    additionalDirectories: sendOptions.additionalDirectories,
-    permissionMode: sendOptions.permissionMode,
-    mcpServers: mergedMcpServers,
-    maxTurns: sendOptions.maxTurns,
-    includePartialMessages: sendOptions.includePartialMessages,
-    settingSources: sendOptions.settingSources,
-    agents: sendOptions.agents,
-    strictMcpConfig: sendOptions.strictMcpConfig,
-    effort: sendOptions.effort,
-    resume: resumeId,
-    forkSession: isFork ? true : undefined,
-    env: { ...process.env, ...(sendOptions.env ?? {}) },
-
-    // Permission gateway: every tool call is forwarded to the parent for a decision.
-    canUseTool: (toolName, input, ctx) => {
-      const requestId = randomUUID()
-      emit({
-        type: "permission_request",
-        sessionId,
-        requestId,
-        toolUseID: ctx.toolUseID,
-        toolName,
-        input,
-        title: ctx.title,
-        displayName: ctx.displayName,
-        description: ctx.description,
-        blockedPath: ctx.blockedPath,
-        decisionReason: ctx.decisionReason,
-        suggestions: ctx.suggestions,
-      })
-      return new Promise((resolve) => {
-        pendingApprovals.set(requestId, { resolve })
-        // Abort if the parent aborts mid-decision.
-        if (ctx.signal) {
-          const onAbort = () => {
-            if (pendingApprovals.delete(requestId)) {
-              resolve({ behavior: "deny", message: "aborted" })
-            }
-          }
-          if (ctx.signal.aborted) onAbort()
-          else ctx.signal.addEventListener("abort", onAbort, { once: true })
-        }
-      })
-    },
-  }
-
-  // Strip undefined- and null-valued keys so the SDK uses its defaults.
-  // Rust's serde encodes `Option::None` as JSON `null`, which the SDK's
-  // option parser treats as a real value and crashes on (e.g. it tries to
-  // read `null.type` for `systemPrompt`). Defensive normalisation here.
-  for (const k of Object.keys(options)) {
-    if (options[k] === undefined || options[k] === null) delete options[k]
-  }
-
-  const q = query({ prompt: inputStream.iterable, options })
-
-  /** @type {Session} */
-  const session = {
-    q,
-    // `content` may be a plain string or an array of content blocks
-    // (text + image). The SDK accepts either shape verbatim.
-    pushUserMessage: (content) =>
-      inputStream.push({
-        type: "user",
-        message: { role: "user", content },
-        parent_tool_use_id: null,
-        session_id: sessionId,
-      }),
-    closeInput: inputStream.close,
-    pendingApprovals,
-  }
-  sessions.set(sessionId, session)
-
-  // Push the first turn.
-  session.pushUserMessage(firstPrompt)
-
-  // Pipe SDK events to the parent.
-  let sdkSessionIdSeen = false
-  ;(async () => {
-    try {
-      for await (const evt of q) {
-        // Capture the SDK-issued session id on the first event that carries
-        // one. The parent persists it so we can pass `resume: <id>` after a
-        // sidecar restart and continue the conversation seamlessly.
-        if (!sdkSessionIdSeen && evt && typeof evt.session_id === "string") {
-          sdkSessionIdSeen = true
-          emit({
-            type: "sdk_session_id",
-            sessionId,
-            sdkSessionId: evt.session_id,
-          })
-        }
-        emit({ type: "event", sessionId, event: evt })
-        if (evt.type === "result") {
-          // The SDK emits a final 'result' message per turn. We keep the session
-          // alive (it still accepts further user turns via streaming input) until
-          // the parent explicitly closes it or the generator finishes.
-        }
-      }
-      emit({ type: "session_ended", sessionId })
-    } catch (err) {
-      emit({
-        type: "session_ended",
-        sessionId,
-        error: err?.message ?? String(err),
-      })
-    } finally {
+  // Wrap the emitter so a `session_ended` from the dispatcher cleans up the
+  // sessions map without each dispatcher having to know about it. Keeps the
+  // map a private concern of this file.
+  const wrappedEmit = (msg) => {
+    emit(msg)
+    if (msg && msg.type === "session_ended" && msg.sessionId === sessionId) {
       sessions.delete(sessionId)
     }
-  })()
-
+  }
+  const session = dispatch({
+    sessionId,
+    firstPrompt,
+    sendOptions,
+    emit: wrappedEmit,
+    log,
+  })
+  if (!session) return null
+  sessions.set(sessionId, session)
   return session
 }
 

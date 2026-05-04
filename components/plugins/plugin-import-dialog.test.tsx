@@ -12,7 +12,7 @@ jest.mock("next-intl", () => ({
   },
 }))
 
-const upsertPluginMock = jest.fn(async () => ({}) as never)
+const upsertPluginMock = jest.fn(async (..._args: unknown[]) => ({}) as never)
 jest.mock("@/lib/db/plugins", () => ({
   upsertPlugin: (...args: unknown[]) => upsertPluginMock(...args),
 }))

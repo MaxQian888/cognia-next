@@ -57,3 +57,7 @@ next-env.d.ts
 # Claude Code user-local state (per-user, not committed)
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+.claude/worktrees/
+
+# coverage / build artifact dumps
+coverage_output.txt

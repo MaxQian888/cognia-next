@@ -15,7 +15,7 @@ jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => mockRows,
 }))
 
-const setPluginEnabledMock = jest.fn(async () => undefined)
+const setPluginEnabledMock = jest.fn(async (_id: string, _enabled: boolean) => undefined)
 jest.mock("@/lib/db/plugins", () => ({
   listPlugins: jest.fn(async () => mockRows),
   setPluginEnabled: (id: string, enabled: boolean) => setPluginEnabledMock(id, enabled),

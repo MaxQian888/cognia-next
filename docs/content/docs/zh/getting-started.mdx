@@ -9,12 +9,12 @@ description: 从源码安装 Cognia，分别在 Web 与桌面模式下运行，�
 
 ## 前置要求
 
-| 工具 | 版本 | 用途 |
-| --- | --- | --- |
-| **Node.js** | ≥ 20.x | Next.js 16 / React 19 运行时 |
-| **pnpm** | ≥ 10.x | 整个 monorepo 共用一个 lockfile（`pnpm-workspace.yaml`） |
-| **Rust** | ≥ 1.77.2 | Tauri 2.9 编译 |
-| **C/C++ 工具链** | 因平台而异 | Tauri 编译原生扩展（如 sqlite-vec）需要 |
+| 工具             | 版本       | 用途                                                     |
+| ---------------- | ---------- | -------------------------------------------------------- |
+| **Node.js**      | ≥ 20.x     | Next.js 16 / React 19 运行时                             |
+| **pnpm**         | ≥ 10.x     | 整个 monorepo 共用一个 lockfile（`pnpm-workspace.yaml`） |
+| **Rust**         | ≥ 1.77.2   | Tauri 2.9 编译                                           |
+| **C/C++ 工具链** | 因平台而异 | Tauri 编译原生扩展（如 sqlite-vec）需要                  |
 
 平台特定说明：
 
@@ -30,6 +30,7 @@ description: 从源码安装 Cognia，分别在 Web 与桌面模式下运行，�
     ```
 
     Apple Silicon 与 Intel 都不需要其他设置。
+
   </Tab>
   <Tab value="Linux">
     安装 GTK / WebKitGTK / libsoup，按发行版参见 [Tauri 前置要求](https://tauri.app/start/prerequisites/)。
@@ -40,6 +41,7 @@ description: 从源码安装 Cognia，分别在 Web 与桌面模式下运行，�
     sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
         libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
     ```
+
   </Tab>
 </Tabs>
 
@@ -62,6 +64,7 @@ cargo --version
     git clone https://github.com/MaxQian888/cognia-next.git
     cd cognia-next
     ```
+
   </Step>
   <Step>
     ### 安装 workspace 依赖
@@ -76,6 +79,7 @@ cargo --version
     - 文档包（`docs/`）—— Fumadocs 文档站点。
 
     两者共享根目录 `pnpm-lock.yaml`。
+
   </Step>
   <Step>
     ### 隐式步骤
@@ -84,6 +88,7 @@ cargo --version
 
     - `prepare` 脚本 → 安装 Husky git hooks（commitlint 校验 commit-msg、lint-staged 处理 pre-commit）。
     - `predev` / `prebuild` → `node scripts/copy-monaco-assets.mjs`，把 Monaco 编辑器资源拷贝到 `public/`。
+
   </Step>
   <Step>
     ### （可选）安装 sidecar 依赖
@@ -96,6 +101,7 @@ cargo --version
     pnpm install
     cd ..
     ```
+
   </Step>
 </Steps>
 
@@ -150,6 +156,7 @@ pnpm tauri info
     ```bash
     pnpm docs:dev   # 保持运行，或首次编译完后 Ctrl+C
     ```
+
   </Accordion>
   <Accordion title="Sidecar 启动失败（无凭证）" id="sidecar-credentials">
     Sidecar 从 Claude Code 的同一来源读取凭证（`ANTHROPIC_API_KEY`、`~/.claude/` 中的 OAuth token）。在没有 Claude Code 登录的全新机器上，它会启动但每次 `claude_send` 都返回 "no credentials"。
@@ -158,6 +165,7 @@ pnpm tauri info
 
     - 在 `.env.local` 设置 `ANTHROPIC_API_KEY`，**或**
     - 运行一次 `claude login`（官方 Claude Code CLI），写入 `~/.claude/`。
+
   </Accordion>
   <Accordion title="端口 3000 已被占用" id="port-3000">
     <Tabs groupId="os" persist items={["Windows", "macOS / Linux"]}>
@@ -175,6 +183,7 @@ pnpm tauri info
     </Tabs>
 
     也可以改成 `PORT=3010 pnpm dev`，并相应修改 `tauri.conf.json` → `build.devUrl`。
+
   </Accordion>
   <Accordion title="Rust 编译错误" id="rust-errors">
     ```bash
@@ -187,6 +196,7 @@ pnpm tauri info
       如果看到 `error: failed to run custom build command for sqlite-vec ...`，
       说明缺少 C 编译器 —— 按"前置要求"安装平台工具链。
     </Callout>
+
   </Accordion>
 </Accordions>
 
@@ -215,7 +225,11 @@ pnpm docs:dev       # Fumadocs（端口 3001）
 <Cards>
   <Card title="架构" href="./architecture" description="先看分层设计再深入" />
   <Card title="运行时 & Tauri" href="./runtime-and-tauri" description="如要修改原生代码" />
-  <Card title="Sidecar & Claude SDK" href="./sidecar-and-claude-sdk" description="承载 SDK 的 Node 主机" />
+  <Card
+    title="Sidecar & Claude SDK"
+    href="./sidecar-and-claude-sdk"
+    description="承载 SDK 的 Node 主机"
+  />
   <Card title="聊天 & 技能" href="./chat-and-skills" description="如要做 AI 表层" />
   <Card title="员工数字孪生" href="./employee-twin" description="最深的定制化层" />
   <Card title="开发工作流" href="./development" description="日常脚本、约定、测试" />

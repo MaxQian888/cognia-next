@@ -46,6 +46,10 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
     ...dispatcherImpl,
     hooks: { has: (n: string) => hookSet.has(n) },
   }),
+  getPluginEventHooks: () => ({
+    ...dispatcherImpl,
+    hooks: { has: (n: string) => hookSet.has(n) },
+  }),
 }))
 
 beforeEach(() => {

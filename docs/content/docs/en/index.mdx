@@ -50,43 +50,99 @@ flowchart LR
 
 ## What's inside
 
-| Subsystem | Where |
-| --- | --- |
-| Multi-character / skill / team chat | `app/`, `components/chat/`, `lib/chat/`, `lib/character/` (via `lib/claude/types.ts`), `lib/skills/`, `lib/db/{characters,skills,teams,sessions,messages}.ts` |
-| Claude Agent SDK + Node sidecar | `sidecar/claude-host.mjs`, `lib/claude/`, `src-tauri/src/claude/` |
-| Employee Digital Twin (RAG + style few-shot) | `lib/twin/{ingest,distill,runtime}/`, `components/twin/`, `app/twin/`, `types/twin/` |
-| Native vector store (sqlite-vec) | `src-tauri/src/vector/`, `lib/vector/` |
-| Encrypted backup / import (schema v3) | `lib/data/`, `components/settings/data/` |
-| Cross-platform scheduler | `src-tauri/src/scheduler/`, `lib/scheduler/`, `components/scheduler/` |
-| Plugin system | `lib/plugin/`, `lib/db/plugins.ts`, `components/plugin/` |
-| A2UI / Canvas / Artifacts surfaces | `lib/a2ui/`, `lib/canvas/`, `lib/artifacts/`, `components/{a2ui,canvas,artifacts}/` |
-| TTS (Edge / OpenAI / Azure / ElevenLabs / native) | `src-tauri/src/tts/`, `lib/tts/` |
-| MCP servers + presets | `lib/claude/mcp-presets.ts`, `lib/db/mcp-servers.ts` |
-| Theming (oklch + custom themes) | `lib/themes/`, `lib/theme/`, `app/globals.css` |
-| i18n (next-intl) | `lib/i18n/`, `i18n/messages/{en,zh-CN}.json` |
+| Subsystem                                         | Where                                                                                                                                                         |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Multi-character / skill / team chat               | `app/`, `components/chat/`, `lib/chat/`, `lib/character/` (via `lib/claude/types.ts`), `lib/skills/`, `lib/db/{characters,skills,teams,sessions,messages}.ts` |
+| Claude Agent SDK + Node sidecar                   | `sidecar/claude-host.mjs`, `lib/claude/`, `src-tauri/src/claude/`                                                                                             |
+| Employee Digital Twin (RAG + style few-shot)      | `lib/twin/{ingest,distill,runtime}/`, `components/twin/`, `app/twin/`, `types/twin/`                                                                          |
+| Native vector store (sqlite-vec)                  | `src-tauri/src/vector/`, `lib/vector/`                                                                                                                        |
+| Encrypted backup / import (schema v3)             | `lib/data/`, `components/settings/data/`                                                                                                                      |
+| Cross-platform scheduler                          | `src-tauri/src/scheduler/`, `lib/scheduler/`, `components/scheduler/`                                                                                         |
+| Plugin system                                     | `lib/plugin/`, `lib/db/plugins.ts`, `components/plugin/`                                                                                                      |
+| A2UI / Canvas / Artifacts surfaces                | `lib/a2ui/`, `lib/canvas/`, `lib/artifacts/`, `components/{a2ui,canvas,artifacts}/`                                                                           |
+| TTS (Edge / OpenAI / Azure / ElevenLabs / native) | `src-tauri/src/tts/`, `lib/tts/`                                                                                                                              |
+| MCP servers + presets                             | `lib/claude/mcp-presets.ts`, `lib/db/mcp-servers.ts`                                                                                                          |
+| Theming (oklch + custom themes)                   | `lib/themes/`, `lib/theme/`, `app/globals.css`                                                                                                                |
+| i18n (next-intl)                                  | `lib/i18n/`, `i18n/messages/{en,zh-CN}.json`                                                                                                                  |
 
 Read the [Architecture](./architecture) page for how these layers fit together.
 
 ## Quick navigation
 
 <Cards>
-  <Card title="Getting Started" href="./getting-started" description="Install deps, run web mode, run desktop mode." />
-  <Card title="Architecture" href="./architecture" description="Four-layer view: frontend → IPC → Rust → sidecar." />
-  <Card title="Runtime & Tauri" href="./runtime-and-tauri" description="Dual web/desktop runtime, IPC pattern, CSP, identifiers." />
-  <Card title="Sidecar & Claude Agent SDK" href="./sidecar-and-claude-sdk" description="Node host protocol, lifecycle, hooks." />
-  <Card title="Chat & Skills" href="./chat-and-skills" description="Sessions, characters, skills, teams, MCP presets." />
-  <Card title="Employee Digital Twin" href="./employee-twin" description="Ingest / distill / runtime pipelines." />
-  <Card title="Vector store" href="./vector-store" description="Native sqlite-vec + 5 cloud backends." />
-  <Card title="Backup & data transfer" href="./backup-and-data" description="Schema v3, scheduled writes, imports." />
-  <Card title="Scheduler" href="./scheduler" description="Cron parsing, native promotion, task templates." />
-  <Card title="Plugin system" href="./plugin-system" description="Manifest, permissions, marketplace, scheduled jobs." />
-  <Card title="Storage" href="./storage" description="Dexie schema v15, settings table, migration discipline." />
-  <Card title="Theming & i18n" href="./theming-and-i18n" description="Tailwind v4, oklch theme tokens, locale switching." />
-  <Card title="Development" href="./development" description="Workflow, scripts, conventions, testing standards." />
-  <Card title="Deployment" href="./deployment" description="Building for web, desktop, and the docs site." />
+  <Card
+    title="Getting Started"
+    href="./getting-started"
+    description="Install deps, run web mode, run desktop mode."
+  />
+  <Card
+    title="Architecture"
+    href="./architecture"
+    description="Four-layer view: frontend → IPC → Rust → sidecar."
+  />
+  <Card
+    title="Runtime & Tauri"
+    href="./runtime-and-tauri"
+    description="Dual web/desktop runtime, IPC pattern, CSP, identifiers."
+  />
+  <Card
+    title="Sidecar & Claude Agent SDK"
+    href="./sidecar-and-claude-sdk"
+    description="Node host protocol, lifecycle, hooks."
+  />
+  <Card
+    title="Chat & Skills"
+    href="./chat-and-skills"
+    description="Sessions, characters, skills, teams, MCP presets."
+  />
+  <Card
+    title="Employee Digital Twin"
+    href="./employee-twin"
+    description="Ingest / distill / runtime pipelines."
+  />
+  <Card
+    title="Vector store"
+    href="./vector-store"
+    description="Native sqlite-vec + 5 cloud backends."
+  />
+  <Card
+    title="Backup & data transfer"
+    href="./backup-and-data"
+    description="Schema v3, scheduled writes, imports."
+  />
+  <Card
+    title="Scheduler"
+    href="./scheduler"
+    description="Cron parsing, native promotion, task templates."
+  />
+  <Card
+    title="Plugin system"
+    href="./plugin-system"
+    description="Manifest, permissions, marketplace, scheduled jobs."
+  />
+  <Card
+    title="Storage"
+    href="./storage"
+    description="Dexie schema v15, settings table, migration discipline."
+  />
+  <Card
+    title="Theming & i18n"
+    href="./theming-and-i18n"
+    description="Tailwind v4, oklch theme tokens, locale switching."
+  />
+  <Card
+    title="Development"
+    href="./development"
+    description="Workflow, scripts, conventions, testing standards."
+  />
+  <Card
+    title="Deployment"
+    href="./deployment"
+    description="Building for web, desktop, and the docs site."
+  />
 </Cards>
 
 <Callout type="info" title="ADRs">
-  The four [Architecture Decision Records](../adr/0001-backup-schema-v3) are referenced
-  from the relevant pages and explain **why** each subsystem looks the way it does.
+  The four [Architecture Decision Records](../adr/0001-backup-schema-v3) are referenced from the
+  relevant pages and explain **why** each subsystem looks the way it does.
 </Callout>

@@ -30,6 +30,7 @@ jest.mock("./composer/voice-controls", () => ({
 import { render, waitFor } from "@testing-library/react"
 import { act } from "react"
 import type { ReactNode } from "react"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { Composer } from "./composer"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
@@ -52,7 +53,9 @@ function makeAdapter(overrides: Partial<DataAdapter> = {}): DataAdapter {
 
 function withAdapter(adapter: DataAdapter) {
   const Wrapper = ({ children }: { children: ReactNode }) => (
-    <DataAdapterProvider adapter={adapter}>{children}</DataAdapterProvider>
+    <DataAdapterProvider adapter={adapter}>
+      <TooltipProvider>{children}</TooltipProvider>
+    </DataAdapterProvider>
   )
   Wrapper.displayName = "ComposerTestWrapper"
   return Wrapper
@@ -95,13 +98,15 @@ describe("Composer — data-hooks integration", () => {
     const adapter = makeAdapter({ updateSession })
     render(
       <DataAdapterProvider adapter={adapter}>
-        <Composer
-          session={mkSession({ permissionMode: undefined })}
-          onStartNewSession={async () => undefined}
-          onOpenSettings={() => undefined}
-          onSend={async () => undefined}
-          onStop={async () => undefined}
-        />
+        <TooltipProvider>
+          <Composer
+            session={mkSession({ permissionMode: undefined })}
+            onStartNewSession={async () => undefined}
+            onOpenSettings={() => undefined}
+            onSend={async () => undefined}
+            onStop={async () => undefined}
+          />
+        </TooltipProvider>
       </DataAdapterProvider>
     )
 
@@ -124,13 +129,15 @@ describe("Composer — data-hooks integration", () => {
     const adapter = makeAdapter({ updateSession })
     render(
       <DataAdapterProvider adapter={adapter}>
-        <Composer
-          session={mkSession({ permissionMode: "plan" })}
-          onStartNewSession={async () => undefined}
-          onOpenSettings={() => undefined}
-          onSend={async () => undefined}
-          onStop={async () => undefined}
-        />
+        <TooltipProvider>
+          <Composer
+            session={mkSession({ permissionMode: "plan" })}
+            onStartNewSession={async () => undefined}
+            onOpenSettings={() => undefined}
+            onSend={async () => undefined}
+            onStop={async () => undefined}
+          />
+        </TooltipProvider>
       </DataAdapterProvider>
     )
 

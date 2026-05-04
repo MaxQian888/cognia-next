@@ -11,7 +11,7 @@
 // pass; the UI degrades to a manifest preview when an unsupported field
 // shape shows up.
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
@@ -37,6 +37,7 @@ import {
 import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { getPlugin, setPluginConfig } from "@/lib/db/plugins"
+import type { PluginRow } from "@/lib/db/plugin-types"
 import { usePluginsStore } from "@/stores/plugins"
 
 interface SchemaField {
@@ -133,26 +134,48 @@ export function PluginConfigForm() {
 function PluginConfigFormContent({ pluginId, onClose }: { pluginId: string; onClose: () => void }) {
   const t = useTranslations("plugins.configForm")
   const plugin = useLiveQuery(() => getPlugin(pluginId), [pluginId])
+
+  if (!plugin) {
+    return <p className="text-sm text-muted-foreground p-4">{t("loading")}</p>
+  }
+
+  return (
+    <PluginConfigFormBody key={pluginId} pluginId={pluginId} plugin={plugin} onClose={onClose} />
+  )
+}
+
+function seedValues(
+  fields: Record<string, SchemaField>,
+  persisted: Record<string, unknown>
+): Record<string, unknown> {
+  const seed: Record<string, unknown> = {}
+  for (const [key, field] of Object.entries(fields)) {
+    if (key in persisted) seed[key] = persisted[key]
+    else if (field.default !== undefined) seed[key] = field.default
+  }
+  return seed
+}
+
+function PluginConfigFormBody({
+  pluginId,
+  plugin,
+  onClose,
+}: {
+  pluginId: string
+  plugin: PluginRow
+  onClose: () => void
+}) {
+  const t = useTranslations("plugins.configForm")
   const schema = useMemo(
     () =>
-      parseSchema((plugin?.manifest as { configSchema?: Record<string, unknown> })?.configSchema),
+      parseSchema((plugin.manifest as { configSchema?: Record<string, unknown> })?.configSchema),
     [plugin]
   )
 
-  const [values, setValues] = useState<Record<string, unknown>>(() => ({}))
+  const [values, setValues] = useState<Record<string, unknown>>(() =>
+    seedValues(schema.fields, plugin.config ?? {})
+  )
   const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    if (!plugin) return
-    const persisted = plugin.config ?? {}
-    const seed: Record<string, unknown> = {}
-    for (const [key, field] of Object.entries(schema.fields)) {
-      if (key in persisted) seed[key] = persisted[key]
-      else if (field.default !== undefined) seed[key] = field.default
-    }
-    const timer = setTimeout(() => setValues(seed), 0)
-    return () => clearTimeout(timer)
-  }, [plugin, schema])
 
   const handleSave = async () => {
     setSaving(true)
@@ -162,10 +185,6 @@ function PluginConfigFormContent({ pluginId, onClose }: { pluginId: string; onCl
     } finally {
       setSaving(false)
     }
-  }
-
-  if (!plugin) {
-    return <p className="text-sm text-muted-foreground p-4">{t("loading")}</p>
   }
 
   if (schema.unknown || Object.keys(schema.fields).length === 0) {

@@ -1,11 +1,15 @@
 /**
- * Coverage for `llm.ts:extractJson` — the JSON-from-LLM-prose extractor.
- * `createAnthropicLlmClient` is exercised end-to-end via the agent tests
- * with a mock client; here we only verify the parser handles the messy
- * shapes real models emit.
+ * Coverage for `llm.ts`:
+ *   - `extractJson` — the JSON-from-LLM-prose extractor.
+ *   - `createLlmClient` provider dispatch — verifies each branch builds
+ *     without throwing and that the back-compat alias still resolves.
+ *
+ * The full agent-side flow (a mocked `LlmClient` driving the distill
+ * sub-agents) is covered separately by the agent tests; here we only
+ * pin the parser + the client-factory dispatch.
  */
 
-import { extractJson } from "./llm"
+import { extractJson, createLlmClient, createAnthropicLlmClient, type LlmConfig } from "./llm"
 
 describe("extractJson", () => {
   it("parses a bare JSON object", () => {
@@ -59,5 +63,55 @@ describe("extractJson", () => {
 
   it("throws on an unterminated JSON span", () => {
     expect(() => extractJson('{"a": 1, "b": ')).toThrow(/unterminated/)
+  })
+})
+
+describe("createLlmClient", () => {
+  // Each provider branch returns an object with `.complete(...)`. The
+  // underlying SDK is loaded lazily, so just constructing the client must
+  // never throw — that's the contract the workbench depends on so a
+  // mis-configured provider surfaces the error at send time, not at
+  // module load.
+  const baseConfig = (provider: LlmConfig["provider"]): LlmConfig => ({
+    provider,
+    model: `${provider}-test-model`,
+    apiKey: "test-key",
+  })
+
+  it("constructs an Anthropic client without throwing", () => {
+    const client = createLlmClient(baseConfig("anthropic"))
+    expect(typeof client.complete).toBe("function")
+  })
+
+  it("constructs an OpenAI client without throwing", () => {
+    const client = createLlmClient(baseConfig("openai"))
+    expect(typeof client.complete).toBe("function")
+  })
+
+  it("constructs a Google client without throwing", () => {
+    const client = createLlmClient(baseConfig("google"))
+    expect(typeof client.complete).toBe("function")
+  })
+
+  it("constructs a Mistral client without throwing", () => {
+    const client = createLlmClient(baseConfig("mistral"))
+    expect(typeof client.complete).toBe("function")
+  })
+
+  it("constructs a Cohere client without throwing", () => {
+    const client = createLlmClient(baseConfig("cohere"))
+    expect(typeof client.complete).toBe("function")
+  })
+
+  it("surfaces an unsupported-provider error on first complete() call", async () => {
+    const client = createLlmClient({
+      ...baseConfig("openai"),
+      provider: "made-up-provider" as LlmConfig["provider"],
+    })
+    await expect(client.complete("hi")).rejects.toThrow(/unsupported provider/i)
+  })
+
+  it("createAnthropicLlmClient is the same factory for back-compat", () => {
+    expect(createAnthropicLlmClient).toBe(createLlmClient)
   })
 })

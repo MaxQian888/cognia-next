@@ -67,10 +67,50 @@ pub struct SendOptions {
     /// Fork a new branch from an existing SDK session id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fork_from_session_id: Option<String>,
+
+    // ---- Provider routing (multi-provider port) -----------------------------
+
+    /// Provider id this turn dispatches against. `None` (or `"anthropic"`)
+    /// keeps the legacy Claude Agent SDK path; any other value flows through
+    /// `sidecar/dispatch/ai-sdk.mjs` (P2). Built-ins: `anthropic`, `openai`,
+    /// `google`, `mistral`, `cohere`, `openrouter`. Custom provider ids also
+    /// accepted (their AI SDK protocol arrives in `provider_credentials`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    /// Per-call credentials. Travels with the request so the sidecar never
+    /// reads keys from disk. `protocol` is the AI SDK family for non-built-in
+    /// provider ids (`"openai"|"anthropic"|"google"|"mistral"|"cohere"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_credentials: Option<ProviderCredentials>,
+    /// Alias resolution metadata. Sidecar ignores this — it's surfaced for
+    /// renderer-side fallback retries + the routing-decision badge in
+    /// message metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alias_resolution: Option<Value>,
+    /// Routing strategy + reason. Sidecar passes verbatim back to the renderer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub routing_decision: Option<Value>,
+
     /// Catch-all for forward-compatibility: any extra fields are merged into
     /// the JSON payload sent to the sidecar.
     #[serde(flatten)]
     pub extra: std::collections::HashMap<String, Value>,
+}
+
+/// Per-call provider credentials. Sent inline with the request rather than
+/// looked up from disk so the sidecar can stay credential-free.
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderCredentials {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// AI SDK protocol family: one of `"openai"`, `"anthropic"`, `"google"`,
+    /// `"mistral"`, `"cohere"`. Required when `provider` is a custom id; for
+    /// built-in providers the sidecar derives the protocol from the id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<String>,
 }
 
 impl SendOptions {
@@ -92,6 +132,25 @@ impl SendOptions {
             for s in sources {
                 if !matches!(s.as_str(), "user" | "project" | "local") {
                     return Err(format!("invalid settingSources entry: {s}"));
+                }
+            }
+        }
+        // Provider id is otherwise free-form (custom providers are allowed)
+        // but an empty string is always wrong.
+        if let Some(p) = self.provider.as_ref() {
+            if p.is_empty() {
+                return Err("provider must not be empty".into());
+            }
+        }
+        // The AI SDK protocol field, when present, must name a family the
+        // sidecar's dispatch table knows about.
+        if let Some(creds) = self.provider_credentials.as_ref() {
+            if let Some(proto) = creds.protocol.as_ref() {
+                if !matches!(
+                    proto.as_str(),
+                    "openai" | "anthropic" | "google" | "mistral" | "cohere"
+                ) {
+                    return Err(format!("invalid providerCredentials.protocol: {proto}"));
                 }
             }
         }
@@ -256,4 +315,134 @@ pub async fn claude_sidecar_status(
     Ok(SidecarStatus {
         ready: state.is_ready().await,
     })
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(json_str: &str) -> SendOptions {
+        serde_json::from_str(json_str).expect("valid SendOptions JSON")
+    }
+
+    #[test]
+    fn validate_accepts_anthropic_provider_with_credentials() {
+        let opts = parse(
+            r#"{
+                "provider": "anthropic",
+                "providerCredentials": { "apiKey": "sk-test", "baseURL": "https://api.anthropic.com" }
+            }"#,
+        );
+        assert!(opts.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_openai_provider_with_protocol() {
+        let opts = parse(
+            r#"{
+                "provider": "openai",
+                "providerCredentials": { "apiKey": "sk-foo", "protocol": "openai" }
+            }"#,
+        );
+        assert!(opts.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_custom_provider_with_explicit_protocol() {
+        let opts = parse(
+            r#"{
+                "provider": "my-self-hosted",
+                "providerCredentials": {
+                    "apiKey": "x",
+                    "baseURL": "https://example.test/v1",
+                    "protocol": "openai"
+                }
+            }"#,
+        );
+        assert!(opts.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_empty_provider_string() {
+        let opts = parse(r#"{ "provider": "" }"#);
+        let err = opts.validate().expect_err("empty provider should fail");
+        assert!(err.contains("provider"));
+    }
+
+    #[test]
+    fn validate_rejects_unknown_protocol() {
+        let opts = parse(
+            r#"{
+                "provider": "openai",
+                "providerCredentials": { "protocol": "voodoo" }
+            }"#,
+        );
+        let err = opts.validate().expect_err("bad protocol should fail");
+        assert!(err.contains("protocol"));
+    }
+
+    #[test]
+    fn provider_credentials_omitted_when_none() {
+        let opts = SendOptions::default();
+        let json = serde_json::to_value(&opts).expect("serialise");
+        assert!(json.get("providerCredentials").is_none());
+        assert!(json.get("provider").is_none());
+        assert!(json.get("aliasResolution").is_none());
+    }
+
+    #[test]
+    fn alias_resolution_round_trips_as_opaque_value() {
+        let opts = parse(
+            r#"{
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "aliasResolution": {
+                    "alias": "fast",
+                    "resolvedTo": { "providerId": "openai", "modelId": "gpt-4o-mini" },
+                    "fallbackEntries": [
+                        { "providerId": "anthropic", "modelId": "claude-3-5-haiku" }
+                    ]
+                },
+                "routingDecision": { "strategy": "cost", "reason": "cheapest in chain" }
+            }"#,
+        );
+        assert!(opts.validate().is_ok());
+        let alias = opts.alias_resolution.as_ref().expect("alias present");
+        assert_eq!(alias["alias"], "fast");
+        let decision = opts.routing_decision.as_ref().expect("decision present");
+        assert_eq!(decision["strategy"], "cost");
+    }
+
+    #[test]
+    fn back_compat_validates_with_no_provider_fields() {
+        // Existing (pre-port) Anthropic-only chats must keep working with no
+        // provider field at all.
+        let opts = parse(r#"{ "model": "claude-3-5-sonnet-20241022" }"#);
+        assert!(opts.validate().is_ok());
+        assert!(opts.provider.is_none());
+        assert!(opts.provider_credentials.is_none());
+    }
+
+    #[test]
+    fn existing_validation_rules_still_work() {
+        let dual_prompt = parse(
+            r#"{ "systemPrompt": "a", "appendSystemPrompt": "b" }"#,
+        );
+        assert!(dual_prompt.validate().is_err());
+
+        let dual_session = parse(
+            r#"{ "resumeSessionId": "x", "forkFromSessionId": "y" }"#,
+        );
+        assert!(dual_session.validate().is_err());
+
+        let bad_turns = parse(r#"{ "maxTurns": 0 }"#);
+        assert!(bad_turns.validate().is_err());
+
+        let bad_source = parse(r#"{ "settingSources": ["user", "globe"] }"#);
+        assert!(bad_source.validate().is_err());
+    }
 }

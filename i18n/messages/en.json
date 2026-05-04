@@ -138,6 +138,20 @@
     }
   },
   "chat": {
+    "subagentPart": {
+      "title": "Sub-agent",
+      "openInWorkspace": "Open in workspace",
+      "noLogsYet": "No log entries yet — sub-agent is initializing.",
+      "durationMs": "{ms}ms"
+    },
+    "agentTeamDispatch": {
+      "title": "Dispatch",
+      "supervisor": "Supervisor",
+      "openMember": "Open member"
+    },
+    "slashCommand": {
+      "ranSlashCommand": "ran slash command"
+    },
     "header": {
       "untitledSession": "(untitled)",
       "noApiKey": "No API key",
@@ -928,11 +942,14 @@
       "agents": "Agents",
       "agentModes": "Agent modes",
       "agentTeams": "Agent teams",
+      "hooks": "Hooks",
+      "slashCommands": "Slash commands",
       "tools": "Tools",
       "search": "Web search",
       "speech": "Speech",
       "characters": "Characters",
       "skills": "Skills",
+      "subagents": "Sub-agents",
       "teams": "Teams",
       "presets": "Presets",
       "artifacts": "Artifacts",
@@ -957,11 +974,14 @@
       "agents": "External agents — Claude Code CLI, Codex, Gemini CLI, Cursor and any custom command speaking ACP / OpenCode / HTTP.",
       "agentModes": "Built-in and custom agent modes — system prompt, tool list, output format and live preview presets.",
       "agentTeams": "Multi-agent team templates — manager-worker, parallel specialists, research squad. Browse built-ins, duplicate to fork, or create new templates.",
+      "hooks": "Lifecycle hooks for ~/.claude/settings.json (User / Project / Local). 21 events × matcher × command-or-webhook handlers.",
+      "slashCommands": "Built-in, custom, and plugin-contributed slash commands — browse, search, and copy a command into the composer.",
       "tools": "Built-in shell, filesystem, git, process and environment tools — global on/off, risk levels, and always-allow management.",
       "search": "Web search providers (Tavily, Brave, Bing, Google, Perplexity, Exa…), defaults, cache, safety and source verification.",
       "speech": "Voice input (STT) language and microphone, plus read-aloud (TTS) provider, voice and auto-play.",
       "characters": "Reusable personas with their own model and skills.",
       "skills": "Reusable instruction blobs appended to system prompts.",
+      "subagents": "Sub-agent templates and live runtime — spawn focused workers from a parent agent for research, code review, content, or analysis sub-tasks.",
       "teams": "Multi-character coordination — round-robin, supervisor, manual.",
       "presets": "Reusable session configurations — system prompt plus model, tool, MCP, and skill overrides.",
       "artifacts": "Auto-detect code, HTML, React, SVG, Mermaid, charts, math and Jupyter notebooks into a side-panel workspace.",
@@ -1824,6 +1844,116 @@
       "editorDescriptionPlaceholder": "What this team is for…",
       "editorCategory": "Category",
       "teammateEditNote": "{count, plural, =0 {No teammates yet — edit teammates from the workspace after creation.} =1 {# teammate carried over from the source template — edit them in the workspace.} other {# teammates carried over from the source template — edit them in the workspace.}}"
+    },
+    "slashCommands": {
+      "title": "Slash commands",
+      "description": "Browse every command surface — built-in actions, your `.claude/commands/*.md` templates, and plugin-contributed commands. Click the play icon to copy `/<name>` to your clipboard.",
+      "filterPlaceholder": "Filter by name or description…",
+      "builtin": "Built-in ({count})",
+      "custom": "Custom ({count})",
+      "plugin": "Plugin ({count})",
+      "scope": {
+        "builtin": "Built-in",
+        "user": "User",
+        "project": "Project",
+        "plugin": "Plugin · {id}"
+      },
+      "scanning": "Scanning .claude/commands…",
+      "emptyBuiltin": "No matches.",
+      "emptyCustom": "No custom commands found in ~/.claude/commands or .claude/commands.",
+      "emptyCustomWeb": "Custom command discovery requires the desktop app.",
+      "emptyPlugin": "No plugin-contributed commands.",
+      "try": "Copy to clipboard",
+      "copiedToClipboard": "Copied `/{name} ` to clipboard.",
+      "typeIntoComposer": "Type `/{name}` into the chat composer to run it.",
+      "openInEditor": "Open file"
+    },
+    "subagents": {
+      "title": "Sub-agents",
+      "description": "Reusable templates and live status for sub-agents spawned by a parent agent. Templates persist across sessions; runtime data is ephemeral.",
+      "tabs": {
+        "templates": "Templates",
+        "runtime": "Runtime"
+      },
+      "templates": {
+        "title": "Templates",
+        "description": "Built-in and user-created sub-agent templates. Built-ins are read-only — duplicate to fork an editable copy.",
+        "newTemplate": "New template",
+        "create": "Create",
+        "save": "Save",
+        "edit": "Edit",
+        "duplicate": "Duplicate",
+        "builtIn": "Built-in",
+        "builtInReadOnly": "Built-in templates are read-only — duplicate first.",
+        "removeTitle": "Remove template?",
+        "removeBody": "\"{name}\" will be removed.",
+        "addedToast": "Added \"{name}\".",
+        "updatedToast": "Updated \"{name}\".",
+        "removedToast": "Removed \"{name}\".",
+        "duplicatedToast": "Duplicated as \"{name}\".",
+        "editAria": "Edit template {name}",
+        "duplicateAria": "Duplicate template {name}",
+        "deleteAria": "Delete template {name}",
+        "nameRequired": "Template name is required.",
+        "editorName": "Name",
+        "editorNamePlaceholder": "Web research",
+        "editorDescription": "Description",
+        "editorCategory": "Category",
+        "editorTaskTemplate": "Task template",
+        "editorTaskTemplatePlaceholder": "Research the following: {{topic}}"
+      },
+      "runtime": {
+        "title": "Runtime",
+        "description": "Currently-executing sub-agents and their last activity. Updates live as the orchestrator emits events.",
+        "emptyTitle": "No sub-agents are running.",
+        "emptyBody": "Sub-agents spawned by an active chat will appear here. The runtime is in-memory and resets when the app restarts.",
+        "parent": "parent: {id}",
+        "duration": "{ms}ms"
+      }
+    },
+    "hooks": {
+      "title": "Lifecycle hooks",
+      "description": "Run shell commands or send webhooks at lifecycle events. Stored in ~/.claude/settings.json (User scope) or .claude/settings.json under a project. The full settings document round-trips — unrelated keys are preserved.",
+      "scope": {
+        "user": "User",
+        "project": "Project",
+        "local": "Local"
+      },
+      "addGroup": "Add group",
+      "noGroupsForEvent": "No groups configured for {event}. Click \"Add group\" to attach a matcher.",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Saved.",
+      "saveError": "Save failed: {detail}",
+      "loadError": "Could not read settings: {detail}",
+      "revert": "Revert",
+      "group": {
+        "matcherLabel": "Matcher",
+        "matcherPlaceholder": "Bash|Write or .* (leave empty to match all)",
+        "matcherHint": "Tool-name regex, pipe alternation, or empty / '*' to match every event.",
+        "matcherInvalid": "Invalid regex: {detail}",
+        "removeAria": "Remove this group",
+        "emptyHandlers": "No handlers — add one below.",
+        "addHandler": "Add handler"
+      },
+      "handler": {
+        "typeLabel": "Type",
+        "typeCommand": "Command",
+        "typeWebhook": "Webhook",
+        "removeAria": "Remove handler",
+        "commandLabel": "Shell command",
+        "commandPlaceholder": "echo \"$CLAUDE_TOOL_NAME ran\"",
+        "urlLabel": "URL",
+        "urlPlaceholder": "https://example.com/hook",
+        "headersLabel": "Headers",
+        "headersAdd": "Add header",
+        "headersEmpty": "No custom headers.",
+        "headerKeyPlaceholder": "X-Custom",
+        "headerValuePlaceholder": "value",
+        "headerRemoveAria": "Remove header",
+        "timeoutLabel": "Timeout (ms)",
+        "timeoutPlaceholder": "5000"
+      }
     },
     "teams": {
       "title": "Teams",
@@ -5834,6 +5964,7 @@
       "setupComplete": "Setup Complete!",
       "providerReady": "{provider} is ready to use"
     },
+    "serverUrl": "Server URL",
     "modelManager": {
       "title": "Model Manager",
       "installedCount": "{installed} of {total} models installed",

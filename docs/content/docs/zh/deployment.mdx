@@ -108,6 +108,7 @@ pnpm tauri build
     ```
 
     企业批量分发首选 `.msi`；NSIS `.exe` 更小，首次运行体验更友好。
+
   </Tab>
   <Tab value="macOS">
     ```
@@ -118,6 +119,7 @@ pnpm tauri build
 
     分发 `.dmg`。Apple Silicon 用户取 `aarch64` 包，Intel 用户取 `x86_64`。
     需要单文件可用 `lipo` 合并为通用二进制。
+
   </Tab>
   <Tab value="Linux">
     ```
@@ -128,6 +130,7 @@ pnpm tauri build
     ```
 
     AppImage 兼容性最好。用户 `chmod +x` 后即可运行。
+
   </Tab>
 </Tabs>
 
@@ -182,6 +185,7 @@ Sidecar 的整个 `node_modules/` 都被打进去，因为 sidecar 作为独立 
 
     - 通过 flathub 或 snapcraft 分发以获得信任。
     - 用 GPG 签 release tag，发分离签名。
+
   </Tab>
 </Tabs>
 
@@ -205,6 +209,7 @@ Sidecar 的整个 `node_modules/` 都被打进去，因为 sidecar 作为独立 
       私钥 `cognia-next.key` 不可入仓、不可分享。
       只分发 `cognia-next.key.pub`。
     </Callout>
+
   </Step>
   <Step>
     ### 把公钥写进 `tauri.conf.json`
@@ -220,17 +225,20 @@ Sidecar 的整个 `node_modules/` 都被打进去，因为 sidecar 作为独立 
       }
     }
     ```
+
   </Step>
   <Step>
     ### 设置 CI secrets
 
     - `TAURI_PRIVATE_KEY` —— 私钥文件 base64。
     - `TAURI_KEY_PASSWORD` —— 密码（或留空字符串）。
+
   </Step>
   <Step>
     ### 打 tag 发版
 
     Tauri GitHub Action 会发布 `latest.json` 清单，updater 在启动时轮询。
+
   </Step>
 </Steps>
 
@@ -246,11 +254,15 @@ Sidecar 的整个 `node_modules/` 都被打进去，因为 sidecar 作为独立 
   "platforms": {
     "darwin-aarch64": {
       "signature": "<base64>",
-      "url": "https://github.com/.../Cognia_0.2.0_aarch64.dmg"
+      "url": "https://github.com/.../Cognia_0.2.0_aarch64.dmg",
     },
-    "windows-x86_64": { /* ... */ },
-    "linux-x86_64":   { /* ... */ }
-  }
+    "windows-x86_64": {
+      /* ... */
+    },
+    "linux-x86_64": {
+      /* ... */
+    },
+  },
 }
 ```
 
@@ -278,11 +290,11 @@ Fumadocs 用 Orama 在浏览器内做全文搜索。索引在构建期由 MDX �
 
 仓库自带 `.github/workflows/`：
 
-| Workflow | 触发 | 内容 |
-| --- | --- | --- |
-| `ci.yml`（或等价） | PR、push | Lint、typecheck、test、Web 构建、有时 Tauri 冒烟 |
-| `release.yml` | 匹配 `v*.*.*` 的 tag | Tauri 构建矩阵 → 把安装包作为 release asset 上传 |
-| `docs.yml` | 推送到 `main`、docs/** | 构建 + 部署文档 |
+| Workflow           | 触发                     | 内容                                             |
+| ------------------ | ------------------------ | ------------------------------------------------ |
+| `ci.yml`（或等价） | PR、push                 | Lint、typecheck、test、Web 构建、有时 Tauri 冒烟 |
+| `release.yml`      | 匹配 `v*.*.*` 的 tag     | Tauri 构建矩阵 → 把安装包作为 release asset 上传 |
+| `docs.yml`         | 推送到 `main`、docs/\*\* | 构建 + 部署文档                                  |
 
 如要 fork Cognia 并发布二进制，把这些 workflow 一起 fork —— 它们编码了矩阵目标和签名接线。
 
@@ -303,30 +315,46 @@ Cognia 在 `package.json` 与 `Cargo.toml` 都用 **semver**，需手动同步�
 
 发版前在每个平台跑：
 
-| 表面 | 冒烟 |
-| --- | --- |
-| Web | `pnpm build && npx serve out` —— 浏览器打开、发一条消息 |
-| 桌面 | `pnpm tauri build` —— 安装并启动产物；发消息；提升一个调度任务 |
-| Sidecar | `node sidecar/claude-host.mjs --smoke` |
-| 更新 | 安装 N-1，把 `latest.json` 设到 N，验证自动更新 |
+| 表面    | 冒烟                                                           |
+| ------- | -------------------------------------------------------------- |
+| Web     | `pnpm build && npx serve out` —— 浏览器打开、发一条消息        |
+| 桌面    | `pnpm tauri build` —— 安装并启动产物；发消息；提升一个调度任务 |
+| Sidecar | `node sidecar/claude-host.mjs --smoke`                         |
+| 更新    | 安装 N-1，把 `latest.json` 设到 N，验证自动更新                |
 
 ## 在哪里入手
 
-| 目标 | 文件 |
-| --- | --- |
-| 加新构建目标 | `src-tauri/Cargo.toml`（target 依赖）、`tauri.conf.json` |
-| 调发版流水线 | `.github/workflows/release.yml` |
-| 自定义安装包 | `tauri.conf.json` → `bundle.windows` / `bundle.macOS` / `bundle.linux` |
-| 加 runtime 环境变量 | `lib/env.ts`、`.env.example`、部署文档 |
+| 目标                | 文件                                                                   |
+| ------------------- | ---------------------------------------------------------------------- |
+| 加新构建目标        | `src-tauri/Cargo.toml`（target 依赖）、`tauri.conf.json`               |
+| 调发版流水线        | `.github/workflows/release.yml`                                        |
+| 自定义安装包        | `tauri.conf.json` → `bundle.windows` / `bundle.macOS` / `bundle.linux` |
+| 加 runtime 环境变量 | `lib/env.ts`、`.env.example`、部署文档                                 |
 
 ## 中文文档到此结束
 
 <Cards>
   <Card title="概览" href="./" description="回到中文文档首页" />
-  <Card title="ADR-0001 · 备份 schema v3" href="../adr/0001-backup-schema-v3" description="为什么备份长成现在这样" />
-  <Card title="ADR-0002 · 调度器" href="../adr/0002-scheduler-full-agent-resolution" description="应用内 vs 原生分层" />
-  <Card title="ADR-0003 · 员工数字孪生" href="../adr/0003-employee-digital-twin" description="仓库里最深的设计文档" />
-  <Card title="ADR-0004 · 向量后端" href="../adr/0004-vector-native-backend" description="为何桌面默认 sqlite-vec" />
+  <Card
+    title="ADR-0001 · 备份 schema v3"
+    href="../adr/0001-backup-schema-v3"
+    description="为什么备份长成现在这样"
+  />
+  <Card
+    title="ADR-0002 · 调度器"
+    href="../adr/0002-scheduler-full-agent-resolution"
+    description="应用内 vs 原生分层"
+  />
+  <Card
+    title="ADR-0003 · 员工数字孪生"
+    href="../adr/0003-employee-digital-twin"
+    description="仓库里最深的设计文档"
+  />
+  <Card
+    title="ADR-0004 · 向量后端"
+    href="../adr/0004-vector-native-backend"
+    description="为何桌面默认 sqlite-vec"
+  />
 </Cards>
 
 <Callout type="info" title="读到这里？">

@@ -89,26 +89,22 @@ jest.mock("./reranker", () => ({
 }))
 
 jest.mock("./contextual-retrieval", () => ({
-  addContextToChunks: jest
-    .fn()
-    .mockResolvedValue([
-      {
-        id: "chunk-1",
-        content: "Test content",
-        contextualContent: "Contextual test content",
-        index: 0,
-      },
-    ]),
-  addLightweightContext: jest
-    .fn()
-    .mockReturnValue([
-      {
-        id: "chunk-1",
-        content: "Test content",
-        contextualContent: "Lightweight context",
-        index: 0,
-      },
-    ]),
+  addContextToChunks: jest.fn().mockResolvedValue([
+    {
+      id: "chunk-1",
+      content: "Test content",
+      contextualContent: "Contextual test content",
+      index: 0,
+    },
+  ]),
+  addLightweightContext: jest.fn().mockReturnValue([
+    {
+      id: "chunk-1",
+      content: "Test content",
+      contextualContent: "Lightweight context",
+      index: 0,
+    },
+  ]),
   createContextCache: jest.fn().mockReturnValue({
     get: jest.fn(),
     set: jest.fn(),

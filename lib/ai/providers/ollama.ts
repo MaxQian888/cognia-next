@@ -4,6 +4,7 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 import type {
   OllamaModel,
   OllamaServerStatus,
@@ -279,25 +280,58 @@ export async function generateOllamaEmbedding(
   model: string,
   input: string
 ): Promise<number[]> {
+  if (!baseUrl) throw new Error("baseURL is required")
+  if (!model) throw new Error("modelId is required")
+
   if (isInTauri()) {
     return invoke<number[]>("ollama_generate_embedding", { baseUrl, model, input })
   }
 
-  // Browser fallback
-  const url = normalizeBaseUrl(baseUrl)
-  const response = await fetch(`${url}/api/embed`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, input }),
-  })
-
-  if (!response.ok) {
-    throw new Error(`Failed to generate embedding: ${response.status}`)
+  const url = `${normalizeBaseUrl(baseUrl)}/api/embeddings`
+  let response: Response
+  try {
+    response = await proxyFetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, prompt: input }),
+    })
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e)
+    throw new Error(`Ollama embedding request failed (url=${url}): ${detail}`)
   }
 
-  const data = await response.json()
-  // Ollama returns embeddings array - get first one for single input
-  return data.embeddings?.[0] || []
+  if (!response.ok) {
+    let bodyText = ""
+    try {
+      bodyText = await response.text()
+    } catch {
+      // ignore — surface only the status
+    }
+    throw new Error(
+      `Ollama embedding HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}: ${bodyText}`
+    )
+  }
+
+  let data: { embedding?: number[]; embeddings?: number[][] }
+  try {
+    data = await response.json()
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e)
+    throw new Error(`Ollama embedding response was not valid JSON: ${detail}`)
+  }
+
+  if (Array.isArray(data.embedding) && data.embedding.length > 0) {
+    return data.embedding
+  }
+  if (
+    Array.isArray(data.embeddings) &&
+    data.embeddings.length > 0 &&
+    Array.isArray(data.embeddings[0]) &&
+    data.embeddings[0].length > 0
+  ) {
+    return data.embeddings[0]
+  }
+  throw new Error("Ollama embedding response is missing an 'embedding' / 'embeddings' field")
 }
 
 /**

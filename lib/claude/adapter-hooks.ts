@@ -1,12 +1,24 @@
 /**
- * Thin wrappers around the plugin lifecycle hook dispatcher so the SDK
- * message pump and request build site can fan out events without learning
- * the full hook system shape. Every wrapper is a no-op when the dispatcher
- * has no registered listeners — keeps the hot path cheap when no plugins
- * are wired up.
+ * Thin wrappers around the plugin hook dispatchers so the SDK message
+ * pump and request build site can fan out events without learning the
+ * full hook system shape. Every wrapper is a no-op when the relevant
+ * dispatcher has no registered listeners — keeps the hot path cheap
+ * when no plugins are wired up.
+ *
+ * The `lib/plugin/messaging/hooks-system` module exposes two distinct
+ * singletons:
+ *
+ * - `PluginLifecycleHooks` — `onLoad/onEnable/onDisable`, scheduled
+ *   tasks, message pipeline (`onMessageSend/Receive`), session, command,
+ *   chat flow, plan, agent, A2UI.
+ * - `PluginEventHooks` — `onUserPromptSubmit/onPreToolUse/onPostToolUse`,
+ *   `onStreamStart/Chunk/End`, `onChatError`, `onTokenUsage`,
+ *   `onPostChatReceive`.
+ *
+ * Each method below routes to the dispatcher that owns the matching hook.
  */
 
-import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
+import { getPluginEventHooks, getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import type { PluginMessage } from "@/types/plugin"
 
 interface DispatcherInternals {
@@ -14,15 +26,27 @@ interface DispatcherInternals {
   dispatcher?: { hooks?: { has: (name: string) => boolean } }
 }
 
+function readHookRegistry(dispatcher: unknown): { has: (name: string) => boolean } | undefined {
+  const internals = dispatcher as DispatcherInternals
+  return internals.dispatcher?.hooks ?? internals.hooks
+}
+
 function hasListeners(hookName: string): boolean {
-  const dispatcher = getPluginLifecycleHooks() as unknown as DispatcherInternals
-  // The dispatcher caches a Map<hookName, Set<plugin>> — we read it through
-  // the cast above but degrade gracefully if the internal shape changes.
-  const hooks = dispatcher.dispatcher?.hooks ?? dispatcher.hooks
+  // Lifecycle-scoped hook query.
+  const hooks = readHookRegistry(getPluginLifecycleHooks())
   if (hooks && typeof hooks.has === "function") {
     return hooks.has(hookName)
   }
   return true // when in doubt, dispatch — keep the wrapper safe.
+}
+
+function hasEventListeners(hookName: string): boolean {
+  // Event-scoped hook query (separate singleton from lifecycle hooks).
+  const hooks = readHookRegistry(getPluginEventHooks())
+  if (hooks && typeof hooks.has === "function") {
+    return hooks.has(hookName)
+  }
+  return true
 }
 
 export interface PromptSubmitContextLike {
@@ -44,11 +68,11 @@ export async function dispatchUserPromptSubmit(
   sessionId: string,
   context: PromptSubmitContextLike = {}
 ): Promise<PromptSubmitResultLike> {
-  if (!hasListeners("onUserPromptSubmit")) {
+  if (!hasEventListeners("onUserPromptSubmit")) {
     return { action: "proceed" }
   }
   try {
-    return (await getPluginLifecycleHooks().dispatchUserPromptSubmit(
+    return (await getPluginEventHooks().dispatchUserPromptSubmit(
       prompt,
       sessionId,
       context as never
@@ -70,9 +94,9 @@ export async function dispatchPreToolUse(
   toolArgs: unknown,
   sessionId: string
 ): Promise<PreToolUseResultLike> {
-  if (!hasListeners("onPreToolUse")) return { action: "allow" }
+  if (!hasEventListeners("onPreToolUse")) return { action: "allow" }
   try {
-    return (await getPluginLifecycleHooks().dispatchPreToolUse(
+    return (await getPluginEventHooks().dispatchPreToolUse(
       toolName,
       toolArgs,
       sessionId
@@ -94,9 +118,9 @@ export async function dispatchPostToolUse(
   toolResult: unknown,
   sessionId: string
 ): Promise<PostToolUseResultLike> {
-  if (!hasListeners("onPostToolUse")) return {}
+  if (!hasEventListeners("onPostToolUse")) return {}
   try {
-    return (await getPluginLifecycleHooks().dispatchPostToolUse(
+    return (await getPluginEventHooks().dispatchPostToolUse(
       toolName,
       toolArgs,
       toolResult,
@@ -119,9 +143,9 @@ export async function dispatchOnAssistantMessage(message: PluginMessage): Promis
 
 /** Fired when an SDK stream begins. */
 export function dispatchStreamStart(sessionId: string): void {
-  if (!hasListeners("onStreamStart")) return
+  if (!hasEventListeners("onStreamStart")) return
   try {
-    getPluginLifecycleHooks().dispatchStreamStart(sessionId)
+    getPluginEventHooks().dispatchStreamStart(sessionId)
   } catch {
     // hooks must not break the stream
   }
@@ -129,9 +153,9 @@ export function dispatchStreamStart(sessionId: string): void {
 
 /** Fired for every chunk in an SDK stream. */
 export function dispatchStreamChunk(sessionId: string, chunk: string, fullContent: string): void {
-  if (!hasListeners("onStreamChunk")) return
+  if (!hasEventListeners("onStreamChunk")) return
   try {
-    getPluginLifecycleHooks().dispatchStreamChunk(sessionId, chunk, fullContent)
+    getPluginEventHooks().dispatchStreamChunk(sessionId, chunk, fullContent)
   } catch {
     // ignore
   }
@@ -139,9 +163,9 @@ export function dispatchStreamChunk(sessionId: string, chunk: string, fullConten
 
 /** Fired when an SDK stream completes. */
 export function dispatchStreamEnd(sessionId: string, finalContent: string): void {
-  if (!hasListeners("onStreamEnd")) return
+  if (!hasEventListeners("onStreamEnd")) return
   try {
-    getPluginLifecycleHooks().dispatchStreamEnd(sessionId, finalContent)
+    getPluginEventHooks().dispatchStreamEnd(sessionId, finalContent)
   } catch {
     // ignore
   }
@@ -149,9 +173,9 @@ export function dispatchStreamEnd(sessionId: string, finalContent: string): void
 
 /** Fired when the SDK reports a chat-level error. */
 export function dispatchChatError(sessionId: string, error: Error): void {
-  if (!hasListeners("onChatError")) return
+  if (!hasEventListeners("onChatError")) return
   try {
-    getPluginLifecycleHooks().dispatchChatError(sessionId, error)
+    getPluginEventHooks().dispatchChatError(sessionId, error)
   } catch {
     // ignore
   }
@@ -167,9 +191,16 @@ export function dispatchTokenUsage(
     cacheReadTokens?: number
   }
 ): void {
-  if (!hasListeners("onTokenUsage")) return
+  if (!hasEventListeners("onTokenUsage")) return
   try {
-    getPluginLifecycleHooks().dispatchTokenUsage(sessionId, usage)
+    // The dispatcher contract uses {prompt, completion, total}; map from
+    // the SDK's {inputTokens, outputTokens} shape and ignore cache split
+    // — plugins receive a normalized total either way.
+    getPluginEventHooks().dispatchTokenUsage(sessionId, {
+      prompt: usage.inputTokens,
+      completion: usage.outputTokens,
+      total: usage.inputTokens + usage.outputTokens,
+    })
   } catch {
     // ignore
   }
@@ -183,14 +214,15 @@ export interface ChatResponseDataLike {
 
 /** Fired after the chat reply has been received and persisted. */
 export async function dispatchPostChatReceive(response: ChatResponseDataLike): Promise<unknown> {
-  if (!hasListeners("onPostChatReceive")) return {}
+  if (!hasEventListeners("onPostChatReceive")) return {}
   try {
-    return await getPluginLifecycleHooks().dispatchPostChatReceive(response as never)
+    return await getPluginEventHooks().dispatchPostChatReceive(response as never)
   } catch {
     return {}
   }
 }
 
-// Re-export the no-listeners predicate so unit tests can verify the
-// short-circuit path without poking the singleton internals.
+// Re-export the no-listeners predicates so unit tests can verify the
+// short-circuit paths without poking the singleton internals.
 export { hasListeners as __hasListenersForTests }
+export { hasEventListeners as __hasEventListenersForTests }

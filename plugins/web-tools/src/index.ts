@@ -157,7 +157,7 @@ const definition: PluginDefinition = {
           required: ["url"],
         },
       } as never,
-      execute: (args) => webFetch((args ?? {}) as FetchArgs, ctx),
+      execute: (args) => webFetch((args ?? {}) as unknown as FetchArgs, ctx),
     })
 
     ctx.agent?.registerTool?.({
@@ -176,7 +176,7 @@ const definition: PluginDefinition = {
           required: ["url"],
         },
       } as never,
-      execute: (args) => webDownload((args ?? {}) as DownloadArgs, ctx),
+      execute: (args) => webDownload((args ?? {}) as unknown as DownloadArgs, ctx),
     })
   },
   deactivate: async () => {

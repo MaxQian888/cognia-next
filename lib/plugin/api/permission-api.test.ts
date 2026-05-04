@@ -76,7 +76,6 @@ describe("Permission API", () => {
       const api = createPermissionAPI(testPluginId, [])
 
       expect(api.hasPermission("canvas:write")).toBe(false)
-
       ;(requestPluginPermission as jest.Mock).mockResolvedValue(true)
       const granted = await api.requestPermission("canvas:write", "Need to edit canvas")
 

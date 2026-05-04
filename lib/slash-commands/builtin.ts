@@ -14,21 +14,19 @@
 
 import type { ChatStatus, PermissionMode } from "@/stores/chat"
 import { useChatStore } from "@/stores/chat"
+import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
 import { handleCost, handleStatus } from "./actions/diagnostics"
+import { seedBuiltinSlashCommands } from "./registry"
 import { handleReset, handleResume, handleSessions } from "./actions/sessions"
 
-/** Names of the sections in the Settings page (URL `?section=` values). */
-export type SettingsTab =
-  | "general"
-  | "appearance"
-  | "api-key"
-  | "characters"
-  | "skills"
-  | "teams"
-  | "presets"
-  | "mcp"
-  | "data"
-  | "about"
+/**
+ * Names of the sections in the Settings page (URL `?section=` values).
+ *
+ * Re-exported from `settings-nav-config` so slash-command handlers stay in
+ * sync with the actual navigation map without a parallel union to
+ * forget-to-update.
+ */
+export type SettingsTab = SettingsSectionId
 
 /** What the dispatcher hands an Action command's handler. */
 export interface SlashContext {
@@ -43,7 +41,7 @@ export interface SlashContext {
   /** Triggers the new-chat flow used by the sidebar's "New" button. */
   startNewSession: () => Promise<void> | void
   /** Open one of the right-rail settings panels. */
-  openSettings: (tab: SettingsTab) => void
+  openSettings: (tab: SettingsSectionId) => void
   /** Force a permission mode change (Shift+Tab equivalent). */
   setPermissionMode: (mode: PermissionMode | null) => void
   /** Push a system message into the active session — used by /help. */
@@ -269,6 +267,13 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     disabled: true,
   },
 ]
+
+// Phase 3: mirror BUILTIN_SLASH_COMMANDS into the unified registry as
+// descriptor-only entries so settings UIs (Phase 7) can enumerate every
+// command — built-in, custom, and plugin-contributed — from one place.
+// This is a side-effect of importing this module, which the chat composer
+// already does.
+seedBuiltinSlashCommands(BUILTIN_SLASH_COMMANDS)
 
 /**
  * Replace `$ARGUMENTS` and `$1..$9` placeholders in a template body. The

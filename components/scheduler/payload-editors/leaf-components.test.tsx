@@ -119,7 +119,10 @@ describe("PermissionModeSelect", () => {
     render(withIntl(<Harness flavor="acp" />))
     fireEvent.click(screen.getByTestId("pm-select"))
     // Radix renders the listbox in a portal — pull from document.body.
-    expect(screen.getByText("Don't ask")).toBeInTheDocument()
+    // Global jest mock pulls translations from `i18n/messages/en.json` rather
+    // than the local `messages` fixture: the canonical English label is
+    // "Don't ask (deny if not pre-approved)".
+    expect(screen.getByText(/don't ask/i)).toBeInTheDocument()
   })
 })
 
@@ -175,7 +178,7 @@ describe("AdditionalDirectoriesList", () => {
 
   it("shows empty hint when no rows", () => {
     render(withIntl(<Harness />))
-    expect(screen.getByText("no dirs")).toBeInTheDocument()
+    expect(screen.getByText("No additional directories.")).toBeInTheDocument()
   })
 
   it("adds a row when 'add dir' is clicked and removes it on remove", () => {
@@ -332,6 +335,6 @@ describe("McpPicker", () => {
         />
       )
     )
-    expect(screen.getByText("No servers")).toBeInTheDocument()
+    expect(screen.getByText("No MCP servers configured.")).toBeInTheDocument()
   })
 })

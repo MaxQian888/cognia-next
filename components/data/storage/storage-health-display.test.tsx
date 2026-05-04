@@ -46,7 +46,10 @@ describe("StorageHealthDisplay", () => {
       recommendations: [],
     })
     expect(screen.getByText("Healthy")).toBeInTheDocument()
-    expect(screen.getByText("All good.")).toBeInTheDocument()
+    // Global jest mock pulls translations from `i18n/messages/en.json` rather
+    // than the `messages` prop on NextIntlClientProvider, so we assert the
+    // canonical English copy.
+    expect(screen.getByText("Your storage is in good condition.")).toBeInTheDocument()
     expect(screen.getByText("12.3% used")).toBeInTheDocument()
   })
 

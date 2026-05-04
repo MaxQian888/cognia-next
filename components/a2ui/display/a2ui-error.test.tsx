@@ -79,8 +79,12 @@ describe("A2UIError", () => {
         />
       )
 
+      // The cognia-next ErrorTraceDetails hides the stack behind a "Show stack
+      // trace" button (Radix Collapsible). The headline ("Widget failed") is
+      // peeled off the first line of the message; the stack frames are
+      // collapsed by default and revealed by clicking the toggle.
       expect(screen.queryByText(/components\/a2ui\/widget\.tsx/)).not.toBeInTheDocument()
-      await user.click(screen.getByText("Widget failed"))
+      await user.click(screen.getByRole("button", { name: /show stack trace/i }))
       expect(screen.getByText(/components\/a2ui\/widget\.tsx/)).toBeInTheDocument()
     })
   })

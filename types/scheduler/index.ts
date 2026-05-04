@@ -587,6 +587,20 @@ export function getCronExpressionOptions(limit?: number): CronExpressionOption[]
 export type TaskCreationSource = "user" | "agent" | "plugin" | "system"
 
 /**
+ * App-wide defaults applied when a new scheduled task is created without
+ * a per-task override. Stored on the policy so users can configure
+ * "what every new task should look like by default" in the settings UI.
+ */
+export interface TaskDefaults {
+  /** Default IANA timezone applied to new tasks. */
+  timezone?: string
+  /** Default notification settings (channels, webhook, etc.). */
+  notification?: Partial<TaskNotificationConfig>
+  /** Default execution settings (timeout, retries, concurrency). */
+  execution?: Partial<TaskExecutionConfig>
+}
+
+/**
  * Permission policy for the app-level scheduler.
  * Controls what agents and plugins can do with scheduled tasks.
  */
@@ -601,6 +615,8 @@ export interface SchedulerPermissionPolicy {
   maxTasksPerSource: number
   /** Maximum number of concurrent task executions globally */
   maxConcurrentExecutions: number
+  /** Defaults applied when creating new tasks; per-task settings override. */
+  taskDefaults?: TaskDefaults
 }
 
 export const DEFAULT_PERMISSION_POLICY: SchedulerPermissionPolicy = {

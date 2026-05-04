@@ -15,8 +15,7 @@
  * its own configured client.
  */
 
-import { generateText } from "ai"
-import { createAnthropic } from "@ai-sdk/anthropic"
+import { generateText, type LanguageModel } from "ai"
 import type { ProviderName } from "@/types/provider/provider"
 
 export interface LlmClientCallOptions {
@@ -40,8 +39,14 @@ export interface LlmClient {
   complete(prompt: string, options?: LlmClientCallOptions): Promise<string>
 }
 
-export interface AnthropicLlmConfig {
-  provider: ProviderName
+/**
+ * Configuration for any provider-aware LLM client. The `provider` field
+ * picks which AI SDK family is loaded; built-ins are anthropic, openai,
+ * google, mistral, cohere. Custom OpenAI-compatible endpoints set
+ * `provider: "openai"` and pass `baseURL`.
+ */
+export interface LlmConfig {
+  provider: ProviderName | "openai" | "google" | "mistral" | "cohere"
   model: string
   apiKey: string
   baseURL?: string
@@ -49,24 +54,76 @@ export interface AnthropicLlmConfig {
   defaultTemperature?: number
 }
 
-/**
- * Build an `LlmClient` that talks to Anthropic's Messages API via the
- * `ai` SDK. The workbench passes in a config built from user settings.
- */
-export function createAnthropicLlmClient(config: AnthropicLlmConfig): LlmClient {
-  if (config.provider !== "anthropic") {
-    throw new Error(
-      `createAnthropicLlmClient: provider must be "anthropic" (got ${config.provider})`
-    )
+/** @deprecated Kept for back-compat with existing call sites. Use {@link LlmConfig}. */
+export type AnthropicLlmConfig = LlmConfig
+
+async function buildLanguageModel(config: LlmConfig): Promise<LanguageModel> {
+  switch (config.provider) {
+    case "anthropic": {
+      const { createAnthropic } = await import("@ai-sdk/anthropic")
+      const client = createAnthropic({
+        apiKey: config.apiKey,
+        baseURL: config.baseURL,
+      })
+      return client(config.model)
+    }
+    case "openai": {
+      const { createOpenAI } = await import("@ai-sdk/openai")
+      const client = createOpenAI({
+        apiKey: config.apiKey,
+        baseURL: config.baseURL,
+      })
+      return client(config.model)
+    }
+    case "google": {
+      const { createGoogleGenerativeAI } = await import("@ai-sdk/google")
+      const client = createGoogleGenerativeAI({
+        apiKey: config.apiKey,
+        baseURL: config.baseURL,
+      })
+      return client(config.model)
+    }
+    case "mistral": {
+      const { createMistral } = await import("@ai-sdk/mistral")
+      const client = createMistral({
+        apiKey: config.apiKey,
+        baseURL: config.baseURL,
+      })
+      return client(config.model)
+    }
+    case "cohere": {
+      const { createCohere } = await import("@ai-sdk/cohere")
+      const client = createCohere({
+        apiKey: config.apiKey,
+        baseURL: config.baseURL,
+      })
+      return client(config.model)
+    }
+    default:
+      throw new Error(
+        `createLlmClient: unsupported provider "${config.provider}" — supported: anthropic, openai, google, mistral, cohere`
+      )
   }
-  const anthropic = createAnthropic({
-    apiKey: config.apiKey,
-    baseURL: config.baseURL,
-  })
-  const model = anthropic(config.model)
+}
+
+/**
+ * Build an `LlmClient` that talks to the configured provider via the `ai`
+ * SDK. Each provider's underlying client is loaded lazily so the twin
+ * worker doesn't pay the cost for SDKs it never uses.
+ */
+export function createLlmClient(config: LlmConfig): LlmClient {
+  // The model handle is built on first use so import failures surface at
+  // `complete()` time (where the workbench can show a meaningful error)
+  // rather than at module load.
+  let modelPromise: Promise<LanguageModel> | null = null
+  const getModel = () => {
+    if (!modelPromise) modelPromise = buildLanguageModel(config)
+    return modelPromise
+  }
 
   return {
     async complete(prompt, options) {
+      const model = await getModel()
       const result = await generateText({
         model,
         system: options?.system,
@@ -78,6 +135,13 @@ export function createAnthropicLlmClient(config: AnthropicLlmConfig): LlmClient 
     },
   }
 }
+
+/**
+ * Back-compat alias for the original Anthropic-only factory. Prefer
+ * {@link createLlmClient} for new code — the underlying implementation is
+ * the same.
+ */
+export const createAnthropicLlmClient = createLlmClient
 
 /**
  * Extract the first JSON value out of an LLM response. Tolerates leading

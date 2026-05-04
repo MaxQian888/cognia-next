@@ -51,7 +51,14 @@ function buildAssistantParts(message: BetaMessage): Parts {
 function blockToParts(block: BetaContentBlock): Part[] {
   if (block.type === "text") {
     const b = block as Extract<BetaContentBlock, { type: "text" }>
-    return splitTextForA2UI(b.text ?? "")
+    const text = b.text ?? ""
+    // splitTextForA2UI returns [] for the empty string, but downstream
+    // consumers expect every text block to map to at least one Part — fall
+    // back to an empty-string text Part to preserve that 1:1 contract.
+    if (!text) {
+      return [{ type: "text", text: "", state: "done" } as unknown as Part]
+    }
+    return splitTextForA2UI(text)
   }
   const single = blockToPart(block)
   return single ? [single] : []

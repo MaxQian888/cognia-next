@@ -53,13 +53,13 @@ beforeEach(() => {
 describe("PluginMarketplace", () => {
   it("renders cards from the marketplace state", async () => {
     render(<PluginMarketplace />)
-    await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
-    expect(screen.getByText("Beta")).toBeInTheDocument()
+    await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
+    expect(screen.getAllByText("Beta").length).toBeGreaterThan(0)
   })
 
   it("renders the section toggle group", async () => {
     render(<PluginMarketplace />)
-    await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
     expect(screen.getByText("sections.featured")).toBeInTheDocument()
     expect(screen.getByText("sections.popular")).toBeInTheDocument()
     expect(screen.getByText("sections.recent")).toBeInTheDocument()
@@ -76,7 +76,7 @@ describe("PluginMarketplace", () => {
       uninstallPlugin: jest.fn(async () => undefined),
     })
     render(<PluginMarketplace />)
-    await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
     const installButtons = screen.getAllByText("install")
     fireEvent.click(installButtons[0])
     await waitFor(() => expect(install).toHaveBeenCalled())

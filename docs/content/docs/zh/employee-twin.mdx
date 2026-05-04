@@ -9,8 +9,8 @@ description: Cognia 如何把一个人的文档、聊天与代码蒸馏成可对
 
 <TLDR>
   把文档、聊天导出与代码蒸馏成一个可对话的孪生。发送时召回 top-K 相关 chunk
-  与风格少样本，让助手保持作者语气。PII 在**任何** embed 或 LLM 调用之前被替换为
-  占位符 —— 逆向映射加密落盘。
+  与风格少样本，让助手保持作者语气。PII 在**任何** embed 或 LLM 调用之前被替换为 占位符 ——
+  逆向映射加密落盘。
 </TLDR>
 
 <StatGrid>
@@ -133,13 +133,13 @@ flowchart LR
 
 **这是隐私红线。** `lib/twin/ingest/redact.ts` 在**任何 embed 或 LLM 调用之前**把 PII 替换为 `<KIND_NNN>` 占位符：
 
-| 类别 | 检测 |
-| --- | --- |
-| `EMAIL` | RFC 宽松正则 |
-| `PHONE` | E.164 + 中国手机号 |
-| `CN_ID` | 中国身份证号（省份码 + 出生日期 + 类 Luhn 校验） |
-| `BANK_CARD` | 通过 Luhn 的 13–19 位数字 |
-| `NAME` | 提示驱动（前面有 "name:"、"by"、"——"、"from" 等） |
+| 类别        | 检测                                              |
+| ----------- | ------------------------------------------------- |
+| `EMAIL`     | RFC 宽松正则                                      |
+| `PHONE`     | E.164 + 中国手机号                                |
+| `CN_ID`     | 中国身份证号（省份码 + 出生日期 + 类 Luhn 校验）  |
+| `BANK_CARD` | 通过 Luhn 的 13–19 位数字                         |
+| `NAME`      | 提示驱动（前面有 "name:"、"by"、"——"、"from" 等） |
 
 逆向映射用 AES-GCM 加密落盘（`twinSources.redactionMapEnc`），密钥派生自用户主密钥。Runtime 永不持久化未脱敏文本。
 
@@ -250,18 +250,21 @@ flowchart TB
     ### 嵌入用户消息
 
     通过 `lib/ai/embedding/embedding.ts` 把最近一条用户消息嵌入**一次**。
+
   </Step>
   <Step>
     ### 召回 top-K chunk
 
     在当前向量库做 RAG，取 top `ragTopK`（默认 5）。
     后端选择见 [向量库](./vector-store)。
+
   </Step>
   <Step>
     ### 选择风格样本
 
     从 `twinProfile.styleSamples` 取 top `styleSamplesK`（默认 3），
     `few-shot-selector.ts` 按主题相似度排序。
+
   </Step>
   <Step>
     ### 装配四段式系统提示
@@ -272,12 +275,12 @@ flowchart TB
     | 2 | 身份块 | 孪生 ID + 作者摘要 |
     | 3 | 召回片段 | 第 2 步 |
     | 4 | 风格示例 | 第 3 步，少样本格式 |
+
   </Step>
 </Steps>
 
 <Callout type="info" title="优雅降级">
-  `applyTwinContext` **总是返回** —— 永不抛错。向量库故障时降级为"无上下文"发送，
-  而不是中断聊天。
+  `applyTwinContext` **总是返回** —— 永不抛错。向量库故障时降级为"无上下文"发送， 而不是中断聊天。
 </Callout>
 
 ```mermaid
@@ -316,12 +319,12 @@ flowchart TB
 
 路由：`app/twin/`。组件：`components/twin/`。四个 tab：
 
-| Tab | 用途 |
-| --- | --- |
-| **Sources** | 粘贴 / 拖入文本。格式选择、状态标记、ingest 按钮。列出已有 sources 与大小、状态。 |
-| **Jobs** | ingest 与 distill 任务的实时进度。展示 `twinJobs` 中的 `phase` 与 `progress`。手动入队 / 取消 / 重试。 |
-| **Drafts** | 优先排序待审核草稿。Accept 流写入真实 `Character` / `Skill` 行 + 把 draft 标记为已接受。 |
-| **Settings** | 只读画像统计（chunk 数、风格样本数、上次蒸馏时间、向量后端）。 |
+| Tab          | 用途                                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------------------------ |
+| **Sources**  | 粘贴 / 拖入文本。格式选择、状态标记、ingest 按钮。列出已有 sources 与大小、状态。                      |
+| **Jobs**     | ingest 与 distill 任务的实时进度。展示 `twinJobs` 中的 `phase` 与 `progress`。手动入队 / 取消 / 重试。 |
+| **Drafts**   | 优先排序待审核草稿。Accept 流写入真实 `Character` / `Skill` 行 + 把 draft 标记为已接受。               |
+| **Settings** | 只读画像统计（chunk 数、风格样本数、上次蒸馏时间、向量后端）。                                         |
 
 工作台是孪生生命周期的主入口，所有动作都从这里发起。
 
@@ -337,33 +340,32 @@ flowchart TB
 
 ## 隐私要点
 
-| 风险 | 缓解 |
-| --- | --- |
-| chunk 中的 PII | `redact.ts` 在 embed/LLM 调用前替换为占位符 |
-| 逆向映射 | 加密落盘（`twinSources.redactionMapEnc`） |
-| API key | `keyring` crate；永不以明文落盘 |
-| 云端外发 | 默认关闭 —— 桌面默认 sqlite-vec，除非用户主动选择 |
-| 审计 | 每次 embed 调用都记录到 `lib/observability/`；可在日志面板查看 |
+| 风险           | 缓解                                                           |
+| -------------- | -------------------------------------------------------------- |
+| chunk 中的 PII | `redact.ts` 在 embed/LLM 调用前替换为占位符                    |
+| 逆向映射       | 加密落盘（`twinSources.redactionMapEnc`）                      |
+| API key        | `keyring` crate；永不以明文落盘                                |
+| 云端外发       | 默认关闭 —— 桌面默认 sqlite-vec，除非用户主动选择              |
+| 审计           | 每次 embed 调用都记录到 `lib/observability/`；可在日志面板查看 |
 
 ## 测试
 
 <Callout type="error" title="安全关键：脱敏测试">
-  `lib/twin/ingest/redact.test.ts` 是整个仓库最安全关键的测试 ——
-  在合成 PII 串语料上断言 `hasNoLeakingPii`。
-  改动它必须极为谨慎；只能加 fixture，绝不能删。
+  `lib/twin/ingest/redact.test.ts` 是整个仓库最安全关键的测试 —— 在合成 PII 串语料上断言
+  `hasNoLeakingPii`。 改动它必须极为谨慎；只能加 fixture，绝不能删。
 </Callout>
 
 `lib/twin/runtime/apply-twin-context.test.ts` 断言"优雅降级"契约（向量库故障不能抛错）。
 
 ## 在哪里入手
 
-| 目标 | 文件 |
-| --- | --- |
-| 加一种 ingest 格式 | `lib/twin/ingest/dispatch.ts`、`lib/document/document-processor.ts`、`parse.ts` |
-| 加强脱敏 | `lib/twin/ingest/redact.ts`（连同测试！） |
-| 加新的蒸馏 agent | `lib/twin/distill/agents/`，在 `orchestrator.ts` 注册 |
-| 调整 runtime 上下文形态 | `lib/twin/runtime/system-prompt-template.ts` |
-| 在新发送路径接入 runtime | 在你的 build-options helper 中调用 `applyTwinContext` |
+| 目标                     | 文件                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------- |
+| 加一种 ingest 格式       | `lib/twin/ingest/dispatch.ts`、`lib/document/document-processor.ts`、`parse.ts` |
+| 加强脱敏                 | `lib/twin/ingest/redact.ts`（连同测试！）                                       |
+| 加新的蒸馏 agent         | `lib/twin/distill/agents/`，在 `orchestrator.ts` 注册                           |
+| 调整 runtime 上下文形态  | `lib/twin/runtime/system-prompt-template.ts`                                    |
+| 在新发送路径接入 runtime | 在你的 build-options helper 中调用 `applyTwinContext`                           |
 
 ## 相关
 

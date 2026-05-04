@@ -18,15 +18,14 @@ import {
   ContextCacheUsage,
   ContextTrigger,
 } from "@/components/ai-elements/context"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@/lib/claude/types"
 import { getLatestUsage, getModelContextWindow, tokensInWindow } from "@/lib/claude/usage"
 import type { LanguageModelUsage } from "ai"
-import { CpuIcon } from "lucide-react"
 import { PermissionModeIndicator } from "../permission-mode-indicator"
 import { WebSearchToggle } from "./web-search-toggle"
+import { ModelPicker } from "./model-picker"
 import { AgentRuntimeSelector } from "@/components/agent/agent-runtime-selector"
 import { AgentModeSelector } from "@/components/agent/agent-mode-selector"
 import { ExternalAgentSelector } from "@/components/agent/external-agent-selector"
@@ -71,15 +70,7 @@ export function BottomToolbar({ session }: BottomToolbarProps) {
   return (
     <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[11px] text-muted-foreground">
       <div className="flex min-w-0 items-center gap-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="flex items-center gap-1.5 truncate">
-              <CpuIcon className="size-3.5 shrink-0" />
-              <span className="truncate font-mono">{modelId}</span>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="top">{t("modelTooltip")}</TooltipContent>
-        </Tooltip>
+        <ModelPicker session={session} />
         <PermissionModeIndicator onCycle={(next) => setPermissionMode(next)} />
         <WebSearchToggle />
         <AgentRuntimeSelector />

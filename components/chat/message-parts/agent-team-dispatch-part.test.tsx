@@ -1,0 +1,51 @@
+/**
+ * @jest-environment jsdom
+ */
+
+import { render, screen } from "@testing-library/react"
+import { AgentTeamDispatchPart } from "./agent-team-dispatch-part"
+import type { AgentTeamDispatchPart as DispatchType } from "@/lib/claude/parts-extensions"
+
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => key,
+}))
+
+const base: DispatchType = {
+  type: "agent-team-dispatch",
+  from: "supervisor-id",
+  to: "alice-id",
+  toName: "Alice",
+  task: "Investigate the schema and return a one-paragraph summary.",
+  sessionId: "s1",
+}
+
+describe("AgentTeamDispatchPart", () => {
+  it("renders the from→to header with the target's display name", () => {
+    render(<AgentTeamDispatchPart part={base} fromName="Captain" />)
+    expect(screen.getByText("Captain")).toBeInTheDocument()
+    expect(screen.getByTestId("dispatch-to").textContent).toBe("Alice")
+  })
+
+  it("falls back to a generic supervisor label when fromName is missing", () => {
+    render(<AgentTeamDispatchPart part={base} />)
+    expect(screen.getByText("supervisor")).toBeInTheDocument()
+  })
+
+  it("renders the task body verbatim", () => {
+    render(<AgentTeamDispatchPart part={base} />)
+    expect(screen.getByText(/Investigate the schema/)).toBeInTheDocument()
+  })
+
+  it("renders an Open-member link pointing at the focus query param", () => {
+    render(<AgentTeamDispatchPart part={base} />)
+    const link = screen.getByTestId("dispatch-open") as HTMLAnchorElement
+    expect(link.getAttribute("href")).toBe("/agent-teams?focus=alice-id")
+  })
+
+  it("preserves whitespace in the task (whitespace-pre-wrap)", () => {
+    const part = { ...base, task: "line1\n\nline2" }
+    render(<AgentTeamDispatchPart part={part} />)
+    const body = screen.getByText(/line1/)
+    expect(body.className).toMatch(/whitespace-pre-wrap/)
+  })
+})

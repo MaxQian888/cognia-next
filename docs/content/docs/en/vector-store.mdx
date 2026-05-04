@@ -11,14 +11,14 @@ The full design rationale is in [ADR-0004](../adr/0004-vector-native-backend).
 
 ## Backends
 
-| Backend | Available in | Notes |
-| --- | --- | --- |
-| **sqlite-vec (native)** | Desktop only | Default on desktop. Data at `<app_data>/cognia/vectors.sqlite`. |
-| **Pinecone** | Web + Desktop | `@pinecone-database/pinecone` |
-| **Qdrant** | Web + Desktop | `@qdrant/js-client-rest` |
-| **Weaviate** | Web + Desktop | `weaviate-client` |
-| **Chroma** | Web + Desktop | `chromadb` |
-| **Milvus** | Web + Desktop | `@zilliz/milvus2-sdk-node` |
+| Backend                 | Available in  | Notes                                                           |
+| ----------------------- | ------------- | --------------------------------------------------------------- |
+| **sqlite-vec (native)** | Desktop only  | Default on desktop. Data at `<app_data>/cognia/vectors.sqlite`. |
+| **Pinecone**            | Web + Desktop | `@pinecone-database/pinecone`                                   |
+| **Qdrant**              | Web + Desktop | `@qdrant/js-client-rest`                                        |
+| **Weaviate**            | Web + Desktop | `weaviate-client`                                               |
+| **Chroma**              | Web + Desktop | `chromadb`                                                      |
+| **Milvus**              | Web + Desktop | `@zilliz/milvus2-sdk-node`                                      |
 
 Web mode hides the native option in twin settings (`!isTauri()`); cloud is required.
 
@@ -28,6 +28,7 @@ Web mode hides the native option in twin settings (`!isTauri()`); cloud is requi
     **Cons**: desktop only, no horizontal scaling, brute-force scan (fine up to ~100k chunks).
 
     File: `<app_data>/cognia/vectors.sqlite`. Inspect with `sqlite3` and `.tables`.
+
   </Tab>
   <Tab value="Pinecone">
     Managed cloud, fastest setup. Set API key + environment in twin settings.
@@ -50,9 +51,8 @@ Web mode hides the native option in twin settings (`!isTauri()`); cloud is requi
 </Tabs>
 
 <Callout type="info" title="Switching backends">
-  Re-embedding is **manual**. Use the "Re-embed all" action in the twin Sources
-  tab after switching backends — dimensions, distance metrics, and metadata
-  schemas may differ.
+  Re-embedding is **manual**. Use the "Re-embed all" action in the twin Sources tab after switching
+  backends — dimensions, distance metrics, and metadata schemas may differ.
 </Callout>
 
 ## Why sqlite-vec on desktop
@@ -199,7 +199,8 @@ Switching backends does **not** automatically migrate. The Sources tab in the tw
 <TypeTable
   type={{
     "Batch size": {
-      description: "100 chunks per LLM embed call, 100 rows per backend upsert. Tunable in `lib/twin/ingest/{embed,persist}.ts`.",
+      description:
+        "100 chunks per LLM embed call, 100 rows per backend upsert. Tunable in `lib/twin/ingest/{embed,persist}.ts`.",
       type: "tuning",
     },
     "Concurrent ingests": {
@@ -211,26 +212,27 @@ Switching backends does **not** automatically migrate. The Sources tab in the tw
       type: "metric",
     },
     "Cloud latency": {
-      description: "Round-trip-dominated; Pinecone us-east-1 is typically 80–150ms from a non-US user.",
+      description:
+        "Round-trip-dominated; Pinecone us-east-1 is typically 80–150ms from a non-US user.",
       type: "metric",
     },
   }}
 />
 
 <Callout type="info" title="Don't mix dimensions">
-  Switching the embedding model means switching the vector dimension —
-  re-embed every chunk before querying. The store doesn't auto-detect mismatched
-  dimensions; you'll get nearest-neighbour garbage instead of a clean error.
+  Switching the embedding model means switching the vector dimension — re-embed every chunk before
+  querying. The store doesn't auto-detect mismatched dimensions; you'll get nearest-neighbour
+  garbage instead of a clean error.
 </Callout>
 
 ## Where to start contributing
 
-| Goal | Files |
-| --- | --- |
-| Add a new cloud backend | `lib/vector/<provider>-client.ts`, register in `store.ts`, add settings UI |
-| Tweak sqlite-vec schema | `src-tauri/src/vector/schema.rs` (bump migration version) |
-| Add a new metadata filter | `src-tauri/src/vector/filters.rs` and `lib/vector/store.ts` types |
-| Improve readiness checks | `lib/vector/readiness.ts` |
+| Goal                      | Files                                                                      |
+| ------------------------- | -------------------------------------------------------------------------- |
+| Add a new cloud backend   | `lib/vector/<provider>-client.ts`, register in `store.ts`, add settings UI |
+| Tweak sqlite-vec schema   | `src-tauri/src/vector/schema.rs` (bump migration version)                  |
+| Add a new metadata filter | `src-tauri/src/vector/filters.rs` and `lib/vector/store.ts` types          |
+| Improve readiness checks  | `lib/vector/readiness.ts`                                                  |
 
 ## Tests
 
@@ -241,7 +243,19 @@ Switching backends does **not** automatically migrate. The Sources tab in the tw
 ## Next
 
 <Cards>
-  <Card title="Employee Digital Twin" href="./employee-twin" description="What the vector store is for." />
-  <Card title="Backup & data transfer" href="./backup-and-data" description="Vector data is NOT in backups by default — only twin sources + chunk metadata." />
-  <Card title="Storage" href="./storage" description="The Dexie tables that mirror chunk metadata." />
+  <Card
+    title="Employee Digital Twin"
+    href="./employee-twin"
+    description="What the vector store is for."
+  />
+  <Card
+    title="Backup & data transfer"
+    href="./backup-and-data"
+    description="Vector data is NOT in backups by default — only twin sources + chunk metadata."
+  />
+  <Card
+    title="Storage"
+    href="./storage"
+    description="The Dexie tables that mirror chunk metadata."
+  />
 </Cards>

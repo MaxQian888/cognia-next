@@ -51,14 +51,21 @@ describe("useCanvasLayoutStore", () => {
       expect(result.current.rightSize).toBe(25)
     })
 
-    it("clamps out-of-range values into [0, 100]", () => {
+    it("clamps each rail into its rail-specific range and renormalizes to sum 100", () => {
+      // cognia-next applies per-rail minimums (left: [12,32], right: [16,36],
+      // center derived as the remainder with a 38 floor) and then scales the
+      // three sizes so they always sum to exactly 100. This is more
+      // restrictive than a flat [0, 100] clamp.
       const { result } = renderHook(() => useCanvasLayoutStore())
       act(() => {
         result.current.setSizes([-5, 200, 50])
       })
-      expect(result.current.leftSize).toBe(0)
-      expect(result.current.centerSize).toBe(100)
-      expect(result.current.rightSize).toBe(50)
+      expect(result.current.leftSize).toBe(12) // clamped up to the left-rail floor
+      expect(result.current.rightSize).toBe(36) // clamped down to the right-rail ceiling
+      expect(result.current.centerSize).toBe(100 - 12 - 36)
+      expect(
+        Math.round(result.current.leftSize + result.current.centerSize + result.current.rightSize)
+      ).toBe(100)
     })
 
     it("ignores malformed input", () => {

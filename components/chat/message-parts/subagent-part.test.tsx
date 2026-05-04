@@ -1,0 +1,122 @@
+/**
+ * @jest-environment jsdom
+ */
+
+import { fireEvent, render, screen } from "@testing-library/react"
+import { SubagentPart } from "./subagent-part"
+import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
+import type { SubagentPart as SubagentPartType } from "@/lib/claude/parts-extensions"
+import type { SubAgent } from "@/types/agent/sub-agent"
+
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
+    vars ? `${key}:${JSON.stringify(vars)}` : key,
+}))
+
+// Stub Collapsible primitives so children always render in tests.
+jest.mock("@/components/ui/collapsible", () => ({
+  Collapsible: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  CollapsibleTrigger: ({
+    children,
+    ...rest
+  }: { children: React.ReactNode } & Record<string, unknown>) => (
+    <button type="button" {...rest}>
+      {children}
+    </button>
+  ),
+  CollapsibleContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}))
+
+const basePart: SubagentPartType = {
+  type: "subagent",
+  subagentId: "sa-1",
+  parentSessionId: "p1",
+  name: "Researcher",
+  status: "running",
+  progress: 33,
+  startedAt: Date.now() - 5000,
+}
+
+function makeSubAgent(overrides: Partial<SubAgent> = {}): SubAgent {
+  return {
+    id: "sa-1",
+    parentAgentId: "p1",
+    name: "Researcher",
+    description: "",
+    task: "search",
+    initialTask: "search",
+    threadId: "t",
+    status: "running",
+    config: {},
+    messages: [],
+    sources: [],
+    logs: [],
+    progress: 33,
+    createdAt: new Date(),
+    lastActivityAt: new Date(),
+    retryCount: 0,
+    order: 0,
+    ...overrides,
+  }
+}
+
+beforeEach(() => {
+  useSubagentRuntimeStore.setState((s) => ({ ...s, subAgents: {} }))
+})
+
+describe("SubagentPart", () => {
+  it("renders the static snapshot when no live entry is in the store", () => {
+    render(<SubagentPart part={basePart} />)
+    const root = screen.getByTestId("subagent-part-sa-1")
+    expect(root.dataset.status).toBe("running")
+    expect(screen.getByText("Researcher")).toBeInTheDocument()
+  })
+
+  it("uses the live store value for status + progress when present", () => {
+    useSubagentRuntimeStore.getState().upsert(makeSubAgent({ status: "completed", progress: 100 }))
+    render(<SubagentPart part={basePart} />)
+    expect(screen.getByTestId("subagent-part-sa-1").dataset.status).toBe("completed")
+    expect(screen.getByTestId("subagent-status-badge").textContent).toMatch(/completed/)
+  })
+
+  it("renders the latest logs when the store has them", () => {
+    useSubagentRuntimeStore.getState().upsert(
+      makeSubAgent({
+        logs: [{ timestamp: new Date(), level: "info", message: "tool ran" }],
+      })
+    )
+    render(<SubagentPart part={basePart} />)
+    expect(screen.getByText(/tool ran/)).toBeInTheDocument()
+  })
+
+  it("renders the noLogsYet placeholder when neither store nor part has logs", () => {
+    render(<SubagentPart part={basePart} />)
+    expect(screen.getByText("noLogsYet")).toBeInTheDocument()
+  })
+
+  it("renders an Open-in-workspace link with the subagent id encoded", () => {
+    render(<SubagentPart part={basePart} />)
+    const link = screen.getByTestId("subagent-open") as HTMLAnchorElement
+    expect(link.getAttribute("href")).toContain("subagent:sa-1")
+  })
+
+  it("computes duration from startedAt → completedAt when both present", () => {
+    const partCompleted: SubagentPartType = {
+      ...basePart,
+      startedAt: 1000,
+      completedAt: 2500,
+      status: "completed",
+    }
+    render(<SubagentPart part={partCompleted} />)
+    // durationMs i18n: durationMs:{"ms":1500}
+    expect(screen.getByText(/durationMs:.*1500/)).toBeInTheDocument()
+  })
+
+  it("toggle button is keyboard activatable (clickable)", () => {
+    render(<SubagentPart part={basePart} />)
+    const toggle = screen.getByTestId("subagent-toggle-sa-1")
+    fireEvent.click(toggle)
+    // Stub Collapsible always shows children; just verify the click doesn't crash.
+    expect(toggle).toBeInTheDocument()
+  })
+})

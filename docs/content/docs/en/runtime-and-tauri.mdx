@@ -30,7 +30,11 @@ function ExternalLink({ href, children }: Props) {
   if (isTauri()) {
     return <button onClick={() => openExternal(href)}>{children}</button>
   }
-  return <a href={href} target="_blank" rel="noreferrer">{children}</a>
+  return (
+    <a href={href} target="_blank" rel="noreferrer">
+      {children}
+    </a>
+  )
 }
 ```
 
@@ -97,6 +101,7 @@ If you find a stray `invoke()` outside this folder during code review, move it.
       - Use `String` not `&str` for arguments — Tauri owns its own buffers.
       - For long-running work, take `tauri::Window` and emit progress events.
     </Callout>
+
   </Step>
   <Step>
     ### Register it in `lib.rs`
@@ -108,6 +113,7 @@ If you find a stray `invoke()` outside this folder during code review, move it.
         // ...
     ])
     ```
+
   </Step>
   <Step>
     ### Add a typed wrapper in `lib/tauri.ts`
@@ -120,6 +126,7 @@ If you find a stray `invoke()` outside this folder during code review, move it.
 
     Or place it in a sub-module under `lib/tauri/` if the surface is large
     (e.g., everything scheduler-related lives in `lib/tauri/scheduler.ts`).
+
   </Step>
   <Step>
     ### Write the test
@@ -152,6 +159,7 @@ If you find a stray `invoke()` outside this folder during code review, move it.
         ```
       </Tab>
     </Tabs>
+
   </Step>
 </Steps>
 
@@ -168,7 +176,7 @@ Key fields:
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
     "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build"
+    "beforeBuildCommand": "pnpm build",
   },
   "app": {
     "windows": [
@@ -181,18 +189,20 @@ Key fields:
         "minHeight": 600,
         "decorations": false,
         "titleBarStyle": "Overlay",
-        "hiddenTitle": true
-      }
+        "hiddenTitle": true,
+      },
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; ..."
-    }
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; ...",
+    },
   },
   "plugins": {
     "deep-link": { "desktop": { "schemes": ["cognia"] } },
-    "cli": { /* CLI args definition */ },
-    "updater": { "active": false }
-  }
+    "cli": {
+      /* CLI args definition */
+    },
+    "updater": { "active": false },
+  },
 }
 ```
 
@@ -204,16 +214,17 @@ Key fields:
   data directory**. Changing it would orphan every existing installation's
   settings, vector store, and chat history.
 
-  **For 99% of contributors, leave `identifier` alone.**
+**For 99% of contributors, leave `identifier` alone.**
+
 </Callout>
 
 Tauri-derived per-user data directory by platform:
 
-| Platform | Path |
-| --- | --- |
-| Windows | `%APPDATA%\com.reactquickstarter.desktop\` |
-| macOS | `~/Library/Application Support/com.reactquickstarter.desktop/` |
-| Linux | `~/.local/share/com.reactquickstarter.desktop/` |
+| Platform | Path                                                           |
+| -------- | -------------------------------------------------------------- |
+| Windows  | `%APPDATA%\com.reactquickstarter.desktop\`                     |
+| macOS    | `~/Library/Application Support/com.reactquickstarter.desktop/` |
+| Linux    | `~/.local/share/com.reactquickstarter.desktop/`                |
 
 If you must rename it, plan a migration:
 
@@ -241,17 +252,17 @@ When you add a feature that calls a new HTTPS origin from the browser (e.g., a m
 
 Registered in `src-tauri/src/lib.rs`. Each has corresponding `tauri-allowlist` entries in `src-tauri/capabilities/default.json` that limit what the JS side can do.
 
-| Plugin | Used for |
-| --- | --- |
-| `single-instance` | Second launches focus the existing window and forward args (CLI workspace path, deep-link URL). |
-| `deep-link` | Registers `cognia://` URL scheme. Mac/Linux receive URLs as launch args; Windows uses single-instance forwarding. |
-| `autostart` | Optional "launch on login". Off by default. |
-| `global-shortcut` | Registers system-wide shortcuts; user-configurable. |
-| `cli` | Parses `--workspace <path>` and `-n` (new chat) flags from launch args. |
-| `store` | Persists settings the Rust side cares about (the JS side uses Dexie). |
-| `updater` | Disabled by default (see `src-tauri/UPDATER.md`). |
-| `dialog`, `fs`, `notification`, `clipboard-manager`, `opener`, `os`, `process` | Standard OS access. |
-| `log`, `window-state` | Logging, persistent window position/size. |
+| Plugin                                                                         | Used for                                                                                                          |
+| ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `single-instance`                                                              | Second launches focus the existing window and forward args (CLI workspace path, deep-link URL).                   |
+| `deep-link`                                                                    | Registers `cognia://` URL scheme. Mac/Linux receive URLs as launch args; Windows uses single-instance forwarding. |
+| `autostart`                                                                    | Optional "launch on login". Off by default.                                                                       |
+| `global-shortcut`                                                              | Registers system-wide shortcuts; user-configurable.                                                               |
+| `cli`                                                                          | Parses `--workspace <path>` and `-n` (new chat) flags from launch args.                                           |
+| `store`                                                                        | Persists settings the Rust side cares about (the JS side uses Dexie).                                             |
+| `updater`                                                                      | Disabled by default (see `src-tauri/UPDATER.md`).                                                                 |
+| `dialog`, `fs`, `notification`, `clipboard-manager`, `opener`, `os`, `process` | Standard OS access.                                                                                               |
+| `log`, `window-state`                                                          | Logging, persistent window position/size.                                                                         |
 
 The first second-instance hook is set up **before** any other plugin, per Tauri docs:
 
@@ -284,7 +295,19 @@ Plugins request additional capabilities through the plugin manifest (see [Plugin
 ## Next
 
 <Cards>
-  <Card title="Sidecar & Claude SDK" href="./sidecar-and-claude-sdk" description="The Node sidecar protocol." />
-  <Card title="Plugin system" href="./plugin-system" description="How third-party plugins request permissions." />
-  <Card title="Architecture" href="./architecture" description="The 4-layer view this page lives in." />
+  <Card
+    title="Sidecar & Claude SDK"
+    href="./sidecar-and-claude-sdk"
+    description="The Node sidecar protocol."
+  />
+  <Card
+    title="Plugin system"
+    href="./plugin-system"
+    description="How third-party plugins request permissions."
+  />
+  <Card
+    title="Architecture"
+    href="./architecture"
+    description="The 4-layer view this page lives in."
+  />
 </Cards>

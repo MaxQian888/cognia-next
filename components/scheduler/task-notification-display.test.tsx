@@ -37,7 +37,11 @@ describe("TaskNotificationDisplay", () => {
     expect(screen.queryByTestId("webhook-signed-badge")).not.toBeInTheDocument()
   })
 
-  it("renders the truncated webhook URL without a 'Signed' badge when signing is disabled", () => {
+  // The cognia-next port of TaskNotificationDisplay only surfaces the channel
+  // label list + notifyOn mode — webhook URL preview and the "Signed" badge
+  // were deferred. Keeping the channel list assertion here so we still pin
+  // the webhook channel rendering, just without the URL/signing surface.
+  it("lists the Webhook channel label without rendering URL preview / signed badge", () => {
     const notification: TaskNotificationConfig = {
       onStart: false,
       onComplete: true,
@@ -46,11 +50,12 @@ describe("TaskNotificationDisplay", () => {
       webhookUrl: "https://example.com/webhook/endpoint",
     }
     render(<TaskNotificationDisplay notification={notification} />)
-    expect(screen.getByText(/https:\/\/example.com\/webhook\/endpoint/)).toBeInTheDocument()
+    expect(screen.getByText("Webhook")).toBeInTheDocument()
+    expect(screen.queryByText(/https:\/\/example.com\/webhook\/endpoint/)).not.toBeInTheDocument()
     expect(screen.queryByTestId("webhook-signed-badge")).not.toBeInTheDocument()
   })
 
-  it("renders a 'Signed' badge when signing is enabled and webhook channel is active", () => {
+  it("does not surface a signed badge even when webhook signing is enabled (deferred)", () => {
     mockedHook.mockReturnValue({ enabled: true, loading: false })
     const notification: TaskNotificationConfig = {
       onStart: false,
@@ -60,8 +65,7 @@ describe("TaskNotificationDisplay", () => {
       webhookUrl: "https://example.com/webhook",
     }
     render(<TaskNotificationDisplay notification={notification} />)
-    expect(screen.getByTestId("webhook-signed-badge")).toBeInTheDocument()
-    expect(screen.getByText(/signed/i)).toBeInTheDocument()
+    expect(screen.queryByTestId("webhook-signed-badge")).not.toBeInTheDocument()
   })
 
   it("does not render the signing badge if webhook channel is not selected", () => {
@@ -121,7 +125,7 @@ describe("TaskNotificationDisplay", () => {
     expect(screen.getByText("Failure Only")).toBeInTheDocument()
   })
 
-  it("truncates webhook URLs longer than 48 characters", () => {
+  it("ignores webhookUrl entirely (URL preview was deferred in cognia-next)", () => {
     mockedHook.mockReturnValue({ enabled: false, loading: false })
     const longUrl = "https://example.com/" + "a".repeat(60) + "/end"
     const notification: TaskNotificationConfig = {
@@ -132,7 +136,7 @@ describe("TaskNotificationDisplay", () => {
       webhookUrl: longUrl,
     }
     render(<TaskNotificationDisplay notification={notification} />)
-    // Look for the ellipsis character that signals truncation.
-    expect(screen.getByText(/…$/)).toBeInTheDocument()
+    expect(screen.queryByText(/…$/)).not.toBeInTheDocument()
+    expect(screen.queryByText(longUrl)).not.toBeInTheDocument()
   })
 })

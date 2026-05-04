@@ -54,7 +54,8 @@ describe("StorageBreakdown", () => {
       totalSize: 0,
       formatBytes: fmt,
     })
-    expect(screen.getByText("No storage data")).toBeInTheDocument()
+    // Global jest mock pulls translations from `i18n/messages/en.json`.
+    expect(screen.getByText("No storage data yet.")).toBeInTheDocument()
   })
 
   it("renders one bar segment per non-empty category", () => {
@@ -77,7 +78,7 @@ describe("StorageBreakdown", () => {
       onClearCategory: onClear,
     })
     fireEvent.click(screen.getByText("View details"))
-    const clears = screen.getAllByRole("button", { name: /clear category/i })
+    const clears = screen.getAllByRole("button", { name: /clear this category/i })
     fireEvent.click(clears[0])
     expect(onClear).toHaveBeenCalledTimes(1)
     expect(onClear).toHaveBeenCalledWith("chat")

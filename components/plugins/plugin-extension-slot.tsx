@@ -79,9 +79,12 @@ class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
     // /plugins panel can surface the failure later. Importing analytics lazily
     // avoids pulling that module into every host page.
     void import("@/lib/plugin/utils/analytics").then((mod) => {
-      mod.trackPluginEvent?.(this.props.pluginId, "extension.render_error", {
-        extensionId: this.props.extensionId,
-        message: error instanceof Error ? error.message : String(error),
+      mod.trackPluginEvent?.({
+        pluginId: this.props.pluginId,
+        eventType: "error",
+        success: false,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        metadata: { extensionId: this.props.extensionId, scope: "extension.render_error" },
       })
     })
   }

@@ -17,6 +17,8 @@ import type {
   SearchUsageEntry,
   CustomSearchSource,
 } from "@/lib/search/types"
+import type { ModelMapping, ModelMappingEntry, RoutingConfig } from "@/types/provider/model-mapping"
+import type { RoutingStrategy } from "@/types/provider/auto-router"
 
 // ---- Outbound (UI → Tauri → sidecar) -------------------------------------
 
@@ -88,6 +90,62 @@ export interface SendOptions {
    * the SDK. See {@link BuiltinToolsConfig}.
    */
   builtinTools?: BuiltinToolsConfig
+
+  // ---- Provider routing (added in the multi-provider port) -----------------
+
+  /**
+   * Provider id this turn should execute against. When omitted, the sidecar
+   * defaults to `"anthropic"` (back-compat with the original Anthropic-only
+   * sidecar). Other ids dispatch to `@ai-sdk/<provider>` runners (P2).
+   *
+   * Built-in ids: `"anthropic" | "openai" | "google" | "mistral" | "cohere" |
+   * "openrouter"`. Custom provider ids (from `AppSettings.customProviders`)
+   * are also accepted and dispatch via the `protocol` field on
+   * `providerCredentials`.
+   */
+  provider?: string
+
+  /**
+   * Per-call credential override. Set by `resolveSendOptions` from the
+   * user's persisted provider settings so the sidecar doesn't read
+   * keys from disk. Travels with the request and is wiped from logs.
+   */
+  providerCredentials?: {
+    apiKey?: string
+    baseURL?: string
+    /**
+     * AI SDK protocol to use when the provider id isn't a built-in.
+     * Custom OpenAI-compatible endpoints set `"openai"`; CLIProxyAPI and
+     * native Gemini set `"google"`; etc.
+     */
+    protocol?: "openai" | "anthropic" | "google" | "mistral" | "cohere"
+  }
+
+  /**
+   * When the caller passed a model alias (e.g., `"fast"`), the routing
+   * engine resolves it via the model-mapping registry and stamps the
+   * resolution onto the SendOptions for downstream introspection +
+   * fallback retries on the renderer side. The sidecar treats the resolved
+   * `provider`/`model` fields as authoritative and ignores this metadata.
+   */
+  aliasResolution?: {
+    alias: string
+    resolvedTo: { providerId: string; modelId: string }
+    fallbackEntries: ModelMappingEntry[]
+    parameterDefaults?: Record<string, unknown>
+  }
+
+  /**
+   * Records which routing strategy made the decision and a human-readable
+   * reason. Surfaced in the message metadata badge for debugging /
+   * transparency. Optional — set only when an alias was resolved or an
+   * auto-router decision was made; direct provider:model selection leaves
+   * this undefined.
+   */
+  routingDecision?: {
+    strategy: RoutingStrategy
+    reason: string
+  }
 }
 
 /**
@@ -297,6 +355,13 @@ export interface ChatSession {
   pinned?: boolean
   /** Per-session overrides — take precedence over the character/app defaults. */
   model?: string
+  /**
+   * Per-session provider override. When set, this beats `Character.providerId`
+   * and `AppSettings.defaultProvider` in `resolveSendOptions`. Written by the
+   * composer's model-picker (P3) so a user can switch providers mid-session
+   * without touching settings.
+   */
+  providerOverride?: string
   systemPrompt?: string
   workingDir?: string
   /**
@@ -613,6 +678,35 @@ export interface AppSettings {
   /** Whether the user dismissed the first-time providers onboarding banner. */
   providerOnboardingDismissed?: boolean
 
+  // ---- Provider routing (P4) ----
+  /**
+   * User-defined model aliases (e.g., `"fast"`, `"coding"`, `"reasoning"`)
+   * that resolve to ordered provider:model fallback chains. Read by the
+   * routing engine inside `resolveSendOptions` when `session.model` matches
+   * an `alias`. Built-in seeds come from `lib/ai/routing/default-mappings.ts`.
+   *
+   * Each `ModelMapping` carries an `alias` plus an ordered `providers`
+   * array of `ModelMappingEntry`. The runtime registry wrapper lives in
+   * `lib/ai/routing/model-mapping-registry.ts`.
+   */
+  modelMappings?: ModelMapping[]
+  /**
+   * Active routing strategy + per-provider constraints. Drives
+   * `ProviderRoutingEngine.selectProvider` when an alias resolves to multiple
+   * eligible entries. Defaults to `DEFAULT_ROUTING_CONFIG` from
+   * `@/types/provider/model-mapping` (strategy `"balanced"`, no constraints,
+   * 30s timeout, 3 fallback attempts).
+   */
+  routingConfig?: RoutingConfig
+  /**
+   * When true, on a `session_ended.error` for a turn that resolved via an
+   * alias with non-empty `aliasResolution.fallbackEntries`, the renderer
+   * adapter automatically retries with the next entry. Default true.
+   * Set false for debugging — keeps the original error visible instead of
+   * masking it with the fallback's outcome.
+   */
+  routingFallbackEnabled?: boolean
+
   // ---- Appearance (background, wallpapers, custom CSS, VSCode imports) ----
   background?: import("@/types/appearance").BackgroundSettings
   wallpapers?: import("@/types/appearance").Wallpaper[]
@@ -795,6 +889,21 @@ export interface Character {
   avatarEmoji?: string
   systemPrompt: string
   model?: string
+  /**
+   * Provider id this character prefers. Beats `AppSettings.defaultProvider`
+   * but is itself overridden by `ChatSession.providerOverride`. Optional —
+   * leave undefined to honour the global default. Added in the multi-provider
+   * port (P3).
+   */
+  providerId?: string
+  /**
+   * Provider id used for embedding this character's twin sources.
+   * Independent of chat provider — a character can chat through OpenAI but
+   * embed via Anthropic, or vice versa. When unset the twin runtime falls
+   * back to `AppSettings.defaultProvider`. Switching this on an existing
+   * character requires a re-embed (twin Workbench surfaces the banner). P5.
+   */
+  embeddingProviderId?: string
   permissionMode?: SendOptions["permissionMode"]
   allowedTools?: string[]
   disallowedTools?: string[]

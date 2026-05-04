@@ -109,6 +109,7 @@ This:
 
     Distribute the `.msi` (preferred for enterprise rollouts) or the NSIS `.exe`
     (smaller; user-friendlier first-run UX).
+
   </Tab>
   <Tab value="macOS">
     ```
@@ -120,6 +121,7 @@ This:
     Distribute the `.dmg`. Apple Silicon users should get the `aarch64` build;
     Intel users the `x86_64` build. Build a universal binary with `lipo` if you
     want a single file.
+
   </Tab>
   <Tab value="Linux">
     ```
@@ -130,6 +132,7 @@ This:
     ```
 
     AppImage is the most portable. Users `chmod +x` and run.
+
   </Tab>
 </Tabs>
 
@@ -184,6 +187,7 @@ Distributing unsigned Cognia builds will trigger SmartScreen / Gatekeeper / Linu
 
     - Distribute via flathub or snapcraft for trust.
     - Sign your release tags with GPG and publish detached signatures.
+
   </Tab>
 </Tabs>
 
@@ -207,6 +211,7 @@ To enable:
       Keep `cognia-next.key` private (never commit, never share).
       Distribute only `cognia-next.key.pub`.
     </Callout>
+
   </Step>
   <Step>
     ### Wire the public key into `tauri.conf.json`
@@ -222,18 +227,21 @@ To enable:
       }
     }
     ```
+
   </Step>
   <Step>
     ### Set CI secrets
 
     - `TAURI_PRIVATE_KEY` — base64-encoded contents of the private key file.
     - `TAURI_KEY_PASSWORD` — the password (or empty string if you skipped one).
+
   </Step>
   <Step>
     ### Tag a release
 
     Tauri's GitHub Action publishes a `latest.json` manifest that the updater
     plugin polls on app start.
+
   </Step>
 </Steps>
 
@@ -249,11 +257,15 @@ The full guide is in `src-tauri/UPDATER.md`.
   "platforms": {
     "darwin-aarch64": {
       "signature": "<base64>",
-      "url": "https://github.com/.../Cognia_0.2.0_aarch64.dmg"
+      "url": "https://github.com/.../Cognia_0.2.0_aarch64.dmg",
     },
-    "windows-x86_64": { /* ... */ },
-    "linux-x86_64":   { /* ... */ }
-  }
+    "windows-x86_64": {
+      /* ... */
+    },
+    "linux-x86_64": {
+      /* ... */
+    },
+  },
 }
 ```
 
@@ -281,11 +293,11 @@ Fumadocs uses Orama for in-browser full-text search. The index is generated at b
 
 The repo includes `.github/workflows/`:
 
-| Workflow | Triggers | What it does |
-| --- | --- | --- |
-| `ci.yml` (or equivalent) | PR, push | Lint, typecheck, test, web build, sometimes Tauri smoke build |
-| `release.yml` | Tag matching `v*.*.*` | Tauri build matrix → upload installers as release assets |
-| `docs.yml` | Push to `main`, docs/** | Build + deploy docs site |
+| Workflow                 | Triggers                  | What it does                                                  |
+| ------------------------ | ------------------------- | ------------------------------------------------------------- |
+| `ci.yml` (or equivalent) | PR, push                  | Lint, typecheck, test, web build, sometimes Tauri smoke build |
+| `release.yml`            | Tag matching `v*.*.*`     | Tauri build matrix → upload installers as release assets      |
+| `docs.yml`               | Push to `main`, docs/\*\* | Build + deploy docs site                                      |
 
 If you fork Cognia and want to ship binaries, fork these workflows too — they encode the matrix targets and signing wiring.
 
@@ -306,34 +318,49 @@ For releases:
 
 Before publishing a release, run a smoke test on each platform:
 
-| Surface | Smoke test |
-| --- | --- |
-| Web | `pnpm build && npx serve out` — open in browser, send a message |
+| Surface | Smoke test                                                                                               |
+| ------- | -------------------------------------------------------------------------------------------------------- |
+| Web     | `pnpm build && npx serve out` — open in browser, send a message                                          |
 | Desktop | `pnpm tauri build` — install and launch the produced installer; send a message; promote a scheduler task |
-| Sidecar | `node sidecar/claude-host.mjs --smoke` |
-| Updater | Install N-1 version, set `latest.json` to N, verify auto-update works |
+| Sidecar | `node sidecar/claude-host.mjs --smoke`                                                                   |
+| Updater | Install N-1 version, set `latest.json` to N, verify auto-update works                                    |
 
 ## Where to start contributing
 
-| Goal | Files |
-| --- | --- |
-| Add a new build target | `src-tauri/Cargo.toml` (target deps), `tauri.conf.json` |
-| Tweak release pipeline | `.github/workflows/release.yml` |
-| Customise installers | `tauri.conf.json` → `bundle.windows` / `bundle.macOS` / `bundle.linux` |
-| Add a runtime env var | `lib/env.ts`, `.env.example`, deployment docs |
+| Goal                   | Files                                                                  |
+| ---------------------- | ---------------------------------------------------------------------- |
+| Add a new build target | `src-tauri/Cargo.toml` (target deps), `tauri.conf.json`                |
+| Tweak release pipeline | `.github/workflows/release.yml`                                        |
+| Customise installers   | `tauri.conf.json` → `bundle.windows` / `bundle.macOS` / `bundle.linux` |
+| Add a runtime env var  | `lib/env.ts`, `.env.example`, deployment docs                          |
 
 ## End of the English docs
 
 <Cards>
   <Card title="Overview" href="./" description="Jump back to the language landing." />
-  <Card title="ADR-0001 · Backup schema v3" href="../adr/0001-backup-schema-v3" description="Why backup looks the way it does." />
-  <Card title="ADR-0002 · Scheduler" href="../adr/0002-scheduler-full-agent-resolution" description="In-app vs native split." />
-  <Card title="ADR-0003 · Employee Digital Twin" href="../adr/0003-employee-digital-twin" description="The deepest design doc in the repo." />
-  <Card title="ADR-0004 · Vector backend" href="../adr/0004-vector-native-backend" description="Why sqlite-vec is the default on desktop." />
+  <Card
+    title="ADR-0001 · Backup schema v3"
+    href="../adr/0001-backup-schema-v3"
+    description="Why backup looks the way it does."
+  />
+  <Card
+    title="ADR-0002 · Scheduler"
+    href="../adr/0002-scheduler-full-agent-resolution"
+    description="In-app vs native split."
+  />
+  <Card
+    title="ADR-0003 · Employee Digital Twin"
+    href="../adr/0003-employee-digital-twin"
+    description="The deepest design doc in the repo."
+  />
+  <Card
+    title="ADR-0004 · Vector backend"
+    href="../adr/0004-vector-native-backend"
+    description="Why sqlite-vec is the default on desktop."
+  />
 </Cards>
 
 <Callout type="info" title="Made it this far?">
-  If you spot anything inaccurate against the actual code, please open a PR or issue.
-  Documentation drift is a bug class — these pages are kept in sync with the
-  implementation, not aspirational.
+  If you spot anything inaccurate against the actual code, please open a PR or issue. Documentation
+  drift is a bug class — these pages are kept in sync with the implementation, not aspirational.
 </Callout>

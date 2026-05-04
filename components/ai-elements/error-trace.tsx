@@ -22,6 +22,16 @@ export interface ErrorTraceDetailsProps {
   copyLabel?: string
   className?: string
   title?: string
+  /**
+   * When the trace originates from a plugin, callers may pass the plugin
+   * id so the alert title reads e.g. "Plugin error — Cognia X" and a
+   * "Disable plugin" action is exposed.
+   */
+  pluginId?: string
+  /** Display name used in the title; falls back to `pluginId` when omitted. */
+  pluginName?: string
+  /** When provided, renders a "Disable plugin" button that invokes this callback. */
+  onDisablePlugin?: (pluginId: string) => void
 }
 
 export function ErrorTraceDetails({
@@ -29,16 +39,20 @@ export function ErrorTraceDetails({
   componentStack,
   className,
   title = "Something went wrong",
+  pluginId,
+  pluginName,
+  onDisablePlugin,
 }: ErrorTraceDetailsProps) {
   const [open, setOpen] = useState(false)
   if (!error) return null
   const message = "message" in error ? error.message : String(error)
   const stack = "stack" in error ? error.stack : undefined
+  const headline = pluginId ? `${title} — ${pluginName ?? pluginId}` : title
 
   return (
     <Alert variant="destructive" className={cn("space-y-2", className)}>
       <AlertCircle className="h-4 w-4" />
-      <AlertTitle>{title}</AlertTitle>
+      <AlertTitle>{headline}</AlertTitle>
       <AlertDescription className="space-y-2">
         <p className="text-sm">{message}</p>
         {(stack || componentStack) && (
@@ -58,6 +72,16 @@ export function ErrorTraceDetails({
               </pre>
             </CollapsibleContent>
           </Collapsible>
+        )}
+        {pluginId && onDisablePlugin && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={() => onDisablePlugin(pluginId)}
+          >
+            Disable plugin
+          </Button>
         )}
       </AlertDescription>
     </Alert>

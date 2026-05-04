@@ -9,6 +9,7 @@ jest.mock("next-intl", () => ({
 }))
 
 import { PluginMarketplaceDetail } from "./plugin-marketplace-detail"
+import type { PluginPermission } from "@/types/plugin"
 
 const detail = {
   id: "p1",
@@ -21,8 +22,8 @@ const detail = {
   homepage: "https://example.com",
   repository: "https://github.com/acme/p",
   capabilities: ["tools", "themes"],
-  permissions: ["clipboard:read", "shell:execute"],
-  optionalPermissions: ["network:fetch"],
+  permissions: ["clipboard:read", "shell:execute"] as PluginPermission[],
+  optionalPermissions: ["network:fetch"] as PluginPermission[],
   dependencies: { "@cognia/core": "^1.0.0" },
   readme: "## Hello\nReadme body.",
   signed: true,

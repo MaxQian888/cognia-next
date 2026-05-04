@@ -30,7 +30,11 @@ function ExternalLink({ href, children }: Props) {
   if (isTauri()) {
     return <button onClick={() => openExternal(href)}>{children}</button>
   }
-  return <a href={href} target="_blank" rel="noreferrer">{children}</a>
+  return (
+    <a href={href} target="_blank" rel="noreferrer">
+      {children}
+    </a>
+  )
 }
 ```
 
@@ -97,6 +101,7 @@ export async function greet(name: string): Promise<string> {
       - 参数用 `String` 不用 `&str` —— Tauri 自己持有缓冲区。
       - 长任务用 `tauri::Window` 参数发进度事件。
     </Callout>
+
   </Step>
   <Step>
     ### 在 `lib.rs` 中注册
@@ -108,6 +113,7 @@ export async function greet(name: string): Promise<string> {
         // ...
     ])
     ```
+
   </Step>
   <Step>
     ### 在 `lib/tauri.ts` 中加类型封装
@@ -120,6 +126,7 @@ export async function greet(name: string): Promise<string> {
 
     如果该领域调用很多，可以放到 `lib/tauri/` 下的子模块
     （例如调度器相关全部放 `lib/tauri/scheduler.ts`）。
+
   </Step>
   <Step>
     ### 写测试
@@ -152,6 +159,7 @@ export async function greet(name: string): Promise<string> {
         ```
       </Tab>
     </Tabs>
+
   </Step>
 </Steps>
 
@@ -168,7 +176,7 @@ export async function greet(name: string): Promise<string> {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
     "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build"
+    "beforeBuildCommand": "pnpm build",
   },
   "app": {
     "windows": [
@@ -181,18 +189,20 @@ export async function greet(name: string): Promise<string> {
         "minHeight": 600,
         "decorations": false,
         "titleBarStyle": "Overlay",
-        "hiddenTitle": true
-      }
+        "hiddenTitle": true,
+      },
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; ..."
-    }
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; ...",
+    },
   },
   "plugins": {
     "deep-link": { "desktop": { "schemes": ["cognia"] } },
-    "cli": { /* CLI 参数定义 */ },
-    "updater": { "active": false }
-  }
+    "cli": {
+      /* CLI 参数定义 */
+    },
+    "updater": { "active": false },
+  },
 }
 ```
 
@@ -202,16 +212,17 @@ export async function greet(name: string): Promise<string> {
   `identifier` 是 `com.reactquickstarter.desktop` —— 历史遗留值。Tauri 用它推导
   **每用户应用数据目录**。修改它会让所有已安装用户的设置、向量库、聊天历史变成孤儿数据。
 
-  **99% 的贡献者请让 `identifier` 保持原样。**
+**99% 的贡献者请让 `identifier` 保持原样。**
+
 </Callout>
 
 按平台的每用户数据目录：
 
-| 平台 | 路径 |
-| --- | --- |
-| Windows | `%APPDATA%\com.reactquickstarter.desktop\` |
-| macOS | `~/Library/Application Support/com.reactquickstarter.desktop/` |
-| Linux | `~/.local/share/com.reactquickstarter.desktop/` |
+| 平台    | 路径                                                           |
+| ------- | -------------------------------------------------------------- |
+| Windows | `%APPDATA%\com.reactquickstarter.desktop\`                     |
+| macOS   | `~/Library/Application Support/com.reactquickstarter.desktop/` |
+| Linux   | `~/.local/share/com.reactquickstarter.desktop/`                |
 
 如果一定要改，请规划迁移：
 
@@ -239,17 +250,17 @@ export async function greet(name: string): Promise<string> {
 
 均在 `src-tauri/src/lib.rs` 注册。每个都有对应的 `tauri-allowlist` 条目（`src-tauri/capabilities/default.json`），限制 JS 侧能做什么。
 
-| 插件 | 用途 |
-| --- | --- |
-| `single-instance` | 第二次启动时聚焦既有窗口并转发参数（CLI workspace 路径、deep-link URL）。 |
-| `deep-link` | 注册 `cognia://` URL 协议。Mac/Linux 把 URL 当作启动参数；Windows 借 single-instance 转发。 |
-| `autostart` | 可选"开机自启"。默认关闭。 |
-| `global-shortcut` | 注册系统级快捷键，由用户配置。 |
-| `cli` | 解析 `--workspace <path>` 与 `-n`（新建会话）启动参数。 |
-| `store` | 持久化 Rust 侧关心的设置（JS 侧用 Dexie）。 |
-| `updater` | 默认禁用（详见 `src-tauri/UPDATER.md`）。 |
-| `dialog`、`fs`、`notification`、`clipboard-manager`、`opener`、`os`、`process` | 标准 OS 访问。 |
-| `log`、`window-state` | 日志、窗口位置/大小持久化。 |
+| 插件                                                                           | 用途                                                                                        |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `single-instance`                                                              | 第二次启动时聚焦既有窗口并转发参数（CLI workspace 路径、deep-link URL）。                   |
+| `deep-link`                                                                    | 注册 `cognia://` URL 协议。Mac/Linux 把 URL 当作启动参数；Windows 借 single-instance 转发。 |
+| `autostart`                                                                    | 可选"开机自启"。默认关闭。                                                                  |
+| `global-shortcut`                                                              | 注册系统级快捷键，由用户配置。                                                              |
+| `cli`                                                                          | 解析 `--workspace <path>` 与 `-n`（新建会话）启动参数。                                     |
+| `store`                                                                        | 持久化 Rust 侧关心的设置（JS 侧用 Dexie）。                                                 |
+| `updater`                                                                      | 默认禁用（详见 `src-tauri/UPDATER.md`）。                                                   |
+| `dialog`、`fs`、`notification`、`clipboard-manager`、`opener`、`os`、`process` | 标准 OS 访问。                                                                              |
+| `log`、`window-state`                                                          | 日志、窗口位置/大小持久化。                                                                 |
 
 按 Tauri 文档要求，single-instance 钩子必须**最先**注册：
 
@@ -282,7 +293,11 @@ Cognia 采用**默认 allow-list** 策略（Tauri 2 capability）。`src-tauri/c
 ## 下一篇
 
 <Cards>
-  <Card title="Sidecar & Claude SDK" href="./sidecar-and-claude-sdk" description="Node sidecar 协议详解" />
+  <Card
+    title="Sidecar & Claude SDK"
+    href="./sidecar-and-claude-sdk"
+    description="Node sidecar 协议详解"
+  />
   <Card title="插件系统" href="./plugin-system" description="插件如何申请权限" />
   <Card title="架构" href="./architecture" description="本页所属的 4 层视图" />
 </Cards>

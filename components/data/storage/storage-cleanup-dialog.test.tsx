@@ -49,7 +49,9 @@ describe("StorageCleanupDialog", () => {
     renderDialog()
     fireEvent.click(screen.getByRole("button", { name: /cleanup/i }))
     expect(screen.getByRole("dialog")).toBeInTheDocument()
-    expect(screen.getByText(/safe & fast/i)).toBeInTheDocument()
+    // Global jest mock pulls translations from `i18n/messages/en.json`, where
+    // the quick-cleanup blurb reads "Clears transient buckets ... Safe and fast.".
+    expect(screen.getByText(/safe and fast/i)).toBeInTheDocument()
   })
 
   it("renders the three cleanup-mode tabs", () => {
@@ -66,9 +68,9 @@ describe("StorageCleanupDialog", () => {
     renderDialog()
     await user.click(screen.getByRole("button", { name: /cleanup/i }))
     const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByText(/safe & fast/i)).toBeInTheDocument()
+    expect(within(dialog).getByText(/safe and fast/i)).toBeInTheDocument()
     // userEvent simulates real pointer events that radix Tabs requires.
     await user.click(within(dialog).getByRole("tab", { name: /custom/i }))
-    expect(await within(dialog).findByText(/pick categories/i)).toBeInTheDocument()
+    expect(await within(dialog).findByText(/pick which categories/i)).toBeInTheDocument()
   })
 })

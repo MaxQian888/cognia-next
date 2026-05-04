@@ -4,7 +4,10 @@ import type {
   PluginManifest,
 } from "@/types/plugin"
 
+import clipboardHistoryManifest from "../../../plugins/clipboard-history/plugin.json"
 import clipboardToolsManifest from "../../../plugins/clipboard-tools/plugin.json"
+import promptTemplatesManifest from "../../../plugins/prompt-templates/plugin.json"
+import screenshotManifest from "../../../plugins/screenshot/plugin.json"
 import webToolsManifest from "../../../plugins/web-tools/plugin.json"
 import workspaceToolsManifest from "../../../plugins/workspace-tools/plugin.json"
 
@@ -32,28 +35,47 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
   {
     manifest: asPluginManifest(workspaceToolsManifest),
     path: "builtin://cognia-workspace-tools",
-    compatibilityDiagnostics: [
-      {
-        code: "runtime.browser.unsupported",
-        severity: "error",
-        message:
-          "Workspace Tools currently require native filesystem capabilities and are desktop-only in browser runtime.",
-        hint: "Use the desktop app for workspace filesystem workflows.",
-      },
-    ],
+    compatibilityDiagnostics: [],
+    load: async () => {
+      const mod = await import("../../../plugins/workspace-tools/src/index")
+      return (mod.default || mod) as PluginDefinition
+    },
   },
   {
     manifest: asPluginManifest(webToolsManifest),
     path: "builtin://cognia-web-tools",
-    compatibilityDiagnostics: [
-      {
-        code: "runtime.browser.unsupported",
-        severity: "error",
-        message:
-          "Web Tools currently depend on desktop-oriented download path handling and are not enabled in browser runtime yet.",
-        hint: "Use the desktop app until browser-safe download and path handling are implemented.",
-      },
-    ],
+    compatibilityDiagnostics: [],
+    load: async () => {
+      const mod = await import("../../../plugins/web-tools/src/index")
+      return (mod.default || mod) as PluginDefinition
+    },
+  },
+  {
+    manifest: asPluginManifest(screenshotManifest),
+    path: "builtin://cognia-screenshot",
+    compatibilityDiagnostics: [],
+    load: async () => {
+      const mod = await import("../../../plugins/screenshot/src/index")
+      return (mod.default || mod) as PluginDefinition
+    },
+  },
+  {
+    manifest: asPluginManifest(promptTemplatesManifest),
+    path: "builtin://cognia-prompt-templates",
+    compatibilityDiagnostics: [],
+    load: async () => {
+      const mod = await import("../../../plugins/prompt-templates/src/index")
+      return (mod.default || mod) as PluginDefinition
+    },
+  },
+  {
+    manifest: asPluginManifest(clipboardHistoryManifest),
+    path: "builtin://cognia-clipboard-history",
+    compatibilityDiagnostics: [],
+    load: async () => {
+      const mod = await import("../../../plugins/clipboard-history/src/index")
+      return (mod.default || mod) as PluginDefinition
+    },
   },
 ]
 

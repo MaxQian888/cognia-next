@@ -243,7 +243,7 @@ jest.mock("./local-provider-setup-wizard", () => ({
 const mockServerScan = jest.fn()
 jest.mock("@/hooks/provider/use-local-provider", () => ({
   useLocalProvidersScan: () => ({
-    results: new Map(),
+    detected: new Map(),
     isScanning: false,
     scan: mockServerScan,
   }),

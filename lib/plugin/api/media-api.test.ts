@@ -1,6 +1,35 @@
 /**
+ * @jest-environment jsdom
+ *
  * Tests for Media Plugin API - Registry Functions
+ *
+ * jsdom omits the canvas-API `ImageData` constructor, so we polyfill a
+ * minimal shape here before the tests run. This is sufficient for the
+ * registry tests below — production code uses the real browser
+ * `ImageData`.
  */
+if (typeof globalThis.ImageData === "undefined") {
+  class ImageDataPolyfill {
+    readonly data: Uint8ClampedArray
+    readonly width: number
+    readonly height: number
+    constructor(data: Uint8ClampedArray | number, widthOrHeight?: number, height?: number) {
+      if (data instanceof Uint8ClampedArray) {
+        this.data = data
+        this.width = widthOrHeight ?? Math.sqrt(data.length / 4)
+        this.height = height ?? this.width
+      } else {
+        const w = data
+        const h = widthOrHeight ?? data
+        this.width = w
+        this.height = h
+        this.data = new Uint8ClampedArray(w * h * 4)
+      }
+    }
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(globalThis as any).ImageData = ImageDataPolyfill
+}
 
 import {
   createMediaAPI,
@@ -45,7 +74,7 @@ jest.mock("@/stores", () => ({
           defaultModel: "gpt-4o",
         },
       },
-      customProviders: {},
+      customProviders: [],
     })),
   },
 }))
@@ -105,6 +134,24 @@ Object.defineProperty(HTMLCanvasElement.prototype, "toDataURL", {
   configurable: true,
 })
 
+// jsdom doesn't ship the canvas 2D context — provide a minimal stub so
+// `document.createElement("canvas").getContext("2d")` returns a usable
+// object for `imageDataToDataUrl` and similar source-side helpers.
+Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+  value: jest.fn(() => ({
+    drawImage: jest.fn(),
+    putImageData: jest.fn(),
+    getImageData: jest.fn(
+      (_x: number, _y: number, w: number, h: number) =>
+        new ImageData(new Uint8ClampedArray(w * h * 4), w, h)
+    ),
+    fillRect: jest.fn(),
+    clearRect: jest.fn(),
+    canvas: { width: 0, height: 0 },
+  })),
+  configurable: true,
+})
+
 describe("Media Registry", () => {
   const testPluginId = "test-plugin"
 
@@ -138,7 +185,7 @@ describe("Media Registry", () => {
           defaultModel: "gpt-4o",
         },
       },
-      customProviders: {},
+      customProviders: [],
     })
 
     const registry = getMediaRegistry()
@@ -547,7 +594,7 @@ describe("Media Registry", () => {
             defaultModel: "grok-2-image",
           },
         },
-        customProviders: {},
+        customProviders: [],
       })
       const api = createMediaAPI(testPluginId, {} as never)
 
@@ -587,7 +634,7 @@ describe("Media Registry", () => {
             defaultModel: "grok-2-image",
           },
         },
-        customProviders: {},
+        customProviders: [],
       })
       const api = createMediaAPI(testPluginId, {} as never)
 
@@ -610,7 +657,7 @@ describe("Media Registry", () => {
             defaultModel: "gpt-4o",
           },
         },
-        customProviders: {},
+        customProviders: [],
       })
 
       const api = createMediaAPI(testPluginId, {} as never)

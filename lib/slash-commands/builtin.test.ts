@@ -1,4 +1,5 @@
-import { applyTemplate, BUILTIN_SLASH_COMMANDS } from "./builtin"
+import { applyTemplate, BUILTIN_SLASH_COMMANDS, type SettingsTab } from "./builtin"
+import { SETTINGS_NAV } from "@/components/settings/settings-nav-config"
 
 describe("applyTemplate", () => {
   it("substitutes $ARGUMENTS with the full args string", () => {
@@ -66,5 +67,23 @@ describe("BUILTIN_SLASH_COMMANDS registry", () => {
     const cost = BUILTIN_SLASH_COMMANDS.find((c) => c.name === "cost")
     expect(cost?.disabled).not.toBe(true)
     expect(cost?.handler).toBeDefined()
+  })
+})
+
+describe("SettingsTab is the live SettingsSectionId union", () => {
+  // Phase 2 dedupe: every SETTINGS_NAV entry is a valid openSettings target.
+  // The compile-time check below catches the case where a future contributor
+  // adds a literal that isn't in SETTINGS_NAV.
+  it("accepts every nav id at the type level", () => {
+    for (const item of SETTINGS_NAV) {
+      const tab: SettingsTab = item.id
+      expect(typeof tab).toBe("string")
+    }
+  })
+
+  it("rejects a stale literal that isn't in the nav", () => {
+    // @ts-expect-error — "unknown-section" must NOT be assignable to SettingsTab.
+    const stale: SettingsTab = "unknown-section"
+    expect(stale).toBe("unknown-section")
   })
 })

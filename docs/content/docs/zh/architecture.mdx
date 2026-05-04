@@ -90,19 +90,19 @@ if (isTauri()) {
 
 `cognia-next` crate 是产品级 Rust 后端。顶层模块：
 
-| 模块 | 用途 |
-| --- | --- |
-| `claude` | 启动并监督 Node sidecar（`SidecarState`）；API key 变更时重启。 |
-| `scheduler` | 跨平台原生调度器 —— `windows.rs`（Task Scheduler）、`macos.rs`（launchd）、`linux.rs`（systemd），sqlite 元数据表用于恢复。 |
-| `vector` | sqlite-vec 后端；在任何连接打开前加载 FFI 扩展。 |
-| `tts` | 语音供应商密钥保管库（keyring）、Edge-TTS WebSocket 桥、通用 HTTP 代理。 |
-| `hooks` | 生命周期钩子（chat send、response、error）。 |
-| `agents` / `external_agent` | Agent 团队协调，外部 CLI agent。 |
-| `a2ui_bridge` | webview ↔ A2UI MCP sidecar 之间的桥。 |
-| `canvas` | 画板文档落盘存储。 |
-| `skills` | 技能资源解析 + 沙箱准备。 |
-| `files`、`shell`、`settings`、`api_key`、`logging` | 文件操作、shell 执行、设置持久化、密钥保管、fern → 原生日志分发。 |
-| `tray`、`menu`、`window_behavior` | 桌面"外壳"（系统托盘、菜单栏、窗口状态）。 |
+| 模块                                               | 用途                                                                                                                        |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `claude`                                           | 启动并监督 Node sidecar（`SidecarState`）；API key 变更时重启。                                                             |
+| `scheduler`                                        | 跨平台原生调度器 —— `windows.rs`（Task Scheduler）、`macos.rs`（launchd）、`linux.rs`（systemd），sqlite 元数据表用于恢复。 |
+| `vector`                                           | sqlite-vec 后端；在任何连接打开前加载 FFI 扩展。                                                                            |
+| `tts`                                              | 语音供应商密钥保管库（keyring）、Edge-TTS WebSocket 桥、通用 HTTP 代理。                                                    |
+| `hooks`                                            | 生命周期钩子（chat send、response、error）。                                                                                |
+| `agents` / `external_agent`                        | Agent 团队协调，外部 CLI agent。                                                                                            |
+| `a2ui_bridge`                                      | webview ↔ A2UI MCP sidecar 之间的桥。                                                                                       |
+| `canvas`                                           | 画板文档落盘存储。                                                                                                          |
+| `skills`                                           | 技能资源解析 + 沙箱准备。                                                                                                   |
+| `files`、`shell`、`settings`、`api_key`、`logging` | 文件操作、shell 执行、设置持久化、密钥保管、fern → 原生日志分发。                                                           |
+| `tray`、`menu`、`window_behavior`                  | 桌面"外壳"（系统托盘、菜单栏、窗口状态）。                                                                                  |
 
 外加在 `lib.rs` 注册的 Tauri 插件：`single-instance`、`deep-link`、`autostart`、`global-shortcut`、`cli`、`store`、`updater`、`dialog`、`fs`、`notification`、`clipboard-manager`、`opener`、`os`、`process`、`log`、`window-state`。
 
@@ -127,14 +127,14 @@ Rust 侧（`src-tauri/src/claude/sidecar.rs`）通过 `SidecarState` 持有子�
 
 ### 存储策略
 
-| 数据 | 位置 | 原因 |
-| --- | --- | --- |
-| 聊天会话、角色、技能、团队、孪生表 | Dexie（IndexedDB） | webview 本地、低延迟、可建索引。Schema 版本只增不改，不要修改旧的 `version().stores()` 块。 |
-| 向量嵌入 | `<app_data>/cognia/vectors.sqlite`（桌面）或远程（Web） | 原生定长向量索引需要 sqlite-vec；Web 退回云端后端。 |
-| 备份快照 | 用户通过 Tauri 对话框选择的文件夹 | 默认 AES-GCM 加密。 |
-| 调度器元数据 | sqlite（Rust 侧 `metadata_store.rs`） | 跨重启保留；交叉引用原生 task ID。 |
-| 设置 | Dexie `settings` 表（单行 key 为 `"singleton"`）+ `lib/settings/` | 启动时由 `SettingsSyncProvider` 从 Rust 同步。 |
-| API key | OS keyring（`keyring` crate） | 永不以明文落盘。 |
+| 数据                               | 位置                                                              | 原因                                                                                        |
+| ---------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| 聊天会话、角色、技能、团队、孪生表 | Dexie（IndexedDB）                                                | webview 本地、低延迟、可建索引。Schema 版本只增不改，不要修改旧的 `version().stores()` 块。 |
+| 向量嵌入                           | `<app_data>/cognia/vectors.sqlite`（桌面）或远程（Web）           | 原生定长向量索引需要 sqlite-vec；Web 退回云端后端。                                         |
+| 备份快照                           | 用户通过 Tauri 对话框选择的文件夹                                 | 默认 AES-GCM 加密。                                                                         |
+| 调度器元数据                       | sqlite（Rust 侧 `metadata_store.rs`）                             | 跨重启保留；交叉引用原生 task ID。                                                          |
+| 设置                               | Dexie `settings` 表（单行 key 为 `"singleton"`）+ `lib/settings/` | 启动时由 `SettingsSyncProvider` 从 Rust 同步。                                              |
+| API key                            | OS keyring（`keyring` crate）                                     | 永不以明文落盘。                                                                            |
 
 ### 日志
 
@@ -153,7 +153,11 @@ Rust 侧（`src-tauri/src/claude/sidecar.rs`）通过 `SidecarState` 持有子�
 
 <Cards>
   <Card title="运行时 & Tauri" href="./runtime-and-tauri" description="IPC 桥的实际用法" />
-  <Card title="Sidecar & Claude SDK" href="./sidecar-and-claude-sdk" description="基于 stdio 的 JSON-lines 协议" />
+  <Card
+    title="Sidecar & Claude SDK"
+    href="./sidecar-and-claude-sdk"
+    description="基于 stdio 的 JSON-lines 协议"
+  />
   <Card title="存储" href="./storage" description="Dexie schema v15 细节" />
   <Card title="插件系统" href="./plugin-system" description="沙箱 + 权限模型" />
 </Cards>

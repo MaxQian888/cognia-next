@@ -21,7 +21,7 @@ import type {
  */
 function getResolvedMode(mode: ThemeMode): "light" | "dark" {
   if (mode === "system") {
-    if (typeof window !== "undefined") {
+    if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
       return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
     }
     return "light"

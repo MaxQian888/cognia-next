@@ -12,7 +12,7 @@ jest.mock("next-intl", () => ({
   },
 }))
 
-const setPluginEnabledMock = jest.fn(async () => undefined)
+const setPluginEnabledMock = jest.fn(async (_id: string, _enabled: boolean) => undefined)
 const mockRows: PluginRow[] = [
   {
     id: "a",

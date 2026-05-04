@@ -8,11 +8,10 @@ description: Schema v3 backup format with AES-GCM encryption, scheduled auto-bac
 <Status variant="stable">schema v3</Status>
 
 <TLDR>
-  AES-GCM-encrypted, integrity-checked backups in package format **v3**.
-  Auto-key per-device (no passphrase) or user passphrase for portability.
-  Six per-domain transfers (skills, MCP, presets, characters, teams, theme)
-  let you move just one slice. ChatGPT / Claude / Gemini imports map external
-  exports into Cognia's chat shape.
+  AES-GCM-encrypted, integrity-checked backups in package format **v3**. Auto-key per-device (no
+  passphrase) or user passphrase for portability. Six per-domain transfers (skills, MCP, presets,
+  characters, teams, theme) let you move just one slice. ChatGPT / Claude / Gemini imports map
+  external exports into Cognia's chat shape.
 </TLDR>
 
 <StatGrid>
@@ -58,9 +57,9 @@ lib/db/backup-history.ts     # backupHistory table (capped at 50)
 interface BackupPackageV3 {
   manifest: {
     schemaVersion: 3
-    createdAt: string         // ISO-8601
+    createdAt: string // ISO-8601
     appVersion: string
-    integrity: string         // SHA-256 of payload
+    integrity: string // SHA-256 of payload
     flags: {
       includesSessions: boolean
       includesApiKey: boolean
@@ -74,7 +73,7 @@ interface BackupPackageV3 {
     teams: Team[]
     promptPresets: SystemPromptPreset[]
     mcpServers: McpServer[]
-    twin?: TwinExport         // sources + profile (chunks excluded by default)
+    twin?: TwinExport // sources + profile (chunks excluded by default)
     canvas?: CanvasExport
     settings: AppSettings
   }
@@ -157,15 +156,15 @@ interface EncryptedEnvelopeV1 {
     algorithm: "pbkdf2"
     hash: "sha256"
     iterations: 600_000
-    salt: string             // base64
+    salt: string // base64
   }
-  iv: string                  // base64
-  ciphertext: string          // base64
-  manifest: BackupPackageV3["manifest"]   // unencrypted manifest copy
+  iv: string // base64
+  ciphertext: string // base64
+  manifest: BackupPackageV3["manifest"] // unencrypted manifest copy
 }
 ```
 
-The manifest is duplicated outside the ciphertext so the user can see *what* the file contains (timestamp, schema version, flags) without entering the passphrase.
+The manifest is duplicated outside the ciphertext so the user can see _what_ the file contains (timestamp, schema version, flags) without entering the passphrase.
 
 `encryptBackupPackage(pkg, passphrase, manifest)` derives a key from the passphrase via PBKDF2-SHA256 with 600,000 iterations (OWASP 2023 recommendation), then AES-GCM-encrypts the canonical-JSON `pkg`.
 
@@ -193,10 +192,10 @@ Built-in characters / skills / teams are filtered out of the payload — they re
 
 `applyBackupPackage(pkg, opts)` writes the payload to Dexie under one of three merge strategies:
 
-| Strategy | Behaviour |
-| --- | --- |
-| `skip` | Skip rows that already exist (by ID). |
-| `overwrite` | Replace existing rows. |
+| Strategy    | Behaviour                             |
+| ----------- | ------------------------------------- |
+| `skip`      | Skip rows that already exist (by ID). |
+| `overwrite` | Replace existing rows.                |
 | `duplicate` | Re-key conflicting rows to fresh IDs. |
 
 Built-in rows are always preserved (the importer skips them).
@@ -272,20 +271,20 @@ The Maintenance tab in settings shows the history.
 
 `lib/data/domain/index.ts` exports `DOMAIN_TRANSFERS` — a registry of transfer modules, one per domain:
 
-| Domain | File | Notes |
-| --- | --- | --- |
-| Skills | `domain/skills.ts` | Single skill or full library |
-| MCP servers | `domain/mcp.ts` | Useful for sharing tool configs |
-| Prompt presets | `domain/prompt-presets.ts` | |
-| Characters | `domain/characters.ts` | Twin binding is preserved by ID |
-| Teams | `domain/teams.ts` | Team members re-resolve by character name on import |
-| Theme | `domain/theme.ts` | Custom theme JSON |
+| Domain         | File                       | Notes                                               |
+| -------------- | -------------------------- | --------------------------------------------------- |
+| Skills         | `domain/skills.ts`         | Single skill or full library                        |
+| MCP servers    | `domain/mcp.ts`            | Useful for sharing tool configs                     |
+| Prompt presets | `domain/prompt-presets.ts` |                                                     |
+| Characters     | `domain/characters.ts`     | Twin binding is preserved by ID                     |
+| Teams          | `domain/teams.ts`          | Team members re-resolve by character name on import |
+| Theme          | `domain/theme.ts`          | Custom theme JSON                                   |
 
 API:
 
 ```ts
-const blob = await buildDomainExport("skills")           // → Blob
-await applyDomainImport("skills", file, "overwrite")     // strategy
+const blob = await buildDomainExport("skills") // → Blob
+await applyDomainImport("skills", file, "overwrite") // strategy
 ```
 
 Each domain transfer has its own `<key>.test.ts` next to the source.
@@ -294,11 +293,11 @@ Each domain transfer has its own `<key>.test.ts` next to the source.
 
 `lib/data/import-registry.ts` dispatches third-party export files to the right importer:
 
-| Importer | Source |
-| --- | --- |
+| Importer            | Source                                    |
+| ------------------- | ----------------------------------------- |
 | `chatgpt-import.ts` | ChatGPT export ZIP (`conversations.json`) |
-| `claude-import.ts` | Claude.ai chat export |
-| `gemini-import.ts` | Google Gemini takeout |
+| `claude-import.ts`  | Claude.ai chat export                     |
+| `gemini-import.ts`  | Google Gemini takeout                     |
 
 Each importer:
 
@@ -329,12 +328,12 @@ Every chat header has a `SingleExportTrigger` (`components/chat/dialogs/single-e
 
 ## Where to start contributing
 
-| Goal | Files |
-| --- | --- |
-| Add a new domain transfer | `lib/data/domain/<name>.ts`, register in `index.ts` |
-| Add a new external importer | `lib/data/importers/<name>.ts`, register in `import-registry.ts` |
-| Tweak schedule cadence | `lib/data/scheduler.ts` |
-| Bump backup schema | New `BackupPackageV4` type, update `migrate.ts` v3→v4, bump in `build-package.ts` |
+| Goal                        | Files                                                                             |
+| --------------------------- | --------------------------------------------------------------------------------- |
+| Add a new domain transfer   | `lib/data/domain/<name>.ts`, register in `index.ts`                               |
+| Add a new external importer | `lib/data/importers/<name>.ts`, register in `import-registry.ts`                  |
+| Tweak schedule cadence      | `lib/data/scheduler.ts`                                                           |
+| Bump backup schema          | New `BackupPackageV4` type, update `migrate.ts` v3→v4, bump in `build-package.ts` |
 
 ## Tests
 
@@ -346,6 +345,14 @@ Every chat header has a `SingleExportTrigger` (`components/chat/dialogs/single-e
 
 <Cards>
   <Card title="Storage" href="./storage" description="The underlying Dexie schema." />
-  <Card title="Scheduler" href="./scheduler" description="The scheduling primitives the backup scheduler builds on." />
-  <Card title="ADR-0001" href="../adr/0001-backup-schema-v3" description="Why schema v3 looks like this." />
+  <Card
+    title="Scheduler"
+    href="./scheduler"
+    description="The scheduling primitives the backup scheduler builds on."
+  />
+  <Card
+    title="ADR-0001"
+    href="../adr/0001-backup-schema-v3"
+    description="Why schema v3 looks like this."
+  />
 </Cards>

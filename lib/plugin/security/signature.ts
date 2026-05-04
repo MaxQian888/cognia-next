@@ -6,6 +6,7 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { loggers } from "../core/logger"
+import { recordSilentFailure } from "../contracts/diagnostics-store"
 
 // =============================================================================
 // Types
@@ -407,8 +408,16 @@ export class PluginSignatureVerifier {
           addedAt: publisher.addedAt.toISOString(),
         }))
       localStorage.setItem(USER_PUBLISHERS_STORAGE_KEY, JSON.stringify(userPublishers))
-    } catch {
-      // Ignore local persistence failures.
+    } catch (error) {
+      recordSilentFailure(
+        "<signature>",
+        {
+          site: "signature.persistUserPublishersToStorage",
+          message: "Trusted publisher persistence skipped (storage unavailable).",
+          expected: false,
+        },
+        error
+      )
     }
   }
 

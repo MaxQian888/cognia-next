@@ -79,16 +79,16 @@ sequenceDiagram
 
 The full protocol is specified in the comment block at the top of `claude-host.mjs`. The high-level shape:
 
-| Direction | Type | Payload |
-| --- | --- | --- |
-| → | `init` | `{ type: "init", apiKey?, workingDir? }` — set credentials and CWD. |
-| → | `send` | `{ type: "send", messages, options }` — start a new turn. |
-| ← | `delta` | `{ type: "delta", content }` — streaming token chunks. |
-| ← | `tool_use` | `{ type: "tool_use", name, input }` — model wants to call a tool. |
-| → | `tool_result` | `{ type: "tool_result", id, content }` — tool output. |
-| ← | `done` | `{ type: "done", usage }` — turn finished. |
-| ← | `error` | `{ type: "error", message }` — fatal error; sidecar exits. |
-| → | `kill` | `{ type: "kill" }` — graceful shutdown. |
+| Direction | Type          | Payload                                                             |
+| --------- | ------------- | ------------------------------------------------------------------- |
+| →         | `init`        | `{ type: "init", apiKey?, workingDir? }` — set credentials and CWD. |
+| →         | `send`        | `{ type: "send", messages, options }` — start a new turn.           |
+| ←         | `delta`       | `{ type: "delta", content }` — streaming token chunks.              |
+| ←         | `tool_use`    | `{ type: "tool_use", name, input }` — model wants to call a tool.   |
+| →         | `tool_result` | `{ type: "tool_result", id, content }` — tool output.               |
+| ←         | `done`        | `{ type: "done", usage }` — turn finished.                          |
+| ←         | `error`       | `{ type: "error", message }` — fatal error; sidecar exits.          |
+| →         | `kill`        | `{ type: "kill" }` — graceful shutdown.                             |
 
 `options` (in `send`) carries the active `Character` system prompt, the resolved skill list, MCP server config, model choice, max tokens, etc. — all assembled by `lib/claude/build-options.ts`.
 
@@ -166,10 +166,9 @@ The sidecar reads credentials from the same sources Claude Code uses:
 />
 
 <Callout type="warn" title="Never plaintext">
-  The Rust side never reads `~/.claude/` directly — it just spawns the sidecar
-  with the right env. API keys entered in the UI are stored in `ApiKeyState`
-  (memory) and the OS keyring (`keyring` crate); they are passed to the sidecar
-  via env at spawn time, **never written to a config file**.
+  The Rust side never reads `~/.claude/` directly — it just spawns the sidecar with the right env.
+  API keys entered in the UI are stored in `ApiKeyState` (memory) and the OS keyring (`keyring`
+  crate); they are passed to the sidecar via env at spawn time, **never written to a config file**.
 </Callout>
 
 ## Adding a new tool
@@ -213,6 +212,7 @@ The sidecar reads credentials from the same sources Claude Code uses:
       Built-in tools ship with every Cognia release. Avoid heavy dependencies —
       prefer MCP for anything specialised.
     </Callout>
+
   </Tab>
   <Tab value="MCP server">
     For most third-party integrations, MCP is the right path because it doesn't require modifying the sidecar.
@@ -237,6 +237,7 @@ The sidecar reads credentials from the same sources Claude Code uses:
         `tool_use` / `tool_result`.
       </Step>
     </Steps>
+
   </Tab>
 </Tabs>
 
@@ -267,7 +268,19 @@ In the running app, sidecar `stderr` is mirrored to the Rust logger and surfaces
 ## Next
 
 <Cards>
-  <Card title="Chat & Skills" href="./chat-and-skills" description="The user-facing surfaces that call claude_send." />
-  <Card title="Plugin system" href="./plugin-system" description="How plugins extend the sidecar via MCP." />
-  <Card title="Runtime & Tauri" href="./runtime-and-tauri" description="The Rust side that owns the sidecar lifecycle." />
+  <Card
+    title="Chat & Skills"
+    href="./chat-and-skills"
+    description="The user-facing surfaces that call claude_send."
+  />
+  <Card
+    title="Plugin system"
+    href="./plugin-system"
+    description="How plugins extend the sidecar via MCP."
+  />
+  <Card
+    title="Runtime & Tauri"
+    href="./runtime-and-tauri"
+    description="The Rust side that owns the sidecar lifecycle."
+  />
 </Cards>

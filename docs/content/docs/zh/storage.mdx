@@ -8,9 +8,8 @@ description: 完整 IndexedDB schema、按版本演进的迁移、以及如何�
 <Status variant="stable">v15</Status>
 
 <TLDR>
-  所有浏览器侧状态通过 Dexie 存在 IndexedDB，库名 `cognia-claude`。
-  Schema 版本只增不改 —— 每次发版加新 `.version(n)` 块，旧的永不修改。
-  迁移幂等，每次打开库都会自动跑。
+  所有浏览器侧状态通过 Dexie 存在 IndexedDB，库名 `cognia-claude`。 Schema 版本只增不改 ——
+  每次发版加新 `.version(n)` 块，旧的永不修改。 迁移幂等，每次打开库都会自动跑。
 </TLDR>
 
 <StatGrid>
@@ -32,37 +31,37 @@ Dexie 数据库名是 `cognia-claude`（保留原始代号，避免对已有用�
 
 ## 表（v15）
 
-| 表 | 类型 | 索引列 | 用途 |
-| --- | --- | --- | --- |
-| `sessions` | `ChatSession` | `id`, `updatedAt`, `createdAt` | 聊天会话 |
-| `messages` | `StoredMessage` | `id`, `sessionId`, `[sessionId+createdAt]` | 聊天消息 |
-| `settings` | `AppSettings`（单例） | `id`（始终 `"singleton"`） | 全局设置 |
-| `promptPresets` | `SystemPromptPreset` | `id`, `category`, `updatedAt` | 可复用提示片段 |
-| `mcpServers` | `McpServer` | `id`, `enabled`, `updatedAt` | MCP 服务器定义 |
-| `characters` | `Character` | `id`, `name`, `isBuiltIn`, `updatedAt` | 角色人格 |
-| `skills` | `Skill` | `id`, `name`, `category`, `isBuiltIn`, `updatedAt` | 技能定义 |
-| `skillResources` | `SkillResource` | `id`, `skillId`, `[skillId+name]` | 技能附件（文件、URL） |
-| `teams` | `Team` | `id`, `name`, `updatedAt` | 多角色团队 |
-| `trustedWorkspaces` | `TrustedWorkspace` | `id`, `path`, `lastUsedAt` | 允许 shell-tool 执行的工作区 |
-| `backupHistory` | `BackupHistoryRow` | `id`, `completedAt`, `status` | 限 50 行 |
-| `canvasDocuments` | `CanvasDocumentRow` | `id`, `sessionId`, `updatedAt` | 长形式 artifact |
-| `canvasVersions` | `CanvasVersionRow` | `id`, `documentId`, `[documentId+createdAt]` | 版本历史 |
-| `canvasComments` | `CanvasCommentRow` | `id`, `documentId`, `createdAt` | 行内评论 |
-| `canvasSessions` | `CanvasSessionRow` | `id`, `documentId`, `updatedAt` | 每会话画板状态 |
-| `a2uiApps` | `A2UIAppRow` | `id`, `name`, `updatedAt` | A2UI 应用实例 |
-| `a2uiSurfaces` | `A2UISurfaceRow` | `id`, `appId`, `[appId+createdAt]` | A2UI 已渲染输出层 |
-| `a2uiTemplates` | `A2UITemplateRow` | `id`, `category`, `updatedAt` | A2UI 输出层模板 |
-| `a2uiEventHistory` | `A2UIEventHistoryRow` | `id`, `surfaceId`, `[surfaceId+createdAt]` | A2UI 事件审计 |
-| `twinSources` | `TwinSource` | `id`, `twinId`, `[twinId+status]`, `updatedAt` | 用户原始素材 |
-| `twinChunks` | `TwinChunk` | `id`, `sourceId`, `[sourceId+chunkIdx]`, `twinId` | 嵌入后的 chunk |
-| `twinProfile` | `TwinProfile` | `id`, `twinId` | 蒸馏画像（每个孪生一行） |
-| `twinDrafts` | `TwinDraft` | `id`, `twinId`, `status`, `[twinId+createdAt]` | 待审角色/技能草稿 |
-| `twinJobs` | `TwinJob` | `id`, `twinId`, `kind`, `status`, `createdAt` | ingest + distill 队列 |
-| `plugins` | `PluginRow` | `id`, `enabled`, `updatedAt` | 已安装插件 |
-| `pluginPermissions` | `PluginPermissionRow` | `[pluginId+permission]`（复合主键） | 已授权权限 |
-| `pluginReviews` | `PluginReviewRow` | `[pluginId+rating]`（复合主键） | 市场评价缓存 |
-| `pluginAnalytics` | `PluginAnalyticsRow` | `[pluginId+day]`（复合主键） | 每日插件统计 |
-| `pluginScheduledJobs` | `PluginScheduledJobRow` | `id`, `pluginId`, `enabled` | 插件定时任务 |
+| 表                    | 类型                    | 索引列                                             | 用途                         |
+| --------------------- | ----------------------- | -------------------------------------------------- | ---------------------------- |
+| `sessions`            | `ChatSession`           | `id`, `updatedAt`, `createdAt`                     | 聊天会话                     |
+| `messages`            | `StoredMessage`         | `id`, `sessionId`, `[sessionId+createdAt]`         | 聊天消息                     |
+| `settings`            | `AppSettings`（单例）   | `id`（始终 `"singleton"`）                         | 全局设置                     |
+| `promptPresets`       | `SystemPromptPreset`    | `id`, `category`, `updatedAt`                      | 可复用提示片段               |
+| `mcpServers`          | `McpServer`             | `id`, `enabled`, `updatedAt`                       | MCP 服务器定义               |
+| `characters`          | `Character`             | `id`, `name`, `isBuiltIn`, `updatedAt`             | 角色人格                     |
+| `skills`              | `Skill`                 | `id`, `name`, `category`, `isBuiltIn`, `updatedAt` | 技能定义                     |
+| `skillResources`      | `SkillResource`         | `id`, `skillId`, `[skillId+name]`                  | 技能附件（文件、URL）        |
+| `teams`               | `Team`                  | `id`, `name`, `updatedAt`                          | 多角色团队                   |
+| `trustedWorkspaces`   | `TrustedWorkspace`      | `id`, `path`, `lastUsedAt`                         | 允许 shell-tool 执行的工作区 |
+| `backupHistory`       | `BackupHistoryRow`      | `id`, `completedAt`, `status`                      | 限 50 行                     |
+| `canvasDocuments`     | `CanvasDocumentRow`     | `id`, `sessionId`, `updatedAt`                     | 长形式 artifact              |
+| `canvasVersions`      | `CanvasVersionRow`      | `id`, `documentId`, `[documentId+createdAt]`       | 版本历史                     |
+| `canvasComments`      | `CanvasCommentRow`      | `id`, `documentId`, `createdAt`                    | 行内评论                     |
+| `canvasSessions`      | `CanvasSessionRow`      | `id`, `documentId`, `updatedAt`                    | 每会话画板状态               |
+| `a2uiApps`            | `A2UIAppRow`            | `id`, `name`, `updatedAt`                          | A2UI 应用实例                |
+| `a2uiSurfaces`        | `A2UISurfaceRow`        | `id`, `appId`, `[appId+createdAt]`                 | A2UI 已渲染输出层            |
+| `a2uiTemplates`       | `A2UITemplateRow`       | `id`, `category`, `updatedAt`                      | A2UI 输出层模板              |
+| `a2uiEventHistory`    | `A2UIEventHistoryRow`   | `id`, `surfaceId`, `[surfaceId+createdAt]`         | A2UI 事件审计                |
+| `twinSources`         | `TwinSource`            | `id`, `twinId`, `[twinId+status]`, `updatedAt`     | 用户原始素材                 |
+| `twinChunks`          | `TwinChunk`             | `id`, `sourceId`, `[sourceId+chunkIdx]`, `twinId`  | 嵌入后的 chunk               |
+| `twinProfile`         | `TwinProfile`           | `id`, `twinId`                                     | 蒸馏画像（每个孪生一行）     |
+| `twinDrafts`          | `TwinDraft`             | `id`, `twinId`, `status`, `[twinId+createdAt]`     | 待审角色/技能草稿            |
+| `twinJobs`            | `TwinJob`               | `id`, `twinId`, `kind`, `status`, `createdAt`      | ingest + distill 队列        |
+| `plugins`             | `PluginRow`             | `id`, `enabled`, `updatedAt`                       | 已安装插件                   |
+| `pluginPermissions`   | `PluginPermissionRow`   | `[pluginId+permission]`（复合主键）                | 已授权权限                   |
+| `pluginReviews`       | `PluginReviewRow`       | `[pluginId+rating]`（复合主键）                    | 市场评价缓存                 |
+| `pluginAnalytics`     | `PluginAnalyticsRow`    | `[pluginId+day]`（复合主键）                       | 每日插件统计                 |
+| `pluginScheduledJobs` | `PluginScheduledJobRow` | `id`, `pluginId`, `enabled`                        | 插件定时任务                 |
 
 ## 版本历史
 
@@ -88,27 +87,27 @@ timeline
 
 `lib/db/schema.ts` 中每个 `.version(n)` 块：
 
-| 版本 | 新增 |
-| --- | --- |
-| **v1** | `sessions`、`messages`、`settings`。原始基线。 |
-| **v2** | `promptPresets`、`mcpServers`。 |
-| **v3** | `characters`、`skills`。 |
-| **v4** | `skillResources`、`teams`。 |
-| **v5** | 给 `characters` 加 `name` 索引（带回填 upgrade hook）。 |
-| **v6** | `trustedWorkspaces`。 |
-| **v7** | 给 `skills` 加 `category` 索引；带回填。 |
-| **v8** | `messages` 索引重排；回填 `[sessionId+createdAt]`。 |
-| **v9** | `backupHistory`。 |
-| **v10** | `canvasDocuments`、`canvasVersions`。 |
-| **v11** | `canvasComments`、`canvasSessions`。 |
-| **v12** | A2UI 表（`a2uiApps`、`a2uiSurfaces`、`a2uiTemplates`）；upgrade hook 种子化内置 MCP A2UI 桥。 |
-| **v13** | `a2uiEventHistory`；索引重排。 |
-| **v14** | 孪生表 —— `twinSources`、`twinChunks`、`twinProfile`、`twinDrafts`、`twinJobs`。 |
+| 版本    | 新增                                                                                                  |
+| ------- | ----------------------------------------------------------------------------------------------------- |
+| **v1**  | `sessions`、`messages`、`settings`。原始基线。                                                        |
+| **v2**  | `promptPresets`、`mcpServers`。                                                                       |
+| **v3**  | `characters`、`skills`。                                                                              |
+| **v4**  | `skillResources`、`teams`。                                                                           |
+| **v5**  | 给 `characters` 加 `name` 索引（带回填 upgrade hook）。                                               |
+| **v6**  | `trustedWorkspaces`。                                                                                 |
+| **v7**  | 给 `skills` 加 `category` 索引；带回填。                                                              |
+| **v8**  | `messages` 索引重排；回填 `[sessionId+createdAt]`。                                                   |
+| **v9**  | `backupHistory`。                                                                                     |
+| **v10** | `canvasDocuments`、`canvasVersions`。                                                                 |
+| **v11** | `canvasComments`、`canvasSessions`。                                                                  |
+| **v12** | A2UI 表（`a2uiApps`、`a2uiSurfaces`、`a2uiTemplates`）；upgrade hook 种子化内置 MCP A2UI 桥。         |
+| **v13** | `a2uiEventHistory`；索引重排。                                                                        |
+| **v14** | 孪生表 —— `twinSources`、`twinChunks`、`twinProfile`、`twinDrafts`、`twinJobs`。                      |
 | **v15** | 插件表 —— `plugins`、`pluginPermissions`、`pluginReviews`、`pluginAnalytics`、`pluginScheduledJobs`。 |
 
 <Callout type="info" title="幂等升级">
-  每个版本都幂等 —— 打开旧库会自动按顺序升级到最新版本。Dexie 按顺序应用。
-  **永远不要修改之前的 `.version(n)` 块。**
+  每个版本都幂等 —— 打开旧库会自动按顺序升级到最新版本。Dexie 按顺序应用。 **永远不要修改之前的
+  `.version(n)` 块。**
 </Callout>
 
 ## Upgrade hooks
@@ -157,16 +156,19 @@ timeline
       // ...
     }
     ```
+
   </Step>
   <Step>
     ### 在 schema.ts 顶部 import
 
     在 `lib/db/schema.ts` 顶部加 `import type { MyNewRow } from "./<name>"`。
+
   </Step>
   <Step>
     ### 添加 Table 字段
 
     在 `CogniaDB` 类中加 `myNewTable!: Table<MyNewRow, string>`。
+
   </Step>
   <Step>
     ### 升级 schema 版本
@@ -177,6 +179,7 @@ timeline
       // 只列出新表；既有表自动继承
     })
     ```
+
   </Step>
   <Step>
     ### （可选）加 upgrade hook
@@ -188,16 +191,19 @@ timeline
       // 幂等迁移
     })
     ```
+
   </Step>
   <Step>
     ### 写测试
 
     `lib/db/<name>.test.ts` 覆盖增删改查；如加了 hook，再覆盖幂等性。
+
   </Step>
   <Step>
     ### 更新本文档页
 
     把新表加入上面的列表。
+
   </Step>
 </Steps>
 
@@ -221,11 +227,11 @@ pluginPermissions: "[pluginId+permission], pluginId"
 
 部分表限量以避免无界增长：
 
-| 表 | 上限 | 修剪 |
-| --- | --- | --- |
-| `backupHistory` | 50 行 | 每次 insert 后调用 `pruneBackupHistory()` |
-| `a2uiEventHistory` | 每 surface ~200 | 超量时 insert 时修剪 |
-| `canvasVersions` | 无界，但可压缩 | 画板 UI 提供"压缩历史"动作 |
+| 表                 | 上限            | 修剪                                      |
+| ------------------ | --------------- | ----------------------------------------- |
+| `backupHistory`    | 50 行           | 每次 insert 后调用 `pruneBackupHistory()` |
+| `a2uiEventHistory` | 每 surface ~200 | 超量时 insert 时修剪                      |
+| `canvasVersions`   | 无界，但可压缩  | 画板 UI 提供"压缩历史"动作                |
 
 新增高写入表时请先决定是否需要上限。
 

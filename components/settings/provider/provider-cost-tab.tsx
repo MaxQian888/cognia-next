@@ -103,7 +103,7 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
   const t = useTranslations("providers")
   const [period, setPeriod] = useState<Period>("30d")
 
-  const providerUsageStats = useSettingsStore((s) => s.providerUsageStats)
+  const providerUsageStats = useSettingsStore((s) => s.providerUsageStats) ?? {}
   // cognia-next stores usage as a flat `ProviderModelUsageEntry[]` keyed by
   // `${providerId}:${modelId}`. Aggregate it here into the
   // `Record<modelId, { dailyStats: Record<date, { calls, inputTokens, outputTokens }> }>`

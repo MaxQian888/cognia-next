@@ -26,6 +26,16 @@ import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 import { buildAgentModeSessionUpdate } from "@/lib/agent"
 import { namespacedA2UIToolNames } from "@/lib/a2ui/mcp-tool-schemas"
 import { A2UI_SYSTEM_PROMPT } from "@/lib/ai/prompts/a2ui-prompts"
+import {
+  createProviderSettingsSnapshot,
+  resolveFeatureProvider,
+} from "@/lib/ai/provider-consumption"
+import {
+  ProviderRoutingEngine,
+  createMappingRegistry,
+  type RoutingEngineDeps,
+} from "@/lib/ai/routing"
+import { DEFAULT_ROUTING_CONFIG } from "@/types/provider/model-mapping"
 
 export interface BuildOptionsContext {
   session?: ChatSession | null
@@ -197,13 +207,117 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const modeUpdate = activeMode ? buildAgentModeSessionUpdate(activeMode) : undefined
 
   // --- Model: per-session > member override > mode override > character > app default ------
-  const model =
+  let model: string | undefined =
     session?.model ??
     memberOverride?.modelOverride ??
     modeUpdate?.model ??
     character?.model ??
     appSettings?.defaultModel
+
+  // --- Provider: per-session override > character > app default > "anthropic" -----
+  // The sidecar uses `provider` to pick which dispatcher (`anthropic` vs the
+  // generic `ai-sdk` runner) to invoke. Credentials travel inline so the
+  // sidecar never reads keys from disk. Resolution is best-effort: when the
+  // selected provider has no key configured we leave both fields off and
+  // let the sidecar fall back to ANTHROPIC_API_KEY (legacy path).
+  let providerId =
+    session?.providerOverride ??
+    character?.providerId ??
+    appSettings?.defaultProvider ??
+    "anthropic"
+
+  // --- Alias resolution (P4) ------------------------------------------------
+  // When `model` matches a registered alias (e.g., "fast", "coding"), run
+  // it through the routing engine to pick a concrete provider:model from
+  // the alias's fallback chain. The decision metadata is stamped on
+  // `opts.aliasResolution` + `opts.routingDecision` so the renderer
+  // adapter can retry on failure (P4 fallback path) and the message
+  // metadata badge can show what was actually used.
+  if (model && appSettings?.modelMappings && appSettings.modelMappings.length > 0) {
+    const registry = createMappingRegistry(appSettings.modelMappings)
+    const routingConfig = appSettings.routingConfig ?? DEFAULT_ROUTING_CONFIG
+    const deps: RoutingEngineDeps = {
+      // Skeleton deps — health-metrics-store + circuit-breaker-store still
+      // return defaults until P6 wires real samples. The engine treats
+      // missing metrics as "no-info" and falls back to priority order, which
+      // matches our intent ("first available wins") until rolling stats land.
+      getHealthMetrics: () => undefined,
+      getCircuitBreakerState: () => "closed",
+      isProviderAvailable: (id) => {
+        const enabled = appSettings.providerSettings?.[id]?.enabled
+        // Custom providers carry their own `enabled` flag.
+        const custom = appSettings.customProviders?.find((p) => p.id === id)
+        return enabled !== false || (custom?.enabled !== false && Boolean(custom))
+      },
+      getPricing: () => undefined,
+    }
+    const engine = new ProviderRoutingEngine(registry, routingConfig, deps)
+    const result = engine.selectProvider({ model })
+    if (result?.fromAlias && result.alias) {
+      model = result.modelId
+      providerId = result.providerId
+      opts.aliasResolution = {
+        alias: result.alias,
+        resolvedTo: { providerId: result.providerId, modelId: result.modelId },
+        fallbackEntries: result.fallbackEntries,
+        // Flatten the strongly-typed ModelMappingParameterDefaults into the
+        // opaque map the SendOptions wire shape carries. The renderer + Rust
+        // struct treat this as metadata only; the sidecar ignores it.
+        parameterDefaults: result.parameterDefaults as Record<string, unknown> | undefined,
+      }
+      opts.routingDecision = {
+        strategy: result.strategy,
+        reason: result.reason,
+      }
+    }
+  }
+
   if (model) opts.model = model
+  if (providerId) {
+    opts.provider = providerId
+    if (appSettings) {
+      const snapshot = createProviderSettingsSnapshot({
+        defaultProvider: appSettings.defaultProvider,
+        providerSettings: appSettings.providerSettings as
+          | Record<string, import("@/lib/ai/provider-consumption").ProviderSettingsEntry>
+          | undefined,
+        customProviders: appSettings.customProviders as
+          | import("@/lib/ai/provider-consumption").RichCustomProviderEntry[]
+          | undefined,
+      })
+      const resolution = resolveFeatureProvider(
+        {
+          featureId: "chat-send",
+          routeProfile: "general-text",
+          selectionMode: "explicit-provider",
+          providerId,
+          fallbackMode: "none",
+        },
+        snapshot
+      )
+      if (resolution.kind === "resolved") {
+        opts.providerCredentials = {
+          apiKey: resolution.apiKey,
+          baseURL: resolution.baseURL,
+          // Built-in id → sidecar derives protocol from the id; explicit
+          // `protocol` is required only for custom provider ids whose name
+          // tells the sidecar nothing.
+          protocol: resolution.isCustomProvider ? resolution.protocol : undefined,
+        }
+        // Backfill model from the provider's default when the caller didn't
+        // pin one — keeps the resolver one-stop for "what should this turn
+        // run against?".
+        if (!opts.model && resolution.model) {
+          opts.model = resolution.model
+        }
+      }
+      // Unresolved providers (no key, disabled, etc.) fall through with
+      // `opts.provider` set but no credentials — for "anthropic" that means
+      // the sidecar still works via the legacy ANTHROPIC_API_KEY env path
+      // (back-compat). For any other provider the sidecar emits a clean
+      // "missing credential" session_ended and the picker UI can surface it.
+    }
+  }
 
   // --- System prompt + skills section --------------------------------------
   // Member override replaces the character system prompt (skills still append).

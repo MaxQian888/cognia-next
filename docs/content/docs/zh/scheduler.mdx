@@ -9,13 +9,16 @@ description: 跨平台调度器，把任务从应用内 cron 提升到原生 OS 
 
 <TLDR>
   双层调度器 —— 应用内 cron 循环负责"只在 Cognia 打开时才需要跑"的任务，
-  原生提升路径把选中的任务镜像到 Windows Task Scheduler / launchd / systemd，
-  应用关闭时也能触发。
+  原生提升路径把选中的任务镜像到 Windows Task Scheduler / launchd / systemd， 应用关闭时也能触发。
 </TLDR>
 
 <StatGrid>
   <Stat label="trigger 类型" value="4" hint="cron · interval · once · event" />
-  <Stat label="内置 executor" value="6" hint="claude-send · shell · script · backup · twin · plugin" />
+  <Stat
+    label="内置 executor"
+    value="6"
+    hint="claude-send · shell · script · backup · twin · plugin"
+  />
   <Stat label="原生平台" value="3" hint="Windows · macOS · Linux" />
   <Stat label="历史上限" value="200" hint="每任务" />
 </StatGrid>
@@ -188,14 +191,14 @@ flowchart TB
 
 内置执行器：
 
-| 执行器 | 位置 |
-| --- | --- |
-| `claude-send` | `executors/claude-send.ts` —— 通过 `claude_send` 发模板化消息 |
-| `shell` | `executors/shell.ts` → `lib/native/local-runtime.ts` → `src-tauri/src/shell.rs`；受信任工作区白名单守护 |
-| `script` | `executors/script.ts` → `script-executor.ts`（`lib/sandbox/` 沙箱化 JS） |
-| `backup` | `executors/backup.ts` —— 调 `lib/data/build-package` + 加密 |
-| `twin-ingest` / `twin-distill` | `executors/twin-*.ts` —— 入队孪生 worker |
-| `plugin` | `executors/plugin.ts` —— 触发插件的定时任务（见 [插件系统](./plugin-system)） |
+| 执行器                         | 位置                                                                                                    |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `claude-send`                  | `executors/claude-send.ts` —— 通过 `claude_send` 发模板化消息                                           |
+| `shell`                        | `executors/shell.ts` → `lib/native/local-runtime.ts` → `src-tauri/src/shell.rs`；受信任工作区白名单守护 |
+| `script`                       | `executors/script.ts` → `script-executor.ts`（`lib/sandbox/` 沙箱化 JS）                                |
+| `backup`                       | `executors/backup.ts` —— 调 `lib/data/build-package` + 加密                                             |
+| `twin-ingest` / `twin-distill` | `executors/twin-*.ts` —— 入队孪生 worker                                                                |
+| `plugin`                       | `executors/plugin.ts` —— 触发插件的定时任务（见 [插件系统](./plugin-system)）                           |
 
 每个执行器返回：
 
@@ -233,12 +236,12 @@ interface ExecutorResult {
 
 ## 在哪里入手
 
-| 目标 | 文件 |
-| --- | --- |
-| 加新执行器 | `lib/scheduler/executors/<name>.ts` 并注册 |
+| 目标              | 文件                                                                  |
+| ----------------- | --------------------------------------------------------------------- |
+| 加新执行器        | `lib/scheduler/executors/<name>.ts` 并注册                            |
 | 加新 trigger 类型 | `lib/scheduler/cron-parser.ts`（或新解析器）、`trigger-normalizer.ts` |
-| 支持新原生平台 | `src-tauri/src/scheduler/<platform>.rs` |
-| 调整对话式创作 | `conversational-task-authoring.ts` |
+| 支持新原生平台    | `src-tauri/src/scheduler/<platform>.rs`                               |
+| 调整对话式创作    | `conversational-task-authoring.ts`                                    |
 
 ## 测试
 
@@ -252,5 +255,9 @@ interface ExecutorResult {
 <Cards>
   <Card title="插件系统" href="./plugin-system" description="插件可注册自己的定时任务" />
   <Card title="备份 & 数据传输" href="./backup-and-data" description="备份调度构建在这些原语上" />
-  <Card title="ADR-0002" href="../adr/0002-scheduler-full-agent-resolution" description="为什么应用内 vs 原生分层" />
+  <Card
+    title="ADR-0002"
+    href="../adr/0002-scheduler-full-agent-resolution"
+    description="为什么应用内 vs 原生分层"
+  />
 </Cards>

@@ -200,9 +200,44 @@ function ComposerInner(props: InnerProps) {
     }
   }, [cwd])
 
+  // --- Hydrate chat-store from session row on first session change -------
+  // `hydratedFor` flips to the session id once the hydration write has
+  // *committed*, not just been scheduled. The persist effect below reads
+  // this ref to skip the first post-hydration render, where the store value
+  // hasn't yet caught up with the session row and would otherwise look
+  // divergent and trigger a redundant write.
+  const hydratedFor = useRef<string | null>(null)
+  const pendingHydrationFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!props.session) return
+    if (
+      hydratedFor.current === props.session.id ||
+      pendingHydrationFor.current === props.session.id
+    ) {
+      return
+    }
+    pendingHydrationFor.current = props.session.id
+    setPermissionMode(props.session.permissionMode ?? null)
+  }, [props.session, setPermissionMode])
+
   // --- Persist active permission mode back to session row ---------------
   useEffect(() => {
     if (!props.session) return
+    // Hydration two-phase commit: when permissionMode catches up with the
+    // session row's value (the value we hydrated *to*), flip the
+    // hydratedFor ref. Until that point the persist branch is a no-op so
+    // the very first render after a session swap doesn't write the stale
+    // store value back to the row.
+    if (
+      pendingHydrationFor.current === props.session.id &&
+      hydratedFor.current !== props.session.id &&
+      permissionMode === (props.session.permissionMode ?? null)
+    ) {
+      hydratedFor.current = props.session.id
+      pendingHydrationFor.current = null
+      return
+    }
+    if (hydratedFor.current !== props.session.id) return
     if (props.session.permissionMode === permissionMode) return
     void updateSession(props.session.id, {
       permissionMode: permissionMode ?? undefined,
@@ -213,15 +248,6 @@ function ComposerInner(props: InnerProps) {
       })
     })
   }, [permissionMode, props.session, updateSession])
-
-  // --- Hydrate chat-store from session row on first session change -------
-  const hydratedFor = useRef<string | null>(null)
-  useEffect(() => {
-    if (!props.session) return
-    if (hydratedFor.current === props.session.id) return
-    hydratedFor.current = props.session.id
-    setPermissionMode(props.session.permissionMode ?? null)
-  }, [props.session, setPermissionMode])
 
   const slashCommands = useMemo(
     () => [...BUILTIN_SLASH_COMMANDS, ...customCommands].filter((c) => !c.hiddenFromPicker),

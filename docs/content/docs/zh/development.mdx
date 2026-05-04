@@ -9,8 +9,8 @@ description: 日常脚本、代码约定、测试规范、commit 卫生，以及
 
 <TLDR>
   从仓库根用 **pnpm**。<Kbd>pnpm dev</Kbd> 跑 Web，<Kbd>pnpm tauri dev</Kbd>
-  跑桌面。测试与源同目录，≥90% 覆盖率阈值。Pre-commit 钩子（Husky + lint-staged
-  + commitlint）保证代码树整洁。
+  跑桌面。测试与源同目录，≥90% 覆盖率阈值。Pre-commit 钩子（Husky + lint-staged +
+  commitlint）保证代码树整洁。
 </TLDR>
 
 <StatGrid>
@@ -70,8 +70,12 @@ pnpm monaco:copy      # 把 Monaco 资源复制到 public/
       <File name="layout.tsx" />
       <File name="page.tsx" />
       <File name="globals.css" />
-      <Folder name="twin"><File name="page.tsx" /></Folder>
-      <Folder name="scheduler"><File name="page.tsx" /></Folder>
+      <Folder name="twin">
+        <File name="page.tsx" />
+      </Folder>
+      <Folder name="scheduler">
+        <File name="page.tsx" />
+      </Folder>
       <Folder name="agent-teams" />
       <Folder name="canvas" />
       <Folder name="skills" />
@@ -139,22 +143,22 @@ pnpm monaco:copy      # 把 Monaco 资源复制到 public/
 
 ## 路径别名
 
-| 别名 | 映射到 | 常见用途 |
-| --- | --- | --- |
-| `@/*` | 仓库根 | 通配（例如 `@/types`、`@/scripts`） |
-| `@/components` | `components/` | UI |
-| `@/lib` | `lib/` | 逻辑 |
-| `@/ui` | `components/ui/` | shadcn 原语 |
-| `@/hooks` | `hooks/` | 共享 hooks |
-| `@/utils` | `lib/utils.ts` | `cn()` |
+| 别名           | 映射到           | 常见用途                            |
+| -------------- | ---------------- | ----------------------------------- |
+| `@/*`          | 仓库根           | 通配（例如 `@/types`、`@/scripts`） |
+| `@/components` | `components/`    | UI                                  |
+| `@/lib`        | `lib/`           | 逻辑                                |
+| `@/ui`         | `components/ui/` | shadcn 原语                         |
+| `@/hooks`      | `hooks/`         | 共享 hooks                          |
+| `@/utils`      | `lib/utils.ts`   | `cn()`                              |
 
 在 `tsconfig.json` 与 `components.json` 中配置。新增别名时**两处都要改**。
 
 文档包（`docs/`）：
 
-| 别名 | 映射到 | 备注 |
-| --- | --- | --- |
-| `@/*` | `docs/` | 文档包内部 |
+| 别名                 | 映射到                | 备注                     |
+| -------------------- | --------------------- | ------------------------ |
+| `@/*`                | `docs/`               | 文档包内部               |
 | `collections/server` | `docs/.source/server` | 由 fumadocs-mdx 自动生成 |
 
 ## 代码约定
@@ -175,15 +179,15 @@ pnpm monaco:copy      # 把 Monaco 资源复制到 public/
 
 ### 命名
 
-| 类别 | 约定 | 示例 |
-| --- | --- | --- |
-| 组件 | PascalCase | `UserProfile.tsx` |
-| 组件文件 | kebab-case | `user-profile.tsx` |
-| Hooks | `use*` camelCase | `useTwinProfile()` |
-| 工具函数 | camelCase | `formatDate()` |
-| 类型 / 接口 | PascalCase | `UserData` |
-| 常量 | SCREAMING_SNAKE_CASE | `MAX_RETRIES` |
-| Tauri 命令 | snake_case | `claude_send`、`vector_query` |
+| 类别        | 约定                 | 示例                          |
+| ----------- | -------------------- | ----------------------------- |
+| 组件        | PascalCase           | `UserProfile.tsx`             |
+| 组件文件    | kebab-case           | `user-profile.tsx`            |
+| Hooks       | `use*` camelCase     | `useTwinProfile()`            |
+| 工具函数    | camelCase            | `formatDate()`                |
+| 类型 / 接口 | PascalCase           | `UserData`                    |
+| 常量        | SCREAMING_SNAKE_CASE | `MAX_RETRIES`                 |
+| Tauri 命令  | snake_case           | `claude_send`、`vector_query` |
 
 shadcn/ui 组件遵循 shadcn 命名（kebab-case 文件名，PascalCase 导出 —— `components/ui/button.tsx` 导出 `Button`）。
 
@@ -277,16 +281,16 @@ Jest 配置（`jest.config.ts`）通过 `coverageThreshold` 按文件强制阈�
 
 ### 测试模式
 
-| 需求 | 工具 |
-| --- | --- |
-| 渲染 React | `@testing-library/react` |
-| 用户交互 | `@testing-library/user-event` |
-| jest-dom 匹配器 | `@testing-library/jest-dom` |
-| IndexedDB / Dexie | `fake-indexeddb` |
-| Mock fetch | Jest `jest.spyOn(global, "fetch")` |
+| 需求                | 工具                                 |
+| ------------------- | ------------------------------------ |
+| 渲染 React          | `@testing-library/react`             |
+| 用户交互            | `@testing-library/user-event`        |
+| jest-dom 匹配器     | `@testing-library/jest-dom`          |
+| IndexedDB / Dexie   | `fake-indexeddb`                     |
+| Mock fetch          | Jest `jest.spyOn(global, "fetch")`   |
 | Mock Tauri `invoke` | 每个测试 mock `@tauri-apps/api/core` |
-| Fake timers | Jest modern fake timers |
-| Snapshot | 仅纯渲染可用；不用于行为断言 |
+| Fake timers         | Jest modern fake timers              |
+| Snapshot            | 仅纯渲染可用；不用于行为断言         |
 
 ### 测试样板
 
@@ -344,11 +348,11 @@ import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog"
 
 Husky 安装：
 
-| 钩子 | 工具 | 职责 |
-| --- | --- | --- |
-| `pre-commit` | lint-staged | 对暂存文件跑 Prettier + ESLint --fix |
-| `commit-msg` | commitlint | 校验 Conventional Commits |
-| `prepare-commit-msg` | （无） | — |
+| 钩子                 | 工具        | 职责                                 |
+| -------------------- | ----------- | ------------------------------------ |
+| `pre-commit`         | lint-staged | 对暂存文件跑 Prettier + ESLint --fix |
+| `commit-msg`         | commitlint  | 校验 Conventional Commits            |
+| `prepare-commit-msg` | （无）      | —                                    |
 
 如果钩子拖慢提交，用 `lint-staged --debug` 排查。
 
@@ -372,8 +376,8 @@ chore(deps): bump tauri to 2.9.1
 ```
 
 <Callout type="warn" title="钩子会拒绝不规范的消息">
-  commit-msg 钩子拒绝不符合 Conventional Commits 的消息。
-  rebase 时如需绕过，优先用 `git commit --amend`（仍会跑钩子），而非 `--no-verify`。
+  commit-msg 钩子拒绝不符合 Conventional Commits 的消息。 rebase 时如需绕过，优先用 `git commit
+  --amend`（仍会跑钩子），而非 `--no-verify`。
 </Callout>
 
 ## Linting
@@ -397,24 +401,24 @@ pnpm typecheck
 
 ## 调试
 
-| 表面 | 工具 |
-| --- | --- |
-| 浏览器层 | DevTools（F12）—— 与普通 Web 一致 |
-| Rust 层 | `RUST_LOG=debug pnpm tauri dev`，看控制台与 `app/logs/` |
-| Sidecar | sidecar 的 `stderr` 镜像到 Rust 日志、`app/logs/` |
-| Dexie | DevTools → Application → IndexedDB → `cognia-claude` |
-| 原生日志 | OS 原生日志查看器（事件查看器 / Console.app / `journalctl --user`） |
-| 向量库（sqlite-vec） | `sqlite3 <app_data>/cognia/vectors.sqlite` 然后 `.tables` |
+| 表面                 | 工具                                                                |
+| -------------------- | ------------------------------------------------------------------- |
+| 浏览器层             | DevTools（F12）—— 与普通 Web 一致                                   |
+| Rust 层              | `RUST_LOG=debug pnpm tauri dev`，看控制台与 `app/logs/`             |
+| Sidecar              | sidecar 的 `stderr` 镜像到 Rust 日志、`app/logs/`                   |
+| Dexie                | DevTools → Application → IndexedDB → `cognia-claude`                |
+| 原生日志             | OS 原生日志查看器（事件查看器 / Console.app / `journalctl --user`） |
+| 向量库（sqlite-vec） | `sqlite3 <app_data>/cognia/vectors.sqlite` 然后 `.tables`           |
 
 ## 常见重构模式
 
-| 想要…… | 做法 |
-| --- | --- |
-| 抽取共享 hook | 移到 `hooks/` 并更新 import |
-| 加 Tauri 命令 | 见 [运行时 & Tauri](./runtime-and-tauri) §"添加新的 IPC 命令" |
-| 升级 Dexie schema | 见 [存储](./storage) §"新增表" |
-| 加 executor / importer / 域传输 | 加注册项；遵循既有模式 |
-| 国际化字符串 | 见 [主题 & 国际化](./theming-and-i18n) §"加新翻译 key" |
+| 想要……                          | 做法                                                          |
+| ------------------------------- | ------------------------------------------------------------- |
+| 抽取共享 hook                   | 移到 `hooks/` 并更新 import                                   |
+| 加 Tauri 命令                   | 见 [运行时 & Tauri](./runtime-and-tauri) §"添加新的 IPC 命令" |
+| 升级 Dexie schema               | 见 [存储](./storage) §"新增表"                                |
+| 加 executor / importer / 域传输 | 加注册项；遵循既有模式                                        |
+| 国际化字符串                    | 见 [主题 & 国际化](./theming-and-i18n) §"加新翻译 key"        |
 
 ## 在哪里入手
 

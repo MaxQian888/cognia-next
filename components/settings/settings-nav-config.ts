@@ -28,6 +28,11 @@ import {
   WrenchIcon,
   BlocksIcon,
   ArrowLeftRightIcon,
+  RadioTowerIcon,
+  BoxesIcon,
+  WebhookIcon,
+  NetworkIcon,
+  TerminalSquareIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
@@ -39,20 +44,26 @@ export type SettingsSectionId =
   | "ccswitch"
   | "agents"
   | "agent-modes"
+  | "agent-teams"
+  | "hooks"
+  | "slash-commands"
   | "tools"
   | "search"
   | "appearance"
   | "speech"
   | "characters"
   | "skills"
+  | "subagents"
   | "teams"
   | "presets"
   | "artifacts"
   | "canvas"
   | "mcp"
   | "a2ui"
+  | "plugins"
   | "data"
   | "scheduled-tasks"
+  | "remote-control"
   | "logs"
   | "diagnostics"
   | "desktop"
@@ -116,6 +127,28 @@ export const SETTINGS_NAV: NavItem[] = [
     icon: BotIcon,
   },
   {
+    id: "agent-teams",
+    labelKey: "agentTeams",
+    descriptionKey: "agentTeams",
+    group: "ai",
+    icon: Layers3Icon,
+  },
+  {
+    id: "hooks",
+    labelKey: "hooks",
+    descriptionKey: "hooks",
+    group: "ai",
+    icon: WebhookIcon,
+    desktopOnly: true,
+  },
+  {
+    id: "slash-commands",
+    labelKey: "slashCommands",
+    descriptionKey: "slashCommands",
+    group: "ai",
+    icon: TerminalSquareIcon,
+  },
+  {
     id: "tools",
     labelKey: "tools",
     descriptionKey: "tools",
@@ -147,6 +180,13 @@ export const SETTINGS_NAV: NavItem[] = [
     icon: SparklesIcon,
   },
   {
+    id: "subagents",
+    labelKey: "subagents",
+    descriptionKey: "subagents",
+    group: "extensions",
+    icon: NetworkIcon,
+  },
+  {
     id: "teams",
     labelKey: "teams",
     descriptionKey: "teams",
@@ -166,6 +206,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "a2ui",
     group: "extensions",
     icon: BlocksIcon,
+  },
+  {
+    id: "plugins",
+    labelKey: "plugins",
+    descriptionKey: "plugins",
+    group: "extensions",
+    icon: BoxesIcon,
   },
 
   // === Interface ===
@@ -238,6 +285,14 @@ export const SETTINGS_NAV: NavItem[] = [
   },
 
   // === System ===
+  {
+    id: "remote-control",
+    labelKey: "remoteControl",
+    descriptionKey: "remoteControl",
+    group: "system",
+    icon: RadioTowerIcon,
+    desktopOnly: true,
+  },
   {
     id: "desktop",
     labelKey: "desktop",
@@ -506,6 +561,84 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "崩溃",
     "诊断",
     "故障",
+  ],
+  hooks: [
+    "hook",
+    "hooks",
+    "lifecycle",
+    "trigger",
+    "webhook",
+    "PreToolUse",
+    "PostToolUse",
+    "UserPromptSubmit",
+    "matcher",
+    "钩子",
+    "回调",
+    "触发",
+    "生命周期",
+  ],
+  "slash-commands": [
+    "slash",
+    "command",
+    "/cost",
+    "/help",
+    "/clear",
+    "/compact",
+    "/init",
+    "plugin command",
+    "shortcut",
+    "斜杠",
+    "命令",
+    "快捷",
+  ],
+  subagents: [
+    "subagent",
+    "sub-agent",
+    "sub agent",
+    "child agent",
+    "spawn",
+    "delegate",
+    "parallel",
+    "research",
+    "code review",
+    "子代理",
+    "子智能体",
+    "派发",
+    "并行",
+  ],
+  "agent-teams": [
+    "team",
+    "teams",
+    "multi-agent",
+    "supervisor",
+    "round-robin",
+    "agent team",
+    "团队",
+    "多代理",
+  ],
+  plugins: [
+    "plugin",
+    "plugins",
+    "extension",
+    "marketplace",
+    "permissions",
+    "scheduled",
+    "audit",
+    "diagnostics",
+    "插件",
+    "扩展",
+    "市场",
+  ],
+  "remote-control": [
+    "remote",
+    "webhook",
+    "remote-control",
+    "inbound",
+    "outbound",
+    "control",
+    "trigger",
+    "远程控制",
+    "外部触发",
   ],
   desktop: ["tauri", "tray", "autostart", "window"],
   about: ["version", "build", "credits"],

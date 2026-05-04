@@ -4,6 +4,7 @@
 
 import React from "react"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { LocalProviderCard } from "./local-provider-card"
 
 // Mock next-intl with direct translations
@@ -20,7 +21,7 @@ jest.mock("next-intl", () => ({
 }))
 
 const renderWithProviders = (ui: React.ReactElement) => {
-  return render(ui)
+  return render(<TooltipProvider>{ui}</TooltipProvider>)
 }
 
 // Mock local-providers

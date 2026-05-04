@@ -1111,7 +1111,7 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
       },
       closePanel: () => {
         set({ panelOpen: false })
-        getPluginEventHooks().dispatchArtifactClose("artifact")
+        getPluginEventHooks().dispatchArtifactClose()
       },
       setPanelView: (view) => set({ panelView: view }),
 

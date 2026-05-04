@@ -1,18 +1,26 @@
 import { invoke } from "@tauri-apps/api/core"
+import { listen } from "@tauri-apps/api/event"
 
 import {
   readClaudeEffectiveSettings,
   readClaudeLocalSettings,
   readClaudeProjectSettings,
   readClaudeUserSettings,
+  subscribeClaudeSettings,
+  writeClaudeLocalSettings,
+  writeClaudeProjectSettings,
+  writeClaudeUserSettings,
   type ClaudeSettings,
+  type ClaudeSettingsChangedEvent,
   type EffectiveSettings,
 } from "./settings"
 
 const mockedInvoke = invoke as unknown as jest.Mock
+const mockedListen = listen as unknown as jest.Mock
 
 beforeEach(() => {
   mockedInvoke.mockReset()
+  mockedListen?.mockReset()
 })
 
 describe("readClaudeUserSettings", () => {
@@ -77,5 +85,62 @@ describe("readClaudeEffectiveSettings", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("read_claude_effective_settings", {
       cwd: null,
     })
+  })
+})
+
+describe("writeClaudeUserSettings (Phase 4 writer)", () => {
+  it("forwards the payload object verbatim", async () => {
+    const payload: ClaudeSettings = { model: "haiku", hooks: { PreToolUse: [] } }
+    mockedInvoke.mockResolvedValueOnce({
+      path: "/home/u/.claude/settings.json",
+      backupPath: null,
+    })
+    const result = await writeClaudeUserSettings(payload)
+    expect(mockedInvoke).toHaveBeenCalledWith("write_claude_user_settings", { payload })
+    expect(result.path).toBe("/home/u/.claude/settings.json")
+  })
+
+  it("propagates Rust-side errors", async () => {
+    mockedInvoke.mockRejectedValueOnce("not installed")
+    await expect(writeClaudeUserSettings({})).rejects.toEqual("not installed")
+  })
+})
+
+describe("writeClaudeProjectSettings + writeClaudeLocalSettings", () => {
+  it("project writer forwards cwd + payload", async () => {
+    mockedInvoke.mockResolvedValueOnce({ path: "/repo/.claude/settings.json", backupPath: null })
+    await writeClaudeProjectSettings("/repo", { model: "x" })
+    expect(mockedInvoke).toHaveBeenCalledWith("write_claude_project_settings", {
+      cwd: "/repo",
+      payload: { model: "x" },
+    })
+  })
+
+  it("local writer targets settings.local.json", async () => {
+    mockedInvoke.mockResolvedValueOnce({
+      path: "/repo/.claude/settings.local.json",
+      backupPath: null,
+    })
+    await writeClaudeLocalSettings("/repo", {})
+    expect(mockedInvoke).toHaveBeenCalledWith("write_claude_local_settings", {
+      cwd: "/repo",
+      payload: {},
+    })
+  })
+})
+
+describe("subscribeClaudeSettings", () => {
+  it("registers a Tauri listener and unwraps the payload before handing to the caller", async () => {
+    const handler = jest.fn()
+    let captured: ((e: { payload: unknown }) => void) | undefined
+    mockedListen.mockImplementationOnce((_name: string, fn: (e: { payload: unknown }) => void) => {
+      captured = fn
+      return Promise.resolve(() => undefined)
+    })
+    await subscribeClaudeSettings(handler)
+    expect(mockedListen).toHaveBeenCalledWith("claude-settings-changed", expect.any(Function))
+    const evt: ClaudeSettingsChangedEvent = { scope: "user", path: "/u/.claude/settings.json" }
+    captured?.({ payload: evt })
+    expect(handler).toHaveBeenCalledWith(evt)
   })
 })

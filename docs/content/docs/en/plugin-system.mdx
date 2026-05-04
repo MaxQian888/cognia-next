@@ -8,10 +8,9 @@ description: Cognia's plugin runtime — manifests, permissions, devtools, marke
 <Status variant="experimental" />
 
 <TLDR>
-  Sandboxed Web Worker per plugin, declared-and-consented permissions, an
-  RPC bridge to a versioned API, and a marketplace for distribution.
-  Plugins ship as signed `.cognia-plugin` archives and run isolated from
-  the host DOM.
+  Sandboxed Web Worker per plugin, declared-and-consented permissions, an RPC bridge to a versioned
+  API, and a marketplace for distribution. Plugins ship as signed `.cognia-plugin` archives and run
+  isolated from the host DOM.
 </TLDR>
 
 <StatGrid>
@@ -73,21 +72,21 @@ A plugin ships a `cognia-plugin.json` manifest:
   "description": "...",
   "author": "...",
   "icon": "icon.svg",
-  "entry": "main.js",                  // ES module entry point
+  "entry": "main.js", // ES module entry point
   "permissions": [
     "chat.read",
     "chat.send",
     "twin.read",
     "scheduler.register",
-    "fs.read:$DOWNLOADS"               // scoped FS permission
+    "fs.read:$DOWNLOADS", // scoped FS permission
   ],
   "surfaces": [
     { "kind": "panel", "id": "main", "title": "My Plugin" },
-    { "kind": "chat-action", "id": "summarize", "label": "Summarize" }
+    { "kind": "chat-action", "id": "summarize", "label": "Summarize" },
   ],
   "scheduledJobs": [
-    { "id": "daily-sync", "trigger": { "type": "cron", "expression": "0 9 * * *" } }
-  ]
+    { "id": "daily-sync", "trigger": { "type": "cron", "expression": "0 9 * * *" } },
+  ],
 }
 ```
 
@@ -107,12 +106,20 @@ Schema validation: `lib/plugin/contracts/manifest-schema.ts` (a Zod schema). Man
       type: "string",
       required: true,
     },
-    name: { description: "Display name shown in the marketplace and settings.", type: "string", required: true },
+    name: {
+      description: "Display name shown in the marketplace and settings.",
+      type: "string",
+      required: true,
+    },
     version: { description: "Plugin version (semver).", type: "string", required: true },
     description: { description: "Short description shown in install dialog.", type: "string" },
     author: { description: "Free-form author label.", type: "string" },
     icon: { description: "Path to an SVG icon, relative to manifest.", type: "string" },
-    entry: { description: "ES module entry path; loaded into the worker.", type: "string", required: true },
+    entry: {
+      description: "ES module entry path; loaded into the worker.",
+      type: "string",
+      required: true,
+    },
     permissions: {
       description: "List of capabilities the plugin requests at install time.",
       type: "string[]",
@@ -203,19 +210,19 @@ stateDiagram-v2
 
 Plugins call into a versioned API exposed via `lib/plugin/api/`:
 
-| Namespace | Capabilities |
-| --- | --- |
-| `chat.*` | Read sessions/messages, send a templated message, register a chat action |
-| `character.*` | Read characters, propose a new character draft |
-| `skill.*` | Read skills, propose a new skill |
-| `twin.*` | Enumerate twins, read a twin profile (no chunk content), trigger an ingest |
-| `vector.*` | Query the active vector store (no upsert; that's privileged) |
-| `scheduler.*` | Register a scheduled job; only the plugin's own jobs |
-| `notification.*` | Show a toast / native notification |
-| `surface.*` | Render a panel, render a chat surface |
-| `storage.*` | Per-plugin key-value store (small, capped) |
-| `network.fetch` | HTTPS fetch, gated by origin-scoped permission |
-| `fs.*` | Scoped FS access (read/write under user-approved roots) |
+| Namespace        | Capabilities                                                               |
+| ---------------- | -------------------------------------------------------------------------- |
+| `chat.*`         | Read sessions/messages, send a templated message, register a chat action   |
+| `character.*`    | Read characters, propose a new character draft                             |
+| `skill.*`        | Read skills, propose a new skill                                           |
+| `twin.*`         | Enumerate twins, read a twin profile (no chunk content), trigger an ingest |
+| `vector.*`       | Query the active vector store (no upsert; that's privileged)               |
+| `scheduler.*`    | Register a scheduled job; only the plugin's own jobs                       |
+| `notification.*` | Show a toast / native notification                                         |
+| `surface.*`      | Render a panel, render a chat surface                                      |
+| `storage.*`      | Per-plugin key-value store (small, capped)                                 |
+| `network.fetch`  | HTTPS fetch, gated by origin-scoped permission                             |
+| `fs.*`           | Scoped FS access (read/write under user-approved roots)                    |
 
 Host-side implementations live alongside the namespace files. Each is responsible for permission gating before performing the action.
 
@@ -264,12 +271,12 @@ Plugins subscribe in their `onActivate()`.
 
 ## Where to start contributing
 
-| Goal | Files |
-| --- | --- |
-| Add a new permission | `lib/plugin/contracts/permissions.ts`, gating in the relevant API namespace |
-| Add a new API namespace | `lib/plugin/api/<name>.ts`, register in `api/index.ts` |
-| Improve sandbox | `lib/plugin/security/`, `lib/plugin/bridge/` |
-| Tweak marketplace UX | `components/plugin/`, `lib/plugin/index.ts` (catalog client) |
+| Goal                    | Files                                                                       |
+| ----------------------- | --------------------------------------------------------------------------- |
+| Add a new permission    | `lib/plugin/contracts/permissions.ts`, gating in the relevant API namespace |
+| Add a new API namespace | `lib/plugin/api/<name>.ts`, register in `api/index.ts`                      |
+| Improve sandbox         | `lib/plugin/security/`, `lib/plugin/bridge/`                                |
+| Tweak marketplace UX    | `components/plugin/`, `lib/plugin/index.ts` (catalog client)                |
 
 ## Tests
 
@@ -280,7 +287,15 @@ Plugins subscribe in their `onActivate()`.
 ## Next
 
 <Cards>
-  <Card title="Scheduler" href="./scheduler" description="The engine plugin scheduled jobs run on." />
+  <Card
+    title="Scheduler"
+    href="./scheduler"
+    description="The engine plugin scheduled jobs run on."
+  />
   <Card title="Storage" href="./storage" description="The plugin tables (v15) in detail." />
-  <Card title="Sidecar & Claude SDK" href="./sidecar-and-claude-sdk" description="Plugins extend the sidecar via MCP." />
+  <Card
+    title="Sidecar & Claude SDK"
+    href="./sidecar-and-claude-sdk"
+    description="Plugins extend the sidecar via MCP."
+  />
 </Cards>

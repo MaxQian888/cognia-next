@@ -48,3 +48,69 @@ export function isA2UIPart(part: unknown): part is A2UIPart {
     typeof (part as { content?: unknown }).content === "string"
   )
 }
+
+// ---- Phase 8 chat-render parts -----------------------------------------
+
+import type { SubAgentStatus } from "@/types/agent/sub-agent"
+
+/**
+ * SubagentPart — emitted by `lib/claude/subagent-bridge.ts` whenever the
+ * runtime store receives a SubAgent event. The renderer subscribes to the
+ * runtime store for live `progress` / `logs` updates; this part carries
+ * just the stable identity bits + status snapshot used for sort/group.
+ */
+export interface SubagentPart {
+  type: "subagent"
+  /** Matches `SubAgent.id` in the runtime store. */
+  subagentId: string
+  /** Session this subagent was spawned from (i.e., the assistant turn). */
+  parentSessionId: string
+  name: string
+  status: SubAgentStatus
+  /** 0..100 — kept on the part so it survives a cold reload. */
+  progress: number
+  /** Epoch ms; serialized so it round-trips through Dexie. */
+  startedAt: number
+  completedAt?: number
+  summary?: string
+  toolUseId?: string
+}
+
+export function isSubagentPart(part: unknown): part is SubagentPart {
+  return (
+    typeof part === "object" &&
+    part !== null &&
+    (part as { type?: unknown }).type === "subagent" &&
+    typeof (part as { subagentId?: unknown }).subagentId === "string"
+  )
+}
+
+/**
+ * AgentTeamDispatchPart — emitted when a supervisor turn contains a
+ * `<dispatch to="…">…</dispatch>` directive (parsed by
+ * `lib/claude/team-router.ts:parseDispatches`). One part per dispatch tag,
+ * appended after the visible (stripped) text. The renderer shows a
+ * from→to banner with the task body.
+ */
+export interface AgentTeamDispatchPart {
+  type: "agent-team-dispatch"
+  /** Sender character id (the supervisor). */
+  from: string
+  /** Target character id resolved against the team's member list. */
+  to: string
+  /** Display name of the target — used when characterById lookup fails. */
+  toName: string
+  task: string
+  sessionId: string
+}
+
+export function isAgentTeamDispatchPart(part: unknown): part is AgentTeamDispatchPart {
+  const p = part as { type?: unknown; to?: unknown; task?: unknown }
+  return (
+    typeof part === "object" &&
+    part !== null &&
+    p.type === "agent-team-dispatch" &&
+    typeof p.to === "string" &&
+    typeof p.task === "string"
+  )
+}

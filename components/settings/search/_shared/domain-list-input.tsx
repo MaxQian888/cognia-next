@@ -18,6 +18,15 @@ export interface DomainListInputProps {
   showAddButton?: boolean
   scrollable?: boolean
   removeAriaLabel?: (domain: string) => string
+  /**
+   * Optional gating validator. Returning a non-null string indicates the
+   * draft is invalid; the returned value is forwarded to `errorRender`
+   * (or shown verbatim) and `onAdd` is suppressed. Returning `null`
+   * means valid.
+   */
+  validate?: (draft: string) => string | null
+  /** Optional renderer for the validate-result key (e.g. i18n lookup). */
+  errorRender?: (key: string) => ReactNode
 }
 
 export function DomainListInput({
@@ -30,12 +39,23 @@ export function DomainListInput({
   showAddButton = false,
   scrollable = false,
   removeAriaLabel,
+  validate,
+  errorRender,
 }: DomainListInputProps) {
   const [draft, setDraft] = useState("")
+  const [error, setError] = useState<string | null>(null)
 
   const submit = () => {
     const trimmed = draft.trim()
     if (!trimmed) return
+    if (validate) {
+      const result = validate(trimmed)
+      if (result) {
+        setError(result)
+        return
+      }
+    }
+    setError(null)
     onAdd(trimmed)
     setDraft("")
   }
@@ -81,6 +101,11 @@ export function DomainListInput({
           </Button>
         )}
       </div>
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {errorRender ? errorRender(error) : error}
+        </p>
+      )}
       {domains.length > 0 &&
         (scrollable ? <ScrollArea className="h-24">{badges}</ScrollArea> : badges)}
     </div>

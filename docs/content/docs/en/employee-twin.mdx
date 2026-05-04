@@ -8,10 +8,10 @@ description: How Cognia distils a person's documents, chats, and code into a cha
 <Status variant="beta">Beta · phase 8</Status>
 
 <TLDR>
-  Distil documents, chat exports and code into a chat-ready twin. Send time pulls
-  the top-K relevant chunks and style few-shot samples to keep the assistant
-  faithful to the author's voice. PII is replaced with placeholders **before**
-  any embedding or LLM call — the redaction map is encrypted on disk.
+  Distil documents, chat exports and code into a chat-ready twin. Send time pulls the top-K relevant
+  chunks and style few-shot samples to keep the assistant faithful to the author's voice. PII is
+  replaced with placeholders **before** any embedding or LLM call — the redaction map is encrypted
+  on disk.
 </TLDR>
 
 <StatGrid>
@@ -113,9 +113,9 @@ flowchart LR
 ```
 
 <Callout type="warn" title="Privacy red-line">
-  Stage 3 (`redact`) is the privacy red-line — `hasNoLeakingPii(text)` is the
-  post-redact assertion. If it fails, the pipeline aborts with a clear error.
-  No embedding or LLM call ever sees unredacted text.
+  Stage 3 (`redact`) is the privacy red-line — `hasNoLeakingPii(text)` is the post-redact assertion.
+  If it fails, the pipeline aborts with a clear error. No embedding or LLM call ever sees unredacted
+  text.
 </Callout>
 
 ### 1. dispatch
@@ -135,13 +135,13 @@ Delegates to `lib/document/document-processor`. Outputs a normalised text + meta
 
 **This is the privacy red-line.** `lib/twin/ingest/redact.ts` replaces PII with `<KIND_NNN>` placeholders **before any embed or LLM call**:
 
-| Kind | Detection |
-| --- | --- |
-| `EMAIL` | RFC-loose regex |
-| `PHONE` | E.164 + China mobile patterns |
-| `CN_ID` | Chinese national ID (province code + birthdate + Luhn-like checksum) |
-| `BANK_CARD` | Luhn-valid 13–19 digit numbers |
-| `NAME` | Hint-driven (preceded by "name:", "by", "—", "from", etc.) |
+| Kind        | Detection                                                            |
+| ----------- | -------------------------------------------------------------------- |
+| `EMAIL`     | RFC-loose regex                                                      |
+| `PHONE`     | E.164 + China mobile patterns                                        |
+| `CN_ID`     | Chinese national ID (province code + birthdate + Luhn-like checksum) |
+| `BANK_CARD` | Luhn-valid 13–19 digit numbers                                       |
+| `NAME`      | Hint-driven (preceded by "name:", "by", "—", "from", etc.)           |
 
 The reverse map is encrypted on disk (`twinSources.redactionMapEnc`) using AES-GCM with a key derived from the user's master key. The runtime never persists the unredacted text.
 
@@ -252,18 +252,21 @@ Implementation: `lib/twin/runtime/`. Single entry: `applyTwinContext(messages, t
     ### Embed the user message
 
     Embed the most recent user message **once** through `lib/ai/embedding/embedding.ts`.
+
   </Step>
   <Step>
     ### Retrieve top-K chunks
 
     Run RAG via the active vector store; take top `ragTopK` (default 5).
     See [Vector store](./vector-store) for backend choices.
+
   </Step>
   <Step>
     ### Select style samples
 
     Pull top `styleSamplesK` (default 3) style samples from `twinProfile.styleSamples`,
     ranked by topical similarity to the current message via `few-shot-selector.ts`.
+
   </Step>
   <Step>
     ### Assemble four-segment system prompt
@@ -274,12 +277,13 @@ Implementation: `lib/twin/runtime/`. Single entry: `applyTwinContext(messages, t
     | 2 | Identity block | twin ID + author summary |
     | 3 | Retrieved chunks | step 2 |
     | 4 | Style examples | step 3, formatted as few-shot |
+
   </Step>
 </Steps>
 
 <Callout type="info" title="Graceful degradation">
-  `applyTwinContext` **always returns** — never throws. A vector-store outage
-  degrades gracefully to a "no context" send rather than breaking the chat.
+  `applyTwinContext` **always returns** — never throws. A vector-store outage degrades gracefully to
+  a "no context" send rather than breaking the chat.
 </Callout>
 
 ```mermaid
@@ -318,12 +322,12 @@ The few-shot selector (`few-shot-selector.ts`) ranks samples by topical similari
 
 Route: `app/twin/`. Components: `components/twin/`. Four tabs:
 
-| Tab | Purpose |
-| --- | --- |
-| **Sources** | Paste / drag text. Format picker, status badges, ingest button. Lists existing sources with size + status. |
-| **Jobs** | Live progress for ingest and distill jobs. Shows `phase` and `progress` from `twinJobs`. Manual queue / cancel / retry. |
-| **Drafts** | Pending drafts sorted first. Accept flow writes a real `Character` / `Skill` row + stamps the draft as accepted. |
-| **Settings** | Read-only profile stats (chunk count, style sample count, last distill timestamp, vector backend). |
+| Tab          | Purpose                                                                                                                 |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| **Sources**  | Paste / drag text. Format picker, status badges, ingest button. Lists existing sources with size + status.              |
+| **Jobs**     | Live progress for ingest and distill jobs. Shows `phase` and `progress` from `twinJobs`. Manual queue / cancel / retry. |
+| **Drafts**   | Pending drafts sorted first. Accept flow writes a real `Character` / `Skill` row + stamps the draft as accepted.        |
+| **Settings** | Read-only profile stats (chunk count, style sample count, last distill timestamp, vector backend).                      |
 
 The workbench is the primary surface for the twin lifecycle; everything happens through it.
 
@@ -339,39 +343,47 @@ Cron-driven retries (e.g., "re-ingest weekly") via the scheduler executor are a 
 
 ## Privacy summary
 
-| Concern | Where mitigated |
-| --- | --- |
-| PII in chunks | `redact.ts` replaces with placeholders before embed/LLM call |
-| Reverse map | Encrypted on disk (`twinSources.redactionMapEnc`) |
-| API keys | `keyring` crate; never written to disk plaintext |
-| Cloud egress | Off by default — vector backend is sqlite-vec on desktop unless user opts in |
-| Audit | Every embed call logs to `lib/observability/`; can be inspected in the logs view |
+| Concern       | Where mitigated                                                                  |
+| ------------- | -------------------------------------------------------------------------------- |
+| PII in chunks | `redact.ts` replaces with placeholders before embed/LLM call                     |
+| Reverse map   | Encrypted on disk (`twinSources.redactionMapEnc`)                                |
+| API keys      | `keyring` crate; never written to disk plaintext                                 |
+| Cloud egress  | Off by default — vector backend is sqlite-vec on desktop unless user opts in     |
+| Audit         | Every embed call logs to `lib/observability/`; can be inspected in the logs view |
 
 ## Tests
 
 <Callout type="error" title="Safety-critical: redaction tests">
-  `lib/twin/ingest/redact.test.ts` is the most safety-critical test in the
-  whole repo — it asserts `hasNoLeakingPii` on a corpus of synthetic PII strings.
-  Treat changes there with extreme care; add fixtures, never remove them.
+  `lib/twin/ingest/redact.test.ts` is the most safety-critical test in the whole repo — it asserts
+  `hasNoLeakingPii` on a corpus of synthetic PII strings. Treat changes there with extreme care; add
+  fixtures, never remove them.
 </Callout>
 
 `lib/twin/runtime/apply-twin-context.test.ts` asserts the graceful-degrade contract (a vector-store outage must not throw).
 
 ## Where to start contributing
 
-| Goal | Files |
-| --- | --- |
-| Add a new ingest format | `lib/twin/ingest/dispatch.ts`, `lib/document/document-processor.ts`, `parse.ts` |
-| Tighten redaction | `lib/twin/ingest/redact.ts` (and its tests!) |
-| Add a new distill agent | `lib/twin/distill/agents/`, register in `orchestrator.ts` |
-| Tweak runtime context shape | `lib/twin/runtime/system-prompt-template.ts` |
-| Wire runtime into a new send path | call `applyTwinContext` from your build-options helper |
+| Goal                              | Files                                                                           |
+| --------------------------------- | ------------------------------------------------------------------------------- |
+| Add a new ingest format           | `lib/twin/ingest/dispatch.ts`, `lib/document/document-processor.ts`, `parse.ts` |
+| Tighten redaction                 | `lib/twin/ingest/redact.ts` (and its tests!)                                    |
+| Add a new distill agent           | `lib/twin/distill/agents/`, register in `orchestrator.ts`                       |
+| Tweak runtime context shape       | `lib/twin/runtime/system-prompt-template.ts`                                    |
+| Wire runtime into a new send path | call `applyTwinContext` from your build-options helper                          |
 
 ## Related
 
 <Cards>
   <Card title="Vector store" href="./vector-store" description="How RAG is actually executed." />
-  <Card title="Backup & data transfer" href="./backup-and-data" description="Twin tables are part of the backup payload." />
+  <Card
+    title="Backup & data transfer"
+    href="./backup-and-data"
+    description="Twin tables are part of the backup payload."
+  />
   <Card title="Storage" href="./storage" description="The five Dexie twin tables in detail." />
-  <Card title="Chat & Skills" href="./chat-and-skills" description="The character / skill bindings that activate the twin." />
+  <Card
+    title="Chat & Skills"
+    href="./chat-and-skills"
+    description="The character / skill bindings that activate the twin."
+  />
 </Cards>

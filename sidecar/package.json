@@ -9,10 +9,17 @@
   "main": "claude-host.mjs",
   "scripts": {
     "start": "node claude-host.mjs",
-    "smoke": "node claude-host.mjs --smoke"
+    "smoke": "node claude-host.mjs --smoke",
+    "test": "node --test dispatch/"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.71",
+    "@ai-sdk/cohere": "^3.0.32",
+    "@ai-sdk/google": "^3.0.66",
+    "@ai-sdk/mistral": "^3.0.32",
+    "@ai-sdk/openai": "^3.0.55",
     "@anthropic-ai/claude-agent-sdk": "latest",
+    "ai": "^6.0.168",
     "diff": "^7.0.0",
     "fast-glob": "^3.3.3",
     "zod": "^4.0.0"

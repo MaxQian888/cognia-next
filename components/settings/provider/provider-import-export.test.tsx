@@ -34,7 +34,7 @@ jest.mock("@/stores", () => ({
       providerSettings: {
         openai: { apiKey: "test-key", enabled: true },
       },
-      customProviders: {},
+      customProviders: [],
       setProviderSettings: mockSetProviderSettings,
       addCustomProvider: mockAddCustomProvider,
       updateCustomProvider: mockUpdateCustomProvider,

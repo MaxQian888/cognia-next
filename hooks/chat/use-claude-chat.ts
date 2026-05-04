@@ -451,6 +451,13 @@ async function handleEvent(
       const isActive = evt.sessionId === activeRef.current
       if (isActive) {
         if (evt.error) {
+          // TODO(P4-followup): When the failing send carried
+          // `opts.aliasResolution.fallbackEntries` and
+          // `appSettings.routingFallbackEnabled !== false`, re-issue the
+          // turn against the next entry in the chain. Requires caching the
+          // last prompt + SendOptions per session so the retry has the
+          // payload it needs. Routing-decision metadata is already produced
+          // upstream in `lib/claude/build-options.ts`.
           useChatStore.getState().setError(evt.error)
         } else {
           useChatStore.getState().setStatus("idle")

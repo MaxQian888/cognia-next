@@ -81,8 +81,8 @@ const PluginsSection = dynamic(
   () => import("./sections/plugins-section").then((m) => m.PluginsSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
-const SkillsLinkCard = dynamic(
-  () => import("./sections/skills-link-card").then((m) => m.SkillsLinkCard),
+const SkillsSection = dynamic(
+  () => import("./sections/skills-section").then((m) => m.SkillsSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
 const SpeechSection = dynamic(() => import("./speech-section").then((m) => m.SpeechSection), {
@@ -107,6 +107,18 @@ const CustomModeSettings = dynamic(
 )
 const AgentTeamTemplatesSection = dynamic(
   () => import("./agent/agent-team-templates-section").then((m) => m.AgentTeamTemplatesSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const HooksSection = dynamic(() => import("./hooks/hooks-section").then((m) => m.HooksSection), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
+const SubagentsSection = dynamic(
+  () => import("./subagents/subagents-section").then((m) => m.SubagentsSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const SlashCommandsSection = dynamic(
+  () => import("./slash-commands/slash-commands-section").then((m) => m.SlashCommandsSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
 const ArtifactsSection = dynamic(
@@ -235,6 +247,10 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <CustomModeSettings />
     case "agent-teams":
       return <AgentTeamTemplatesSection />
+    case "hooks":
+      return <HooksSection />
+    case "slash-commands":
+      return <SlashCommandsSection />
     case "tools":
       return <ToolSettingsSection />
     case "search":
@@ -246,7 +262,9 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
     case "characters":
       return <CharactersSection />
     case "skills":
-      return <SkillsLinkCard onClose={onClose} />
+      return <SkillsSection />
+    case "subagents":
+      return <SubagentsSection />
     case "teams":
       return <TeamsSection />
     case "presets":

@@ -105,8 +105,8 @@ A custom theme JSON:
     },
     "dark": {
       // ...
-    }
-  }
+    },
+  },
 }
 ```
 
@@ -226,13 +226,13 @@ This is documented in case you need to do it; today, it's a follow-up.
 
 ## Where to start contributing
 
-| Goal | Files |
-| --- | --- |
-| Tweak default theme tokens | `app/globals.css` |
-| Add a built-in custom theme | `lib/themes/` |
-| Add a translation | `i18n/messages/{en,zh-CN}.json`, use `useTranslations` |
-| Add a new locale | New JSON file + register in `lib/i18n/` + settings UI |
-| Add a new chart palette | `app/globals.css` (`--chart-*` tokens) |
+| Goal                        | Files                                                  |
+| --------------------------- | ------------------------------------------------------ |
+| Tweak default theme tokens  | `app/globals.css`                                      |
+| Add a built-in custom theme | `lib/themes/`                                          |
+| Add a translation           | `i18n/messages/{en,zh-CN}.json`, use `useTranslations` |
+| Add a new locale            | New JSON file + register in `lib/i18n/` + settings UI  |
+| Add a new chart palette     | `app/globals.css` (`--chart-*` tokens)                 |
 
 ## Tests
 
@@ -242,6 +242,14 @@ This is documented in case you need to do it; today, it's a follow-up.
 ## Next
 
 <Cards>
-  <Card title="Development workflow" href="./development" description="Daily-loop scripts, conventions, testing." />
-  <Card title="Backup & data transfer" href="./backup-and-data" description="Custom themes export through the domain transfer system." />
+  <Card
+    title="Development workflow"
+    href="./development"
+    description="Daily-loop scripts, conventions, testing."
+  />
+  <Card
+    title="Backup & data transfer"
+    href="./backup-and-data"
+    description="Custom themes export through the domain transfer system."
+  />
 </Cards>

@@ -118,8 +118,10 @@ export function CustomModeSettings() {
   // File input ref for import
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Get modes as array
-  const modesArray = Object.values(customModes)
+  // Get modes as array. The custom-mode store hydrates `customModes`
+  // asynchronously, so guard against the initial null/undefined snapshot
+  // that some test fixtures hand back without a fully-populated record.
+  const modesArray = Object.values(customModes ?? {})
 
   // Filter and sort modes
   const filteredModes = modesArray

@@ -12,7 +12,13 @@ import { Task, TaskContent, TaskItem, TaskTrigger } from "@/components/ai-elemen
 import { Tool, ToolBody, ToolHeader, ToolContent } from "@/components/ai-elements/tool"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { A2UIPart } from "@/components/chat/message-parts/a2ui-part"
-import type { A2UIPart as A2UIPartType } from "@/lib/claude/parts-extensions"
+import { SubagentPart } from "@/components/chat/message-parts/subagent-part"
+import { AgentTeamDispatchPart } from "@/components/chat/message-parts/agent-team-dispatch-part"
+import type {
+  A2UIPart as A2UIPartType,
+  AgentTeamDispatchPart as AgentTeamDispatchPartType,
+  SubagentPart as SubagentPartType,
+} from "@/lib/claude/parts-extensions"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -388,6 +394,16 @@ function renderPart(
 
   if (type === "a2ui") {
     return <A2UIPart key={key} part={part as unknown as A2UIPartType} _messageId={messageId} />
+  }
+
+  if (type === "subagent") {
+    return <SubagentPart key={key} part={part as unknown as SubagentPartType} />
+  }
+
+  if (type === "agent-team-dispatch") {
+    const dp = part as unknown as AgentTeamDispatchPartType
+    const fromName = characterById?.get(dp.from)?.name
+    return <AgentTeamDispatchPart key={key} part={dp} fromName={fromName} />
   }
 
   if (type === "text") {

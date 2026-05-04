@@ -6,7 +6,7 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 let mockPlugin: PluginRow | undefined
-const setPluginConfigMock = jest.fn(async () => {})
+const setPluginConfigMock = jest.fn(async (_id: string, _cfg: Record<string, unknown>) => undefined)
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,

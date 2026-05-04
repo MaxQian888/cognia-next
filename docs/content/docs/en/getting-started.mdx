@@ -9,12 +9,12 @@ This page walks you from a fresh clone to a working web dev server **and** a wor
 
 ## Prerequisites
 
-| Tool | Version | Why |
-| --- | --- | --- |
-| **Node.js** | ≥ 20.x | Next.js 16 / React 19 runtime |
-| **pnpm** | ≥ 10.x | Single lockfile across the monorepo (`pnpm-workspace.yaml`) |
-| **Rust** | ≥ 1.77.2 | Tauri 2.9 compilation |
-| **C/C++ toolchain** | platform-specific | Tauri compiles native extensions (sqlite-vec, …) |
+| Tool                | Version           | Why                                                         |
+| ------------------- | ----------------- | ----------------------------------------------------------- |
+| **Node.js**         | ≥ 20.x            | Next.js 16 / React 19 runtime                               |
+| **pnpm**            | ≥ 10.x            | Single lockfile across the monorepo (`pnpm-workspace.yaml`) |
+| **Rust**            | ≥ 1.77.2          | Tauri 2.9 compilation                                       |
+| **C/C++ toolchain** | platform-specific | Tauri compiles native extensions (sqlite-vec, …)            |
 
 Platform-specific notes:
 
@@ -32,6 +32,7 @@ Platform-specific notes:
     ```
 
     No further setup needed for Apple Silicon or Intel Macs.
+
   </Tab>
   <Tab value="Linux">
     Install GTK / WebKitGTK / libsoup. See the
@@ -43,6 +44,7 @@ Platform-specific notes:
     sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
         libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
     ```
+
   </Tab>
 </Tabs>
 
@@ -65,6 +67,7 @@ cargo --version
     git clone https://github.com/MaxQian888/cognia-next.git
     cd cognia-next
     ```
+
   </Step>
   <Step>
     ### Install workspace dependencies
@@ -79,6 +82,7 @@ cargo --version
     - The docs package (`docs/`) — Fumadocs documentation site.
 
     Both share `pnpm-lock.yaml` at the repo root.
+
   </Step>
   <Step>
     ### Implicit setup
@@ -87,6 +91,7 @@ cargo --version
 
     - `prepare` script → installs Husky git hooks (commit-msg with commitlint, pre-commit with lint-staged).
     - `predev` / `prebuild` → `node scripts/copy-monaco-assets.mjs` copies Monaco editor assets into `public/`.
+
   </Step>
   <Step>
     ### (Optional) install sidecar dependencies
@@ -99,6 +104,7 @@ cargo --version
     pnpm install
     cd ..
     ```
+
   </Step>
 </Steps>
 
@@ -155,6 +161,7 @@ If any line shows ❌, fix it before continuing.
     ```bash
     pnpm docs:dev   # leave running, or Ctrl+C after the first compile
     ```
+
   </Accordion>
   <Accordion title="Sidecar fails to start (no credentials)" id="sidecar-credentials">
     The sidecar reads its credentials from the same sources Claude Code uses
@@ -165,6 +172,7 @@ If any line shows ❌, fix it before continuing.
 
     - Set `ANTHROPIC_API_KEY` in `.env.local`, **or**
     - Run `claude login` (the official Claude Code CLI) once to populate `~/.claude/`.
+
   </Accordion>
   <Accordion title="Port 3000 already in use" id="port-3000">
     <Tabs groupId="os" persist items={["Windows", "macOS / Linux"]}>
@@ -182,6 +190,7 @@ If any line shows ❌, fix it before continuing.
     </Tabs>
 
     You can also pass `PORT=3010 pnpm dev` and update `tauri.conf.json` → `build.devUrl` accordingly.
+
   </Accordion>
   <Accordion title="Rust compile errors" id="rust-errors">
     ```bash
@@ -195,6 +204,7 @@ If any line shows ❌, fix it before continuing.
       your C compiler is missing — install the platform toolchain from the
       prerequisites above.
     </Callout>
+
   </Accordion>
 </Accordions>
 
@@ -221,10 +231,34 @@ See [Development](./development) for the full reference.
 ## Next steps
 
 <Cards>
-  <Card title="Architecture" href="./architecture" description="Skim the layered design before going deeper." />
-  <Card title="Runtime & Tauri" href="./runtime-and-tauri" description="If you'll be touching native code." />
-  <Card title="Sidecar & Claude Agent SDK" href="./sidecar-and-claude-sdk" description="The Node host that runs the SDK." />
-  <Card title="Chat & Skills" href="./chat-and-skills" description="If you'll be working on the AI surfaces." />
-  <Card title="Employee Digital Twin" href="./employee-twin" description="The deepest customisation surface." />
-  <Card title="Development workflow" href="./development" description="Daily-loop scripts, conventions, testing." />
+  <Card
+    title="Architecture"
+    href="./architecture"
+    description="Skim the layered design before going deeper."
+  />
+  <Card
+    title="Runtime & Tauri"
+    href="./runtime-and-tauri"
+    description="If you'll be touching native code."
+  />
+  <Card
+    title="Sidecar & Claude Agent SDK"
+    href="./sidecar-and-claude-sdk"
+    description="The Node host that runs the SDK."
+  />
+  <Card
+    title="Chat & Skills"
+    href="./chat-and-skills"
+    description="If you'll be working on the AI surfaces."
+  />
+  <Card
+    title="Employee Digital Twin"
+    href="./employee-twin"
+    description="The deepest customisation surface."
+  />
+  <Card
+    title="Development workflow"
+    href="./development"
+    description="Daily-loop scripts, conventions, testing."
+  />
 </Cards>

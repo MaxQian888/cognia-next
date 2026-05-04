@@ -90,19 +90,19 @@ The wrappers re-export from `lib/tauri/index.ts`, which groups by plugin (clipbo
 
 The `cognia-next` crate is the production Rust backend. Top-level modules:
 
-| Module | Purpose |
-| --- | --- |
-| `claude` | Spawns and supervises the Node sidecar (`SidecarState`); restarts on key change. |
-| `scheduler` | Cross-platform native scheduler — `windows.rs` (Task Scheduler), `macos.rs` (launchd), `linux.rs` (systemd), with a sqlite-backed metadata store for recovery. |
-| `vector` | sqlite-vec backend; loads the FFI extension before any connection opens. |
-| `tts` | Provider key vault (keyring), Edge-TTS WebSocket bridge, generic HTTP proxy. |
-| `hooks` | Lifecycle hooks (chat send, response, error). |
-| `agents` / `external_agent` | Agent team coordination, external CLI agents. |
-| `a2ui_bridge` | Bridge between the webview and the A2UI MCP sidecar. |
-| `canvas` | File-backed canvas document storage. |
-| `skills` | Skill resource resolution + sandbox setup. |
-| `files`, `shell`, `settings`, `api_key`, `logging` | Filesystem ops, shell exec, settings persistence, key store, fern → native log dispatch. |
-| `tray`, `menu`, `window_behavior` | Desktop chrome (system tray, menu bar, window state). |
+| Module                                             | Purpose                                                                                                                                                        |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `claude`                                           | Spawns and supervises the Node sidecar (`SidecarState`); restarts on key change.                                                                               |
+| `scheduler`                                        | Cross-platform native scheduler — `windows.rs` (Task Scheduler), `macos.rs` (launchd), `linux.rs` (systemd), with a sqlite-backed metadata store for recovery. |
+| `vector`                                           | sqlite-vec backend; loads the FFI extension before any connection opens.                                                                                       |
+| `tts`                                              | Provider key vault (keyring), Edge-TTS WebSocket bridge, generic HTTP proxy.                                                                                   |
+| `hooks`                                            | Lifecycle hooks (chat send, response, error).                                                                                                                  |
+| `agents` / `external_agent`                        | Agent team coordination, external CLI agents.                                                                                                                  |
+| `a2ui_bridge`                                      | Bridge between the webview and the A2UI MCP sidecar.                                                                                                           |
+| `canvas`                                           | File-backed canvas document storage.                                                                                                                           |
+| `skills`                                           | Skill resource resolution + sandbox setup.                                                                                                                     |
+| `files`, `shell`, `settings`, `api_key`, `logging` | Filesystem ops, shell exec, settings persistence, key store, fern → native log dispatch.                                                                       |
+| `tray`, `menu`, `window_behavior`                  | Desktop chrome (system tray, menu bar, window state).                                                                                                          |
 
 Plus Tauri plugins registered in `lib.rs`: `single-instance`, `deep-link`, `autostart`, `global-shortcut`, `cli`, `store`, `updater`, `dialog`, `fs`, `notification`, `clipboard-manager`, `opener`, `os`, `process`, `log`, `window-state`.
 
@@ -127,14 +127,14 @@ The Rust side (`src-tauri/src/claude/sidecar.rs`) owns the child process handle 
 
 ### Storage strategy
 
-| Data | Where | Why |
-| --- | --- | --- |
-| Chat sessions, characters, skills, teams, twin tables | Dexie (IndexedDB) | Webview-local, low-latency, indexed. Schema versions are append-only; never mutate an old `version().stores()` block. |
-| Vector embeddings | `<app_data>/cognia/vectors.sqlite` (desktop) or remote (web) | Native fixed-vector index needs sqlite-vec; web falls back to cloud backends. |
-| Backup snapshots | User-chosen folder via Tauri dialog | Encrypted by default with AES-GCM. |
-| Scheduler metadata | sqlite (Rust side, `metadata_store.rs`) | Survives app restarts; cross-references native task IDs. |
-| Settings | Dexie `settings` table (single row keyed `"singleton"`) + `lib/settings/` | Synced from Rust at boot via `SettingsSyncProvider`. |
-| API keys | OS keyring via `keyring` crate | Never written to disk in plaintext. |
+| Data                                                  | Where                                                                     | Why                                                                                                                   |
+| ----------------------------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Chat sessions, characters, skills, teams, twin tables | Dexie (IndexedDB)                                                         | Webview-local, low-latency, indexed. Schema versions are append-only; never mutate an old `version().stores()` block. |
+| Vector embeddings                                     | `<app_data>/cognia/vectors.sqlite` (desktop) or remote (web)              | Native fixed-vector index needs sqlite-vec; web falls back to cloud backends.                                         |
+| Backup snapshots                                      | User-chosen folder via Tauri dialog                                       | Encrypted by default with AES-GCM.                                                                                    |
+| Scheduler metadata                                    | sqlite (Rust side, `metadata_store.rs`)                                   | Survives app restarts; cross-references native task IDs.                                                              |
+| Settings                                              | Dexie `settings` table (single row keyed `"singleton"`) + `lib/settings/` | Synced from Rust at boot via `SettingsSyncProvider`.                                                                  |
+| API keys                                              | OS keyring via `keyring` crate                                            | Never written to disk in plaintext.                                                                                   |
 
 ### Logging
 
@@ -152,8 +152,20 @@ This means a single `logger.error(...)` call from React reaches the OS-native lo
 ## Next
 
 <Cards>
-  <Card title="Runtime & Tauri" href="./runtime-and-tauri" description="How the IPC bridge actually works in practice." />
-  <Card title="Sidecar & Claude Agent SDK" href="./sidecar-and-claude-sdk" description="The JSON-lines protocol over stdio." />
+  <Card
+    title="Runtime & Tauri"
+    href="./runtime-and-tauri"
+    description="How the IPC bridge actually works in practice."
+  />
+  <Card
+    title="Sidecar & Claude Agent SDK"
+    href="./sidecar-and-claude-sdk"
+    description="The JSON-lines protocol over stdio."
+  />
   <Card title="Storage" href="./storage" description="Dexie schema v15 in detail." />
-  <Card title="Plugin system" href="./plugin-system" description="The sandbox + permissions model." />
+  <Card
+    title="Plugin system"
+    href="./plugin-system"
+    description="The sandbox + permissions model."
+  />
 </Cards>

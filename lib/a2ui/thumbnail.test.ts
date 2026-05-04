@@ -47,15 +47,35 @@ jest.mock("html2canvas", () => ({
 
 describe("A2UI Thumbnail", () => {
   let toDataURLSpy: jest.SpyInstance
+  let getContextSpy: jest.SpyInstance
 
   beforeAll(() => {
     toDataURLSpy = jest
       .spyOn(HTMLCanvasElement.prototype, "toDataURL")
       .mockImplementation(() => "data:image/png;base64,mockCanvasData")
+    // jsdom doesn't ship a real 2D context. Stub a minimal one so the source's
+    // `if (!ctx) return ""` early-out doesn't fire.
+    const fake2dContext = {
+      fillStyle: "",
+      font: "",
+      textAlign: "",
+      textBaseline: "",
+      createLinearGradient: jest.fn(() => ({ addColorStop: jest.fn() })),
+      fillRect: jest.fn(),
+      fillText: jest.fn(),
+      beginPath: jest.fn(),
+      arc: jest.fn(),
+      fill: jest.fn(),
+      drawImage: jest.fn(),
+    } as unknown as CanvasRenderingContext2D
+    getContextSpy = jest
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockImplementation(() => fake2dContext as unknown as never)
   })
 
   afterAll(() => {
     toDataURLSpy.mockRestore()
+    getContextSpy.mockRestore()
   })
 
   beforeEach(() => {

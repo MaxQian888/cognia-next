@@ -79,16 +79,16 @@ sequenceDiagram
 
 完整协议在 `claude-host.mjs` 顶部的注释块里。高层形态：
 
-| 方向 | type | payload |
-| --- | --- | --- |
-| → | `init` | `{ type: "init", apiKey?, workingDir? }` —— 设置凭证与 CWD。 |
-| → | `send` | `{ type: "send", messages, options }` —— 发起一轮对话。 |
-| ← | `delta` | `{ type: "delta", content }` —— 流式 token 片段。 |
-| ← | `tool_use` | `{ type: "tool_use", name, input }` —— 模型要调用工具。 |
-| → | `tool_result` | `{ type: "tool_result", id, content }` —— 工具结果。 |
-| ← | `done` | `{ type: "done", usage }` —— 本轮结束。 |
-| ← | `error` | `{ type: "error", message }` —— 致命错误；sidecar 退出。 |
-| → | `kill` | `{ type: "kill" }` —— 优雅关闭。 |
+| 方向 | type          | payload                                                      |
+| ---- | ------------- | ------------------------------------------------------------ |
+| →    | `init`        | `{ type: "init", apiKey?, workingDir? }` —— 设置凭证与 CWD。 |
+| →    | `send`        | `{ type: "send", messages, options }` —— 发起一轮对话。      |
+| ←    | `delta`       | `{ type: "delta", content }` —— 流式 token 片段。            |
+| ←    | `tool_use`    | `{ type: "tool_use", name, input }` —— 模型要调用工具。      |
+| →    | `tool_result` | `{ type: "tool_result", id, content }` —— 工具结果。         |
+| ←    | `done`        | `{ type: "done", usage }` —— 本轮结束。                      |
+| ←    | `error`       | `{ type: "error", message }` —— 致命错误；sidecar 退出。     |
+| →    | `kill`        | `{ type: "kill" }` —— 优雅关闭。                             |
 
 `send` 中的 `options` 携带活动 `Character` 的系统提示、解析后的技能列表、MCP 服务器配置、模型选择、最大 token 数等 —— 全部由 `lib/claude/build-options.ts` 装配。
 
@@ -166,9 +166,9 @@ Sidecar 从 Claude Code 的同一来源读取凭证：
 />
 
 <Callout type="warn" title="永不明文">
-  Rust 侧**绝不**直接读 `~/.claude/` —— 只是用合适的环境变量启 sidecar。UI
-  输入的 API key 存在 `ApiKeyState`（内存）和 OS keyring（`keyring` crate），
-  通过环境变量在 spawn 时传给 sidecar，**永不**写入配置文件。
+  Rust 侧**绝不**直接读 `~/.claude/` —— 只是用合适的环境变量启 sidecar。UI 输入的 API key 存在
+  `ApiKeyState`（内存）和 OS keyring（`keyring` crate）， 通过环境变量在 spawn 时传给
+  sidecar，**永不**写入配置文件。
 </Callout>
 
 ## 添加新工具
@@ -213,6 +213,7 @@ Sidecar 从 Claude Code 的同一来源读取凭证：
       内置工具会随 Cognia 每次发版分发。避免重依赖 ——
       特殊场景优先用 MCP。
     </Callout>
+
   </Tab>
   <Tab value="MCP 服务器">
     绝大多数第三方集成走 MCP 路径，因为不必修改 sidecar。
@@ -236,6 +237,7 @@ Sidecar 从 Claude Code 的同一来源读取凭证：
         工具调用通过 `tool_use` / `tool_result` 往返。
       </Step>
     </Steps>
+
   </Tab>
 </Tabs>
 
@@ -268,5 +270,9 @@ echo '{"type":"init"}\n{"type":"send","messages":[{"role":"user","content":"hi"}
 <Cards>
   <Card title="聊天 & 技能" href="./chat-and-skills" description="调用 claude_send 的用户面" />
   <Card title="插件系统" href="./plugin-system" description="插件如何借 MCP 扩展 sidecar" />
-  <Card title="运行时 & Tauri" href="./runtime-and-tauri" description="拥有 sidecar 生命周期的 Rust 侧" />
+  <Card
+    title="运行时 & Tauri"
+    href="./runtime-and-tauri"
+    description="拥有 sidecar 生命周期的 Rust 侧"
+  />
 </Cards>

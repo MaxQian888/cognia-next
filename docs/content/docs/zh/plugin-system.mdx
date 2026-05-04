@@ -71,21 +71,21 @@ components/plugin/       # 设置 UI + 市场
   "description": "...",
   "author": "...",
   "icon": "icon.svg",
-  "entry": "main.js",                  // ES module 入口
+  "entry": "main.js", // ES module 入口
   "permissions": [
     "chat.read",
     "chat.send",
     "twin.read",
     "scheduler.register",
-    "fs.read:$DOWNLOADS"               // 限定作用域的 FS 权限
+    "fs.read:$DOWNLOADS", // 限定作用域的 FS 权限
   ],
   "surfaces": [
     { "kind": "panel", "id": "main", "title": "My Plugin" },
-    { "kind": "chat-action", "id": "summarize", "label": "Summarize" }
+    { "kind": "chat-action", "id": "summarize", "label": "Summarize" },
   ],
   "scheduledJobs": [
-    { "id": "daily-sync", "trigger": { "type": "cron", "expression": "0 9 * * *" } }
-  ]
+    { "id": "daily-sync", "trigger": { "type": "cron", "expression": "0 9 * * *" } },
+  ],
 }
 ```
 
@@ -201,19 +201,19 @@ stateDiagram-v2
 
 插件经由 `lib/plugin/api/` 调用版本化的 API：
 
-| 命名空间 | 能力 |
-| --- | --- |
-| `chat.*` | 读会话/消息、发模板化消息、注册聊天动作 |
-| `character.*` | 读角色、提交新角色草稿 |
-| `skill.*` | 读技能、提交新技能 |
-| `twin.*` | 列举孪生、读孪生画像（不含 chunk 内容）、触发 ingest |
-| `vector.*` | 查询活动向量库（不可 upsert，特权操作） |
-| `scheduler.*` | 注册定时任务，仅限插件自己 |
-| `notification.*` | 显示 toast / 原生通知 |
-| `surface.*` | 渲染面板、渲染聊天输出层 |
-| `storage.*` | 每插件一份 KV 存储（小、有上限） |
-| `network.fetch` | HTTPS fetch，受按 origin 限定的权限守护 |
-| `fs.*` | 受限 FS 访问（在用户许可的根下读/写） |
+| 命名空间         | 能力                                                 |
+| ---------------- | ---------------------------------------------------- |
+| `chat.*`         | 读会话/消息、发模板化消息、注册聊天动作              |
+| `character.*`    | 读角色、提交新角色草稿                               |
+| `skill.*`        | 读技能、提交新技能                                   |
+| `twin.*`         | 列举孪生、读孪生画像（不含 chunk 内容）、触发 ingest |
+| `vector.*`       | 查询活动向量库（不可 upsert，特权操作）              |
+| `scheduler.*`    | 注册定时任务，仅限插件自己                           |
+| `notification.*` | 显示 toast / 原生通知                                |
+| `surface.*`      | 渲染面板、渲染聊天输出层                             |
+| `storage.*`      | 每插件一份 KV 存储（小、有上限）                     |
+| `network.fetch`  | HTTPS fetch，受按 origin 限定的权限守护              |
+| `fs.*`           | 受限 FS 访问（在用户许可的根下读/写）                |
 
 宿主侧实现与命名空间文件并列。每一处都先做权限守卫。
 
@@ -262,12 +262,12 @@ stateDiagram-v2
 
 ## 在哪里入手
 
-| 目标 | 文件 |
-| --- | --- |
-| 加新权限 | `lib/plugin/contracts/permissions.ts`，相应 API 命名空间内做守卫 |
-| 加新 API 命名空间 | `lib/plugin/api/<name>.ts`，在 `api/index.ts` 注册 |
-| 改进沙箱 | `lib/plugin/security/`、`lib/plugin/bridge/` |
-| 调整市场 UX | `components/plugin/`、`lib/plugin/index.ts`（目录客户端） |
+| 目标              | 文件                                                             |
+| ----------------- | ---------------------------------------------------------------- |
+| 加新权限          | `lib/plugin/contracts/permissions.ts`，相应 API 命名空间内做守卫 |
+| 加新 API 命名空间 | `lib/plugin/api/<name>.ts`，在 `api/index.ts` 注册               |
+| 改进沙箱          | `lib/plugin/security/`、`lib/plugin/bridge/`                     |
+| 调整市场 UX       | `components/plugin/`、`lib/plugin/index.ts`（目录客户端）        |
 
 ## 测试
 
@@ -280,5 +280,9 @@ stateDiagram-v2
 <Cards>
   <Card title="调度器" href="./scheduler" description="插件定时任务的执行引擎" />
   <Card title="存储" href="./storage" description="v15 插件表细节" />
-  <Card title="Sidecar & Claude SDK" href="./sidecar-and-claude-sdk" description="插件借 MCP 扩展 sidecar" />
+  <Card
+    title="Sidecar & Claude SDK"
+    href="./sidecar-and-claude-sdk"
+    description="插件借 MCP 扩展 sidecar"
+  />
 </Cards>

@@ -914,6 +914,21 @@ export interface PluginStorage {
   delete: (key: string) => Promise<void>
   keys: () => Promise<string[]>
   clear: () => Promise<void>
+  /**
+   * Convenience alias for `delete`. Some plugin authors prefer this name;
+   * implementations may forward to `delete`.
+   */
+  remove?: (key: string) => Promise<void>
+  /** Returns true when the key has a value. */
+  has?: (key: string) => Promise<boolean>
+  /**
+   * Encrypted-at-rest storage for sensitive values (API tokens, OAuth
+   * secrets). Implementations should encrypt with the host keychain or
+   * secure-storage backend before persisting.
+   */
+  setSecure?: <T>(key: string, value: T) => Promise<void>
+  /** Decrypts a value previously stored via `setSecure`. */
+  getSecure?: <T>(key: string) => Promise<T | undefined>
 }
 
 export interface PluginEventEmitter {
@@ -1554,7 +1569,13 @@ export type PluginSystemEvent =
 export interface PluginDefinition {
   manifest: PluginManifest
   activate: (context: PluginContext) => Promise<PluginHooks | void> | PluginHooks | void
-  deactivate?: () => Promise<void> | void
+  /**
+   * Optional teardown invoked when the plugin is disabled or unloaded.
+   * The runtime passes the same `PluginContext` used in `activate` so
+   * cleanup can release context-bound resources (subscriptions, secure
+   * storage handles, registered commands).
+   */
+  deactivate?: (context?: PluginContext) => Promise<void> | void
   /** Parsed activation metadata resolved by runtime manager */
   activation?: {
     startup: boolean

@@ -11,14 +11,14 @@ Cognia 的 [员工数字孪生](./employee-twin) 需要向量索引来支持 RAG
 
 ## 后端
 
-| 后端 | 适用 | 备注 |
-| --- | --- | --- |
-| **sqlite-vec（原生）** | 仅桌面 | 桌面默认。数据位于 `<app_data>/cognia/vectors.sqlite`。 |
-| **Pinecone** | Web + 桌面 | `@pinecone-database/pinecone` |
-| **Qdrant** | Web + 桌面 | `@qdrant/js-client-rest` |
-| **Weaviate** | Web + 桌面 | `weaviate-client` |
-| **Chroma** | Web + 桌面 | `chromadb` |
-| **Milvus** | Web + 桌面 | `@zilliz/milvus2-sdk-node` |
+| 后端                   | 适用       | 备注                                                    |
+| ---------------------- | ---------- | ------------------------------------------------------- |
+| **sqlite-vec（原生）** | 仅桌面     | 桌面默认。数据位于 `<app_data>/cognia/vectors.sqlite`。 |
+| **Pinecone**           | Web + 桌面 | `@pinecone-database/pinecone`                           |
+| **Qdrant**             | Web + 桌面 | `@qdrant/js-client-rest`                                |
+| **Weaviate**           | Web + 桌面 | `weaviate-client`                                       |
+| **Chroma**             | Web + 桌面 | `chromadb`                                              |
+| **Milvus**             | Web + 桌面 | `@zilliz/milvus2-sdk-node`                              |
 
 Web 模式（`!isTauri()`）会在孪生设置中隐藏原生选项；必须用云端。
 
@@ -28,6 +28,7 @@ Web 模式（`!isTauri()`）会在孪生设置中隐藏原生选项；必须用�
     **缺点**：仅桌面、无水平扩展、暴力扫描（≤ 10 万 chunk 内表现良好）。
 
     文件：`<app_data>/cognia/vectors.sqlite`。可用 `sqlite3` + `.tables` 检视。
+
   </Tab>
   <Tab value="Pinecone">
     托管云，搭建最快。在孪生设置里配 API key + 环境。
@@ -48,8 +49,8 @@ Web 模式（`!isTauri()`）会在孪生设置中隐藏原生选项；必须用�
 </Tabs>
 
 <Callout type="info" title="切换后端">
-  重新嵌入需**手动**。切后端后请在孪生 Sources tab 用"重新嵌入"动作 ——
-  维度、距离度量、元数据 schema 可能不同。
+  重新嵌入需**手动**。切后端后请在孪生 Sources tab 用"重新嵌入"动作 —— 维度、距离度量、元数据 schema
+  可能不同。
 </Callout>
 
 ## 桌面为何选 sqlite-vec
@@ -195,19 +196,20 @@ interface VectorStore {
 
 <TypeTable
   type={{
-    "批量大小": {
-      description: "每次 LLM 嵌入 100 chunk，每次后端 upsert 100 行。可在 `lib/twin/ingest/{embed,persist}.ts` 调。",
+    批量大小: {
+      description:
+        "每次 LLM 嵌入 100 chunk，每次后端 upsert 100 行。可在 `lib/twin/ingest/{embed,persist}.ts` 调。",
       type: "调参",
     },
     "并发 ingest": {
       description: "每个孪生一次一个，由 job worker 强制。",
       type: "不变量",
     },
-    "原生查询延迟": {
+    原生查询延迟: {
       description: "2024 笔电上 ~50k chunk 的 `topK ≤ 20` < 50ms。",
       type: "指标",
     },
-    "云端延迟": {
+    云端延迟: {
       description: "往返为主；从非美用户访问 Pinecone us-east-1 通常 80–150ms。",
       type: "指标",
     },
@@ -221,12 +223,12 @@ interface VectorStore {
 
 ## 在哪里入手
 
-| 目标 | 文件 |
-| --- | --- |
-| 加一个新云端后端 | `lib/vector/<provider>-client.ts`，在 `store.ts` 注册，加设置 UI |
-| 调 sqlite-vec schema | `src-tauri/src/vector/schema.rs`（提升迁移版本号） |
-| 加新的元数据过滤 | `src-tauri/src/vector/filters.rs` 与 `lib/vector/store.ts` 类型 |
-| 改进 readiness 检查 | `lib/vector/readiness.ts` |
+| 目标                 | 文件                                                             |
+| -------------------- | ---------------------------------------------------------------- |
+| 加一个新云端后端     | `lib/vector/<provider>-client.ts`，在 `store.ts` 注册，加设置 UI |
+| 调 sqlite-vec schema | `src-tauri/src/vector/schema.rs`（提升迁移版本号）               |
+| 加新的元数据过滤     | `src-tauri/src/vector/filters.rs` 与 `lib/vector/store.ts` 类型  |
+| 改进 readiness 检查  | `lib/vector/readiness.ts`                                        |
 
 ## 测试
 
@@ -238,6 +240,10 @@ interface VectorStore {
 
 <Cards>
   <Card title="员工数字孪生" href="./employee-twin" description="向量库的最大消费者" />
-  <Card title="备份 & 数据传输" href="./backup-and-data" description="默认向量数据不在备份内 —— 只备份 twin sources 与 chunk 元数据" />
+  <Card
+    title="备份 & 数据传输"
+    href="./backup-and-data"
+    description="默认向量数据不在备份内 —— 只备份 twin sources 与 chunk 元数据"
+  />
   <Card title="存储" href="./storage" description="承载 chunk 元数据的 Dexie 表" />
 </Cards>

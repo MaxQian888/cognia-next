@@ -32,6 +32,25 @@ export const A2UIError = memo(function A2UIError({
     component.message.includes(" at ") ||
     component.message.includes("Error:")
 
+  // When the message looks like a stack trace, peel the first line off as the
+  // human-facing summary and feed the rest of the lines to ErrorTraceDetails
+  // as the stack — that way the collapsible can hide the noisy frame lines.
+  const traceMessage = (() => {
+    if (!shouldUseTraceDetails) return component.message
+    const firstLineBreak = component.message.indexOf("\n")
+    let firstLine =
+      firstLineBreak === -1 ? component.message : component.message.slice(0, firstLineBreak)
+    // Strip a leading "Error: " prefix so the headline reads naturally.
+    firstLine = firstLine.replace(/^Error:\s*/, "")
+    return firstLine
+  })()
+  const traceStack = (() => {
+    if (!shouldUseTraceDetails) return undefined
+    const firstLineBreak = component.message.indexOf("\n")
+    if (firstLineBreak === -1) return undefined
+    return component.message.slice(firstLineBreak + 1)
+  })()
+
   const handleRetry = () => {
     if (component.retryAction) {
       onAction(component.retryAction, {})
@@ -55,7 +74,7 @@ export const A2UIError = memo(function A2UIError({
           </h3>
         )}
         {shouldUseTraceDetails ? (
-          <ErrorTraceDetails error={{ message: component.message }} />
+          <ErrorTraceDetails error={{ message: traceMessage, stack: traceStack }} />
         ) : (
           <p
             className={cn(

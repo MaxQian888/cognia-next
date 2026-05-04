@@ -794,8 +794,24 @@ function uniqueStrings(values: Array<string | undefined | null>): string[] {
   )
 }
 
-function normalizeProviderBaseUrl(baseURL?: string): string {
-  return (baseURL || "https://api.openai.com/v1").replace(/\/$/, "")
+function normalizeProviderBaseUrl(baseURL?: string, providerId?: SupportedImageProviderId): string {
+  if (baseURL) return baseURL.replace(/\/$/, "")
+  // Per-provider defaults — without these, every provider that omits baseURL
+  // gets routed to the OpenAI host, which silently breaks xAI / Together AI /
+  // Fireworks / DeepInfra image edit requests.
+  switch (providerId) {
+    case "xai":
+      return "https://api.x.ai/v1"
+    case "togetherai":
+      return "https://api.together.xyz/v1"
+    case "fireworks":
+      return "https://api.fireworks.ai/inference/v1"
+    case "deepinfra":
+      return "https://api.deepinfra.com/v1/openai"
+    case "openai":
+    default:
+      return "https://api.openai.com/v1"
+  }
 }
 
 function createMediaAIError(
@@ -889,7 +905,7 @@ function resolveConfiguredImageProvider(): ResolvedImageProviderConfig {
       return {
         providerId,
         apiKey: resolution.apiKey,
-        baseURL: normalizeProviderBaseUrl(resolution.baseURL),
+        baseURL: normalizeProviderBaseUrl(resolution.baseURL, providerId),
         model: resolveImageProviderModel(providerId, resolution.model),
       }
     }

@@ -185,6 +185,7 @@ const config: Config = {
 
     // Mock Tauri API for Jest (not available in jsdom)
     "^@tauri-apps/api/core$": "<rootDir>/__mocks__/tauri-api.js",
+    "^@tauri-apps/api/event$": "<rootDir>/__mocks__/tauri-api-event.js",
     "^@tauri-apps/plugin-store$": "<rootDir>/__mocks__/tauri-plugin-store.js",
 
     // nanoid ships ESM-only browser entry that Jest's CommonJS loader can't
@@ -284,7 +285,18 @@ const config: Config = {
   // `/sidecar/` is excluded because the sidecar's `.mjs` tests use Node's
   // built-in `--test` runner (see `pnpm sidecar:test`), not Jest. The two test
   // surfaces have different setup expectations and should not be run together.
-  testPathIgnorePatterns: ["/node_modules/", "/.next/", "/out/", "/src-tauri/", "/sidecar/"],
+  testPathIgnorePatterns: [
+    "/node_modules/",
+    "/.next/",
+    "/out/",
+    "/src-tauri/",
+    "/sidecar/",
+    // Stale duplicates inside `.claude/worktrees/<branch>/` are self-contained
+    // copies of the repo for in-flight feature branches. Running them from the
+    // main tree picks up out-of-date renderer code paired with current schemas
+    // and produces a flood of false negatives.
+    "/.claude/worktrees/",
+  ],
 
   // The regexp pattern or array of patterns that Jest uses to detect test files
   // testRegex: [],

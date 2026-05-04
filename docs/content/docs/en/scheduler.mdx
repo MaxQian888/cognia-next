@@ -8,15 +8,18 @@ description: A cross-platform scheduler that promotes tasks from in-app cron to 
 <Status variant="stable" />
 
 <TLDR>
-  Two-layer scheduler — an in-app cron loop for tasks that only matter while
-  Cognia is open, and a native promotion path that mirrors selected tasks to
-  Windows Task Scheduler / launchd / systemd so they fire even when the app
-  is closed.
+  Two-layer scheduler — an in-app cron loop for tasks that only matter while Cognia is open, and a
+  native promotion path that mirrors selected tasks to Windows Task Scheduler / launchd / systemd so
+  they fire even when the app is closed.
 </TLDR>
 
 <StatGrid>
   <Stat label="Trigger types" value="4" hint="cron · interval · once · event" />
-  <Stat label="Built-in executors" value="6" hint="claude-send · shell · script · backup · twin · plugin" />
+  <Stat
+    label="Built-in executors"
+    value="6"
+    hint="claude-send · shell · script · backup · twin · plugin"
+  />
   <Stat label="Native platforms" value="3" hint="Windows · macOS · Linux" />
   <Stat label="History cap" value="200" hint="per task" />
 </StatGrid>
@@ -189,14 +192,14 @@ This surfaces in the workbench's "Create with AI" panel.
 
 Built-in executors:
 
-| Executor | Where |
-| --- | --- |
-| `claude-send` | `executors/claude-send.ts` — sends a templated message via `claude_send` |
-| `shell` | `executors/shell.ts` → `lib/native/local-runtime.ts` → `src-tauri/src/shell.rs`; gated by trusted-workspace allow-list |
-| `script` | `executors/script.ts` → `script-executor.ts` (sandboxed JS via `lib/sandbox/`) |
-| `backup` | `executors/backup.ts` — calls `lib/data/build-package` + encrypt |
-| `twin-ingest` / `twin-distill` | `executors/twin-*.ts` — enqueue to the twin job worker |
-| `plugin` | `executors/plugin.ts` — invoke a plugin's scheduled job (see [Plugin system](./plugin-system)) |
+| Executor                       | Where                                                                                                                  |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `claude-send`                  | `executors/claude-send.ts` — sends a templated message via `claude_send`                                               |
+| `shell`                        | `executors/shell.ts` → `lib/native/local-runtime.ts` → `src-tauri/src/shell.rs`; gated by trusted-workspace allow-list |
+| `script`                       | `executors/script.ts` → `script-executor.ts` (sandboxed JS via `lib/sandbox/`)                                         |
+| `backup`                       | `executors/backup.ts` — calls `lib/data/build-package` + encrypt                                                       |
+| `twin-ingest` / `twin-distill` | `executors/twin-*.ts` — enqueue to the twin job worker                                                                 |
+| `plugin`                       | `executors/plugin.ts` — invoke a plugin's scheduled job (see [Plugin system](./plugin-system))                         |
 
 Each executor returns:
 
@@ -234,12 +237,12 @@ Route: `app/scheduler/`. Components: `components/scheduler/`. Tabs:
 
 ## Where to start contributing
 
-| Goal | Files |
-| --- | --- |
-| Add a new executor | `lib/scheduler/executors/<name>.ts` + register |
-| Add a new trigger type | `lib/scheduler/cron-parser.ts` (or a new parser), `trigger-normalizer.ts` |
-| Add a native platform | `src-tauri/src/scheduler/<platform>.rs` |
-| Tweak conversational authoring | `conversational-task-authoring.ts` |
+| Goal                           | Files                                                                     |
+| ------------------------------ | ------------------------------------------------------------------------- |
+| Add a new executor             | `lib/scheduler/executors/<name>.ts` + register                            |
+| Add a new trigger type         | `lib/scheduler/cron-parser.ts` (or a new parser), `trigger-normalizer.ts` |
+| Add a native platform          | `src-tauri/src/scheduler/<platform>.rs`                                   |
+| Tweak conversational authoring | `conversational-task-authoring.ts`                                        |
 
 ## Tests
 
@@ -251,7 +254,19 @@ Route: `app/scheduler/`. Components: `components/scheduler/`. Tabs:
 ## Next
 
 <Cards>
-  <Card title="Plugin system" href="./plugin-system" description="Plugins can register their own scheduled jobs." />
-  <Card title="Backup & data transfer" href="./backup-and-data" description="The backup scheduler builds on these primitives." />
-  <Card title="ADR-0002" href="../adr/0002-scheduler-full-agent-resolution" description="Why the in-app vs native split exists." />
+  <Card
+    title="Plugin system"
+    href="./plugin-system"
+    description="Plugins can register their own scheduled jobs."
+  />
+  <Card
+    title="Backup & data transfer"
+    href="./backup-and-data"
+    description="The backup scheduler builds on these primitives."
+  />
+  <Card
+    title="ADR-0002"
+    href="../adr/0002-scheduler-full-agent-resolution"
+    description="Why the in-app vs native split exists."
+  />
 </Cards>
