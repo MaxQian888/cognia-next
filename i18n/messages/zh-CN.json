@@ -964,6 +964,7 @@
       "a2ui": "A2UI",
       "plugins": "插件",
       "remoteControl": "远程控制",
+      "externalBridge": "外部桥接 (MCP)",
       "providers": "提供商"
     },
     "descriptions": {
@@ -996,6 +997,7 @@
       "a2ui": "Agent-to-UI 小应用、运行时默认值、MCP 桥接与调试器。",
       "plugins": "浏览、安装、配置并治理插件。查看权限、定时任务、devtools 与契约审计。",
       "remoteControl": "桌面端本地 HTTP 入站监听器，搭配出站 webhook 的 HMAC 签名与自定义请求头。",
+      "externalBridge": "把 Cognia 的 wiki / RAG / 运行时实体通过 MCP 暴露给外部 Agent（Claude Code、Cursor、Cline）。每个 scope 默认 OFF，需手动启用。",
       "providers": "AI 提供商的 API 密钥、模型与连接设置。"
     },
     "canvas": {
