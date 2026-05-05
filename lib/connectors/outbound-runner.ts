@@ -30,9 +30,121 @@ import {
   markDeadlettered,
 } from "@/lib/db/outbound-jobs"
 import { getDb } from "@/lib/db/schema"
+import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { appendAudit } from "./audit"
 import { createCircuitBreaker, type CircuitBreaker } from "./circuit-breaker"
 import { createTokenBucket, type TokenBucket } from "./rate-limit"
+
+// ── Quiet hours helpers ────────────────────────────────────────────────────────
+
+/**
+ * Return true if the given wall-clock timestamp (ms) falls within the quiet
+ * window `[from, to]` in the specified IANA timezone. The window is expressed
+ * as "HH:MM" strings (24-h). Supports cross-midnight windows (e.g. 22:00–06:00).
+ */
+export function isInQuietHours(nowMs: number, from: string, to: string, tz: string): boolean {
+  // Parse HH:MM strings into total-minutes-since-midnight
+  const toMins = (hhmm: string): number => {
+    const [h, m] = hhmm.split(":").map(Number)
+    return (h ?? 0) * 60 + (m ?? 0)
+  }
+
+  // Get current local time in target timezone
+  const localStr = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(nowMs))
+
+  // "24:00" can appear for midnight in some locales — normalise to 0:00
+  const [rawH, rawM] = localStr.split(":").map(Number)
+  const currentMins = (rawH % 24) * 60 + (rawM ?? 0)
+
+  const fromMins = toMins(from)
+  const toMins2 = toMins(to)
+
+  if (fromMins <= toMins2) {
+    // Same-day window (e.g. 09:00–17:00)
+    return currentMins >= fromMins && currentMins < toMins2
+  } else {
+    // Cross-midnight window (e.g. 22:00–06:00)
+    return currentMins >= fromMins || currentMins < toMins2
+  }
+}
+
+/**
+ * Return the ms timestamp at which the quiet window closes (next `to` time).
+ */
+export function msUntilQuietEnd(nowMs: number, to: string, tz: string): number {
+  const [toH, toM] = to.split(":").map(Number)
+
+  const now = new Date(nowMs)
+  // Construct today's window-close in the target tz by manipulating UTC offset
+  // We do this by getting the current date parts in tz then building a Date.
+  const todayParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour12: false,
+  }).formatToParts(now)
+
+  const partMap: Record<string, string> = {}
+  for (const p of todayParts) {
+    partMap[p.type] = p.value
+  }
+
+  // Build ISO string in tz then convert to UTC via Date constructor
+  const isoDate = `${partMap.year}-${partMap.month}-${partMap.day}`
+  const candidateStr = `${isoDate}T${String(toH ?? 0).padStart(2, "0")}:${String(toM ?? 0).padStart(2, "0")}:00`
+
+  // Parse in tz via temporary offset
+  const tzDate = new Date(new Date(candidateStr).toLocaleString("en-US", { timeZone: "UTC" }))
+
+  // Adjust for tz offset: offset = local_utc_for_candidate - utc_at_candidate
+  const utcCandidate = Date.parse(candidateStr + "Z")
+  const localCandidate = Date.parse(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    })
+      .format(new Date(utcCandidate))
+      .replace(/(\d+)\/(\d+)\/(\d+), /, "$3-$1-$2T")
+      .replace(",", "")
+  )
+
+  void tzDate
+  void localCandidate
+
+  // Simpler, robust approach: compute the next "to" time wall-clock ms using
+  // a brute-force offset derivation. We know the desired local HH:MM in tz,
+  // so we step through candidate UTC timestamps until the local time matches.
+  // For typical timezones this converges in ≤ 1 iteration.
+  const MINUTE = 60_000
+  let candidate = Math.ceil(nowMs / MINUTE) * MINUTE // round up to next minute
+  for (let i = 0; i < 1440; i++) {
+    const localHHMM = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(new Date(candidate))
+    const [lh, lm] = localHHMM.split(":").map(Number)
+    if ((lh ?? 0) === (toH ?? 0) && (lm ?? 0) === (toM ?? 0)) {
+      return candidate - nowMs
+    }
+    candidate += MINUTE
+  }
+  // Fallback: 24h (should never happen)
+  return 24 * 60 * MINUTE
+}
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -168,6 +280,43 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
 
     const { conversationKey, request } = job
     const { idempotencyKey } = request.metadata
+
+    // ── Muted / quiet-hours check ─────────────────────────────────────────
+    const adapterRow = await getAdapterInstance(adapterId)
+    if (adapterRow) {
+      if (adapterRow.muted === true) {
+        // Muted: defer by 60 s, do NOT count as failure
+        await markFailed(job.id, "muted", "Adapter is globally muted", now + 60_000)
+        await appendAudit({
+          adapterId,
+          kind: "delivery.error",
+          at: now,
+          conversationKey,
+          idempotencyKey,
+          reason: "muted",
+          message: "Adapter is globally muted — delivery deferred",
+        })
+        return
+      }
+
+      if (adapterRow.quietHours) {
+        const { from, to, tz } = adapterRow.quietHours
+        if (isInQuietHours(now, from, to, tz)) {
+          const deferMs = msUntilQuietEnd(now, to, tz)
+          await markFailed(job.id, "quiet_hours", "Within quiet hours window", now + deferMs)
+          await appendAudit({
+            adapterId,
+            kind: "delivery.error",
+            at: now,
+            conversationKey,
+            idempotencyKey,
+            reason: "quiet_hours",
+            message: `Within quiet hours [${from}–${to} ${tz}] — deferred ${Math.round(deferMs / 60_000)} min`,
+          })
+          return
+        }
+      }
+    }
 
     // ── Idempotency short-circuit ─────────────────────────────────────────
     if (idempotencyCache.has(idempotencyKey)) {
