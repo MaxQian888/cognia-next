@@ -1,4 +1,5 @@
 pub mod discord;
+pub mod lark;
 pub mod slack;
 pub mod telegram;
 
