@@ -12,6 +12,7 @@ pub mod commands;
 pub mod http_client;
 pub mod keyring;
 pub mod server_lifecycle;
+pub mod sigverify;
 pub mod state;
 pub mod types;
 pub mod ws_client;
