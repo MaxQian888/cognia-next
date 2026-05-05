@@ -965,7 +965,8 @@
       "plugins": "插件",
       "remoteControl": "远程控制",
       "externalBridge": "外部桥接 (MCP)",
-      "providers": "提供商"
+      "providers": "提供商",
+      "connections": "平台连接"
     },
     "descriptions": {
       "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",
@@ -998,7 +999,8 @@
       "plugins": "浏览、安装、配置并治理插件。查看权限、定时任务、devtools 与契约审计。",
       "remoteControl": "桌面端本地 HTTP 入站监听器，搭配出站 webhook 的 HMAC 签名与自定义请求头。",
       "externalBridge": "把 Cognia 的 wiki / RAG / 运行时实体通过 MCP 暴露给外部 Agent（Claude Code、Cursor、Cline）。每个 scope 默认 OFF，需手动启用。",
-      "providers": "AI 提供商的 API 密钥、模型与连接设置。"
+      "providers": "AI 提供商的 API 密钥、模型与连接设置。",
+      "connections": "配置消息平台适配器（Telegram、Discord、Slack 等）并管理出站队列。"
     },
     "canvas": {
       "title": "画布",
@@ -6010,7 +6012,7 @@
     "testConnectionToOllama": "测试 Ollama 服务器连接",
     "serverStatus": "服务器状态",
     "serverConfiguration": "服务器配置",
-    "serverUrl": "服务器地址",
+    "serverUrl": "服务器 URL",
     "endpoint": "端点",
     "host": "主机",
     "port": "端口",
@@ -6101,7 +6103,6 @@
       "setupComplete": "设置完成！",
       "providerReady": "{provider} 已准备就绪"
     },
-    "serverUrl": "服务器 URL",
     "modelManager": {
       "title": "模型管理器",
       "installedCount": "已安装 {installed}/{total} 个模型",

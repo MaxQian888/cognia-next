@@ -33,6 +33,7 @@ import {
   WebhookIcon,
   NetworkIcon,
   TerminalSquareIcon,
+  LinkIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
@@ -61,6 +62,7 @@ export type SettingsSectionId =
   | "mcp"
   | "a2ui"
   | "plugins"
+  | "connections"
   | "data"
   | "scheduled-tasks"
   | "remote-control"
@@ -214,6 +216,14 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "plugins",
     group: "extensions",
     icon: BoxesIcon,
+  },
+  {
+    id: "connections",
+    labelKey: "connections",
+    descriptionKey: "connections",
+    group: "extensions",
+    icon: LinkIcon,
+    desktopOnly: true,
   },
 
   // === Interface ===
@@ -636,6 +646,29 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "插件",
     "扩展",
     "市场",
+  ],
+  connections: [
+    "connections",
+    "platform",
+    "connector",
+    "connectors",
+    "telegram",
+    "discord",
+    "slack",
+    "lark",
+    "onebot",
+    "messaging",
+    "adapter",
+    "adapters",
+    "bot",
+    "webhook",
+    "longpoll",
+    "outbound",
+    "audit",
+    "平台连接",
+    "消息平台",
+    "机器人",
+    "适配器",
   ],
   "remote-control": [
     "remote",

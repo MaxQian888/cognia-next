@@ -965,7 +965,8 @@
       "plugins": "Plugins",
       "remoteControl": "Remote Control",
       "externalBridge": "External Bridge (MCP)",
-      "providers": "Providers"
+      "providers": "Providers",
+      "connections": "Connections"
     },
     "descriptions": {
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
@@ -998,7 +999,8 @@
       "plugins": "Browse, install, configure, and govern plugins. Review permissions, scheduled jobs, devtools, and contract audits.",
       "remoteControl": "Local HTTP listener for inbound triggers, plus webhook signing and custom headers for outbound calls.",
       "externalBridge": "MCP server that exposes Cognia's wiki, RAG, and runtime entities to external coding agents (Claude Code, Cursor, Cline). Opt-in per scope.",
-      "providers": "AI provider API keys, models, and connection settings."
+      "providers": "AI provider API keys, models, and connection settings.",
+      "connections": "Configure messaging platform adapters (Telegram, Discord, Slack, ...) and manage the outbound delivery queue."
     },
     "canvas": {
       "title": "Canvas",

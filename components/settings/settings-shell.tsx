@@ -145,6 +145,10 @@ const CcswitchSection = dynamic(
   () => import("./ccswitch/ccswitch-section").then((m) => m.CcswitchSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
+const ConnectionsSection = dynamic(
+  () => import("./connections/connections-section").then((m) => m.ConnectionsSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 
 interface Props {
   /** Renders an actions menu (e.g., Reset/Export/Import) in the header. */
@@ -283,6 +287,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <A2UISection />
     case "plugins":
       return <PluginsSection onClose={onClose} />
+    case "connections":
+      return <ConnectionsSection />
     case "data":
       return <DataSection />
     case "scheduled-tasks":
