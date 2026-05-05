@@ -37,6 +37,15 @@ const config: Config = {
     // `process.env.NODE_ENV === "production" ? ... : ...` ternaries that
     // evaluate to a constant in the test runtime.
     "!lib/logger/types.ts",
+    // Pure type/interface modules — TS strips them at runtime, so V8 always
+    // reports 0%. Same exemption pattern as the four entries above.
+    "!lib/storage/persistence/types.ts",
+    "!lib/wiki/types.ts",
+    "!hooks/a2ui/app-builder/types.ts",
+    "!lib/ccswitch/types.ts",
+    "!lib/data-hooks/types.ts",
+    "!lib/db/a2ui-types.ts",
+    "!lib/db/plugin-types.ts",
     // The ACP / OpenCode external-agent protocol adapters are 1.5k–2.5k LOC
     // of stdio + JSON-RPC + Tauri-IPC plumbing that only runs against a real
     // subprocess. jsdom can stub the surface but can't drive the live
