@@ -16,6 +16,7 @@ import { SchedulerInitializer } from "@/components/scheduler"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provider"
 import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provider"
+import { ConnectorBusProvider } from "@/components/connectors/connector-bus-provider"
 import { BackgroundApplier } from "@/lib/appearance"
 import { CustomThemeApplier } from "@/lib/appearance/custom-theme-applier"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
@@ -68,9 +69,11 @@ export default function RootLayout({
                             {/* style tag in sync with the appearance store. */}
                             <BackgroundApplier />
                             <CustomThemeApplier />
-                            <div data-bg-target="global" className="contents">
-                              {children}
-                            </div>
+                            <ConnectorBusProvider>
+                              <div data-bg-target="global" className="contents">
+                                {children}
+                              </div>
+                            </ConnectorBusProvider>
                           </DataAdapterProvider>
                         </A2UIDispatchProvider>
                       </CanvasBridgeProvider>
