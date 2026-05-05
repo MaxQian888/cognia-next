@@ -29,4 +29,9 @@ describe("PlatformKind", () => {
     }
     expect(isPlatformKind("nope")).toBe(false)
   })
+
+  it("returns false for non-string inputs", () => {
+    expect(isPlatformKind(123)).toBe(false)
+    expect(isPlatformKind(null)).toBe(false)
+  })
 })

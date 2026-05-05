@@ -24,5 +24,8 @@ export const ALL_PLATFORM_KINDS = [
 export type PlatformKind = (typeof ALL_PLATFORM_KINDS)[number]
 
 export function isPlatformKind(value: unknown): value is PlatformKind {
-  return typeof value === "string" && (ALL_PLATFORM_KINDS as readonly string[]).includes(value)
+  return (
+    typeof value === "string" &&
+    (ALL_PLATFORM_KINDS as readonly PlatformKind[]).includes(value as PlatformKind)
+  )
 }
