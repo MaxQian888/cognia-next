@@ -291,11 +291,11 @@ const config: Config = {
     "/out/",
     "/src-tauri/",
     "/sidecar/",
-    // Stale duplicates inside `.claude/worktrees/<branch>/` are self-contained
-    // copies of the repo for in-flight feature branches. Running them from the
-    // main tree picks up out-of-date renderer code paired with current schemas
-    // and produces a flood of false negatives.
-    "/.claude/worktrees/",
+    // NOTE: the master jest.config.ts also ignores `/.claude/worktrees/` so
+    // tests in worktrees aren't double-run from the main tree. That guard is
+    // intentionally removed *here* — when running inside this worktree, our
+    // own absolute path contains `/.claude/worktrees/` and the ignore would
+    // otherwise mask 100% of our tests. Each worktree owns this exemption.
   ],
 
   // The regexp pattern or array of patterns that Jest uses to detect test files
