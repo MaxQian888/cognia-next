@@ -200,9 +200,7 @@ describe("createSlackAdapter", () => {
     mockListen.mockImplementation(session.listenImpl)
 
     // First invoke: apps.connections.open returns a WSS URL
-    let invokeCallCount = 0
     mockInvoke.mockImplementation(async (cmd: string) => {
-      invokeCallCount++
       if (cmd === "connectors_ws_open") return "ws-handle-x"
       if (cmd === "connectors_ws_send") return undefined
       if (cmd === "connectors_ws_close") return undefined

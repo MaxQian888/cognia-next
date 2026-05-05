@@ -347,7 +347,7 @@ describe("Slack adapter contract suite", () => {
           adapterId: "sl-contract",
           channelId: "C01",
         },
-        segments: [{ type: "card", payload: { type: "section", text: "card payload" } }],
+        segments: [{ type: "card", card: { kind: "block_kit", payload: { type: "section" } } }],
         metadata: { idempotencyKey: "k11" },
       }
       await adapter.send(req)

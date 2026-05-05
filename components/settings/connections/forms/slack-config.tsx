@@ -29,6 +29,7 @@ import {
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { connectorsHttpRequest, connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
 import { isTauri } from "@/lib/tauri"
+import { openUrl } from "@/lib/native/opener"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
 import { buildSlackOAuthUrl } from "@/lib/connectors/adapters/slack/oauth"
@@ -145,16 +146,9 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
       redirectUri: "cognia://connector/oauth/slack",
       state,
     })
-    if (desktop) {
-      // Use Tauri shell open for the desktop runtime
-      import("@tauri-apps/plugin-shell")
-        .then(({ open }) => open(url))
-        .catch(() => {
-          window.open(url, "_blank")
-        })
-    } else {
-      window.open(url, "_blank")
-    }
+    // openUrl routes through @tauri-apps/plugin-opener on desktop,
+    // and falls back to window.open on web.
+    void openUrl(url)
   }
 
   const handleSave = async () => {
