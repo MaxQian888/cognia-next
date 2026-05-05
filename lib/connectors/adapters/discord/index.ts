@@ -50,7 +50,7 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
   let lastActivityAt: number | undefined = undefined
   let stopCalled = false
   let selfId = opts.selfId
-  let gatewayClient: GatewayClient | null = null
+  let _gatewayClient: GatewayClient | null = null
 
   async function doRequest(
     method: "GET" | "POST" | "PATCH" | "DELETE",
@@ -85,7 +85,7 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
       botToken: opts.botToken,
       signal,
     })
-    gatewayClient = client
+    _gatewayClient = client
 
     // Drive the gateway in the background
     ;(async () => {
@@ -119,7 +119,7 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
     stopCalled = true
     abortController?.abort()
     abortController = null
-    gatewayClient = null
+    _gatewayClient = null
     healthState = "down"
   }
 

@@ -23,7 +23,7 @@ jest.mock("./adapters/discord", () => ({
   createDiscordAdapter: jest.fn().mockReturnValue({ platform: "discord", id: "dc-mock" }),
 }))
 
-import { buildAdapterFromRow, buildTelegramAdapter, buildDiscordAdapter } from "./adapter-registry"
+import { buildAdapterFromRow, buildDiscordAdapter } from "./adapter-registry"
 import { createTelegramAdapter } from "./adapters/telegram"
 import { createDiscordAdapter } from "./adapters/discord"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
