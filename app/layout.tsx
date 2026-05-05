@@ -17,6 +17,7 @@ import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler
 import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provider"
 import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provider"
 import { ConnectorBusProvider } from "@/components/connectors/connector-bus-provider"
+import { ConnectorDeepLinkRouter } from "@/components/connectors/connector-deep-link-router"
 import { BackgroundApplier } from "@/lib/appearance"
 import { CustomThemeApplier } from "@/lib/appearance/custom-theme-applier"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
@@ -70,9 +71,11 @@ export default function RootLayout({
                             <BackgroundApplier />
                             <CustomThemeApplier />
                             <ConnectorBusProvider>
-                              <div data-bg-target="global" className="contents">
-                                {children}
-                              </div>
+                              <ConnectorDeepLinkRouter>
+                                <div data-bg-target="global" className="contents">
+                                  {children}
+                                </div>
+                              </ConnectorDeepLinkRouter>
                             </ConnectorBusProvider>
                           </DataAdapterProvider>
                         </A2UIDispatchProvider>
