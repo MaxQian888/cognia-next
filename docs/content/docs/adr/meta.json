@@ -6,6 +6,9 @@
     "0003-employee-digital-twin",
     "0004-vector-native-backend",
     "0005-remote-control",
-    "0006-plugin-system"
+    "0006-plugin-system",
+    "0007-theme-and-background-fix",
+    "0008-external-bridge",
+    "0009-platform-connectors"
   ]
 }
