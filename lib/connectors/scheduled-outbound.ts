@@ -75,7 +75,7 @@ async function handleOutboundSend(
   task: ScheduledTask,
   execution: TaskExecution
 ): Promise<{ success: boolean; output?: Record<string, unknown>; error?: string }> {
-  const payload = execution.triggerData ?? task.config?.parameters
+  const payload = execution.input ?? task.payload
   if (!isOutboundSendPayload(payload)) {
     return { success: false, error: "Invalid connection:outbound:send payload" }
   }
@@ -119,7 +119,7 @@ async function handleScheduledDigest(
   task: ScheduledTask,
   execution: TaskExecution
 ): Promise<{ success: boolean; output?: Record<string, unknown>; error?: string }> {
-  const payload = execution.triggerData ?? task.config?.parameters
+  const payload = execution.input ?? task.payload
   if (!isScheduledDigestPayload(payload)) {
     return { success: false, error: "Invalid connection:scheduled:digest payload" }
   }

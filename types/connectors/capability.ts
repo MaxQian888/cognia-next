@@ -13,6 +13,7 @@ export const ALL_CAPABILITIES = [
   "send.poll",
   "send.location",
   "send.reply",
+  "send.emoji",
   "send.mention",
   "send.thread",
   "send.reaction",

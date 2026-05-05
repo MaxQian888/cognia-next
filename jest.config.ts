@@ -291,6 +291,7 @@ const config: Config = {
     "/out/",
     "/src-tauri/",
     "/sidecar/",
+    "/tests/e2e/", // Playwright E2E tests — run via `pnpx playwright test`, not Jest
     // NOTE: the master jest.config.ts also ignores `/.claude/worktrees/` so
     // tests in worktrees aren't double-run from the main tree. That guard is
     // intentionally removed *here* — when running inside this worktree, our

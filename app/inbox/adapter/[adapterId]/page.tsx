@@ -1,20 +1,25 @@
-"use client"
-
 /**
  * /inbox/adapter/[adapterId] — per-adapter conversation list.
  *
- * Renders InboxShell with view="by-adapter" and the adapterId scope.
+ * Server component entry for `output: "export"`. The UI lives in
+ * page-client.tsx so this file can export generateStaticParams without
+ * being a "use client" module.
  */
 
-import { use } from "react"
-import { InboxShell } from "@/components/inbox/inbox-shell"
+import { AdapterInboxPageClient } from "./page-client"
+
+// Required for `output: "export"` static generation; actual data is loaded
+// client-side from Dexie so the static shell is always an empty array.
+export function generateStaticParams(): Array<{ adapterId: string }> {
+  return [{ adapterId: "_" }]
+}
+
+export const dynamicParams = false
 
 interface PageProps {
   params: Promise<{ adapterId: string }>
 }
 
 export default function AdapterInboxPage({ params }: PageProps) {
-  const { adapterId } = use(params)
-
-  return <InboxShell view="by-adapter" adapterId={adapterId} data-testid="adapter-inbox-shell" />
+  return <AdapterInboxPageClient params={params} />
 }

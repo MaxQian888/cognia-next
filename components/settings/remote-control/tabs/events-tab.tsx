@@ -18,6 +18,8 @@ const EVENT_TYPES: SchedulerEventType[] = [
   "backup:completed",
   "workflow:completed",
   "agent:completed",
+  "connection:outbound:send",
+  "connection:scheduled:digest",
   "custom",
 ]
 
@@ -32,6 +34,8 @@ const EVENT_KEY_MAP: Record<SchedulerEventType, string> = {
   "backup:completed": "backupCompleted",
   "workflow:completed": "workflowCompleted",
   "agent:completed": "agentCompleted",
+  "connection:outbound:send": "connectionOutboundSend",
+  "connection:scheduled:digest": "connectionScheduledDigest",
   custom: "custom",
 }
 

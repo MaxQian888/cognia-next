@@ -36,12 +36,12 @@ jest.mock("@/lib/logger", () => {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-function makeTask(params?: Record<string, unknown>) {
-  return { id: "t1", config: { parameters: params ?? {} } }
+function makeTask(payload?: Record<string, unknown>) {
+  return { id: "t1", payload }
 }
 
-function makeExecution(triggerData?: Record<string, unknown>) {
-  return { id: "e1", triggerData }
+function makeExecution(input?: Record<string, unknown>) {
+  return { id: "e1", input }
 }
 
 async function callExecutor(type: string, task: unknown, execution: unknown) {
@@ -68,7 +68,7 @@ describe("installScheduledOutboundHandlers", () => {
 describe("connection:outbound:send executor", () => {
   beforeEach(() => installScheduledOutboundHandlers())
 
-  it("enqueues an outbound job from triggerData", async () => {
+  it("enqueues an outbound job from execution.input", async () => {
     const conversationKey = "tg:adp_tg:chat_1_" + Math.random()
     const idempotencyKey = "idem_001_" + Math.random()
     const payload = {
@@ -95,7 +95,7 @@ describe("connection:outbound:send executor", () => {
     expect(jobs[0].idempotencyKey).toBe(idempotencyKey)
   })
 
-  it("falls back to task.config.parameters when triggerData is absent", async () => {
+  it("falls back to task.payload when execution.input is absent", async () => {
     const conversationKey = "tg:adp_tg:chat_2_" + Math.random()
     const payload = {
       adapterId: "adp_tg",
