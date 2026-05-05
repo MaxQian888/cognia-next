@@ -150,6 +150,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
+    "@types/cheerio": "^1.0.0",
     "@types/culori": "^4.0.1",
     "@types/d3": "^7.4.3",
     "@types/jest": "^30.0.0",
