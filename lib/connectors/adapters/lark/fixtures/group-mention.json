@@ -1,0 +1,38 @@
+{
+  "schema": "2.0",
+  "header": {
+    "event_id": "evt_grp_001",
+    "event_type": "im.message.receive_v1",
+    "create_time": "1714900001000",
+    "token": "verify_token_xxx",
+    "app_id": "cli_app_001"
+  },
+  "event": {
+    "sender": {
+      "sender_id": {
+        "open_id": "ou_user_002",
+        "user_id": "uid_002"
+      },
+      "sender_type": "user",
+      "tenant_key": "tenant_abc"
+    },
+    "message": {
+      "message_id": "om_grp_001",
+      "chat_id": "oc_group_chat_001",
+      "chat_type": "group",
+      "message_type": "text",
+      "content": "{\"text\":\"Hey @_user_1 can you help?\"}",
+      "mentions": [
+        {
+          "key": "@_user_1",
+          "id": {
+            "open_id": "ou_bot_self_001"
+          },
+          "name": "TestBot"
+        }
+      ],
+      "create_time": "1714900001000",
+      "thread_id": null
+    }
+  }
+}
