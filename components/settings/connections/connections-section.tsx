@@ -13,9 +13,11 @@
 // Outbound / Audit.
 
 import { useRouter, useSearchParams } from "next/navigation"
-import { LinkIcon } from "lucide-react"
+import { LinkIcon, MonitorIcon } from "lucide-react"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { isTauri } from "@/lib/tauri"
 import { OverviewTab } from "./tabs/overview-tab"
 import { AdaptersTab } from "./tabs/adapters-tab"
 import { OutboundTab } from "./tabs/outbound-tab"
@@ -59,6 +61,8 @@ export function ConnectionsSection() {
     router.replace(`?${next.toString()}`, { scroll: false })
   }
 
+  const desktop = isTauri()
+
   return (
     <div className="space-y-6">
       <div className="space-y-1">
@@ -71,6 +75,16 @@ export function ConnectionsSection() {
           outbound delivery queue.
         </p>
       </div>
+
+      {!desktop && (
+        <Alert role="status" aria-label="Web mode banner">
+          <MonitorIcon className="size-4" />
+          <AlertDescription>
+            Adapters require the desktop app — open cognia-next on your desktop to configure
+            connectors. Already-configured conversations sync read-only here.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <Tabs value={activeTab} onValueChange={onTabChange}>
         <TabsList>

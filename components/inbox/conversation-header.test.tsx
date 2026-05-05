@@ -16,7 +16,7 @@ jest.mock("next/navigation", () => ({
 }))
 
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
-jest.mock("@/lib/tauri", () => ({ isTauri: () => false }))
+jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => false) }))
 jest.mock("@/lib/db/conversation-overrides", () => ({
   upsertByConversationKey: jest.fn().mockResolvedValue({}),
 }))
@@ -47,6 +47,7 @@ jest.mock("@/components/ui/tooltip", () => ({
 // ---------------------------------------------------------------------------
 
 import { ConversationHeader } from "./conversation-header"
+import { isTauri } from "@/lib/tauri"
 import type { TriggerPolicy } from "@/types/connectors/policy"
 
 const EMPTY_POLICY: TriggerPolicy = {
@@ -54,6 +55,10 @@ const EMPTY_POLICY: TriggerPolicy = {
   blockers: [],
   storeUnmatchedInDraftMode: false,
 }
+
+beforeEach(() => {
+  ;(isTauri as jest.Mock).mockReturnValue(false)
+})
 
 describe("ConversationHeader", () => {
   it("renders the conversation title", () => {
@@ -97,5 +102,41 @@ describe("ConversationHeader", () => {
       />
     )
     expect(screen.getByTestId("policy-info-trigger")).toBeInTheDocument()
+  })
+
+  it("wraps mode switcher with disabled span in web mode (isTauri=false)", () => {
+    ;(isTauri as jest.Mock).mockReturnValue(false)
+    render(
+      <ConversationHeader
+        conversationKey="ck4"
+        sessionId="s4"
+        title="Web test"
+        platform="telegram"
+        currentMode="auto"
+        policy={EMPTY_POLICY}
+      />
+    )
+    // In web mode the mode switcher is wrapped in a pointer-events-none disabled span
+    const disabled = screen.getByTestId("mode-switcher-disabled")
+    expect(disabled).toBeInTheDocument()
+    expect(disabled).toHaveAttribute("aria-disabled", "true")
+    expect(disabled).toHaveClass("pointer-events-none")
+  })
+
+  it("renders mode switcher directly in desktop mode (isTauri=true)", () => {
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    render(
+      <ConversationHeader
+        conversationKey="ck5"
+        sessionId="s5"
+        title="Desktop test"
+        platform="discord"
+        currentMode="manual"
+        policy={EMPTY_POLICY}
+      />
+    )
+    // In desktop mode there is no disabled wrapper
+    expect(screen.queryByTestId("mode-switcher-disabled")).not.toBeInTheDocument()
+    expect(screen.getByTestId("mode-switcher-trigger")).toBeInTheDocument()
   })
 })

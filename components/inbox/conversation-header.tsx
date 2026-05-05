@@ -11,6 +11,8 @@
 import { ModeSwitcher } from "./mode-switcher"
 import { PolicyInfo } from "./policy-info"
 import { PlatformBadge } from "./platform-badge"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { isTauri } from "@/lib/tauri"
 import type { ConnectorMode, TriggerPolicy } from "@/types/connectors/policy"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 
@@ -33,6 +35,8 @@ export function ConversationHeader({
   policy,
   onModeChange,
 }: ConversationHeaderProps) {
+  const desktop = isTauri()
+
   return (
     <header
       className="flex h-12 shrink-0 items-center gap-3 border-b px-4"
@@ -44,13 +48,32 @@ export function ConversationHeader({
         <h2 className="text-sm font-semibold truncate">{title}</h2>
       </div>
 
-      {/* Middle: mode switcher */}
-      <ModeSwitcher
-        conversationKey={conversationKey}
-        sessionId={sessionId}
-        currentMode={currentMode}
-        onModeChange={onModeChange}
-      />
+      {/* Middle: mode switcher — disabled in web mode */}
+      {desktop ? (
+        <ModeSwitcher
+          conversationKey={conversationKey}
+          sessionId={sessionId}
+          currentMode={currentMode}
+          onModeChange={onModeChange}
+        />
+      ) : (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              data-testid="mode-switcher-disabled"
+              aria-disabled="true"
+              className="pointer-events-none opacity-50"
+            >
+              <ModeSwitcher
+                conversationKey={conversationKey}
+                sessionId={sessionId}
+                currentMode={currentMode}
+              />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>Mode switching requires the desktop app</TooltipContent>
+        </Tooltip>
+      )}
 
       {/* Right: policy info */}
       <PolicyInfo policy={policy} />

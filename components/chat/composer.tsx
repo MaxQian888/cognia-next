@@ -674,10 +674,12 @@ function ComposerInner(props: InnerProps) {
                   aria-label={isStreaming ? t("ariaStop") : t("ariaSend")}
                   className="size-9 rounded-full"
                   disabled={
-                    !isStreaming &&
-                    (props.disabled ||
-                      (controller.textInput.value.trim().length === 0 &&
-                        attachments.files.length === 0))
+                    // In web mode, platform-bound sessions cannot send outbound messages.
+                    (!isTauri() && !!props.session?.platformBinding) ||
+                    (!isStreaming &&
+                      (props.disabled ||
+                        (controller.textInput.value.trim().length === 0 &&
+                          attachments.files.length === 0)))
                   }
                   onClick={() => (isStreaming ? void props.onStop() : void submit())}
                   size="icon"
