@@ -199,6 +199,13 @@ export interface StyleSample {
   tone: string[]
   addedAt: number
   addedBy: "distill" | "manual"
+  /**
+   * Cosine-space embedding of `summary`. Populated by `appendStyleSamples`
+   * when an `embeddingFn` is provided (distill path) or by the runtime via
+   * lazy backfill. Optional for back-compat with profiles distilled before
+   * Phase A2.
+   */
+  embedding?: number[]
 }
 
 export interface PlaybookStep {

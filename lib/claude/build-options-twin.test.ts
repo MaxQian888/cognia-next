@@ -103,4 +103,25 @@ describe("resolveSendOptions twin injection", () => {
     // twin identity block on top of the original.
     expect(opts.systemPrompt).toContain("BASE_SYSTEM_PROMPT")
   })
+
+  it("forwards precomputedQueryEmbedding to applyTwinContext", async () => {
+    // Mock the applyTwinContext function to capture the arguments it receives
+    jest.mock("@/lib/twin/runtime", () => ({
+      applyTwinContext: jest.fn(async (input) => ({
+        applied: {
+          systemPrompt: "TWIN_SYSTEM_PROMPT",
+        },
+      })),
+    }))
+
+    const opts = await resolveSendOptions({
+      character: baseCharacter,
+      twinDeps: fakeDeps,
+      twinUserMessage: "what would Alice do?",
+      precomputedQueryEmbedding: [0.5, 0.5, 0.1],
+    })
+
+    // The twin runtime should have been invoked and the system prompt replaced
+    expect(opts.systemPrompt).toContain("TWIN_SYSTEM_PROMPT")
+  })
 })

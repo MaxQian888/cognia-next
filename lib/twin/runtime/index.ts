@@ -2,6 +2,9 @@
  * Public surface of the twin runtime subsystem.
  */
 
+export type { TwinDepsForBuild } from "./build-deps"
+export { tryBuildTwinDeps } from "./build-deps"
+
 export type {
   ApplyTwinContextDeps,
   ApplyTwinContextInput,
