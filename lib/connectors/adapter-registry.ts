@@ -1,8 +1,8 @@
 /**
- * Adapter factory registry — Task 41 + Task 68 + Task 80.
+ * Adapter factory registry — Task 41 + Task 68 + Task 80 + Task 93.
  *
  * Switch on AdapterInstanceRow.type to instantiate the correct PlatformAdapter.
- * Phase 1 ships Telegram, Discord, and Slack.
+ * Phase 1 ships Telegram, Discord, Slack, and Lark.
  */
 
 import type { PlatformAdapter } from "@/types/connectors"
@@ -12,6 +12,8 @@ import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { createTelegramAdapter } from "./adapters/telegram"
 import { createDiscordAdapter } from "./adapters/discord"
 import { createSlackAdapter } from "./adapters/slack"
+import { createLarkAdapter } from "./adapters/lark"
+import { getTenantAccessToken } from "./adapters/lark/auth"
 
 /**
  * Build and return a PlatformAdapter for the given row.
@@ -28,6 +30,8 @@ export async function buildAdapterFromRow(
       return buildDiscordAdapter(row)
     case "slack":
       return buildSlackAdapter(row)
+    case "lark":
+      return buildLarkAdapter(row)
     default:
       // Unsupported platform in Phase 1 — skip silently.
       console.warn(`[adapter-registry] unsupported adapter type: ${row.type} (id=${row.id})`)
@@ -149,6 +153,61 @@ export async function buildSlackAdapter(row: AdapterInstanceRow): Promise<Platfo
     appToken: () => connectorsKeyringGet(row.id, "appToken").then((t) => t ?? ""),
     signingSecret: () => connectorsKeyringGet(row.id, "signingSecret").then((t) => t ?? ""),
     selfId,
+    transport,
+  })
+}
+
+/**
+ * Instantiate a Lark PlatformAdapter from a persisted AdapterInstanceRow.
+ *
+ * Reads App ID + App Secret from the keyring, obtains a tenant_access_token to
+ * call /open-apis/bot/v3/info, and resolves the bot's own open_id (selfBotOpenId).
+ * If the API call fails the adapter still starts — mention detection falls back to
+ * checking the app_id in event headers.
+ *
+ * TODO Phase 2: cache selfBotOpenId in the row settings so startup is faster on
+ * subsequent launches.
+ */
+export async function buildLarkAdapter(row: AdapterInstanceRow): Promise<PlatformAdapter> {
+  const settings = (row.settings ?? {}) as { transport?: "long-connection" | "webhook" }
+  const transport: "long-connection" | "webhook" =
+    settings.transport === "webhook" ? "webhook" : "long-connection"
+
+  const appIdRaw = await connectorsKeyringGet(row.id, "appId")
+  const appId = appIdRaw ?? ""
+  const appSecretRaw = await connectorsKeyringGet(row.id, "appSecret")
+  const appSecret = appSecretRaw ?? ""
+
+  // Resolve the bot's own open_id to enable accurate self-mention detection.
+  let selfBotOpenId = ""
+  try {
+    const tat = await getTenantAccessToken({ appId, appSecret })
+    const resp = await connectorsHttpRequest({
+      url: "https://open.feishu.cn/open-apis/bot/v3/info",
+      method: "GET",
+      headers: { Authorization: `Bearer ${tat}` },
+    })
+    const parsed = JSON.parse(resp.body) as {
+      code?: number
+      data?: { open_id?: string }
+    }
+    if (parsed.code === 0 && parsed.data?.open_id) {
+      selfBotOpenId = parsed.data.open_id
+    }
+  } catch {
+    // Non-fatal: selfBotOpenId will be empty; adapter still starts but mention
+    // detection may miss cases where the bot is addressed without an explicit @.
+    console.warn(`[adapter-registry] bot/v3/info failed for Lark adapter ${row.id}`)
+  }
+
+  return createLarkAdapter({
+    id: row.id,
+    displayName: row.displayName,
+    appId: () => connectorsKeyringGet(row.id, "appId").then((v) => v ?? ""),
+    appSecret: () => connectorsKeyringGet(row.id, "appSecret").then((v) => v ?? ""),
+    encryptKey: () => connectorsKeyringGet(row.id, "encryptKey").then((v) => v ?? ""),
+    verificationToken: () => connectorsKeyringGet(row.id, "verificationToken").then((v) => v ?? ""),
+    selfBotOpenId,
     transport,
   })
 }

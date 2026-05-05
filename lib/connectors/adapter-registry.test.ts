@@ -1,5 +1,5 @@
 /**
- * Adapter registry round-trip tests — Task 68 + Task 80.
+ * Adapter registry round-trip tests — Task 68 + Task 80 + Task 93.
  *
  * Verifies that buildAdapterFromRow correctly routes to each platform's builder
  * and that unsupported types return null.
@@ -27,16 +27,27 @@ jest.mock("./adapters/slack", () => ({
   createSlackAdapter: jest.fn().mockReturnValue({ platform: "slack", id: "sl-mock" }),
 }))
 
-import { buildAdapterFromRow, buildDiscordAdapter, buildSlackAdapter } from "./adapter-registry"
+jest.mock("./adapters/lark", () => ({
+  createLarkAdapter: jest.fn().mockReturnValue({ platform: "lark", id: "lk-mock" }),
+}))
+
+import {
+  buildAdapterFromRow,
+  buildDiscordAdapter,
+  buildSlackAdapter,
+  buildLarkAdapter,
+} from "./adapter-registry"
 import { createTelegramAdapter } from "./adapters/telegram"
 import { createDiscordAdapter } from "./adapters/discord"
 import { createSlackAdapter } from "./adapters/slack"
+import { createLarkAdapter } from "./adapters/lark"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
 
 const mockCreateTelegramAdapter = createTelegramAdapter as jest.Mock
 const mockCreateDiscordAdapter = createDiscordAdapter as jest.Mock
 const mockCreateSlackAdapter = createSlackAdapter as jest.Mock
+const mockCreateLarkAdapter = createLarkAdapter as jest.Mock
 
 function makeRow(overrides: Partial<AdapterInstanceRow> = {}): AdapterInstanceRow {
   return {
@@ -83,11 +94,28 @@ function makeSlackAuthTestResp(userId: string) {
   }
 }
 
+function makeLarkBotInfoResp(openId: string) {
+  return {
+    status: 200,
+    headers: {},
+    body: JSON.stringify({ code: 0, data: { open_id: openId, app_name: "cognia-bot" } }),
+  }
+}
+
+function makeLarkTatResp() {
+  return {
+    status: 200,
+    headers: {},
+    body: JSON.stringify({ code: 0, tenant_access_token: "t-test-tat", expire: 7200 }),
+  }
+}
+
 beforeEach(() => {
   mockInvoke.mockReset()
   mockCreateTelegramAdapter.mockClear()
   mockCreateDiscordAdapter.mockClear()
   mockCreateSlackAdapter.mockClear()
+  mockCreateLarkAdapter.mockClear()
 })
 
 // ---------------------------------------------------------------------------
@@ -138,12 +166,28 @@ describe("buildAdapterFromRow", () => {
     expect(mockCreateTelegramAdapter).not.toHaveBeenCalled()
   })
 
+  it("routes 'lark' type to buildLarkAdapter and returns an adapter", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "connectors_keyring_get") return makeKeyringOkResp()
+      if (cmd === "connectors_http_request") return makeLarkBotInfoResp("ou_lark_bot_001")
+      return null
+    })
+
+    const row = makeRow({ id: "lk-1", type: "lark", transportMode: "gateway" })
+    const adapter = await buildAdapterFromRow(row)
+    expect(adapter).not.toBeNull()
+    expect(mockCreateLarkAdapter).toHaveBeenCalledTimes(1)
+    expect(mockCreateTelegramAdapter).not.toHaveBeenCalled()
+    expect(mockCreateDiscordAdapter).not.toHaveBeenCalled()
+    expect(mockCreateSlackAdapter).not.toHaveBeenCalled()
+  })
+
   it("returns null and warns for an unsupported type", async () => {
     const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
-    const row = makeRow({ type: "lark" as never })
+    const row = makeRow({ type: "unknown-platform" as never })
     const adapter = await buildAdapterFromRow(row)
     expect(adapter).toBeNull()
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("lark"))
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("unknown-platform"))
     warnSpy.mockRestore()
   })
 })
@@ -274,5 +318,115 @@ describe("buildSlackAdapter", () => {
 
     const callArgs = mockCreateSlackAdapter.mock.calls[0][0] as { transport: string }
     expect(callArgs.transport).toBe("events-api-webhook")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// buildLarkAdapter — selfBotOpenId resolution
+// ---------------------------------------------------------------------------
+
+describe("buildLarkAdapter", () => {
+  it("passes selfBotOpenId resolved from bot/v3/info into createLarkAdapter", async () => {
+    mockInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === "connectors_keyring_get") return "lark-cred-value"
+      if (cmd === "connectors_http_request") {
+        const url = (args as { req?: { url?: string } })?.req?.url ?? ""
+        if (url.includes("tenant_access_token")) return makeLarkTatResp()
+        return makeLarkBotInfoResp("ou_bot_open_001")
+      }
+      return null
+    })
+
+    const row = makeRow({
+      id: "lk-10",
+      type: "lark",
+      transportMode: "gateway",
+      settings: { transport: "long-connection" },
+      credentialsRef: {
+        keyringService: "com.cognia.platforms",
+        accounts: ["appId", "appSecret", "encryptKey", "verificationToken"],
+      },
+    })
+    await buildLarkAdapter(row)
+
+    const callArgs = mockCreateLarkAdapter.mock.calls[0][0] as {
+      id: string
+      selfBotOpenId: string
+      transport: string
+      appId: () => Promise<string>
+    }
+    expect(callArgs.id).toBe("lk-10")
+    expect(callArgs.selfBotOpenId).toBe("ou_bot_open_001")
+    expect(callArgs.transport).toBe("long-connection")
+    expect(typeof callArgs.appId).toBe("function")
+  })
+
+  it("falls back to empty selfBotOpenId when bot/v3/info throws", async () => {
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+    mockInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === "connectors_keyring_get") return "lark-cred"
+      if (cmd === "connectors_http_request") {
+        const url = (args as { req?: { url?: string } })?.req?.url ?? ""
+        if (url.includes("tenant_access_token")) return makeLarkTatResp()
+        throw new Error("network error")
+      }
+      return null
+    })
+
+    const row = makeRow({ id: "lk-11", type: "lark", transportMode: "gateway" })
+    await buildLarkAdapter(row)
+
+    const callArgs = mockCreateLarkAdapter.mock.calls[0][0] as { selfBotOpenId: string }
+    expect(callArgs.selfBotOpenId).toBe("")
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("lk-11"))
+    warnSpy.mockRestore()
+  })
+
+  it("uses webhook transport when settings.transport is webhook", async () => {
+    mockInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === "connectors_keyring_get") return "lark-cred"
+      if (cmd === "connectors_http_request") {
+        const url = (args as { req?: { url?: string } })?.req?.url ?? ""
+        if (url.includes("tenant_access_token")) return makeLarkTatResp()
+        return makeLarkBotInfoResp("ou_wh_bot")
+      }
+      return null
+    })
+
+    const row = makeRow({
+      id: "lk-12",
+      type: "lark",
+      transportMode: "webhook",
+      settings: { transport: "webhook" },
+    })
+    await buildLarkAdapter(row)
+
+    const callArgs = mockCreateLarkAdapter.mock.calls[0][0] as { transport: string }
+    expect(callArgs.transport).toBe("webhook")
+  })
+
+  it("credential factories resolve fresh values from keyring on each call", async () => {
+    let callCount = 0
+    mockInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === "connectors_keyring_get") {
+        callCount++
+        return `CRED-${callCount}`
+      }
+      if (cmd === "connectors_http_request") {
+        const url = (args as { req?: { url?: string } })?.req?.url ?? ""
+        if (url.includes("tenant_access_token")) return makeLarkTatResp()
+        return makeLarkBotInfoResp("ou_fresh")
+      }
+      return null
+    })
+
+    const row = makeRow({ id: "lk-13", type: "lark", transportMode: "gateway" })
+    await buildLarkAdapter(row)
+
+    const callArgs = mockCreateLarkAdapter.mock.calls[0][0] as {
+      appId: () => Promise<string>
+    }
+    const cred = await callArgs.appId()
+    expect(cred).toMatch(/^CRED-/)
   })
 })

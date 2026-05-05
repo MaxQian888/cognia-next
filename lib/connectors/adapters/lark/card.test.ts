@@ -118,7 +118,7 @@ describe("segmentToLarkBody", () => {
   })
 
   it("emoji segment → null (unsupported)", () => {
-    expect(segmentToLarkBody({ type: "emoji", shortcode: "thumbsup" })).toBeNull()
+    expect(segmentToLarkBody({ type: "emoji", code: "thumbsup" })).toBeNull()
   })
 })
 
