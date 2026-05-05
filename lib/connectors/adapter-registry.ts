@@ -1,8 +1,13 @@
 /**
- * Adapter factory registry — Task 41 + Task 68 + Task 80 + Task 93.
+ * Adapter factory registry — Task 41 + Task 68 + Task 80 + Task 93 + Task 107.
  *
  * Switch on AdapterInstanceRow.type to instantiate the correct PlatformAdapter.
- * Phase 1 ships Telegram, Discord, Slack, and Lark.
+ * Phase 1 ships Telegram, Discord, Slack, Lark, and OneBot.
+ *
+ * NOTE: OneBot does NOT use OAuth. It uses a reverse-WebSocket transport — the
+ * QQ client connects to cognia-next, not the other way around. No OAuth flow is
+ * needed; the only optional credential is the bearer token stored in the keyring
+ * under `<adapterId>:onebotBearer`.
  */
 
 import type { PlatformAdapter } from "@/types/connectors"
@@ -13,6 +18,7 @@ import { createTelegramAdapter } from "./adapters/telegram"
 import { createDiscordAdapter } from "./adapters/discord"
 import { createSlackAdapter } from "./adapters/slack"
 import { createLarkAdapter } from "./adapters/lark"
+import { createOneBotAdapter } from "./adapters/onebot"
 import { getTenantAccessToken } from "./adapters/lark/auth"
 
 /**
@@ -32,6 +38,8 @@ export async function buildAdapterFromRow(
       return buildSlackAdapter(row)
     case "lark":
       return buildLarkAdapter(row)
+    case "onebot":
+      return buildOneBotAdapter(row)
     default:
       // Unsupported platform in Phase 1 — skip silently.
       console.warn(`[adapter-registry] unsupported adapter type: ${row.type} (id=${row.id})`)
@@ -209,5 +217,31 @@ export async function buildLarkAdapter(row: AdapterInstanceRow): Promise<Platfor
     verificationToken: () => connectorsKeyringGet(row.id, "verificationToken").then((v) => v ?? ""),
     selfBotOpenId,
     transport,
+  })
+}
+
+/**
+ * Instantiate a OneBot PlatformAdapter from a persisted AdapterInstanceRow.
+ *
+ * OneBot uses reverse-WebSocket — the QQ client connects to cognia-next.
+ * No API call is needed at startup; transport starts when NapCat/Lagrange
+ * establishes the WS connection.
+ *
+ * NOTE: OneBot does not use OAuth. The only credential is the optional
+ * bearer token (`onebotBearer`) stored in the keyring.
+ */
+export async function buildOneBotAdapter(row: AdapterInstanceRow): Promise<PlatformAdapter> {
+  const settings = (row.settings ?? {}) as {
+    selfBotUin?: string
+    expectedClient?: "napcat" | "lagrange" | "llonebot"
+  }
+  const selfBotUin = settings.selfBotUin ?? ""
+
+  return createOneBotAdapter({
+    id: row.id,
+    displayName: row.displayName,
+    selfBotUin,
+    bearerToken: () => connectorsKeyringGet(row.id, "onebotBearer").then((t) => t ?? ""),
+    expectedClient: settings.expectedClient,
   })
 }

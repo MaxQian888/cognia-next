@@ -31,16 +31,22 @@ jest.mock("./adapters/lark", () => ({
   createLarkAdapter: jest.fn().mockReturnValue({ platform: "lark", id: "lk-mock" }),
 }))
 
+jest.mock("./adapters/onebot", () => ({
+  createOneBotAdapter: jest.fn().mockReturnValue({ platform: "onebot", id: "ob-mock" }),
+}))
+
 import {
   buildAdapterFromRow,
   buildDiscordAdapter,
   buildSlackAdapter,
   buildLarkAdapter,
+  buildOneBotAdapter,
 } from "./adapter-registry"
 import { createTelegramAdapter } from "./adapters/telegram"
 import { createDiscordAdapter } from "./adapters/discord"
 import { createSlackAdapter } from "./adapters/slack"
 import { createLarkAdapter } from "./adapters/lark"
+import { createOneBotAdapter } from "./adapters/onebot"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
 
@@ -48,6 +54,7 @@ const mockCreateTelegramAdapter = createTelegramAdapter as jest.Mock
 const mockCreateDiscordAdapter = createDiscordAdapter as jest.Mock
 const mockCreateSlackAdapter = createSlackAdapter as jest.Mock
 const mockCreateLarkAdapter = createLarkAdapter as jest.Mock
+const mockCreateOneBotAdapter = createOneBotAdapter as jest.Mock
 
 function makeRow(overrides: Partial<AdapterInstanceRow> = {}): AdapterInstanceRow {
   return {
@@ -116,6 +123,7 @@ beforeEach(() => {
   mockCreateDiscordAdapter.mockClear()
   mockCreateSlackAdapter.mockClear()
   mockCreateLarkAdapter.mockClear()
+  mockCreateOneBotAdapter.mockClear()
 })
 
 // ---------------------------------------------------------------------------
@@ -180,6 +188,24 @@ describe("buildAdapterFromRow", () => {
     expect(mockCreateTelegramAdapter).not.toHaveBeenCalled()
     expect(mockCreateDiscordAdapter).not.toHaveBeenCalled()
     expect(mockCreateSlackAdapter).not.toHaveBeenCalled()
+  })
+
+  it("routes 'onebot' type to buildOneBotAdapter and returns an adapter", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "connectors_keyring_get") return null // no bearer configured
+      return null
+    })
+
+    const row = makeRow({
+      id: "ob-1",
+      type: "onebot",
+      transportMode: "reverse-ws",
+      settings: { selfBotUin: "123456789" },
+    })
+    const adapter = await buildAdapterFromRow(row)
+    expect(adapter).not.toBeNull()
+    expect(mockCreateOneBotAdapter).toHaveBeenCalledTimes(1)
+    expect(mockCreateTelegramAdapter).not.toHaveBeenCalled()
   })
 
   it("returns null and warns for an unsupported type", async () => {
@@ -428,5 +454,65 @@ describe("buildLarkAdapter", () => {
     }
     const cred = await callArgs.appId()
     expect(cred).toMatch(/^CRED-/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// buildOneBotAdapter — no API call required
+// ---------------------------------------------------------------------------
+
+describe("buildOneBotAdapter", () => {
+  it("passes selfBotUin from settings into createOneBotAdapter", async () => {
+    mockInvoke.mockResolvedValue(null)
+
+    const row = makeRow({
+      id: "ob-10",
+      type: "onebot",
+      transportMode: "reverse-ws",
+      settings: { selfBotUin: "987654321", expectedClient: "napcat" },
+    })
+    await buildOneBotAdapter(row)
+
+    const callArgs = mockCreateOneBotAdapter.mock.calls[0][0] as {
+      id: string
+      selfBotUin: string
+      expectedClient: string
+      bearerToken: () => Promise<string>
+    }
+    expect(callArgs.id).toBe("ob-10")
+    expect(callArgs.selfBotUin).toBe("987654321")
+    expect(callArgs.expectedClient).toBe("napcat")
+    expect(typeof callArgs.bearerToken).toBe("function")
+  })
+
+  it("bearerToken factory resolves from keyring on each call", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "connectors_keyring_get") return "secret-bearer"
+      return null
+    })
+
+    const row = makeRow({
+      id: "ob-11",
+      type: "onebot",
+      transportMode: "reverse-ws",
+      settings: { selfBotUin: "111" },
+    })
+    await buildOneBotAdapter(row)
+
+    const callArgs = mockCreateOneBotAdapter.mock.calls[0][0] as {
+      bearerToken: () => Promise<string>
+    }
+    const token = await callArgs.bearerToken()
+    expect(token).toBe("secret-bearer")
+  })
+
+  it("selfBotUin falls back to empty string when settings is missing", async () => {
+    mockInvoke.mockResolvedValue(null)
+
+    const row = makeRow({ id: "ob-12", type: "onebot", transportMode: "reverse-ws", settings: {} })
+    await buildOneBotAdapter(row)
+
+    const callArgs = mockCreateOneBotAdapter.mock.calls[0][0] as { selfBotUin: string }
+    expect(callArgs.selfBotUin).toBe("")
   })
 })
