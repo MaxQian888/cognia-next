@@ -1,0 +1,36 @@
+{
+  "t": "MESSAGE_CREATE",
+  "s": 4,
+  "op": 0,
+  "d": {
+    "id": "4434567890123456789",
+    "type": 0,
+    "content": "Check out this image!",
+    "channel_id": "9876543210987654321",
+    "author": {
+      "id": "444444444444444444",
+      "username": "dianauser",
+      "discriminator": "0",
+      "global_name": "Diana",
+      "bot": false
+    },
+    "timestamp": "2024-05-05T12:03:00.000000+00:00",
+    "attachments": [
+      {
+        "id": "5556789012345678901",
+        "filename": "photo.png",
+        "url": "https://cdn.discordapp.com/attachments/9876543210987654321/5556789012345678901/photo.png",
+        "proxy_url": "https://media.discordapp.net/attachments/9876543210987654321/5556789012345678901/photo.png",
+        "size": 12345,
+        "content_type": "image/png",
+        "width": 800,
+        "height": 600
+      }
+    ],
+    "mentions": [],
+    "mention_roles": [],
+    "pinned": false,
+    "mention_everyone": false,
+    "tts": false
+  }
+}
