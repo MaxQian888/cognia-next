@@ -1,8 +1,8 @@
 /**
- * Adapter factory registry — Task 41 + Task 68.
+ * Adapter factory registry — Task 41 + Task 68 + Task 80.
  *
  * Switch on AdapterInstanceRow.type to instantiate the correct PlatformAdapter.
- * Phase 1 ships Telegram and Discord; subsequent phases extend the switch.
+ * Phase 1 ships Telegram, Discord, and Slack.
  */
 
 import type { PlatformAdapter } from "@/types/connectors"
@@ -11,6 +11,7 @@ import { connectorsKeyringGet } from "@/lib/connectors/tauri/commands"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { createTelegramAdapter } from "./adapters/telegram"
 import { createDiscordAdapter } from "./adapters/discord"
+import { createSlackAdapter } from "./adapters/slack"
 
 /**
  * Build and return a PlatformAdapter for the given row.
@@ -25,6 +26,8 @@ export async function buildAdapterFromRow(
       return buildTelegramAdapter(row)
     case "discord":
       return buildDiscordAdapter(row)
+    case "slack":
+      return buildSlackAdapter(row)
     default:
       // Unsupported platform in Phase 1 — skip silently.
       console.warn(`[adapter-registry] unsupported adapter type: ${row.type} (id=${row.id})`)
@@ -101,5 +104,51 @@ export async function buildDiscordAdapter(row: AdapterInstanceRow): Promise<Plat
     displayName: row.displayName,
     botToken: () => connectorsKeyringGet(row.id, "botToken").then((t) => t ?? ""),
     selfId,
+  })
+}
+
+/**
+ * Instantiate a Slack PlatformAdapter from a persisted AdapterInstanceRow.
+ *
+ * Reads the bot token from the keyring and calls auth.test to fetch the
+ * bot's own user id (selfId), then delegates to createSlackAdapter.
+ */
+export async function buildSlackAdapter(row: AdapterInstanceRow): Promise<PlatformAdapter> {
+  const tokenRaw = await connectorsKeyringGet(row.id, "botToken")
+  const token = tokenRaw ?? ""
+
+  const settings = (row.settings ?? {}) as { transport?: "socket-mode" | "events-api-webhook" }
+  const transport: "socket-mode" | "events-api-webhook" =
+    settings.transport === "events-api-webhook" ? "events-api-webhook" : "socket-mode"
+
+  let selfId = ""
+  try {
+    const resp = await connectorsHttpRequest({
+      url: "https://slack.com/api/auth.test",
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: "",
+    })
+    const parsed = JSON.parse(resp.body) as { ok: boolean; user_id?: string }
+    if (parsed.ok && parsed.user_id) {
+      selfId = parsed.user_id
+    }
+  } catch {
+    // Non-fatal: selfId will be empty string; adapter still starts but may
+    // not correctly detect self-mentions.
+    console.warn(`[adapter-registry] auth.test failed for Slack adapter ${row.id}`)
+  }
+
+  return createSlackAdapter({
+    id: row.id,
+    displayName: row.displayName,
+    botToken: () => connectorsKeyringGet(row.id, "botToken").then((t) => t ?? ""),
+    appToken: () => connectorsKeyringGet(row.id, "appToken").then((t) => t ?? ""),
+    signingSecret: () => connectorsKeyringGet(row.id, "signingSecret").then((t) => t ?? ""),
+    selfId,
+    transport,
   })
 }
