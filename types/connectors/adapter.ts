@@ -2,7 +2,6 @@ import type { PlatformKind } from "./platform-kind"
 import type { Capability } from "./capability"
 import type { NormalizedInboundEvent } from "./event"
 import type { OutboundRequest, OutboundResult } from "./outbound"
-import type { MessageSegment } from "./segment"
 
 export type TransportMode = "longpoll" | "webhook" | "reverse-ws" | "gateway" | "imap-smtp" | "stub" // tests only
 
