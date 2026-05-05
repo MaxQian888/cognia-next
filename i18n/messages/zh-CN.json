@@ -3031,6 +3031,9 @@
         "loading": "加载中…",
         "disabled": "已停用",
         "enabled": "已启用"
+      },
+      "runtimeWarnings": {
+        "python-runtime-unavailable": "Python 运行时不可用——仅桌面端"
       }
     },
     "delete": {
@@ -3136,7 +3139,30 @@
       "installing": "安装中…",
       "uninstall": "卸载",
       "uninstalling": "卸载中…",
-      "dangerous": "危险"
+      "dangerous": "危险",
+      "addToCompareAria": "将 {name} 加入对比",
+      "removeFromCompareAria": "将 {name} 从对比中移除"
+    },
+    "comparison": {
+      "title": "对比插件",
+      "count": "{count, plural, =0 {未加入对比} =1 {{count} 个插件} other {# 个插件}}",
+      "triggerLabel": "对比（{count}）",
+      "empty": "对比队列为空。",
+      "removeAria": "将 {name} 从对比中移除",
+      "clearAll": "清空",
+      "close": "关闭",
+      "author": "作者",
+      "rating": "评分",
+      "downloads": "下载量",
+      "signed": "已签名",
+      "yes": "是",
+      "no": "否",
+      "capabilities": "能力",
+      "permissions": "权限",
+      "permissionsCount": "{count, plural, =0 {无} =1 {{count} 项权限} other {# 项权限}}",
+      "dangerousCount": "{count, plural, other {# 项危险}}",
+      "install": "安装",
+      "installed": "已安装"
     },
     "marketplaceDetail": {
       "author": "作者",
@@ -3163,6 +3189,12 @@
         "featured": "精选",
         "popular": "热门",
         "recent": "最近上架"
+      },
+      "modeBanner": {
+        "degradedTitle": "插件市场不可达",
+        "degradedHint": "正在显示上次同步的本地缓存，安装与更新操作在网络恢复前不可用。",
+        "demoTitle": "演示市场",
+        "demoHint": "你正在浏览示例目录，在此模式下安装为模拟，不会真正运行插件代码。"
       }
     },
     "batchActions": {

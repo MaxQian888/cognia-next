@@ -37,7 +37,7 @@ export function PluginCategorySheet({ className }: Props) {
       </SheetTrigger>
       <SheetContent
         side="left"
-        className="w-72 p-4 overflow-y-auto"
+        className="w-full max-w-72 p-4 overflow-y-auto"
         onClick={(e) => {
           // Close the sheet when a sidebar button is clicked so the user
           // sees the filter applied to the panel underneath. Buttons are

@@ -77,6 +77,7 @@ import { PluginMarketplace } from "@/components/plugins/plugin-marketplace"
 import { PluginScheduledJobs } from "@/components/plugins/plugin-scheduled-jobs"
 import { PluginDevtoolsPanel } from "@/components/plugins/plugin-devtools-panel"
 import { PluginPointDiagnosticsPanel } from "@/components/plugins/plugin-point-diagnostics-panel"
+import { ScrollShadowRow } from "@/components/plugins/scroll-shadow-row"
 
 const PLUGINS_TAB_PARAM = "pluginsTab"
 
@@ -135,7 +136,7 @@ export function PluginsSection({ onClose }: Props) {
       </div>
 
       <Tabs value={activeTab} onValueChange={onTabChange}>
-        <div className="overflow-x-auto -mx-1 px-1">
+        <ScrollShadowRow scrollerClassName="-mx-1 px-1" testId="plugins-section-tabs">
           <TabsList className="inline-flex h-9 w-max whitespace-nowrap">
             <TabsTrigger value="overview" className="gap-1.5">
               <BoxesIcon className="size-3.5" />
@@ -170,7 +171,7 @@ export function PluginsSection({ onClose }: Props) {
               {t("subTabs.settings")}
             </TabsTrigger>
           </TabsList>
-        </div>
+        </ScrollShadowRow>
 
         <TabsContent value="overview" className="mt-4">
           <OverviewTab onClose={onClose} />
@@ -274,36 +275,42 @@ function InstalledTab({ onClose }: { onClose?: () => void }) {
 
   return (
     <Card>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{t("colName")}</TableHead>
-            <TableHead>{t("colVersion")}</TableHead>
-            <TableHead>{t("colSource")}</TableHead>
-            <TableHead>{t("colStatus")}</TableHead>
-            <TableHead className="text-right">{t("colCapabilities")}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {plugins.map((p) => (
-            <TableRow key={p.id}>
-              <TableCell className="font-medium">{p.name}</TableCell>
-              <TableCell className="text-muted-foreground">{p.version}</TableCell>
-              <TableCell>
-                <Badge variant="outline" className="text-xs">
-                  {p.source}
-                </Badge>
-              </TableCell>
-              <TableCell>
-                <PluginStatusBadge status={p.status} enabled={p.enabled} />
-              </TableCell>
-              <TableCell className="text-right text-xs text-muted-foreground">
-                {p.capabilities.length}
-              </TableCell>
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("colName")}</TableHead>
+              <TableHead className="hidden md:table-cell">{t("colVersion")}</TableHead>
+              <TableHead>{t("colSource")}</TableHead>
+              <TableHead>{t("colStatus")}</TableHead>
+              <TableHead className="hidden md:table-cell text-right">
+                {t("colCapabilities")}
+              </TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {plugins.map((p) => (
+              <TableRow key={p.id}>
+                <TableCell className="font-medium">{p.name}</TableCell>
+                <TableCell className="hidden md:table-cell text-muted-foreground">
+                  {p.version}
+                </TableCell>
+                <TableCell>
+                  <Badge variant="outline" className="text-xs">
+                    {p.source}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <PluginStatusBadge status={p.status} enabled={p.enabled} />
+                </TableCell>
+                <TableCell className="hidden md:table-cell text-right text-xs text-muted-foreground">
+                  {p.capabilities.length}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
       <div className="border-t p-3 flex justify-end">
         <Button asChild size="sm" variant="ghost" onClick={() => onClose?.()}>
           <Link href="/plugins">

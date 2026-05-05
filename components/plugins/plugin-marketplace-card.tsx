@@ -5,12 +5,14 @@
 // concerns: signature badge, danger-permission warning, capability count.
 
 import { useTranslations } from "next-intl"
-import { DownloadIcon, StarIcon, AlertTriangleIcon } from "lucide-react"
+import { DownloadIcon, StarIcon, AlertTriangleIcon, GitCompareIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { PluginSignatureBadge, type SignatureState } from "./plugin-signature-badge"
 import type { PluginMarketplaceEntry } from "@/hooks/plugins/use-plugin-marketplace"
+import { usePluginMarketplaceStore } from "@/stores/plugin/plugin-marketplace-store"
+import { cn } from "@/lib/utils"
 
 interface Props {
   entry: PluginMarketplaceEntry & {
@@ -36,6 +38,11 @@ export function PluginMarketplaceCard({
   onUninstall,
 }: Props) {
   const t = useTranslations("plugins.marketplaceCard")
+  const comparisonIds = usePluginMarketplaceStore((s) => s.comparisonIds)
+  const addToComparison = usePluginMarketplaceStore((s) => s.addToComparison)
+  const removeFromComparison = usePluginMarketplaceStore((s) => s.removeFromComparison)
+  const inComparison = comparisonIds.includes(entry.id)
+  const comparisonFull = !inComparison && comparisonIds.length >= 2
   const dangerous =
     (entry.permissions ?? []).filter(
       (p) =>
@@ -83,7 +90,7 @@ export function PluginMarketplaceCard({
       </div>
 
       <div className="flex items-center justify-between gap-2 mt-auto pt-2">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
           {typeof entry.rating === "number" && entry.rating > 0 && (
             <span className="flex items-center gap-0.5">
               <StarIcon className="size-3 fill-current" />
@@ -98,25 +105,45 @@ export function PluginMarketplaceCard({
           )}
           {entry.author && <span className="truncate">{entry.author}</span>}
         </div>
-        {installed ? (
+        <div className="flex items-center gap-1 shrink-0">
           <Button
-            size="sm"
+            size="icon"
             variant="ghost"
-            onClick={() => onUninstall(entry.id)}
-            disabled={installing}
+            className={cn("size-7", inComparison && "text-primary")}
+            onClick={() =>
+              inComparison ? removeFromComparison(entry.id) : addToComparison(entry.id)
+            }
+            disabled={comparisonFull}
+            aria-label={
+              inComparison
+                ? t("removeFromCompareAria", { name: entry.name })
+                : t("addToCompareAria", { name: entry.name })
+            }
+            aria-pressed={inComparison}
+            data-testid={`plugin-marketplace-compare-toggle-${entry.id}`}
           >
-            {installing ? t("uninstalling") : t("uninstall")}
+            <GitCompareIcon className="size-3.5" />
           </Button>
-        ) : (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => onInstall(entry.id, entry.version)}
-            disabled={installing}
-          >
-            {installing ? t("installing") : t("install")}
-          </Button>
-        )}
+          {installed ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => onUninstall(entry.id)}
+              disabled={installing}
+            >
+              {installing ? t("uninstalling") : t("uninstall")}
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onInstall(entry.id, entry.version)}
+              disabled={installing}
+            >
+              {installing ? t("installing") : t("install")}
+            </Button>
+          )}
+        </div>
       </div>
     </Card>
   )

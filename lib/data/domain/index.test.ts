@@ -38,6 +38,7 @@ describe("DOMAIN_TRANSFERS", () => {
         "canvas",
         "characters",
         "mcpServers",
+        "plugins",
         "promptPresets",
         "settingsTheme",
         "skills",
@@ -357,6 +358,77 @@ describe("settingsTheme — projection", () => {
     expect(file.payload.settings?.theme).toBe("dark")
     expect(file.payload.settings?.fontScale).toBe("lg")
     expect(file.payload.settings?.apiKey).toBeUndefined()
+  })
+})
+
+describe("buildDomainExport — plugins", () => {
+  it("excludes builtin plugins and orphan permission/job/analytics rows", async () => {
+    const db = getDb()
+    await db.plugins.bulkPut([
+      {
+        id: "plg-builtin",
+        name: "Built-in",
+        version: "1.0.0",
+        status: "loaded",
+        source: "builtin",
+        type: "frontend",
+        enabled: true,
+        capabilities: [],
+        path: "builtin://x",
+        manifest: { id: "plg-builtin" },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "plg-user",
+        name: "User",
+        version: "1.0.0",
+        status: "loaded",
+        source: "local",
+        type: "frontend",
+        enabled: true,
+        capabilities: ["tools"],
+        path: "/local/x",
+        manifest: { id: "plg-user" },
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ])
+    await db.pluginPermissions.bulkPut([
+      { pluginId: "plg-user", permission: "clipboard:read", decision: "allow", grantedAt: 1 },
+      { pluginId: "plg-builtin", permission: "shell:execute", decision: "allow", grantedAt: 1 },
+    ])
+    await db.pluginAnalytics.bulkPut([
+      { pluginId: "plg-user", key: "tool", count: 1, lastEventAt: 1 },
+      { pluginId: "plg-builtin", key: "tool", count: 1, lastEventAt: 1 },
+    ])
+    await db.pluginScheduledJobs.bulkPut([
+      {
+        id: "j-user",
+        pluginId: "plg-user",
+        cron: "0 * * * *",
+        handler: "tick",
+        status: "active",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "j-builtin",
+        pluginId: "plg-builtin",
+        cron: "0 * * * *",
+        handler: "tick",
+        status: "active",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+
+    const file = await buildDomainExport("plugins")
+    expect(file.payload.plugins).toHaveLength(1)
+    expect((file.payload.plugins?.[0] as { id: string }).id).toBe("plg-user")
+    expect(file.payload.pluginPermissions).toHaveLength(1)
+    expect(file.payload.pluginAnalytics).toHaveLength(1)
+    expect(file.payload.pluginScheduledJobs).toHaveLength(1)
   })
 })
 

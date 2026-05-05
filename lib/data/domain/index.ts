@@ -11,6 +11,12 @@ import type {
   SystemPromptPreset,
   Team,
 } from "@/lib/claude/types"
+import type {
+  PluginAnalyticsRow,
+  PluginPermissionRow,
+  PluginRow,
+  PluginScheduledJobRow,
+} from "@/lib/db/plugin-types"
 import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 import { getDb } from "@/lib/db/schema"
 import { applyBackupPackage } from "@/lib/data/apply-package"
@@ -153,6 +159,26 @@ export const DOMAIN_TRANSFERS: DomainSpec[] = [
     const db = getDb()
     const teams = await db.teams.toArray()
     return { teams: teams.filter((t: Team) => !t.isBuiltIn) }
+  }),
+  makeSpec("plugins", "plugins", async () => {
+    const db = getDb()
+    const [plugins, pluginPermissions, pluginScheduledJobs, pluginAnalytics] = (await Promise.all([
+      db.plugins.toArray(),
+      db.pluginPermissions.toArray(),
+      db.pluginScheduledJobs.toArray(),
+      db.pluginAnalytics.toArray(),
+    ])) as [PluginRow[], PluginPermissionRow[], PluginScheduledJobRow[], PluginAnalyticsRow[]]
+    // Don't carry built-in plugins (re-seeded locally) or marketplace
+    // review caches (remote-derived). Keep permissions/jobs/analytics only
+    // for user-installed plugins so the export stays self-contained.
+    const userPlugins = plugins.filter((p) => p.source !== "builtin")
+    const userIds = new Set(userPlugins.map((p) => p.id))
+    return {
+      plugins: userPlugins,
+      pluginPermissions: pluginPermissions.filter((r) => userIds.has(r.pluginId)),
+      pluginScheduledJobs: pluginScheduledJobs.filter((r) => userIds.has(r.pluginId)),
+      pluginAnalytics: pluginAnalytics.filter((r) => userIds.has(r.pluginId)),
+    }
   }),
   makeSpec("canvas", "canvas", async () => {
     const db = getDb()

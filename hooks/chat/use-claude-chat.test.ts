@@ -65,6 +65,13 @@ jest.mock("@/lib/claude/build-options", () => ({
   resolveSendOptions: jest.fn(async () => ({ model: "sonnet", systemPrompt: "sys" })),
 }))
 
+const dispatchUserPromptSubmitMock = jest.fn(async () => ({ action: "proceed" as const }))
+const dispatchChatErrorMock = jest.fn()
+jest.mock("@/lib/claude/adapter-hooks", () => ({
+  dispatchUserPromptSubmit: (...a: unknown[]) => dispatchUserPromptSubmitMock(...(a as [])),
+  dispatchChatError: (...a: unknown[]) => dispatchChatErrorMock(...(a as [])),
+}))
+
 interface ChatStateLike {
   activeSessionId: string | null
   messages: unknown[]
@@ -258,6 +265,72 @@ describe("useClaudeChat — actions", () => {
       await result.current.send("hi")
     })
     expect(chatState.setPendingCommandOverrides).toHaveBeenCalledWith(null)
+  })
+
+  it("send() consults the plugin onUserPromptSubmit hook before sending", async () => {
+    dispatchUserPromptSubmitMock.mockResolvedValueOnce({ action: "proceed" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    expect(dispatchUserPromptSubmitMock).toHaveBeenCalledWith("hello", "sess-1", expect.any(Object))
+    expect(sendPromptMock).toHaveBeenCalled()
+  })
+
+  it("send() bails when a plugin returns action:'block'", async () => {
+    dispatchUserPromptSubmitMock.mockResolvedValueOnce({
+      action: "block",
+      reason: "policy violation",
+    } as never)
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("nope")
+    })
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(chatState.setError).toHaveBeenCalledWith("policy violation")
+  })
+
+  it("send() rewrites the prompt when a plugin returns action:'modify'", async () => {
+    dispatchUserPromptSubmitMock.mockResolvedValueOnce({
+      action: "modify",
+      modifiedPrompt: "rewritten",
+    } as never)
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("original")
+    })
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "rewritten", expect.any(Object))
+  })
+
+  it("send() folds plugin additionalContext into appendSystemPrompt", async () => {
+    dispatchUserPromptSubmitMock.mockResolvedValueOnce({
+      action: "modify",
+      additionalContext: "extra system note",
+    } as never)
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      "sess-1",
+      "hello",
+      expect.objectContaining({ appendSystemPrompt: "extra system note" })
+    )
+  })
+
+  it("send() calls dispatchChatError when sendPrompt throws", async () => {
+    sendPromptMock.mockRejectedValueOnce(new Error("network down"))
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+    expect(chatState.setError).toHaveBeenCalledWith("network down")
+    expect(dispatchChatErrorMock).toHaveBeenCalledWith("sess-1", expect.any(Error))
   })
 
   it("stop() interrupts the active session", async () => {

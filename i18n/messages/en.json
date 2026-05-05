@@ -3031,6 +3031,9 @@
         "loading": "Loading…",
         "disabled": "Disabled",
         "enabled": "Enabled"
+      },
+      "runtimeWarnings": {
+        "python-runtime-unavailable": "Python runtime unavailable — desktop only"
       }
     },
     "delete": {
@@ -3136,7 +3139,30 @@
       "installing": "Installing…",
       "uninstall": "Uninstall",
       "uninstalling": "Uninstalling…",
-      "dangerous": "Dangerous"
+      "dangerous": "Dangerous",
+      "addToCompareAria": "Add {name} to comparison",
+      "removeFromCompareAria": "Remove {name} from comparison"
+    },
+    "comparison": {
+      "title": "Compare plugins",
+      "count": "{count, plural, =0 {nothing queued} =1 {1 plugin} other {# plugins}}",
+      "triggerLabel": "Compare ({count})",
+      "empty": "No plugins queued for comparison.",
+      "removeAria": "Remove {name} from comparison",
+      "clearAll": "Clear",
+      "close": "Close",
+      "author": "Author",
+      "rating": "Rating",
+      "downloads": "Downloads",
+      "signed": "Signed",
+      "yes": "Yes",
+      "no": "No",
+      "capabilities": "Capabilities",
+      "permissions": "Permissions",
+      "permissionsCount": "{count, plural, =0 {none} =1 {1 permission} other {# permissions}}",
+      "dangerousCount": "{count, plural, other {# dangerous}}",
+      "install": "Install",
+      "installed": "Installed"
     },
     "marketplaceDetail": {
       "author": "Author",
@@ -3163,6 +3189,12 @@
         "featured": "Featured",
         "popular": "Popular",
         "recent": "Recent"
+      },
+      "modeBanner": {
+        "degradedTitle": "Marketplace is unreachable",
+        "degradedHint": "Showing cached entries from your last successful sync. Install and update actions are disabled until the connection recovers.",
+        "demoTitle": "Demo marketplace",
+        "demoHint": "You're browsing a sample catalog. Installs in this mode are simulated and won't run real plugin code."
       }
     },
     "batchActions": {

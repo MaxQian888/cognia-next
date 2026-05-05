@@ -433,3 +433,151 @@ describe("applyBackupPackage — localStorage snapshot face", () => {
     expect(summary.localStorage?.restoredFromPreSnap).toContain("cognia-external-agents")
   })
 })
+
+describe("applyBackupPackage — plugins domain", () => {
+  function pluginRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "plg1",
+      name: "Sample plugin",
+      version: "1.0.0",
+      status: "loaded",
+      source: "local",
+      type: "frontend",
+      enabled: true,
+      capabilities: ["tools"],
+      path: "builtin://plg1",
+      manifest: { id: "plg1" },
+      createdAt: 1,
+      updatedAt: 1,
+      ...overrides,
+    }
+  }
+
+  it("imports new plugin rows but forces enabled=false", async () => {
+    const db = getDb()
+    const summary = await applyBackupPackage(
+      pkg({ plugins: [pluginRow({ id: "plg1", enabled: true })] }),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    const row = await db.plugins.get("plg1")
+    expect(row?.enabled).toBe(false)
+    expect(summary.added.plugins).toBe(1)
+  })
+
+  it("skips builtin plugins from the import payload", async () => {
+    const db = getDb()
+    const summary = await applyBackupPackage(
+      pkg({
+        plugins: [
+          pluginRow({ id: "plg-builtin", source: "builtin" }),
+          pluginRow({ id: "plg-user", source: "local" }),
+        ],
+      }),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    expect(await db.plugins.get("plg-builtin")).toBeUndefined()
+    expect(await db.plugins.get("plg-user")).toBeDefined()
+    expect(summary.builtInsSkipped.plugins).toBe(1)
+    expect(summary.added.plugins).toBe(1)
+  })
+
+  it("never overwrites a local builtin plugin even when merge=overwrite", async () => {
+    const db = getDb()
+    await db.plugins.put(pluginRow({ id: "plg-shared", source: "builtin" }))
+    const summary = await applyBackupPackage(
+      pkg({
+        plugins: [pluginRow({ id: "plg-shared", source: "local", name: "remote-overwrite" })],
+      }),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    const row = await db.plugins.get("plg-shared")
+    expect(row?.source).toBe("builtin")
+    expect(row?.name).not.toBe("remote-overwrite")
+    expect(summary.builtInsSkipped.plugins).toBe(1)
+  })
+
+  it("'duplicate' strategy assigns a fresh id and still forces enabled=false", async () => {
+    const db = getDb()
+    await db.plugins.put(pluginRow({ id: "plg-dup", name: "local", enabled: true }))
+    const summary = await applyBackupPackage(
+      pkg({ plugins: [pluginRow({ id: "plg-dup", name: "remote", enabled: true })] }),
+      { mergeStrategy: "duplicate", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    const all = await db.plugins.toArray()
+    expect(all.length).toBe(2)
+    const dup = all.find((r) => r.id !== "plg-dup")
+    expect(dup?.enabled).toBe(false)
+    expect(summary.added.plugins).toBe(1)
+  })
+
+  it("imports permissions / scheduled-jobs / analytics only for imported plugin ids", async () => {
+    const db = getDb()
+    const summary = await applyBackupPackage(
+      pkg({
+        plugins: [pluginRow({ id: "plg-with-data" })],
+        pluginPermissions: [
+          {
+            pluginId: "plg-with-data",
+            permission: "clipboard:read",
+            decision: "allow",
+            grantedAt: 1,
+          },
+          { pluginId: "plg-orphan", permission: "shell:execute", decision: "allow", grantedAt: 1 },
+        ],
+        pluginAnalytics: [
+          { pluginId: "plg-with-data", key: "tool.invoke", count: 5, lastEventAt: 1 },
+          { pluginId: "plg-orphan", key: "tool.invoke", count: 5, lastEventAt: 1 },
+        ],
+        pluginScheduledJobs: [
+          {
+            id: "j1",
+            pluginId: "plg-with-data",
+            cron: "0 * * * *",
+            handler: "tick",
+            status: "active",
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          {
+            id: "j2",
+            pluginId: "plg-orphan",
+            cron: "0 * * * *",
+            handler: "tick",
+            status: "active",
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+      }),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    expect(await db.pluginPermissions.toArray()).toHaveLength(1)
+    expect(await db.pluginAnalytics.toArray()).toHaveLength(1)
+    const jobs = await db.pluginScheduledJobs.toArray()
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0]?.pluginId).toBe("plg-with-data")
+    expect(summary.added.pluginPermissions).toBe(1)
+    expect(summary.added.pluginAnalytics).toBe(1)
+    expect(summary.added.pluginScheduledJobs).toBe(1)
+  })
+
+  it("skip strategy preserves local plugin rows", async () => {
+    const db = getDb()
+    await db.plugins.put(pluginRow({ id: "plg-skip", name: "local", enabled: true }))
+    const summary = await applyBackupPackage(
+      pkg({ plugins: [pluginRow({ id: "plg-skip", name: "remote" })] }),
+      { mergeStrategy: "skip", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    const row = await db.plugins.get("plg-skip")
+    expect(row?.name).toBe("local")
+    // local was enabled so leaving it alone keeps it enabled
+    expect(row?.enabled).toBe(true)
+    expect(summary.skipped.plugins).toBe(1)
+  })
+})

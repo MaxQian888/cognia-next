@@ -86,7 +86,7 @@ export function PluginConfigureTab() {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder={t("search")}
-        className="max-w-md"
+        className="w-full sm:max-w-md"
         aria-label={t("search")}
       />
 

@@ -19,6 +19,9 @@ import type { PluginMarketplaceEntry } from "@/hooks/plugins/use-plugin-marketpl
 import { PluginMarketplaceCard } from "./plugin-marketplace-card"
 import { PluginMarketplaceDetail } from "./plugin-marketplace-detail"
 import { PluginDiscovery } from "./plugin-discovery"
+import { ScrollShadowRow } from "./scroll-shadow-row"
+import { PluginMarketplaceModeBanner } from "./plugin-marketplace-mode-banner"
+import { PluginComparisonSheet, PluginComparisonTrigger } from "./plugin-comparison-sheet"
 
 type Section = "all" | "featured" | "popular" | "recent"
 
@@ -78,6 +81,7 @@ export function PluginMarketplace() {
 
   return (
     <div className="space-y-4">
+      <PluginMarketplaceModeBanner />
       {showDiscovery && <PluginDiscovery />}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Input
@@ -89,18 +93,25 @@ export function PluginMarketplace() {
           }}
           className="w-full sm:max-w-md"
         />
-        <div className="overflow-x-auto -mx-1 px-1 sm:overflow-visible sm:mx-0 sm:px-0">
-          <ToggleGroup
-            type="single"
-            value={section}
-            onValueChange={(v) => v && setSection(v as Section)}
-            className="w-max"
+        <div className="flex items-center gap-2 min-w-0">
+          <ScrollShadowRow
+            className="flex-1 min-w-0"
+            scrollerClassName="-mx-1 px-1 sm:overflow-visible sm:mx-0 sm:px-0"
+            testId="plugin-marketplace-sections"
           >
-            <ToggleGroupItem value="all">{t("sections.all")}</ToggleGroupItem>
-            <ToggleGroupItem value="featured">{t("sections.featured")}</ToggleGroupItem>
-            <ToggleGroupItem value="popular">{t("sections.popular")}</ToggleGroupItem>
-            <ToggleGroupItem value="recent">{t("sections.recent")}</ToggleGroupItem>
-          </ToggleGroup>
+            <ToggleGroup
+              type="single"
+              value={section}
+              onValueChange={(v) => v && setSection(v as Section)}
+              className="w-max"
+            >
+              <ToggleGroupItem value="all">{t("sections.all")}</ToggleGroupItem>
+              <ToggleGroupItem value="featured">{t("sections.featured")}</ToggleGroupItem>
+              <ToggleGroupItem value="popular">{t("sections.popular")}</ToggleGroupItem>
+              <ToggleGroupItem value="recent">{t("sections.recent")}</ToggleGroupItem>
+            </ToggleGroup>
+          </ScrollShadowRow>
+          <PluginComparisonTrigger />
         </div>
       </div>
 
@@ -130,6 +141,12 @@ export function PluginMarketplace() {
         onClose={() => setSelectedEntry(null)}
         onInstall={(id, version) => void market.install(id, version)}
         onUninstall={(id) => void market.uninstall(id)}
+      />
+
+      <PluginComparisonSheet
+        entries={[...allResults, ...market.featured, ...market.popular, ...market.recent]}
+        installedIds={installedIds}
+        onInstall={(id, version) => void market.install(id, version)}
       />
     </div>
   )

@@ -179,7 +179,7 @@ function PermissionSection({
       </div>
       <div className={cn("rounded-md border overflow-x-auto", danger && "border-destructive/30")}>
         <Table>
-          <TableHeader>
+          <TableHeader className={cn(danger && "bg-destructive/5")}>
             <TableRow>
               <TableHead>{t("col.permission")}</TableHead>
               <TableHead className="hidden sm:table-cell">{t("col.holders")}</TableHead>
@@ -188,9 +188,11 @@ function PermissionSection({
           </TableHeader>
           <TableBody>
             {entries.map((entry) => (
-              <TableRow key={entry.permission}>
+              <TableRow key={entry.permission} className={cn(danger && "hover:bg-destructive/5")}>
                 <TableCell className="font-mono text-xs">
-                  <span className={cn(danger && "text-destructive")}>{entry.permission}</span>
+                  <span className={cn(danger && "text-destructive font-semibold")}>
+                    {entry.permission}
+                  </span>
                 </TableCell>
                 <TableCell className="hidden sm:table-cell">
                   <Badge variant={danger ? "destructive" : "outline"}>{entry.holders.length}</Badge>

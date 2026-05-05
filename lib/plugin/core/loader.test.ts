@@ -149,12 +149,82 @@ describe("PluginLoader", () => {
       const definition = await loader.load(plugin)
 
       const mockContext = {
-        logger: { info: jest.fn() },
+        logger: { info: jest.fn(), warn: jest.fn() },
       }
 
       await definition.activate(mockContext as never)
 
-      expect(mockContext.logger.info).toHaveBeenCalledWith(expect.stringContaining("Python plugin"))
+      // The stub fallback warns (not infos) so Python plugins land in the
+      // degraded UI surface — the assertion was previously on .info.
+      expect(mockContext.logger.warn).toHaveBeenCalledWith(expect.stringContaining("Python plugin"))
+    })
+
+    it("stamps a python-runtime-unavailable warning on the row via persistPythonStubWarning", async () => {
+      jest.useRealTimers()
+      jest.resetModules()
+      const updatePlugin = jest.fn().mockResolvedValue(undefined)
+      const getPlugin = jest.fn().mockResolvedValue({
+        id: "python-warn",
+        manifest: { id: "python-warn" },
+      })
+      jest.doMock("@/lib/db/plugins", () => ({ getPlugin, updatePlugin }))
+
+      const { PluginLoader: FreshLoader } = await import("./loader")
+      const fresh = new FreshLoader() as unknown as {
+        persistPythonStubWarning: (id: string) => Promise<void>
+      }
+
+      await fresh.persistPythonStubWarning("python-warn")
+
+      expect(getPlugin).toHaveBeenCalledWith("python-warn")
+      expect(updatePlugin).toHaveBeenCalledWith(
+        "python-warn",
+        expect.objectContaining({
+          manifest: expect.objectContaining({
+            _cogniaWarnings: ["python-runtime-unavailable"],
+          }),
+        })
+      )
+      jest.useFakeTimers()
+    })
+
+    it("does not duplicate the warning when persistPythonStubWarning runs twice", async () => {
+      jest.useRealTimers()
+      jest.resetModules()
+      const updatePlugin = jest.fn().mockResolvedValue(undefined)
+      const getPlugin = jest.fn().mockResolvedValue({
+        id: "python-twice",
+        manifest: { id: "python-twice", _cogniaWarnings: ["python-runtime-unavailable"] },
+      })
+      jest.doMock("@/lib/db/plugins", () => ({ getPlugin, updatePlugin }))
+
+      const { PluginLoader: FreshLoader } = await import("./loader")
+      const fresh = new FreshLoader() as unknown as {
+        persistPythonStubWarning: (id: string) => Promise<void>
+      }
+
+      await fresh.persistPythonStubWarning("python-twice")
+
+      expect(updatePlugin).not.toHaveBeenCalled()
+      jest.useFakeTimers()
+    })
+
+    it("swallows db errors during warning persistence", async () => {
+      jest.useRealTimers()
+      jest.resetModules()
+      const getPlugin = jest.fn().mockRejectedValue(new Error("db down"))
+      const updatePlugin = jest.fn()
+      jest.doMock("@/lib/db/plugins", () => ({ getPlugin, updatePlugin }))
+
+      const { PluginLoader: FreshLoader } = await import("./loader")
+      const fresh = new FreshLoader() as unknown as {
+        persistPythonStubWarning: (id: string) => Promise<void>
+      }
+
+      // Should not throw.
+      await expect(fresh.persistPythonStubWarning("python-broken")).resolves.toBeUndefined()
+      expect(updatePlugin).not.toHaveBeenCalled()
+      jest.useFakeTimers()
     })
   })
 

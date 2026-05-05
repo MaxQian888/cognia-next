@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { PluginSignatureBadge, type SignatureState } from "./plugin-signature-badge"
+import { PluginRuntimeWarnings, PluginStatusPill } from "./plugin-status-badge"
 
 interface Props {
   plugin: PluginRow
@@ -181,8 +182,10 @@ export function PluginCard({
             </span>
           )}
         </div>
-        <StatusPill status={status} enabled={plugin.enabled} loading={isLoading} />
+        <PluginStatusPill status={status} enabled={plugin.enabled} loading={isLoading} />
       </div>
+
+      <PluginRuntimeWarnings plugin={plugin} />
 
       {errored && plugin.error && (
         <div className="flex items-start gap-1 text-xs text-destructive">
@@ -191,43 +194,5 @@ export function PluginCard({
         </div>
       )}
     </Card>
-  )
-}
-
-function StatusPill({
-  status,
-  enabled,
-  loading,
-}: {
-  status: string
-  enabled: boolean
-  loading: boolean
-}) {
-  const t = useTranslations("plugins.card.status")
-  if (status === "error") {
-    return (
-      <Badge variant="destructive" className="text-xs">
-        {t("error")}
-      </Badge>
-    )
-  }
-  if (loading) {
-    return (
-      <Badge variant="outline" className="text-xs">
-        {t("loading")}
-      </Badge>
-    )
-  }
-  if (!enabled) {
-    return (
-      <Badge variant="outline" className="text-xs">
-        {t("disabled")}
-      </Badge>
-    )
-  }
-  return (
-    <Badge variant="secondary" className="text-xs">
-      {t("enabled")}
-    </Badge>
   )
 }

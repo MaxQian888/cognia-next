@@ -171,9 +171,11 @@ interface PluginMarketplaceState {
 
   // Comparison state
   comparisonIds: string[]
+  comparisonOpen: boolean
   addToComparison: (id: string) => void
   removeFromComparison: (id: string) => void
   clearComparison: () => void
+  setComparisonOpen: (open: boolean) => void
 
   // Reset
   reset: () => void
@@ -593,6 +595,7 @@ export const usePluginMarketplaceStore = create<PluginMarketplaceState>()(
 
       // Comparison
       comparisonIds: [],
+      comparisonOpen: false,
       addToComparison: (id) =>
         set((state) => {
           if (state.comparisonIds.includes(id) || state.comparisonIds.length >= 2) return state
@@ -602,7 +605,8 @@ export const usePluginMarketplaceStore = create<PluginMarketplaceState>()(
         set((state) => ({
           comparisonIds: state.comparisonIds.filter((cid) => cid !== id),
         })),
-      clearComparison: () => set({ comparisonIds: [] }),
+      clearComparison: () => set({ comparisonIds: [], comparisonOpen: false }),
+      setComparisonOpen: (open) => set({ comparisonOpen: open }),
 
       // Reset
       reset: () =>
@@ -625,6 +629,7 @@ export const usePluginMarketplaceStore = create<PluginMarketplaceState>()(
             activeTab: "browse",
           },
           comparisonIds: [],
+          comparisonOpen: false,
         }),
     }),
     {

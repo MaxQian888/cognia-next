@@ -21,6 +21,12 @@ import type {
 import type { TrustedWorkspace } from "@/lib/db/trusted-workspaces"
 import type { SessionStateRow, TtsProviderKeyRow } from "@/lib/db/schema"
 import { getDb } from "@/lib/db/schema"
+import type {
+  PluginAnalyticsRow,
+  PluginPermissionRow,
+  PluginRow,
+  PluginScheduledJobRow,
+} from "@/lib/db/plugin-types"
 import {
   emptySummary,
   type BackupPackageV3,
@@ -109,6 +115,10 @@ export async function applyBackupPackage(
       db.a2uiApps,
       db.a2uiTemplates,
       db.a2uiEventHistory,
+      db.plugins,
+      db.pluginPermissions,
+      db.pluginAnalytics,
+      db.pluginScheduledJobs,
     ],
     async () => {
       // --- settings (singleton) -------------------------------------------
@@ -272,6 +282,86 @@ export async function applyBackupPackage(
         idPrefix: "a2evt",
         respectBuiltIn: false,
       })
+
+      // --- plugins (always applied; builtin protected; enabled forced false) ---
+      // Plugin rows carry the user's installed catalog. We import them under
+      // the same merge logic as characters/skills, with two extras:
+      //   • `source === "builtin"` plugins are skipped — they're seeded locally.
+      //   • Imported plugins are forced to `enabled: false` so a fresh restore
+      //     doesn't silently reactivate a plugin the user might have disabled
+      //     for security reasons before the export.
+      // Permissions/analytics/scheduled jobs follow the parent plugin via
+      // `bulkPut` keyed on their composite primary keys — overwrite is the
+      // only sensible strategy for derived per-plugin data.
+      if (env.plugins && env.plugins.length > 0) {
+        const incomingPlugins = env.plugins as PluginRow[]
+        const importedIds = new Set<string>()
+        for (const row of incomingPlugins) {
+          if (row.source === "builtin") {
+            incrementCounter(summary.builtInsSkipped, "plugins")
+            continue
+          }
+          const safeRow: PluginRow = { ...row, enabled: false }
+          const existing = await db.plugins.get(row.id)
+          if (existing && existing.source === "builtin") {
+            incrementCounter(summary.builtInsSkipped, "plugins")
+            continue
+          }
+          if (!existing) {
+            await db.plugins.put(safeRow)
+            incrementCounter(summary.added, "plugins")
+            importedIds.add(safeRow.id)
+            continue
+          }
+          switch (opts.mergeStrategy) {
+            case "skip":
+              incrementCounter(summary.skipped, "plugins")
+              break
+            case "overwrite":
+              await db.plugins.put(safeRow)
+              incrementCounter(summary.overwritten, "plugins")
+              importedIds.add(safeRow.id)
+              break
+            case "duplicate": {
+              const copy: PluginRow = { ...safeRow, id: newId("plugin") }
+              await db.plugins.put(copy)
+              incrementCounter(summary.added, "plugins")
+              importedIds.add(copy.id)
+              break
+            }
+          }
+        }
+
+        // Permissions / analytics / scheduled jobs follow the imported plugin
+        // rows. Skip rows whose owning plugin wasn't imported.
+        if (env.pluginPermissions && env.pluginPermissions.length > 0) {
+          const perms = (env.pluginPermissions as PluginPermissionRow[]).filter((r) =>
+            importedIds.has(r.pluginId)
+          )
+          if (perms.length > 0) {
+            await db.pluginPermissions.bulkPut(perms)
+            incrementCounterBy(summary.added, "pluginPermissions", perms.length)
+          }
+        }
+        if (env.pluginAnalytics && env.pluginAnalytics.length > 0) {
+          const rows = (env.pluginAnalytics as PluginAnalyticsRow[]).filter((r) =>
+            importedIds.has(r.pluginId)
+          )
+          if (rows.length > 0) {
+            await db.pluginAnalytics.bulkPut(rows)
+            incrementCounterBy(summary.added, "pluginAnalytics", rows.length)
+          }
+        }
+        if (env.pluginScheduledJobs && env.pluginScheduledJobs.length > 0) {
+          const rows = (env.pluginScheduledJobs as PluginScheduledJobRow[]).filter((r) =>
+            importedIds.has(r.pluginId)
+          )
+          if (rows.length > 0) {
+            await db.pluginScheduledJobs.bulkPut(rows)
+            incrementCounterBy(summary.added, "pluginScheduledJobs", rows.length)
+          }
+        }
+      }
 
       // --- sessions + messages + sessionState (off by default) -----------
       if (opts.includeSessions) {
@@ -446,4 +536,8 @@ async function applyKeyedCollection<T>(args: KeyedApplyArgs<T>): Promise<void> {
 
 function incrementCounter(target: Record<string, number>, key: string): void {
   target[key] = (target[key] ?? 0) + 1
+}
+
+function incrementCounterBy(target: Record<string, number>, key: string, amount: number): void {
+  target[key] = (target[key] ?? 0) + amount
 }

@@ -57,6 +57,7 @@ import {
 import { usePluginHotReload } from "@/lib/plugin/devtools/hot-reload.client"
 import { listPlugins } from "@/lib/db/plugins"
 import { isTauri } from "@/lib/tauri"
+import { ScrollShadowRow } from "./scroll-shadow-row"
 
 const DEVELOPER_MODE_KEY = "cognia.plugins.developerMode"
 
@@ -105,7 +106,7 @@ export function PluginDevtoolsPanel() {
 
   return (
     <Tabs defaultValue="logs" className="space-y-3">
-      <div className="overflow-x-auto -mx-1 px-1">
+      <ScrollShadowRow scrollerClassName="-mx-1 px-1" testId="plugin-devtools-tabs">
         <TabsList className="inline-flex h-9 w-max whitespace-nowrap">
           <TabsTrigger value="logs">{t("tabs.logs")}</TabsTrigger>
           <TabsTrigger value="bus">{t("tabs.bus")}</TabsTrigger>
@@ -114,7 +115,7 @@ export function PluginDevtoolsPanel() {
           <TabsTrigger value="hotReload">{t("tabs.hotReload")}</TabsTrigger>
           <TabsTrigger value="inspect">{t("tabs.inspect")}</TabsTrigger>
         </TabsList>
-      </div>
+      </ScrollShadowRow>
 
       <TabsContent value="logs" className="mt-0">
         <LogsPane />

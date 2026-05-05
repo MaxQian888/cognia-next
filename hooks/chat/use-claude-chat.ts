@@ -14,6 +14,10 @@ import { listMessages, persistMessages, truncateAfter } from "@/lib/db/messages"
 import { getSession, setSdkSessionId, touchSession, updateSession } from "@/lib/db/sessions"
 import { bumpUnread } from "@/lib/db/session-state"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import {
+  dispatchChatError as dispatchPluginChatError,
+  dispatchUserPromptSubmit as dispatchPluginUserPromptSubmit,
+} from "@/lib/claude/adapter-hooks"
 import type {
   ApprovalDecision,
   ChatSession,
@@ -147,25 +151,80 @@ export function useClaudeChat() {
         useChatStore.getState().setPendingCommandOverrides(null)
       }
 
+      // Plugin opt-in — fire `onUserPromptSubmit` before the network call.
+      // Block / modify / proceed semantics:
+      //   • "block" — surface the plugin's reason as the chat error and bail.
+      //   • "modify" — when the plugin returns `modifiedPrompt` and the
+      //     content is plain text, replace it; multimodal content is left
+      //     alone (mod APIs only describe text).
+      //   • "modify" with `additionalContext` — fold into the appendSystemPrompt
+      //     slot so the SDK passes it through as a system-prompt extension.
+      // Errors bubble up as `proceed` (adapter-hooks swallows internally).
+      let effectiveContent: SendContent = content
+      const promptText =
+        typeof content === "string"
+          ? content
+          : ((content.find((b) => b.type === "text") as { text?: string } | undefined)?.text ?? "")
+      const promptDecision = await dispatchPluginUserPromptSubmit(
+        promptText,
+        sessionId,
+        // Cast — the dispatcher's structural shape accepts any subset.
+        {} as never
+      )
+      if (promptDecision.action === "block") {
+        store.getState().setError(promptDecision.reason ?? "A plugin blocked this prompt.")
+        return
+      }
+      if (promptDecision.action === "modify") {
+        if (typeof promptDecision.modifiedPrompt === "string") {
+          if (typeof content === "string") {
+            effectiveContent = promptDecision.modifiedPrompt
+          } else {
+            // Replace the first text block with the modified prompt and keep
+            // the rest of the content (attachments, etc.) intact.
+            effectiveContent = content.map((block) => {
+              if (block.type === "text") {
+                return { ...block, text: promptDecision.modifiedPrompt as string } as typeof block
+              }
+              return block
+            })
+          }
+        }
+        const additionalContext = (promptDecision as { additionalContext?: string })
+          .additionalContext
+        if (typeof additionalContext === "string" && additionalContext.trim()) {
+          const existing = sendOptions.appendSystemPrompt?.trim() ?? ""
+          sendOptions = {
+            ...sendOptions,
+            appendSystemPrompt: existing
+              ? `${existing}\n\n${additionalContext}`
+              : additionalContext,
+          }
+        }
+      }
+
       // Optimistic user-message append.
-      const userMsg = makeUserMessage(content)
+      const userMsg = makeUserMessage(effectiveContent)
       const next = [...useChatStore.getState().messages, userMsg]
       store.getState().replaceMessages(next)
       store.getState().setStatus("streaming")
       store.getState().setError(null)
-      lastUserContentRef.current.set(sessionId, content)
+      lastUserContentRef.current.set(sessionId, effectiveContent)
 
       try {
         await persistMessages(sessionId, next)
         await touchSession(sessionId)
         // If the session has no title yet, derive one from the first prompt.
         if (session && (session.title === "New chat" || !session.title)) {
-          const preview = contentPreview(content, 40)
+          const preview = contentPreview(effectiveContent, 40)
           if (preview) await updateSession(sessionId, { title: preview })
         }
-        await sendPrompt(sessionId, content, sendOptions)
+        await sendPrompt(sessionId, effectiveContent, sendOptions)
       } catch (err) {
-        store.getState().setError(err instanceof Error ? err.message : String(err))
+        const error = err instanceof Error ? err : new Error(String(err))
+        store.getState().setError(error.message)
+        // Notify plugins; fire-and-forget — host already surfaced the error.
+        dispatchPluginChatError(sessionId, error)
       }
     },
     [store]
