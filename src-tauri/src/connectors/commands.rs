@@ -142,6 +142,15 @@ pub async fn connectors_http_request(req: TauriHttpRequest) -> Result<TauriHttpR
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
+pub async fn connectors_ws_open(
+    app: tauri::AppHandle,
+    url: String,
+    headers: Option<std::collections::HashMap<String, String>>,
+) -> Result<String, String> {
+    super::ws_client::open_ws(app, url, headers).await
+}
+
+#[tauri::command]
 pub async fn connectors_ws_send(handle_id: String, data: String) -> Result<(), String> {
     super::ws_client::ws_send(&handle_id, data).await
 }

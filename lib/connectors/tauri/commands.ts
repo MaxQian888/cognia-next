@@ -127,6 +127,17 @@ export async function connectorsHttpRequest(req: TauriHttpRequest): Promise<Taur
 // ---------------------------------------------------------------------------
 
 /**
+ * Open a WebSocket connection. Returns the stable handle id.
+ * Incoming messages arrive as Tauri events at `connectors://ws/<id>/message`.
+ */
+export async function connectorsWsOpen(
+  url: string,
+  headers?: Record<string, string>
+): Promise<string> {
+  return invoke<string>("connectors_ws_open", { url, headers })
+}
+
+/**
  * Send a text message on an open WebSocket identified by `handleId`.
  */
 export async function connectorsWsSend(handleId: string, data: string): Promise<void> {

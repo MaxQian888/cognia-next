@@ -316,6 +316,7 @@ pub fn run() {
             connectors::commands::connectors_keyring_delete,
             connectors::commands::connectors_keyring_list,
             connectors::commands::connectors_http_request,
+            connectors::commands::connectors_ws_open,
             connectors::commands::connectors_ws_send,
             connectors::commands::connectors_ws_close,
             connectors::commands::connectors_attachment_fetch,
