@@ -1,0 +1,26 @@
+{
+  "update_id": 100000002,
+  "message": {
+    "message_id": 1002,
+    "from": {
+      "id": 222222222,
+      "is_bot": false,
+      "first_name": "Bob",
+      "username": "bobuser"
+    },
+    "chat": {
+      "id": -1001234567890,
+      "title": "Test Group",
+      "type": "supergroup"
+    },
+    "date": 1714900100,
+    "text": "@mybot hello there",
+    "entities": [
+      {
+        "offset": 0,
+        "length": 7,
+        "type": "mention"
+      }
+    ]
+  }
+}

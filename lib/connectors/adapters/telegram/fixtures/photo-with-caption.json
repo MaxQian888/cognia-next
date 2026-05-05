@@ -1,0 +1,36 @@
+{
+  "update_id": 100000004,
+  "message": {
+    "message_id": 1004,
+    "from": {
+      "id": 444444444,
+      "is_bot": false,
+      "first_name": "Dave",
+      "username": "daveuser"
+    },
+    "chat": {
+      "id": 444444444,
+      "first_name": "Dave",
+      "username": "daveuser",
+      "type": "private"
+    },
+    "date": 1714900300,
+    "photo": [
+      {
+        "file_id": "AgACAgIAAxkBAAIBpGZ0photo_small",
+        "file_unique_id": "AQADsmallUQ",
+        "file_size": 1234,
+        "width": 90,
+        "height": 67
+      },
+      {
+        "file_id": "AgACAgIAAxkBAAIBpGZ0photo_large",
+        "file_unique_id": "AQADlargeUQ",
+        "file_size": 45678,
+        "width": 800,
+        "height": 600
+      }
+    ],
+    "caption": "Check out this photo!"
+  }
+}
