@@ -48,6 +48,22 @@ import { detectTrigger, spliceToken, type ComposerTrigger } from "./composer-tri
 import { ComposerPopover, type ComposerPopoverHandle, type PopoverItem } from "./composer-popover"
 import { ReferenceChips } from "./reference-chips"
 import { nextPermissionMode } from "./permission-mode-indicator"
+import { useResolvedConnectorMode } from "./use-resolved-connector-mode"
+import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { getDb } from "@/lib/db/schema"
+import {
+  listPendingForConversation as listPendingDrafts,
+  approveDraft,
+  rejectDraft,
+} from "@/lib/db/connector-drafts"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import type { ConnectorDraftRow } from "@/lib/db/connector-types"
 import {
   BUILTIN_SLASH_COMMANDS,
   applyTemplate,
@@ -159,6 +175,8 @@ interface InnerProps {
   onCommand: (cmd: SlashCommand, args: string) => Promise<boolean>
   onSubmitMemory: (scope: MemoryScope, text: string) => Promise<boolean>
   handleRef?: Ref<ComposerHandle>
+  /** Non-zero when the session has pending connector drafts to review. */
+  pendingDraftCount?: number
 }
 
 function ComposerInner(props: InnerProps) {
@@ -166,6 +184,7 @@ function ComposerInner(props: InnerProps) {
   const tAttach = useTranslations("chat.composer.attachments")
   const tCommands = useTranslations("chat.composer.commands")
   const tMemory = useTranslations("chat.composer.memory")
+  const hasPendingDrafts = (props.pendingDraftCount ?? 0) > 0
   const controller = usePromptInputController()
   const attachments = usePromptInputAttachments()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -639,29 +658,44 @@ function ComposerInner(props: InnerProps) {
         <div className="flex shrink-0 items-center">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                aria-label={isStreaming ? t("ariaStop") : t("ariaSend")}
-                className="size-9 rounded-full"
-                disabled={
-                  !isStreaming &&
-                  (props.disabled ||
-                    (controller.textInput.value.trim().length === 0 &&
-                      attachments.files.length === 0))
-                }
-                onClick={() => (isStreaming ? void props.onStop() : void submit())}
-                size="icon"
-                type="button"
-              >
-                {isStreaming ? (
-                  <SquareIcon className="size-4" />
-                ) : props.status === "submitted" ? (
-                  <Loader2Icon className="size-4 animate-spin" />
-                ) : (
-                  <ArrowUpIcon className="size-4" />
-                )}
-              </Button>
+              {hasPendingDrafts ? (
+                <Button
+                  aria-label="Edit draft"
+                  className="h-9 rounded-full px-3 text-xs"
+                  disabled={props.disabled}
+                  onClick={() => void submit()}
+                  type="button"
+                  variant="secondary"
+                >
+                  Edit draft
+                </Button>
+              ) : (
+                <Button
+                  aria-label={isStreaming ? t("ariaStop") : t("ariaSend")}
+                  className="size-9 rounded-full"
+                  disabled={
+                    !isStreaming &&
+                    (props.disabled ||
+                      (controller.textInput.value.trim().length === 0 &&
+                        attachments.files.length === 0))
+                  }
+                  onClick={() => (isStreaming ? void props.onStop() : void submit())}
+                  size="icon"
+                  type="button"
+                >
+                  {isStreaming ? (
+                    <SquareIcon className="size-4" />
+                  ) : props.status === "submitted" ? (
+                    <Loader2Icon className="size-4 animate-spin" />
+                  ) : (
+                    <ArrowUpIcon className="size-4" />
+                  )}
+                </Button>
+              )}
             </TooltipTrigger>
-            <TooltipContent>{isStreaming ? t("stopTooltip") : t("sendTooltip")}</TooltipContent>
+            <TooltipContent>
+              {hasPendingDrafts ? "Edit draft" : isStreaming ? t("stopTooltip") : t("sendTooltip")}
+            </TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -710,6 +744,28 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const clearReferencedPaths = useChatStore((s) => s.clearReferencedPaths)
 
   const cwd = session?.workingDir ?? null
+
+  // ── Platform connector mode ─────────────────────────────────────────────
+  const resolvedMode = useResolvedConnectorMode(session)
+  const [pendingDrafts, setPendingDrafts] = useState<ConnectorDraftRow[]>([])
+  const [draftDialogOpen, setDraftDialogOpen] = useState(false)
+
+  // Poll pending drafts when in draft mode
+  useEffect(() => {
+    const conversationKey = session?.platformBinding?.conversationKey
+    if (!conversationKey || resolvedMode !== "draft") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPendingDrafts([])
+      return
+    }
+    let cancelled = false
+    void listPendingDrafts(conversationKey).then((drafts) => {
+      if (!cancelled) setPendingDrafts(drafts)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [session?.platformBinding?.conversationKey, resolvedMode])
 
   const pushSystemMessage = useCallback(
     (markdown: string) => {
@@ -813,6 +869,45 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         return
       }
 
+      // ── Platform connector short-circuit ─────────────────────────────────
+      // When a session is platform-bound, branch on the resolved mode before
+      // the standard sendPrompt path.
+      if (session?.platformBinding && resolvedMode && resolvedMode !== "auto") {
+        const { adapterId, conversationKey, conversationRef } = session.platformBinding
+        if (resolvedMode === "manual") {
+          if (!trimmed && files.length === 0) return
+          // Build outbound job for manual delivery
+          const job = await enqueueOutbound({
+            adapterId,
+            conversationKey,
+            request: {
+              conversationRef,
+              segments: [{ type: "text", text: trimmed }],
+              metadata: { idempotencyKey: crypto.randomUUID() },
+            },
+          })
+          // Insert StoredMessage with outboundJobId
+          const now = Date.now()
+          await getDb().messages.add({
+            id: crypto.randomUUID(),
+            sessionId: session.id,
+            role: "user",
+            parts: [{ type: "text", text: trimmed }],
+            metadata: { outboundJobId: job.id },
+            createdAt: now,
+          })
+          return // skip standard sendPrompt — caller's input cleared by ComposerInner
+        }
+        if (resolvedMode === "draft") {
+          // In draft mode, the submit button opens the draft reviewer dialog
+          const drafts = await listPendingDrafts(conversationKey)
+          setPendingDrafts(drafts)
+          setDraftDialogOpen(true)
+          return
+        }
+      }
+      // ── END platform connector short-circuit ──────────────────────────────
+
       // ── Web search prefetch ─────────────────────────────────────────
       // If the user toggled web search for this turn, run the query through
       // the configured provider before forwarding to the SDK and prepend the
@@ -876,6 +971,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       tAttach,
       tMemory,
       tWebSearch,
+      session,
+      resolvedMode,
+      setPendingDrafts,
+      setDraftDialogOpen,
     ]
   )
 
@@ -885,6 +984,31 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       : status === "error"
         ? "error"
         : "ready"
+
+  // ── Draft review dialog helpers ─────────────────────────────────────────
+  const handleApproveDraft = useCallback(
+    async (draft: ConnectorDraftRow) => {
+      const binding = session?.platformBinding
+      if (!binding) return
+      await enqueueOutbound({
+        adapterId: binding.adapterId,
+        conversationKey: binding.conversationKey,
+        request: {
+          conversationRef: binding.conversationRef,
+          segments: draft.segments,
+          metadata: { idempotencyKey: crypto.randomUUID() },
+        },
+      })
+      await approveDraft(draft.id)
+      setPendingDrafts((prev) => prev.filter((d) => d.id !== draft.id))
+    },
+    [session?.platformBinding]
+  )
+
+  const handleRejectDraft = useCallback(async (draft: ConnectorDraftRow) => {
+    await rejectDraft(draft.id)
+    setPendingDrafts((prev) => prev.filter((d) => d.id !== draft.id))
+  }, [])
 
   return (
     <div className="border-t bg-background p-3">
@@ -898,10 +1022,47 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           onCommand={handleSlashCommand}
           onSubmitMemory={handleMemorySubmit}
           handleRef={ref}
+          pendingDraftCount={pendingDrafts.length}
         />
         <BottomToolbar session={session ?? null} />
         <HelperHints />
       </PromptInputProvider>
+
+      {/* Draft review dialog — shown when the session has pending connector drafts */}
+      <Dialog open={draftDialogOpen} onOpenChange={setDraftDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Review platform drafts</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {pendingDrafts.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No pending drafts.</p>
+            ) : (
+              pendingDrafts.map((draft) => (
+                <div key={draft.id} className="rounded-md border p-3 text-sm">
+                  <p className="mb-2 whitespace-pre-wrap">
+                    {draft.segments
+                      .map((s) => (s.type === "text" ? s.text : s.type === "markdown" ? s.md : ""))
+                      .join(" ")}
+                  </p>
+                  <DialogFooter className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleRejectDraft(draft)}
+                    >
+                      Reject
+                    </Button>
+                    <Button size="sm" onClick={() => void handleApproveDraft(draft)}>
+                      Approve
+                    </Button>
+                  </DialogFooter>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 })
