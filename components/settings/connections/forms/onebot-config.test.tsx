@@ -1,0 +1,191 @@
+/**
+ * @jest-environment jsdom
+ */
+
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+
+// ---------------------------------------------------------------------------
+// Mocks
+// ---------------------------------------------------------------------------
+
+const mockCreateAdapterInstance = jest.fn().mockResolvedValue({ id: "ob-new-id" })
+const mockUpdateAdapterInstance = jest.fn().mockResolvedValue(undefined)
+const mockConnectorsKeyringSet = jest.fn().mockResolvedValue(undefined)
+const mockConnectorsHealth = jest.fn().mockResolvedValue({
+  serverRunning: true,
+  boundAddr: "127.0.0.1:9090",
+  registeredAdapterCount: 0,
+})
+
+jest.mock("@/lib/db/adapter-instances", () => ({
+  createAdapterInstance: (...args: unknown[]) => mockCreateAdapterInstance(...args),
+  updateAdapterInstance: (...args: unknown[]) => mockUpdateAdapterInstance(...args),
+}))
+
+jest.mock("@/lib/connectors/tauri/commands", () => ({
+  connectorsKeyringSet: (...args: unknown[]) => mockConnectorsKeyringSet(...args),
+  connectorsHealth: () => mockConnectorsHealth(),
+}))
+
+jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn().mockReturnValue(true) }))
+
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+
+import { toast } from "sonner"
+const mockToastSuccess = toast.success as jest.Mock
+const mockToastError = toast.error as jest.Mock
+
+// ---------------------------------------------------------------------------
+// Import component after mocks
+// ---------------------------------------------------------------------------
+
+import { OneBotConfigDialog } from "./onebot-config"
+import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+import { defaultGroupChatPolicy } from "@/types/connectors/policy"
+
+beforeEach(() => {
+  jest.clearAllMocks()
+})
+
+// ---------------------------------------------------------------------------
+// Tests — create new
+// ---------------------------------------------------------------------------
+
+describe("OneBotConfigDialog — create new", () => {
+  it("renders 'Add OneBot (QQ) Adapter' title when open + no row", () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    expect(screen.getByText(/add onebot \(qq\) adapter/i)).toBeInTheDocument()
+  })
+
+  it("renders Bot UIN input", () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    expect(screen.getByLabelText(/bot uin/i)).toBeInTheDocument()
+  })
+
+  it("renders Bearer Token input", () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    expect(screen.getByLabelText(/bearer token/i)).toBeInTheDocument()
+  })
+
+  it("renders Expected Client select", () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    expect(screen.getByLabelText(/expected client/i)).toBeInTheDocument()
+  })
+
+  it("shows error toast when UIN is empty on Save", async () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("required"))
+    })
+    expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
+  })
+
+  it("calls createAdapterInstance + connectorsKeyringSet on Save with bearer token", async () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+
+    fireEvent.change(screen.getByLabelText(/bot uin/i), { target: { value: "123456789" } })
+    fireEvent.change(screen.getByLabelText(/bearer token/i), { target: { value: "secret123" } })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() => {
+      expect(mockCreateAdapterInstance).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "onebot",
+          settings: expect.objectContaining({ selfBotUin: "123456789" }),
+        })
+      )
+      expect(mockConnectorsKeyringSet).toHaveBeenCalledWith(
+        "ob-new-id",
+        "onebotBearer",
+        "secret123"
+      )
+    })
+  })
+
+  it("shows success toast after creation", async () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/bot uin/i), { target: { value: "987654321" } })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() => {
+      expect(mockToastSuccess).toHaveBeenCalled()
+    })
+  })
+
+  it("does NOT write to keyring when bearer token is empty", async () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/bot uin/i), { target: { value: "111" } })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() => {
+      expect(mockCreateAdapterInstance).toHaveBeenCalled()
+    })
+    expect(mockConnectorsKeyringSet).not.toHaveBeenCalled()
+  })
+
+  it("calls connectorsHealth to build endpoint URL after creation", async () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/bot uin/i), { target: { value: "111" } })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() => {
+      expect(mockConnectorsHealth).toHaveBeenCalled()
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Tests — edit existing
+// ---------------------------------------------------------------------------
+
+describe("OneBotConfigDialog — edit existing", () => {
+  const existingRow: AdapterInstanceRow = {
+    id: "ob-existing",
+    type: "onebot",
+    displayName: "Prod QQ Bot",
+    enabled: true,
+    transportMode: "reverse-ws",
+    settings: { selfBotUin: "111222333", expectedClient: "napcat" },
+    credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["onebotBearer"] },
+    trigger: defaultGroupChatPolicy(),
+    defaultMode: "auto",
+    createdAt: 1000,
+    updatedAt: 2000,
+  }
+
+  it("renders 'Configure OneBot (QQ) Adapter' title for existing row", () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
+    expect(screen.getByText(/configure onebot \(qq\) adapter/i)).toBeInTheDocument()
+  })
+
+  it("pre-fills display name from existing row", () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
+    expect(screen.getByDisplayValue("Prod QQ Bot")).toBeInTheDocument()
+  })
+
+  it("calls updateAdapterInstance on Save", async () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
+    fireEvent.change(screen.getByDisplayValue("Prod QQ Bot"), { target: { value: "Updated Bot" } })
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+
+    await waitFor(() => {
+      expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
+        "ob-existing",
+        expect.objectContaining({ displayName: "Updated Bot" })
+      )
+      expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Tests — closed state
+// ---------------------------------------------------------------------------
+
+describe("OneBotConfigDialog — closed", () => {
+  it("does not render content when closed", () => {
+    render(<OneBotConfigDialog open={false} onOpenChange={jest.fn()} row={null} />)
+    expect(screen.queryByText(/add onebot/i)).not.toBeInTheDocument()
+  })
+})
