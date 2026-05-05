@@ -1,3 +1,4 @@
+pub mod discord;
 pub mod telegram;
 
 #[derive(Debug, thiserror::Error)]
