@@ -14,18 +14,21 @@ use axum::{
 };
 
 use super::state::ConnectorsState;
+use super::ws_server;
 
 /// Build the connectors axum `Router<ConnectorsState>` (state not yet resolved).
 ///
-/// Callers that need to add more routes (e.g. `ws_server::register_routes`)
-/// call this first, extend the router, then call `.with_state(state)` once.
+/// Callers that need to add more routes can extend the returned router before
+/// calling `.with_state(state)`.
 pub fn build_unresolved_router() -> Router<ConnectorsState> {
-    Router::new()
+    let base = Router::new()
         .route("/health", get(health_handler))
         .route(
             "/webhook/{adapter_type}/{adapter_id}",
             any(unimplemented_webhook_handler),
-        )
+        );
+    // Wire in the OneBot reverse-WS route (`/ws/onebot/:adapter_id`).
+    ws_server::register_routes(base)
 }
 
 /// Convenience wrapper: build the router and resolve state in one call.
