@@ -63,7 +63,7 @@ function makeAdapter(id: string, displayName: string): AdapterInstanceRow {
     type: "telegram",
     displayName,
     enabled: true,
-    transportMode: "polling",
+    transportMode: "stub",
     settings: {},
     credentialsRef: { keyringService: "k", accounts: [] },
     trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },

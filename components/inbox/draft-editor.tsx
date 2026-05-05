@@ -52,7 +52,7 @@ export function DraftEditor({ draft, onClose }: DraftEditorProps) {
           segments,
         }
         await enqueueOutbound({
-          adapterId: updatedRequest.adapterId,
+          adapterId: updatedRequest.conversationRef.adapterId,
           conversationKey: draft.conversationKey,
           request: updatedRequest,
         })

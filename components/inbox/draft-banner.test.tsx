@@ -56,11 +56,10 @@ function makeDraft(overrides: Partial<ConnectorDraftRow> = {}): ConnectorDraftRo
     status: "pending",
     createdAt: Date.now(),
     outboundPreview: {
-      adapterId: "a1",
-      conversationKey: "ck1",
+      conversationRef: { platform: "telegram", adapterId: "a1", chatId: 123 },
       segments: [{ type: "text", text: "Hello platform user!" }],
       metadata: { idempotencyKey: "idem_1" },
-    } as unknown as OutboundRequest,
+    } satisfies OutboundRequest,
     ...overrides,
   }
 }
