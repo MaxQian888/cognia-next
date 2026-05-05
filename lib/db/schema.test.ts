@@ -43,6 +43,127 @@ describe("getDb", () => {
     expect(db.wikiSections).toBeDefined()
     expect(db.wikiManifest).toBeDefined()
     expect(db.mcpAuditLog).toBeDefined()
+    // v18 — Platform Connectors tables.
+    expect(db.adapterInstances).toBeDefined()
+    expect(db.platformIdentities).toBeDefined()
+    expect(db.inboundLedger).toBeDefined()
+    expect(db.outboundQueue).toBeDefined()
+    expect(db.conversationOverrides).toBeDefined()
+    expect(db.connectorAudit).toBeDefined()
+    expect(db.connectorDrafts).toBeDefined()
+    expect(db.connectorAttachments).toBeDefined()
+  })
+
+  // §A-Schema migration check for v18: Platform Connectors tables open
+  // cleanly on a fresh database (Dexie auto-applies all version blocks up to
+  // 18). Verify round-trips through each new table to prove the per-row type
+  // compiles and the declared indexes accept inserts.
+  it("v18 connector tables accept inserts and reads round-trip", async () => {
+    const db = getDb()
+    const now = Date.now()
+
+    await db.adapterInstances.put({
+      id: "tg-1",
+      type: "telegram",
+      displayName: "My Telegram bot",
+      enabled: true,
+      transportMode: "longpoll",
+      settings: { pollIntervalMs: 1000 },
+      credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["tg-1:botToken"] },
+      trigger: {
+        rules: [{ kind: "private-default" }],
+        blockers: [],
+        storeUnmatchedInDraftMode: true,
+      },
+      defaultMode: "auto",
+      createdAt: now,
+      updatedAt: now,
+    })
+    expect((await db.adapterInstances.get("tg-1"))?.type).toBe("telegram")
+
+    await db.platformIdentities.put({
+      id: "pi-1",
+      platform: "telegram",
+      adapterId: "tg-1",
+      remoteUserId: "999",
+      displayName: "Alice",
+      lastSeenAt: now,
+    })
+    expect(
+      (
+        await db.platformIdentities
+          .where("[platform+remoteUserId]")
+          .equals(["telegram", "999"])
+          .first()
+      )?.id
+    ).toBe("pi-1")
+
+    await db.inboundLedger.put({
+      id: "tg-1:m-1",
+      adapterId: "tg-1",
+      platformMessageId: "m-1",
+      receivedAt: now,
+    })
+    expect((await db.inboundLedger.get("tg-1:m-1"))?.adapterId).toBe("tg-1")
+
+    await db.outboundQueue.put({
+      id: "ob-1",
+      adapterId: "tg-1",
+      conversationKey: "telegram:tg-1:1",
+      request: {
+        conversationRef: { platform: "telegram", adapterId: "tg-1" },
+        segments: [{ type: "text", text: "hi" }],
+        metadata: { idempotencyKey: "k1" },
+      },
+      status: "pending",
+      attempts: 0,
+      createdAt: now,
+      nextAttemptAt: now,
+      idempotencyKey: "k1",
+    })
+    expect((await db.outboundQueue.get("ob-1"))?.status).toBe("pending")
+
+    await db.conversationOverrides.put({
+      id: "co-1",
+      conversationKey: "telegram:tg-1:1",
+      sessionId: "s1",
+      mode: "manual",
+      createdAt: now,
+      updatedAt: now,
+    })
+    expect(
+      (await db.conversationOverrides.where("conversationKey").equals("telegram:tg-1:1").first())
+        ?.mode
+    ).toBe("manual")
+
+    await db.connectorAudit.put({
+      id: "a-1",
+      adapterId: "tg-1",
+      kind: "delivery.success",
+      at: now,
+    })
+    expect((await db.connectorAudit.get("a-1"))?.kind).toBe("delivery.success")
+
+    await db.connectorDrafts.put({
+      id: "d-1",
+      conversationKey: "telegram:tg-1:1",
+      sessionId: "s1",
+      segments: [{ type: "text", text: "draft" }],
+      status: "pending",
+      createdAt: now,
+    })
+    expect((await db.connectorDrafts.get("d-1"))?.status).toBe("pending")
+
+    await db.connectorAttachments.put({
+      id: "att-1",
+      adapterId: "tg-1",
+      remoteRef: "tg-file-id",
+      localPath: "/tmp/xyz.png",
+      mimeType: "image/png",
+      sizeBytes: 1024,
+      fetchedAt: now,
+    })
+    expect((await db.connectorAttachments.get("att-1"))?.mimeType).toBe("image/png")
   })
 
   // §A-Schema migration check for v17: tables open cleanly on a fresh

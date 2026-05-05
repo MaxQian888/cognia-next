@@ -32,6 +32,16 @@ import type {
   PluginScheduledJobRow,
 } from "./plugin-types"
 import type { WikiArticle, WikiSection, WikiManifest, McpAuditLogRow } from "@/types/wiki"
+import type {
+  AdapterInstanceRow,
+  PlatformIdentityRow,
+  InboundLedgerRow,
+  OutboundJobRow,
+  ConversationOverrideRow,
+  ConnectorAuditRow,
+  ConnectorDraftRow,
+  ConnectorAttachmentRow,
+} from "./connector-types"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -73,6 +83,16 @@ export class CogniaDB extends Dexie {
   wikiSections!: Table<WikiSection, string>
   wikiManifest!: Table<WikiManifest, string>
   mcpAuditLog!: Table<McpAuditLogRow, string>
+  // v18 — Platform Connectors tables. Indexed columns are declared in the v18
+  // .stores block below; the per-row types live in `./connector-types.ts`.
+  adapterInstances!: Table<AdapterInstanceRow, string>
+  platformIdentities!: Table<PlatformIdentityRow, string>
+  inboundLedger!: Table<InboundLedgerRow, string>
+  outboundQueue!: Table<OutboundJobRow, string>
+  conversationOverrides!: Table<ConversationOverrideRow, string>
+  connectorAudit!: Table<ConnectorAuditRow, string>
+  connectorDrafts!: Table<ConnectorDraftRow, string>
+  connectorAttachments!: Table<ConnectorAttachmentRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -623,6 +643,75 @@ export class CogniaDB extends Dexie {
       wikiSections: "&id, articleId, [articleId+sectionIndex]",
       wikiManifest: "&scope, lastBuildAt",
       mcpAuditLog: "&id, ts, tool, allowed, [tool+ts]",
+    })
+
+    // v18 — Platform Connectors (ADR-0009). Pure additions; no upgrade hook
+    // because we don't migrate existing rows. Indexes calibrated to the
+    // hot paths in lib/connectors/:
+    //   • adapterInstances — by enabled/type for the bus boot list, by displayName for nav.
+    //   • platformIdentities — composite [platform+remoteUserId] for cross-platform
+    //     identity merge, [adapterId+remoteUserId] for per-adapter directory lookups.
+    //   • inboundLedger — composite [adapterId+platformMessageId] for O(1) dedup
+    //     check; receivedAt for the LRU prune sweep (cap 10k rows).
+    //   • outboundQueue — by conversationKey for FIFO lane lookup, by [conversationKey+createdAt]
+    //     for in-order picking, by status / nextAttemptAt for the runner's
+    //     "next pending due" query, by idempotencyKey for retry coalescing.
+    //   • conversationOverrides — by conversationKey for resolution, by sessionId
+    //     for "session → override" lookups when the chat UI binds.
+    //   • connectorAudit — by adapterId for per-adapter filter, by [adapterId+at]
+    //     for time-ordered scrolling. Capped at 5000 rows by the writer.
+    //   • connectorDrafts — by conversationKey + status for "next pending draft",
+    //     by [conversationKey+createdAt] for order.
+    //   • connectorAttachments — composite [adapterId+remoteRef] for "do I have it",
+    //     by adapterId for adapter-scoped cleanup, by mimeType for filters.
+    this.version(18).stores({
+      sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
+      messages: "id, sessionId, [sessionId+createdAt], senderId",
+      settings: "id",
+      promptPresets:
+        "id, updatedAt, isBuiltIn, isDefault, isFavorite, sortOrder, category, lastUsedAt",
+      mcpServers: "id, name, enabled",
+      characters: "id, name, updatedAt, isBuiltIn",
+      skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
+      skillResources: "id, skillId, [skillId+kind], [skillId+path], updatedAt",
+      teams: "id, name, updatedAt, isBuiltIn",
+      sessionState: "sessionId, lastReadAt",
+      trustedWorkspaces: "path, trustedAt",
+      tts_provider_keys: "id",
+      backupHistory: "id, completedAt, type, success",
+      canvasDocuments: "id, title, language, type, updatedAt, createdAt",
+      canvasVersions: "id, documentId, [documentId+createdAt], isAutoSave",
+      canvasComments: "id, documentId, [documentId+createdAt], parentId, resolvedAt",
+      canvasSessions: "id, documentId, ownerId, createdAt",
+      a2uiApps: "id, name, updatedAt, createdAt, isBuiltIn, category, isFavorite, sortOrder",
+      a2uiSurfaces: "id, appId, sessionId, updatedAt, createdAt, type",
+      a2uiTemplates: "id, name, category, updatedAt, source",
+      a2uiEventHistory: "id, surfaceId, [surfaceId+timestamp], timestamp, type",
+      twinSources: "&id, twinId, kind, format, status, fingerprint, [twinId+kind], [twinId+status]",
+      twinChunks: "&id, twinId, sourceId, vectorDocId, [twinId+sourceId], [twinId+createdAt]",
+      twinProfile: "&id, twinId",
+      twinDrafts: "&id, twinId, jobId, kind, status, [twinId+status], [twinId+kind]",
+      twinJobs: "&id, twinId, status, queuedAt, [twinId+status], [twinId+kind]",
+      plugins: "id, name, version, status, source, type, enabled, lastUsedAt, *capabilities",
+      pluginPermissions: "[pluginId+permission], pluginId, permission, decision, expiresAt",
+      pluginReviews: "[pluginId+id], pluginId, rating, createdAt",
+      pluginAnalytics: "[pluginId+key], pluginId, key, lastEventAt",
+      pluginScheduledJobs: "id, pluginId, cron, lastRunAt, nextRunAt, status",
+      wikiArticles: "&id, &slug, scope, module, pageRank, generatedAt, [scope+module]",
+      wikiSections: "&id, articleId, [articleId+sectionIndex]",
+      wikiManifest: "&scope, lastBuildAt",
+      mcpAuditLog: "&id, ts, tool, allowed, [tool+ts]",
+      adapterInstances: "id, type, enabled, displayName, [type+enabled], createdAt, updatedAt",
+      platformIdentities:
+        "&id, [platform+remoteUserId], [adapterId+remoteUserId], remoteUserId, platform, lastSeenAt",
+      inboundLedger: "&id, [adapterId+platformMessageId], adapterId, receivedAt",
+      outboundQueue:
+        "&id, conversationKey, [conversationKey+createdAt], status, nextAttemptAt, idempotencyKey, [adapterId+status]",
+      conversationOverrides: "&id, &conversationKey, sessionId, pinned, archived",
+      connectorAudit: "&id, adapterId, kind, at, [adapterId+at]",
+      connectorDrafts:
+        "&id, conversationKey, sessionId, [conversationKey+createdAt], status, expiresAt",
+      connectorAttachments: "&id, [adapterId+remoteRef], adapterId, mimeType, fetchedAt, expiresAt",
     })
   }
 
