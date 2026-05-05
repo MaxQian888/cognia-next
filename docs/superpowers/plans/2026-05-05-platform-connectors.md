@@ -3315,13 +3315,15 @@ Wires the existing scheduler so a cron task with payload `{ kind: "outbound", ad
 
 ---
 
-## Task 112: ADR-0008 documentation
+## Task 112: ADR-0009 documentation
+
+ADR-0008 is already taken by the External Bridge (`docs/content/docs/adr/0008-external-bridge.md`); Platform Connectors is the next free number.
 
 **Files:**
 
-- Create: `docs/content/docs/adr/0008-platform-connectors.md` — accepts the spec verbatim plus the implementation outcome notes (any deltas from the original spec).
+- Create: `docs/content/docs/adr/0009-platform-connectors.md` — accepts the spec verbatim plus the implementation outcome notes (any deltas from the original spec).
 
-- [ ] Commit `docs(connectors): ADR-0008`.
+- [ ] Commit `docs(connectors): ADR-0009`.
 
 ---
 
