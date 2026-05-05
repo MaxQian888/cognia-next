@@ -141,7 +141,7 @@ async function insertInboundMessage(
  *
  * Call this once at app startup (e.g. from ConnectorBusProvider).
  */
-export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOptions): void {
+export function installRuntime(bus: ReturnType<typeof getBus>, _opts: RuntimeOptions): void {
   bus.routeHandler = async (
     event: NormalizedInboundEvent,
     decision: RouteDecision,
