@@ -13,6 +13,18 @@
       "author": "Vercel",
       "rawSkillUrl": "https://raw.githubusercontent.com/vercel/ai-elements/main/skills/ai-elements/SKILL.md"
     },
+    "ai-sdk": {
+      "source": "vercel/ai",
+      "sourceType": "github",
+      "skillPath": "skills/use-ai-sdk/SKILL.md",
+      "computedHash": "2249889eb47ef0f61c4dba4cf2afe01c1c8dd793bb4c24230347c1ab909bb7dd"
+    },
+    "find-skills": {
+      "source": "vercel-labs/skills",
+      "sourceType": "github",
+      "skillPath": "skills/find-skills/SKILL.md",
+      "computedHash": "9e1c8b3103f92fa8092568a44fe64858de7c5c9dc65ce4bea8f168080e889cfd"
+    },
     "next-best-practices": {
       "source": "vercel-labs/next-skills",
       "sourceType": "github",
@@ -36,6 +48,12 @@
       "tags": ["shadcn", "react", "ui", "tailwind"],
       "author": "shadcn",
       "rawSkillUrl": "https://raw.githubusercontent.com/shadcn-ui/ui/main/skills/shadcn/SKILL.md"
+    },
+    "streamdown": {
+      "source": "vercel/streamdown",
+      "sourceType": "github",
+      "skillPath": "skills/streamdown/SKILL.md",
+      "computedHash": "c842552c75b80abb74ef8f92481d34684c709884dd2df22c2ab3b183aee582fe"
     }
   }
 }
