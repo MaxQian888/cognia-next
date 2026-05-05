@@ -20,7 +20,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { getDb } from "@/lib/db/schema"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
-import { setArchived, setPinned, upsertByConversationKey } from "@/lib/db/conversation-overrides"
+import { setArchived, setPinned } from "@/lib/db/conversation-overrides"
 
 export function ConversationsTab() {
   const router = useRouter()

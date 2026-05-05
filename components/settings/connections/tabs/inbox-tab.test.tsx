@@ -34,7 +34,7 @@ jest.mock("next/link", () => ({
 
 jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn() }))
 
-import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
+import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 interface AdapterStats {
   adapter: AdapterInstanceRow
@@ -60,7 +60,7 @@ function makeAdapter(id: string, displayName: string): AdapterInstanceRow {
     type: "telegram",
     displayName,
     enabled: true,
-    transportMode: "polling",
+    transportMode: "stub",
     settings: {},
     credentialsRef: { keyringService: "k", accounts: [] },
     trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
