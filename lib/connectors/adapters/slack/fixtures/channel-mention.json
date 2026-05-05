@@ -1,0 +1,16 @@
+{
+  "token": "XXYYZZ",
+  "team_id": "T123ABC",
+  "api_app_id": "A123APP",
+  "event": {
+    "type": "message",
+    "channel": "C333CHANNEL",
+    "user": "U444USER",
+    "text": "Hey <@USELF123> can you help?",
+    "ts": "1714900100.000200",
+    "channel_type": "channel"
+  },
+  "type": "event_callback",
+  "event_id": "Ev222EVT",
+  "event_time": 1714900100
+}

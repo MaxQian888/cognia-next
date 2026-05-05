@@ -1,0 +1,17 @@
+{
+  "token": "XXYYZZ",
+  "team_id": "T123ABC",
+  "api_app_id": "A123APP",
+  "event": {
+    "type": "message",
+    "channel": "C555CHANNEL",
+    "user": "U666USER",
+    "text": "This is a thread reply",
+    "ts": "1714900200.000300",
+    "thread_ts": "1714900000.000100",
+    "channel_type": "channel"
+  },
+  "type": "event_callback",
+  "event_id": "Ev333EVT",
+  "event_time": 1714900200
+}

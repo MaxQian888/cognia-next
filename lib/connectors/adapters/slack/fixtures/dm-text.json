@@ -1,0 +1,16 @@
+{
+  "token": "XXYYZZ",
+  "team_id": "T123ABC",
+  "api_app_id": "A123APP",
+  "event": {
+    "type": "message",
+    "channel": "D111CHANNEL",
+    "user": "U222USER",
+    "text": "Hello, bot!",
+    "ts": "1714900000.000100",
+    "channel_type": "im"
+  },
+  "type": "event_callback",
+  "event_id": "Ev111EVT",
+  "event_time": 1714900000
+}
