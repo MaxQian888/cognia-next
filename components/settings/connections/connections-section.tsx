@@ -20,12 +20,27 @@ import { OverviewTab } from "./tabs/overview-tab"
 import { AdaptersTab } from "./tabs/adapters-tab"
 import { OutboundTab } from "./tabs/outbound-tab"
 import { AuditTab } from "./tabs/audit-tab"
+import { ConversationsTab } from "./tabs/conversations-tab"
+import { InboxTab } from "./tabs/inbox-tab"
 
 const CONNECTIONS_TAB_PARAM = "connectionsTab"
 
-export type ConnectionsTabId = "overview" | "adapters" | "outbound" | "audit"
+export type ConnectionsTabId =
+  | "overview"
+  | "adapters"
+  | "conversations"
+  | "inbox"
+  | "outbound"
+  | "audit"
 
-const TAB_IDS: ConnectionsTabId[] = ["overview", "adapters", "outbound", "audit"]
+const TAB_IDS: ConnectionsTabId[] = [
+  "overview",
+  "adapters",
+  "conversations",
+  "inbox",
+  "outbound",
+  "audit",
+]
 
 function isConnectionsTab(value: string | null): value is ConnectionsTabId {
   return !!value && (TAB_IDS as string[]).includes(value)
@@ -61,6 +76,8 @@ export function ConnectionsSection() {
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="adapters">Adapters</TabsTrigger>
+          <TabsTrigger value="conversations">Conversations</TabsTrigger>
+          <TabsTrigger value="inbox">Inbox</TabsTrigger>
           <TabsTrigger value="outbound">Outbound</TabsTrigger>
           <TabsTrigger value="audit">Audit</TabsTrigger>
         </TabsList>
@@ -69,6 +86,12 @@ export function ConnectionsSection() {
         </TabsContent>
         <TabsContent value="adapters" className="mt-4">
           <AdaptersTab />
+        </TabsContent>
+        <TabsContent value="conversations" className="mt-4">
+          <ConversationsTab />
+        </TabsContent>
+        <TabsContent value="inbox" className="mt-4">
+          <InboxTab />
         </TabsContent>
         <TabsContent value="outbound" className="mt-4">
           <OutboundTab />
