@@ -6,7 +6,6 @@
  */
 
 import type { ConversationOverrideRow } from "./connector-types"
-import type { ConnectorMode } from "@/types/connectors/policy"
 import { getDb } from "./schema"
 
 function newId(): string {

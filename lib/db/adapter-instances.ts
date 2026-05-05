@@ -8,8 +8,6 @@
 
 import type { AdapterInstanceRow } from "./connector-types"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
-import type { TransportMode } from "@/types/connectors/adapter"
-import type { TriggerPolicy, ConnectorMode } from "@/types/connectors/policy"
 import { getDb } from "./schema"
 
 function newId(): string {

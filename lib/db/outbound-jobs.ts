@@ -78,7 +78,7 @@ export async function markSending(jobId: string): Promise<void> {
 }
 
 /** Transition a job to "sent". */
-export async function markSent(jobId: string, platformMessageId: string): Promise<void> {
+export async function markSent(jobId: string, _platformMessageId: string): Promise<void> {
   await getDb().outboundQueue.update(jobId, { status: "sent" })
 }
 
