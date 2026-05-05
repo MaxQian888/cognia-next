@@ -57,6 +57,7 @@ export type PluginCapability =
   | "python" // Python runtime capability
   | "scheduler" // Provides scheduled tasks
   | "external-agent-preset" // cognia-next: contributes external-agent presets (Claude Code / Codex / etc.)
+  | "connectors" // Provides Platform Connector adapters (Task 110)
 
 /**
  * Plugin status in the lifecycle
@@ -374,6 +375,33 @@ export interface PluginManifest {
   // Scheduled Tasks
   /** Scheduled tasks provided by this plugin */
   scheduledTasks?: PluginScheduledTaskDef[]
+
+  // Platform Connectors (Task 110)
+  /**
+   * Platform Connector adapters provided by this plugin.
+   * Each entry describes a factory function the connectors bridge will call to
+   * instantiate a `PlatformAdapter`.
+   */
+  connectors?: PluginConnectorDef[]
+}
+
+/**
+ * One connector adapter definition inside `PluginManifest.connectors`.
+ */
+export interface PluginConnectorDef {
+  /** Platform kind string (e.g. "telegram", "discord", or a custom string for 3rd-party platforms). */
+  type: string
+  /**
+   * Name of the exported factory function from the plugin's `main` entrypoint.
+   * Signature: `(ctx: AdapterContext) => PlatformAdapter | Promise<PlatformAdapter>`
+   */
+  factory: string
+  /** JSON Schema (draft-07) describing the per-instance settings shape. */
+  configSchema: object
+  /** Default trigger policy (optional — overridden by the bus defaults if absent). */
+  defaultTrigger?: Record<string, unknown>
+  /** Transport modes this adapter supports. */
+  transportModes: string[]
 }
 
 /**
