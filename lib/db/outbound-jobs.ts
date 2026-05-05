@@ -41,15 +41,17 @@ export async function enqueueOutbound(input: EnqueueInput): Promise<OutboundJobR
 }
 
 /**
- * Return the oldest pending row with `nextAttemptAt <= now`, or undefined
- * if nothing is due. Does not mutate the row — caller must call `markSending`.
+ * Return the oldest actionable row with `nextAttemptAt <= now`, or undefined
+ * if nothing is due. Picks both "pending" (first attempt) and "failed"
+ * (scheduled retry) rows. Does not mutate the row — caller must call
+ * `markSending`.
  */
 export async function pickNextDue(): Promise<OutboundJobRow | undefined> {
   const now = Date.now()
   const candidates = await getDb()
-    .outboundQueue.where("status")
-    .equals("pending")
-    .filter((r) => r.nextAttemptAt <= now)
+    .outboundQueue.filter(
+      (r) => (r.status === "pending" || r.status === "failed") && r.nextAttemptAt <= now
+    )
     .toArray()
   if (candidates.length === 0) return undefined
   return candidates.sort((a, b) => a.createdAt - b.createdAt)[0]

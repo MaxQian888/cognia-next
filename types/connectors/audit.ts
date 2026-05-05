@@ -7,6 +7,7 @@ export type AuditKind =
   | "inbound.deduped"
   | "inbound.policy_blocked"
   | "inbound.signature_failed"
+  | "outbound.enqueued"
   | "circuit.opened"
   | "circuit.half_opened"
   | "circuit.closed"
