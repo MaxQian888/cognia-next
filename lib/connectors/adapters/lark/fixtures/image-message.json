@@ -1,0 +1,30 @@
+{
+  "schema": "2.0",
+  "header": {
+    "event_id": "evt_img_001",
+    "event_type": "im.message.receive_v1",
+    "create_time": "1714900003000",
+    "token": "verify_token_xxx",
+    "app_id": "cli_app_001"
+  },
+  "event": {
+    "sender": {
+      "sender_id": {
+        "open_id": "ou_user_004",
+        "user_id": "uid_004"
+      },
+      "sender_type": "user",
+      "tenant_key": "tenant_abc"
+    },
+    "message": {
+      "message_id": "om_img_001",
+      "chat_id": "oc_group_chat_003",
+      "chat_type": "group",
+      "message_type": "image",
+      "content": "{\"image_key\":\"img_v3_abc123\"}",
+      "mentions": [],
+      "create_time": "1714900003000",
+      "thread_id": null
+    }
+  }
+}

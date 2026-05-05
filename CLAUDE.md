@@ -271,6 +271,64 @@ enabledScopes` before the handler runs. Denials get MCP error
 
 See `docs/content/docs/adr/0008-external-bridge.md` for the full ADR.
 
+## Platform Connectors
+
+cognia-next AI characters can act as real bots on Telegram, Discord, Slack,
+Lark (Feishu), and QQ/NapCat (OneBot v11). The subsystem lives under
+`lib/connectors/`, `types/connectors/`, `components/settings/connections/`,
+`components/inbox/`, and `app/inbox/`, with Rust transport helpers under
+`src-tauri/src/connectors/`.
+
+- **Schema (v18)**: 8 new Dexie tables —
+  `adapterInstances` / `platformIdentities` / `inboundLedger` /
+  `outboundQueue` / `conversationOverrides` / `connectorAudit` /
+  `connectorDrafts` / `connectorAttachments`.
+- **ConnectorBus** (`lib/connectors/bus.ts`): singleton fan-in / fan-out.
+  `getBus()` → `registerAdapter()` / `unregisterAdapter()`.
+  Each adapter calls `bus.inbound()` on arrival; the bus evaluates the
+  `TriggerPolicy`, routes to the mode handler, and persists to `connectorAudit`.
+- **Five built-in adapters** (`lib/connectors/adapters/`):
+  `telegram/` (long-poll or webhook), `discord/` (Gateway WS v10),
+  `slack/` (Events API webhook), `lark/` (event callback webhook),
+  `onebot/` (reverse-WS). Each folder contains
+  `parse.ts` / `serialize.ts` / transport / `capability.ts` / `sigverify.ts` / `index.ts`.
+- **Outbound queue runner** (`lib/connectors/outbound-runner.ts`):
+  Dexie-backed FIFO per conversation with circuit breaker (50% failure rate /
+  10-event window / 30 s cooldown), token bucket (cap 20 / 5 tok·s⁻¹),
+  exponential back-off (`min(60 s, 1 s × 2ⁿ) + jitter`), dead-letter at 5
+  attempts, idempotency LRU (1 000 entries), and quiet-hours / muted guard.
+  `isInQuietHours(nowMs, from, to, tz)` and `msUntilQuietEnd(nowMs, to, tz)`
+  are exported for reuse.
+- **Mode routing**: three layers — adapter default → per-conversation override
+  → event override. Modes: `auto` (AI reply, Phase 1 stubbed), `manual` (human
+  types in Composer), `draft` (AI generates; human approves via Inbox).
+- **Scheduler integration** (`lib/connectors/scheduled-outbound.ts`):
+  `installScheduledOutboundHandlers()` registers executors for
+  `"connection:outbound:send"` and `"connection:scheduled:digest"`.
+- **Plugin extension API** (`lib/plugin/connectors-bridge.ts`):
+  `registerPluginAdapters(pluginId, manifest, exports)` discovers
+  `manifest.connectors[]` and calls each factory. `unregisterPluginAdapters`
+  cleans up on plugin disable. The `PluginConnectorDef` type lives in
+  `types/plugin/plugin.ts`.
+- **Settings UI** (`components/settings/connections/connections-section.tsx`):
+  tabbed shell at `?section=connections`. Tabs: Overview / Adapters /
+  Conversations / Inbox / Outbound / Audit. Quiet-hours + mute form lives in
+  `components/settings/connections/forms/quiet-hours-and-mute.tsx`.
+- **Web-mode degradation**: in browser (non-Tauri) the connections banner
+  (`role="status" aria-label="Web mode banner"`) explains the limitation; the
+  mode switcher in `ConversationHeader` gets `pointer-events-none`; the
+  Composer Send button is disabled for platform-bound sessions.
+- **Inbox UI** (`app/inbox/`, `components/inbox/`): `InboxShell` +
+  `InboxSidebar` (data-testid `"inbox-sidebar"`) list platform-bound sessions.
+  `/inbox/[conversationKey]` is a client-only static page compatible with
+  `output: "export"`.
+- **E2E tests**: `playwright.config.ts` + `tests/e2e/connectors/` contain a
+  Playwright suite with an Express-based mock Telegram server
+  (`createTelegramMockServer`). Install deps first:
+  `pnpm add -D express @types/express @playwright/test && pnpx playwright install chromium`.
+
+See `docs/content/docs/adr/0009-platform-connectors.md` for the full ADR.
+
 ## Testing Standards
 
 - **Coverage requirement**: every source file must reach **≥90% test coverage** (lines, branches, functions). Verify with `pnpm test:coverage`.

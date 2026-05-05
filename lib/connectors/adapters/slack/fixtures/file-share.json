@@ -1,0 +1,30 @@
+{
+  "token": "XXYYZZ",
+  "team_id": "T123ABC",
+  "api_app_id": "A123APP",
+  "event": {
+    "type": "message",
+    "channel": "C777CHANNEL",
+    "user": "U888USER",
+    "text": "Check out this image",
+    "ts": "1714900300.000400",
+    "channel_type": "channel",
+    "files": [
+      {
+        "id": "F123FILE",
+        "name": "photo.png",
+        "mimetype": "image/png",
+        "filetype": "png",
+        "url_private": "https://files.slack.com/files-pri/T123ABC-F123FILE/photo.png",
+        "permalink": "https://example.slack.com/files/U888USER/F123FILE/photo.png",
+        "size": 204800,
+        "image_exif_rotation": 1,
+        "original_w": 1024,
+        "original_h": 768
+      }
+    ]
+  },
+  "type": "event_callback",
+  "event_id": "Ev444EVT",
+  "event_time": 1714900300
+}

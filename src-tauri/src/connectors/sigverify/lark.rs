@@ -1,0 +1,166 @@
+use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use sha2::{Digest, Sha256};
+
+use super::SigError;
+
+type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
+
+/// Verify a Lark webhook verification token.
+///
+/// Lark sends a `token` field in every event header (schema 2.0). The
+/// caller compares it against the value configured in the Lark App dashboard.
+///
+/// # Arguments
+/// - `provided`:  the `token` field from the event header (may be None if absent)
+/// - `expected`:  the verification token configured in the Lark App
+///
+/// # Returns
+/// `Ok(())` if the tokens match; `SigError::Missing` if `provided` is None or empty;
+/// `SigError::Mismatch` otherwise.
+pub fn verify_token(provided: Option<&str>, expected: &str) -> Result<(), SigError> {
+    match provided {
+        None => Err(SigError::Missing),
+        Some(token) if token.is_empty() => Err(SigError::Missing),
+        Some(token) => {
+            if token == expected {
+                Ok(())
+            } else {
+                Err(SigError::Mismatch)
+            }
+        }
+    }
+}
+
+/// Decrypt a Lark encrypted event body.
+///
+/// Lark encrypts events with AES-256-CBC:
+/// - Key: SHA-256 of the Encrypt Key string (32 bytes)
+/// - Ciphertext: base64-decode the `encrypt` field from the JSON body
+/// - IV: first 16 bytes of the decoded ciphertext
+/// - Actual cipher input: remaining bytes after the IV
+/// - Padding: PKCS#7
+///
+/// # Arguments
+/// - `encrypted_b64`: the base64-encoded string from Lark's `encrypt` field
+/// - `encrypt_key`:   the Encrypt Key configured in the Lark App dashboard
+///
+/// # Returns
+/// The decrypted plaintext bytes on success, or a `SigError` on failure.
+pub fn decrypt_body(encrypted_b64: &str, encrypt_key: &str) -> Result<Vec<u8>, SigError> {
+    // Derive 32-byte AES key from the encrypt_key string via SHA-256
+    let key_bytes = Sha256::digest(encrypt_key.as_bytes());
+
+    // Base64-decode the ciphertext
+    let raw = BASE64
+        .decode(encrypted_b64)
+        .map_err(|_| SigError::Mismatch)?;
+
+    if raw.len() < 16 {
+        return Err(SigError::Mismatch);
+    }
+
+    // IV = first 16 bytes; ciphertext = remainder
+    let (iv, ciphertext) = raw.split_at(16);
+
+    let iv_arr: [u8; 16] = iv.try_into().map_err(|_| SigError::Mismatch)?;
+
+    // Decrypt in-place
+    let mut buf = ciphertext.to_vec();
+    let decryptor = Aes256CbcDec::new(key_bytes.as_slice().into(), &iv_arr.into());
+    let plaintext = decryptor
+        .decrypt_padded_mut::<Pkcs7>(&mut buf)
+        .map_err(|_| SigError::Mismatch)?;
+
+    Ok(plaintext.to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aes::cipher::{BlockEncryptMut, KeyIvInit};
+    use rand::RngCore;
+
+    type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
+
+    fn encrypt_body(plaintext: &[u8], encrypt_key: &str) -> String {
+        let key_bytes = Sha256::digest(encrypt_key.as_bytes());
+
+        // Random IV
+        let mut iv = [0u8; 16];
+        rand::thread_rng().fill_bytes(&mut iv);
+
+        let ciphertext = Aes256CbcEnc::new(key_bytes.as_slice().into(), &iv.into())
+            .encrypt_padded_vec_mut::<Pkcs7>(plaintext);
+
+        // Prepend IV to ciphertext, then base64-encode
+        let mut combined = iv.to_vec();
+        combined.extend_from_slice(&ciphertext);
+        BASE64.encode(combined)
+    }
+
+    // -------------------------------------------------------------------------
+    // verify_token
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn known_good_token_returns_ok() {
+        let expected = "my-verification-token";
+        assert!(verify_token(Some(expected), expected).is_ok());
+    }
+
+    #[test]
+    fn mismatched_token_returns_mismatch() {
+        let err = verify_token(Some("wrong-token"), "correct-token").unwrap_err();
+        assert!(matches!(err, SigError::Mismatch));
+    }
+
+    #[test]
+    fn missing_token_none_returns_missing() {
+        let err = verify_token(None, "expected").unwrap_err();
+        assert!(matches!(err, SigError::Missing));
+    }
+
+    #[test]
+    fn empty_token_returns_missing() {
+        let err = verify_token(Some(""), "expected").unwrap_err();
+        assert!(matches!(err, SigError::Missing));
+    }
+
+    // -------------------------------------------------------------------------
+    // decrypt_body — round-trip
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn decrypt_round_trip_with_known_plaintext() {
+        let key = "my-secret-encrypt-key";
+        let plaintext = b"{\"schema\":\"2.0\",\"header\":{\"event_type\":\"im.message.receive_v1\"}}";
+
+        let encrypted = encrypt_body(plaintext, key);
+        let decrypted = decrypt_body(&encrypted, key).expect("decrypt should succeed");
+        assert_eq!(decrypted, plaintext.as_slice());
+    }
+
+    #[test]
+    fn decrypt_invalid_base64_returns_mismatch() {
+        let err = decrypt_body("not-valid-base64!!!", "key").unwrap_err();
+        assert!(matches!(err, SigError::Mismatch));
+    }
+
+    #[test]
+    fn decrypt_too_short_payload_returns_mismatch() {
+        // Base64 of fewer than 16 bytes
+        let short = BASE64.encode(b"short");
+        let err = decrypt_body(&short, "key").unwrap_err();
+        assert!(matches!(err, SigError::Mismatch));
+    }
+
+    #[test]
+    fn decrypt_wrong_key_returns_mismatch() {
+        let plaintext = b"test plaintext body";
+        let encrypted = encrypt_body(plaintext, "correct-key");
+        // Decrypting with a wrong key should fail (bad padding)
+        let err = decrypt_body(&encrypted, "wrong-key").unwrap_err();
+        assert!(matches!(err, SigError::Mismatch));
+    }
+}

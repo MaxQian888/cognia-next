@@ -1,0 +1,21 @@
+{
+  "update_id": 100000005,
+  "message": {
+    "message_id": 1005,
+    "from": {
+      "id": 555555555,
+      "is_bot": false,
+      "first_name": "Eve",
+      "username": "eveuser"
+    },
+    "chat": {
+      "id": -1009876543210,
+      "title": "Forum Group",
+      "type": "supergroup",
+      "is_forum": true
+    },
+    "date": 1714900400,
+    "message_thread_id": 42,
+    "text": "Forum thread message"
+  }
+}

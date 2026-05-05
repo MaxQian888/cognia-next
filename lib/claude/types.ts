@@ -382,6 +382,8 @@ export interface ChatSession {
    * for diagnostics; not auto-applied to subsequent sends.
    */
   forkedFromSdkSessionId?: string
+  /** Set when this session is bound to an external IM platform conversation. */
+  platformBinding?: import("@/types/connectors/binding").PlatformBinding
   createdAt: number
   updatedAt: number
 }
@@ -402,7 +404,16 @@ export interface StoredMessage {
   senderId?: string
   senderKind?: MessageSenderKind
   /** Carries `usage` / `cost` info attached to the result-bearing assistant message. */
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, unknown> & {
+    /** Set on inbound messages from a platform connector. */
+    platformMessage?: {
+      messageId: string
+      platform: import("@/types/connectors/platform-kind").PlatformKind
+      sender: import("@/types/connectors/event").PlatformIdentity
+    }
+    /** Set on outbound (assistant) messages once enqueued. */
+    outboundJobId?: string
+  }
   createdAt: number
 }
 
@@ -947,6 +958,7 @@ export interface Character {
     enableStyleFewShot?: boolean
     styleSamplesK?: number
   }
+  platformDefaults?: import("@/types/connectors/binding").CharacterPlatformDefaults
   createdAt: number
   updatedAt: number
 }

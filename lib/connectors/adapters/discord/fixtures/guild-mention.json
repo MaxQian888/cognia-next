@@ -1,0 +1,34 @@
+{
+  "t": "MESSAGE_CREATE",
+  "s": 2,
+  "op": 0,
+  "d": {
+    "id": "2234567890123456789",
+    "type": 0,
+    "content": "<@987654321098765432> hello there",
+    "channel_id": "8876543210987654321",
+    "guild_id": "7776543210987654321",
+    "author": {
+      "id": "222222222222222222",
+      "username": "bobuser",
+      "discriminator": "0",
+      "global_name": "Bob",
+      "bot": false
+    },
+    "timestamp": "2024-05-05T12:01:00.000000+00:00",
+    "attachments": [],
+    "mentions": [
+      {
+        "id": "987654321098765432",
+        "username": "mybot",
+        "discriminator": "0",
+        "global_name": "My Bot",
+        "bot": true
+      }
+    ],
+    "mention_roles": [],
+    "pinned": false,
+    "mention_everyone": false,
+    "tts": false
+  }
+}

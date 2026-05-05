@@ -1,0 +1,25 @@
+{
+  "t": "MESSAGE_CREATE",
+  "s": 1,
+  "op": 0,
+  "d": {
+    "id": "1234567890123456789",
+    "type": 0,
+    "content": "Hello, bot!",
+    "channel_id": "9876543210987654321",
+    "author": {
+      "id": "111111111111111111",
+      "username": "aliceuser",
+      "discriminator": "0",
+      "global_name": "Alice Smith",
+      "bot": false
+    },
+    "timestamp": "2024-05-05T12:00:00.000000+00:00",
+    "attachments": [],
+    "mentions": [],
+    "mention_roles": [],
+    "pinned": false,
+    "mention_everyone": false,
+    "tts": false
+  }
+}

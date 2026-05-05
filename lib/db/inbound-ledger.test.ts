@@ -1,0 +1,77 @@
+/**
+ * Tests for lib/db/inbound-ledger.ts — dedup ledger for inbound messages.
+ */
+
+import "fake-indexeddb/auto"
+import { recordInbound, pruneOldest } from "./inbound-ledger"
+import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+
+beforeEach(async () => {
+  await getDb().delete()
+  __resetDbForTesting()
+  getDb()
+  await whenSeeded()
+})
+
+describe("inbound-ledger", () => {
+  it("recordInbound returns true on first call for a message", async () => {
+    const isNew = await recordInbound("adp_1", "msg_abc")
+    expect(isNew).toBe(true)
+  })
+
+  it("recordInbound returns false for a duplicate message", async () => {
+    await recordInbound("adp_1", "msg_abc")
+    const isNew = await recordInbound("adp_1", "msg_abc")
+    expect(isNew).toBe(false)
+  })
+
+  it("same platformMessageId for different adapters are not duplicates", async () => {
+    const first = await recordInbound("adp_1", "msg_shared")
+    const second = await recordInbound("adp_2", "msg_shared")
+    expect(first).toBe(true)
+    expect(second).toBe(true)
+  })
+
+  it("persists a row with correct fields", async () => {
+    const before = Date.now()
+    await recordInbound("adp_1", "msg_xyz")
+    const db = getDb()
+    const rows = await db.inboundLedger.toArray()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].adapterId).toBe("adp_1")
+    expect(rows[0].platformMessageId).toBe("msg_xyz")
+    expect(rows[0].receivedAt).toBeGreaterThanOrEqual(before)
+  })
+
+  it("pruneOldest is a no-op when count <= cap", async () => {
+    await recordInbound("adp_1", "m1")
+    await recordInbound("adp_1", "m2")
+    await pruneOldest(10)
+    const count = await getDb().inboundLedger.count()
+    expect(count).toBe(2)
+  })
+
+  it("pruneOldest keeps exactly `cap` newest rows", async () => {
+    // Insert 10 rows with deterministic receivedAt ordering
+    for (let i = 0; i < 10; i++) {
+      await recordInbound("adp_1", `msg_${i}`)
+      // Force distinct receivedAt via waiting
+      await new Promise((r) => setTimeout(r, 1))
+    }
+    await pruneOldest(3)
+    const db = getDb()
+    const remaining = await db.inboundLedger.orderBy("receivedAt").toArray()
+    expect(remaining).toHaveLength(3)
+    // The 3 newest survive (msg_7, msg_8, msg_9)
+    expect(remaining.map((r) => r.platformMessageId)).toEqual(["msg_7", "msg_8", "msg_9"])
+  })
+
+  it("pruneOldest default cap is 10_000", async () => {
+    // Just verify it runs without error (functional test on small data)
+    for (let i = 0; i < 5; i++) {
+      await recordInbound("adp_1", `m${i}`)
+    }
+    await pruneOldest()
+    expect(await getDb().inboundLedger.count()).toBe(5)
+  })
+})

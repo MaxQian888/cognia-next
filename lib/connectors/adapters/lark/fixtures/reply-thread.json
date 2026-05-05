@@ -1,0 +1,30 @@
+{
+  "schema": "2.0",
+  "header": {
+    "event_id": "evt_thr_001",
+    "event_type": "im.message.receive_v1",
+    "create_time": "1714900002000",
+    "token": "verify_token_xxx",
+    "app_id": "cli_app_001"
+  },
+  "event": {
+    "sender": {
+      "sender_id": {
+        "open_id": "ou_user_003",
+        "user_id": "uid_003"
+      },
+      "sender_type": "user",
+      "tenant_key": "tenant_abc"
+    },
+    "message": {
+      "message_id": "om_thr_001",
+      "chat_id": "oc_group_chat_002",
+      "chat_type": "group",
+      "message_type": "text",
+      "content": "{\"text\":\"This is a reply in a thread\"}",
+      "mentions": [],
+      "create_time": "1714900002000",
+      "thread_id": "thr_root_001"
+    }
+  }
+}

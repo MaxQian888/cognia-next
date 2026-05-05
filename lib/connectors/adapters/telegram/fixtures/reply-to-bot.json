@@ -1,0 +1,35 @@
+{
+  "update_id": 100000003,
+  "message": {
+    "message_id": 1003,
+    "from": {
+      "id": 333333333,
+      "is_bot": false,
+      "first_name": "Carol",
+      "username": "caroluser"
+    },
+    "chat": {
+      "id": -1001234567890,
+      "title": "Test Group",
+      "type": "supergroup"
+    },
+    "date": 1714900200,
+    "text": "Thanks for the help",
+    "reply_to_message": {
+      "message_id": 999,
+      "from": {
+        "id": 987654321,
+        "is_bot": true,
+        "first_name": "MyBot",
+        "username": "mybot"
+      },
+      "chat": {
+        "id": -1001234567890,
+        "title": "Test Group",
+        "type": "supergroup"
+      },
+      "date": 1714900150,
+      "text": "You are welcome!"
+    }
+  }
+}

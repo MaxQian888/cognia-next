@@ -73,9 +73,20 @@ base64 = "0.22"
 
 # MCP HTTP server — axum for the inbound listener, subtle for constant-time
 # bearer-token comparison, tower-http for body-size limits.
-axum = { version = "0.8", features = ["macros"] }
+axum = { version = "0.8", features = ["macros", "ws"] }
 subtle = "2"
-tower-http = { version = "0.6", features = ["limit"] }
+tower = { version = "0.5", features = ["util", "limit", "timeout"] }
+tower-http = { version = "0.6", features = ["limit", "trace", "cors"] }
+hmac = "0.12"
+sha1 = "0.10"
+sha2 = "0.10"
+ed25519-dalek = "2"
+hex = "0.4"
+url = "2"
+aes-gcm = { version = "0.10", features = ["aes"] }
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+rand = "0.8"
 
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-window-state = "2"
@@ -98,3 +109,5 @@ syslog = "7"
 [dev-dependencies]
 # Unit tests for the scheduler + vector subsystems create temp sqlite DBs.
 tempfile = "3"
+# HTTP mock server for connectors::http_client and attachments tests.
+wiremock = "0.6"

@@ -5,6 +5,7 @@ mod canvas;
 mod ccswitch;
 mod claude;
 mod commands;
+mod connectors;
 mod external_agent;
 mod files;
 mod hooks;
@@ -170,6 +171,10 @@ pub fn run() {
         .manage(claude::SidecarState::new())
         .manage(ApiKeyState::new())
         .manage(WindowBehavior::new())
+        .manage(connectors::ConnectorsState::new())
+        .manage(connectors::commands::ConnectorsServer(std::sync::Arc::new(
+            tokio::sync::Mutex::new(None),
+        )))
         .manage(mcp_server::McpServerState::new())
         .manage(external_agent::commands::ExternalAgentState::default())
         .manage(external_agent::commands::AcpTerminalState::default())
@@ -301,6 +306,20 @@ pub fn run() {
             mcp_server::commands::mcp_server_stop,
             mcp_server::commands::mcp_server_restart,
             mcp_server::commands::mcp_server_status,
+            connectors::commands::connectors_register_adapter,
+            connectors::commands::connectors_unregister_adapter,
+            connectors::commands::connectors_health,
+            connectors::commands::connectors_start_server,
+            connectors::commands::connectors_stop_server,
+            connectors::commands::connectors_keyring_set,
+            connectors::commands::connectors_keyring_get,
+            connectors::commands::connectors_keyring_delete,
+            connectors::commands::connectors_keyring_list,
+            connectors::commands::connectors_http_request,
+            connectors::commands::connectors_ws_open,
+            connectors::commands::connectors_ws_send,
+            connectors::commands::connectors_ws_close,
+            connectors::commands::connectors_attachment_fetch,
         ])
         .setup(|app| {
             // Bootstrap native logging in *all* builds. Installs tauri-plugin-log

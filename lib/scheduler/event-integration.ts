@@ -25,6 +25,9 @@ export type SchedulerEventType =
   | "workflow:completed"
   | "agent:completed"
   | "custom"
+  // Platform Connectors — proactive outbound events (Task 108)
+  | "connection:outbound:send"
+  | "connection:scheduled:digest"
 
 /**
  * Event data that can be passed to event-triggered tasks
@@ -100,6 +103,8 @@ export function isValidEventType(eventType: string): eventType is SchedulerEvent
     "workflow:completed",
     "agent:completed",
     "custom",
+    "connection:outbound:send",
+    "connection:scheduled:digest",
   ]
   return validTypes.includes(eventType as SchedulerEventType)
 }

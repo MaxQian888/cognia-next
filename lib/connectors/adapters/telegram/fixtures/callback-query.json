@@ -1,0 +1,34 @@
+{
+  "update_id": 100000007,
+  "callback_query": {
+    "id": "4382bfdwdsb323b2d9",
+    "from": {
+      "id": 777777777,
+      "is_bot": false,
+      "first_name": "Grace",
+      "username": "graceuser"
+    },
+    "message": {
+      "message_id": 1007,
+      "from": {
+        "id": 987654321,
+        "is_bot": true,
+        "first_name": "MyBot",
+        "username": "mybot"
+      },
+      "chat": {
+        "id": 777777777,
+        "first_name": "Grace",
+        "username": "graceuser",
+        "type": "private"
+      },
+      "date": 1714900700,
+      "text": "Choose an option:",
+      "reply_markup": {
+        "inline_keyboard": [[{ "text": "Option A", "callback_data": "option_a" }]]
+      }
+    },
+    "chat_instance": "-8269112408",
+    "data": "option_a"
+  }
+}
