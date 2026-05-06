@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   ActivityIcon,
@@ -42,6 +43,7 @@ function auditKindBadgeVariant(kind: string): "default" | "secondary" | "destruc
 }
 
 export function OverviewTab() {
+  const t = useTranslations("settings.connections.overview")
   const [health, setHealth] = useState<ConnectorsHealth | null>(null)
   const desktop = isTauri()
 
@@ -93,29 +95,26 @@ export function OverviewTab() {
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-sm font-medium">
             <ServerIcon className="h-4 w-4" />
-            Connector Server
+            {t("serverHeading")}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
-          {!desktop && (
-            <p className="text-xs text-muted-foreground">
-              Platform connectors require the desktop (Tauri) runtime.
-            </p>
-          )}
+          {!desktop && <p className="text-xs text-muted-foreground">{t("desktopOnlyNotice")}</p>}
           <div className="flex items-center gap-2">
             <StatusDot state={serverStatus} />
             <span>
               {serverStatus === "ok"
-                ? `Running — ${health?.boundAddr ?? ""}`
+                ? t("statusRunning", { addr: health?.boundAddr ?? "" })
                 : serverStatus === "error"
-                  ? "Stopped"
-                  : "Unknown"}
+                  ? t("statusStopped")
+                  : t("statusUnknown")}
             </span>
           </div>
           {health && (
             <div className="text-xs text-muted-foreground">
-              {health.registeredAdapterCount} adapter
-              {health.registeredAdapterCount !== 1 ? "s" : ""} registered
+              {health.registeredAdapterCount === 1
+                ? t("adapterCount", { count: health.registeredAdapterCount })
+                : t("adapterCountPlural", { count: health.registeredAdapterCount })}
             </div>
           )}
         </CardContent>
@@ -126,12 +125,12 @@ export function OverviewTab() {
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-sm font-medium">
             <ActivityIcon className="h-4 w-4" />
-            Adapters
+            {t("adaptersHeading")}
           </CardTitle>
         </CardHeader>
         <CardContent>
           {!adapters || adapters.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No adapters configured yet.</p>
+            <p className="text-xs text-muted-foreground">{t("noAdapters")}</p>
           ) : (
             <ul className="space-y-2">
               {adapters.map((a) => (
@@ -143,7 +142,7 @@ export function OverviewTab() {
                   </Badge>
                   {!a.enabled && (
                     <Badge variant="secondary" className="shrink-0 text-xs">
-                      disabled
+                      {t("disabledBadge")}
                     </Badge>
                   )}
                 </li>
@@ -158,12 +157,12 @@ export function OverviewTab() {
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-sm font-medium">
             <CheckCircle2Icon className="h-4 w-4" />
-            Recent Activity
+            {t("recentActivityHeading")}
           </CardTitle>
         </CardHeader>
         <CardContent>
           {!recentAudit || recentAudit.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No recent activity.</p>
+            <p className="text-xs text-muted-foreground">{t("noRecentActivity")}</p>
           ) : (
             <ul className="space-y-1.5">
               {recentAudit.map((entry) => (

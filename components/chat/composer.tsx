@@ -589,7 +589,7 @@ function ComposerInner(props: InnerProps) {
       <AttachmentPreview />
       <div
         className={cn(
-          "relative flex items-end gap-2 rounded-2xl border border-input/60 bg-background px-2 py-2 shadow-sm transition-shadow",
+          "relative flex items-end gap-2 rounded-2xl border border-input/60 bg-background/70 px-2 py-2 shadow-sm transition-shadow",
           "focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/15"
         )}
         onDragEnter={onDragEnter}
@@ -1013,7 +1013,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   }, [])
 
   return (
-    <div className="border-t bg-background p-3">
+    <div className="border-t bg-background/70 p-3">
       <PromptInputProvider>
         <ComposerInner
           session={session}

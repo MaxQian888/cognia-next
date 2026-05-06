@@ -1,5 +1,6 @@
 mod a2ui_bridge;
 mod agents;
+mod anthropic_subscription;
 mod api_key;
 mod canvas;
 mod ccswitch;
@@ -73,6 +74,24 @@ async fn claude_set_provider_env(
 #[tauri::command]
 async fn claude_has_api_key(state: State<'_, ApiKeyState>) -> Result<bool, String> {
     Ok(state.get().await.is_some())
+}
+
+/// Push the Claude OAuth bearer (Pro/Max subscription or Console flow) into
+/// the in-process store. The frontend follows up with `claude_restart_sidecar`
+/// so the next spawn sees the new env. Pass `None` to clear.
+#[tauri::command]
+async fn claude_set_oauth_bearer(
+    state: State<'_, ApiKeyState>,
+    token: Option<String>,
+) -> Result<(), String> {
+    state.set_oauth_bearer(token).await;
+    Ok(())
+}
+
+/// Whether a Claude OAuth bearer is currently registered (UI badge).
+#[tauri::command]
+async fn claude_has_oauth_bearer(state: State<'_, ApiKeyState>) -> Result<bool, String> {
+    Ok(state.get_oauth_bearer().await.is_some())
 }
 
 /// Stop the running sidecar so the next `claude_send` spawns a new one. Used
@@ -175,6 +194,7 @@ pub fn run() {
         .manage(connectors::commands::ConnectorsServer(std::sync::Arc::new(
             tokio::sync::Mutex::new(None),
         )))
+        .manage(remote_control::RemoteControlState::new())
         .manage(mcp_server::McpServerState::new())
         .manage(external_agent::commands::ExternalAgentState::default())
         .manage(external_agent::commands::AcpTerminalState::default())
@@ -199,9 +219,14 @@ pub fn run() {
             ccswitch::commands::ccswitch_list_mcp_servers,
             ccswitch::commands::ccswitch_list_prompts,
             ccswitch::commands::ccswitch_list_skills,
+            anthropic_subscription::commands::claude_sub_save_token,
+            anthropic_subscription::commands::claude_sub_load_token,
+            anthropic_subscription::commands::claude_sub_clear_token,
             claude_set_api_key,
             claude_set_provider_env,
+            claude_set_oauth_bearer,
             claude_has_api_key,
+            claude_has_oauth_bearer,
             claude_restart_sidecar,
             canvas::python_exec::canvas_run_python,
             window_behavior::set_tray_on_close,
@@ -320,6 +345,14 @@ pub fn run() {
             connectors::commands::connectors_ws_send,
             connectors::commands::connectors_ws_close,
             connectors::commands::connectors_attachment_fetch,
+            remote_control::commands::remote_control_get_status,
+            remote_control::commands::remote_control_start,
+            remote_control::commands::remote_control_stop,
+            remote_control::commands::remote_control_get_token,
+            remote_control::commands::remote_control_rotate_token,
+            remote_control::commands::remote_control_update_config,
+            remote_control::commands::remote_control_set_signing_secret,
+            remote_control::commands::remote_control_get_signing_secret,
         ])
         .setup(|app| {
             // Bootstrap native logging in *all* builds. Installs tauri-plugin-log
@@ -426,6 +459,24 @@ pub fn run() {
                 let app = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     a2ui_bridge::spawn(app).await;
+                });
+            }
+
+            // Remote-control inbound listener auto-start. Per ADR-0005, only
+            // starts when `inbound.enabled` is persisted true AND the OS
+            // keyring still has a token — `RemoteControlState::new()` already
+            // clears `enabled` to false when the token is missing, so this
+            // spawn is a safe no-op on a fresh install.
+            {
+                let app = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let rc_state = app.state::<remote_control::RemoteControlState>();
+                    if rc_state.config().inbound.enabled {
+                        match rc_state.start(app.clone()).await {
+                            Ok(()) => log::info!("remote-control inbound listener started"),
+                            Err(e) => log::warn!("remote-control auto-start skipped: {e}"),
+                        }
+                    }
                 });
             }
 

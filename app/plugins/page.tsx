@@ -6,7 +6,7 @@ import { PluginPanel } from "@/components/plugins"
 // a Suspense boundary lets it bail out to client-side rendering.
 export default function PluginsRoutePage() {
   return (
-    <div className="h-svh w-full">
+    <div className="h-svh w-full" data-bg-target="chat">
       <Suspense fallback={null}>
         <PluginPanel />
       </Suspense>

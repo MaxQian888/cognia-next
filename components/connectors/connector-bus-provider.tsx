@@ -29,7 +29,25 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
     let cancelled = false
 
     void (async () => {
-      const enabled = await listEnabledAdapterInstances()
+      let enabled: Awaited<ReturnType<typeof listEnabledAdapterInstances>>
+      try {
+        enabled = await listEnabledAdapterInstances()
+      } catch (err) {
+        // Stale IndexedDB schema (e.g. v17 still cached after a v18 code bump,
+        // or a blocked upgrade because another tab held the DB open). Log
+        // once and bail — refusing to crash the whole app over a missing
+        // connector table. A reload usually lets Dexie complete the upgrade.
+        const name = err instanceof Error ? err.name : ""
+        if (name === "NotFoundError") {
+          console.warn(
+            "[connector-bus] adapterInstances object store is missing — " +
+              "IndexedDB schema is out of date. Reload the app to let Dexie " +
+              "finish migrating to v18."
+          )
+          return
+        }
+        throw err
+      }
       if (cancelled) return
 
       const bus = getBus()

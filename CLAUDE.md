@@ -271,6 +271,52 @@ enabledScopes` before the handler runs. Denials get MCP error
 
 See `docs/content/docs/adr/0008-external-bridge.md` for the full ADR.
 
+## Claude Subscription OAuth
+
+cognia-next supports Claude Pro/Max OAuth login alongside the legacy
+API-key path, with live 5-hour / 7-day rate-limit visibility built on
+the `anthropic-ratelimit-unified-*` response headers. The subsystem
+lives under `lib/anthropic-subscription/`, `components/settings/
+subscription/`, and `src-tauri/src/anthropic_subscription/`.
+
+- **OAuth flow**: paste-the-code PKCE against `claude.ai/oauth/authorize`
+  (subscription mode) or `console.anthropic.com/oauth/authorize`
+  (console mode). Both share the public Claude Code client_id
+  `9d1c250a-...`; the differentiator is the authorize host + redirect
+  URI + scopes. Token endpoint is `POST https://platform.claude.com/v1/
+oauth/token` (form-encoded — JSON returns 400 invalid_grant).
+- **Credential storage**: OS keyring via the `keyring` crate, service
+  `com.cognia.claude-subscription/v1`, account `default`. Tauri-only;
+  the web build degrades to a banner. cognia-next never writes
+  `~/.claude/.credentials.json` — that file is owned by `claude login`.
+- **Sidecar integration** (`src-tauri/src/api_key.rs:set_oauth_bearer`,
+  `src-tauri/src/claude/sidecar.rs:spawn`): when an OAuth bearer is
+  registered, the sidecar is spawned with `CLAUDE_CODE_OAUTH_TOKEN`
+  set (and `ANTHROPIC_API_KEY` actively unset). The official
+  `@anthropic-ai/claude-agent-sdk` reads this var and sends Bearer
+  auth + the `oauth-2025-04-20` beta header automatically — we don't
+  need a custom fetch wrapper for the agent path.
+- **Passive usage collection**: `sidecar/fetch-interceptor.mjs`
+  monkey-patches `globalThis.fetch` _before_ the agent SDK loads.
+  Every response on `api.anthropic.com` triggers a `usage_headers`
+  stdout event; `lib/anthropic-subscription/usage-collector.ts`
+  parses + persists to the `subscriptionUsage` Dexie table (v20).
+  Zero extra quota cost — every real chat send doubles as a sample.
+- **Active probe** (`lib/anthropic-subscription/usage-probe.ts`):
+  default-OFF opt-in. Sends a near-empty `POST /v1/messages` and
+  reads the unified-\* headers. Each probe consumes ~10 input + 1
+  output tokens (no documented Anthropic carve-out — surface this
+  in UI). Cadence floor 60 s.
+- **UI** (`components/settings/subscription/subscription-section.tsx`):
+  4 tabs at `?subTab=overview|account|usage|settings` — status badge +
+  5h/7d progress bars with reset countdowns; account email/plan/expiry
+  - manual refresh + sign out; recent-200-samples table; cadence +
+    threshold settings. Mounted in the sidebar between Providers and
+    CCSwitch.
+
+See `docs/content/docs/adr/0010-claude-subscription-oauth.md` for the
+full ADR.
+
 ## Platform Connectors
 
 cognia-next AI characters can act as real bots on Telegram, Discord, Slack,

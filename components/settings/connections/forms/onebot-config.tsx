@@ -14,6 +14,7 @@
 //   - Expected client hint (cosmetic)
 
 import { useState, useCallback } from "react"
+import { useTranslations } from "next-intl"
 import { CheckCircle2Icon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -66,13 +67,14 @@ async function resolveWsEndpoint(adapterId: string): Promise<string> {
 // ---------------------------------------------------------------------------
 
 export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDialogProps) {
+  const t = useTranslations("settings.connections.onebot")
   const isNew = row === null
   const settings = (row?.settings ?? {}) as {
     selfBotUin?: string
     expectedClient?: ExpectedClient
   }
 
-  const [displayName, setDisplayName] = useState(row?.displayName ?? "My QQ Bot")
+  const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
   const [botUin, setBotUin] = useState(settings.selfBotUin ?? "")
   const [bearerToken, setBearerToken] = useState("")
   const [expectedClient, setExpectedClient] = useState<ExpectedClient>(
@@ -95,11 +97,11 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
   // After save, trigger endpoint resolution
   const handleSave = async () => {
     if (!displayName.trim()) {
-      toast.error("Display name is required.")
+      toast.error(t("displayNameRequired"))
       return
     }
     if (!botUin.trim()) {
-      toast.error("Bot UIN is required.")
+      toast.error(t("botUinRequired"))
       return
     }
 
@@ -144,9 +146,7 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
       setSavedAdapterId(adapterId)
       await resolveEndpoint(adapterId)
 
-      toast.success(
-        isNew ? "Adapter created. Paste the endpoint URL into NapCat config." : "Adapter updated."
-      )
+      toast.success(isNew ? t("adapterCreatedWithEndpoint") : t("adapterUpdated"))
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -157,7 +157,7 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
 
   const handleVerify = async () => {
     if (!savedAdapterId) {
-      toast.error("Save the adapter first, then verify the connection.")
+      toast.error(t("saveBeforeVerify"))
       return
     }
 
@@ -181,12 +181,10 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
         })
       })
       setVerifyResult("connected")
-      toast.success("NapCat connected successfully.")
+      toast.success(t("verifyConnectedToast"))
     } catch {
       setVerifyResult("timeout")
-      toast.error(
-        "No connection received within 10 s. Is NapCat running and pointing to the correct URL?"
-      )
+      toast.error(t("verifyTimeoutToast"))
     } finally {
       setVerifying(false)
     }
@@ -196,20 +194,18 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>
-            {isNew ? "Add OneBot (QQ) Adapter" : "Configure OneBot (QQ) Adapter"}
-          </DialogTitle>
+          <DialogTitle>{isNew ? t("titleNew") : t("titleEdit")}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
           {/* Display name */}
           <div className="space-y-1.5">
-            <Label htmlFor="ob-display-name">Display name</Label>
+            <Label htmlFor="ob-display-name">{t("displayNameLabel")}</Label>
             <Input
               id="ob-display-name"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="My QQ Bot"
+              placeholder={t("displayNamePlaceholder")}
               disabled={saving}
             />
           </div>
@@ -217,26 +213,25 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
           {/* Bot UIN */}
           <div className="space-y-1.5">
             <Label htmlFor="ob-uin">
-              Bot UIN (QQ number)<span className="ml-1 text-destructive">*</span>
+              {t("botUinLabel")}
+              <span className="ml-1 text-destructive">*</span>
             </Label>
-            <p className="text-xs text-muted-foreground">
-              The QQ number of the bot account (e.g. 123456789).
-            </p>
+            <p className="text-xs text-muted-foreground">{t("botUinHelp")}</p>
             <Input
               id="ob-uin"
               value={botUin}
               onChange={(e) => setBotUin(e.target.value)}
-              placeholder="123456789"
+              placeholder={t("botUinPlaceholder")}
               disabled={saving}
             />
           </div>
 
           {/* Bearer token */}
           <div className="space-y-1.5">
-            <Label htmlFor="ob-bearer">Bearer Token (optional)</Label>
+            <Label htmlFor="ob-bearer">{t("bearerTokenLabel")}</Label>
             <p className="text-xs text-muted-foreground">
-              If NapCat / Lagrange has <code className="text-xs">accessToken</code> configured,
-              paste the same value here. Stored encrypted in the OS keyring.
+              {t("bearerTokenHelpPrefix")} <code className="text-xs">accessToken</code>{" "}
+              {t("bearerTokenHelpSuffix")}
             </p>
             <Input
               id="ob-bearer"
@@ -244,14 +239,14 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
               autoComplete="new-password"
               value={bearerToken}
               onChange={(e) => setBearerToken(e.target.value)}
-              placeholder="Optional secret token"
+              placeholder={t("bearerTokenPlaceholder")}
               disabled={saving}
             />
           </div>
 
           {/* Expected client hint */}
           <div className="space-y-1.5">
-            <Label htmlFor="ob-client">Expected Client</Label>
+            <Label htmlFor="ob-client">{t("expectedClientLabel")}</Label>
             <Select
               value={expectedClient}
               onValueChange={(v) => setExpectedClient(v as ExpectedClient)}
@@ -261,15 +256,13 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="napcat">NapCat</SelectItem>
-                <SelectItem value="lagrange">Lagrange</SelectItem>
-                <SelectItem value="llonebot">LLOneBot</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
+                <SelectItem value="napcat">{t("expectedClientNapcat")}</SelectItem>
+                <SelectItem value="lagrange">{t("expectedClientLagrange")}</SelectItem>
+                <SelectItem value="llonebot">{t("expectedClientLlonebot")}</SelectItem>
+                <SelectItem value="other">{t("expectedClientOther")}</SelectItem>
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">
-              Purely cosmetic — used for documentation links.
-            </p>
+            <p className="text-xs text-muted-foreground">{t("expectedClientHelp")}</p>
           </div>
 
           <Separator />
@@ -277,14 +270,14 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
           {/* Reverse-WS endpoint display */}
           {savedAdapterId && wsEndpoint && (
             <div className="space-y-1.5">
-              <Label>Reverse-WS Endpoint URL</Label>
+              <Label>{t("endpointLabel")}</Label>
               <p className="text-xs text-muted-foreground">
-                Paste this URL into your NapCat / Lagrange{" "}
-                <code className="text-xs">wsReverse</code> config.
+                {t("endpointHelpPrefix")} <code className="text-xs">wsReverse</code>{" "}
+                {t("endpointHelpSuffix")}
               </p>
               <div
                 className="rounded-md bg-muted px-3 py-2 font-mono text-xs break-all"
-                aria-label="reverse-ws endpoint"
+                aria-label={t("endpointAria")}
               >
                 {wsEndpoint}
               </div>
@@ -298,24 +291,24 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
                     variant="outline"
                     onClick={handleVerify}
                     disabled={verifying}
-                    aria-label="Verify reverse-WS reception"
+                    aria-label={t("verifyConnectionAria")}
                   >
                     {verifying ? (
                       <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
                     ) : (
-                      "Verify connection"
+                      t("verifyConnectionButton")
                     )}
                   </Button>
                   {verifyResult === "connected" && (
                     <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
                       <CheckCircle2Icon className="h-3.5 w-3.5" />
-                      Connected
+                      {t("verifyConnectedBadge")}
                     </span>
                   )}
                   {verifyResult === "timeout" && (
                     <span className="flex items-center gap-1 text-xs text-destructive">
                       <XCircleIcon className="h-3.5 w-3.5" />
-                      No connection
+                      {t("verifyTimeoutBadge")}
                     </span>
                   )}
                 </div>
@@ -333,10 +326,10 @@ export function OneBotConfigDialog({ open, onOpenChange, row }: OneBotConfigDial
               onClick={() => onOpenChange(false)}
               disabled={saving}
             >
-              Cancel
+              {t("cancel")}
             </Button>
             <Button type="button" onClick={handleSave} disabled={saving}>
-              {saving ? "Saving…" : isNew ? "Create" : "Save"}
+              {saving ? t("saving") : isNew ? t("create") : t("save")}
             </Button>
           </div>
         </div>

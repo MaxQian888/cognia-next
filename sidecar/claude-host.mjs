@@ -15,6 +15,12 @@
 //   { type: "ready" }
 //   { type: "log",                level, message }
 
+// Side-effect import — must come first so the global fetch is patched
+// before the Claude agent SDK loads. The interceptor emits a `usage_headers`
+// event for every response on `api.anthropic.com`, which the renderer's
+// usage-collector subscribes to (Phase 4a of the Claude subscription ADR).
+import "./fetch-interceptor.mjs"
+
 import readline from "node:readline"
 import { dispatch } from "./dispatch/index.mjs"
 

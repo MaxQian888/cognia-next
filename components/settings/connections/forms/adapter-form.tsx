@@ -8,6 +8,7 @@
 // object — the parent is responsible for calling connectorsKeyringSet.
 
 import { useState } from "react"
+import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -62,11 +63,13 @@ export function AdapterForm({
   secretFields = [],
   onSubmit,
   onCancel,
-  submitLabel = "Save",
+  submitLabel,
   disabled = false,
 }: AdapterFormProps) {
+  const t = useTranslations("settings.connections.adapterForm")
   const properties = schema.properties ?? {}
   const propEntries = Object.entries(properties)
+  const resolvedSubmitLabel = submitLabel ?? t("save")
 
   // Regular field state (non-secrets)
   const [values, setValues] = useState<Record<string, unknown>>(() => {
@@ -185,7 +188,7 @@ export function AdapterForm({
                 value={secrets[key] ?? ""}
                 onChange={(e) => updateSecret(key, e.target.value)}
                 disabled={disabled || submitting}
-                placeholder={`Enter ${label}`}
+                placeholder={t("enterField", { label })}
               />
             ) : (
               <Input
@@ -194,7 +197,7 @@ export function AdapterForm({
                 value={String(values[key] ?? "")}
                 onChange={(e) => updateValue(key, e.target.value)}
                 disabled={disabled || submitting}
-                placeholder={`Enter ${label}`}
+                placeholder={t("enterField", { label })}
               />
             )}
           </div>
@@ -204,11 +207,11 @@ export function AdapterForm({
       <div className="flex items-center justify-end gap-2 pt-2">
         {onCancel && (
           <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>
-            Cancel
+            {t("cancel")}
           </Button>
         )}
         <Button type="submit" disabled={disabled || submitting}>
-          {submitting ? "Saving…" : submitLabel}
+          {submitting ? t("saving") : resolvedSubmitLabel}
         </Button>
       </div>
     </form>

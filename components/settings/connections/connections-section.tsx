@@ -12,6 +12,7 @@
 // override UI is CP-C scope. Phase 1 ships 4 tabs: Overview / Adapters /
 // Outbound / Audit.
 
+import { useTranslations } from "next-intl"
 import { useRouter, useSearchParams } from "next/navigation"
 import { LinkIcon, MonitorIcon } from "lucide-react"
 import { Label } from "@/components/ui/label"
@@ -49,6 +50,7 @@ function isConnectionsTab(value: string | null): value is ConnectionsTabId {
 }
 
 export function ConnectionsSection() {
+  const t = useTranslations("settings.connections")
   const router = useRouter()
   const searchParams = useSearchParams()
   const requested = searchParams.get(CONNECTIONS_TAB_PARAM)
@@ -68,32 +70,26 @@ export function ConnectionsSection() {
       <div className="space-y-1">
         <Label className="flex items-center gap-2">
           <LinkIcon className="size-4" />
-          Platform Connections
+          {t("title")}
         </Label>
-        <p className="text-xs text-muted-foreground">
-          Configure messaging platform adapters (Telegram, Discord, Slack, …) and manage the
-          outbound delivery queue.
-        </p>
+        <p className="text-xs text-muted-foreground">{t("description")}</p>
       </div>
 
       {!desktop && (
-        <Alert role="status" aria-label="Web mode banner">
+        <Alert role="status" aria-label={t("webModeBanner.ariaLabel")}>
           <MonitorIcon className="size-4" />
-          <AlertDescription>
-            Adapters require the desktop app — open cognia-next on your desktop to configure
-            connectors. Already-configured conversations sync read-only here.
-          </AlertDescription>
+          <AlertDescription>{t("webModeBanner.body")}</AlertDescription>
         </Alert>
       )}
 
       <Tabs value={activeTab} onValueChange={onTabChange}>
         <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="adapters">Adapters</TabsTrigger>
-          <TabsTrigger value="conversations">Conversations</TabsTrigger>
-          <TabsTrigger value="inbox">Inbox</TabsTrigger>
-          <TabsTrigger value="outbound">Outbound</TabsTrigger>
-          <TabsTrigger value="audit">Audit</TabsTrigger>
+          <TabsTrigger value="overview">{t("tabs.overview")}</TabsTrigger>
+          <TabsTrigger value="adapters">{t("tabs.adapters")}</TabsTrigger>
+          <TabsTrigger value="conversations">{t("tabs.conversations")}</TabsTrigger>
+          <TabsTrigger value="inbox">{t("tabs.inbox")}</TabsTrigger>
+          <TabsTrigger value="outbound">{t("tabs.outbound")}</TabsTrigger>
+          <TabsTrigger value="audit">{t("tabs.audit")}</TabsTrigger>
         </TabsList>
         <TabsContent value="overview" className="mt-4">
           <OverviewTab />

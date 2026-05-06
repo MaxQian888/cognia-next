@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { BotIcon, CircleIcon, PlusIcon, Settings2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -46,6 +47,7 @@ function StatusDot({ enabled }: { enabled: boolean }) {
 }
 
 export function AdaptersTab() {
+  const t = useTranslations("settings.connections.adapters")
   const [telegramDialogOpen, setTelegramDialogOpen] = useState(false)
   const [editingRow, setEditingRow] = useState<AdapterInstanceRow | null>(null)
 
@@ -75,12 +77,12 @@ export function AdaptersTab() {
     <div className="space-y-4">
       {/* Add adapter dropdown */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">Manage your platform adapter instances.</p>
+        <p className="text-sm text-muted-foreground">{t("manageHint")}</p>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button size="sm" variant="outline">
               <PlusIcon className="mr-2 h-3.5 w-3.5" />
-              Add adapter
+              {t("addAdapter")}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -92,7 +94,7 @@ export function AdaptersTab() {
               >
                 {entry.label}
                 {!entry.available && (
-                  <span className="ml-2 text-xs text-muted-foreground">Coming soon</span>
+                  <span className="ml-2 text-xs text-muted-foreground">{t("comingSoon")}</span>
                 )}
               </DropdownMenuItem>
             ))}
@@ -105,10 +107,8 @@ export function AdaptersTab() {
         <Card>
           <CardContent className="py-8 text-center">
             <BotIcon className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">No adapters configured yet.</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Click &ldquo;Add adapter&rdquo; to add your first platform connection.
-            </p>
+            <p className="text-sm text-muted-foreground">{t("noAdaptersTitle")}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{t("noAdaptersHint")}</p>
           </CardContent>
         </Card>
       ) : (
@@ -134,23 +134,27 @@ export function AdaptersTab() {
                       id={`adapter-enabled-${row.id}`}
                       checked={row.enabled}
                       onCheckedChange={() => onToggleEnabled(row)}
-                      aria-label={`${row.enabled ? "Disable" : "Enable"} ${row.displayName}`}
+                      aria-label={
+                        row.enabled
+                          ? t("disableAria", { name: row.displayName })
+                          : t("enableAria", { name: row.displayName })
+                      }
                     />
                     <label
                       htmlFor={`adapter-enabled-${row.id}`}
                       className="text-xs text-muted-foreground cursor-pointer"
                     >
-                      {row.enabled ? "Enabled" : "Disabled"}
+                      {row.enabled ? t("enabled") : t("disabled")}
                     </label>
                   </div>
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => onConfigure(row)}
-                    aria-label={`Configure ${row.displayName}`}
+                    aria-label={t("configureAria", { name: row.displayName })}
                   >
                     <Settings2Icon className="mr-2 h-3.5 w-3.5" />
-                    Configure
+                    {t("configure")}
                   </Button>
                 </div>
               </CardContent>

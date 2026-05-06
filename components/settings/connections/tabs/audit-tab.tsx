@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { AlertTriangleIcon, ChevronDownIcon, ChevronRightIcon, ShieldIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -34,12 +35,7 @@ const ALL_AUDIT_KINDS: AuditKind[] = [
 
 type TimeRange = "1h" | "24h" | "7d" | "all"
 
-const TIME_RANGE_OPTIONS: { value: TimeRange; label: string }[] = [
-  { value: "1h", label: "Last hour" },
-  { value: "24h", label: "Last 24h" },
-  { value: "7d", label: "Last 7d" },
-  { value: "all", label: "All" },
-]
+const TIME_RANGE_OPTIONS: TimeRange[] = ["1h", "24h", "7d", "all"]
 
 function timeRangeToMs(range: TimeRange): number | null {
   switch (range) {
@@ -72,6 +68,7 @@ function kindBadgeClass(kind: AuditKind): string {
 }
 
 function AuditRow({ entry }: { entry: AuditEntry }) {
+  const t = useTranslations("settings.connections.audit")
   const [expanded, setExpanded] = useState(false)
   const hasFields = entry.fields && Object.keys(entry.fields).length > 0
 
@@ -84,7 +81,7 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
         onClick={hasFields ? () => setExpanded((v) => !v) : undefined}
         role={hasFields ? "button" : undefined}
         aria-expanded={hasFields ? expanded : undefined}
-        aria-label={hasFields ? `${expanded ? "Collapse" : "Expand"} audit entry` : undefined}
+        aria-label={hasFields ? (expanded ? t("collapseAria") : t("expandAria")) : undefined}
       >
         {hasFields ? (
           expanded ? (
@@ -128,6 +125,7 @@ interface AuditTabProps {
 }
 
 export function AuditTab({ initialTimeRange = "24h" }: AuditTabProps = {}) {
+  const t = useTranslations("settings.connections.audit")
   const [selectedAdapters, setSelectedAdapters] = useState<string[]>([])
   const [selectedKinds, setSelectedKinds] = useState<AuditKind[]>([])
   const [timeRange, setTimeRange] = useState<TimeRange>(initialTimeRange)
@@ -173,13 +171,13 @@ export function AuditTab({ initialTimeRange = "24h" }: AuditTabProps = {}) {
       {/* Redaction reminder */}
       <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
         <ShieldIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        <span>Audit logs are allowlist-redacted; tokens and message bodies never appear here.</span>
+        <span>{t("redactionNotice")}</span>
       </div>
 
       {/* Adapter filter */}
       {adapters && adapters.length > 0 && (
         <div className="space-y-1.5">
-          <p className="text-xs font-medium text-muted-foreground">Filter by adapter</p>
+          <p className="text-xs font-medium text-muted-foreground">{t("filterByAdapter")}</p>
           <div className="flex flex-wrap gap-1.5">
             {adapters.map((a) => (
               <Toggle
@@ -187,7 +185,7 @@ export function AuditTab({ initialTimeRange = "24h" }: AuditTabProps = {}) {
                 size="sm"
                 pressed={selectedAdapters.includes(a.id)}
                 onPressedChange={() => toggleAdapter(a.id)}
-                aria-label={`Filter by adapter ${a.displayName}`}
+                aria-label={t("filterByAdapterAria", { name: a.displayName })}
               >
                 {a.displayName}
               </Toggle>
@@ -198,7 +196,7 @@ export function AuditTab({ initialTimeRange = "24h" }: AuditTabProps = {}) {
 
       {/* Kind filter */}
       <div className="space-y-1.5">
-        <p className="text-xs font-medium text-muted-foreground">Filter by kind</p>
+        <p className="text-xs font-medium text-muted-foreground">{t("filterByKind")}</p>
         <div className="flex flex-wrap gap-1.5">
           {ALL_AUDIT_KINDS.map((kind) => (
             <Toggle
@@ -206,7 +204,7 @@ export function AuditTab({ initialTimeRange = "24h" }: AuditTabProps = {}) {
               size="sm"
               pressed={selectedKinds.includes(kind)}
               onPressedChange={() => toggleKind(kind)}
-              aria-label={`Filter by ${kind}`}
+              aria-label={t("filterByKindAria", { kind })}
             >
               {kind}
             </Toggle>
@@ -216,19 +214,22 @@ export function AuditTab({ initialTimeRange = "24h" }: AuditTabProps = {}) {
 
       {/* Time range */}
       <div className="space-y-1.5">
-        <p className="text-xs font-medium text-muted-foreground">Time range</p>
+        <p className="text-xs font-medium text-muted-foreground">{t("timeRangeLabel")}</p>
         <div className="flex flex-wrap gap-1.5">
-          {TIME_RANGE_OPTIONS.map((opt) => (
-            <Toggle
-              key={opt.value}
-              size="sm"
-              pressed={timeRange === opt.value}
-              onPressedChange={() => setTimeRange(opt.value)}
-              aria-label={opt.label}
-            >
-              {opt.label}
-            </Toggle>
-          ))}
+          {TIME_RANGE_OPTIONS.map((value) => {
+            const label = t(`timeRange.${value}`)
+            return (
+              <Toggle
+                key={value}
+                size="sm"
+                pressed={timeRange === value}
+                onPressedChange={() => setTimeRange(value)}
+                aria-label={label}
+              >
+                {label}
+              </Toggle>
+            )
+          })}
         </div>
       </div>
 
@@ -237,9 +238,7 @@ export function AuditTab({ initialTimeRange = "24h" }: AuditTabProps = {}) {
         <Card>
           <CardContent className="py-8 text-center">
             <AlertTriangleIcon className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">
-              No audit entries match the current filters.
-            </p>
+            <p className="text-sm text-muted-foreground">{t("empty")}</p>
           </CardContent>
         </Card>
       ) : (

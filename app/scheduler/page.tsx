@@ -407,7 +407,7 @@ export default function SchedulerPage() {
   }
 
   return (
-    <SidebarProvider>
+    <SidebarProvider data-bg-target="chat">
       {/* Mobile detail view — full-screen push */}
       {isMobile && mobileView === "detail" && selectedTask && (
         <SchedulerMobileDetailView
@@ -449,7 +449,7 @@ export default function SchedulerPage() {
           highlightedIndex={highlightedIndex}
         />
 
-        <SidebarInset>
+        <SidebarInset data-bg-target="chat">
           <SchedulerContentHeader
             selectedTaskName={selectedTask?.name}
             isRefreshing={isLoading}

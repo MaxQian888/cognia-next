@@ -9,6 +9,7 @@
     "0006-plugin-system",
     "0007-theme-and-background-fix",
     "0008-external-bridge",
-    "0009-platform-connectors"
+    "0009-platform-connectors",
+    "0010-claude-subscription-oauth"
   ]
 }

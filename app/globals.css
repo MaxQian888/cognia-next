@@ -228,11 +228,41 @@ body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target]::before,
 body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target]::before {
   display: block;
   background-image: var(--app-bg-image);
+  /* `attachment: fixed` anchors the image to the viewport rather than each
+     target's box. Without this, every [data-bg-target] paints its own
+     `cover`-sized copy of the image — narrow panels (channel list, sidebar
+     inset) end up zoomed-in on a different crop than the main panel, so
+     the wallpaper looks misaligned at panel seams. With fixed attachment,
+     `cover` sizes the image to the viewport once and each panel only
+     renders the slice that falls within its box, producing a continuous
+     image across panels. */
+  background-attachment: fixed;
   background-position: var(--app-bg-position);
   background-size: var(--app-bg-size);
   background-repeat: var(--app-bg-repeat);
   filter: blur(var(--app-bg-blur));
   opacity: var(--app-bg-opacity);
+}
+
+/* When a wallpaper is painting under a shadcn sidebar, soften the sidebar's
+   own bg so the wallpaper bleeds through. Mirrors the scope rules above:
+   the sidebar only goes translucent when its enclosing [data-bg-target] is
+   actually drawing the wallpaper for the active scope. Without this, the
+   sidebar's opaque `bg-sidebar` would feel disconnected from the wallpaper
+   visible in the SidebarInset / page body. */
+body[data-bg-enabled="true"][data-bg-scope="chat"]
+  [data-bg-target="chat"]
+  [data-slot="sidebar-inner"],
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  [data-slot="sidebar-inner"],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]
+  [data-slot="sidebar-inner"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="sidebar-inner"],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot="sidebar-inner"] {
+  background-color: color-mix(in oklch, var(--sidebar) 55%, transparent);
+  backdrop-filter: blur(8px);
 }
 
 /* ----------------------------------------------------------------------

@@ -6,5 +6,5 @@
  * only provides the min-h-screen container.
  */
 export default function InboxLayout({ children }: { children: React.ReactNode }) {
-  return <div className="min-h-screen bg-background">{children}</div>
+  return <div className="min-h-screen">{children}</div>
 }

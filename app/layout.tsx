@@ -18,6 +18,7 @@ import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provi
 import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provider"
 import { ConnectorBusProvider } from "@/components/connectors/connector-bus-provider"
 import { ConnectorDeepLinkRouter } from "@/components/connectors/connector-deep-link-router"
+import { SubscriptionUsageProvider } from "@/components/providers/subscription-usage-provider"
 import { BackgroundApplier } from "@/lib/appearance"
 import { CustomThemeApplier } from "@/lib/appearance/custom-theme-applier"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
@@ -72,9 +73,11 @@ export default function RootLayout({
                             <CustomThemeApplier />
                             <ConnectorBusProvider>
                               <ConnectorDeepLinkRouter>
-                                <div data-bg-target="global" className="contents">
-                                  {children}
-                                </div>
+                                <SubscriptionUsageProvider>
+                                  <div data-bg-target="global" className="contents">
+                                    {children}
+                                  </div>
+                                </SubscriptionUsageProvider>
                               </ConnectorDeepLinkRouter>
                             </ConnectorBusProvider>
                           </DataAdapterProvider>

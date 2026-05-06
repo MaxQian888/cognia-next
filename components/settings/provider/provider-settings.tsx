@@ -154,12 +154,12 @@ export function ProviderSettings() {
     : (selectedSettings?.enabled ?? false)
 
   return (
-    <div className="space-y-4">
+    <div className="flex h-full min-h-0 flex-col gap-4">
       <ProviderOnboardingBanner />
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-[320px_1fr]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[320px_1fr]">
         {/* ── Sidebar ───────────────────────────────────────────────── */}
-        <div className="flex min-h-[600px] flex-col overflow-hidden rounded-lg border">
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
           {sidebarProviders.length === 0 && search.trim() === "" ? (
             <div className="flex-1 p-4">
               <ProviderEmptyState
@@ -188,7 +188,7 @@ export function ProviderSettings() {
         </div>
 
         {/* ── Detail panel ──────────────────────────────────────────── */}
-        <div className="min-h-[600px] rounded-lg border">
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
           {selectedId === null ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               {t("emptyStateDescription" as never) as string}

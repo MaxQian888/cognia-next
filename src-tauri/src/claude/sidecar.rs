@@ -131,12 +131,22 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    // Inject the user-supplied Anthropic provider env, if any. The sidecar
-    // reads `process.env.ANTHROPIC_API_KEY` (and optionally `ANTHROPIC_BASE_URL`,
-    // for CCSwitch-style proxy providers like Kimi / DeepSeek) and forwards
-    // both to the SDK.
+    // Inject the user-supplied Anthropic provider env, if any. Auth precedence:
+    //   1. OAuth bearer (CLAUDE_CODE_OAUTH_TOKEN) — when the user has signed in
+    //      with their Pro/Max subscription. The `@anthropic-ai/claude-agent-sdk`
+    //      reads this var and sends `Authorization: Bearer ...` plus the
+    //      `oauth-2025-04-20` beta header automatically. We deliberately do
+    //      not also send ANTHROPIC_API_KEY in this case — mixing modes is
+    //      undefined behavior on the SDK side.
+    //   2. ANTHROPIC_API_KEY — legacy + CCSwitch flow.
+    // ANTHROPIC_BASE_URL is orthogonal to auth mode and forwarded whenever set.
     if let Some(api_key_state) = app.try_state::<ApiKeyState>() {
-        if let Some(key) = api_key_state.get().await {
+        if let Some(token) = api_key_state.get_oauth_bearer().await {
+            cmd.env("CLAUDE_CODE_OAUTH_TOKEN", token);
+            // Defensive: ensure no stale API key from the parent process leaks
+            // through to the sidecar when OAuth is the chosen mode.
+            cmd.env_remove("ANTHROPIC_API_KEY");
+        } else if let Some(key) = api_key_state.get().await {
             cmd.env("ANTHROPIC_API_KEY", key);
         }
         if let Some(url) = api_key_state.get_base_url().await {

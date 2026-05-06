@@ -204,9 +204,9 @@ export function StatusBar() {
       </StatusItem>
 
       <StatusItem onClick={cycleTheme} aria-label={t("themeNext")} testId="status-theme">
-        {theme === "light" ? (
+        {mounted && theme === "light" ? (
           <SunIcon aria-hidden className="size-3" />
-        ) : theme === "dark" ? (
+        ) : mounted && theme === "dark" ? (
           <MoonIcon aria-hidden className="size-3" />
         ) : (
           <MonitorIcon aria-hidden className="size-3" />

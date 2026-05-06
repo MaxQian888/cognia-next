@@ -175,6 +175,27 @@ describe("ConnectorBusProvider", () => {
     expect(mockStartOutboundRunner).toHaveBeenCalledTimes(1)
   })
 
+  it("logs and bails when the adapterInstances store is missing (stale IDB)", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    const notFound = Object.assign(new Error("store missing"), { name: "NotFoundError" })
+    mockListEnabled.mockRejectedValue(notFound)
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+
+    render(
+      <ConnectorBusProvider>
+        <div>child</div>
+      </ConnectorBusProvider>
+    )
+
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("adapterInstances"))
+    })
+    expect(mockInstallRuntime).not.toHaveBeenCalled()
+    expect(mockRegisterAdapter).not.toHaveBeenCalled()
+    expect(mockStartOutboundRunner).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
+  })
+
   it("renders children in both modes", () => {
     mockedIsTauri.mockReturnValue(false)
     mockListEnabled.mockResolvedValue([])

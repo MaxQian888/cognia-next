@@ -32,6 +32,7 @@ import type {
   PluginScheduledJobRow,
 } from "./plugin-types"
 import type { WikiArticle, WikiSection, WikiManifest, McpAuditLogRow } from "@/types/wiki"
+import type { SubscriptionUsageRow } from "@/lib/anthropic-subscription/types"
 import type {
   AdapterInstanceRow,
   PlatformIdentityRow,
@@ -93,6 +94,10 @@ export class CogniaDB extends Dexie {
   connectorAudit!: Table<ConnectorAuditRow, string>
   connectorDrafts!: Table<ConnectorDraftRow, string>
   connectorAttachments!: Table<ConnectorAttachmentRow, string>
+  // v20 — Claude subscription usage table. One row per `anthropic-ratelimit-
+  // unified-*` header snapshot; capped at 1 000 rows newest-first by
+  // `lib/anthropic-subscription/usage-collector.ts`.
+  subscriptionUsage!: Table<SubscriptionUsageRow, number>
 
   constructor() {
     super("cognia-claude")
@@ -712,6 +717,24 @@ export class CogniaDB extends Dexie {
       connectorDrafts:
         "&id, conversationKey, sessionId, [conversationKey+createdAt], status, expiresAt",
       connectorAttachments: "&id, [adapterId+remoteRef], adapterId, mimeType, fetchedAt, expiresAt",
+    })
+
+    // v19 — Pure index addition: `conversationOverrides` now has `updatedAt`
+    // indexed so the Conversations settings tab can drive a `orderBy("updatedAt")`
+    // newest-first listing. No upgrade hook needed; existing rows already carry
+    // `updatedAt` (set by `lib/db/conversation-overrides.ts`), Dexie just needs
+    // the keyPath registered on the object store.
+    this.version(19).stores({
+      conversationOverrides: "&id, &conversationKey, sessionId, pinned, archived, updatedAt",
+    })
+
+    // v20 — Claude subscription usage. One row per snapshot of the
+    // `anthropic-ratelimit-unified-*` headers, captured either passively from
+    // real chat traffic or actively from the optional probe loop. The collector
+    // trims oldest rows over the 1 000-row cap; the Overview / Usage tabs query
+    // by `[fetchedAt+source]` for time-windowed views.
+    this.version(20).stores({
+      subscriptionUsage: "++localId, fetchedAt, status, source, [source+fetchedAt]",
     })
   }
 

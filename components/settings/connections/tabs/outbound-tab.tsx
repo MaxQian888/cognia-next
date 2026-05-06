@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { InboxIcon, RefreshCwIcon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -57,6 +58,7 @@ interface OutboundTabProps {
 }
 
 export function OutboundTab({ initialFilter = "all" }: OutboundTabProps = {}) {
+  const t = useTranslations("settings.connections.outbound")
   const [filter, setFilter] = useState<StatusFilter>(initialFilter)
   // Capture render time once so we don't call Date.now() during render on every re-render
   // (satisfies react-hooks/purity). Jobs with nextAttemptAt in the future show a retry hint.
@@ -84,9 +86,9 @@ export function OutboundTab({ initialFilter = "all" }: OutboundTabProps = {}) {
           size="sm"
           pressed={filter === "all"}
           onPressedChange={() => setFilter("all")}
-          aria-label="Show all"
+          aria-label={t("filterAllAria")}
         >
-          All
+          {t("filterAll")}
         </Toggle>
         {ALL_STATUSES.map((s) => (
           <Toggle
@@ -94,7 +96,7 @@ export function OutboundTab({ initialFilter = "all" }: OutboundTabProps = {}) {
             size="sm"
             pressed={filter === s}
             onPressedChange={() => setFilter(s)}
-            aria-label={`Filter ${s}`}
+            aria-label={t("filterStatusAria", { status: s })}
           >
             {s}
           </Toggle>
@@ -106,7 +108,7 @@ export function OutboundTab({ initialFilter = "all" }: OutboundTabProps = {}) {
         <Card>
           <CardContent className="py-8 text-center">
             <InboxIcon className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">No outbound jobs in flight.</p>
+            <p className="text-sm text-muted-foreground">{t("empty")}</p>
           </CardContent>
         </Card>
       ) : (
@@ -120,11 +122,13 @@ export function OutboundTab({ initialFilter = "all" }: OutboundTabProps = {}) {
               <div className="flex-1 min-w-0 space-y-0.5">
                 <p className="truncate font-mono text-xs">{job.conversationKey}</p>
                 <p className="text-xs text-muted-foreground">
-                  Adapter: {job.adapterId} · Attempts: {job.attempts}
+                  {t("adapterLabel", { adapter: job.adapterId, attempts: job.attempts })}
                 </p>
                 {job.status === "failed" && job.nextAttemptAt > now && (
                   <p className="text-xs text-muted-foreground">
-                    Next retry: {new Date(job.nextAttemptAt).toLocaleTimeString()}
+                    {t("nextRetry", {
+                      time: new Date(job.nextAttemptAt).toLocaleTimeString(),
+                    })}
                   </p>
                 )}
               </div>
@@ -134,10 +138,10 @@ export function OutboundTab({ initialFilter = "all" }: OutboundTabProps = {}) {
                     size="sm"
                     variant="outline"
                     onClick={() => retryJob(job.id)}
-                    aria-label={`Retry ${job.id}`}
+                    aria-label={t("retryAria", { id: job.id })}
                   >
                     <RefreshCwIcon className="mr-1.5 h-3.5 w-3.5" />
-                    Retry
+                    {t("retry")}
                   </Button>
                 )}
                 {job.status === "pending" && (
@@ -145,10 +149,10 @@ export function OutboundTab({ initialFilter = "all" }: OutboundTabProps = {}) {
                     size="sm"
                     variant="ghost"
                     onClick={() => cancelJob(job.id)}
-                    aria-label={`Cancel ${job.id}`}
+                    aria-label={t("cancelAria", { id: job.id })}
                   >
                     <XIcon className="mr-1.5 h-3.5 w-3.5" />
-                    Cancel
+                    {t("cancel")}
                   </Button>
                 )}
               </div>

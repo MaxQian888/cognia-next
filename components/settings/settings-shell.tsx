@@ -145,6 +145,10 @@ const CcswitchSection = dynamic(
   () => import("./ccswitch/ccswitch-section").then((m) => m.CcswitchSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
+const SubscriptionSection = dynamic(
+  () => import("./subscription/subscription-section").then((m) => m.SubscriptionSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const ConnectionsSection = dynamic(
   () => import("./connections/connections-section").then((m) => m.ConnectionsSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -156,6 +160,10 @@ interface Props {
 }
 
 const VALID_SECTIONS = new Set<SettingsSectionId>(SETTINGS_NAV.map((n) => n.id))
+
+// Sections that own a list+detail layout and manage their own internal scroll.
+// These bypass the outer ScrollArea so the frame stays fixed while inner panes scroll.
+const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>(["providers"])
 
 function isSection(value: string | null): value is SettingsSectionId {
   return value !== null && VALID_SECTIONS.has(value as SettingsSectionId)
@@ -191,6 +199,7 @@ function SettingsShellInner({ actions }: Props) {
   return (
     <SidebarProvider
       defaultOpen
+      data-bg-target="chat"
       className="flex h-dvh overflow-hidden"
       style={{ "--sidebar-width": "15rem" } as React.CSSProperties}
     >
@@ -201,7 +210,7 @@ function SettingsShellInner({ actions }: Props) {
         onSearchChange={setSearchQuery}
       />
 
-      <SidebarInset className="flex flex-col min-w-0 h-full overflow-hidden">
+      <SidebarInset data-bg-target="chat" className="flex flex-col min-w-0 h-full overflow-hidden">
         <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 z-10">
           <Button
             variant="ghost"
@@ -227,13 +236,24 @@ function SettingsShellInner({ actions }: Props) {
           {actions}
         </header>
 
-        <ScrollArea className="flex-1 min-h-0">
-          <div className="p-3 sm:p-4 md:p-5 lg:p-6" data-settings-panel>
-            <div className="mx-auto w-full max-w-5xl animate-in fade-in slide-in-from-bottom-2 duration-200">
+        {FILL_HEIGHT_SECTIONS.has(activeSection) ? (
+          <div
+            className="flex flex-1 min-h-0 flex-col p-3 sm:p-4 md:p-5 lg:p-6"
+            data-settings-panel
+          >
+            <div className="mx-auto flex w-full min-h-0 flex-1 flex-col animate-in fade-in slide-in-from-bottom-2 duration-200">
               <SectionContent section={activeSection} onClose={goHome} />
             </div>
           </div>
-        </ScrollArea>
+        ) : (
+          <ScrollArea className="flex-1 min-h-0">
+            <div className="p-3 sm:p-4 md:p-5 lg:p-6" data-settings-panel>
+              <div className="mx-auto w-full max-w-5xl animate-in fade-in slide-in-from-bottom-2 duration-200">
+                <SectionContent section={activeSection} onClose={goHome} />
+              </div>
+            </div>
+          </ScrollArea>
+        )}
       </SidebarInset>
     </SidebarProvider>
   )
@@ -247,6 +267,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <ApiKeySection />
     case "providers":
       return <ProvidersSection />
+    case "subscription":
+      return <SubscriptionSection />
     case "ccswitch":
       return <CcswitchSection />
     case "agents":

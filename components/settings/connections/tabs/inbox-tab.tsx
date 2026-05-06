@@ -13,6 +13,7 @@
  */
 
 import Link from "next/link"
+import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { InboxIcon, ExternalLinkIcon } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -31,6 +32,7 @@ interface AdapterStats {
 }
 
 export function InboxTab() {
+  const t = useTranslations("settings.connections.inbox")
   const stats = useLiveQuery<AdapterStats[]>(async () => {
     if (typeof window === "undefined") return []
     const db = getDb()
@@ -71,13 +73,11 @@ export function InboxTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          Per-adapter conversation summary. Use the Inbox for the full view.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("summary")}</p>
         <Button asChild variant="outline" size="sm">
           <Link href="/inbox" data-testid="open-inbox-link">
             <InboxIcon className="h-4 w-4 mr-2" />
-            Open Inbox
+            {t("openInbox")}
             <ExternalLinkIcon className="h-3 w-3 ml-1" />
           </Link>
         </Button>
@@ -86,7 +86,7 @@ export function InboxTab() {
       {!stats || stats.length === 0 ? (
         <Card>
           <CardContent className="py-4">
-            <p className="text-xs text-muted-foreground">No adapters configured yet.</p>
+            <p className="text-xs text-muted-foreground">{t("noAdapters")}</p>
           </CardContent>
         </Card>
       ) : (
@@ -103,10 +103,22 @@ export function InboxTab() {
               </CardHeader>
               <CardContent className="pb-3">
                 <div className="grid grid-cols-4 gap-2 text-center text-xs">
-                  <StatCell label="Total" value={total} testId={`total-${adapter.id}`} />
-                  <StatCell label="Unread" value={unread} testId={`unread-${adapter.id}`} />
-                  <StatCell label="Pinned" value={pinned} testId={`pinned-${adapter.id}`} />
-                  <StatCell label="Archived" value={archived} testId={`archived-${adapter.id}`} />
+                  <StatCell label={t("totalLabel")} value={total} testId={`total-${adapter.id}`} />
+                  <StatCell
+                    label={t("unreadLabel")}
+                    value={unread}
+                    testId={`unread-${adapter.id}`}
+                  />
+                  <StatCell
+                    label={t("pinnedLabel")}
+                    value={pinned}
+                    testId={`pinned-${adapter.id}`}
+                  />
+                  <StatCell
+                    label={t("archivedLabel")}
+                    value={archived}
+                    testId={`archived-${adapter.id}`}
+                  />
                 </div>
               </CardContent>
             </Card>

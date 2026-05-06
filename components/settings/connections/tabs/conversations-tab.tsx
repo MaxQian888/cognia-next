@@ -13,6 +13,7 @@
  */
 
 import { useRouter } from "next/navigation"
+import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { PinIcon, ArchiveIcon, Trash2Icon, ExternalLinkIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -23,6 +24,7 @@ import type { ConversationOverrideRow } from "@/lib/db/connector-types"
 import { setArchived, setPinned } from "@/lib/db/conversation-overrides"
 
 export function ConversationsTab() {
+  const t = useTranslations("settings.connections.conversations")
   const router = useRouter()
 
   const overrides = useLiveQuery<ConversationOverrideRow[]>(
@@ -48,14 +50,11 @@ export function ConversationsTab() {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium">Conversation overrides</CardTitle>
+        <CardTitle className="text-sm font-medium">{t("heading")}</CardTitle>
       </CardHeader>
       <CardContent>
         {!overrides || overrides.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
-            No conversation overrides yet. Platform conversations appear here once you interact with
-            them.
-          </p>
+          <p className="text-xs text-muted-foreground">{t("empty")}</p>
         ) : (
           <ul className="space-y-2" data-testid="conversations-list">
             {overrides.map((row) => (
@@ -83,19 +82,19 @@ export function ConversationsTab() {
                     )}
                     {row.characterId && (
                       <Badge variant="secondary" className="text-xs">
-                        char:{row.characterId.slice(0, 8)}
+                        {t("characterPrefix", { id: row.characterId.slice(0, 8) })}
                       </Badge>
                     )}
                     {row.pinned && (
                       <Badge variant="default" className="text-xs">
                         <PinIcon className="h-2.5 w-2.5 mr-0.5" />
-                        pinned
+                        {t("pinnedBadge")}
                       </Badge>
                     )}
                     {row.archived && (
                       <Badge variant="secondary" className="text-xs">
                         <ArchiveIcon className="h-2.5 w-2.5 mr-0.5" />
-                        archived
+                        {t("archivedBadge")}
                       </Badge>
                     )}
                   </div>
@@ -107,7 +106,7 @@ export function ConversationsTab() {
                     size="icon"
                     className="h-7 w-7"
                     onClick={() => void handleTogglePin(row)}
-                    aria-label="Toggle pin"
+                    aria-label={t("togglePin")}
                     data-testid={`pin-btn-${row.id}`}
                   >
                     <PinIcon className="h-3.5 w-3.5" />
@@ -117,7 +116,7 @@ export function ConversationsTab() {
                     size="icon"
                     className="h-7 w-7"
                     onClick={() => void handleToggleArchive(row)}
-                    aria-label="Toggle archive"
+                    aria-label={t("toggleArchive")}
                     data-testid={`archive-btn-${row.id}`}
                   >
                     <ArchiveIcon className="h-3.5 w-3.5" />
@@ -129,7 +128,7 @@ export function ConversationsTab() {
                     onClick={() =>
                       router.push(`/inbox/c/${encodeURIComponent(row.conversationKey)}`)
                     }
-                    aria-label="Open conversation"
+                    aria-label={t("openConversation")}
                     data-testid={`open-btn-${row.id}`}
                   >
                     <ExternalLinkIcon className="h-3.5 w-3.5" />
@@ -139,7 +138,7 @@ export function ConversationsTab() {
                     size="icon"
                     className="h-7 w-7 text-destructive hover:text-destructive"
                     onClick={() => void handleDelete(row.id)}
-                    aria-label="Delete override"
+                    aria-label={t("deleteOverride")}
                     data-testid={`delete-btn-${row.id}`}
                   >
                     <Trash2Icon className="h-3.5 w-3.5" />

@@ -12,6 +12,7 @@
 // On Save: creates / updates the AdapterInstanceRow and writes secrets to keyring.
 
 import { useState } from "react"
+import { useTranslations } from "next-intl"
 import { CheckCircle2Icon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -92,9 +93,10 @@ interface SlackConfigDialogProps {
 }
 
 export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialogProps) {
+  const t = useTranslations("settings.connections.slack")
   const isNew = row === null
 
-  const [displayName, setDisplayName] = useState(row?.displayName ?? "My Slack Bot")
+  const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
   const [botToken, setBotToken] = useState("")
   const [signingSecret, setSigningSecret] = useState("")
   const [appToken, setAppToken] = useState("")
@@ -111,7 +113,7 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
 
   const handleTest = async () => {
     if (!botToken.trim()) {
-      toast.error("Enter a bot token first.")
+      toast.error(t("tokenRequiredForTest"))
       return
     }
     setTesting(true)
@@ -121,17 +123,20 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
     setTesting(false)
     if (result.ok) {
       toast.success(
-        `Connected: ${result.user ?? "unknown"} @ ${result.team ?? "unknown workspace"}`
+        t("connectedToast", {
+          user: result.user ?? t("unknownUser"),
+          team: result.team ?? t("unknownTeam"),
+        })
       )
     } else {
-      toast.error(result.error ?? "Connection failed")
+      toast.error(result.error ?? t("connectionFailedToast"))
     }
   }
 
   const handleOAuth = () => {
     const clientId = process.env.NEXT_PUBLIC_SLACK_CLIENT_ID ?? ""
     if (!clientId) {
-      toast.error("NEXT_PUBLIC_SLACK_CLIENT_ID is not set.")
+      toast.error(t("oauthClientIdMissing"))
       return
     }
     // Generate a random CSRF state and store it
@@ -153,19 +158,19 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
 
   const handleSave = async () => {
     if (!displayName.trim()) {
-      toast.error("Display name is required.")
+      toast.error(t("displayNameRequired"))
       return
     }
     if (isNew && !botToken.trim()) {
-      toast.error("Bot token is required.")
+      toast.error(t("botTokenRequired"))
       return
     }
     if (isNew && !signingSecret.trim()) {
-      toast.error("Signing secret is required.")
+      toast.error(t("signingSecretRequired"))
       return
     }
     if (isNew && transport === "socket-mode" && !appToken.trim()) {
-      toast.error("App token is required for Socket Mode.")
+      toast.error(t("appTokenRequired"))
       return
     }
 
@@ -209,7 +214,7 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
         await connectorsKeyringSet(adapterId, "appToken", appToken.trim())
       }
 
-      toast.success(isNew ? "Adapter created." : "Adapter updated.")
+      toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -222,18 +227,18 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{isNew ? "Add Slack Bot" : "Configure Slack Bot"}</DialogTitle>
+          <DialogTitle>{isNew ? t("titleNew") : t("titleEdit")}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
           {/* Display name */}
           <div className="space-y-1.5">
-            <Label htmlFor="sl-display-name">Display name</Label>
+            <Label htmlFor="sl-display-name">{t("displayNameLabel")}</Label>
             <Input
               id="sl-display-name"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="My Slack Bot"
+              placeholder={t("displayNamePlaceholder")}
               disabled={saving}
             />
           </div>
@@ -241,11 +246,10 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
           {/* Bot token + test */}
           <div className="space-y-1.5">
             <Label htmlFor="sl-bot-token">
-              Bot Token<span className="ml-1 text-destructive">*</span>
+              {t("botTokenLabel")}
+              <span className="ml-1 text-destructive">*</span>
             </Label>
-            <p className="text-xs text-muted-foreground">
-              xoxb-... token from the Slack App OAuth page. Stored encrypted in the OS keyring.
-            </p>
+            <p className="text-xs text-muted-foreground">{t("botTokenHelp")}</p>
             <div className="flex gap-2">
               <Input
                 id="sl-bot-token"
@@ -253,7 +257,7 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
                 autoComplete="new-password"
                 value={botToken}
                 onChange={(e) => setBotToken(e.target.value)}
-                placeholder="xoxb-..."
+                placeholder={t("botTokenPlaceholder")}
                 disabled={saving}
                 className="flex-1"
               />
@@ -263,9 +267,13 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
                 variant="outline"
                 onClick={handleTest}
                 disabled={testing || saving || !desktop}
-                aria-label="Test connection"
+                aria-label={t("testConnectionAria")}
               >
-                {testing ? <LoaderIcon className="h-3.5 w-3.5 animate-spin" /> : "Test"}
+                {testing ? (
+                  <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  t("testButtonLabel")
+                )}
               </Button>
             </div>
 
@@ -278,7 +286,9 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
                     : "bg-destructive/10 text-destructive"
                 }`}
                 role="status"
-                aria-label={testResult.ok ? "Connection successful" : "Connection failed"}
+                aria-label={
+                  testResult.ok ? t("connectionSucceededLabel") : t("connectionFailedLabel")
+                }
               >
                 {testResult.ok ? (
                   <CheckCircle2Icon className="h-3.5 w-3.5 shrink-0" />
@@ -286,14 +296,18 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
                   <XCircleIcon className="h-3.5 w-3.5 shrink-0" />
                 )}
                 {testResult.ok
-                  ? `${testResult.user ?? "unknown"} @ ${testResult.team ?? "unknown"} (id: ${testResult.userId ?? "?"})`
+                  ? t("connectedAs", {
+                      user: testResult.user ?? t("unknownUser"),
+                      team: testResult.team ?? t("unknownUser"),
+                      userId: testResult.userId ?? t("unknownId"),
+                    })
                   : testResult.error}
               </div>
             )}
 
             {!desktop && (
               <p className="text-xs text-amber-600 dark:text-amber-400">
-                Token testing requires the desktop runtime.
+                {t("testRequiresDesktop")}
               </p>
             )}
           </div>
@@ -303,25 +317,24 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
           {/* Signing secret */}
           <div className="space-y-1.5">
             <Label htmlFor="sl-signing-secret">
-              Signing Secret<span className="ml-1 text-destructive">*</span>
+              {t("signingSecretLabel")}
+              <span className="ml-1 text-destructive">*</span>
             </Label>
-            <p className="text-xs text-muted-foreground">
-              From Slack App &gt; Basic Information. Used to verify incoming webhook requests.
-            </p>
+            <p className="text-xs text-muted-foreground">{t("signingSecretHelp")}</p>
             <Input
               id="sl-signing-secret"
               type="password"
               autoComplete="new-password"
               value={signingSecret}
               onChange={(e) => setSigningSecret(e.target.value)}
-              placeholder="Signing secret…"
+              placeholder={t("signingSecretPlaceholder")}
               disabled={saving}
             />
           </div>
 
           {/* Transport */}
           <div className="space-y-1.5">
-            <Label htmlFor="sl-transport">Transport</Label>
+            <Label htmlFor="sl-transport">{t("transportLabel")}</Label>
             <Select
               value={transport}
               onValueChange={(v) => setTransport(v as TransportMode)}
@@ -331,8 +344,8 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="socket-mode">Socket Mode</SelectItem>
-                <SelectItem value="events-api-webhook">Events API webhook</SelectItem>
+                <SelectItem value="socket-mode">{t("transportSocketMode")}</SelectItem>
+                <SelectItem value="events-api-webhook">{t("transportEventsApi")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -341,18 +354,17 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
           {transport === "socket-mode" && (
             <div className="space-y-1.5">
               <Label htmlFor="sl-app-token">
-                App Token<span className="ml-1 text-destructive">*</span>
+                {t("appTokenLabel")}
+                <span className="ml-1 text-destructive">*</span>
               </Label>
-              <p className="text-xs text-muted-foreground">
-                xapp-... app-level token with connections:write scope. Required for Socket Mode.
-              </p>
+              <p className="text-xs text-muted-foreground">{t("appTokenHelp")}</p>
               <Input
                 id="sl-app-token"
                 type="password"
                 autoComplete="new-password"
                 value={appToken}
                 onChange={(e) => setAppToken(e.target.value)}
-                placeholder="xapp-..."
+                placeholder={t("appTokenPlaceholder")}
                 disabled={saving}
               />
             </div>
@@ -362,18 +374,16 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
 
           {/* OAuth button */}
           <div className="space-y-1.5">
-            <p className="text-xs text-muted-foreground">
-              Alternatively, authorize via OAuth to let Slack generate the bot token automatically.
-            </p>
+            <p className="text-xs text-muted-foreground">{t("oauthHint")}</p>
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={handleOAuth}
               disabled={saving}
-              aria-label="Connect via OAuth"
+              aria-label={t("oauthButtonAria")}
             >
-              Connect via OAuth
+              {t("oauthButton")}
             </Button>
           </div>
 
@@ -385,10 +395,10 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
               onClick={() => onOpenChange(false)}
               disabled={saving}
             >
-              Cancel
+              {t("cancel")}
             </Button>
             <Button type="button" onClick={handleSave} disabled={saving}>
-              {saving ? "Saving…" : isNew ? "Create" : "Save"}
+              {saving ? t("saving") : isNew ? t("create") : t("save")}
             </Button>
           </div>
         </div>

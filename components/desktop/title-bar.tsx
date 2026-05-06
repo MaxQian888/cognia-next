@@ -45,6 +45,17 @@ import { useEffect, useState, useSyncExternalStore } from "react"
 const log = loggers.ui
 const NARROW_QUERY = "(max-width: 760px)"
 
+// Override classes applied at the call site of every MenubarContent /
+// DropdownMenuContent inside the title bar. The shadcn primitives ship with
+// `animate-in` / `animate-out` enter+exit keyframes plus a soft `shadow-md`,
+// which on Windows WebView2 cause the popovers to repaint a large area on every
+// open / cross-menu hover switch. Killing the animations and dropping the
+// shadow weight removes the per-frame paint cost; `will-change` hints the
+// compositor to promote the popover to its own layer. tailwind-merge dedupes
+// against the vendor classes so we don't have to fork components/ui/menubar.
+const MENU_CONTENT_PERF =
+  "data-[state=open]:!animate-none data-[state=closed]:!animate-none shadow-sm [will-change:transform,opacity]"
+
 type WindowApi = {
   minimize: () => Promise<void>
   toggleMaximize: () => Promise<void>
@@ -80,6 +91,48 @@ function useNarrow(): boolean {
   )
 }
 
+// The chat-store status (changes per token during streaming) and the two
+// dexie-react-hooks live queries (re-fire on any sessions / characters write)
+// used to live on TitleBar itself, which forced the entire menubar tree to
+// re-render whenever the active chat changed. Lifting them into a leaf
+// component scoped to the search pill keeps the menubar render-stable.
+function TitleBarSearchPill({
+  appName,
+  separator,
+  placeholder,
+  kbdHint,
+  onClick,
+}: {
+  appName: string
+  separator: string
+  placeholder: string
+  kbdHint: string
+  onClick: () => void
+}) {
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const status = useChatStore((s) => s.status)
+  const session = useLiveQuery(
+    () => (activeSessionId ? getSession(activeSessionId) : Promise.resolve(undefined)),
+    [activeSessionId]
+  )
+  const character = useLiveQuery(
+    () => (session?.characterId ? getCharacter(session.characterId) : Promise.resolve(undefined)),
+    [session?.characterId]
+  )
+  const doc = character?.name ?? session?.title ?? null
+  const title = doc ? `${appName}${separator}${doc}` : appName
+  const isStreaming = status === "streaming"
+  return (
+    <QuickSearchPill
+      title={title}
+      placeholder={placeholder}
+      kbdHint={kbdHint}
+      isStreaming={isStreaming}
+      onClick={onClick}
+    />
+  )
+}
+
 /**
  * VSCode-style frameless title bar (active when `decorations: false`).
  *
@@ -100,17 +153,6 @@ export function TitleBar() {
   const [alwaysOnTop, setAlwaysOnTopState] = useState(false)
   const [platform, setPlatform] = useState<string>("")
   const [systemMenu, setSystemMenu] = useState<{ x: number; y: number } | null>(null)
-
-  const activeSessionId = useChatStore((s) => s.activeSessionId)
-  const status = useChatStore((s) => s.status)
-  const session = useLiveQuery(
-    () => (activeSessionId ? getSession(activeSessionId) : Promise.resolve(undefined)),
-    [activeSessionId]
-  )
-  const character = useLiveQuery(
-    () => (session?.characterId ? getCharacter(session.characterId) : Promise.resolve(undefined)),
-    [session?.characterId]
-  )
 
   const toggleSidebar = useUIStore((s) => s.toggleSidebar)
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
@@ -156,9 +198,6 @@ export function TitleBar() {
 
   const isMac = platform.includes("mac")
   const appName = t("appName")
-  const doc = character?.name ?? session?.title ?? null
-  const title = doc ? `${appName}${t("separator")}${doc}` : appName
-  const isStreaming = status === "streaming"
   const zoom = clampZoom(persistedZoom ?? DEFAULT_ZOOM)
 
   const handleMin = async () => {
@@ -374,7 +413,11 @@ export function TitleBar() {
               >
                 <MenuIcon className="size-4" />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" sideOffset={4} className="w-60">
+              <DropdownMenuContent
+                align="start"
+                sideOffset={4}
+                className={cn("w-60", MENU_CONTENT_PERF)}
+              >
                 {/* File */}
                 <DropdownMenuLabel>{tMenu("file.label")}</DropdownMenuLabel>
                 <DropdownMenuItem onSelect={handleNewChat}>
@@ -496,7 +539,7 @@ export function TitleBar() {
                 <MenubarTrigger className="px-2 py-0.5 text-xs">
                   {tMenu("file.label")}
                 </MenubarTrigger>
-                <MenubarContent>
+                <MenubarContent className={MENU_CONTENT_PERF}>
                   <MenubarItem onSelect={handleNewChat}>
                     {tMenu("file.newChat")}
                     <MenubarShortcut>{tMenu("shortcut.cmdOrCtrlN")}</MenubarShortcut>
@@ -521,7 +564,7 @@ export function TitleBar() {
                 <MenubarTrigger className="px-2 py-0.5 text-xs">
                   {tMenu("edit.label")}
                 </MenubarTrigger>
-                <MenubarContent>
+                <MenubarContent className={MENU_CONTENT_PERF}>
                   <MenubarItem onSelect={execEdit("undo")}>{tMenu("edit.undo")}</MenubarItem>
                   <MenubarItem onSelect={execEdit("redo")}>{tMenu("edit.redo")}</MenubarItem>
                   <MenubarSeparator />
@@ -542,7 +585,7 @@ export function TitleBar() {
                 <MenubarTrigger className="px-2 py-0.5 text-xs">
                   {tMenu("view.label")}
                 </MenubarTrigger>
-                <MenubarContent>
+                <MenubarContent className={MENU_CONTENT_PERF}>
                   <MenubarItem onSelect={handleCommandPalette}>
                     {tMenu("view.commandPalette")}
                     <MenubarShortcut>{tMenu("shortcut.cmdOrCtrlShiftP")}</MenubarShortcut>
@@ -581,7 +624,7 @@ export function TitleBar() {
               </MenubarMenu>
               <MenubarMenu>
                 <MenubarTrigger className="px-2 py-0.5 text-xs">{tMenu("go.label")}</MenubarTrigger>
-                <MenubarContent>
+                <MenubarContent className={MENU_CONTENT_PERF}>
                   <MenubarItem onSelect={handleGo("dms")}>{tMenu("go.dms")}</MenubarItem>
                   <MenubarItem onSelect={handleGo("canvas")}>{tMenu("go.canvas")}</MenubarItem>
                   <MenubarItem onSelect={handleGo("twin")}>{tMenu("go.twin")}</MenubarItem>
@@ -594,7 +637,7 @@ export function TitleBar() {
                 <MenubarTrigger className="px-2 py-0.5 text-xs">
                   {tMenu("window.label")}
                 </MenubarTrigger>
-                <MenubarContent>
+                <MenubarContent className={MENU_CONTENT_PERF}>
                   <MenubarItem onSelect={() => void handleAlwaysOnTop()}>
                     {tMenu("window.alwaysOnTop")}
                     {alwaysOnTop && <MenubarShortcut>✓</MenubarShortcut>}
@@ -616,7 +659,7 @@ export function TitleBar() {
                 <MenubarTrigger className="px-2 py-0.5 text-xs">
                   {tMenu("help.label")}
                 </MenubarTrigger>
-                <MenubarContent>
+                <MenubarContent className={MENU_CONTENT_PERF}>
                   <MenubarItem onSelect={() => void handleDocumentation()}>
                     {tMenu("help.documentation")}
                   </MenubarItem>
@@ -628,11 +671,11 @@ export function TitleBar() {
       </div>
 
       <div data-tauri-drag-region className="flex flex-1 items-center justify-center px-2 min-w-0">
-        <QuickSearchPill
-          title={title}
+        <TitleBarSearchPill
+          appName={appName}
+          separator={t("separator")}
           placeholder={t("searchPlaceholder")}
           kbdHint={t("kbdHint")}
-          isStreaming={isStreaming}
           onClick={handleCommandPalette}
         />
       </div>
@@ -677,7 +720,7 @@ export function TitleBar() {
             }}
             aria-hidden
           />
-          <DropdownMenuContent align="start" sideOffset={0}>
+          <DropdownMenuContent align="start" sideOffset={0} className={MENU_CONTENT_PERF}>
             <DropdownMenuItem
               disabled={!maximized}
               onSelect={async () => {

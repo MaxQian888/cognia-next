@@ -966,7 +966,8 @@
       "remoteControl": "Remote Control",
       "externalBridge": "External Bridge (MCP)",
       "providers": "Providers",
-      "connections": "Connections"
+      "connections": "Connections",
+      "subscription": "Claude Subscription"
     },
     "descriptions": {
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
@@ -1000,7 +1001,8 @@
       "remoteControl": "Local HTTP listener for inbound triggers, plus webhook signing and custom headers for outbound calls.",
       "externalBridge": "MCP server that exposes Cognia's wiki, RAG, and runtime entities to external coding agents (Claude Code, Cursor, Cline). Opt-in per scope.",
       "providers": "AI provider API keys, models, and connection settings.",
-      "connections": "Configure messaging platform adapters (Telegram, Discord, Slack, ...) and manage the outbound delivery queue."
+      "connections": "Configure messaging platform adapters (Telegram, Discord, Slack, ...) and manage the outbound delivery queue.",
+      "subscription": "Sign in with your Claude Pro/Max subscription, monitor 5h/7d rate-limit windows, and manage OAuth credentials in your OS keychain."
     },
     "canvas": {
       "title": "Canvas",
@@ -1973,6 +1975,44 @@
         "emptyBody": "Sub-agents spawned by an active chat will appear here. The runtime is in-memory and resets when the app restarts.",
         "parent": "parent: {id}",
         "duration": "{ms}ms"
+      },
+      "import": {
+        "trigger": "Import",
+        "title": "Import sub-agents",
+        "description": "Read sub-agent configurations from external tools and convert them to cognia templates or characters.",
+        "step1Title": "Select source",
+        "step2Title": "Select files",
+        "step3Title": "Review and import",
+        "sources": {
+          "auto": "Auto detect",
+          "claude-code": "Claude Code (.claude/agents/*.md)",
+          "codex-cli": "Codex CLI (~/.codex/agents/*.md)",
+          "cursor": "Cursor (.cursor/rules/*.mdc)",
+          "cline": "Cline (.clinerules/*.md)",
+          "generic-md": "Generic markdown + frontmatter"
+        },
+        "tauriPickHint": "Pick one or more agent files from your filesystem.",
+        "webPickHint": "Drop files here or click to browse.",
+        "webPickFormats": "Accepts .md / .markdown / .mdc / .yaml / .yml.",
+        "pickFiles": "Choose files",
+        "noDrafts": "No agents were parsed from the selected files.",
+        "warningsHeader": "{count} file(s) failed to parse",
+        "targetLabel": "Import as",
+        "strategyLabel": "When a name already exists",
+        "target": {
+          "subagentTemplate": "Sub-agent template",
+          "character": "Character"
+        },
+        "strategy": {
+          "skip": "Skip duplicates",
+          "overwrite": "Overwrite existing",
+          "duplicate": "Keep both (rename copy)"
+        },
+        "applyButton": "Import {count} agent(s)",
+        "summary": "Imported {imported}, skipped {skipped}, overwritten {overwritten}, failed {failed}.",
+        "errors": {
+          "pickFailed": "Could not read the selected files."
+        }
       }
     },
     "hooks": {
@@ -2480,6 +2520,313 @@
           "agentCompleted": "An agent task finished.",
           "custom": "Free-form event — typically posted from external tooling."
         }
+      }
+    },
+    "connections": {
+      "title": "Platform Connections",
+      "description": "Configure messaging platform adapters (Telegram, Discord, Slack, …) and manage the outbound delivery queue.",
+      "webModeBanner": {
+        "ariaLabel": "Web mode banner",
+        "body": "Adapters require the desktop app — open cognia-next on your desktop to configure connectors. Already-configured conversations sync read-only here."
+      },
+      "tabs": {
+        "overview": "Overview",
+        "adapters": "Adapters",
+        "conversations": "Conversations",
+        "inbox": "Inbox",
+        "outbound": "Outbound",
+        "audit": "Audit"
+      },
+      "overview": {
+        "serverHeading": "Connector Server",
+        "desktopOnlyNotice": "Platform connectors require the desktop (Tauri) runtime.",
+        "statusRunning": "Running — {addr}",
+        "statusStopped": "Stopped",
+        "statusUnknown": "Unknown",
+        "adapterCount": "{count} adapter registered",
+        "adapterCountPlural": "{count} adapters registered",
+        "adaptersHeading": "Adapters",
+        "noAdapters": "No adapters configured yet.",
+        "disabledBadge": "disabled",
+        "recentActivityHeading": "Recent Activity",
+        "noRecentActivity": "No recent activity."
+      },
+      "adapters": {
+        "manageHint": "Manage your platform adapter instances.",
+        "addAdapter": "Add adapter",
+        "comingSoon": "Coming soon",
+        "noAdaptersTitle": "No adapters configured yet.",
+        "noAdaptersHint": "Click \"Add adapter\" to add your first platform connection.",
+        "enableAria": "Enable {name}",
+        "disableAria": "Disable {name}",
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "configure": "Configure",
+        "configureAria": "Configure {name}"
+      },
+      "conversations": {
+        "heading": "Conversation overrides",
+        "empty": "No conversation overrides yet. Platform conversations appear here once you interact with them.",
+        "characterPrefix": "char:{id}",
+        "pinnedBadge": "pinned",
+        "archivedBadge": "archived",
+        "togglePin": "Toggle pin",
+        "toggleArchive": "Toggle archive",
+        "openConversation": "Open conversation",
+        "deleteOverride": "Delete override"
+      },
+      "inbox": {
+        "summary": "Per-adapter conversation summary. Use the Inbox for the full view.",
+        "openInbox": "Open Inbox",
+        "noAdapters": "No adapters configured yet.",
+        "totalLabel": "Total",
+        "unreadLabel": "Unread",
+        "pinnedLabel": "Pinned",
+        "archivedLabel": "Archived"
+      },
+      "outbound": {
+        "filterAll": "All",
+        "filterAllAria": "Show all",
+        "filterStatusAria": "Filter {status}",
+        "empty": "No outbound jobs in flight.",
+        "adapterLabel": "Adapter: {adapter} · Attempts: {attempts}",
+        "nextRetry": "Next retry: {time}",
+        "retry": "Retry",
+        "retryAria": "Retry {id}",
+        "cancel": "Cancel",
+        "cancelAria": "Cancel {id}"
+      },
+      "audit": {
+        "redactionNotice": "Audit logs are allowlist-redacted; tokens and message bodies never appear here.",
+        "filterByAdapter": "Filter by adapter",
+        "filterByAdapterAria": "Filter by adapter {name}",
+        "filterByKind": "Filter by kind",
+        "filterByKindAria": "Filter by {kind}",
+        "timeRangeLabel": "Time range",
+        "timeRange": {
+          "1h": "Last hour",
+          "24h": "Last 24h",
+          "7d": "Last 7d",
+          "all": "All"
+        },
+        "empty": "No audit entries match the current filters.",
+        "expandAria": "Expand audit entry",
+        "collapseAria": "Collapse audit entry"
+      },
+      "telegram": {
+        "titleNew": "Add Telegram Bot",
+        "titleEdit": "Configure Telegram Bot",
+        "displayNameLabel": "Display name",
+        "displayNamePlaceholder": "My Telegram Bot",
+        "botTokenLabel": "Bot Token",
+        "botTokenHelp": "Obtain from @BotFather. The token is stored encrypted in the OS keyring and never logged.",
+        "botTokenPlaceholder": "1234567890:ABCDEF…",
+        "testConnectionAria": "Test connection",
+        "testButtonLabel": "Test",
+        "testRequiresDesktop": "Token testing requires the desktop runtime.",
+        "transportLabel": "Transport",
+        "transportLongpoll": "Long Polling",
+        "transportWebhook": "Webhook",
+        "transportLongpollHelp": "Cognia polls Telegram servers directly. No public URL required.",
+        "transportWebhookHelp": "Telegram pushes updates to a public URL you configure in @BotFather.",
+        "webhookSecretLabel": "Webhook Secret Token (optional)",
+        "webhookSecretHelpPrefix": "If set, Telegram will include this in the",
+        "webhookSecretHelpSuffix": "header.",
+        "webhookSecretPlaceholder": "Optional secret",
+        "cancel": "Cancel",
+        "save": "Save",
+        "create": "Create",
+        "saving": "Saving…",
+        "tokenRequiredForTest": "Enter a bot token first.",
+        "displayNameRequired": "Display name is required.",
+        "botTokenRequired": "Bot token is required.",
+        "connectionSucceededLabel": "Connection successful",
+        "connectionFailedLabel": "Connection failed",
+        "connectedAs": "Connected as @{username} (id: {id})",
+        "connectedToast": "Connected as @{username}",
+        "connectionFailedToast": "Connection failed",
+        "unknownUsername": "unknown",
+        "unknownId": "?",
+        "adapterCreated": "Adapter created.",
+        "adapterUpdated": "Adapter updated."
+      },
+      "discord": {
+        "titleNew": "Add Discord Bot",
+        "titleEdit": "Configure Discord Bot",
+        "displayNameLabel": "Display name",
+        "displayNamePlaceholder": "My Discord Bot",
+        "botTokenLabel": "Bot Token",
+        "botTokenHelp": "Obtain from the Discord Developer Portal. Stored encrypted in the OS keyring.",
+        "botTokenPlaceholder": "Bot token…",
+        "testConnectionAria": "Test connection",
+        "testButtonLabel": "Test",
+        "testRequiresDesktop": "Token testing requires the desktop runtime.",
+        "publicKeyLabel": "Public Key (optional)",
+        "publicKeyHelp": "Ed25519 public key from the Discord Developer Portal. Required only if you enable webhook / interactions mode in a future phase.",
+        "publicKeyPlaceholder": "64-character hex key",
+        "transportInfoPrefix": "Transport:",
+        "transportInfoValue": "Gateway (WebSocket)",
+        "transportInfoSuffix": "— Cognia connects to the Discord Gateway directly. No public URL required.",
+        "cancel": "Cancel",
+        "save": "Save",
+        "create": "Create",
+        "saving": "Saving…",
+        "tokenRequiredForTest": "Enter a bot token first.",
+        "displayNameRequired": "Display name is required.",
+        "botTokenRequired": "Bot token is required.",
+        "connectionSucceededLabel": "Connection successful",
+        "connectionFailedLabel": "Connection failed",
+        "connectedAs": "Connected as {username} (id: {id})",
+        "connectedToast": "Connected as {username}",
+        "connectionFailedToast": "Connection failed",
+        "unknownUsername": "unknown",
+        "unknownId": "?",
+        "adapterCreated": "Adapter created.",
+        "adapterUpdated": "Adapter updated."
+      },
+      "slack": {
+        "titleNew": "Add Slack Bot",
+        "titleEdit": "Configure Slack Bot",
+        "displayNameLabel": "Display name",
+        "displayNamePlaceholder": "My Slack Bot",
+        "botTokenLabel": "Bot Token",
+        "botTokenHelp": "xoxb-... token from the Slack App OAuth page. Stored encrypted in the OS keyring.",
+        "botTokenPlaceholder": "xoxb-...",
+        "testConnectionAria": "Test connection",
+        "testButtonLabel": "Test",
+        "testRequiresDesktop": "Token testing requires the desktop runtime.",
+        "signingSecretLabel": "Signing Secret",
+        "signingSecretHelp": "From Slack App > Basic Information. Used to verify incoming webhook requests.",
+        "signingSecretPlaceholder": "Signing secret…",
+        "transportLabel": "Transport",
+        "transportSocketMode": "Socket Mode",
+        "transportEventsApi": "Events API webhook",
+        "appTokenLabel": "App Token",
+        "appTokenHelp": "xapp-... app-level token with connections:write scope. Required for Socket Mode.",
+        "appTokenPlaceholder": "xapp-...",
+        "oauthHint": "Alternatively, authorize via OAuth to let Slack generate the bot token automatically.",
+        "oauthButton": "Connect via OAuth",
+        "oauthButtonAria": "Connect via OAuth",
+        "oauthClientIdMissing": "NEXT_PUBLIC_SLACK_CLIENT_ID is not set.",
+        "cancel": "Cancel",
+        "save": "Save",
+        "create": "Create",
+        "saving": "Saving…",
+        "tokenRequiredForTest": "Enter a bot token first.",
+        "displayNameRequired": "Display name is required.",
+        "botTokenRequired": "Bot token is required.",
+        "signingSecretRequired": "Signing secret is required.",
+        "appTokenRequired": "App token is required for Socket Mode.",
+        "connectionSucceededLabel": "Connection successful",
+        "connectionFailedLabel": "Connection failed",
+        "connectedAs": "{user} @ {team} (id: {userId})",
+        "connectedToast": "Connected: {user} @ {team}",
+        "connectionFailedToast": "Connection failed",
+        "unknownUser": "unknown",
+        "unknownTeam": "unknown workspace",
+        "unknownId": "?",
+        "adapterCreated": "Adapter created.",
+        "adapterUpdated": "Adapter updated."
+      },
+      "lark": {
+        "titleNew": "Add Lark Bot",
+        "titleEdit": "Configure Lark Bot",
+        "displayNameLabel": "Display name",
+        "displayNamePlaceholder": "My Lark Bot",
+        "appIdLabel": "App ID",
+        "appIdHelp": "cli_... from Lark Developer Console > App. Stored encrypted in the OS keyring.",
+        "appIdPlaceholder": "cli_...",
+        "testConnectionAria": "Test connection",
+        "testButtonLabel": "Test",
+        "testRequiresDesktop": "Connection testing requires the desktop runtime.",
+        "appSecretLabel": "App Secret",
+        "appSecretHelp": "From Lark Developer Console > App > Credentials.",
+        "appSecretPlaceholder": "App secret…",
+        "transportLabel": "Transport",
+        "transportLongConnection": "Long connection",
+        "transportWebhook": "Webhook",
+        "verificationTokenLabel": "Verification Token",
+        "verificationTokenHelp": "From Lark App > Event subscriptions > Verification Token.",
+        "verificationTokenPlaceholder": "Verification token…",
+        "encryptKeyLabel": "Encrypt Key",
+        "encryptKeyHelp": "Optional. Required only when Encrypt Key is enabled in Lark App > Event subscriptions. Enables AES-256-CBC decryption of incoming events.",
+        "encryptKeyPlaceholder": "Encrypt key (optional)…",
+        "cancel": "Cancel",
+        "save": "Save",
+        "create": "Create",
+        "saving": "Saving…",
+        "tokenRequiredForTest": "Enter App ID and App Secret first.",
+        "displayNameRequired": "Display name is required.",
+        "appIdRequired": "App ID is required.",
+        "appSecretRequired": "App Secret is required.",
+        "verificationTokenRequired": "Verification Token is required.",
+        "connectionSucceededLabel": "Connection successful",
+        "connectionFailedLabel": "Connection failed",
+        "connectedAs": "Connected: {appId}",
+        "connectedToast": "Connected: {appId}",
+        "connectionFailedToast": "Connection failed",
+        "unknownApp": "unknown app",
+        "unknownAppShort": "unknown",
+        "adapterCreated": "Adapter created.",
+        "adapterUpdated": "Adapter updated."
+      },
+      "onebot": {
+        "titleNew": "Add OneBot (QQ) Adapter",
+        "titleEdit": "Configure OneBot (QQ) Adapter",
+        "displayNameLabel": "Display name",
+        "displayNamePlaceholder": "My QQ Bot",
+        "botUinLabel": "Bot UIN (QQ number)",
+        "botUinHelp": "The QQ number of the bot account (e.g. 123456789).",
+        "botUinPlaceholder": "123456789",
+        "bearerTokenLabel": "Bearer Token (optional)",
+        "bearerTokenHelpPrefix": "If NapCat / Lagrange has",
+        "bearerTokenHelpSuffix": "configured, paste the same value here. Stored encrypted in the OS keyring.",
+        "bearerTokenPlaceholder": "Optional secret token",
+        "expectedClientLabel": "Expected Client",
+        "expectedClientNapcat": "NapCat",
+        "expectedClientLagrange": "Lagrange",
+        "expectedClientLlonebot": "LLOneBot",
+        "expectedClientOther": "Other",
+        "expectedClientHelp": "Purely cosmetic — used for documentation links.",
+        "endpointLabel": "Reverse-WS Endpoint URL",
+        "endpointHelpPrefix": "Paste this URL into your NapCat / Lagrange",
+        "endpointHelpSuffix": "config.",
+        "endpointAria": "reverse-ws endpoint",
+        "verifyConnectionButton": "Verify connection",
+        "verifyConnectionAria": "Verify reverse-WS reception",
+        "verifyConnectedBadge": "Connected",
+        "verifyTimeoutBadge": "No connection",
+        "verifyConnectedToast": "NapCat connected successfully.",
+        "verifyTimeoutToast": "No connection received within 10 s. Is NapCat running and pointing to the correct URL?",
+        "saveBeforeVerify": "Save the adapter first, then verify the connection.",
+        "cancel": "Cancel",
+        "save": "Save",
+        "create": "Create",
+        "saving": "Saving…",
+        "displayNameRequired": "Display name is required.",
+        "botUinRequired": "Bot UIN is required.",
+        "adapterCreatedWithEndpoint": "Adapter created. Paste the endpoint URL into NapCat config.",
+        "adapterUpdated": "Adapter updated."
+      },
+      "quietHours": {
+        "mutedLabel": "Globally muted",
+        "mutedHelp": "Suppress all outbound messages until unmuted.",
+        "mutedAria": "Mute adapter",
+        "enableLabel": "Quiet hours",
+        "enableHelp": "Defer outbound messages during these hours.",
+        "enableAria": "Enable quiet hours",
+        "fromLabel": "From (HH:MM)",
+        "fromAria": "Quiet hours from",
+        "toLabel": "To (HH:MM)",
+        "toAria": "Quiet hours to",
+        "timezoneLabel": "Timezone",
+        "timezoneAria": "Quiet hours timezone"
+      },
+      "adapterForm": {
+        "cancel": "Cancel",
+        "save": "Save",
+        "saving": "Saving…",
+        "enterField": "Enter {label}"
       }
     }
   },
@@ -3413,6 +3760,119 @@
       }
     }
   },
+  "subscription": {
+    "title": "Claude Subscription",
+    "description": "Sign in with your Claude Pro/Max subscription or Anthropic Console account to use OAuth authentication and monitor your 5-hour and 7-day rate-limit windows in real time.",
+    "tabs": {
+      "overview": "Overview",
+      "account": "Account",
+      "usage": "Usage",
+      "settings": "Settings"
+    },
+    "webModeBanner": "Subscription credentials are stored in your OS keychain — only available in the desktop app.",
+    "login": {
+      "title": "Sign in with Claude",
+      "chooseMode": "Choose which Claude account to authorize.",
+      "awaitingCode": "Authorize cognia-next on the page that just opened, then paste the displayed code back here.",
+      "exchanging": "Exchanging the code for a token…",
+      "done": "Signed in.",
+      "modeGroupLabel": "OAuth flow",
+      "modes": {
+        "subscription": {
+          "label": "Subscription (Pro / Max)",
+          "description": "Authorize via claude.ai. Uses your subscription's 5h / 7d rolling quota."
+        },
+        "console": {
+          "label": "Console (API billing)",
+          "description": "Authorize via console.anthropic.com. Uses your billed API credits."
+        }
+      },
+      "pasteHint": "If the page didn't open automatically, click the link below. After authorizing, copy the code or the full callback URL into the box.",
+      "reopenLink": "Re-open authorization page",
+      "codeFieldLabel": "Authorization code (or full callback URL)",
+      "codeFieldPlaceholder": "Paste the code or URL the redirect page showed you",
+      "actions": {
+        "cancel": "Cancel",
+        "openAuthorize": "Open authorization page",
+        "signIn": "Sign in"
+      },
+      "errors": {
+        "flowStateMissing": "Lost the OAuth flow state — please restart the sign-in.",
+        "codeMalformed": "Couldn't find a code in that input. Paste either the code or the full callback URL.",
+        "stateMismatch": "OAuth state mismatch — possible CSRF. Restart the sign-in."
+      }
+    },
+    "overview": {
+      "signedOutTitle": "Not signed in",
+      "signedOutBody": "Sign in with your Claude account to monitor 5h/7d rate-limit windows.",
+      "signInCta": "Sign in",
+      "noSampleTitle": "Waiting for first sample",
+      "noSampleBody": "Send a chat message to populate usage, or run a probe from Settings.",
+      "fiveHourTitle": "5-hour window",
+      "sevenDayTitle": "7-day window",
+      "windowMissing": "No data for this window yet.",
+      "authoritative": "authoritative",
+      "approachingLimit": "Approaching limit",
+      "statusFetched": "Last sample {when}",
+      "status": {
+        "allowed": "All clear",
+        "allowed_warning": "Warning",
+        "rate_limited": "Rate limited",
+        "unknown": "Status unknown"
+      }
+    },
+    "account": {
+      "signedOutTitle": "Not signed in",
+      "signedOutBody": "Authorize cognia-next with your Claude account.",
+      "signInCta": "Sign in",
+      "unknownEmail": "Signed in (no email reported)",
+      "planLine": "{plan} · {mode}",
+      "modeLine": "{mode} flow",
+      "expiresLabel": "Token expires",
+      "scopeLabel": "Scope",
+      "refresh": "Refresh now",
+      "signOut": "Sign out",
+      "errorTitle": "Action failed",
+      "keychainNoticeTitle": "About your credentials",
+      "keychainNoticeBody": "Tokens are stored in your OS keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service). Cognia-next never writes to ~/.claude/.credentials.json — that file is owned by the official Claude Code CLI."
+    },
+    "usage": {
+      "loading": "Loading…",
+      "emptyTitle": "No usage samples yet",
+      "emptyBody": "Send a chat message or enable the active probe to populate this table.",
+      "tableTitle": "Recent samples",
+      "tableDescription": "Newest 200 entries. Passive samples come from real chat traffic; probe samples are generated by the optional active probe.",
+      "col": {
+        "fetchedAt": "Fetched at",
+        "source": "Source",
+        "status": "Status",
+        "fiveHour": "5h",
+        "sevenDay": "7d"
+      }
+    },
+    "settings": {
+      "probe": {
+        "title": "Active probe",
+        "description": "Periodically send a near-empty /v1/messages request and persist the rate-limit headers. Each probe consumes ~10 input + 1 output tokens of your quota.",
+        "enableLabel": "Enable active probe",
+        "enableHelp": "Off by default. Passive collection from your real chat traffic always runs and is preferred.",
+        "visibleLabel": "Cadence when this page is visible (seconds)",
+        "visibleHelp": "Floor 60 seconds.",
+        "idleLabel": "Cadence when this page is hidden (seconds)",
+        "idleHelp": "Floor 60 seconds. Use a higher value to save quota in the background."
+      },
+      "threshold": {
+        "title": "Warning threshold",
+        "description": "Highlights the Overview tab when utilization crosses this percentage.",
+        "label": "Warn at (%)",
+        "help": "0–100. Default 90."
+      },
+      "actions": {
+        "save": "Save",
+        "reset": "Reset to defaults"
+      }
+    }
+  },
   "ccswitch": {
     "title": "CCSwitch",
     "description": "Read providers, MCP servers, prompts and skills from your local CCSwitch installation. Switching a provider here updates cognia-next's bundled SDK and (optionally) propagates to selected external agents.",
@@ -4094,7 +4554,9 @@
     "dismiss": "Dismiss",
     "import": "Import",
     "export": "Export",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "next": "Next",
+    "back": "Back"
   },
   "externalAgent": {
     "disabled": "External Agents Disabled",
@@ -6176,7 +6638,11 @@
       "config": "Config",
       "models": "Models",
       "cost": "Cost",
-      "advanced": "Advanced"
+      "advanced": "Advanced",
+      "parameters": "Parameters",
+      "routing": "Routing",
+      "health": "Health",
+      "presets": "Presets"
     },
     "detailPanel": {
       "emptyTitle": "No Provider Selected",

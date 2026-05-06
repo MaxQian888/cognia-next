@@ -10,6 +10,7 @@
 // and writes botToken (+ optionally publicKey) to the OS keyring.
 
 import { useState } from "react"
+import { useTranslations } from "next-intl"
 import { CheckCircle2Icon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -73,9 +74,10 @@ interface DiscordConfigDialogProps {
 }
 
 export function DiscordConfigDialog({ open, onOpenChange, row }: DiscordConfigDialogProps) {
+  const t = useTranslations("settings.connections.discord")
   const isNew = row === null
 
-  const [displayName, setDisplayName] = useState(row?.displayName ?? "My Discord Bot")
+  const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
   const [botToken, setBotToken] = useState("")
   const [publicKey, setPublicKey] = useState("")
 
@@ -88,7 +90,7 @@ export function DiscordConfigDialog({ open, onOpenChange, row }: DiscordConfigDi
 
   const handleTest = async () => {
     if (!botToken.trim()) {
-      toast.error("Enter a bot token first.")
+      toast.error(t("tokenRequiredForTest"))
       return
     }
     setTesting(true)
@@ -97,19 +99,19 @@ export function DiscordConfigDialog({ open, onOpenChange, row }: DiscordConfigDi
     setTestResult(result)
     setTesting(false)
     if (result.ok) {
-      toast.success(`Connected as ${result.username ?? "unknown"}`)
+      toast.success(t("connectedToast", { username: result.username ?? t("unknownUsername") }))
     } else {
-      toast.error(result.error ?? "Connection failed")
+      toast.error(result.error ?? t("connectionFailedToast"))
     }
   }
 
   const handleSave = async () => {
     if (!displayName.trim()) {
-      toast.error("Display name is required.")
+      toast.error(t("displayNameRequired"))
       return
     }
     if (isNew && !botToken.trim()) {
-      toast.error("Bot token is required.")
+      toast.error(t("botTokenRequired"))
       return
     }
 
@@ -148,7 +150,7 @@ export function DiscordConfigDialog({ open, onOpenChange, row }: DiscordConfigDi
         await connectorsKeyringSet(adapterId, "publicKey", publicKey.trim())
       }
 
-      toast.success(isNew ? "Adapter created." : "Adapter updated.")
+      toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -161,18 +163,18 @@ export function DiscordConfigDialog({ open, onOpenChange, row }: DiscordConfigDi
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{isNew ? "Add Discord Bot" : "Configure Discord Bot"}</DialogTitle>
+          <DialogTitle>{isNew ? t("titleNew") : t("titleEdit")}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
           {/* Display name */}
           <div className="space-y-1.5">
-            <Label htmlFor="dc-display-name">Display name</Label>
+            <Label htmlFor="dc-display-name">{t("displayNameLabel")}</Label>
             <Input
               id="dc-display-name"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="My Discord Bot"
+              placeholder={t("displayNamePlaceholder")}
               disabled={saving}
             />
           </div>
@@ -180,11 +182,10 @@ export function DiscordConfigDialog({ open, onOpenChange, row }: DiscordConfigDi
           {/* Bot token + test */}
           <div className="space-y-1.5">
             <Label htmlFor="dc-bot-token">
-              Bot Token<span className="ml-1 text-destructive">*</span>
+              {t("botTokenLabel")}
+              <span className="ml-1 text-destructive">*</span>
             </Label>
-            <p className="text-xs text-muted-foreground">
-              Obtain from the Discord Developer Portal. Stored encrypted in the OS keyring.
-            </p>
+            <p className="text-xs text-muted-foreground">{t("botTokenHelp")}</p>
             <div className="flex gap-2">
               <Input
                 id="dc-bot-token"
@@ -192,7 +193,7 @@ export function DiscordConfigDialog({ open, onOpenChange, row }: DiscordConfigDi
                 autoComplete="new-password"
                 value={botToken}
                 onChange={(e) => setBotToken(e.target.value)}
-                placeholder="Bot token…"
+                placeholder={t("botTokenPlaceholder")}
                 disabled={saving}
                 className="flex-1"
               />
@@ -202,9 +203,13 @@ export function DiscordConfigDialog({ open, onOpenChange, row }: DiscordConfigDi
                 variant="outline"
                 onClick={handleTest}
                 disabled={testing || saving || !desktop}
-                aria-label="Test connection"
+                aria-label={t("testConnectionAria")}
               >
-                {testing ? <LoaderIcon className="h-3.5 w-3.5 animate-spin" /> : "Test"}
+                {testing ? (
+                  <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  t("testButtonLabel")
+                )}
               </Button>
             </div>
 
@@ -217,7 +222,9 @@ export function DiscordConfigDialog({ open, onOpenChange, row }: DiscordConfigDi
                     : "bg-destructive/10 text-destructive"
                 }`}
                 role="status"
-                aria-label={testResult.ok ? "Connection successful" : "Connection failed"}
+                aria-label={
+                  testResult.ok ? t("connectionSucceededLabel") : t("connectionFailedLabel")
+                }
               >
                 {testResult.ok ? (
                   <CheckCircle2Icon className="h-3.5 w-3.5 shrink-0" />
@@ -225,14 +232,17 @@ export function DiscordConfigDialog({ open, onOpenChange, row }: DiscordConfigDi
                   <XCircleIcon className="h-3.5 w-3.5 shrink-0" />
                 )}
                 {testResult.ok
-                  ? `Connected as ${testResult.username ?? "unknown"} (id: ${testResult.id ?? "?"})`
+                  ? t("connectedAs", {
+                      username: testResult.username ?? t("unknownUsername"),
+                      id: testResult.id ?? t("unknownId"),
+                    })
                   : testResult.error}
               </div>
             )}
 
             {!desktop && (
               <p className="text-xs text-amber-600 dark:text-amber-400">
-                Token testing requires the desktop runtime.
+                {t("testRequiresDesktop")}
               </p>
             )}
           </div>
@@ -241,18 +251,15 @@ export function DiscordConfigDialog({ open, onOpenChange, row }: DiscordConfigDi
 
           {/* Public key (optional) */}
           <div className="space-y-1.5">
-            <Label htmlFor="dc-public-key">Public Key (optional)</Label>
-            <p className="text-xs text-muted-foreground">
-              Ed25519 public key from the Discord Developer Portal. Required only if you enable
-              webhook / interactions mode in a future phase.
-            </p>
+            <Label htmlFor="dc-public-key">{t("publicKeyLabel")}</Label>
+            <p className="text-xs text-muted-foreground">{t("publicKeyHelp")}</p>
             <Input
               id="dc-public-key"
               type="password"
               autoComplete="new-password"
               value={publicKey}
               onChange={(e) => setPublicKey(e.target.value)}
-              placeholder="64-character hex key"
+              placeholder={t("publicKeyPlaceholder")}
               disabled={saving}
             />
           </div>
@@ -261,8 +268,9 @@ export function DiscordConfigDialog({ open, onOpenChange, row }: DiscordConfigDi
 
           {/* Info: transport mode */}
           <p className="text-xs text-muted-foreground">
-            Transport: <span className="font-medium">Gateway (WebSocket)</span> — Cognia connects to
-            the Discord Gateway directly. No public URL required.
+            {t("transportInfoPrefix")}{" "}
+            <span className="font-medium">{t("transportInfoValue")}</span>{" "}
+            {t("transportInfoSuffix")}
           </p>
 
           {/* Actions */}
@@ -273,10 +281,10 @@ export function DiscordConfigDialog({ open, onOpenChange, row }: DiscordConfigDi
               onClick={() => onOpenChange(false)}
               disabled={saving}
             >
-              Cancel
+              {t("cancel")}
             </Button>
             <Button type="button" onClick={handleSave} disabled={saving}>
-              {saving ? "Saving…" : isNew ? "Create" : "Save"}
+              {saving ? t("saving") : isNew ? t("create") : t("save")}
             </Button>
           </div>
         </div>

@@ -223,6 +223,18 @@ export interface SDKEventEnvelope {
   event: SDKMessage
 }
 
+/**
+ * Emitted by `sidecar/fetch-interceptor.mjs` once per response on
+ * `api.anthropic.com`. Carries the verbatim `anthropic-ratelimit-*` headers
+ * (lowercased keys) the renderer's usage-collector parses into a snapshot.
+ *
+ * Not session-scoped — the interceptor sees raw HTTP, not session state.
+ */
+export interface UsageHeadersEvent {
+  type: "usage_headers"
+  headers: Record<string, string>
+}
+
 export type ClaudeEvent =
   | ReadyEvent
   | SidecarExitedEvent
@@ -231,6 +243,7 @@ export type ClaudeEvent =
   | SdkSessionIdEvent
   | PermissionRequestEvent
   | SDKEventEnvelope
+  | UsageHeadersEvent
 
 // ---- Narrow subset of SDKMessage we care about ---------------------------
 // Full type lives in @anthropic-ai/claude-agent-sdk. We mirror only the bits
@@ -466,6 +479,14 @@ export interface AppSettings {
     watchDb: boolean
     defaultPropagation: AgentId[]
   }
+  /**
+   * Claude subscription (OAuth) settings — drives the Settings → Subscription
+   * section. The credential itself lives in the OS keyring (Tauri-only); only
+   * cadence + threshold preferences are stored here. See
+   * `lib/anthropic-subscription/types.ts:SubscriptionSettings` for field-level
+   * docs and {@link DEFAULT_SUBSCRIPTION_SETTINGS} for defaults.
+   */
+  subscriptionSettings?: import("@/lib/anthropic-subscription/types").SubscriptionSettings
   /** Last time the auto-updater check ran (ms since epoch). Daily debounce. */
   lastUpdateCheckAt?: number
   /** UI theme; "system" follows OS preference. */

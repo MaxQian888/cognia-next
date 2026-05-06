@@ -966,7 +966,8 @@
       "remoteControl": "远程控制",
       "externalBridge": "外部桥接 (MCP)",
       "providers": "提供商",
-      "connections": "平台连接"
+      "connections": "平台连接",
+      "subscription": "Claude 订阅"
     },
     "descriptions": {
       "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",
@@ -1000,7 +1001,8 @@
       "remoteControl": "桌面端本地 HTTP 入站监听器，搭配出站 webhook 的 HMAC 签名与自定义请求头。",
       "externalBridge": "把 Cognia 的 wiki / RAG / 运行时实体通过 MCP 暴露给外部 Agent（Claude Code、Cursor、Cline）。每个 scope 默认 OFF，需手动启用。",
       "providers": "AI 提供商的 API 密钥、模型与连接设置。",
-      "connections": "配置消息平台适配器（Telegram、Discord、Slack 等）并管理出站队列。"
+      "connections": "配置消息平台适配器（Telegram、Discord、Slack 等）并管理出站队列。",
+      "subscription": "用 Claude Pro/Max 订阅登录，监控 5 小时 / 7 天速率限制窗口，OAuth 凭据保存在系统钥匙串。"
     },
     "canvas": {
       "title": "画布",
@@ -1973,6 +1975,44 @@
         "emptyBody": "由活跃会话派发的子代理会显示在这里。运行时数据存于内存,重启后清空。",
         "parent": "父代理：{id}",
         "duration": "{ms}ms"
+      },
+      "import": {
+        "trigger": "导入",
+        "title": "导入子代理",
+        "description": "从外部工具读取子代理配置，并转换为 Cognia 模板或角色。",
+        "step1Title": "选择来源",
+        "step2Title": "选择文件",
+        "step3Title": "预览并导入",
+        "sources": {
+          "auto": "自动识别",
+          "claude-code": "Claude Code (.claude/agents/*.md)",
+          "codex-cli": "Codex CLI (~/.codex/agents/*.md)",
+          "cursor": "Cursor (.cursor/rules/*.mdc)",
+          "cline": "Cline (.clinerules/*.md)",
+          "generic-md": "通用 markdown + frontmatter"
+        },
+        "tauriPickHint": "从本机选择一个或多个子代理文件。",
+        "webPickHint": "拖入文件或点击浏览。",
+        "webPickFormats": "支持 .md / .markdown / .mdc / .yaml / .yml。",
+        "pickFiles": "选择文件",
+        "noDrafts": "未从所选文件中解析出子代理。",
+        "warningsHeader": "{count} 个文件解析失败",
+        "targetLabel": "导入为",
+        "strategyLabel": "重名时如何处理",
+        "target": {
+          "subagentTemplate": "子代理模板",
+          "character": "角色"
+        },
+        "strategy": {
+          "skip": "跳过同名条目",
+          "overwrite": "覆盖已存在条目",
+          "duplicate": "保留两份（自动重命名）"
+        },
+        "applyButton": "导入 {count} 个",
+        "summary": "已导入 {imported}，跳过 {skipped}，覆盖 {overwritten}，失败 {failed}。",
+        "errors": {
+          "pickFailed": "无法读取所选文件。"
+        }
       }
     },
     "hooks": {
@@ -2480,6 +2520,313 @@
           "agentCompleted": "代理任务已完成。",
           "custom": "自定义事件——通常由外部工具发起。"
         }
+      }
+    },
+    "connections": {
+      "title": "平台连接",
+      "description": "配置消息平台适配器（Telegram、Discord、Slack 等）并管理出站投递队列。",
+      "webModeBanner": {
+        "ariaLabel": "Web 模式提示",
+        "body": "适配器需要桌面端 — 请在桌面上打开 cognia-next 进行配置。已配置的会话会以只读形式同步过来。"
+      },
+      "tabs": {
+        "overview": "概览",
+        "adapters": "适配器",
+        "conversations": "会话",
+        "inbox": "收件箱",
+        "outbound": "出站",
+        "audit": "审计"
+      },
+      "overview": {
+        "serverHeading": "连接器服务",
+        "desktopOnlyNotice": "平台连接器需要桌面 (Tauri) 运行时。",
+        "statusRunning": "运行中 — {addr}",
+        "statusStopped": "已停止",
+        "statusUnknown": "未知",
+        "adapterCount": "已注册 {count} 个适配器",
+        "adapterCountPlural": "已注册 {count} 个适配器",
+        "adaptersHeading": "适配器",
+        "noAdapters": "尚未配置任何适配器。",
+        "disabledBadge": "已禁用",
+        "recentActivityHeading": "最近活动",
+        "noRecentActivity": "暂无最近活动。"
+      },
+      "adapters": {
+        "manageHint": "管理你的平台适配器实例。",
+        "addAdapter": "添加适配器",
+        "comingSoon": "即将推出",
+        "noAdaptersTitle": "尚未配置任何适配器。",
+        "noAdaptersHint": "点击「添加适配器」，添加你的第一个平台连接。",
+        "enableAria": "启用 {name}",
+        "disableAria": "禁用 {name}",
+        "enabled": "已启用",
+        "disabled": "已禁用",
+        "configure": "配置",
+        "configureAria": "配置 {name}"
+      },
+      "conversations": {
+        "heading": "会话覆盖",
+        "empty": "暂无会话覆盖。与平台会话交互后会出现在这里。",
+        "characterPrefix": "角色：{id}",
+        "pinnedBadge": "已置顶",
+        "archivedBadge": "已归档",
+        "togglePin": "切换置顶",
+        "toggleArchive": "切换归档",
+        "openConversation": "打开会话",
+        "deleteOverride": "删除覆盖"
+      },
+      "inbox": {
+        "summary": "按适配器分组的会话汇总。完整视图请到收件箱。",
+        "openInbox": "打开收件箱",
+        "noAdapters": "尚未配置任何适配器。",
+        "totalLabel": "总数",
+        "unreadLabel": "未读",
+        "pinnedLabel": "置顶",
+        "archivedLabel": "归档"
+      },
+      "outbound": {
+        "filterAll": "全部",
+        "filterAllAria": "显示全部",
+        "filterStatusAria": "筛选 {status}",
+        "empty": "当前没有正在投递的出站任务。",
+        "adapterLabel": "适配器：{adapter} · 尝试次数：{attempts}",
+        "nextRetry": "下次重试：{time}",
+        "retry": "重试",
+        "retryAria": "重试 {id}",
+        "cancel": "取消",
+        "cancelAria": "取消 {id}"
+      },
+      "audit": {
+        "redactionNotice": "审计日志按白名单脱敏，Token 与消息正文不会出现在这里。",
+        "filterByAdapter": "按适配器筛选",
+        "filterByAdapterAria": "按适配器筛选 {name}",
+        "filterByKind": "按类型筛选",
+        "filterByKindAria": "按 {kind} 筛选",
+        "timeRangeLabel": "时间范围",
+        "timeRange": {
+          "1h": "最近 1 小时",
+          "24h": "最近 24 小时",
+          "7d": "最近 7 天",
+          "all": "全部"
+        },
+        "empty": "当前筛选条件下没有审计条目。",
+        "expandAria": "展开审计条目",
+        "collapseAria": "收起审计条目"
+      },
+      "telegram": {
+        "titleNew": "添加 Telegram 机器人",
+        "titleEdit": "配置 Telegram 机器人",
+        "displayNameLabel": "显示名称",
+        "displayNamePlaceholder": "我的 Telegram 机器人",
+        "botTokenLabel": "Bot Token",
+        "botTokenHelp": "在 @BotFather 中获取。Token 会加密存放在系统钥匙串中，且永远不会被记录。",
+        "botTokenPlaceholder": "1234567890:ABCDEF…",
+        "testConnectionAria": "测试连接",
+        "testButtonLabel": "测试",
+        "testRequiresDesktop": "测试 Token 需要桌面运行时。",
+        "transportLabel": "传输方式",
+        "transportLongpoll": "长轮询",
+        "transportWebhook": "Webhook",
+        "transportLongpollHelp": "Cognia 直接轮询 Telegram 服务器，无需公网地址。",
+        "transportWebhookHelp": "Telegram 将更新推送到你在 @BotFather 中配置的公网 URL。",
+        "webhookSecretLabel": "Webhook 密钥（可选）",
+        "webhookSecretHelpPrefix": "如果设置，Telegram 会将其放入",
+        "webhookSecretHelpSuffix": "请求头中。",
+        "webhookSecretPlaceholder": "可选的密钥",
+        "cancel": "取消",
+        "save": "保存",
+        "create": "创建",
+        "saving": "保存中…",
+        "tokenRequiredForTest": "请先输入 Bot Token。",
+        "displayNameRequired": "显示名称不能为空。",
+        "botTokenRequired": "Bot Token 不能为空。",
+        "connectionSucceededLabel": "连接成功",
+        "connectionFailedLabel": "连接失败",
+        "connectedAs": "已连接为 @{username}（id: {id}）",
+        "connectedToast": "已连接为 @{username}",
+        "connectionFailedToast": "连接失败",
+        "unknownUsername": "unknown",
+        "unknownId": "?",
+        "adapterCreated": "适配器已创建。",
+        "adapterUpdated": "适配器已更新。"
+      },
+      "discord": {
+        "titleNew": "添加 Discord 机器人",
+        "titleEdit": "配置 Discord 机器人",
+        "displayNameLabel": "显示名称",
+        "displayNamePlaceholder": "我的 Discord 机器人",
+        "botTokenLabel": "Bot Token",
+        "botTokenHelp": "在 Discord Developer Portal 获取。加密存放在系统钥匙串中。",
+        "botTokenPlaceholder": "Bot token…",
+        "testConnectionAria": "测试连接",
+        "testButtonLabel": "测试",
+        "testRequiresDesktop": "测试 Token 需要桌面运行时。",
+        "publicKeyLabel": "Public Key（可选）",
+        "publicKeyHelp": "Discord Developer Portal 中的 Ed25519 公钥。仅在后续版本启用 Webhook / Interactions 模式时需要。",
+        "publicKeyPlaceholder": "64 字符十六进制密钥",
+        "transportInfoPrefix": "传输方式：",
+        "transportInfoValue": "Gateway (WebSocket)",
+        "transportInfoSuffix": " — Cognia 直接连接 Discord Gateway，无需公网 URL。",
+        "cancel": "取消",
+        "save": "保存",
+        "create": "创建",
+        "saving": "保存中…",
+        "tokenRequiredForTest": "请先输入 Bot Token。",
+        "displayNameRequired": "显示名称不能为空。",
+        "botTokenRequired": "Bot Token 不能为空。",
+        "connectionSucceededLabel": "连接成功",
+        "connectionFailedLabel": "连接失败",
+        "connectedAs": "已连接为 {username}（id: {id}）",
+        "connectedToast": "已连接为 {username}",
+        "connectionFailedToast": "连接失败",
+        "unknownUsername": "unknown",
+        "unknownId": "?",
+        "adapterCreated": "适配器已创建。",
+        "adapterUpdated": "适配器已更新。"
+      },
+      "slack": {
+        "titleNew": "添加 Slack 机器人",
+        "titleEdit": "配置 Slack 机器人",
+        "displayNameLabel": "显示名称",
+        "displayNamePlaceholder": "我的 Slack 机器人",
+        "botTokenLabel": "Bot Token",
+        "botTokenHelp": "Slack App OAuth 页面颁发的 xoxb-... Token。加密存放在系统钥匙串中。",
+        "botTokenPlaceholder": "xoxb-...",
+        "testConnectionAria": "测试连接",
+        "testButtonLabel": "测试",
+        "testRequiresDesktop": "测试 Token 需要桌面运行时。",
+        "signingSecretLabel": "Signing Secret",
+        "signingSecretHelp": "来自 Slack App > Basic Information，用于校验入站 Webhook 请求。",
+        "signingSecretPlaceholder": "Signing secret…",
+        "transportLabel": "传输方式",
+        "transportSocketMode": "Socket Mode",
+        "transportEventsApi": "Events API webhook",
+        "appTokenLabel": "App Token",
+        "appTokenHelp": "带 connections:write 范围的 xapp-... 应用级 Token，Socket Mode 必填。",
+        "appTokenPlaceholder": "xapp-...",
+        "oauthHint": "也可以通过 OAuth 授权，让 Slack 自动生成 Bot Token。",
+        "oauthButton": "通过 OAuth 连接",
+        "oauthButtonAria": "通过 OAuth 连接",
+        "oauthClientIdMissing": "未设置 NEXT_PUBLIC_SLACK_CLIENT_ID。",
+        "cancel": "取消",
+        "save": "保存",
+        "create": "创建",
+        "saving": "保存中…",
+        "tokenRequiredForTest": "请先输入 Bot Token。",
+        "displayNameRequired": "显示名称不能为空。",
+        "botTokenRequired": "Bot Token 不能为空。",
+        "signingSecretRequired": "Signing Secret 不能为空。",
+        "appTokenRequired": "Socket Mode 下 App Token 不能为空。",
+        "connectionSucceededLabel": "连接成功",
+        "connectionFailedLabel": "连接失败",
+        "connectedAs": "{user} @ {team}（id: {userId}）",
+        "connectedToast": "已连接：{user} @ {team}",
+        "connectionFailedToast": "连接失败",
+        "unknownUser": "unknown",
+        "unknownTeam": "unknown workspace",
+        "unknownId": "?",
+        "adapterCreated": "适配器已创建。",
+        "adapterUpdated": "适配器已更新。"
+      },
+      "lark": {
+        "titleNew": "添加飞书机器人",
+        "titleEdit": "配置飞书机器人",
+        "displayNameLabel": "显示名称",
+        "displayNamePlaceholder": "我的飞书机器人",
+        "appIdLabel": "App ID",
+        "appIdHelp": "飞书开放平台 > 应用 中获取 cli_...。加密存放在系统钥匙串中。",
+        "appIdPlaceholder": "cli_...",
+        "testConnectionAria": "测试连接",
+        "testButtonLabel": "测试",
+        "testRequiresDesktop": "测试连接需要桌面运行时。",
+        "appSecretLabel": "App Secret",
+        "appSecretHelp": "来自飞书开放平台 > 应用 > 凭证。",
+        "appSecretPlaceholder": "App secret…",
+        "transportLabel": "传输方式",
+        "transportLongConnection": "长连接",
+        "transportWebhook": "Webhook",
+        "verificationTokenLabel": "Verification Token",
+        "verificationTokenHelp": "来自飞书应用 > 事件订阅 > Verification Token。",
+        "verificationTokenPlaceholder": "Verification token…",
+        "encryptKeyLabel": "Encrypt Key",
+        "encryptKeyHelp": "可选。仅当飞书应用 > 事件订阅 启用了 Encrypt Key 时填写。开启后会用 AES-256-CBC 解密入站事件。",
+        "encryptKeyPlaceholder": "Encrypt key（可选）…",
+        "cancel": "取消",
+        "save": "保存",
+        "create": "创建",
+        "saving": "保存中…",
+        "tokenRequiredForTest": "请先输入 App ID 和 App Secret。",
+        "displayNameRequired": "显示名称不能为空。",
+        "appIdRequired": "App ID 不能为空。",
+        "appSecretRequired": "App Secret 不能为空。",
+        "verificationTokenRequired": "Verification Token 不能为空。",
+        "connectionSucceededLabel": "连接成功",
+        "connectionFailedLabel": "连接失败",
+        "connectedAs": "已连接：{appId}",
+        "connectedToast": "已连接：{appId}",
+        "connectionFailedToast": "连接失败",
+        "unknownApp": "unknown app",
+        "unknownAppShort": "unknown",
+        "adapterCreated": "适配器已创建。",
+        "adapterUpdated": "适配器已更新。"
+      },
+      "onebot": {
+        "titleNew": "添加 OneBot (QQ) 适配器",
+        "titleEdit": "配置 OneBot (QQ) 适配器",
+        "displayNameLabel": "显示名称",
+        "displayNamePlaceholder": "我的 QQ 机器人",
+        "botUinLabel": "Bot UIN（QQ 号）",
+        "botUinHelp": "机器人账号的 QQ 号（例如 123456789）。",
+        "botUinPlaceholder": "123456789",
+        "bearerTokenLabel": "Bearer Token（可选）",
+        "bearerTokenHelpPrefix": "若 NapCat / Lagrange 配置了",
+        "bearerTokenHelpSuffix": "，请将相同值粘贴到这里。加密存放在系统钥匙串中。",
+        "bearerTokenPlaceholder": "可选的密钥",
+        "expectedClientLabel": "客户端类型",
+        "expectedClientNapcat": "NapCat",
+        "expectedClientLagrange": "Lagrange",
+        "expectedClientLlonebot": "LLOneBot",
+        "expectedClientOther": "其它",
+        "expectedClientHelp": "仅作展示用途——用于跳转对应文档。",
+        "endpointLabel": "反向 WebSocket 地址",
+        "endpointHelpPrefix": "把该地址粘贴到 NapCat / Lagrange 的",
+        "endpointHelpSuffix": "配置中。",
+        "endpointAria": "反向 WebSocket 地址",
+        "verifyConnectionButton": "验证连接",
+        "verifyConnectionAria": "验证反向 WebSocket 接入",
+        "verifyConnectedBadge": "已连接",
+        "verifyTimeoutBadge": "未连接",
+        "verifyConnectedToast": "NapCat 已成功连接。",
+        "verifyTimeoutToast": "10 秒内没有收到连接。请确认 NapCat 已运行并指向正确的 URL。",
+        "saveBeforeVerify": "请先保存适配器，再验证连接。",
+        "cancel": "取消",
+        "save": "保存",
+        "create": "创建",
+        "saving": "保存中…",
+        "displayNameRequired": "显示名称不能为空。",
+        "botUinRequired": "Bot UIN 不能为空。",
+        "adapterCreatedWithEndpoint": "适配器已创建。请把端点 URL 粘贴到 NapCat 配置中。",
+        "adapterUpdated": "适配器已更新。"
+      },
+      "quietHours": {
+        "mutedLabel": "全局静音",
+        "mutedHelp": "解除前抑制所有出站消息。",
+        "mutedAria": "静音适配器",
+        "enableLabel": "勿扰时段",
+        "enableHelp": "在此时段内推迟出站消息。",
+        "enableAria": "启用勿扰时段",
+        "fromLabel": "起始（HH:MM）",
+        "fromAria": "勿扰时段起始",
+        "toLabel": "结束（HH:MM）",
+        "toAria": "勿扰时段结束",
+        "timezoneLabel": "时区",
+        "timezoneAria": "勿扰时段时区"
+      },
+      "adapterForm": {
+        "cancel": "取消",
+        "save": "保存",
+        "saving": "保存中…",
+        "enterField": "输入 {label}"
       }
     }
   },
@@ -3413,6 +3760,119 @@
       }
     }
   },
+  "subscription": {
+    "title": "Claude 订阅",
+    "description": "用你的 Claude Pro/Max 订阅或 Anthropic Console 账号登录，启用 OAuth 认证并实时查看 5 小时和 7 天的速率限制窗口用量。",
+    "tabs": {
+      "overview": "概览",
+      "account": "账号",
+      "usage": "用量",
+      "settings": "设置"
+    },
+    "webModeBanner": "订阅凭据保存在系统钥匙串中——仅桌面应用支持。",
+    "login": {
+      "title": "登录 Claude",
+      "chooseMode": "选择要授权的 Claude 账号类型。",
+      "awaitingCode": "在刚才打开的页面中授权 cognia-next，然后把显示的 code 粘贴回这里。",
+      "exchanging": "正在用 code 换取访问令牌…",
+      "done": "登录成功。",
+      "modeGroupLabel": "OAuth 流程",
+      "modes": {
+        "subscription": {
+          "label": "订阅（Pro / Max）",
+          "description": "通过 claude.ai 授权。使用订阅的 5 小时 / 7 天滚动配额。"
+        },
+        "console": {
+          "label": "Console（API 计费）",
+          "description": "通过 console.anthropic.com 授权。使用计费 API 额度。"
+        }
+      },
+      "pasteHint": "如果页面没有自动打开，请点击下方链接。授权后把页面显示的 code 或完整 URL 复制粘贴到下面。",
+      "reopenLink": "重新打开授权页",
+      "codeFieldLabel": "授权 code（或完整回调 URL）",
+      "codeFieldPlaceholder": "粘贴跳转页给你的 code 或 URL",
+      "actions": {
+        "cancel": "取消",
+        "openAuthorize": "打开授权页",
+        "signIn": "登录"
+      },
+      "errors": {
+        "flowStateMissing": "OAuth 流程状态丢失，请重新登录。",
+        "codeMalformed": "输入里找不到 code。请粘贴 code 或完整回调 URL。",
+        "stateMismatch": "OAuth state 不匹配——可能是 CSRF。请重新登录。"
+      }
+    },
+    "overview": {
+      "signedOutTitle": "未登录",
+      "signedOutBody": "登录 Claude 账号即可监控 5 小时 / 7 天速率限制窗口。",
+      "signInCta": "登录",
+      "noSampleTitle": "等待首个样本",
+      "noSampleBody": "发一条对话即可看到用量，或在「设置」里手动触发一次探测。",
+      "fiveHourTitle": "5 小时窗口",
+      "sevenDayTitle": "7 天窗口",
+      "windowMissing": "此窗口暂无数据。",
+      "authoritative": "权威窗口",
+      "approachingLimit": "接近上限",
+      "statusFetched": "最近一次样本 {when}",
+      "status": {
+        "allowed": "正常",
+        "allowed_warning": "警告",
+        "rate_limited": "已限流",
+        "unknown": "状态未知"
+      }
+    },
+    "account": {
+      "signedOutTitle": "未登录",
+      "signedOutBody": "用 Claude 账号授权 cognia-next。",
+      "signInCta": "登录",
+      "unknownEmail": "已登录（服务器未返回邮箱）",
+      "planLine": "{plan} · {mode}",
+      "modeLine": "{mode} 流程",
+      "expiresLabel": "Token 过期",
+      "scopeLabel": "作用域",
+      "refresh": "立即刷新",
+      "signOut": "登出",
+      "errorTitle": "操作失败",
+      "keychainNoticeTitle": "关于凭据存储",
+      "keychainNoticeBody": "Token 保存在系统钥匙串（macOS Keychain / Windows Credential Manager / Linux Secret Service）。cognia-next 不会写 ~/.claude/.credentials.json——那个文件归官方 Claude Code CLI 所有。"
+    },
+    "usage": {
+      "loading": "加载中…",
+      "emptyTitle": "还没有用量样本",
+      "emptyBody": "发一条对话或启用主动探测以填充本表。",
+      "tableTitle": "最近样本",
+      "tableDescription": "最新 200 条。passive 来自真实对话流量；probe 来自可选的主动探测。",
+      "col": {
+        "fetchedAt": "采集时间",
+        "source": "来源",
+        "status": "状态",
+        "fiveHour": "5h",
+        "sevenDay": "7d"
+      }
+    },
+    "settings": {
+      "probe": {
+        "title": "主动探测",
+        "description": "定期发送一次近乎空的 /v1/messages 请求来读取 rate-limit headers。每次探测约消耗 10 input + 1 output tokens 配额。",
+        "enableLabel": "启用主动探测",
+        "enableHelp": "默认关闭。被动收集（真实对话流量）始终在跑，优先级更高。",
+        "visibleLabel": "本页可见时的探测周期（秒）",
+        "visibleHelp": "下限 60 秒。",
+        "idleLabel": "本页隐藏时的探测周期（秒）",
+        "idleHelp": "下限 60 秒。建议设大一些以节省配额。"
+      },
+      "threshold": {
+        "title": "警告阈值",
+        "description": "用量达到该比例时，「概览」标签会高亮提醒。",
+        "label": "警告阈值（%）",
+        "help": "0–100，默认 90。"
+      },
+      "actions": {
+        "save": "保存",
+        "reset": "恢复默认"
+      }
+    }
+  },
   "ccswitch": {
     "title": "CCSwitch",
     "description": "从本地 CCSwitch 安装中读取服务商、MCP 服务器、提示词与技能。在这里切换服务商会更新 cognia-next 自带的 SDK，并可（按需）同步到选中的外部代理。",
@@ -4094,7 +4554,9 @@
     "dismiss": "忽略",
     "import": "导入",
     "export": "导出",
-    "loading": "加载中…"
+    "loading": "加载中…",
+    "next": "下一步",
+    "back": "上一步"
   },
   "externalAgent": {
     "disabled": "外部代理已禁用",
@@ -6218,7 +6680,11 @@
       "config": "基本配置",
       "models": "模型管理",
       "cost": "费用统计",
-      "advanced": "高级设置"
+      "advanced": "高级设置",
+      "parameters": "参数",
+      "routing": "路由",
+      "health": "健康",
+      "presets": "预设"
     },
     "detailPanel": {
       "emptyTitle": "未选择提供商",

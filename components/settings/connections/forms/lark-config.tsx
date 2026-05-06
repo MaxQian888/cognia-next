@@ -12,6 +12,7 @@
 // On Save: creates / updates the AdapterInstanceRow and writes secrets to keyring.
 
 import { useState } from "react"
+import { useTranslations } from "next-intl"
 import { CheckCircle2Icon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -83,9 +84,10 @@ interface LarkConfigDialogProps {
 }
 
 export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogProps) {
+  const t = useTranslations("settings.connections.lark")
   const isNew = row === null
 
-  const [displayName, setDisplayName] = useState(row?.displayName ?? "My Lark Bot")
+  const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
   const [appId, setAppId] = useState("")
   const [appSecret, setAppSecret] = useState("")
   const [encryptKey, setEncryptKey] = useState("")
@@ -103,7 +105,7 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
 
   const handleTest = async () => {
     if (!appId.trim() || !appSecret.trim()) {
-      toast.error("Enter App ID and App Secret first.")
+      toast.error(t("tokenRequiredForTest"))
       return
     }
     setTesting(true)
@@ -112,27 +114,27 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
     setTestResult(result)
     setTesting(false)
     if (result.ok) {
-      toast.success(`Connected: ${result.appId ?? "unknown app"}`)
+      toast.success(t("connectedToast", { appId: result.appId ?? t("unknownApp") }))
     } else {
-      toast.error(result.error ?? "Connection failed")
+      toast.error(result.error ?? t("connectionFailedToast"))
     }
   }
 
   const handleSave = async () => {
     if (!displayName.trim()) {
-      toast.error("Display name is required.")
+      toast.error(t("displayNameRequired"))
       return
     }
     if (isNew && !appId.trim()) {
-      toast.error("App ID is required.")
+      toast.error(t("appIdRequired"))
       return
     }
     if (isNew && !appSecret.trim()) {
-      toast.error("App Secret is required.")
+      toast.error(t("appSecretRequired"))
       return
     }
     if (isNew && !verificationToken.trim()) {
-      toast.error("Verification Token is required.")
+      toast.error(t("verificationTokenRequired"))
       return
     }
 
@@ -179,7 +181,7 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
         await connectorsKeyringSet(adapterId, "verificationToken", verificationToken.trim())
       }
 
-      toast.success(isNew ? "Adapter created." : "Adapter updated.")
+      toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -192,18 +194,18 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{isNew ? "Add Lark Bot" : "Configure Lark Bot"}</DialogTitle>
+          <DialogTitle>{isNew ? t("titleNew") : t("titleEdit")}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
           {/* Display name */}
           <div className="space-y-1.5">
-            <Label htmlFor="lk-display-name">Display name</Label>
+            <Label htmlFor="lk-display-name">{t("displayNameLabel")}</Label>
             <Input
               id="lk-display-name"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="My Lark Bot"
+              placeholder={t("displayNamePlaceholder")}
               disabled={saving}
             />
           </div>
@@ -211,17 +213,16 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
           {/* App ID */}
           <div className="space-y-1.5">
             <Label htmlFor="lk-app-id">
-              App ID<span className="ml-1 text-destructive">*</span>
+              {t("appIdLabel")}
+              <span className="ml-1 text-destructive">*</span>
             </Label>
-            <p className="text-xs text-muted-foreground">
-              cli_... from Lark Developer Console &gt; App. Stored encrypted in the OS keyring.
-            </p>
+            <p className="text-xs text-muted-foreground">{t("appIdHelp")}</p>
             <div className="flex gap-2">
               <Input
                 id="lk-app-id"
                 value={appId}
                 onChange={(e) => setAppId(e.target.value)}
-                placeholder="cli_..."
+                placeholder={t("appIdPlaceholder")}
                 disabled={saving}
                 className="flex-1"
               />
@@ -231,9 +232,13 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
                 variant="outline"
                 onClick={handleTest}
                 disabled={testing || saving || !desktop}
-                aria-label="Test connection"
+                aria-label={t("testConnectionAria")}
               >
-                {testing ? <LoaderIcon className="h-3.5 w-3.5 animate-spin" /> : "Test"}
+                {testing ? (
+                  <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  t("testButtonLabel")
+                )}
               </Button>
             </div>
 
@@ -246,20 +251,24 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
                     : "bg-destructive/10 text-destructive"
                 }`}
                 role="status"
-                aria-label={testResult.ok ? "Connection successful" : "Connection failed"}
+                aria-label={
+                  testResult.ok ? t("connectionSucceededLabel") : t("connectionFailedLabel")
+                }
               >
                 {testResult.ok ? (
                   <CheckCircle2Icon className="h-3.5 w-3.5 shrink-0" />
                 ) : (
                   <XCircleIcon className="h-3.5 w-3.5 shrink-0" />
                 )}
-                {testResult.ok ? `Connected: ${testResult.appId ?? "unknown"}` : testResult.error}
+                {testResult.ok
+                  ? t("connectedAs", { appId: testResult.appId ?? t("unknownAppShort") })
+                  : testResult.error}
               </div>
             )}
 
             {!desktop && (
               <p className="text-xs text-amber-600 dark:text-amber-400">
-                Connection testing requires the desktop runtime.
+                {t("testRequiresDesktop")}
               </p>
             )}
           </div>
@@ -267,25 +276,24 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
           {/* App Secret */}
           <div className="space-y-1.5">
             <Label htmlFor="lk-app-secret">
-              App Secret<span className="ml-1 text-destructive">*</span>
+              {t("appSecretLabel")}
+              <span className="ml-1 text-destructive">*</span>
             </Label>
-            <p className="text-xs text-muted-foreground">
-              From Lark Developer Console &gt; App &gt; Credentials.
-            </p>
+            <p className="text-xs text-muted-foreground">{t("appSecretHelp")}</p>
             <Input
               id="lk-app-secret"
               type="password"
               autoComplete="new-password"
               value={appSecret}
               onChange={(e) => setAppSecret(e.target.value)}
-              placeholder="App secret…"
+              placeholder={t("appSecretPlaceholder")}
               disabled={saving}
             />
           </div>
 
           {/* Transport */}
           <div className="space-y-1.5">
-            <Label htmlFor="lk-transport">Transport</Label>
+            <Label htmlFor="lk-transport">{t("transportLabel")}</Label>
             <Select
               value={transport}
               onValueChange={(v) => setTransport(v as TransportMode)}
@@ -295,8 +303,8 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="long-connection">Long connection</SelectItem>
-                <SelectItem value="webhook">Webhook</SelectItem>
+                <SelectItem value="long-connection">{t("transportLongConnection")}</SelectItem>
+                <SelectItem value="webhook">{t("transportWebhook")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -306,36 +314,32 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
           {/* Verification Token */}
           <div className="space-y-1.5">
             <Label htmlFor="lk-verification-token">
-              Verification Token<span className="ml-1 text-destructive">*</span>
+              {t("verificationTokenLabel")}
+              <span className="ml-1 text-destructive">*</span>
             </Label>
-            <p className="text-xs text-muted-foreground">
-              From Lark App &gt; Event subscriptions &gt; Verification Token.
-            </p>
+            <p className="text-xs text-muted-foreground">{t("verificationTokenHelp")}</p>
             <Input
               id="lk-verification-token"
               type="password"
               autoComplete="new-password"
               value={verificationToken}
               onChange={(e) => setVerificationToken(e.target.value)}
-              placeholder="Verification token…"
+              placeholder={t("verificationTokenPlaceholder")}
               disabled={saving}
             />
           </div>
 
           {/* Encrypt Key (optional) */}
           <div className="space-y-1.5">
-            <Label htmlFor="lk-encrypt-key">Encrypt Key</Label>
-            <p className="text-xs text-muted-foreground">
-              Optional. Required only when Encrypt Key is enabled in Lark App &gt; Event
-              subscriptions. Enables AES-256-CBC decryption of incoming events.
-            </p>
+            <Label htmlFor="lk-encrypt-key">{t("encryptKeyLabel")}</Label>
+            <p className="text-xs text-muted-foreground">{t("encryptKeyHelp")}</p>
             <Input
               id="lk-encrypt-key"
               type="password"
               autoComplete="new-password"
               value={encryptKey}
               onChange={(e) => setEncryptKey(e.target.value)}
-              placeholder="Encrypt key (optional)…"
+              placeholder={t("encryptKeyPlaceholder")}
               disabled={saving}
             />
           </div>
@@ -348,10 +352,10 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
               onClick={() => onOpenChange(false)}
               disabled={saving}
             >
-              Cancel
+              {t("cancel")}
             </Button>
             <Button type="button" onClick={handleSave} disabled={saving}>
-              {saving ? "Saving…" : isNew ? "Create" : "Save"}
+              {saving ? t("saving") : isNew ? t("create") : t("save")}
             </Button>
           </div>
         </div>

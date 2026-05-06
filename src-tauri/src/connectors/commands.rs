@@ -1,9 +1,10 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
-use tauri::State;
+use tauri::{AppHandle, State};
 use tokio::sync::Mutex as AsyncMutex;
 
+use super::axum_app::{AppHandleEmitter, EventEmitter};
 use super::server_lifecycle::{start_server, ServerHandle};
 use super::state::ConnectorsState;
 use super::types::{AdapterRegistration, ConnectorsHealth, TauriHttpRequest, TauriHttpResponse};
@@ -54,6 +55,7 @@ pub struct ConnectorsServer(pub Arc<AsyncMutex<Option<ServerHandle>>>);
 
 #[tauri::command]
 pub async fn connectors_start_server(
+    app: AppHandle,
     state: State<'_, ConnectorsState>,
     server: State<'_, ConnectorsServer>,
     port: u16,
@@ -68,7 +70,8 @@ pub async fn connectors_start_server(
     } else {
         IpAddr::V4(Ipv4Addr::UNSPECIFIED)
     };
-    let handle = start_server(state.inner_state(), SocketAddr::new(ip, port)).await?;
+    let emitter: Arc<dyn EventEmitter> = Arc::new(AppHandleEmitter(app));
+    let handle = start_server(state.inner_state(), SocketAddr::new(ip, port), emitter).await?;
     let bound = handle.bound_addr.to_string();
     *handle_lock = Some(handle);
     Ok(bound)

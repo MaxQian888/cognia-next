@@ -9,6 +9,7 @@
 // to the keyring via connectorsKeyringSet.
 
 import { useState } from "react"
+import { useTranslations } from "next-intl"
 import { CheckCircle2Icon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -78,9 +79,10 @@ interface TelegramConfigDialogProps {
 }
 
 export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfigDialogProps) {
+  const t = useTranslations("settings.connections.telegram")
   const isNew = row === null
 
-  const [displayName, setDisplayName] = useState(row?.displayName ?? "My Telegram Bot")
+  const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
   const [botToken, setBotToken] = useState("")
   const [transport, setTransport] = useState<TransportMode>(
     (row?.transportMode as TransportMode) ?? "longpoll"
@@ -96,7 +98,7 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
 
   const handleTest = async () => {
     if (!botToken.trim()) {
-      toast.error("Enter a bot token first.")
+      toast.error(t("tokenRequiredForTest"))
       return
     }
     setTesting(true)
@@ -105,19 +107,19 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
     setTestResult(result)
     setTesting(false)
     if (result.ok) {
-      toast.success(`Connected as @${result.username ?? "unknown"}`)
+      toast.success(t("connectedToast", { username: result.username ?? t("unknownUsername") }))
     } else {
-      toast.error(result.error ?? "Connection failed")
+      toast.error(result.error ?? t("connectionFailedToast"))
     }
   }
 
   const handleSave = async () => {
     if (!displayName.trim()) {
-      toast.error("Display name is required.")
+      toast.error(t("displayNameRequired"))
       return
     }
     if (isNew && !botToken.trim()) {
-      toast.error("Bot token is required.")
+      toast.error(t("botTokenRequired"))
       return
     }
 
@@ -156,7 +158,7 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
         await connectorsKeyringSet(adapterId, "webhookSecret", webhookSecret.trim())
       }
 
-      toast.success(isNew ? "Adapter created." : "Adapter updated.")
+      toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -169,18 +171,18 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{isNew ? "Add Telegram Bot" : "Configure Telegram Bot"}</DialogTitle>
+          <DialogTitle>{isNew ? t("titleNew") : t("titleEdit")}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
           {/* Display name */}
           <div className="space-y-1.5">
-            <Label htmlFor="tg-display-name">Display name</Label>
+            <Label htmlFor="tg-display-name">{t("displayNameLabel")}</Label>
             <Input
               id="tg-display-name"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="My Telegram Bot"
+              placeholder={t("displayNamePlaceholder")}
               disabled={saving}
             />
           </div>
@@ -188,12 +190,10 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
           {/* Bot token + test */}
           <div className="space-y-1.5">
             <Label htmlFor="tg-bot-token">
-              Bot Token<span className="ml-1 text-destructive">*</span>
+              {t("botTokenLabel")}
+              <span className="ml-1 text-destructive">*</span>
             </Label>
-            <p className="text-xs text-muted-foreground">
-              Obtain from @BotFather. The token is stored encrypted in the OS keyring and never
-              logged.
-            </p>
+            <p className="text-xs text-muted-foreground">{t("botTokenHelp")}</p>
             <div className="flex gap-2">
               <Input
                 id="tg-bot-token"
@@ -201,7 +201,7 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
                 autoComplete="new-password"
                 value={botToken}
                 onChange={(e) => setBotToken(e.target.value)}
-                placeholder="1234567890:ABCDEF…"
+                placeholder={t("botTokenPlaceholder")}
                 disabled={saving}
                 className="flex-1"
               />
@@ -211,9 +211,13 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
                 variant="outline"
                 onClick={handleTest}
                 disabled={testing || saving || !desktop}
-                aria-label="Test connection"
+                aria-label={t("testConnectionAria")}
               >
-                {testing ? <LoaderIcon className="h-3.5 w-3.5 animate-spin" /> : "Test"}
+                {testing ? (
+                  <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  t("testButtonLabel")
+                )}
               </Button>
             </div>
 
@@ -226,7 +230,9 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
                     : "bg-destructive/10 text-destructive"
                 }`}
                 role="status"
-                aria-label={testResult.ok ? "Connection successful" : "Connection failed"}
+                aria-label={
+                  testResult.ok ? t("connectionSucceededLabel") : t("connectionFailedLabel")
+                }
               >
                 {testResult.ok ? (
                   <CheckCircle2Icon className="h-3.5 w-3.5 shrink-0" />
@@ -234,14 +240,17 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
                   <XCircleIcon className="h-3.5 w-3.5 shrink-0" />
                 )}
                 {testResult.ok
-                  ? `Connected as @${testResult.username ?? "unknown"} (id: ${testResult.id ?? "?"})`
+                  ? t("connectedAs", {
+                      username: testResult.username ?? t("unknownUsername"),
+                      id: testResult.id ?? t("unknownId"),
+                    })
                   : testResult.error}
               </div>
             )}
 
             {!desktop && (
               <p className="text-xs text-amber-600 dark:text-amber-400">
-                Token testing requires the desktop runtime.
+                {t("testRequiresDesktop")}
               </p>
             )}
           </div>
@@ -250,7 +259,7 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
 
           {/* Transport mode */}
           <div className="space-y-1.5">
-            <Label htmlFor="tg-transport">Transport</Label>
+            <Label htmlFor="tg-transport">{t("transportLabel")}</Label>
             <Select
               value={transport}
               onValueChange={(v) => setTransport(v as TransportMode)}
@@ -260,24 +269,23 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="longpoll">Long Polling</SelectItem>
-                <SelectItem value="webhook">Webhook</SelectItem>
+                <SelectItem value="longpoll">{t("transportLongpoll")}</SelectItem>
+                <SelectItem value="webhook">{t("transportWebhook")}</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              {transport === "longpoll"
-                ? "Cognia polls Telegram servers directly. No public URL required."
-                : "Telegram pushes updates to a public URL you configure in @BotFather."}
+              {transport === "longpoll" ? t("transportLongpollHelp") : t("transportWebhookHelp")}
             </p>
           </div>
 
           {/* Webhook secret (only when webhook selected) */}
           {transport === "webhook" && (
             <div className="space-y-1.5">
-              <Label htmlFor="tg-webhook-secret">Webhook Secret Token (optional)</Label>
+              <Label htmlFor="tg-webhook-secret">{t("webhookSecretLabel")}</Label>
               <p className="text-xs text-muted-foreground">
-                If set, Telegram will include this in the{" "}
-                <code className="text-xs">X-Telegram-Bot-Api-Secret-Token</code> header.
+                {t("webhookSecretHelpPrefix")}{" "}
+                <code className="text-xs">X-Telegram-Bot-Api-Secret-Token</code>{" "}
+                {t("webhookSecretHelpSuffix")}
               </p>
               <Input
                 id="tg-webhook-secret"
@@ -285,7 +293,7 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
                 autoComplete="new-password"
                 value={webhookSecret}
                 onChange={(e) => setWebhookSecret(e.target.value)}
-                placeholder="Optional secret"
+                placeholder={t("webhookSecretPlaceholder")}
                 disabled={saving}
               />
             </div>
@@ -301,10 +309,10 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
               onClick={() => onOpenChange(false)}
               disabled={saving}
             >
-              Cancel
+              {t("cancel")}
             </Button>
             <Button type="button" onClick={handleSave} disabled={saving}>
-              {saving ? "Saving…" : isNew ? "Create" : "Save"}
+              {saving ? t("saving") : isNew ? t("create") : t("save")}
             </Button>
           </div>
         </div>

@@ -28,6 +28,7 @@ import {
   WrenchIcon,
   BlocksIcon,
   ArrowLeftRightIcon,
+  ZapIcon,
   RadioTowerIcon,
   BoxesIcon,
   WebhookIcon,
@@ -42,6 +43,7 @@ export type SettingsSectionId =
   | "general"
   | "api-key"
   | "providers"
+  | "subscription"
   | "ccswitch"
   | "agents"
   | "agent-modes"
@@ -106,6 +108,14 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "providers",
     group: "ai",
     icon: ServerCogIcon,
+  },
+  {
+    id: "subscription",
+    labelKey: "subscription",
+    descriptionKey: "subscription",
+    group: "ai",
+    icon: ZapIcon,
+    desktopOnly: true,
   },
   {
     id: "ccswitch",
@@ -376,6 +386,27 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "切换",
     "供应商",
     "服务商",
+  ],
+  subscription: [
+    "subscription",
+    "claude",
+    "pro",
+    "max",
+    "oauth",
+    "sign in",
+    "login",
+    "rate limit",
+    "ratelimit",
+    "5 hour",
+    "7 day",
+    "quota",
+    "usage",
+    "anthropic",
+    "订阅",
+    "限额",
+    "用量",
+    "登录",
+    "授权",
   ],
   agents: [
     "external",

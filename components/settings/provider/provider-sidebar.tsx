@@ -44,7 +44,7 @@ export function ProviderSidebar({
   const active = providers.filter((p) => p.status === "connected").length
 
   return (
-    <div className="flex h-full w-[280px] shrink-0 flex-col overflow-hidden border-r">
+    <div className="flex h-full w-full min-w-0 flex-col overflow-hidden">
       {/* Top: search + add button */}
       <div className="flex min-w-0 gap-2 border-b p-3">
         <div className="relative flex-1">

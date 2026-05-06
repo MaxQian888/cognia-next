@@ -113,10 +113,6 @@ impl RemoteControlState {
         inner.config.outbound.has_signing_secret = has_secret;
     }
 
-    pub fn server_running(&self) -> bool {
-        self.inner.lock().server.is_some()
-    }
-
     pub async fn start(&self, app_handle: AppHandle) -> Result<(), RemoteControlError> {
         let token = keyring::read_token()
             .map_err(RemoteControlError::Keyring)?

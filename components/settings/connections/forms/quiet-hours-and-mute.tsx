@@ -12,6 +12,7 @@
  * the values via updateAdapterInstance.
  */
 
+import { useTranslations } from "next-intl"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
@@ -54,6 +55,7 @@ export function QuietHoursAndMute({
   onQuietHoursChange,
   disabled,
 }: QuietHoursAndMuteProps) {
+  const t = useTranslations("settings.connections.quietHours")
   const qhEnabled = quietHours !== null
 
   function handleToggleQH(checked: boolean) {
@@ -72,18 +74,16 @@ export function QuietHoursAndMute({
       <div className="flex items-center justify-between">
         <div>
           <Label htmlFor="qhm-muted" className="text-sm font-medium">
-            Globally muted
+            {t("mutedLabel")}
           </Label>
-          <p className="text-xs text-muted-foreground">
-            Suppress all outbound messages until unmuted.
-          </p>
+          <p className="text-xs text-muted-foreground">{t("mutedHelp")}</p>
         </div>
         <Switch
           id="qhm-muted"
           checked={muted}
           onCheckedChange={onMutedChange}
           disabled={disabled}
-          aria-label="Mute adapter"
+          aria-label={t("mutedAria")}
         />
       </div>
 
@@ -91,18 +91,16 @@ export function QuietHoursAndMute({
       <div className="flex items-center justify-between">
         <div>
           <Label htmlFor="qhm-enable" className="text-sm font-medium">
-            Quiet hours
+            {t("enableLabel")}
           </Label>
-          <p className="text-xs text-muted-foreground">
-            Defer outbound messages during these hours.
-          </p>
+          <p className="text-xs text-muted-foreground">{t("enableHelp")}</p>
         </div>
         <Switch
           id="qhm-enable"
           checked={qhEnabled}
           onCheckedChange={handleToggleQH}
           disabled={disabled}
-          aria-label="Enable quiet hours"
+          aria-label={t("enableAria")}
         />
       </div>
 
@@ -111,7 +109,7 @@ export function QuietHoursAndMute({
         <div className="grid grid-cols-3 gap-2">
           <div className="space-y-1">
             <Label htmlFor="qhm-from" className="text-xs">
-              From (HH:MM)
+              {t("fromLabel")}
             </Label>
             <Input
               id="qhm-from"
@@ -119,12 +117,12 @@ export function QuietHoursAndMute({
               value={quietHours.from}
               onChange={(e) => onQuietHoursChange({ ...quietHours, from: e.target.value })}
               disabled={disabled}
-              aria-label="Quiet hours from"
+              aria-label={t("fromAria")}
             />
           </div>
           <div className="space-y-1">
             <Label htmlFor="qhm-to" className="text-xs">
-              To (HH:MM)
+              {t("toLabel")}
             </Label>
             <Input
               id="qhm-to"
@@ -132,19 +130,19 @@ export function QuietHoursAndMute({
               value={quietHours.to}
               onChange={(e) => onQuietHoursChange({ ...quietHours, to: e.target.value })}
               disabled={disabled}
-              aria-label="Quiet hours to"
+              aria-label={t("toAria")}
             />
           </div>
           <div className="space-y-1">
             <Label htmlFor="qhm-tz" className="text-xs">
-              Timezone
+              {t("timezoneLabel")}
             </Label>
             <select
               id="qhm-tz"
               value={quietHours.tz}
               onChange={(e) => onQuietHoursChange({ ...quietHours, tz: e.target.value })}
               disabled={disabled}
-              aria-label="Quiet hours timezone"
+              aria-label={t("timezoneAria")}
               className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               {COMMON_TZ.map((tz) => (

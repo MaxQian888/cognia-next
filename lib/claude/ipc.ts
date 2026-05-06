@@ -80,6 +80,23 @@ export async function hasApiKey(): Promise<boolean> {
   return invoke<boolean>("claude_has_api_key")
 }
 
+/**
+ * Push the Claude OAuth bearer (Pro/Max subscription or Console flow) into
+ * the in-process Rust state. The sidecar reads this on its next spawn and
+ * forwards it as `CLAUDE_CODE_OAUTH_TOKEN` to the agent SDK. Pass `null` to
+ * clear; the caller is responsible for triggering a sidecar restart so the
+ * change takes effect.
+ */
+export async function setOauthBearer(token: string | null): Promise<void> {
+  ensureTauri()
+  await invoke("claude_set_oauth_bearer", { token })
+}
+
+export async function hasOauthBearer(): Promise<boolean> {
+  ensureTauri()
+  return invoke<boolean>("claude_has_oauth_bearer")
+}
+
 export async function restartSidecar(): Promise<void> {
   ensureTauri()
   await invoke("claude_restart_sidecar")

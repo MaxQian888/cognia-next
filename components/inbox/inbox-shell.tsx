@@ -37,6 +37,7 @@ export function InboxShell({
   return (
     <SidebarProvider
       defaultOpen
+      data-bg-target="chat"
       className="flex h-dvh overflow-hidden"
       style={{ "--sidebar-width": "14rem" } as React.CSSProperties}
     >
@@ -58,6 +59,7 @@ export function InboxShell({
       {/* Right pane — conversation detail / children */}
       <SidebarInset
         data-testid="inbox-detail-pane"
+        data-bg-target="chat"
         className="flex flex-col flex-1 min-w-0 overflow-hidden"
       >
         {children ?? (

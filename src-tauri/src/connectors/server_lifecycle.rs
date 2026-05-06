@@ -5,10 +5,11 @@
 //! OS-assigned ephemeral ports (handy in tests).
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
-use super::axum_app::build_router;
+use super::axum_app::{build_router, EventEmitter};
 use super::state::ConnectorsState;
 
 /// Live server handle returned by [`start_server`].
@@ -26,11 +27,14 @@ impl ServerHandle {
 
 /// Bind `bind_addr`, build the router, and spawn the server task.
 ///
-/// Updates `state.inner.server_running` and `bound_addr` before returning so
+/// `emitter` is the sink for verified webhook events. Production callers pass
+/// an `AppHandleEmitter`; tests can pass a recording mock. Updates
+/// `state.inner.server_running` and `bound_addr` before returning so
 /// `connectors_health` reflects the new state immediately.
 pub async fn start_server(
     state: ConnectorsState,
     bind_addr: SocketAddr,
+    emitter: Arc<dyn EventEmitter>,
 ) -> Result<ServerHandle, String> {
     let listener = TcpListener::bind(bind_addr)
         .await
@@ -38,7 +42,7 @@ pub async fn start_server(
     let bound = listener.local_addr().map_err(|e| e.to_string())?;
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
-    let app = build_router(state.clone());
+    let app = build_router(state.clone(), emitter);
 
     {
         let mut inner = state.inner.lock();
@@ -72,12 +76,18 @@ mod tests {
     use super::*;
     use std::net::{IpAddr, Ipv4Addr};
 
+    struct NullEmitter;
+    impl EventEmitter for NullEmitter {
+        fn emit_webhook(&self, _adapter_id: &str, _payload: &serde_json::Value) {}
+    }
+
     #[tokio::test]
     async fn server_starts_and_shuts_down_cleanly() {
         let state = ConnectorsState::new();
         let handle = start_server(
             state.clone(),
             SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            Arc::new(NullEmitter),
         )
         .await
         .unwrap();

@@ -71,7 +71,7 @@ describe("ProviderSidebar", () => {
   it("adds overflow guards so the desktop sidebar stays within its layout bounds", () => {
     const { container } = render(<ProviderSidebar {...defaultProps} />)
 
-    expect(container.firstChild).toHaveClass("shrink-0")
+    expect(container.firstChild).toHaveClass("min-w-0")
     expect(container.firstChild).toHaveClass("overflow-hidden")
     expect(container.querySelector('[data-slot="tabs-list"]')).toHaveClass("w-full")
   })

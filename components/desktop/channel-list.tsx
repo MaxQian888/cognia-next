@@ -78,6 +78,7 @@ export function ChannelList(props: Props) {
     <aside
       className="hidden h-full w-64 shrink-0 flex-col border-r bg-background md:flex"
       aria-label={t("conversationsTitle")}
+      data-bg-target="chat"
     >
       <ChannelListBody {...props} onSelect={handleSelect} />
     </aside>

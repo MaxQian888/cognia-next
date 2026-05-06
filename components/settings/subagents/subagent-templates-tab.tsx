@@ -10,7 +10,7 @@
 
 import { useMemo, useState, useCallback } from "react"
 import { useTranslations } from "next-intl"
-import { CopyIcon, PencilIcon, PlusIcon, Trash2Icon, NetworkIcon } from "lucide-react"
+import { CopyIcon, DownloadIcon, PencilIcon, PlusIcon, Trash2Icon, NetworkIcon } from "lucide-react"
 import { nanoid } from "nanoid"
 
 import { Button } from "@/components/ui/button"
@@ -42,6 +42,7 @@ import { toast } from "@/components/ui/sonner"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import type { SubAgentTemplate } from "@/types/agent/sub-agent"
 import { createLogger } from "@/lib/logger"
+import { SubagentImportDialog } from "./subagent-import-dialog"
 
 const log = createLogger("settings.subagents.templates")
 
@@ -64,6 +65,7 @@ export function SubagentTemplatesTab() {
 
   const [editing, setEditing] = useState<SubAgentTemplate | null>(null)
   const [creating, setCreating] = useState(false)
+  const [importing, setImporting] = useState(false)
 
   const sortedTemplates = useMemo(() => {
     const all = Object.values(templates)
@@ -114,19 +116,32 @@ export function SubagentTemplatesTab() {
           </Label>
           <p className="text-xs text-muted-foreground">{t("description")}</p>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            setEditing(null)
-            setCreating(true)
-          }}
-          data-testid="subagent-template-new"
-        >
-          <PlusIcon className="mr-2 size-4" />
-          {t("newTemplate")}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setImporting(true)}
+            data-testid="subagent-template-import"
+          >
+            <DownloadIcon className="mr-2 size-4" />
+            {t("import.trigger")}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setEditing(null)
+              setCreating(true)
+            }}
+            data-testid="subagent-template-new"
+          >
+            <PlusIcon className="mr-2 size-4" />
+            {t("newTemplate")}
+          </Button>
+        </div>
       </div>
+
+      <SubagentImportDialog open={importing} onOpenChange={setImporting} />
 
       <div className="grid gap-2" data-testid="subagent-template-grid">
         {sortedTemplates.map((tpl) => (
