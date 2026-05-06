@@ -8,10 +8,12 @@ import type { ThemeColors } from "@/types/plugin/plugin-extended"
 import { themeKeyToCssVar, CSS_VAR_KEYS } from "./css-var"
 
 /**
- * Mounts at the root layout and writes the active CustomTheme's tokens onto
- * `<html>` as inline CSS variables. When no custom theme is active or none
- * resolves, removes all previously-injected variables so the cascade falls
- * back to the `:root` / `.dark` defaults in `app/globals.css`.
+ * Mounts at the root layout and writes resolved theme tokens onto `<html>`
+ * as inline CSS variables. Covers both custom themes AND color presets —
+ * `resolveActiveThemeColors` always returns the correct palette, so we apply
+ * it unconditionally. When the resolved colors match the default preset we
+ * clear the inline vars so the `:root` / `.dark` stylesheet rules serve as
+ * the single source of truth (avoids redundancy and keeps the cascade clean).
  *
  * Subscribes minimally — only the active id, the customThemes list, the
  * colorTheme preset, and the resolved theme — so unrelated settings updates
@@ -35,8 +37,8 @@ export function CustomThemeApplier(): null {
       activeCustomThemeId,
       customThemes,
     })
-    const isCustom = resolved.themeSource === "custom"
-    if (!isCustom) {
+    const isDefaultPreset = resolved.themeSource === "preset" && colorTheme === "default"
+    if (isDefaultPreset) {
       if (lastApplied.current) {
         for (const cssVar of CSS_VAR_KEYS) root.style.removeProperty(cssVar)
         lastApplied.current = false

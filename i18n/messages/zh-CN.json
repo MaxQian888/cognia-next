@@ -135,6 +135,71 @@
       "documentLabel": "文档",
       "openCanvas": "打开画布",
       "home": "返回首页"
+    },
+    "keybindings": "快捷键",
+    "keyboardShortcuts": "键盘快捷键",
+    "searchShortcuts": "搜索快捷键…",
+    "exportKeybindings": "导出快捷键",
+    "importKeybindings": "导入快捷键",
+    "resetAllKeybindings": "重置全部快捷键",
+    "keybindingConflicts": "检测到快捷键冲突",
+    "modified": "已修改",
+    "notSet": "未设置",
+    "pressKeys": "按下按键…",
+    "conflictWarning": "此快捷键与其他操作冲突",
+    "resetTo": "重置为",
+    "resetKeybindingsConfirm": "这将把所有快捷键重置为默认值。此操作不可撤销。",
+    "close": "关闭",
+    "cancel": "取消",
+    "reset": "重置",
+    "category": {
+      "canvas": "画布",
+      "action": "操作",
+      "navigation": "导航",
+      "view": "视图",
+      "edit": "编辑",
+      "fold": "折叠"
+    },
+    "action": {
+      "save": "保存",
+      "saveVersion": "保存版本",
+      "undo": "撤销",
+      "redo": "重做",
+      "find": "查找",
+      "replace": "替换",
+      "goToLine": "跳转到行",
+      "format": "格式化",
+      "toggleWordWrap": "切换自动换行",
+      "toggleMinimap": "切换缩略图",
+      "close": "关闭",
+      "review": "审阅",
+      "fix": "修复",
+      "improve": "改进",
+      "explain": "解释",
+      "simplify": "简化",
+      "expand": "扩写",
+      "translate": "翻译",
+      "run": "运行",
+      "nextSuggestion": "下一个建议",
+      "prevSuggestion": "上一个建议",
+      "acceptSuggestion": "接受建议",
+      "rejectSuggestion": "拒绝建议",
+      "nextDocument": "下一个文档",
+      "prevDocument": "上一个文档",
+      "toggleHistory": "切换历史",
+      "toggleSuggestions": "切换建议",
+      "toggleInlineCommand": "切换内联命令",
+      "toggleExecution": "切换执行",
+      "selectAll": "全选",
+      "copy": "复制",
+      "cut": "剪切",
+      "paste": "粘贴",
+      "duplicate": "复制行",
+      "comment": "评论",
+      "foldAll": "全部折叠",
+      "unfoldAll": "全部展开",
+      "foldLevel1": "折叠至 1 级",
+      "foldLevel2": "折叠至 2 级"
     }
   },
   "chat": {
@@ -751,6 +816,7 @@
     "providers": "搜索 Providers",
     "providersDescription": "为各 Provider 配置 API 密钥",
     "filterProviders": "筛选 Provider…",
+    "featuresFilter": "功能",
     "features": {
       "aiAnswer": "AI 回答",
       "news": "新闻",
@@ -1004,6 +1070,25 @@
       "connections": "配置消息平台适配器（Telegram、Discord、Slack 等）并管理出站队列。",
       "subscription": "用 Claude Pro/Max 订阅登录，监控 5 小时 / 7 天速率限制窗口，OAuth 凭据保存在系统钥匙串。"
     },
+    "externalBridge": {
+      "wikiIndex": "Wiki 索引",
+      "rebuildWiki": "重建 Wiki",
+      "forceRebuild": "全量重建",
+      "forceRebuildDesc": "忽略缓存哈希——重新处理所有文件。",
+      "lastBuild": "上次构建",
+      "articleCount": "文章数",
+      "never": "从未",
+      "rebuilding": "索引中…",
+      "scope": "范围",
+      "generator": "生成器",
+      "rebuildConfirmTitle": "确认重建 Wiki？",
+      "rebuildConfirmDesc": "将重新索引 Cognia 代码库并消耗 LLM API 配额。继续？",
+      "rebuildConfirmDescForce": "将从头开始重新索引整个代码库，所有现有文章将被替换。可能需要数分钟并消耗 LLM API 配额。",
+      "rebuildCancel": "取消",
+      "rebuildResult": "Wiki 已重建：{added} 新增，{changed} 更新，{removed} 移除，{errors} 失败",
+      "webModeWarning": "Wiki 重建需要 Tauri 桌面应用。",
+      "noApiKeyError": "未配置 LLM API 密钥，请在 设置 → 提供商 中添加。"
+    },
     "canvas": {
       "title": "画布",
       "description": "配置基于 Monaco 的代码/文档编辑器——字体、AI 建议、版本管理、协作、沙盒执行、无障碍与快捷键。",
@@ -1020,9 +1105,134 @@
         "keys": "快捷键",
         "theme": "主题"
       },
+      "editor": {
+        "fontSize": "字体大小",
+        "fontFamily": "字体族",
+        "fontFamilyOptions": {
+          "firaCode": "Fira Code / Cascadia / JetBrains Mono",
+          "jetbrainsMono": "JetBrains Mono",
+          "cascadiaCode": "Cascadia Code",
+          "sourceCodePro": "Source Code Pro",
+          "ibmPlexMono": "IBM Plex Mono",
+          "systemMonospace": "系统等宽字体"
+        },
+        "lineHeight": "行高",
+        "tabSize": "Tab 大小",
+        "insertSpaces": "插入空格（代替 Tab）",
+        "wordWrap": "自动换行",
+        "minimap": "缩略图",
+        "lineNumbers": "行号",
+        "lineNumbersOptions": {
+          "on": "显示",
+          "off": "隐藏",
+          "relative": "相对"
+        },
+        "renderWhitespace": "显示空白字符",
+        "renderWhitespaceOptions": {
+          "none": "不显示",
+          "boundary": "边界",
+          "selection": "选中区域",
+          "trailing": "行尾",
+          "all": "全部"
+        },
+        "scrollBeyondLastLine": "滚动超出最后一行",
+        "autoClosingBrackets": "自动闭合括号",
+        "autoClosingQuotes": "自动闭合引号",
+        "formatOnPaste": "粘贴时格式化",
+        "formatOnType": "输入时格式化",
+        "cursorBlinking": "光标闪烁",
+        "cursorBlinkingOptions": {
+          "blink": "闪烁",
+          "smooth": "平滑",
+          "phase": "相位",
+          "expand": "展开",
+          "solid": "常亮"
+        },
+        "cursorStyle": "光标样式",
+        "cursorStyleOptions": {
+          "line": "竖线",
+          "block": "方块",
+          "underline": "下划线"
+        },
+        "smoothScrolling": "平滑滚动",
+        "mouseWheelZoom": "滚轮缩放",
+        "bracketPairColorization": "括号对着色",
+        "indentationGuides": "缩进参考线",
+        "bracketPairGuides": "括号对参考线"
+      },
+      "ai": {
+        "autoSuggestions": "自动建议",
+        "suggestionDelay": "建议延迟",
+        "maxSuggestions": "最大建议数",
+        "streamingResponses": "流式响应",
+        "contextLines": "上下文行数",
+        "suggestionProvider": "建议提供商",
+        "suggestionProviderOptions": {
+          "default": "默认（Anthropic）",
+          "custom": "自定义 URL"
+        },
+        "customProviderUrl": "自定义提供商 URL",
+        "enableInlineCompletion": "启用内联补全",
+        "showConfidence": "显示置信度"
+      },
+      "version": {
+        "autoSaveInterval": "自动保存间隔",
+        "maxVersions": "最大版本数",
+        "compressOldVersions": "压缩旧版本",
+        "keepNamedVersions": "保留命名版本",
+        "diffViewMode": "差异视图模式",
+        "diffViewModeOptions": {
+          "inline": "内联",
+          "sideBySide": "并排",
+          "unified": "统一"
+        },
+        "showVersionTimestamps": "显示版本时间戳"
+      },
+      "collab": {
+        "enableCollaboration": "启用协作",
+        "signallingServerUrl": "信令服务器 URL",
+        "showCursors": "显示光标",
+        "showAvatars": "显示头像",
+        "showSelections": "显示选区",
+        "cursorSmoothing": "光标平滑",
+        "presenceTimeout": "在线超时",
+        "syncInterval": "同步间隔"
+      },
+      "execution": {
+        "autoExecute": "保存时自动执行",
+        "maxExecutionTime": "最大执行时间",
+        "showOutput": "显示输出面板",
+        "clearOutputOnRun": "每次运行时清空输出",
+        "preserveVariables": "跨运行保留变量",
+        "sandboxMode": "沙盒模式",
+        "sandboxModeOptions": {
+          "strict": "严格（无网络/存储）",
+          "permissive": "宽松"
+        },
+        "pythonRuntime": "Python 运行时",
+        "pythonRuntimeOptions": {
+          "none": "禁用",
+          "tauriSidecar": "Tauri Python sidecar（桌面端）"
+        },
+        "pythonRequiresDesktop": "Python 执行需要桌面端（Tauri）。运行 `pnpm tauri dev` 以启用。"
+      },
+      "a11y": {
+        "screenReaderOptimized": "屏幕阅读器优化",
+        "highContrast": "高对比度",
+        "reducedMotion": "减少动效",
+        "focusIndicator": "焦点指示器",
+        "announceErrors": "播报错误"
+      },
       "theme": {
         "followSystem": "跟随系统主题",
         "monacoTheme": "Monaco 主题",
+        "monacoThemeOptions": {
+          "auto": "自动（跟随应用主题）",
+          "vs": "vs（亮色）",
+          "vsDark": "vs-dark",
+          "hcLight": "hc-light",
+          "hcBlack": "hc-black"
+        },
         "hint": "通过画布插件 API 注册的自定义 Monaco 主题将在运行时出现在此列表中。"
       }
     },
@@ -1182,10 +1392,21 @@
           "mutedForeground": "弱化色文字",
           "card": "卡片",
           "cardForeground": "卡片文字",
+          "popover": "弹出层",
+          "popoverForeground": "弹出层文字",
+          "input": "输入框",
           "border": "边框",
           "ring": "聚焦环",
           "destructive": "破坏性",
-          "destructiveForeground": "破坏性文字"
+          "destructiveForeground": "破坏性文字",
+          "sidebar": "侧栏",
+          "sidebarForeground": "侧栏文字",
+          "sidebarPrimary": "侧栏主色",
+          "sidebarBorder": "侧栏边框",
+          "sidebarPrimaryForeground": "侧栏主色文字",
+          "sidebarAccent": "侧栏强调色",
+          "sidebarAccentForeground": "侧栏强调色文字",
+          "sidebarRing": "侧栏聚焦环"
         }
       },
       "vscode": {
@@ -1203,6 +1424,9 @@
         "manifestTitle": "已从 VSCode 导入",
         "removeButton": "移除",
         "history": "历史",
+        "activeLabel": "使用中",
+        "activateButton": "应用",
+        "deactivateButton": "使用预设",
         "errorTitle": "导入失败",
         "timeout": "解析超时，可能是文件损坏。请尝试更小的 .vsix 文件。",
         "legend": "VSCode 风格预设",

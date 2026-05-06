@@ -49,18 +49,28 @@ import {
   type BridgeScope,
   type ExternalBridgeSettings,
 } from "@/types/wiki"
+import { WikiRebuildCard } from "./wiki-rebuild-card"
 
 /** Phase 1 disables user-repo scopes (M3 in plan). */
 const PHASE_1_DISABLED_SCOPES: BridgeScope[] = ["wiki:user-repo", "rag:user-repo"]
 
 /**
- * Default sidecar binary location. Phase 2 plugin packaging owns the real
- * distribution path; for Phase 1 we expect the user (or the dev workflow)
- * to drop a built `cognia-mcp.js` here. The Rust side surfaces a clear
- * error if the file is missing.
+ * Default sidecar binary location. Resolves the user's home directory via
+ * Tauri's path API; falls back to a platform-agnostic default in web mode.
  */
-function resolveSidecarPath(): string {
-  return "${HOME}/.cognia/cognia-mcp.js"
+async function resolveSidecarPath(): Promise<string> {
+  try {
+    const { homeDir } = await import("@tauri-apps/api/path")
+    const home = await homeDir()
+    const sep = home.includes("\\") ? "\\" : "/"
+    return `${home}${sep}.cognia${sep}cognia-mcp.js`
+  } catch {
+    // Web mode — won't be reached in practice since startMcpServer throws
+    // before the sidecar path is used, but return a sensible fallback.
+    const home = process.env["HOME"] || process.env["USERPROFILE"] || "~"
+    const sep = home.includes("\\") ? "\\" : "/"
+    return `${home}${sep}.cognia${sep}cognia-mcp.js`
+  }
 }
 
 /** Tiny status indicator used in the ServerStatusCard header. */
@@ -130,6 +140,7 @@ export function ExternalBridgeSection() {
     <div className="space-y-4 p-4">
       <ServerStatusCard settings={settings} onChange={persist} />
       <ScopeTogglesCard settings={settings} onChange={persist} />
+      <WikiRebuildCard />
       <SetupInstructionsCard settings={settings} />
       <AuditLogCard rows={auditRows ?? []} />
     </div>
@@ -196,7 +207,7 @@ function ServerStatusCard({
             port: next.httpPort ?? 0,
             token: next.bearerToken!,
             settings: next,
-            sidecarPath: resolveSidecarPath(),
+            sidecarPath: await resolveSidecarPath(),
           })
           onChange({ ...next, httpPort: port })
           toast.success(`MCP HTTP server listening on 127.0.0.1:${port}`)

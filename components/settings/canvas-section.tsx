@@ -127,12 +127,13 @@ interface SectionProps {
 /* ------- Editor tab ------- */
 
 function EditorTab({ settings }: SectionProps) {
+  const t = useTranslations("settings.canvas.editor")
   const update = useCanvasSettingsStore((s) => s.updateEditorSettings)
   const e = settings.editor
   return (
     <div className="space-y-5">
       <SliderRow
-        label="Font size"
+        label={t("fontSize")}
         value={e.fontSize}
         min={8}
         max={72}
@@ -140,27 +141,35 @@ function EditorTab({ settings }: SectionProps) {
         unit="px"
         onChange={(v) => update({ fontSize: v })}
       />
-      <Row label="Font family">
+      <Row label={t("fontFamily")}>
         <Select value={e.fontFamily} onValueChange={(v) => update({ fontFamily: v })}>
           <SelectTrigger className="w-full max-w-md text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace">
-              Fira Code / Cascadia / JetBrains Mono
+              {t("fontFamilyOptions.firaCode")}
             </SelectItem>
-            <SelectItem value="'JetBrains Mono', monospace">JetBrains Mono</SelectItem>
-            <SelectItem value="'Cascadia Code', monospace">Cascadia Code</SelectItem>
-            <SelectItem value="'Source Code Pro', monospace">Source Code Pro</SelectItem>
-            <SelectItem value="'IBM Plex Mono', monospace">IBM Plex Mono</SelectItem>
+            <SelectItem value="'JetBrains Mono', monospace">
+              {t("fontFamilyOptions.jetbrainsMono")}
+            </SelectItem>
+            <SelectItem value="'Cascadia Code', monospace">
+              {t("fontFamilyOptions.cascadiaCode")}
+            </SelectItem>
+            <SelectItem value="'Source Code Pro', monospace">
+              {t("fontFamilyOptions.sourceCodePro")}
+            </SelectItem>
+            <SelectItem value="'IBM Plex Mono', monospace">
+              {t("fontFamilyOptions.ibmPlexMono")}
+            </SelectItem>
             <SelectItem value="ui-monospace, SFMono-Regular, monospace">
-              System monospace
+              {t("fontFamilyOptions.systemMonospace")}
             </SelectItem>
           </SelectContent>
         </Select>
       </Row>
       <SliderRow
-        label="Line height"
+        label={t("lineHeight")}
         value={e.lineHeight}
         min={1}
         max={3}
@@ -168,7 +177,7 @@ function EditorTab({ settings }: SectionProps) {
         onChange={(v) => update({ lineHeight: v })}
       />
       <SliderRow
-        label="Tab size"
+        label={t("tabSize")}
         value={e.tabSize}
         min={1}
         max={8}
@@ -176,13 +185,17 @@ function EditorTab({ settings }: SectionProps) {
         onChange={(v) => update({ tabSize: v })}
       />
       <Toggle
-        label="Insert spaces (vs. tabs)"
+        label={t("insertSpaces")}
         checked={e.insertSpaces}
         onChange={(v) => update({ insertSpaces: v })}
       />
-      <Toggle label="Word wrap" checked={e.wordWrap} onChange={(v) => update({ wordWrap: v })} />
-      <Toggle label="Minimap" checked={e.minimap} onChange={(v) => update({ minimap: v })} />
-      <Row label="Line numbers">
+      <Toggle
+        label={t("wordWrap")}
+        checked={e.wordWrap}
+        onChange={(v) => update({ wordWrap: v })}
+      />
+      <Toggle label={t("minimap")} checked={e.minimap} onChange={(v) => update({ minimap: v })} />
+      <Row label={t("lineNumbers")}>
         <Select
           value={e.lineNumbers}
           onValueChange={(v) => update({ lineNumbers: v as typeof e.lineNumbers })}
@@ -191,13 +204,13 @@ function EditorTab({ settings }: SectionProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="on">On</SelectItem>
-            <SelectItem value="off">Off</SelectItem>
-            <SelectItem value="relative">Relative</SelectItem>
+            <SelectItem value="on">{t("lineNumbersOptions.on")}</SelectItem>
+            <SelectItem value="off">{t("lineNumbersOptions.off")}</SelectItem>
+            <SelectItem value="relative">{t("lineNumbersOptions.relative")}</SelectItem>
           </SelectContent>
         </Select>
       </Row>
-      <Row label="Render whitespace">
+      <Row label={t("renderWhitespace")}>
         <Select
           value={e.renderWhitespace}
           onValueChange={(v) => update({ renderWhitespace: v as typeof e.renderWhitespace })}
@@ -206,40 +219,40 @@ function EditorTab({ settings }: SectionProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="none">None</SelectItem>
-            <SelectItem value="boundary">Boundary</SelectItem>
-            <SelectItem value="selection">Selection</SelectItem>
-            <SelectItem value="trailing">Trailing</SelectItem>
-            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="none">{t("renderWhitespaceOptions.none")}</SelectItem>
+            <SelectItem value="boundary">{t("renderWhitespaceOptions.boundary")}</SelectItem>
+            <SelectItem value="selection">{t("renderWhitespaceOptions.selection")}</SelectItem>
+            <SelectItem value="trailing">{t("renderWhitespaceOptions.trailing")}</SelectItem>
+            <SelectItem value="all">{t("renderWhitespaceOptions.all")}</SelectItem>
           </SelectContent>
         </Select>
       </Row>
       <Toggle
-        label="Scroll beyond last line"
+        label={t("scrollBeyondLastLine")}
         checked={e.scrollBeyondLastLine}
         onChange={(v) => update({ scrollBeyondLastLine: v })}
       />
       <Toggle
-        label="Auto-close brackets"
+        label={t("autoClosingBrackets")}
         checked={e.autoClosingBrackets}
         onChange={(v) => update({ autoClosingBrackets: v })}
       />
       <Toggle
-        label="Auto-close quotes"
+        label={t("autoClosingQuotes")}
         checked={e.autoClosingQuotes}
         onChange={(v) => update({ autoClosingQuotes: v })}
       />
       <Toggle
-        label="Format on paste"
+        label={t("formatOnPaste")}
         checked={e.formatOnPaste}
         onChange={(v) => update({ formatOnPaste: v })}
       />
       <Toggle
-        label="Format on type"
+        label={t("formatOnType")}
         checked={e.formatOnType}
         onChange={(v) => update({ formatOnType: v })}
       />
-      <Row label="Cursor blinking">
+      <Row label={t("cursorBlinking")}>
         <Select
           value={e.cursorBlinking}
           onValueChange={(v) => update({ cursorBlinking: v as typeof e.cursorBlinking })}
@@ -250,13 +263,13 @@ function EditorTab({ settings }: SectionProps) {
           <SelectContent>
             {(["blink", "smooth", "phase", "expand", "solid"] as const).map((v) => (
               <SelectItem key={v} value={v}>
-                {v}
+                {t(`cursorBlinkingOptions.${v}` as Parameters<typeof t>[0])}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
       </Row>
-      <Row label="Cursor style">
+      <Row label={t("cursorStyle")}>
         <Select
           value={e.cursorStyle}
           onValueChange={(v) => update({ cursorStyle: v as typeof e.cursorStyle })}
@@ -267,35 +280,35 @@ function EditorTab({ settings }: SectionProps) {
           <SelectContent>
             {(["line", "block", "underline"] as const).map((v) => (
               <SelectItem key={v} value={v}>
-                {v}
+                {t(`cursorStyleOptions.${v}` as Parameters<typeof t>[0])}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
       </Row>
       <Toggle
-        label="Smooth scrolling"
+        label={t("smoothScrolling")}
         checked={e.smoothScrolling}
         onChange={(v) => update({ smoothScrolling: v })}
       />
       <Toggle
-        label="Mouse-wheel zoom"
+        label={t("mouseWheelZoom")}
         checked={e.mouseWheelZoom}
         onChange={(v) => update({ mouseWheelZoom: v })}
       />
       <Toggle
-        label="Bracket pair colorization"
+        label={t("bracketPairColorization")}
         checked={e.bracketPairColorization}
         onChange={(v) => update({ bracketPairColorization: v })}
       />
       <Separator />
       <Toggle
-        label="Indentation guides"
+        label={t("indentationGuides")}
         checked={e.guides.indentation}
         onChange={(v) => update({ guides: { ...e.guides, indentation: v } })}
       />
       <Toggle
-        label="Bracket pair guides"
+        label={t("bracketPairGuides")}
         checked={e.guides.bracketPairs}
         onChange={(v) => update({ guides: { ...e.guides, bracketPairs: v } })}
       />
@@ -306,17 +319,18 @@ function EditorTab({ settings }: SectionProps) {
 /* ------- AI tab ------- */
 
 function AITab({ settings }: SectionProps) {
+  const t = useTranslations("settings.canvas.ai")
   const update = useCanvasSettingsStore((s) => s.updateAISettings)
   const a = settings.ai
   return (
     <div className="space-y-5">
       <Toggle
-        label="Auto suggestions"
+        label={t("autoSuggestions")}
         checked={a.autoSuggestions}
         onChange={(v) => update({ autoSuggestions: v })}
       />
       <SliderRow
-        label="Suggestion delay"
+        label={t("suggestionDelay")}
         value={a.suggestionDelay}
         min={100}
         max={5000}
@@ -325,7 +339,7 @@ function AITab({ settings }: SectionProps) {
         onChange={(v) => update({ suggestionDelay: v })}
       />
       <SliderRow
-        label="Max suggestions"
+        label={t("maxSuggestions")}
         value={a.maxSuggestions}
         min={1}
         max={20}
@@ -333,19 +347,19 @@ function AITab({ settings }: SectionProps) {
         onChange={(v) => update({ maxSuggestions: v })}
       />
       <Toggle
-        label="Streaming responses"
+        label={t("streamingResponses")}
         checked={a.streamingResponses}
         onChange={(v) => update({ streamingResponses: v })}
       />
       <SliderRow
-        label="Context lines"
+        label={t("contextLines")}
         value={a.contextLines}
         min={1}
         max={200}
         step={1}
         onChange={(v) => update({ contextLines: v })}
       />
-      <Row label="Suggestion provider">
+      <Row label={t("suggestionProvider")}>
         <Select
           value={a.suggestionProvider}
           onValueChange={(v) => update({ suggestionProvider: v as typeof a.suggestionProvider })}
@@ -354,13 +368,13 @@ function AITab({ settings }: SectionProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="default">Default (Anthropic)</SelectItem>
-            <SelectItem value="custom">Custom URL</SelectItem>
+            <SelectItem value="default">{t("suggestionProviderOptions.default")}</SelectItem>
+            <SelectItem value="custom">{t("suggestionProviderOptions.custom")}</SelectItem>
           </SelectContent>
         </Select>
       </Row>
       {a.suggestionProvider === "custom" && (
-        <Row label="Custom provider URL">
+        <Row label={t("customProviderUrl")}>
           <Input
             className="max-w-md text-xs"
             value={a.customProviderUrl ?? ""}
@@ -370,12 +384,12 @@ function AITab({ settings }: SectionProps) {
         </Row>
       )}
       <Toggle
-        label="Enable inline completion"
+        label={t("enableInlineCompletion")}
         checked={a.enableInlineCompletion}
         onChange={(v) => update({ enableInlineCompletion: v })}
       />
       <Toggle
-        label="Show confidence"
+        label={t("showConfidence")}
         checked={a.showConfidence}
         onChange={(v) => update({ showConfidence: v })}
       />
@@ -386,12 +400,13 @@ function AITab({ settings }: SectionProps) {
 /* ------- Versioning tab ------- */
 
 function VersionTab({ settings }: SectionProps) {
+  const t = useTranslations("settings.canvas.version")
   const update = useCanvasSettingsStore((s) => s.updateVersionSettings)
   const v = settings.version
   return (
     <div className="space-y-5">
       <SliderRow
-        label="Auto-save interval"
+        label={t("autoSaveInterval")}
         value={v.autoSaveInterval}
         min={10}
         max={300}
@@ -400,7 +415,7 @@ function VersionTab({ settings }: SectionProps) {
         onChange={(n) => update({ autoSaveInterval: n })}
       />
       <SliderRow
-        label="Max versions"
+        label={t("maxVersions")}
         value={v.maxVersions}
         min={5}
         max={200}
@@ -408,16 +423,16 @@ function VersionTab({ settings }: SectionProps) {
         onChange={(n) => update({ maxVersions: n })}
       />
       <Toggle
-        label="Compress old versions"
+        label={t("compressOldVersions")}
         checked={v.compressOldVersions}
         onChange={(b) => update({ compressOldVersions: b })}
       />
       <Toggle
-        label="Keep named versions"
+        label={t("keepNamedVersions")}
         checked={v.keepNamedVersions}
         onChange={(b) => update({ keepNamedVersions: b })}
       />
-      <Row label="Diff view mode">
+      <Row label={t("diffViewMode")}>
         <Select
           value={v.diffViewMode}
           onValueChange={(val) => update({ diffViewMode: val as typeof v.diffViewMode })}
@@ -426,14 +441,14 @@ function VersionTab({ settings }: SectionProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="inline">Inline</SelectItem>
-            <SelectItem value="side-by-side">Side-by-side</SelectItem>
-            <SelectItem value="unified">Unified</SelectItem>
+            <SelectItem value="inline">{t("diffViewModeOptions.inline")}</SelectItem>
+            <SelectItem value="side-by-side">{t("diffViewModeOptions.sideBySide")}</SelectItem>
+            <SelectItem value="unified">{t("diffViewModeOptions.unified")}</SelectItem>
           </SelectContent>
         </Select>
       </Row>
       <Toggle
-        label="Show version timestamps"
+        label={t("showVersionTimestamps")}
         checked={v.showVersionTimestamps}
         onChange={(b) => update({ showVersionTimestamps: b })}
       />
@@ -444,16 +459,17 @@ function VersionTab({ settings }: SectionProps) {
 /* ------- Collaboration tab ------- */
 
 function CollaborationTab({ settings }: SectionProps) {
+  const t = useTranslations("settings.canvas.collab")
   const set = useCanvasSettingsStore((s) => s.updateSettings)
   const c = settings.collaboration
   return (
     <div className="space-y-5">
       <Toggle
-        label="Enable collaboration"
+        label={t("enableCollaboration")}
         checked={c.enabled}
         onChange={(v) => set({ collaboration: { ...c, enabled: v } })}
       />
-      <Row label="Signalling server URL">
+      <Row label={t("signallingServerUrl")}>
         <Input
           value={c.serverUrl}
           placeholder="ws://localhost:8787"
@@ -462,27 +478,27 @@ function CollaborationTab({ settings }: SectionProps) {
         />
       </Row>
       <Toggle
-        label="Show cursors"
+        label={t("showCursors")}
         checked={c.showCursors}
         onChange={(v) => set({ collaboration: { ...c, showCursors: v } })}
       />
       <Toggle
-        label="Show avatars"
+        label={t("showAvatars")}
         checked={c.showAvatars}
         onChange={(v) => set({ collaboration: { ...c, showAvatars: v } })}
       />
       <Toggle
-        label="Show selections"
+        label={t("showSelections")}
         checked={c.showSelections}
         onChange={(v) => set({ collaboration: { ...c, showSelections: v } })}
       />
       <Toggle
-        label="Cursor smoothing"
+        label={t("cursorSmoothing")}
         checked={c.cursorSmoothing}
         onChange={(v) => set({ collaboration: { ...c, cursorSmoothing: v } })}
       />
       <SliderRow
-        label="Presence timeout"
+        label={t("presenceTimeout")}
         value={c.presenceTimeout}
         min={5000}
         max={300000}
@@ -491,7 +507,7 @@ function CollaborationTab({ settings }: SectionProps) {
         onChange={(n) => set({ collaboration: { ...c, presenceTimeout: n } })}
       />
       <SliderRow
-        label="Sync interval"
+        label={t("syncInterval")}
         value={c.syncInterval}
         min={50}
         max={1000}
@@ -506,18 +522,19 @@ function CollaborationTab({ settings }: SectionProps) {
 /* ------- Execution tab ------- */
 
 function ExecutionTab({ settings }: SectionProps) {
+  const t = useTranslations("settings.canvas.execution")
   const set = useCanvasSettingsStore((s) => s.updateSettings)
   const e = settings.execution
   const desktop = isTauri()
   return (
     <div className="space-y-5">
       <Toggle
-        label="Auto-execute on save"
+        label={t("autoExecute")}
         checked={e.autoExecute}
         onChange={(v) => set({ execution: { ...e, autoExecute: v } })}
       />
       <SliderRow
-        label="Max execution time"
+        label={t("maxExecutionTime")}
         value={e.maxExecutionTime}
         min={1000}
         max={60000}
@@ -526,21 +543,21 @@ function ExecutionTab({ settings }: SectionProps) {
         onChange={(v) => set({ execution: { ...e, maxExecutionTime: v } })}
       />
       <Toggle
-        label="Show output panel"
+        label={t("showOutput")}
         checked={e.showOutput}
         onChange={(v) => set({ execution: { ...e, showOutput: v } })}
       />
       <Toggle
-        label="Clear output on each run"
+        label={t("clearOutputOnRun")}
         checked={e.clearOutputOnRun}
         onChange={(v) => set({ execution: { ...e, clearOutputOnRun: v } })}
       />
       <Toggle
-        label="Preserve variables across runs"
+        label={t("preserveVariables")}
         checked={e.preserveVariables}
         onChange={(v) => set({ execution: { ...e, preserveVariables: v } })}
       />
-      <Row label="Sandbox mode">
+      <Row label={t("sandboxMode")}>
         <Select
           value={e.sandboxMode}
           onValueChange={(v) =>
@@ -551,12 +568,12 @@ function ExecutionTab({ settings }: SectionProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="strict">Strict (no network/storage)</SelectItem>
-            <SelectItem value="permissive">Permissive</SelectItem>
+            <SelectItem value="strict">{t("sandboxModeOptions.strict")}</SelectItem>
+            <SelectItem value="permissive">{t("sandboxModeOptions.permissive")}</SelectItem>
           </SelectContent>
         </Select>
       </Row>
-      <Row label="Python runtime">
+      <Row label={t("pythonRuntime")}>
         <Select
           value={e.pythonRuntime}
           onValueChange={(v) =>
@@ -568,17 +585,12 @@ function ExecutionTab({ settings }: SectionProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="none">Disabled</SelectItem>
-            <SelectItem value="tauri-sidecar">Tauri Python sidecar (desktop)</SelectItem>
+            <SelectItem value="none">{t("pythonRuntimeOptions.none")}</SelectItem>
+            <SelectItem value="tauri-sidecar">{t("pythonRuntimeOptions.tauriSidecar")}</SelectItem>
           </SelectContent>
         </Select>
       </Row>
-      {!desktop && (
-        <p className="text-xs text-muted-foreground">
-          Python execution requires the desktop build (Tauri). Run <code>pnpm tauri dev</code> to
-          enable.
-        </p>
-      )}
+      {!desktop && <p className="text-xs text-muted-foreground">{t("pythonRequiresDesktop")}</p>}
     </div>
   )
 }
@@ -586,32 +598,33 @@ function ExecutionTab({ settings }: SectionProps) {
 /* ------- Accessibility tab ------- */
 
 function AccessibilityTab({ settings }: SectionProps) {
+  const t = useTranslations("settings.canvas.a11y")
   const set = useCanvasSettingsStore((s) => s.updateSettings)
   const a = settings.accessibility
   return (
     <div className="space-y-5">
       <Toggle
-        label="Screen reader optimised"
+        label={t("screenReaderOptimized")}
         checked={a.screenReaderOptimized}
         onChange={(v) => set({ accessibility: { ...a, screenReaderOptimized: v } })}
       />
       <Toggle
-        label="High contrast"
+        label={t("highContrast")}
         checked={a.highContrast}
         onChange={(v) => set({ accessibility: { ...a, highContrast: v } })}
       />
       <Toggle
-        label="Reduced motion"
+        label={t("reducedMotion")}
         checked={a.reducedMotion}
         onChange={(v) => set({ accessibility: { ...a, reducedMotion: v } })}
       />
       <Toggle
-        label="Focus indicator"
+        label={t("focusIndicator")}
         checked={a.focusIndicator}
         onChange={(v) => set({ accessibility: { ...a, focusIndicator: v } })}
       />
       <Toggle
-        label="Announce errors"
+        label={t("announceErrors")}
         checked={a.announceErrors}
         onChange={(v) => set({ accessibility: { ...a, announceErrors: v } })}
       />
@@ -659,11 +672,11 @@ function ThemeTab({ settings }: SectionProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="auto">Auto (follow app theme)</SelectItem>
-            <SelectItem value="vs">vs (light)</SelectItem>
-            <SelectItem value="vs-dark">vs-dark</SelectItem>
-            <SelectItem value="hc-light">hc-light</SelectItem>
-            <SelectItem value="hc-black">hc-black</SelectItem>
+            <SelectItem value="auto">{t("monacoThemeOptions.auto")}</SelectItem>
+            <SelectItem value="vs">{t("monacoThemeOptions.vs")}</SelectItem>
+            <SelectItem value="vs-dark">{t("monacoThemeOptions.vsDark")}</SelectItem>
+            <SelectItem value="hc-light">{t("monacoThemeOptions.hcLight")}</SelectItem>
+            <SelectItem value="hc-black">{t("monacoThemeOptions.hcBlack")}</SelectItem>
           </SelectContent>
         </Select>
       </Row>

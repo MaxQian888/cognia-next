@@ -183,7 +183,7 @@ export function SearchProviderGrid() {
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="h-8 text-xs">
                 <Filter className="h-3 w-3 mr-1" />
-                {t("features")}
+                {t("featuresFilter")}
                 {featureFilters.length > 0 && (
                   <Badge variant="secondary" className="ml-1 text-[10px] px-1 py-0">
                     {featureFilters.length}

@@ -71,6 +71,7 @@ export function VscodeImportTab() {
   const addImportedTheme = useSettingsStore((s) => s.addImportedTheme)
   const removeImportedTheme = useSettingsStore((s) => s.removeImportedTheme)
   const deleteCustomTheme = useSettingsStore((s) => s.deleteCustomTheme)
+  const activeCustomThemeId = useSettingsStore((s) => s.activeCustomThemeId)
   const importedRecords = useSettingsStore(
     (s) => s.settings?.importedVscodeThemes ?? EMPTY_IMPORTED
   )
@@ -294,26 +295,56 @@ export function VscodeImportTab() {
           <ul className="space-y-1">
             {importedRecords.map((record) => {
               const ct = customThemes.find((c) => c.id === record.customThemeId)
+              const isActive = record.customThemeId === activeCustomThemeId
               return (
                 <li
                   key={record.customThemeId}
-                  className="flex flex-col gap-1 rounded border p-2 text-xs sm:flex-row sm:items-center"
+                  className={cn(
+                    "flex flex-col gap-1 rounded border p-2 text-xs sm:flex-row sm:items-center",
+                    isActive && "border-primary bg-primary/5"
+                  )}
                 >
-                  <span className="font-medium">{ct?.name ?? record.sourceName}</span>
+                  <span className="font-medium">
+                    {ct?.name ?? record.sourceName}
+                    {isActive && (
+                      <span className="ml-1.5 text-[10px] text-primary">{t("activeLabel")}</span>
+                    )}
+                  </span>
                   <span className="font-mono text-[10px] text-muted-foreground">
                     {record.origin.kind === "json"
                       ? record.origin.fileName
                       : `${record.origin.vsixName} · ${record.origin.themePath}`}
                   </span>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="ml-auto h-6 w-6 text-destructive"
-                    onClick={() => void removeRecord(record)}
-                    aria-label={t("removeButton")}
-                  >
-                    <Trash2Icon className="size-3" />
-                  </Button>
+                  <div className="ml-auto flex items-center gap-1">
+                    {isActive ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 px-2 text-[10px]"
+                        onClick={() => void setActive(null)}
+                      >
+                        {t("deactivateButton")}
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 px-2 text-[10px]"
+                        onClick={() => void setActive(record.customThemeId)}
+                      >
+                        {t("activateButton")}
+                      </Button>
+                    )}
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-6 w-6 text-destructive"
+                      onClick={() => void removeRecord(record)}
+                      aria-label={t("removeButton")}
+                    >
+                      <Trash2Icon className="size-3" />
+                    </Button>
+                  </div>
                 </li>
               )
             })}

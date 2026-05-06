@@ -61,6 +61,35 @@ export type A2UIComponentType =
   | "Animation"
   | "InteractiveGuide"
   | "RichOutput"
+  | "Switch"
+  | "Loading"
+  | "Error"
+  | "Empty"
+  | "Animation"
+  | "FormGroup"
+  | "AcademicAnalysis"
+  | "Avatar"
+  | "Tooltip"
+  | "Skeleton"
+  | "Spinner"
+  | "Toast"
+  | "Combobox"
+  | "DropdownMenu"
+  | "ContextMenu"
+  | "Popover"
+  | "HoverCard"
+  | "Breadcrumb"
+  | "Carousel"
+  | "Drawer"
+  | "Sheet"
+  | "ScrollArea"
+  | "Pagination"
+  | "Sidebar"
+  | "InputOTP"
+  | "ToggleGroup"
+  | "ButtonGroup"
+  | "InputGroup"
+  | "Collapsible"
   | string // Allow custom component types
 
 /**
@@ -708,6 +737,263 @@ export interface A2UIDataExplorerComponent extends A2UIBaseComponent {
   emptyMessage?: string
 }
 
+export interface A2UISwitchComponent extends A2UIBaseComponent {
+  component: "Switch"
+  checked: A2UIBooleanOrPath
+  label?: string
+  description?: string
+}
+
+export interface A2UILoadingComponent extends A2UIBaseComponent {
+  component: "Loading"
+  text?: A2UIStringOrPath
+  size?: "sm" | "md" | "lg"
+}
+
+export interface A2UIErrorComponent extends A2UIBaseComponent {
+  component: "Error"
+  title?: A2UIStringOrPath
+  message: A2UIStringOrPath
+  retryAction?: string
+}
+
+export interface A2UIEmptyComponent extends A2UIBaseComponent {
+  component: "Empty"
+  title?: string
+  message?: string
+  icon?: string
+  actionLabel?: string
+  action?: string
+}
+
+export interface A2UIAnimationComponent extends A2UIBaseComponent {
+  component: "Animation"
+  src: string
+  autoplay?: boolean
+  loop?: boolean
+}
+
+export interface A2UIInteractiveGuideComponent extends A2UIBaseComponent {
+  component: "InteractiveGuide"
+  steps: string[]
+  currentStep?: A2UINumberOrPath
+}
+
+export interface A2UIAvatarComponent extends A2UIBaseComponent {
+  component: "Avatar"
+  src?: A2UIStringOrPath
+  alt?: string
+  fallback?: string
+  size?: "sm" | "md" | "lg"
+}
+
+export interface A2UITooltipComponent extends A2UIBaseComponent {
+  component: "Tooltip"
+  text: A2UIStringOrPath
+  children: string[]
+  side?: "top" | "right" | "bottom" | "left"
+  delayDuration?: number
+}
+
+export interface A2UISkeletonComponent extends A2UIBaseComponent {
+  component: "Skeleton"
+  variant?: "text" | "circular" | "rectangular"
+  width?: number | string
+  height?: number | string
+  lines?: number
+}
+
+export interface A2UISpinnerComponent extends A2UIBaseComponent {
+  component: "Spinner"
+  size?: "sm" | "md" | "lg"
+  label?: string
+}
+
+export interface A2UIToastComponent extends A2UIBaseComponent {
+  component: "Toast"
+  message: A2UIStringOrPath
+  description?: A2UIStringOrPath
+  variant?: "default" | "success" | "error" | "warning" | "info" | "loading"
+  duration?: number
+  actionLabel?: string
+  action?: string
+}
+
+export interface A2UIComboboxOption {
+  value: string
+  label: string
+  disabled?: boolean
+}
+
+export interface A2UIComboboxComponent extends A2UIBaseComponent {
+  component: "Combobox"
+  options: A2UIComboboxOption[] | A2UIPathValue<A2UIComboboxOption[]>
+  value: A2UIStringOrPath
+  placeholder?: string
+  emptyText?: string
+  searchPlaceholder?: string
+  label?: string
+}
+
+export interface A2UIDropdownMenuItem {
+  id: string
+  label: string
+  action?: string
+  icon?: string
+  disabled?: boolean
+  danger?: boolean
+  separator?: boolean
+}
+
+export interface A2UIDropdownMenuComponent extends A2UIBaseComponent {
+  component: "DropdownMenu"
+  trigger: string
+  items: A2UIDropdownMenuItem[]
+  label?: string
+  align?: "start" | "center" | "end"
+  side?: "top" | "right" | "bottom" | "left"
+}
+
+export interface A2UIContextMenuComponent extends A2UIBaseComponent {
+  component: "ContextMenu"
+  trigger: string
+  items: A2UIDropdownMenuItem[]
+  label?: string
+}
+
+export interface A2UIPopoverComponent extends A2UIBaseComponent {
+  component: "Popover"
+  trigger: string
+  children: string[]
+  align?: "start" | "center" | "end"
+  side?: "top" | "right" | "bottom" | "left"
+}
+
+export interface A2UIHoverCardComponent extends A2UIBaseComponent {
+  component: "HoverCard"
+  trigger: string
+  children: string[]
+  align?: "start" | "center" | "end"
+  side?: "top" | "right" | "bottom" | "left"
+  openDelay?: number
+}
+
+export interface A2UIBreadcrumbItem {
+  label: string
+  href?: string
+  current?: boolean
+  ellipsis?: boolean
+}
+
+export interface A2UIBreadcrumbComponent extends A2UIBaseComponent {
+  component: "Breadcrumb"
+  items: A2UIBreadcrumbItem[]
+}
+
+export interface A2UICarouselComponent extends A2UIBaseComponent {
+  component: "Carousel"
+  children: string[]
+  showControls?: boolean
+  loop?: boolean
+}
+
+export interface A2UIDrawerComponent extends A2UIBaseComponent {
+  component: "Drawer"
+  trigger: string
+  title?: A2UIStringOrPath
+  description?: A2UIStringOrPath
+  children: string[]
+  open?: A2UIBooleanOrPath
+}
+
+export interface A2UISheetComponent extends A2UIBaseComponent {
+  component: "Sheet"
+  trigger: string
+  title?: A2UIStringOrPath
+  description?: A2UIStringOrPath
+  children: string[]
+  side?: "top" | "right" | "bottom" | "left"
+  open?: A2UIBooleanOrPath
+}
+
+export interface A2UIScrollAreaComponent extends A2UIBaseComponent {
+  component: "ScrollArea"
+  children: string[]
+  height?: number | string
+}
+
+export interface A2UIPaginationComponent extends A2UIBaseComponent {
+  component: "Pagination"
+  currentPage: A2UINumberOrPath
+  totalPages: number
+  siblingCount?: number
+  pageChangeAction?: string
+}
+
+export interface A2UISidebarNavItem {
+  id: string
+  label: string
+  icon?: string
+  action?: string
+  active?: boolean
+}
+
+export interface A2UISidebarGroup {
+  id: string
+  label?: string
+  items: A2UISidebarNavItem[]
+}
+
+export interface A2UISidebarComponent extends A2UIBaseComponent {
+  component: "Sidebar"
+  groups: A2UISidebarGroup[]
+  header?: string
+  footer?: string
+  collapsed?: boolean
+  side?: "left" | "right"
+}
+
+export interface A2UIInputOTPComponent extends A2UIBaseComponent {
+  component: "InputOTP"
+  value: A2UIStringOrPath
+  maxLength?: number
+  label?: string
+  disabled?: boolean
+}
+
+export interface A2UIToggleGroupOption {
+  value: string
+  label: string
+  disabled?: boolean
+}
+
+export interface A2UIToggleGroupComponent extends A2UIBaseComponent {
+  component: "ToggleGroup"
+  options: A2UIToggleGroupOption[]
+  value: string[] | A2UIPathValue<string[]>
+  label?: string
+  multiple?: boolean
+  size?: "sm" | "default" | "lg"
+}
+
+export interface A2UIButtonGroupComponent extends A2UIBaseComponent {
+  component: "ButtonGroup"
+  children: string[]
+  orientation?: "horizontal" | "vertical"
+}
+
+export interface A2UIInputGroupComponent extends A2UIBaseComponent {
+  component: "InputGroup"
+  children: string[]
+}
+
+export interface A2UICollapsibleComponent extends A2UIBaseComponent {
+  component: "Collapsible"
+  title: A2UIStringOrPath
+  children: string[]
+  open?: A2UIBooleanOrPath
+}
+
 export interface A2UIWidgetStatusComponent extends A2UIBaseComponent {
   component: "WidgetStatus"
   status: A2UIWidgetStatus
@@ -758,6 +1044,34 @@ export type A2UIComponent =
   | A2UIMockupFrameComponent
   | A2UIDataExplorerComponent
   | A2UIWidgetStatusComponent
+  | A2UISwitchComponent
+  | A2UILoadingComponent
+  | A2UIErrorComponent
+  | A2UIEmptyComponent
+  | A2UIAnimationComponent
+  | A2UIInteractiveGuideComponent
+  | A2UIAvatarComponent
+  | A2UITooltipComponent
+  | A2UISkeletonComponent
+  | A2UISpinnerComponent
+  | A2UIToastComponent
+  | A2UIComboboxComponent
+  | A2UIDropdownMenuComponent
+  | A2UIContextMenuComponent
+  | A2UIPopoverComponent
+  | A2UIHoverCardComponent
+  | A2UIBreadcrumbComponent
+  | A2UICarouselComponent
+  | A2UIDrawerComponent
+  | A2UISheetComponent
+  | A2UIScrollAreaComponent
+  | A2UIPaginationComponent
+  | A2UISidebarComponent
+  | A2UIInputOTPComponent
+  | A2UIToggleGroupComponent
+  | A2UIButtonGroupComponent
+  | A2UIInputGroupComponent
+  | A2UICollapsibleComponent
   | A2UIBaseComponent // Fallback for custom components
 
 // =============================================================================

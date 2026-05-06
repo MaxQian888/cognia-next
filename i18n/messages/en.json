@@ -135,6 +135,71 @@
       "documentLabel": "Document",
       "openCanvas": "Open Canvas",
       "home": "Back home"
+    },
+    "keybindings": "Keybindings",
+    "keyboardShortcuts": "Keyboard shortcuts",
+    "searchShortcuts": "Search shortcuts…",
+    "exportKeybindings": "Export keybindings",
+    "importKeybindings": "Import keybindings",
+    "resetAllKeybindings": "Reset all keybindings",
+    "keybindingConflicts": "Keybinding conflicts detected",
+    "modified": "Modified",
+    "notSet": "Not set",
+    "pressKeys": "Press keys…",
+    "conflictWarning": "This keybinding conflicts with another action",
+    "resetTo": "Reset to",
+    "resetKeybindingsConfirm": "This will reset all keybindings to their defaults. This action cannot be undone.",
+    "close": "Close",
+    "cancel": "Cancel",
+    "reset": "Reset",
+    "category": {
+      "canvas": "Canvas",
+      "action": "Actions",
+      "navigation": "Navigation",
+      "view": "View",
+      "edit": "Edit",
+      "fold": "Folding"
+    },
+    "action": {
+      "save": "Save",
+      "saveVersion": "Save version",
+      "undo": "Undo",
+      "redo": "Redo",
+      "find": "Find",
+      "replace": "Replace",
+      "goToLine": "Go to line",
+      "format": "Format",
+      "toggleWordWrap": "Toggle word wrap",
+      "toggleMinimap": "Toggle minimap",
+      "close": "Close",
+      "review": "Review",
+      "fix": "Fix",
+      "improve": "Improve",
+      "explain": "Explain",
+      "simplify": "Simplify",
+      "expand": "Expand",
+      "translate": "Translate",
+      "run": "Run",
+      "nextSuggestion": "Next suggestion",
+      "prevSuggestion": "Previous suggestion",
+      "acceptSuggestion": "Accept suggestion",
+      "rejectSuggestion": "Reject suggestion",
+      "nextDocument": "Next document",
+      "prevDocument": "Previous document",
+      "toggleHistory": "Toggle history",
+      "toggleSuggestions": "Toggle suggestions",
+      "toggleInlineCommand": "Toggle inline command",
+      "toggleExecution": "Toggle execution",
+      "selectAll": "Select all",
+      "copy": "Copy",
+      "cut": "Cut",
+      "paste": "Paste",
+      "duplicate": "Duplicate",
+      "comment": "Comment",
+      "foldAll": "Fold all",
+      "unfoldAll": "Unfold all",
+      "foldLevel1": "Fold level 1",
+      "foldLevel2": "Fold level 2"
     }
   },
   "chat": {
@@ -751,6 +816,7 @@
     "providers": "Search providers",
     "providersDescription": "Configure API keys for each provider",
     "filterProviders": "Filter providers…",
+    "featuresFilter": "Features",
     "features": {
       "aiAnswer": "AI Answer",
       "news": "News",
@@ -1004,6 +1070,25 @@
       "connections": "Configure messaging platform adapters (Telegram, Discord, Slack, ...) and manage the outbound delivery queue.",
       "subscription": "Sign in with your Claude Pro/Max subscription, monitor 5h/7d rate-limit windows, and manage OAuth credentials in your OS keychain."
     },
+    "externalBridge": {
+      "wikiIndex": "Wiki Index",
+      "rebuildWiki": "Rebuild Wiki",
+      "forceRebuild": "Full rebuild",
+      "forceRebuildDesc": "Ignore cached hashes — re-process every file.",
+      "lastBuild": "Last build",
+      "articleCount": "Articles",
+      "never": "Never",
+      "rebuilding": "Indexing…",
+      "scope": "Scope",
+      "generator": "Generator",
+      "rebuildConfirmTitle": "Rebuild Wiki?",
+      "rebuildConfirmDesc": "This will re-index the Cognia codebase and consume LLM API quota. Continue?",
+      "rebuildConfirmDescForce": "This will re-index the entire codebase from scratch. All existing articles will be replaced. This may take several minutes and consume LLM API quota.",
+      "rebuildCancel": "Cancel",
+      "rebuildResult": "Wiki rebuilt: {added} new, {changed} updated, {removed} removed, {errors} failed",
+      "webModeWarning": "Wiki rebuild requires the Tauri desktop app.",
+      "noApiKeyError": "No LLM API key configured. Add one in Settings → Providers."
+    },
     "canvas": {
       "title": "Canvas",
       "description": "Configure the Monaco-based code/document editor — fonts, AI suggestions, versioning, collaboration, sandbox execution, accessibility and keybindings.",
@@ -1020,9 +1105,134 @@
         "keys": "Keybindings",
         "theme": "Theme"
       },
+      "editor": {
+        "fontSize": "Font size",
+        "fontFamily": "Font family",
+        "fontFamilyOptions": {
+          "firaCode": "Fira Code / Cascadia / JetBrains Mono",
+          "jetbrainsMono": "JetBrains Mono",
+          "cascadiaCode": "Cascadia Code",
+          "sourceCodePro": "Source Code Pro",
+          "ibmPlexMono": "IBM Plex Mono",
+          "systemMonospace": "System monospace"
+        },
+        "lineHeight": "Line height",
+        "tabSize": "Tab size",
+        "insertSpaces": "Insert spaces (vs. tabs)",
+        "wordWrap": "Word wrap",
+        "minimap": "Minimap",
+        "lineNumbers": "Line numbers",
+        "lineNumbersOptions": {
+          "on": "On",
+          "off": "Off",
+          "relative": "Relative"
+        },
+        "renderWhitespace": "Render whitespace",
+        "renderWhitespaceOptions": {
+          "none": "None",
+          "boundary": "Boundary",
+          "selection": "Selection",
+          "trailing": "Trailing",
+          "all": "All"
+        },
+        "scrollBeyondLastLine": "Scroll beyond last line",
+        "autoClosingBrackets": "Auto-close brackets",
+        "autoClosingQuotes": "Auto-close quotes",
+        "formatOnPaste": "Format on paste",
+        "formatOnType": "Format on type",
+        "cursorBlinking": "Cursor blinking",
+        "cursorBlinkingOptions": {
+          "blink": "Blink",
+          "smooth": "Smooth",
+          "phase": "Phase",
+          "expand": "Expand",
+          "solid": "Solid"
+        },
+        "cursorStyle": "Cursor style",
+        "cursorStyleOptions": {
+          "line": "Line",
+          "block": "Block",
+          "underline": "Underline"
+        },
+        "smoothScrolling": "Smooth scrolling",
+        "mouseWheelZoom": "Mouse-wheel zoom",
+        "bracketPairColorization": "Bracket pair colorization",
+        "indentationGuides": "Indentation guides",
+        "bracketPairGuides": "Bracket pair guides"
+      },
+      "ai": {
+        "autoSuggestions": "Auto suggestions",
+        "suggestionDelay": "Suggestion delay",
+        "maxSuggestions": "Max suggestions",
+        "streamingResponses": "Streaming responses",
+        "contextLines": "Context lines",
+        "suggestionProvider": "Suggestion provider",
+        "suggestionProviderOptions": {
+          "default": "Default (Anthropic)",
+          "custom": "Custom URL"
+        },
+        "customProviderUrl": "Custom provider URL",
+        "enableInlineCompletion": "Enable inline completion",
+        "showConfidence": "Show confidence"
+      },
+      "version": {
+        "autoSaveInterval": "Auto-save interval",
+        "maxVersions": "Max versions",
+        "compressOldVersions": "Compress old versions",
+        "keepNamedVersions": "Keep named versions",
+        "diffViewMode": "Diff view mode",
+        "diffViewModeOptions": {
+          "inline": "Inline",
+          "sideBySide": "Side-by-side",
+          "unified": "Unified"
+        },
+        "showVersionTimestamps": "Show version timestamps"
+      },
+      "collab": {
+        "enableCollaboration": "Enable collaboration",
+        "signallingServerUrl": "Signalling server URL",
+        "showCursors": "Show cursors",
+        "showAvatars": "Show avatars",
+        "showSelections": "Show selections",
+        "cursorSmoothing": "Cursor smoothing",
+        "presenceTimeout": "Presence timeout",
+        "syncInterval": "Sync interval"
+      },
+      "execution": {
+        "autoExecute": "Auto-execute on save",
+        "maxExecutionTime": "Max execution time",
+        "showOutput": "Show output panel",
+        "clearOutputOnRun": "Clear output on each run",
+        "preserveVariables": "Preserve variables across runs",
+        "sandboxMode": "Sandbox mode",
+        "sandboxModeOptions": {
+          "strict": "Strict (no network/storage)",
+          "permissive": "Permissive"
+        },
+        "pythonRuntime": "Python runtime",
+        "pythonRuntimeOptions": {
+          "none": "Disabled",
+          "tauriSidecar": "Tauri Python sidecar (desktop)"
+        },
+        "pythonRequiresDesktop": "Python execution requires the desktop build (Tauri). Run `pnpm tauri dev` to enable."
+      },
+      "a11y": {
+        "screenReaderOptimized": "Screen reader optimised",
+        "highContrast": "High contrast",
+        "reducedMotion": "Reduced motion",
+        "focusIndicator": "Focus indicator",
+        "announceErrors": "Announce errors"
+      },
       "theme": {
         "followSystem": "Follow system theme",
         "monacoTheme": "Monaco theme",
+        "monacoThemeOptions": {
+          "auto": "Auto (follow app theme)",
+          "vs": "vs (light)",
+          "vsDark": "vs-dark",
+          "hcLight": "hc-light",
+          "hcBlack": "hc-black"
+        },
         "hint": "Custom Monaco themes registered through the canvas plugin API will appear in this list at runtime."
       }
     },
@@ -1203,10 +1413,21 @@
           "mutedForeground": "Muted text",
           "card": "Card",
           "cardForeground": "Card text",
+          "popover": "Popover",
+          "popoverForeground": "Popover text",
+          "input": "Input",
           "border": "Border",
           "ring": "Ring",
           "destructive": "Destructive",
-          "destructiveForeground": "Destructive text"
+          "destructiveForeground": "Destructive text",
+          "sidebar": "Sidebar",
+          "sidebarForeground": "Sidebar text",
+          "sidebarPrimary": "Sidebar primary",
+          "sidebarBorder": "Sidebar border",
+          "sidebarPrimaryForeground": "Sidebar primary text",
+          "sidebarAccent": "Sidebar accent",
+          "sidebarAccentForeground": "Sidebar accent text",
+          "sidebarRing": "Sidebar ring"
         }
       },
       "vscode": {
@@ -1224,6 +1445,9 @@
         "manifestTitle": "Imported from VSCode",
         "removeButton": "Remove",
         "history": "History",
+        "activeLabel": "Active",
+        "activateButton": "Apply",
+        "deactivateButton": "Use preset",
         "errorTitle": "Import failed",
         "timeout": "Parsing timed out — the file may be corrupt. Try a smaller .vsix.",
         "legend": "VSCode-inspired presets",

@@ -37,6 +37,8 @@ export function ThemeTab() {
   const theme: AppTheme = settings?.theme ?? "system"
   const colorTheme: ColorThemePreset = settings?.colorTheme ?? "default"
   const activeCustomThemeId = settings?.activeCustomThemeId ?? null
+  const customThemes = settings?.customThemes ?? []
+  const importedRecords = settings?.importedVscodeThemes ?? []
 
   return (
     <div className="space-y-6">
@@ -104,18 +106,23 @@ export function ThemeTab() {
           {BUILT_IN_VSCODE_THEMES.map((preset) => {
             const swatchVariant = preset.baseVariant ?? "dark"
             const swatchSet = preset.tokens?.[swatchVariant]
+            const active =
+              activeCustomThemeId != null &&
+              customThemes.some((ct) => ct.id === activeCustomThemeId && ct.name === preset.name)
             return (
               <button
                 key={preset.name}
                 type="button"
                 className={cn(
                   "rounded border p-2 text-left transition",
-                  "hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  "hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  active && "border-primary bg-primary/5"
                 )}
                 onClick={() => {
-                  // `createCustomTheme` accepts `Omit<CustomTheme, "id">`, which
-                  // is exactly the shape of a built-in preset. The cast keeps
-                  // TS happy with the readonly array element.
+                  if (active) {
+                    setActiveCustom(null)
+                    return
+                  }
                   const id = createCustomTheme(preset as Omit<CustomTheme, "id">)
                   setActiveCustom(id)
                 }}
@@ -137,9 +144,67 @@ export function ThemeTab() {
                     aria-hidden
                   />
                 </div>
-                <div className="mt-1 text-xs font-medium">{preset.name}</div>
+                <div className="mt-1 text-xs font-medium">
+                  {preset.name}
+                  {active && (
+                    <span className="ml-1 text-[10px] text-primary">{t("vscode.activeLabel")}</span>
+                  )}
+                </div>
                 <div className="text-[10px] text-muted-foreground">
                   {t(`vscode.variant.${swatchVariant}`)}
+                </div>
+              </button>
+            )
+          })}
+          {/* Imported themes — each maps to a CustomTheme row. */}
+          {importedRecords.map((record) => {
+            const ct = customThemes.find((c) => c.id === record.customThemeId)
+            if (!ct) return null
+            const variant = ct.baseVariant ?? (ct.isDark ? "dark" : "light")
+            const tokens = ct.tokens?.[variant]
+            const isActive = record.customThemeId === activeCustomThemeId
+            return (
+              <button
+                key={record.customThemeId}
+                type="button"
+                className={cn(
+                  "rounded border p-2 text-left transition",
+                  "hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  isActive && "border-primary bg-primary/5"
+                )}
+                onClick={() => {
+                  if (isActive) {
+                    setActiveCustom(null)
+                  } else {
+                    setActiveCustom(record.customThemeId)
+                  }
+                }}
+              >
+                <div className="flex gap-1">
+                  <span
+                    className="h-4 w-4 rounded"
+                    style={{ background: tokens?.background }}
+                    aria-hidden
+                  />
+                  <span
+                    className="h-4 w-4 rounded"
+                    style={{ background: tokens?.primary }}
+                    aria-hidden
+                  />
+                  <span
+                    className="h-4 w-4 rounded"
+                    style={{ background: tokens?.accent }}
+                    aria-hidden
+                  />
+                </div>
+                <div className="mt-1 text-xs font-medium">
+                  {ct.name}
+                  {isActive && (
+                    <span className="ml-1 text-[10px] text-primary">{t("vscode.activeLabel")}</span>
+                  )}
+                </div>
+                <div className="text-[10px] text-muted-foreground">
+                  {t(`vscode.variant.${variant}`)}
                 </div>
               </button>
             )

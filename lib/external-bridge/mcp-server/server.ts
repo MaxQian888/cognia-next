@@ -14,19 +14,17 @@
  *   5. Convert handler output to MCP envelope shape.
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
-import type { ExternalBridgeSettings } from "@/types/wiki"
+import type { BridgeScope, ExternalBridgeSettings } from "@/types/wiki"
 import { ALL_BRIDGE_SCOPES } from "@/types/wiki"
+import { listAllWikiArticles, getWikiArticleBySlug } from "@/lib/db/wiki-articles"
+import { listSkills, getSkill } from "@/lib/db/skills"
+import { listCharacters, getCharacter } from "@/lib/db/characters"
 import { recordCall } from "../audit-log"
 import { checkRuntimeCall, checkScope, checkToolCall } from "../permission-gate"
 import { ragSearch } from "../handlers/rag"
-import {
-  listResources,
-  parseResourceUri,
-  readResource,
-  scopeForResourceUri,
-} from "../handlers/resources"
+import { parseResourceUri } from "../handlers/resources"
 import { runtimeQuery, type RuntimeEntityType } from "../handlers/runtime"
 import { wikiRead, wikiSearch } from "../handlers/wiki"
 
@@ -38,7 +36,7 @@ export interface BuildServerOptions {
   settingsGetter: SettingsGetter
 }
 
-const DEFAULT_SERVER_INFO = { name: "cognia", version: "0.1.0" }
+const DEFAULT_SERVER_INFO = { name: "cognia", version: "1.0.0" }
 
 /**
  * Build the McpServer. The returned instance is not connected yet —
@@ -50,13 +48,14 @@ const DEFAULT_SERVER_INFO = { name: "cognia", version: "0.1.0" }
  */
 export function buildMcpServer(opts: BuildServerOptions): McpServer {
   const server = new McpServer(opts.serverInfo ?? DEFAULT_SERVER_INFO, {
-    capabilities: { tools: {}, resources: {} },
+    capabilities: { tools: {}, resources: {}, prompts: {} },
   })
 
   registerWikiTools(server, opts.settingsGetter)
   registerRagTool(server, opts.settingsGetter)
   registerRuntimeTool(server, opts.settingsGetter)
   registerResources(server, opts.settingsGetter)
+  registerPrompts(server)
 
   return server
 }
@@ -73,6 +72,12 @@ function registerWikiTools(server: McpServer, settingsGetter: SettingsGetter) {
       description:
         "Semantic search over Cognia's generated code wiki articles. " +
         "Returns top-K article summaries with slugs you can pass to wiki_read.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
       inputSchema: {
         query: z.string().describe("Natural language query"),
         scope: z
@@ -96,6 +101,12 @@ function registerWikiTools(server: McpServer, settingsGetter: SettingsGetter) {
     {
       title: "Read a Cognia wiki article",
       description: "Fetch the full Markdown body of a wiki article by slug.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
       inputSchema: { slug: z.string().describe("Article slug (from wiki_search results)") },
     },
     async (args) =>
@@ -124,6 +135,12 @@ function registerRagTool(server: McpServer, settingsGetter: SettingsGetter) {
       description:
         "Chunk-level retrieval over Cognia's wiki sections. Use for fine-grained " +
         "code passages; for module-level overviews use wiki_search.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
       inputSchema: {
         query: z.string(),
         scope: z.enum(["cognia-self", "user-repo", "runtime", "all"]).optional(),
@@ -161,6 +178,12 @@ function registerRuntimeTool(server: McpServer, settingsGetter: SettingsGetter) 
       description:
         "List or get a runtime entity (skill/character/twin/plugin/agent-team). " +
         "Honors the per-entity OptIn whitelist.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
       inputSchema: {
         entityType: z.enum(RUNTIME_ENTITY_TYPES),
         op: z.enum(["list", "get"]),
@@ -209,102 +232,363 @@ function mapEntityToScope(entityType: string) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Resources
+// Resources — registered via the high-level ResourceTemplate API.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function registerResources(server: McpServer, settingsGetter: SettingsGetter) {
-  // The MCP SDK's high-level resource API expects either fixed URIs or
-  // URI templates. We back the resources by overriding the underlying
-  // request handlers via `server.server.setRequestHandler` so the dynamic
-  // (Dexie-driven) listing logic stays in our handler module.
-  const lowLevel = server.server
+  registerWikiResource(server, settingsGetter)
+  registerSkillResource(server, settingsGetter)
+  registerCharacterResource(server, settingsGetter)
+}
 
-  lowLevel.setRequestHandler(ResourceListSchema, async () => {
-    const start = Date.now()
-    const settings = await settingsGetter()
-    const enabled = settings?.enabledScopes ?? []
-    try {
-      const resources = await listResources(enabled)
+function registerWikiResource(server: McpServer, settingsGetter: SettingsGetter) {
+  const template = new ResourceTemplate("cognia://wiki/{slug}", {
+    list: async () => {
+      const start = Date.now()
+      const s = await settingsGetter()
+      const enabled = new Set(s?.enabledScopes ?? [])
+      if (!enabled.has("wiki:cognia") && !enabled.has("wiki:user-repo")) {
+        await recordCall({
+          tool: "resources/list:wiki",
+          scope: "wiki:cognia",
+          check: { allowed: false, reason: "scope OFF" },
+          latencyMs: Date.now() - start,
+        })
+        return { resources: [] }
+      }
+      const articles = await listAllWikiArticles()
+      const resources = articles
+        .filter((a) => {
+          const scope: BridgeScope = a.scope === "cognia-self" ? "wiki:cognia" : "wiki:user-repo"
+          return enabled.has(scope)
+        })
+        .map((a) => ({
+          uri: `cognia://wiki/${a.slug}`,
+          name: a.title,
+          description: a.summary,
+          mimeType: "text/markdown" as const,
+        }))
       await recordCall({
-        tool: "resources/list",
-        scope: "n/a",
+        tool: "resources/list:wiki",
+        scope: "wiki:cognia",
         check: { allowed: true },
         latencyMs: Date.now() - start,
       })
       return { resources }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+    },
+  })
+
+  server.registerResource(
+    "cognia-wiki",
+    template,
+    {
+      title: "Cognia Wiki Article",
+      description: "A generated code wiki article for a module in the Cognia codebase.",
+      mimeType: "text/markdown",
+    },
+    async (uri) => {
+      const start = Date.now()
+      const s = await settingsGetter()
+      const parts = parseResourceUri(uri.href)
+      if (!parts) {
+        await recordCall({
+          tool: "resources/read:wiki",
+          scope: "wiki:cognia",
+          check: { allowed: false, reason: "malformed uri" },
+          latencyMs: Date.now() - start,
+        })
+        throw new Error(`malformed resource uri '${uri.href}'`)
+      }
+      const article = await getWikiArticleBySlug(parts.id)
+      const requiredScope: BridgeScope =
+        article?.scope === "cognia-self" ? "wiki:cognia" : "wiki:user-repo"
+      const check = checkScope(s, requiredScope)
+      if (!check.allowed) {
+        await recordCall({
+          tool: "resources/read:wiki",
+          scope: requiredScope,
+          check,
+          latencyMs: Date.now() - start,
+        })
+        throw new Error(check.reason)
+      }
+      if (!article) {
+        await recordCall({
+          tool: "resources/read:wiki",
+          scope: requiredScope,
+          check: { allowed: true },
+          latencyMs: Date.now() - start,
+        })
+        throw new Error(`wiki article '${parts.id}' not found`)
+      }
       await recordCall({
-        tool: "resources/list",
-        scope: "n/a",
+        tool: "resources/read:wiki",
+        scope: requiredScope,
         check: { allowed: true },
         latencyMs: Date.now() - start,
-        errorMessage: message,
       })
-      throw err
+      return { contents: [{ uri: uri.href, mimeType: "text/markdown", text: article.contentMd }] }
     }
-  })
-
-  lowLevel.setRequestHandler(ResourceReadSchema, async (request) => {
-    const start = Date.now()
-    const uri = request.params.uri
-    const settings = await settingsGetter()
-    const requiredScope = await scopeForResourceUri(uri)
-    const check = requiredScope
-      ? checkScope(settings, requiredScope)
-      : ({ allowed: false, reason: `unknown resource uri '${uri}'` } as const)
-    if (!check.allowed) {
-      await recordCall({
-        tool: "resources/read",
-        scope: requiredScope ?? "n/a",
-        check,
-        latencyMs: Date.now() - start,
-      })
-      throw new Error(check.reason)
-    }
-    const parts = parseResourceUri(uri)
-    if (!parts) {
-      await recordCall({
-        tool: "resources/read",
-        scope: requiredScope ?? "n/a",
-        check: { allowed: false, reason: "malformed uri" },
-        latencyMs: Date.now() - start,
-      })
-      throw new Error(`malformed resource uri '${uri}'`)
-    }
-    const content = await readResource(uri)
-    await recordCall({
-      tool: "resources/read",
-      scope: requiredScope ?? "n/a",
-      check: { allowed: true },
-      latencyMs: Date.now() - start,
-    })
-    if (!content) return { contents: [] }
-    return {
-      contents: [
-        {
-          uri: content.uri,
-          mimeType: content.mimeType,
-          text: content.text,
-        },
-      ],
-    }
-  })
+  )
 }
 
-// Minimal request-shape schemas that match the MCP `resources/list` and
-// `resources/read` envelopes. We keep them inline so the file doesn't pull
-// the entire SDK types surface.
-const ResourceListSchema = z
-  .object({ method: z.literal("resources/list"), params: z.optional(z.object({}).passthrough()) })
-  .passthrough()
-
-const ResourceReadSchema = z
-  .object({
-    method: z.literal("resources/read"),
-    params: z.object({ uri: z.string() }).passthrough(),
+function registerSkillResource(server: McpServer, settingsGetter: SettingsGetter) {
+  const template = new ResourceTemplate("cognia://skill/{id}", {
+    list: async () => {
+      const start = Date.now()
+      const s = await settingsGetter()
+      const enabled = new Set(s?.enabledScopes ?? [])
+      if (!enabled.has("runtime:skills")) {
+        await recordCall({
+          tool: "resources/list:skill",
+          scope: "runtime:skills",
+          check: { allowed: false, reason: "scope OFF" },
+          latencyMs: Date.now() - start,
+        })
+        return { resources: [] }
+      }
+      const skills = await listSkills()
+      await recordCall({
+        tool: "resources/list:skill",
+        scope: "runtime:skills",
+        check: { allowed: true },
+        latencyMs: Date.now() - start,
+      })
+      return {
+        resources: skills.map((sk) => ({
+          uri: `cognia://skill/${sk.id}`,
+          name: sk.name,
+          description: sk.description,
+          mimeType: "text/markdown" as const,
+        })),
+      }
+    },
   })
-  .passthrough()
+
+  server.registerResource(
+    "cognia-skill",
+    template,
+    {
+      title: "Cognia Skill",
+      description: "A Cognia skill definition exported as SKILL.md.",
+      mimeType: "text/markdown",
+    },
+    async (uri) => {
+      const start = Date.now()
+      const s = await settingsGetter()
+      const check = checkScope(s, "runtime:skills")
+      if (!check.allowed) {
+        await recordCall({
+          tool: "resources/read:skill",
+          scope: "runtime:skills",
+          check,
+          latencyMs: Date.now() - start,
+        })
+        throw new Error(check.reason)
+      }
+      const parts = parseResourceUri(uri.href)
+      if (!parts) {
+        await recordCall({
+          tool: "resources/read:skill",
+          scope: "runtime:skills",
+          check: { allowed: false, reason: "malformed uri" },
+          latencyMs: Date.now() - start,
+        })
+        throw new Error(`malformed resource uri '${uri.href}'`)
+      }
+      const skill = await getSkill(parts.id)
+      if (!skill) {
+        await recordCall({
+          tool: "resources/read:skill",
+          scope: "runtime:skills",
+          check: { allowed: true },
+          latencyMs: Date.now() - start,
+        })
+        throw new Error(`skill '${parts.id}' not found`)
+      }
+      const { serializeSkill } = await import("@/lib/claude/skills-io")
+      const text = serializeSkill({
+        name: skill.name,
+        description: skill.description,
+        content: skill.content,
+        allowedTools: skill.allowedTools,
+        tags: skill.tags,
+        category: skill.category,
+        version: skill.version,
+        author: skill.author,
+        license: skill.license,
+      })
+      await recordCall({
+        tool: "resources/read:skill",
+        scope: "runtime:skills",
+        check: { allowed: true },
+        latencyMs: Date.now() - start,
+      })
+      return { contents: [{ uri: uri.href, mimeType: "text/markdown", text }] }
+    }
+  )
+}
+
+function registerCharacterResource(server: McpServer, settingsGetter: SettingsGetter) {
+  const template = new ResourceTemplate("cognia://character/{id}", {
+    list: async () => {
+      const start = Date.now()
+      const s = await settingsGetter()
+      const enabled = new Set(s?.enabledScopes ?? [])
+      if (!enabled.has("runtime:characters")) {
+        await recordCall({
+          tool: "resources/list:character",
+          scope: "runtime:characters",
+          check: { allowed: false, reason: "scope OFF" },
+          latencyMs: Date.now() - start,
+        })
+        return { resources: [] }
+      }
+      const characters = await listCharacters()
+      await recordCall({
+        tool: "resources/list:character",
+        scope: "runtime:characters",
+        check: { allowed: true },
+        latencyMs: Date.now() - start,
+      })
+      return {
+        resources: characters.map((c) => ({
+          uri: `cognia://character/${c.id}`,
+          name: c.name,
+          description: c.description,
+          mimeType: "application/json" as const,
+        })),
+      }
+    },
+  })
+
+  server.registerResource(
+    "cognia-character",
+    template,
+    {
+      title: "Cognia Character",
+      description: "A Cognia character definition as JSON.",
+      mimeType: "application/json",
+    },
+    async (uri) => {
+      const start = Date.now()
+      const s = await settingsGetter()
+      const check = checkScope(s, "runtime:characters")
+      if (!check.allowed) {
+        await recordCall({
+          tool: "resources/read:character",
+          scope: "runtime:characters",
+          check,
+          latencyMs: Date.now() - start,
+        })
+        throw new Error(check.reason)
+      }
+      const parts = parseResourceUri(uri.href)
+      if (!parts) {
+        await recordCall({
+          tool: "resources/read:character",
+          scope: "runtime:characters",
+          check: { allowed: false, reason: "malformed uri" },
+          latencyMs: Date.now() - start,
+        })
+        throw new Error(`malformed resource uri '${uri.href}'`)
+      }
+      const character = await getCharacter(parts.id)
+      if (!character) {
+        await recordCall({
+          tool: "resources/read:character",
+          scope: "runtime:characters",
+          check: { allowed: true },
+          latencyMs: Date.now() - start,
+        })
+        throw new Error(`character '${parts.id}' not found`)
+      }
+      await recordCall({
+        tool: "resources/read:character",
+        scope: "runtime:characters",
+        check: { allowed: true },
+        latencyMs: Date.now() - start,
+      })
+      return {
+        contents: [
+          { uri: uri.href, mimeType: "application/json", text: JSON.stringify(character, null, 2) },
+        ],
+      }
+    }
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Prompts — help external agents discover and use Cognia's tools.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function registerPrompts(server: McpServer) {
+  server.registerPrompt(
+    "cognia-howto",
+    {
+      title: "How to explore Cognia's codebase",
+      description:
+        "Guidance for coding agents on when and how to use Cognia's MCP tools " +
+        "to understand the codebase, find relevant modules, and answer architecture questions.",
+    },
+    async () => ({
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text:
+              "I want to explore the Cognia codebase. Please guide me on how to use your available tools.\n\n" +
+              "Available tools:\n" +
+              "- **wiki_search**: Find high-level module overviews by topic. Use this first to discover which modules exist.\n" +
+              "- **wiki_read**: Read a full module article by slug (from wiki_search results). Use this when you need detailed API or internals info.\n" +
+              "- **rag_search**: Fine-grained code retrieval at the section level. Use this when you need specific implementation details.\n" +
+              "- **runtime_query**: List or get runtime entities (skills, characters, twins, plugins, agent-teams).\n\n" +
+              "Resources (URI-based, auto-discovered by the client):\n" +
+              "- `cognia://wiki/{slug}` — full wiki article as Markdown\n" +
+              "- `cognia://skill/{id}` — skill definition as SKILL.md\n" +
+              "- `cognia://character/{id}` — character config as JSON\n\n" +
+              "Suggested workflow:\n" +
+              "1. Start with `wiki_search` to find relevant modules by topic.\n" +
+              "2. Use `wiki_read` on promising slugs to get the full article.\n" +
+              "3. For implementation details, use `rag_search` for section-level retrieval.\n" +
+              "4. Cross-reference with resources for skills and characters as needed.",
+          },
+        },
+      ],
+    })
+  )
+
+  server.registerPrompt(
+    "cognia-architecture",
+    {
+      title: "Understand Cognia's architecture",
+      description:
+        "A prompt that guides the agent through Cognia's layered architecture — " +
+        "from the high-level module map down to specific subsystems.",
+    },
+    async () => ({
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text:
+              "I need to understand Cognia's architecture. Please walk me through the major subsystems.\n\n" +
+              "Start by running `wiki_search` with an empty query to get an overview of all modules, then drill into:\n" +
+              "- **External Bridge** (`lib/external-bridge/`) — MCP server, permission gate, audit log\n" +
+              "- **Wiki System** (`lib/wiki/`) — orchestrator, agents, Merkle engine, exporter\n" +
+              "- **Twin** (`lib/twin/`) — ingest pipeline, distill agents, RAG runtime\n" +
+              "- **Connectors** (`lib/connectors/`) — platform adapters, outbound runner, inbox\n" +
+              "- **Claude Subscription** (`lib/anthropic-subscription/`) — OAuth flow, usage collection\n" +
+              "- **Data** (`lib/data/`) — backup/restore, import/export, domain transfers\n\n" +
+              "For each subsystem, use `wiki_read` to get the full article, then `rag_search` for specific implementation questions.",
+          },
+        },
+      ],
+    })
+  )
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -381,4 +665,4 @@ async function runWithGate<T>(input: RunWithGateInput<T>): Promise<ToolEnvelope>
   }
 }
 
-export const __TESTING__ = { mapEntityToScope, runWithGate, ResourceListSchema, ResourceReadSchema }
+export const __TESTING__ = { mapEntityToScope, runWithGate }

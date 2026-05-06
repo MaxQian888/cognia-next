@@ -63,6 +63,38 @@ import { A2UIAnalysisAdapter } from "./academic/a2ui-analysis-adapter"
 import { A2UIStepperShell } from "./layout/a2ui-stepper-shell"
 import { A2UIMockupFrame } from "./layout/a2ui-mockup-frame"
 
+// P0 display
+import { A2UISpinner } from "./display/a2ui-spinner"
+import { A2UISkeleton } from "./display/a2ui-skeleton"
+import { A2UIAvatar } from "./display/a2ui-avatar"
+import { A2UIToast } from "./display/a2ui-toast"
+
+// P0 overlay
+import { A2UITooltip } from "./overlay/a2ui-tooltip"
+import { A2UIPopover } from "./overlay/a2ui-popover"
+import { A2UIHoverCard } from "./overlay/a2ui-hover-card"
+import { A2UIDropdownMenu } from "./overlay/a2ui-dropdown-menu"
+import { A2UIContextMenu } from "./overlay/a2ui-context-menu"
+
+// P0 type fix + form
+import { A2UICombobox } from "./form/a2ui-combobox"
+import { A2UIInputOTP } from "./form/a2ui-input-otp"
+import { A2UIToggleGroup } from "./form/a2ui-toggle-group"
+import { A2UIButtonGroup } from "./form/a2ui-button-group"
+import { A2UIInputGroup } from "./form/a2ui-input-group"
+
+// P1 navigation
+import { A2UIBreadcrumb } from "./navigation/a2ui-breadcrumb"
+import { A2UICarousel } from "./navigation/a2ui-carousel"
+import { A2UIDrawer } from "./navigation/a2ui-drawer"
+import { A2UISheet } from "./navigation/a2ui-sheet"
+import { A2UIScrollArea } from "./navigation/a2ui-scroll-area"
+import { A2UIPagination } from "./navigation/a2ui-pagination"
+import { A2UISidebar } from "./navigation/a2ui-sidebar"
+
+// P1 layout
+import { A2UICollapsible } from "./layout/a2ui-collapsible"
+
 // Lazy-load heavy components (recharts ~200KB, motion/react)
 const A2UIChart = lazy(() => import("./data/a2ui-chart").then((m) => ({ default: m.A2UIChart })))
 const A2UIAnimation = lazy(() =>
@@ -128,6 +160,33 @@ const builtInComponents = new Map<string, A2UIComponentType>([
   ["InteractiveGuide", A2UIInteractiveGuide as A2UIComponentType],
   // Academic components (wrapped with withA2UIContext bridge)
   ["AcademicAnalysis", withA2UIContext(A2UIAnalysisAdapter) as unknown as A2UIComponentType],
+  // P0 display
+  ["Avatar", A2UIAvatar as A2UIComponentType],
+  ["Skeleton", A2UISkeleton as A2UIComponentType],
+  ["Spinner", A2UISpinner as A2UIComponentType],
+  ["Toast", A2UIToast as A2UIComponentType],
+  // P0 overlay
+  ["Tooltip", A2UITooltip as A2UIComponentType],
+  ["Popover", A2UIPopover as A2UIComponentType],
+  ["HoverCard", A2UIHoverCard as A2UIComponentType],
+  ["DropdownMenu", A2UIDropdownMenu as A2UIComponentType],
+  ["ContextMenu", A2UIContextMenu as A2UIComponentType],
+  // P1 form
+  ["Combobox", A2UICombobox as A2UIComponentType],
+  ["InputOTP", A2UIInputOTP as A2UIComponentType],
+  ["ToggleGroup", A2UIToggleGroup as A2UIComponentType],
+  ["ButtonGroup", A2UIButtonGroup as A2UIComponentType],
+  ["InputGroup", A2UIInputGroup as A2UIComponentType],
+  // P1 navigation
+  ["Breadcrumb", A2UIBreadcrumb as A2UIComponentType],
+  ["Carousel", A2UICarousel as A2UIComponentType],
+  ["Drawer", A2UIDrawer as A2UIComponentType],
+  ["Sheet", A2UISheet as A2UIComponentType],
+  ["ScrollArea", A2UIScrollArea as A2UIComponentType],
+  ["Pagination", A2UIPagination as A2UIComponentType],
+  ["Sidebar", A2UISidebar as A2UIComponentType],
+  // P1 layout
+  ["Collapsible", A2UICollapsible as A2UIComponentType],
 ])
 
 /**

@@ -209,6 +209,7 @@ export const useCommentStore = create<CommentState>()(
       }),
       storage: {
         getItem: (name) => {
+          if (typeof localStorage === "undefined") return null
           try {
             const raw = localStorage.getItem(name)
             if (!raw) return null
@@ -238,6 +239,7 @@ export const useCommentStore = create<CommentState>()(
           }
         },
         setItem: (name, value) => {
+          if (typeof localStorage === "undefined") return
           try {
             localStorage.setItem(name, JSON.stringify(value))
           } catch (err) {
@@ -247,7 +249,10 @@ export const useCommentStore = create<CommentState>()(
             })
           }
         },
-        removeItem: (name) => localStorage.removeItem(name),
+        removeItem: (name) => {
+          if (typeof localStorage === "undefined") return
+          localStorage.removeItem(name)
+        },
       },
     }
   )
