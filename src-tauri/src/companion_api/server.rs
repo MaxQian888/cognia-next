@@ -25,6 +25,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use axum::{middleware::from_fn_with_state, routing::{get, post}, Router};
+use super::rpc;
 use tokio::sync::watch;
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -157,9 +158,10 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/api/v1/auth/pair", post(auth::pair_handler));
 
     // Authenticated routes — JWT verifier middleware applied.
-    // M2.5/M2.6 will add more routes inside this block.
+    // M2.6 will add the WS event channel route inside this block.
     let protected_routes = Router::new()
         .route("/api/v1/whoami", get(auth::whoami_handler))
+        .route("/api/v1/_rpc/:name", post(rpc::rpc_handler))
         .layer(from_fn_with_state(
             state.clone(),
             middleware::require_device_jwt,
@@ -188,12 +190,13 @@ mod tests {
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
 
     fn test_state() -> SharedState {
-        use crate::companion_api::deny_list::DenyList;
+        use crate::companion_api::{deny_list::DenyList, idempotency::IdempotencyCache};
         Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
+            idempotency: Arc::new(IdempotencyCache::new()),
         })
     }
 

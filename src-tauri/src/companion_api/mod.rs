@@ -30,9 +30,11 @@
 
 pub mod auth;
 pub mod deny_list;
+pub mod idempotency;
 pub mod jwt;
 pub mod middleware;
 pub mod redemption_lru;
+pub mod rpc;
 pub mod secret;
 pub mod server;
 
@@ -48,6 +50,7 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 
 use deny_list::DenyList;
+use idempotency::IdempotencyCache;
 use redemption_lru::RedemptionLru;
 
 // ---------------------------------------------------------------------------
@@ -72,6 +75,11 @@ pub struct CompanionState {
     pub deny_list: Arc<DenyList>,
     /// Tauri `AppHandle` — `None` in unit tests, `Some` in production.
     pub app_handle: Option<tauri::AppHandle>,
+    /// Per-device idempotency cache for `POST /api/v1/_rpc/:name`.
+    ///
+    /// Keyed by `(device_id, Idempotency-Key header)`.  Successful responses
+    /// are stored for 60 s; read-only commands skip caching entirely.
+    pub idempotency: Arc<IdempotencyCache>,
 }
 
 // ---------------------------------------------------------------------------
@@ -190,6 +198,7 @@ mod tests {
             redemption_lru: RedemptionLru::new(),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
+            idempotency: Arc::new(IdempotencyCache::new()),
         })
     }
 

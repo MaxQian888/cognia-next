@@ -60,6 +60,7 @@ pub async fn companion_server_start(
         redemption_lru: super::redemption_lru::RedemptionLru::new(),
         deny_list: Arc::clone(&state.deny_list),
         app_handle: Some(app_handle),
+        idempotency: Arc::new(super::idempotency::IdempotencyCache::new()),
     });
 
     state.start(port, bind_loopback_only, shared).await
