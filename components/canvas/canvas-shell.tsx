@@ -84,8 +84,6 @@ function CanvasDesktopShell() {
           maxSize={CANVAS_SHELL_LEFT_MAX}
           collapsible
           collapsedSize={0}
-          onCollapse={() => setLeftCollapsed(true)}
-          onExpand={() => setLeftCollapsed(false)}
         >
           <div
             className={cn(
@@ -116,8 +114,6 @@ function CanvasDesktopShell() {
           maxSize={CANVAS_SHELL_RIGHT_MAX}
           collapsible
           collapsedSize={0}
-          onCollapse={() => setRightCollapsed(true)}
-          onExpand={() => setRightCollapsed(false)}
         >
           <div
             className={cn(

@@ -31,7 +31,7 @@ jest.mock("./code-execution-panel", () => ({
 }))
 jest.mock("@/stores/canvas/comment-store", () => {
   const store = {
-    getComments: () => [],
+    getCommentsForDocument: () => [],
   }
   return {
     useCommentStore: (selector?: (s: typeof store) => unknown) =>

@@ -51,21 +51,21 @@ export function CanvasSidePanels() {
 
   const documents = useArtifactStore((s) => s.canvasDocuments)
   const getCanvasVersions = useArtifactStore((s) => s.getCanvasVersions)
-  const getComments = useCommentStore((s) => s.getComments)
+  const getCommentsForDocument = useCommentStore((s) => s.getCommentsForDocument)
 
   const tabBadges = useMemo(() => {
     const doc = documents[activeId ?? ""]
     const suggestions = doc?.aiSuggestions ?? []
     const versions = getCanvasVersions(activeId ?? "")
-    const comments = getComments(activeId ?? "")
+    const comments = getCommentsForDocument(activeId ?? "")
     return {
       suggestions: suggestions.filter((s) => s.status === "pending").length,
       history: versions.length,
-      comments: comments.filter((c) => c.status !== "resolved").length,
+      comments: comments.filter((c: { resolvedAt?: unknown }) => c.resolvedAt == null).length,
       collaboration: 0,
       execution: 0,
     }
-  }, [activeId, documents, getCanvasVersions, getComments])
+  }, [activeId, documents, getCanvasVersions, getCommentsForDocument])
 
   if (!activeId) {
     return (
@@ -283,9 +283,9 @@ function HistoryHost({ documentId }: { documentId: string }) {
  */
 function CommentsHost({ documentId }: { documentId: string }) {
   const t = useTranslations("canvas.panels")
-  const getComments = useCommentStore((s) => s.getComments)
-  const comments = getComments(documentId)
-  const unresolved = comments.filter((c) => c.status !== "resolved")
+  const getCommentsForDocument = useCommentStore((s) => s.getCommentsForDocument)
+  const comments = getCommentsForDocument(documentId)
+  const unresolved = comments.filter((c) => c.resolvedAt == null)
 
   if (comments.length === 0) {
     return (
