@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core"
+import { transport } from "@/lib/tauri"
 
 jest.mock("@tauri-apps/api/event", () => ({
   listen: jest.fn(),
@@ -42,59 +42,44 @@ function setTauri(on: boolean) {
   else delete (window as unknown as Record<string, unknown>)[TAURI_KEY]
 }
 
-const mockedInvoke = invoke as unknown as jest.Mock
 const mockedListen = listen as unknown as jest.Mock
+
+let callSpy: jest.SpiedFunction<typeof transport.call>
 
 beforeEach(() => {
   jest.clearAllMocks()
   setTauri(true)
+  callSpy = jest.spyOn(transport, "call")
 })
 
 afterEach(() => {
   setTauri(false)
+  jest.restoreAllMocks()
 })
 
-describe("ensureTauri guard", () => {
-  it("every wrapper throws a clear error when not running inside Tauri", async () => {
+describe("web-mode rejection", () => {
+  it("transport-routed wrappers reject with the WebStub error when no spy is attached", async () => {
     setTauri(false)
-    const matcher = /Claude IPC is only available inside Tauri/
+    callSpy.mockRestore()
 
-    await expect(sendPrompt("s", "hi")).rejects.toThrow(matcher)
-    await expect(interruptSession("s")).rejects.toThrow(matcher)
-    await expect(approveTool("s", "r", "allow")).rejects.toThrow(matcher)
-    await expect(closeSession("s")).rejects.toThrow(matcher)
-    await expect(getSidecarStatus()).rejects.toThrow(matcher)
-    await expect(setApiKey(null)).rejects.toThrow(matcher)
-    await expect(hasApiKey()).rejects.toThrow(matcher)
-    await expect(restartSidecar()).rejects.toThrow(matcher)
-    expect(() => onClaudeMessage(() => undefined)).toThrow(matcher)
-    await expect(readTextFile("/x")).rejects.toThrow(matcher)
-    await expect(writeTextFile("/x", "y")).rejects.toThrow(matcher)
-    await expect(ensureDir("/x")).rejects.toThrow(matcher)
-    await expect(defaultExportDir()).rejects.toThrow(matcher)
-    await expect(scanClaudeSkills()).rejects.toThrow(matcher)
-    await expect(readClaudeUserConfig()).rejects.toThrow(matcher)
-    await expect(readAgentConfig("claude-code")).rejects.toThrow(matcher)
-    await expect(writeAgentConfig("claude-code", {})).rejects.toThrow(matcher)
-    await expect(skillsScanNative()).rejects.toThrow(matcher)
-    await expect(skillsScanDir("/x")).rejects.toThrow(matcher)
-    await expect(
-      skillsInstallNative({ dirName: "x", content: "", resources: [], clean: false })
-    ).rejects.toThrow(matcher)
-    await expect(skillsUninstallNative("x")).rejects.toThrow(matcher)
-    await expect(skillsFetchRemoteMd("https://x")).rejects.toThrow(matcher)
-    await expect(skillsLoadRegistry()).rejects.toThrow(matcher)
-    await expect(skillsScanSecurity("body")).rejects.toThrow(matcher)
-    await expect(skillsScanResources([["x", "y"]])).rejects.toThrow(matcher)
-    await expect(testMcpServer({ transport: "stdio", command: "x" })).rejects.toThrow(matcher)
+    await expect(sendPrompt("s", "hi")).rejects.toThrow(/tauri-only command from web mode/)
+    await expect(getSidecarStatus()).rejects.toThrow(/tauri-only command from web mode/)
+    await expect(setApiKey(null)).rejects.toThrow(/tauri-only command from web mode/)
+  })
+
+  it("onClaudeMessage keeps its synchronous ensureTauri guard until M1.5", () => {
+    setTauri(false)
+    expect(() => onClaudeMessage(() => undefined)).toThrow(
+      /Claude IPC is only available inside Tauri/
+    )
   })
 })
 
 describe("Claude session commands", () => {
   it("sendPrompt forwards sessionId / prompt / options", async () => {
-    mockedInvoke.mockResolvedValueOnce(undefined)
+    callSpy.mockResolvedValueOnce(undefined)
     await sendPrompt("sess-1", "hello", { model: "claude-opus-4-7" })
-    expect(mockedInvoke).toHaveBeenCalledWith("claude_send", {
+    expect(callSpy).toHaveBeenCalledWith("claude_send", {
       sessionId: "sess-1",
       prompt: "hello",
       options: { model: "claude-opus-4-7" },
@@ -102,9 +87,9 @@ describe("Claude session commands", () => {
   })
 
   it("sendPrompt accepts undefined options", async () => {
-    mockedInvoke.mockResolvedValueOnce(undefined)
+    callSpy.mockResolvedValueOnce(undefined)
     await sendPrompt("sess-1", "hi")
-    expect(mockedInvoke).toHaveBeenCalledWith("claude_send", {
+    expect(callSpy).toHaveBeenCalledWith("claude_send", {
       sessionId: "sess-1",
       prompt: "hi",
       options: undefined,
@@ -112,15 +97,15 @@ describe("Claude session commands", () => {
   })
 
   it("interruptSession invokes the interrupt command with the id", async () => {
-    mockedInvoke.mockResolvedValueOnce(undefined)
+    callSpy.mockResolvedValueOnce(undefined)
     await interruptSession("sess-2")
-    expect(mockedInvoke).toHaveBeenCalledWith("claude_interrupt", { sessionId: "sess-2" })
+    expect(callSpy).toHaveBeenCalledWith("claude_interrupt", { sessionId: "sess-2" })
   })
 
   it("approveTool packs the decision payload", async () => {
-    mockedInvoke.mockResolvedValueOnce(undefined)
+    callSpy.mockResolvedValueOnce(undefined)
     await approveTool("sess-3", "req-1", "deny", "no thanks", { foo: 1 })
-    expect(mockedInvoke).toHaveBeenCalledWith("claude_approve", {
+    expect(callSpy).toHaveBeenCalledWith("claude_approve", {
       sessionId: "sess-3",
       requestId: "req-1",
       decision: "deny",
@@ -130,9 +115,9 @@ describe("Claude session commands", () => {
   })
 
   it("approveTool tolerates omitted message / updatedInput", async () => {
-    mockedInvoke.mockResolvedValueOnce(undefined)
+    callSpy.mockResolvedValueOnce(undefined)
     await approveTool("sess-3", "req-1", "allow")
-    expect(mockedInvoke).toHaveBeenCalledWith("claude_approve", {
+    expect(callSpy).toHaveBeenCalledWith("claude_approve", {
       sessionId: "sess-3",
       requestId: "req-1",
       decision: "allow",
@@ -142,36 +127,36 @@ describe("Claude session commands", () => {
   })
 
   it("closeSession invokes the close command", async () => {
-    mockedInvoke.mockResolvedValueOnce(undefined)
+    callSpy.mockResolvedValueOnce(undefined)
     await closeSession("sess-4")
-    expect(mockedInvoke).toHaveBeenCalledWith("claude_close_session", { sessionId: "sess-4" })
+    expect(callSpy).toHaveBeenCalledWith("claude_close_session", { sessionId: "sess-4" })
   })
 
   it("getSidecarStatus returns the parsed boolean", async () => {
-    mockedInvoke.mockResolvedValueOnce({ ready: true })
+    callSpy.mockResolvedValueOnce({ ready: true })
     await expect(getSidecarStatus()).resolves.toEqual({ ready: true })
   })
 
   it("setApiKey forwards the key (string or null)", async () => {
-    mockedInvoke.mockResolvedValueOnce(undefined)
+    callSpy.mockResolvedValueOnce(undefined)
     await setApiKey("sk-abc")
-    expect(mockedInvoke).toHaveBeenCalledWith("claude_set_api_key", { key: "sk-abc" })
+    expect(callSpy).toHaveBeenCalledWith("claude_set_api_key", { key: "sk-abc" })
 
-    mockedInvoke.mockResolvedValueOnce(undefined)
+    callSpy.mockResolvedValueOnce(undefined)
     await setApiKey(null)
-    expect(mockedInvoke).toHaveBeenCalledWith("claude_set_api_key", { key: null })
+    expect(callSpy).toHaveBeenCalledWith("claude_set_api_key", { key: null })
   })
 
   it("hasApiKey returns the boolean from the command", async () => {
-    mockedInvoke.mockResolvedValueOnce(true)
+    callSpy.mockResolvedValueOnce(true)
     await expect(hasApiKey()).resolves.toBe(true)
-    expect(mockedInvoke).toHaveBeenCalledWith("claude_has_api_key")
+    expect(callSpy).toHaveBeenCalledWith("claude_has_api_key")
   })
 
   it("restartSidecar invokes its command", async () => {
-    mockedInvoke.mockResolvedValueOnce(undefined)
+    callSpy.mockResolvedValueOnce(undefined)
     await restartSidecar()
-    expect(mockedInvoke).toHaveBeenCalledWith("claude_restart_sidecar")
+    expect(callSpy).toHaveBeenCalledWith("claude_restart_sidecar")
   })
 })
 
@@ -202,36 +187,36 @@ describe("onClaudeMessage", () => {
 
 describe("filesystem commands", () => {
   it("readTextFile returns the string content", async () => {
-    mockedInvoke.mockResolvedValueOnce("file body")
+    callSpy.mockResolvedValueOnce("file body")
     await expect(readTextFile("/p")).resolves.toBe("file body")
-    expect(mockedInvoke).toHaveBeenCalledWith("read_text_file", { path: "/p" })
+    expect(callSpy).toHaveBeenCalledWith("read_text_file", { path: "/p" })
   })
 
   it("writeTextFile forwards path + content", async () => {
-    mockedInvoke.mockResolvedValueOnce(undefined)
+    callSpy.mockResolvedValueOnce(undefined)
     await writeTextFile("/p", "data")
-    expect(mockedInvoke).toHaveBeenCalledWith("write_text_file", {
+    expect(callSpy).toHaveBeenCalledWith("write_text_file", {
       path: "/p",
       content: "data",
     })
   })
 
   it("ensureDir forwards the path", async () => {
-    mockedInvoke.mockResolvedValueOnce(undefined)
+    callSpy.mockResolvedValueOnce(undefined)
     await ensureDir("/p")
-    expect(mockedInvoke).toHaveBeenCalledWith("ensure_dir", { path: "/p" })
+    expect(callSpy).toHaveBeenCalledWith("ensure_dir", { path: "/p" })
   })
 
   it("defaultExportDir returns the resolved path", async () => {
-    mockedInvoke.mockResolvedValueOnce("/exports")
+    callSpy.mockResolvedValueOnce("/exports")
     await expect(defaultExportDir()).resolves.toBe("/exports")
-    expect(mockedInvoke).toHaveBeenCalledWith("default_export_dir")
+    expect(callSpy).toHaveBeenCalledWith("default_export_dir")
   })
 })
 
 describe("scanClaudeSkills", () => {
   it("camelCases each row's snake_case fields", async () => {
-    mockedInvoke.mockResolvedValueOnce([
+    callSpy.mockResolvedValueOnce([
       { dir_name: "skill-a", file_path: "/p/a.md", content: "a body" },
       { dir_name: "skill-b", file_path: "/p/b.md", content: "b body" },
     ])
@@ -245,9 +230,9 @@ describe("scanClaudeSkills", () => {
 
 describe("readClaudeUserConfig", () => {
   it("returns the parsed JSON tree as-is", async () => {
-    mockedInvoke.mockResolvedValueOnce({ model: "x" })
+    callSpy.mockResolvedValueOnce({ model: "x" })
     await expect(readClaudeUserConfig()).resolves.toEqual({ model: "x" })
-    expect(mockedInvoke).toHaveBeenCalledWith("read_claude_user_config")
+    expect(callSpy).toHaveBeenCalledWith("read_claude_user_config")
   })
 })
 
@@ -261,16 +246,16 @@ describe("multi-agent MCP IO", () => {
       raw: "{}",
       parsed: {},
     }
-    mockedInvoke.mockResolvedValueOnce(result)
+    callSpy.mockResolvedValueOnce(result)
     await expect(readAgentConfig("cursor")).resolves.toEqual(result)
-    expect(mockedInvoke).toHaveBeenCalledWith("read_agent_config", { agent: "cursor" })
+    expect(callSpy).toHaveBeenCalledWith("read_agent_config", { agent: "cursor" })
   })
 
   it("writeAgentConfig forwards the agent id and value tree", async () => {
-    mockedInvoke.mockResolvedValueOnce({ path: "/x", backupPath: "/x.bak" })
+    callSpy.mockResolvedValueOnce({ path: "/x", backupPath: "/x.bak" })
     const out = await writeAgentConfig("cursor", { mcpServers: { a: { command: "a" } } })
     expect(out).toEqual({ path: "/x", backupPath: "/x.bak" })
-    expect(mockedInvoke).toHaveBeenCalledWith("write_agent_config", {
+    expect(callSpy).toHaveBeenCalledWith("write_agent_config", {
       agent: "cursor",
       value: { mcpServers: { a: { command: "a" } } },
     })
@@ -279,58 +264,56 @@ describe("multi-agent MCP IO", () => {
 
 describe("skills commands", () => {
   it("skillsScanNative just forwards the response", async () => {
-    mockedInvoke.mockResolvedValueOnce([
-      { dirName: "x", filePath: "/x", content: "", resources: [] },
-    ])
+    callSpy.mockResolvedValueOnce([{ dirName: "x", filePath: "/x", content: "", resources: [] }])
     await expect(skillsScanNative()).resolves.toHaveLength(1)
-    expect(mockedInvoke).toHaveBeenCalledWith("skills_scan_native")
+    expect(callSpy).toHaveBeenCalledWith("skills_scan_native")
   })
 
   it("skillsScanDir forwards the path argument", async () => {
-    mockedInvoke.mockResolvedValueOnce([])
+    callSpy.mockResolvedValueOnce([])
     await skillsScanDir("/scan/me")
-    expect(mockedInvoke).toHaveBeenCalledWith("skills_scan_dir", { path: "/scan/me" })
+    expect(callSpy).toHaveBeenCalledWith("skills_scan_dir", { path: "/scan/me" })
   })
 
   it("skillsInstallNative wraps the request in {request}", async () => {
-    mockedInvoke.mockResolvedValueOnce({ directory: "/d", writtenFiles: ["a"] })
+    callSpy.mockResolvedValueOnce({ directory: "/d", writtenFiles: ["a"] })
     const req = { dirName: "x", content: "y", resources: [], clean: false }
     await skillsInstallNative(req)
-    expect(mockedInvoke).toHaveBeenCalledWith("skills_install_native", { request: req })
+    expect(callSpy).toHaveBeenCalledWith("skills_install_native", { request: req })
   })
 
   it("skillsUninstallNative forwards dirName", async () => {
-    mockedInvoke.mockResolvedValueOnce({ removed: true, directory: "/d" })
+    callSpy.mockResolvedValueOnce({ removed: true, directory: "/d" })
     await skillsUninstallNative("x")
-    expect(mockedInvoke).toHaveBeenCalledWith("skills_uninstall_native", { dirName: "x" })
+    expect(callSpy).toHaveBeenCalledWith("skills_uninstall_native", { dirName: "x" })
   })
 
   it("skillsFetchRemoteMd forwards url", async () => {
-    mockedInvoke.mockResolvedValueOnce("# md")
+    callSpy.mockResolvedValueOnce("# md")
     await expect(skillsFetchRemoteMd("https://e/x.md")).resolves.toBe("# md")
-    expect(mockedInvoke).toHaveBeenCalledWith("skills_fetch_remote_md", {
+    expect(callSpy).toHaveBeenCalledWith("skills_fetch_remote_md", {
       url: "https://e/x.md",
     })
   })
 
   it("skillsLoadRegistry just returns the array", async () => {
-    mockedInvoke.mockResolvedValueOnce([{ id: "x", source: "y", sourceType: "z" }])
+    callSpy.mockResolvedValueOnce([{ id: "x", source: "y", sourceType: "z" }])
     await expect(skillsLoadRegistry()).resolves.toHaveLength(1)
   })
 
   it("skillsScanSecurity forwards content", async () => {
-    mockedInvoke.mockResolvedValueOnce([])
+    callSpy.mockResolvedValueOnce([])
     await skillsScanSecurity("body")
-    expect(mockedInvoke).toHaveBeenCalledWith("skills_scan_security", { content: "body" })
+    expect(callSpy).toHaveBeenCalledWith("skills_scan_security", { content: "body" })
   })
 
   it("skillsScanResources forwards the [path,content] tuples", async () => {
-    mockedInvoke.mockResolvedValueOnce([])
+    callSpy.mockResolvedValueOnce([])
     await skillsScanResources([
       ["/a", "alpha"],
       ["/b", "beta"],
     ])
-    expect(mockedInvoke).toHaveBeenCalledWith("skills_scan_resources", {
+    expect(callSpy).toHaveBeenCalledWith("skills_scan_resources", {
       resources: [
         ["/a", "alpha"],
         ["/b", "beta"],
@@ -341,7 +324,7 @@ describe("skills commands", () => {
 
 describe("testMcpServer", () => {
   it("normalizes snake_case Rust output and undefineds nullable fields", async () => {
-    mockedInvoke.mockResolvedValueOnce({
+    callSpy.mockResolvedValueOnce({
       ok: true,
       tool_count: 2,
       tools: [
@@ -363,7 +346,7 @@ describe("testMcpServer", () => {
       durationMs: 42,
     })
     // Spread into the payload preserves shape.
-    expect(mockedInvoke).toHaveBeenCalledWith("test_mcp_server", {
+    expect(callSpy).toHaveBeenCalledWith("test_mcp_server", {
       transport: "stdio",
       command: "x",
       args: ["y"],
@@ -371,7 +354,7 @@ describe("testMcpServer", () => {
   })
 
   it("propagates an error string and a zero tool count", async () => {
-    mockedInvoke.mockResolvedValueOnce({
+    callSpy.mockResolvedValueOnce({
       ok: false,
       tool_count: 0,
       tools: [],

@@ -1,9 +1,8 @@
 /**
- * Coverage for the Tauri command wrappers.
+ * Coverage for the MCP server Tauri command wrappers.
  *
- * The test environment mocks `@tauri-apps/api/core` to capture invoke calls
- * without spawning a real Tauri process; `isTauri()` is also mockable for
- * the web-mode branches.
+ * Routes through `transport` from `@/lib/tauri` (M1.4) — tests spy on the
+ * shared transport instead of mocking `invoke` directly.
  */
 
 import {
@@ -12,22 +11,25 @@ import {
   startMcpServer,
   stopMcpServer,
 } from "./tauri-control"
-import { invoke } from "@tauri-apps/api/core"
-import { isTauri } from "@/lib/tauri"
+import { transport } from "@/lib/tauri"
 import type { ExternalBridgeSettings } from "@/types/wiki"
 
-jest.mock("@tauri-apps/api/core")
-jest.mock("@/lib/tauri", () => ({
-  isTauri: jest.fn(() => true),
-}))
+const TAURI_KEY = "__TAURI_INTERNALS__"
+function setTauri(on: boolean) {
+  if (on) (window as unknown as Record<string, unknown>)[TAURI_KEY] = {}
+  else delete (window as unknown as Record<string, unknown>)[TAURI_KEY]
+}
 
-const mockedInvoke = invoke as jest.MockedFunction<typeof invoke>
-const mockedIsTauri = isTauri as jest.MockedFunction<typeof isTauri>
+let callSpy: jest.SpiedFunction<typeof transport.call>
 
 beforeEach(() => {
-  mockedInvoke.mockReset()
-  mockedIsTauri.mockReset()
-  mockedIsTauri.mockReturnValue(true)
+  setTauri(true)
+  callSpy = jest.spyOn(transport, "call")
+})
+
+afterEach(() => {
+  setTauri(false)
+  jest.restoreAllMocks()
 })
 
 const SAMPLE_SETTINGS: ExternalBridgeSettings = {
@@ -37,8 +39,8 @@ const SAMPLE_SETTINGS: ExternalBridgeSettings = {
 }
 
 describe("startMcpServer", () => {
-  it("invokes mcp_server_start with serialized settings", async () => {
-    mockedInvoke.mockResolvedValueOnce(3001 as never)
+  it("calls mcp_server_start with serialized settings", async () => {
+    callSpy.mockResolvedValueOnce(3001)
     const port = await startMcpServer({
       port: 0,
       token: "abc",
@@ -46,44 +48,26 @@ describe("startMcpServer", () => {
       sidecarPath: "/path/to/cognia-mcp.js",
     })
     expect(port).toBe(3001)
-    expect(mockedInvoke).toHaveBeenCalledWith("mcp_server_start", {
+    expect(callSpy).toHaveBeenCalledWith("mcp_server_start", {
       port: 0,
       token: "abc",
       settingsJson: JSON.stringify(SAMPLE_SETTINGS),
       sidecarPath: "/path/to/cognia-mcp.js",
     })
   })
-
-  it("throws a friendly error in web mode", async () => {
-    mockedIsTauri.mockReturnValue(false)
-    await expect(
-      startMcpServer({
-        port: 0,
-        token: "abc",
-        settings: SAMPLE_SETTINGS,
-        sidecarPath: "x",
-      })
-    ).rejects.toThrow(/Tauri-only/)
-    expect(mockedInvoke).not.toHaveBeenCalled()
-  })
 })
 
 describe("stopMcpServer", () => {
-  it("invokes mcp_server_stop without arguments", async () => {
-    mockedInvoke.mockResolvedValueOnce(undefined as never)
+  it("calls mcp_server_stop without arguments", async () => {
+    callSpy.mockResolvedValueOnce(undefined)
     await stopMcpServer()
-    expect(mockedInvoke).toHaveBeenCalledWith("mcp_server_stop")
-  })
-
-  it("throws in web mode", async () => {
-    mockedIsTauri.mockReturnValue(false)
-    await expect(stopMcpServer()).rejects.toThrow(/Tauri-only/)
+    expect(callSpy).toHaveBeenCalledWith("mcp_server_stop")
   })
 })
 
 describe("restartMcpServer", () => {
-  it("invokes mcp_server_restart with serialized settings", async () => {
-    mockedInvoke.mockResolvedValueOnce(3002 as never)
+  it("calls mcp_server_restart with serialized settings", async () => {
+    callSpy.mockResolvedValueOnce(3002)
     const port = await restartMcpServer({
       port: 3001,
       token: "tok",
@@ -91,7 +75,7 @@ describe("restartMcpServer", () => {
       sidecarPath: "x",
     })
     expect(port).toBe(3002)
-    expect(mockedInvoke).toHaveBeenCalledWith("mcp_server_restart", {
+    expect(callSpy).toHaveBeenCalledWith("mcp_server_restart", {
       port: 3001,
       token: "tok",
       settingsJson: JSON.stringify(SAMPLE_SETTINGS),
@@ -101,19 +85,19 @@ describe("restartMcpServer", () => {
 })
 
 describe("getMcpServerStatus", () => {
-  it("returns a stub status in web mode (no invoke fired)", async () => {
-    mockedIsTauri.mockReturnValue(false)
+  it("returns a stub status in plain-web mode (no transport call fired)", async () => {
+    setTauri(false)
     const status = await getMcpServerStatus()
     expect(status).toEqual({ running: false, port: null, startedAt: null })
-    expect(mockedInvoke).not.toHaveBeenCalled()
+    expect(callSpy).not.toHaveBeenCalled()
   })
 
   it("forwards the Rust-side status verbatim in Tauri mode", async () => {
-    mockedInvoke.mockResolvedValueOnce({
+    callSpy.mockResolvedValueOnce({
       running: true,
       port: 3001,
       startedAt: "2026-05-04T12:34:56Z",
-    } as never)
+    })
     const status = await getMcpServerStatus()
     expect(status.running).toBe(true)
     expect(status.port).toBe(3001)

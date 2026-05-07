@@ -1,10 +1,10 @@
 /**
  * Tests for native/system-scheduler — thin wrappers over Tauri scheduler_*
  * commands. Each function should pass its arguments straight through and
- * return whatever invoke() resolves to.
+ * return whatever transport.call resolves to.
  */
 
-import { invoke } from "@tauri-apps/api/core"
+import { transport } from "@/lib/tauri"
 import {
   getSchedulerCapabilities,
   isSchedulerAvailable,
@@ -25,69 +25,73 @@ import {
   getPendingConfirmations,
 } from "./system-scheduler"
 
-const mockedInvoke = invoke as unknown as jest.Mock
+let callSpy: jest.SpiedFunction<typeof transport.call>
 
 beforeEach(() => {
-  mockedInvoke.mockReset()
+  callSpy = jest.spyOn(transport, "call")
 })
 
-describe("system-scheduler invoke wrappers", () => {
+afterEach(() => {
+  jest.restoreAllMocks()
+})
+
+describe("system-scheduler transport wrappers", () => {
   it("getSchedulerCapabilities()", async () => {
     const caps = { supportsElevation: true } as unknown
-    mockedInvoke.mockResolvedValueOnce(caps)
+    callSpy.mockResolvedValueOnce(caps)
     await expect(getSchedulerCapabilities()).resolves.toBe(caps)
-    expect(mockedInvoke).toHaveBeenCalledWith("scheduler_get_capabilities")
+    expect(callSpy).toHaveBeenCalledWith("scheduler_get_capabilities")
   })
 
   it("isSchedulerAvailable()", async () => {
-    mockedInvoke.mockResolvedValueOnce(true)
+    callSpy.mockResolvedValueOnce(true)
     await expect(isSchedulerAvailable()).resolves.toBe(true)
-    expect(mockedInvoke).toHaveBeenCalledWith("scheduler_is_available")
+    expect(callSpy).toHaveBeenCalledWith("scheduler_is_available")
   })
 
   it("isSchedulerElevated()", async () => {
-    mockedInvoke.mockResolvedValueOnce(false)
+    callSpy.mockResolvedValueOnce(false)
     await expect(isSchedulerElevated()).resolves.toBe(false)
-    expect(mockedInvoke).toHaveBeenCalledWith("scheduler_is_elevated")
+    expect(callSpy).toHaveBeenCalledWith("scheduler_is_elevated")
   })
 
   it("listSystemTasks()", async () => {
-    mockedInvoke.mockResolvedValueOnce([])
+    callSpy.mockResolvedValueOnce([])
     await expect(listSystemTasks()).resolves.toEqual([])
-    expect(mockedInvoke).toHaveBeenCalledWith("scheduler_list_tasks")
+    expect(callSpy).toHaveBeenCalledWith("scheduler_list_tasks")
   })
 
   it("getSystemTask() forwards the taskId", async () => {
-    mockedInvoke.mockResolvedValueOnce(null)
+    callSpy.mockResolvedValueOnce(null)
     await expect(getSystemTask("task-1")).resolves.toBeNull()
-    expect(mockedInvoke).toHaveBeenCalledWith("scheduler_get_task", { taskId: "task-1" })
+    expect(callSpy).toHaveBeenCalledWith("scheduler_get_task", { taskId: "task-1" })
   })
 
   it("createSystemTask() defaults confirmed=false", async () => {
-    mockedInvoke.mockResolvedValueOnce({ ok: true })
+    callSpy.mockResolvedValueOnce({ ok: true })
     const input = { name: "task" } as unknown as Parameters<typeof createSystemTask>[0]
     await createSystemTask(input)
-    expect(mockedInvoke).toHaveBeenCalledWith("scheduler_create_task", {
+    expect(callSpy).toHaveBeenCalledWith("scheduler_create_task", {
       input,
       confirmed: false,
     })
   })
 
   it("createSystemTask() forwards confirmed=true when provided", async () => {
-    mockedInvoke.mockResolvedValueOnce({ ok: true })
+    callSpy.mockResolvedValueOnce({ ok: true })
     const input = { name: "task" } as unknown as Parameters<typeof createSystemTask>[0]
     await createSystemTask(input, true)
-    expect(mockedInvoke).toHaveBeenCalledWith("scheduler_create_task", {
+    expect(callSpy).toHaveBeenCalledWith("scheduler_create_task", {
       input,
       confirmed: true,
     })
   })
 
   it("updateSystemTask() defaults confirmed=false", async () => {
-    mockedInvoke.mockResolvedValueOnce({ ok: true })
+    callSpy.mockResolvedValueOnce({ ok: true })
     const input = { name: "updated" } as unknown as Parameters<typeof updateSystemTask>[1]
     await updateSystemTask("task-1", input)
-    expect(mockedInvoke).toHaveBeenCalledWith("scheduler_update_task", {
+    expect(callSpy).toHaveBeenCalledWith("scheduler_update_task", {
       taskId: "task-1",
       input,
       confirmed: false,
@@ -95,10 +99,10 @@ describe("system-scheduler invoke wrappers", () => {
   })
 
   it("updateSystemTask() forwards explicit confirmed flag", async () => {
-    mockedInvoke.mockResolvedValueOnce({ ok: true })
+    callSpy.mockResolvedValueOnce({ ok: true })
     const input = { name: "updated" } as unknown as Parameters<typeof updateSystemTask>[1]
     await updateSystemTask("task-1", input, true)
-    expect(mockedInvoke).toHaveBeenCalledWith("scheduler_update_task", {
+    expect(callSpy).toHaveBeenCalledWith("scheduler_update_task", {
       taskId: "task-1",
       input,
       confirmed: true,
@@ -106,48 +110,48 @@ describe("system-scheduler invoke wrappers", () => {
   })
 
   it("deleteSystemTask()", async () => {
-    mockedInvoke.mockResolvedValueOnce(true)
+    callSpy.mockResolvedValueOnce(true)
     await expect(deleteSystemTask("task-1")).resolves.toBe(true)
-    expect(mockedInvoke).toHaveBeenCalledWith("scheduler_delete_task", { taskId: "task-1" })
+    expect(callSpy).toHaveBeenCalledWith("scheduler_delete_task", { taskId: "task-1" })
   })
 
   it("enableSystemTask()", async () => {
-    mockedInvoke.mockResolvedValueOnce(true)
+    callSpy.mockResolvedValueOnce(true)
     await enableSystemTask("task-1")
-    expect(mockedInvoke).toHaveBeenCalledWith("scheduler_enable_task", { taskId: "task-1" })
+    expect(callSpy).toHaveBeenCalledWith("scheduler_enable_task", { taskId: "task-1" })
   })
 
   it("disableSystemTask()", async () => {
-    mockedInvoke.mockResolvedValueOnce(true)
+    callSpy.mockResolvedValueOnce(true)
     await disableSystemTask("task-1")
-    expect(mockedInvoke).toHaveBeenCalledWith("scheduler_disable_task", { taskId: "task-1" })
+    expect(callSpy).toHaveBeenCalledWith("scheduler_disable_task", { taskId: "task-1" })
   })
 
   it("runSystemTaskNow()", async () => {
-    mockedInvoke.mockResolvedValueOnce({ success: true })
+    callSpy.mockResolvedValueOnce({ success: true })
     await runSystemTaskNow("task-1")
-    expect(mockedInvoke).toHaveBeenCalledWith("scheduler_run_task_now", { taskId: "task-1" })
+    expect(callSpy).toHaveBeenCalledWith("scheduler_run_task_now", { taskId: "task-1" })
   })
 
   it("validateSystemTask()", async () => {
-    mockedInvoke.mockResolvedValueOnce({ valid: true })
+    callSpy.mockResolvedValueOnce({ valid: true })
     const input = { name: "t" } as unknown as Parameters<typeof validateSystemTask>[0]
     await validateSystemTask(input)
-    expect(mockedInvoke).toHaveBeenCalledWith("scheduler_validate_task", { input })
+    expect(callSpy).toHaveBeenCalledWith("scheduler_validate_task", { input })
   })
 
   it("confirmSystemTask()", async () => {
-    mockedInvoke.mockResolvedValueOnce({ id: "task-1" })
+    callSpy.mockResolvedValueOnce({ id: "task-1" })
     await confirmSystemTask("confirm-1")
-    expect(mockedInvoke).toHaveBeenCalledWith("scheduler_confirm_task", {
+    expect(callSpy).toHaveBeenCalledWith("scheduler_confirm_task", {
       confirmationId: "confirm-1",
     })
   })
 
   it("cancelConfirmation()", async () => {
-    mockedInvoke.mockResolvedValueOnce(true)
+    callSpy.mockResolvedValueOnce(true)
     await cancelConfirmation("confirm-1")
-    expect(mockedInvoke).toHaveBeenCalledWith("scheduler_cancel_confirmation", {
+    expect(callSpy).toHaveBeenCalledWith("scheduler_cancel_confirmation", {
       confirmationId: "confirm-1",
     })
   })
@@ -157,19 +161,19 @@ describe("system-scheduler invoke wrappers", () => {
   })
 
   it("requestSchedulerElevation()", async () => {
-    mockedInvoke.mockResolvedValueOnce(true)
+    callSpy.mockResolvedValueOnce(true)
     await expect(requestSchedulerElevation()).resolves.toBe(true)
-    expect(mockedInvoke).toHaveBeenCalledWith("scheduler_request_elevation")
+    expect(callSpy).toHaveBeenCalledWith("scheduler_request_elevation")
   })
 
   it("getPendingConfirmations()", async () => {
-    mockedInvoke.mockResolvedValueOnce([])
+    callSpy.mockResolvedValueOnce([])
     await getPendingConfirmations()
-    expect(mockedInvoke).toHaveBeenCalledWith("scheduler_get_pending_confirmations")
+    expect(callSpy).toHaveBeenCalledWith("scheduler_get_pending_confirmations")
   })
 
-  it("propagates errors from the Tauri side", async () => {
-    mockedInvoke.mockRejectedValueOnce(new Error("boom"))
+  it("propagates errors from the transport", async () => {
+    callSpy.mockRejectedValueOnce(new Error("boom"))
     await expect(listSystemTasks()).rejects.toThrow("boom")
   })
 })

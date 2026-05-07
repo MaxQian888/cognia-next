@@ -1,6 +1,4 @@
-import { TauriTransport } from "./tauri/transport-tauri"
-import type { Transport } from "./tauri/transport-types"
-import { WebStubTransport } from "./tauri/transport-web"
+import { transport } from "./tauri/transport-instance"
 
 /**
  * Detects whether the app is running inside a Tauri webview.
@@ -11,15 +9,10 @@ export function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 }
 
-/**
- * Module-scope transport selection. Picked once at module load — the runtime
- * context can't change inside a single page session, so re-checking on every
- * call would add no value.
- *
- * M1.6 extends this to also detect Capacitor and pick `CompanionTransportStub`
- * (and eventually the real `CompanionTransport` in M2.7).
- */
-export const transport: Transport = isTauri() ? new TauriTransport() : new WebStubTransport()
+// Re-export the transport so consumers can `import { transport } from "@/lib/tauri"`.
+// The actual instance lives in `lib/tauri/transport-instance.ts` to stay out
+// of the circular import chain that runs through this barrel.
+export { transport }
 
 // Type-safe wrappers for Rust commands defined in src-tauri/src/commands.rs.
 // Keep this file as the SOLE authoritative seam — business code imports named
