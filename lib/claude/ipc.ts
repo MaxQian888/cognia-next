@@ -1,25 +1,12 @@
-// Thin wrapper around Tauri's invoke/listen API for the Claude sidecar.
-// Components should use this module rather than touching @tauri-apps/api directly.
+// Thin wrapper around the Claude sidecar IPC. Components should use this
+// module rather than touching @tauri-apps/api directly — every boundary
+// goes through `transport` from `@/lib/tauri`.
 
-import { listen, type UnlistenFn } from "@tauri-apps/api/event"
-import { isTauri, transport } from "@/lib/tauri"
+import type { UnlistenFn } from "@tauri-apps/api/event"
+import { transport } from "@/lib/tauri"
 import type { AgentId, ApprovalDecision, ClaudeEvent, SendContent, SendOptions } from "./types"
 
 const SIDECAR_EVENT = "claude://message"
-
-/**
- * Local guard kept for onClaudeMessage's listen() — M1.4 migrated every
- * invoke caller below to `transport.call`, which handles its own
- * web-mode rejection. The listen-based path moves to transport.subscribe
- * in M1.5; until then this guard preserves the existing error message.
- */
-function ensureTauri() {
-  if (!isTauri()) {
-    throw new Error(
-      "Claude IPC is only available inside Tauri. Run `pnpm tauri dev` instead of `pnpm dev`."
-    )
-  }
-}
 
 export async function sendPrompt(
   sessionId: string,
@@ -96,11 +83,8 @@ export async function restartSidecar(): Promise<void> {
   await transport.call("claude_restart_sidecar")
 }
 
-export function onClaudeMessage(handler: (evt: ClaudeEvent) => void): Promise<UnlistenFn> {
-  ensureTauri()
-  return listen<ClaudeEvent>(SIDECAR_EVENT, (event) => {
-    handler(event.payload)
-  })
+export async function onClaudeMessage(handler: (evt: ClaudeEvent) => void): Promise<UnlistenFn> {
+  return transport.subscribe<ClaudeEvent>(SIDECAR_EVENT, handler)
 }
 
 // ---- File-system commands (Skills + MCP import/export) -------------------

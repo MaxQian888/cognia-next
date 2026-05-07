@@ -1,7 +1,7 @@
 "use client"
 
-import { listen, type UnlistenFn } from "@tauri-apps/api/event"
-import { isTauri } from "@/lib/tauri"
+import type { UnlistenFn } from "@tauri-apps/api/event"
+import { transport } from "@/lib/tauri"
 
 /**
  * Tauri-side event names emitted from `src-tauri/src/{lib,tray,menu}.rs`.
@@ -24,10 +24,16 @@ export const TAURI_EVENTS = {
   deepLink: "deep-link://received",
 } as const
 
+/**
+ * Subscribe to a Tauri event channel. Routes through the module-scope
+ * `transport` so Capacitor mode (M2.6) can transparently swap to a
+ * WebSocket-backed stream. The async return preserves the existing
+ * `await onTauriEvent(...)` contract while delegating to `transport.subscribe`
+ * which is synchronous internally.
+ */
 export async function onTauriEvent<T = unknown>(
   event: string,
   handler: (payload: T) => void
 ): Promise<UnlistenFn> {
-  if (!isTauri()) return async () => {}
-  return await listen<T>(event, (e) => handler(e.payload))
+  return transport.subscribe<T>(event, handler)
 }

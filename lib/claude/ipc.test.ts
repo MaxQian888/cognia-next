@@ -67,11 +67,15 @@ describe("web-mode rejection", () => {
     await expect(setApiKey(null)).rejects.toThrow(/tauri-only command from web mode/)
   })
 
-  it("onClaudeMessage keeps its synchronous ensureTauri guard until M1.5", () => {
+  it("onClaudeMessage in web mode resolves to a no-op unlistener (M1.5 transport.subscribe contract)", async () => {
     setTauri(false)
-    expect(() => onClaudeMessage(() => undefined)).toThrow(
-      /Claude IPC is only available inside Tauri/
-    )
+    callSpy.mockRestore()
+    // No spy on transport.subscribe — falls through to WebStubTransport.subscribe
+    // which returns a no-op unlistener and never calls the handler.
+    const handler = jest.fn()
+    const unlisten = await onClaudeMessage(handler)
+    expect(typeof unlisten).toBe("function")
+    expect(handler).not.toHaveBeenCalled()
   })
 })
 
@@ -161,26 +165,22 @@ describe("Claude session commands", () => {
 })
 
 describe("onClaudeMessage", () => {
-  it("subscribes to the sidecar event channel and forwards payloads", async () => {
+  it("subscribes via transport.subscribe with the channel + caller handler", async () => {
     const unlistenSpy = jest.fn()
-    let captured: ((event: { payload: unknown }) => void) | undefined
-
-    mockedListen.mockImplementation(((
-      channel: string,
-      handler: (e: { payload: unknown }) => void
-    ) => {
+    let captured: ((payload: unknown) => void) | undefined
+    const subscribeSpy = jest.spyOn(transport, "subscribe").mockImplementation((channel, h) => {
       expect(channel).toBe("claude://message")
-      captured = handler
-      return Promise.resolve(unlistenSpy)
-    }) as unknown as typeof listen)
+      captured = h as (payload: unknown) => void
+      return unlistenSpy
+    })
 
     const handler = jest.fn()
     const unlisten = await onClaudeMessage(handler)
 
+    expect(subscribeSpy).toHaveBeenCalledWith("claude://message", handler)
     expect(captured).toBeDefined()
-    captured?.({ payload: { type: "ready" } })
+    captured?.({ type: "ready" })
     expect(handler).toHaveBeenCalledWith({ type: "ready" })
-
     expect(unlisten).toBe(unlistenSpy)
   })
 })

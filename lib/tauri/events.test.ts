@@ -1,30 +1,17 @@
+import { transport } from "@/lib/tauri"
 import { TAURI_EVENTS, onTauriEvent } from "./events"
 
-jest.mock("@tauri-apps/api/event", () => ({
-  listen: jest.fn(),
-}))
+let subscribeSpy: jest.SpiedFunction<typeof transport.subscribe>
 
-import { listen } from "@tauri-apps/api/event"
+beforeEach(() => {
+  subscribeSpy = jest.spyOn(transport, "subscribe")
+})
 
-const mockedListen = listen as jest.MockedFunction<typeof listen>
-
-const TAURI_KEY = "__TAURI_INTERNALS__"
-
-function setTauri(on: boolean) {
-  if (on) (window as unknown as Record<string, unknown>)[TAURI_KEY] = {}
-  else delete (window as unknown as Record<string, unknown>)[TAURI_KEY]
-}
+afterEach(() => {
+  jest.restoreAllMocks()
+})
 
 describe("lib/tauri/events", () => {
-  beforeEach(() => {
-    jest.clearAllMocks()
-    setTauri(false)
-  })
-
-  afterEach(() => {
-    setTauri(false)
-  })
-
   describe("TAURI_EVENTS", () => {
     it("exposes the expected channel names", () => {
       expect(TAURI_EVENTS).toEqual({
@@ -41,34 +28,41 @@ describe("lib/tauri/events", () => {
   })
 
   describe("onTauriEvent", () => {
-    it("returns an async no-op unlistener outside Tauri", async () => {
+    it("returns a no-op unlistener when the transport is the WebStub", async () => {
+      // Default jsdom transport is the WebStub — its `subscribe` is a no-op
+      // returning a no-op unlistener; our async wrapper preserves that.
+      subscribeSpy.mockRestore()
       const handler = jest.fn()
       const unlisten = await onTauriEvent("foo", handler)
       expect(typeof unlisten).toBe("function")
-      // The fallback returns an async function
+      // Must not throw or await indefinitely.
       const result = unlisten()
-      // Either undefined or a Promise — assert no throw
       await Promise.resolve(result)
-      expect(mockedListen).not.toHaveBeenCalled()
+      expect(handler).not.toHaveBeenCalled()
     })
 
-    it("forwards payload from native listen and returns unlistener", async () => {
-      setTauri(true)
+    it("forwards the channel + handler straight to transport.subscribe", async () => {
       const unlistenFn = jest.fn()
-      mockedListen.mockImplementation(
-        async (
-          _event: string,
-          cb: (e: { payload: unknown; event: string; id: number }) => void
-        ) => {
-          cb({ event: "foo", id: 1, payload: { hello: "world" } })
-          return unlistenFn
-        }
-      )
+      subscribeSpy.mockReturnValue(unlistenFn)
       const handler = jest.fn()
       const returned = await onTauriEvent<{ hello: string }>("foo", handler)
-      expect(handler).toHaveBeenCalledWith({ hello: "world" })
+      expect(subscribeSpy).toHaveBeenCalledWith("foo", handler)
       expect(returned).toBe(unlistenFn)
-      expect(mockedListen).toHaveBeenCalledWith("foo", expect.any(Function))
+    })
+
+    it("subscribe→emit→unsubscribe→emit cleanup contract", async () => {
+      const handler = jest.fn()
+      let captured: ((payload: unknown) => void) | undefined
+      const unlistenFn = jest.fn()
+      subscribeSpy.mockImplementation((_event, h) => {
+        captured = h as (payload: unknown) => void
+        return unlistenFn
+      })
+      const unlisten = await onTauriEvent<{ n: number }>("foo", handler)
+      captured?.({ n: 1 })
+      expect(handler).toHaveBeenCalledWith({ n: 1 })
+      unlisten()
+      expect(unlistenFn).toHaveBeenCalledTimes(1)
     })
   })
 })
