@@ -1,19 +1,33 @@
-import { greet, isTauri, transport } from "./tauri"
+import { greet, isCapacitor, isTauri, transport } from "./tauri"
 
 const TAURI_KEY = "__TAURI_INTERNALS__"
+const CAPACITOR_KEY = "Capacitor"
 
 function setTauri(on: boolean) {
   if (on) (window as unknown as Record<string, unknown>)[TAURI_KEY] = {}
   else delete (window as unknown as Record<string, unknown>)[TAURI_KEY]
 }
 
+function setCapacitor(state: "native" | "web" | "absent") {
+  const w = window as unknown as Record<string, unknown>
+  if (state === "absent") {
+    delete w[CAPACITOR_KEY]
+    return
+  }
+  w[CAPACITOR_KEY] = {
+    isNativePlatform: () => state === "native",
+  }
+}
+
 describe("lib/tauri", () => {
   beforeEach(() => {
     setTauri(false)
+    setCapacitor("absent")
   })
 
   afterEach(() => {
     setTauri(false)
+    setCapacitor("absent")
     jest.restoreAllMocks()
   })
 
@@ -25,6 +39,27 @@ describe("lib/tauri", () => {
     it("returns true when __TAURI_INTERNALS__ is on window", () => {
       setTauri(true)
       expect(isTauri()).toBe(true)
+    })
+  })
+
+  describe("isCapacitor", () => {
+    it("returns false when window.Capacitor is absent", () => {
+      expect(isCapacitor()).toBe(false)
+    })
+
+    it("returns false when Capacitor is present but isNativePlatform() is false (Capacitor web build)", () => {
+      setCapacitor("web")
+      expect(isCapacitor()).toBe(false)
+    })
+
+    it("returns true when Capacitor.isNativePlatform() returns true", () => {
+      setCapacitor("native")
+      expect(isCapacitor()).toBe(true)
+    })
+
+    it("returns false when Capacitor exists but lacks isNativePlatform", () => {
+      ;(window as unknown as Record<string, unknown>)[CAPACITOR_KEY] = {}
+      expect(isCapacitor()).toBe(false)
     })
   })
 

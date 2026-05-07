@@ -7,10 +7,13 @@
  * `lib/tauri/<wrapper>.ts` imports from this file directly — they import
  * `transport` from `@/lib/tauri`, which re-exports it.
  *
- * M1.6 will detect Capacitor here and pick `CompanionTransportStub`
- * (and eventually the real `CompanionTransport` in M2.7).
+ * Selection happens once at module load:
+ *   - Tauri desktop  → `TauriTransport`
+ *   - Capacitor mobile → `CompanionTransportStub` (M2.7 swaps in the real impl)
+ *   - Plain web      → `WebStubTransport`
  */
 
+import { CompanionTransportStub } from "./transport-companion-stub"
 import { TauriTransport } from "./transport-tauri"
 import type { Transport } from "./transport-types"
 import { WebStubTransport } from "./transport-web"
@@ -19,4 +22,20 @@ function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 }
 
-export const transport: Transport = isTauri() ? new TauriTransport() : new WebStubTransport()
+function isCapacitor(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof (window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
+      ?.isNativePlatform === "function" &&
+    (window as { Capacitor: { isNativePlatform: () => boolean } }).Capacitor.isNativePlatform() ===
+      true
+  )
+}
+
+function pickTransport(): Transport {
+  if (isTauri()) return new TauriTransport()
+  if (isCapacitor()) return new CompanionTransportStub()
+  return new WebStubTransport()
+}
+
+export const transport: Transport = pickTransport()

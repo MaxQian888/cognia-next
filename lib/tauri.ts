@@ -9,6 +9,23 @@ export function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 }
 
+/**
+ * Detects whether the app is running inside a Capacitor mobile shell.
+ * Use this for UI gating that needs to know the native runtime is mobile
+ * (versus desktop Tauri or plain browser). The transport selection itself
+ * happens in `lib/tauri/transport-instance.ts` — this helper is only for
+ * UI-level platform branching alongside `isTauri()`.
+ */
+export function isCapacitor(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof (window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
+      ?.isNativePlatform === "function" &&
+    (window as { Capacitor: { isNativePlatform: () => boolean } }).Capacitor.isNativePlatform() ===
+      true
+  )
+}
+
 // Re-export the transport so consumers can `import { transport } from "@/lib/tauri"`.
 // The actual instance lives in `lib/tauri/transport-instance.ts` to stay out
 // of the circular import chain that runs through this barrel.
