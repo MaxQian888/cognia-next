@@ -162,6 +162,7 @@ mod tests {
     use super::*;
     use crate::companion_api::{redemption_lru::RedemptionLru, CompanionState};
     use parking_lot::RwLock;
+    use std::sync::Arc;
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
 
