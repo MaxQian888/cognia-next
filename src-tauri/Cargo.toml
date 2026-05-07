@@ -97,6 +97,7 @@ aes-gcm = { version = "0.10", features = ["aes"] }
 aes = "0.8"
 cbc = { version = "0.1", features = ["alloc"] }
 rand = "0.8"
+jsonwebtoken = "9"
 
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-window-state = "2"
