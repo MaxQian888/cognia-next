@@ -87,12 +87,34 @@ export interface Wallpaper {
 export interface ImportedThemeRecord {
   /** Foreign key into `AppSettings.customThemes[].id`. */
   customThemeId: string
+  /**
+   * Deterministic identity for the source: `json:<fileName>:<themeName>` or
+   * `vsix:<vsixName>:<themePath>`. Used to dedupe re-imports of the same
+   * .vsix or .json file so the history list doesn't grow N copies of the
+   * same theme. Optional for back-compat with rows written before this
+   * field existed; the import flow always populates it now.
+   */
+  sourceKey?: string
   /** Human-readable name from the VSCode theme `label`. */
   sourceName: string
   /** Whether the imported theme targets light or dark UI. */
   sourceVariant: "light" | "dark"
   importedAt: number
   origin: { kind: "json"; fileName: string } | { kind: "vsix"; vsixName: string; themePath: string }
+}
+
+/**
+ * Compute a deterministic identity for an imported theme. Re-importing the
+ * same .json file or selecting the same theme path inside the same .vsix
+ * yields the same key, so the import flow can update the existing record
+ * in place instead of producing duplicates.
+ */
+export function importedThemeSourceKey(
+  origin: ImportedThemeRecord["origin"],
+  sourceName: string
+): string {
+  if (origin.kind === "json") return `json:${origin.fileName}:${sourceName}`
+  return `vsix:${origin.vsixName}:${origin.themePath}`
 }
 
 /**

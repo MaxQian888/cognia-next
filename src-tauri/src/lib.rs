@@ -12,6 +12,7 @@ mod files;
 mod hooks;
 mod logging;
 mod mcp_server;
+mod proxy_config;
 mod remote_control;
 mod scheduler;
 mod settings;
@@ -331,6 +332,11 @@ pub fn run() {
             mcp_server::commands::mcp_server_stop,
             mcp_server::commands::mcp_server_restart,
             mcp_server::commands::mcp_server_status,
+            proxy_config::commands::proxy_set,
+            proxy_config::commands::proxy_get_active,
+            proxy_config::commands::proxy_detect,
+            proxy_config::commands::proxy_test,
+            proxy_config::commands::proxy_http_request,
             connectors::commands::connectors_register_adapter,
             connectors::commands::connectors_unregister_adapter,
             connectors::commands::connectors_health,

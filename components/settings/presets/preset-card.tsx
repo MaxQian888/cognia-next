@@ -69,12 +69,12 @@ export function PresetCard({
   const isBuiltIn = preset.isBuiltIn === true
   const categorySpec = getCategorySpec(preset.category)
 
-  const safeT = (k: string, fallback: string) => {
-    const out = t(k as never)
+  const safeT = (k: string, fallback: string, values?: Record<string, string | number>) => {
+    const out = t(k as never, values as never)
     return out === `presets.${k}` || out === k ? fallback : out
   }
-  const safeTCard = (k: string, fallback: string) => {
-    const out = tCard(k as never)
+  const safeTCard = (k: string, fallback: string, values?: Record<string, string | number>) => {
+    const out = tCard(k as never, values as never)
     return out === `presets.card.${k}` || out === k ? fallback : out
   }
   const safeTCategory = (k: string, fallback: string) => {
@@ -152,8 +152,8 @@ export function PresetCard({
             onClick={onToggleFavorite}
             aria-label={
               preset.isFavorite
-                ? safeTCard("unfavorite", `Unfavorite ${preset.name}`)
-                : safeTCard("favorite", `Favorite ${preset.name}`)
+                ? safeTCard("unfavorite", `Unfavorite ${preset.name}`, { name: preset.name })
+                : safeTCard("favorite", `Favorite ${preset.name}`, { name: preset.name })
             }
             title={
               preset.isFavorite
@@ -175,8 +175,10 @@ export function PresetCard({
             onClick={onToggleDefault}
             aria-label={
               preset.isDefault
-                ? safeTCard("clearDefault", `Clear default on ${preset.name}`)
-                : safeTCard("setDefault", `Set ${preset.name} as default`)
+                ? safeTCard("clearDefault", `Clear default on ${preset.name}`, {
+                    name: preset.name,
+                  })
+                : safeTCard("setDefault", `Set ${preset.name} as default`, { name: preset.name })
             }
             title={
               preset.isDefault
@@ -238,8 +240,9 @@ export function PresetCard({
                 <AlertDialogDescription>
                   {safeT(
                     "deleteConfirmDescription",
-                    `"${preset.name}" will be removed from your library. Sessions currently using it keep their copy of the system prompt.`
-                  ).replace("{name}", preset.name)}
+                    `"${preset.name}" will be removed from your library. Sessions currently using it keep their copy of the system prompt.`,
+                    { name: preset.name }
+                  )}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>

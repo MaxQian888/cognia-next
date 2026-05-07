@@ -161,6 +161,49 @@ describe("load", () => {
     expect(console.warn).toHaveBeenCalled()
     expect(useSettingsStore.getState().loaded).toBe(true)
   })
+
+  it("repairs orphaned importedVscodeThemes on load and persists the cleanup", async () => {
+    // Two import rows, but only one has a matching customTheme — the
+    // other is a leftover from the historical saveSettings race.
+    dbSettings.getSettings.mockResolvedValue(
+      baseSettings({
+        customThemes: [{ id: "ct-keep", name: "Kept" }],
+        importedVscodeThemes: [
+          {
+            customThemeId: "ct-orphan",
+            sourceKey: "json:gone.json:Gone",
+            sourceName: "Gone",
+            sourceVariant: "dark",
+            importedAt: 1,
+            origin: { kind: "json", fileName: "gone.json" },
+          },
+          {
+            customThemeId: "ct-keep",
+            sourceKey: "json:k.json:Kept",
+            sourceName: "Kept",
+            sourceVariant: "light",
+            importedAt: 2,
+            origin: { kind: "json", fileName: "k.json" },
+          },
+        ],
+      })
+    )
+    keyring.loadAllProviderKeys.mockResolvedValue({})
+    tauri.isTauri.mockReturnValue(false)
+    dbSettings.saveSettings.mockImplementation(async (p) => baseSettings(p))
+
+    await act(async () => {
+      await useSettingsStore.getState().load()
+    })
+
+    const cleanedRecords = useSettingsStore.getState().settings?.importedVscodeThemes
+    expect(cleanedRecords).toHaveLength(1)
+    expect(cleanedRecords?.[0].customThemeId).toBe("ct-keep")
+    // The cleanup must be persisted so the next load doesn't redo this work.
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      importedVscodeThemes: [expect.objectContaining({ customThemeId: "ct-keep" })],
+    })
+  })
 })
 
 // ---- save ----
@@ -996,5 +1039,121 @@ describe("appearance setters", () => {
     expect(dbSettings.saveSettings).toHaveBeenCalledWith({
       importedVscodeThemes: [records[1]],
     })
+  })
+})
+
+describe("repairImportedVscodeThemes", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { repairImportedVscodeThemes } =
+    require("./settings-store") as typeof import("./settings-store")
+
+  it("returns the same object reference when nothing needs repair", () => {
+    const s = baseSettings({
+      customThemes: [{ id: "ct-1", name: "Dracula" }],
+      importedVscodeThemes: [
+        {
+          customThemeId: "ct-1",
+          sourceKey: "json:dracula.json:Dracula",
+          sourceName: "Dracula",
+          sourceVariant: "dark",
+          importedAt: 1,
+          origin: { kind: "json", fileName: "dracula.json" },
+        },
+      ],
+    })
+    expect(repairImportedVscodeThemes(s)).toBe(s)
+  })
+
+  it("drops history rows whose customThemeId no longer exists", () => {
+    const s = baseSettings({
+      customThemes: [{ id: "ct-keep", name: "Kept" }],
+      importedVscodeThemes: [
+        {
+          customThemeId: "ct-orphan",
+          sourceKey: "json:gone.json:Gone",
+          sourceName: "Gone",
+          sourceVariant: "dark",
+          importedAt: 1,
+          origin: { kind: "json", fileName: "gone.json" },
+        },
+        {
+          customThemeId: "ct-keep",
+          sourceKey: "json:k.json:Kept",
+          sourceName: "Kept",
+          sourceVariant: "light",
+          importedAt: 2,
+          origin: { kind: "json", fileName: "k.json" },
+        },
+      ],
+    })
+    const out = repairImportedVscodeThemes(s)
+    expect(out).not.toBe(s)
+    expect(out.importedVscodeThemes).toHaveLength(1)
+    expect(out.importedVscodeThemes?.[0].customThemeId).toBe("ct-keep")
+  })
+
+  it("collapses duplicate sourceKey rows to the most recent importedAt", () => {
+    const s = baseSettings({
+      customThemes: [
+        { id: "ct-1", name: "Night Owl" },
+        { id: "ct-2", name: "Night Owl" },
+      ],
+      importedVscodeThemes: [
+        {
+          customThemeId: "ct-1",
+          sourceKey: "vsix:night-owl.vsix:themes/Night Owl-color-theme.json",
+          sourceName: "Night Owl",
+          sourceVariant: "dark",
+          importedAt: 100,
+          origin: {
+            kind: "vsix",
+            vsixName: "night-owl.vsix",
+            themePath: "themes/Night Owl-color-theme.json",
+          },
+        },
+        {
+          customThemeId: "ct-2",
+          sourceKey: "vsix:night-owl.vsix:themes/Night Owl-color-theme.json",
+          sourceName: "Night Owl",
+          sourceVariant: "dark",
+          importedAt: 200,
+          origin: {
+            kind: "vsix",
+            vsixName: "night-owl.vsix",
+            themePath: "themes/Night Owl-color-theme.json",
+          },
+        },
+      ],
+    })
+    const out = repairImportedVscodeThemes(s)
+    expect(out.importedVscodeThemes).toHaveLength(1)
+    expect(out.importedVscodeThemes?.[0].customThemeId).toBe("ct-2")
+  })
+
+  it("preserves rows that have no sourceKey (pre-fix data) instead of folding them by name", () => {
+    const s = baseSettings({
+      customThemes: [
+        { id: "ct-1", name: "Old A" },
+        { id: "ct-2", name: "Old B" },
+      ],
+      importedVscodeThemes: [
+        {
+          customThemeId: "ct-1",
+          sourceName: "Old A",
+          sourceVariant: "dark",
+          importedAt: 1,
+          origin: { kind: "json", fileName: "old.json" },
+        },
+        {
+          customThemeId: "ct-2",
+          sourceName: "Old B",
+          sourceVariant: "dark",
+          importedAt: 2,
+          origin: { kind: "json", fileName: "old.json" },
+        },
+      ],
+    })
+    const out = repairImportedVscodeThemes(s)
+    expect(out).toBe(s)
   })
 })

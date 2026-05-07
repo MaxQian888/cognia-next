@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Persist a rolling clipboard history (encrypted) and surface helpers to retrieve recent entries.",
   "type": "frontend",
-  "capabilities": ["tools", "commands"],
+  "capabilities": ["tools", "commands", "themes"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
@@ -42,5 +42,46 @@
         "description": "Polling interval (ms). 0 disables automatic capture; entries are then only added by explicit tool / slash-command calls."
       }
     }
-  }
+  },
+  "themes": [
+    {
+      "id": "clipboard-noir",
+      "name": "Clipboard Noir",
+      "vscodeJsonPath": "themes/clipboard-noir.json"
+    },
+    {
+      "id": "clipboard-paper",
+      "name": "Clipboard Paper",
+      "isDark": false,
+      "colors": {
+        "background": "#fafaf7",
+        "foreground": "#1f1f23",
+        "primary": "#7c3aed",
+        "primaryForeground": "#fafaf7",
+        "secondary": "#ece9e2",
+        "secondaryForeground": "#1f1f23",
+        "accent": "#22c55e",
+        "accentForeground": "#fafaf7",
+        "muted": "#f0ede6",
+        "mutedForeground": "#5d5d63",
+        "card": "#ffffff",
+        "cardForeground": "#1f1f23",
+        "popover": "#ffffff",
+        "popoverForeground": "#1f1f23",
+        "input": "#ece9e2",
+        "border": "#d6d3ca",
+        "ring": "#7c3aed",
+        "destructive": "#dc2626",
+        "destructiveForeground": "#fafaf7",
+        "sidebar": "#f5f3ec",
+        "sidebarForeground": "#1f1f23",
+        "sidebarPrimary": "#7c3aed",
+        "sidebarBorder": "#d6d3ca",
+        "sidebarPrimaryForeground": "#fafaf7",
+        "sidebarAccent": "#ece9e2",
+        "sidebarAccentForeground": "#1f1f23",
+        "sidebarRing": "#7c3aed"
+      }
+    }
+  ]
 }

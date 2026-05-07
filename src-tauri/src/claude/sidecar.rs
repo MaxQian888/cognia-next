@@ -154,6 +154,31 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
         }
     }
 
+    // Inject the user's network proxy config so the Node sidecar's outbound
+    // HTTP (Anthropic SDK + any provider relays) routes through the same
+    // proxy as the rest of the app. The interceptor at
+    // `sidecar/fetch-interceptor.mjs` reads HTTPS_PROXY at boot and wraps
+    // the global undici dispatcher.
+    let proxy_cfg = crate::proxy_config::current();
+    for (k, v) in proxy_cfg.env_vars() {
+        cmd.env(k, v);
+    }
+    if !proxy_cfg.is_active() {
+        // Defensive: clear any inherited proxy env so the sidecar doesn't
+        // route through a stale parent-process value when the user just
+        // disabled the proxy.
+        for key in &[
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "NO_PROXY",
+            "no_proxy",
+        ] {
+            cmd.env_remove(key);
+        }
+    }
+
     // On Windows, prevent a console window from popping up when the parent app
     // has no console (e.g. a release build). tokio::process::Command exposes
     // `creation_flags` directly on Windows, so no extra import is needed.

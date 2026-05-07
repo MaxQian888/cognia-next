@@ -61,7 +61,11 @@ gray_matter = { version = "0.2", default-features = false, features = ["yaml"] }
 wait-timeout = "0.2"
 regex = "1"
 toml_edit = { version = "0.22", features = ["serde"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks"] }
+tokio-socks = "0.5"
+tokio-rustls = "0.26"
+rustls-pki-types = "1"
+webpki-roots = "0.26"
 futures-util = { version = "0.3", default-features = false }
 bytes = "1"
 

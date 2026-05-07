@@ -51,6 +51,7 @@ const appearance = require("@/lib/appearance") as {
 }
 
 const createCustomTheme = jest.fn().mockReturnValue("ct-new")
+const updateCustomTheme = jest.fn()
 const setActive = jest.fn()
 const addImportedTheme = jest.fn()
 const removeImportedTheme = jest.fn()
@@ -62,6 +63,7 @@ jest.mock("@/stores/settings", () => ({
     selector({
       settings: storeState.settings,
       createCustomTheme,
+      updateCustomTheme,
       setActiveCustomTheme: setActive,
       addImportedTheme,
       removeImportedTheme,
@@ -260,6 +262,115 @@ describe("VscodeImportTab", () => {
     storeState.settings = {}
     expect(() => render(<VscodeImportTab />)).not.toThrow()
     expect(screen.getByText("noThemes")).toBeInTheDocument()
+  })
+
+  it("stamps a deterministic sourceKey on every imported record", async () => {
+    appearance.importVscodeThemeJson.mockReturnValue({
+      theme: { name: "Sample", colors: {}, isDark: true },
+      emptyColors: false,
+      matchedCount: 5,
+    })
+    render(<VscodeImportTab />)
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    const file = new File([JSON.stringify({ name: "Sample" })], "sample.json", {
+      type: "application/json",
+    })
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } })
+    })
+    await waitFor(() => expect(addImportedTheme).toHaveBeenCalled())
+    expect(addImportedTheme).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceKey: "json:sample.json:Sample",
+        origin: { kind: "json", fileName: "sample.json" },
+      })
+    )
+  })
+
+  it("re-importing the same JSON updates the existing CustomTheme instead of creating a new one", async () => {
+    storeState.settings = {
+      customThemes: [{ id: "ct-1", name: "Sample" }],
+      importedVscodeThemes: [
+        {
+          customThemeId: "ct-1",
+          sourceKey: "json:sample.json:Sample",
+          sourceName: "Sample",
+          sourceVariant: "dark",
+          importedAt: 0,
+          origin: { kind: "json", fileName: "sample.json" },
+        },
+      ],
+    }
+    appearance.importVscodeThemeJson.mockReturnValue({
+      theme: { name: "Sample", colors: { background: "#222" }, isDark: true },
+      emptyColors: false,
+      matchedCount: 5,
+    })
+    render(<VscodeImportTab />)
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    const file = new File([JSON.stringify({ name: "Sample" })], "sample.json", {
+      type: "application/json",
+    })
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } })
+    })
+    await waitFor(() => expect(updateCustomTheme).toHaveBeenCalledWith("ct-1", expect.any(Object)))
+    expect(createCustomTheme).not.toHaveBeenCalled()
+    // The history record we hand to addImportedTheme reuses the original
+    // customThemeId so the store's filter doesn't keep both rows.
+    expect(addImportedTheme).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customThemeId: "ct-1",
+        sourceKey: "json:sample.json:Sample",
+      })
+    )
+  })
+
+  it("re-importing the same VSIX entry updates the existing CustomTheme instead of creating a new one", async () => {
+    storeState.settings = {
+      customThemes: [{ id: "ct-vsix", name: "B" }],
+      importedVscodeThemes: [
+        {
+          customThemeId: "ct-vsix",
+          sourceKey: "vsix:pack.vsix:themes/b.json",
+          sourceName: "B",
+          sourceVariant: "dark",
+          importedAt: 0,
+          origin: { kind: "vsix", vsixName: "pack.vsix", themePath: "themes/b.json" },
+        },
+      ],
+    }
+    appearance.readVsix.mockResolvedValue({
+      displayName: "Pack",
+      name: "publisher.pack",
+      version: "1.0.0",
+      themes: [
+        {
+          label: "B",
+          uiTheme: "vs-dark",
+          path: "themes/b.json",
+          parsed: {
+            theme: { name: "B", colors: { background: "#000" }, isDark: true },
+            emptyColors: false,
+            matchedCount: 3,
+          },
+        },
+      ],
+    })
+    render(<VscodeImportTab />)
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    const file = new File([new Uint8Array([1])], "pack.vsix", {
+      type: "application/octet-stream",
+    })
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file] } })
+    })
+    await waitFor(() => expect(screen.getByText("selectThemes")).toBeInTheDocument())
+    fireEvent.click(screen.getByRole("button", { name: /importButton/ }))
+    await waitFor(() =>
+      expect(updateCustomTheme).toHaveBeenCalledWith("ct-vsix", expect.any(Object))
+    )
+    expect(createCustomTheme).not.toHaveBeenCalled()
   })
 
   it("renders the history list and lets the user remove a record", async () => {

@@ -53,7 +53,7 @@ export function SttCard() {
       .then((devices) => {
         setMics(
           devices
-            .filter((d) => d.kind === "audioinput")
+            .filter((d) => d.kind === "audioinput" && d.deviceId)
             .map((d) => ({ deviceId: d.deviceId, label: d.label || fallbackLabel }))
         )
       })

@@ -757,6 +757,21 @@ export interface AppSettings {
    * Default install ships with only `wiki:cognia` + `rag:cognia` enabled.
    */
   externalBridge?: import("@/types/wiki").ExternalBridgeSettings
+
+  // ---- Network Proxy ----
+  /**
+   * HTTP/HTTPS/SOCKS5 proxy configuration applied to outbound network
+   * traffic from the renderer, the Rust backend (reqwest clients +
+   * WebSocket dialer), and the Node sidecar (via injected
+   * `HTTP_PROXY` / `HTTPS_PROXY` env vars). When `undefined` or
+   * `mode === "off"`, every caller goes direct.
+   *
+   * The Rust side reads this via `proxy_config::current()`; the
+   * frontend mirrors writes into Rust by calling `proxy_set` after
+   * every save so the in-memory config stays coherent without a Dexie
+   * round-trip on the hot path.
+   */
+  networkProxy?: import("@/types/network/proxy").NetworkProxySettings
 }
 
 export interface BackupAutoSchedule {

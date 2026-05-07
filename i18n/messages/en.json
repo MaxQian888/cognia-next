@@ -1033,7 +1033,8 @@
       "externalBridge": "External Bridge (MCP)",
       "providers": "Providers",
       "connections": "Connections",
-      "subscription": "Claude Subscription"
+      "subscription": "Claude Subscription",
+      "network": "Network Proxy"
     },
     "descriptions": {
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
@@ -1068,7 +1069,8 @@
       "externalBridge": "MCP server that exposes Cognia's wiki, RAG, and runtime entities to external coding agents (Claude Code, Cursor, Cline). Opt-in per scope.",
       "providers": "AI provider API keys, models, and connection settings.",
       "connections": "Configure messaging platform adapters (Telegram, Discord, Slack, ...) and manage the outbound delivery queue.",
-      "subscription": "Sign in with your Claude Pro/Max subscription, monitor 5h/7d rate-limit windows, and manage OAuth credentials in your OS keychain."
+      "subscription": "Sign in with your Claude Pro/Max subscription, monitor 5h/7d rate-limit windows, and manage OAuth credentials in your OS keychain.",
+      "network": "HTTP / HTTPS / SOCKS5 proxy for all outbound network traffic. Auto-detect Clash Verge, Mihomo, V2Ray and other local proxy tools."
     },
     "externalBridge": {
       "wikiIndex": "Wiki Index",
@@ -1088,6 +1090,68 @@
       "rebuildResult": "Wiki rebuilt: {added} new, {changed} updated, {removed} removed, {errors} failed",
       "webModeWarning": "Wiki rebuild requires the Tauri desktop app.",
       "noApiKeyError": "No LLM API key configured. Add one in Settings → Providers."
+    },
+    "network": {
+      "title": "Network Proxy",
+      "description": "Route every outbound HTTP, HTTPS, and WebSocket request through a local proxy — Clash Verge, Mihomo, V2Ray, Shadowsocks, or any HTTP/SOCKS5 proxy.",
+      "tabs": {
+        "general": "General",
+        "detection": "Auto-detect",
+        "test": "Test"
+      },
+      "modeLabel": "Proxy mode",
+      "mode": {
+        "off": "Off",
+        "manual": "Manual",
+        "auto": "Auto-detected"
+      },
+      "modeHint": {
+        "off": "Direct connections — ignore any proxy settings.",
+        "manual": "Use the host/port/credentials below.",
+        "auto": "Filled in via Auto-detect; behaves the same as Manual once set."
+      },
+      "form": {
+        "protocol": "Protocol",
+        "host": "Host",
+        "port": "Port",
+        "username": "Username",
+        "password": "Password",
+        "optionalPlaceholder": "Optional",
+        "bypass": "Bypass list",
+        "bypassHint": "Hosts and domain suffixes that should skip the proxy. Add a leading dot to match a domain suffix (e.g. \".internal\").",
+        "addBypass": "Add",
+        "removeBypass": "Remove {entry} from bypass list",
+        "proxyWebsocketsLabel": "Proxy WebSocket connections",
+        "proxyWebsocketsHint": "Tunnel Discord Gateway, Slack Socket Mode, and other WSS connections through the proxy via HTTP CONNECT or SOCKS5."
+      },
+      "detection": {
+        "heading": "Detect a local proxy",
+        "subheading": "Probes 127.0.0.1 ports 7890/7891/1080/10808/8080/8888 and queries the Clash/Mihomo controller API.",
+        "button": "Detect now",
+        "empty": "No local proxy found on the well-known ports. Configure one manually in the General tab.",
+        "running": "Probing local ports…",
+        "results": "Candidates",
+        "apply": "Apply",
+        "currentBadge": "Active",
+        "webUnsupported": "Auto-detection requires the Tauri desktop app."
+      },
+      "test": {
+        "urlLabel": "Test URL",
+        "run": "Send test",
+        "running": "Sending…",
+        "success": "Reachable",
+        "failure": "Failed",
+        "statusLabel": "HTTP status",
+        "latencyMs": "Latency",
+        "proxyUrl": "Routed via",
+        "directConnection": "Direct connection — no proxy applied.",
+        "webUnsupported": "Live proxy testing requires the Tauri desktop app."
+      },
+      "candidates": {
+        "clash": "Clash / Mihomo",
+        "http": "HTTP proxy",
+        "socks5": "SOCKS5 proxy"
+      }
     },
     "canvas": {
       "title": "Canvas",
@@ -1454,6 +1518,34 @@
         "variant": {
           "light": "Light",
           "dark": "Dark"
+        },
+        "importShort": "Import…",
+        "noResults": "No themes match the current filters.",
+        "search": {
+          "placeholder": "Search VSCode themes…"
+        },
+        "filter": {
+          "all": "All",
+          "light": "Light",
+          "dark": "Dark"
+        },
+        "source": {
+          "builtin": "Built-in",
+          "imported": "Imported",
+          "fromPlugin": "From plugin: {name}"
+        },
+        "menu": {
+          "aria": "Theme actions for {name}",
+          "setActive": "Set active",
+          "editCopy": "Edit copy",
+          "delete": "Delete imported",
+          "disablePlugin": "Disable source plugin"
+        },
+        "disablePlugin": {
+          "title": "Disable plugin?",
+          "body": "Disable plugin “{name}”? Themes contributed by this plugin will be removed from the gallery. Any custom themes you've already activated stay in your library.",
+          "cancel": "Cancel",
+          "confirm": "Disable"
         }
       },
       "advanced": {
@@ -4451,6 +4543,7 @@
       "transportRetries": "Retries",
       "transportDropped": "Dropped",
       "transportLastFailure": "Last Failure",
+      "transportHealthOverflow": "Show more transports",
       "viewDiagnostics": "View Diagnostics",
       "logRatePulse": "Live log stream activity",
       "nativeLoggingDetails": "Native Logging Details",

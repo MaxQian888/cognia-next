@@ -7,6 +7,7 @@ import {
   createDefaultSearchUsageStats,
 } from "@/lib/search/types"
 import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
+import { DEFAULT_NETWORK_PROXY_SETTINGS } from "@/types/network/proxy"
 import { getDb } from "./schema"
 
 const SINGLETON_ID = "singleton" as const
@@ -99,6 +100,9 @@ const DEFAULTS: AppSettings = {
   customCss: "",
   customCssEnabled: false,
   importedVscodeThemes: [],
+
+  // Network proxy defaults — disabled until the user configures one.
+  networkProxy: { ...DEFAULT_NETWORK_PROXY_SETTINGS },
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -118,6 +122,7 @@ export async function getSettings(): Promise<AppSettings> {
     customCss: row.customCss ?? "",
     customCssEnabled: row.customCssEnabled ?? false,
     importedVscodeThemes: row.importedVscodeThemes ?? [],
+    networkProxy: { ...DEFAULT_NETWORK_PROXY_SETTINGS, ...(row.networkProxy ?? {}) },
     id: SINGLETON_ID,
   }
 }
@@ -126,10 +131,27 @@ function mergeBuiltinTools(stored: BuiltinToolsConfig | undefined): BuiltinTools
   return { ...DEFAULT_BUILTIN_TOOLS, ...(stored ?? {}) }
 }
 
+// Serialize concurrent saveSettings calls. The function is read-modify-write
+// at the DB layer (getSettings → merge → put), so two concurrent invocations
+// would each `getSettings()` against the same persisted row and the second
+// `put` would clobber the first's patch. That race wiped customThemes in
+// production when createCustomTheme + setActiveCustomTheme fired together —
+// the fire-and-forget setActiveCustomTheme save read stale state and
+// overwrote the new theme row. Chaining onto a single tail Promise gives
+// us a strict per-process write order without needing a mutex library.
+let saveQueue: Promise<unknown> = Promise.resolve()
+
 export async function saveSettings(patch: Partial<Omit<AppSettings, "id">>): Promise<AppSettings> {
-  const current = await getSettings()
-  const next: AppSettings = { ...current, ...patch, id: SINGLETON_ID }
-  await getDb().settings.put(next)
+  const next = saveQueue.then(async () => {
+    const current = await getSettings()
+    const merged: AppSettings = { ...current, ...patch, id: SINGLETON_ID }
+    await getDb().settings.put(merged)
+    return merged
+  })
+  // Swallow rejection on the queue tail so a single failure doesn't poison
+  // every subsequent caller — each awaiter still gets their own rejected
+  // Promise via the `next` reference returned below.
+  saveQueue = next.catch(() => undefined)
   return next
 }
 

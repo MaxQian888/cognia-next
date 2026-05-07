@@ -273,6 +273,53 @@ async function syncApiKeyToTauri(key: string | null | undefined) {
   }
 }
 
+/**
+ * Repair the `importedVscodeThemes` list on load:
+ *
+ *  1. Drop orphan records whose `customThemeId` no longer exists in
+ *     `customThemes` — those are leftovers from the historical
+ *     saveSettings race that committed an import row but lost the
+ *     companion theme row.
+ *  2. Collapse multiple records with the same `sourceKey` to the most
+ *     recently imported one — re-imports of the same VSIX entry used
+ *     to produce N copies in History.
+ *
+ * Returns the same `AppSettings` object when nothing needed repair, so
+ * the caller can short-circuit the persist.
+ */
+export function repairImportedVscodeThemes(s: AppSettings): AppSettings {
+  const records = s.importedVscodeThemes ?? []
+  if (records.length === 0) return s
+  const themeIds = new Set((s.customThemes ?? []).map((c) => c.id))
+
+  // First pass: drop orphans. A record without a matching CustomTheme
+  // has nothing to render in the preset grid and confuses both the
+  // History list (no swatch / no activate target) and `resolveActiveThemeColors`
+  // (active id resolves to no row).
+  const live = records.filter((r) => themeIds.has(r.customThemeId))
+
+  // Second pass: collapse duplicate sourceKeys to the newest entry.
+  // Records without sourceKey are pre-fix rows — keep them as-is so
+  // we don't fold together genuinely distinct sources that happen to
+  // share a name.
+  const bySourceKey = new Map<string, ImportedThemeRecord>()
+  const noSourceKey: ImportedThemeRecord[] = []
+  for (const r of live) {
+    if (!r.sourceKey) {
+      noSourceKey.push(r)
+      continue
+    }
+    const existing = bySourceKey.get(r.sourceKey)
+    if (!existing || (r.importedAt ?? 0) > (existing.importedAt ?? 0)) {
+      bySourceKey.set(r.sourceKey, r)
+    }
+  }
+  const repaired: ImportedThemeRecord[] = [...noSourceKey, ...bySourceKey.values()]
+
+  if (repaired.length === records.length) return s
+  return { ...s, importedVscodeThemes: repaired }
+}
+
 /** Get the current `searchProviders` map, falling back to defaults. */
 function getProvidersMap(
   s: AppSettings | null
@@ -364,12 +411,32 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     load: async () => {
       if (get().loaded) return
       try {
-        const s = await getSettings()
+        const raw = await getSettings()
+        const s = repairImportedVscodeThemes(raw)
+        // If the repair produced changes, persist them so subsequent loads
+        // observe the cleaned-up state. The repair is purely subtractive
+        // (drops orphans / collapses duplicate sourceKey rows) so it never
+        // loses the user's intent.
+        if (s.importedVscodeThemes !== raw.importedVscodeThemes) {
+          await saveSettings({ importedVscodeThemes: s.importedVscodeThemes })
+        }
         set({ settings: s, loaded: true })
         // Push the API key to the Rust process on first load. The user expects
         // their previously-entered key to be active without a manual save.
         if (s.apiKey) {
           await syncApiKeyToTauri(s.apiKey)
+        }
+        // Mirror the persisted network proxy config into the Rust
+        // `proxy_config::current()` slot so reqwest clients honour it from
+        // the very first outbound request. Lazy-import so the network-proxy
+        // store doesn't cycle through this file.
+        if (s.networkProxy) {
+          try {
+            const { applyProxyToRust } = await import("@/stores/network-proxy")
+            await applyProxyToRust(s.networkProxy)
+          } catch (err) {
+            console.warn("networkProxy.applyToRust failed", err)
+          }
         }
         // Load TTS provider keys from the OS keyring (Tauri) / Dexie fallback.
         // Failures here are non-fatal; missing keys are surfaced in the UI.
@@ -388,6 +455,17 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     save: async (patch) => {
       const next = await saveSettings(patch)
       set({ settings: next })
+      // If the patch touched `networkProxy`, push the new config into the
+      // Rust process so reqwest clients see the change before the next
+      // outbound call. Other patches don't need this hop.
+      if (patch.networkProxy !== undefined) {
+        try {
+          const { applyProxyToRust } = await import("@/stores/network-proxy")
+          await applyProxyToRust(next.networkProxy)
+        } catch (err) {
+          console.warn("networkProxy.applyToRust failed", err)
+        }
+      }
     },
 
     toggleAlwaysAllow: async (toolName, allow) => {
@@ -985,7 +1063,16 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     addImportedTheme: async (record) => {
       const cur = get().settings
       const list = cur?.importedVscodeThemes ?? []
-      const filtered = list.filter((r) => r.customThemeId !== record.customThemeId)
+      // Dedupe by both customThemeId AND sourceKey: a re-import targets the
+      // same record (sourceKey matches) but is committed against the
+      // original CustomTheme row, so customThemeId also matches. Prior to
+      // sourceKey existing, only customThemeId was used — that filter
+      // remains in place for back-compat with rows on disk.
+      const filtered = list.filter((r) => {
+        if (r.customThemeId === record.customThemeId) return false
+        if (record.sourceKey && r.sourceKey === record.sourceKey) return false
+        return true
+      })
       const next = await saveSettings({
         importedVscodeThemes: [...filtered, record],
       })

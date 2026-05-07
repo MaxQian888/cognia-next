@@ -449,6 +449,21 @@ export interface CustomTheme {
   colors?: Partial<ThemeColors>
   /** @deprecated Read via `baseVariant` instead. Retained for pre-v16 rows. */
   isDark?: boolean
+
+  /**
+   * Plugin id this theme was seeded from when the user activated a plugin
+   * preset. Metadata only — the row lives in `customThemes` independently
+   * of plugin enable/disable, matching the user's "what I'm using is mine"
+   * intuition. Useful for badging "originated from <plugin>".
+   */
+  sourcePluginId?: string
+  /**
+   * Built-in VSCode preset name this theme was cloned from (e.g., "Dracula").
+   * Set when the user activates a built-in preset card so subsequent clicks
+   * on the same card reuse this row instead of spawning N clones. Mutually
+   * exclusive with `sourcePluginId`.
+   */
+  sourceBuiltinName?: string
 }
 
 /**

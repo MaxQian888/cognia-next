@@ -36,6 +36,7 @@ import { PluginRegistry } from "@/lib/plugin/core/registry"
 import { createFullPluginContext } from "@/lib/plugin/core/context"
 import { buildExtensionDescriptor } from "@/lib/plugin/core/descriptor"
 import { createPluginA2UIBridge, type PluginA2UIBridge } from "@/lib/plugin/bridge/a2ui-bridge"
+import { PluginThemesBridge } from "@/lib/plugin/bridge/themes-bridge"
 import { PluginLifecycleHooks, getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
 import { clearPluginExtensions } from "@/lib/plugin/api/extension-api"
@@ -198,6 +199,7 @@ export class PluginManager {
   private registry: PluginRegistry
   private hooksManager: PluginLifecycleHooks
   private a2uiBridge: PluginA2UIBridge | null = null
+  private themesBridge: PluginThemesBridge | null = null
   private contexts: Map<string, PluginContext> = new Map()
   private registeredSlashCommandsByPlugin: Map<string, string[]> = new Map()
   private activationInFlight: Set<string> = new Set()
@@ -231,6 +233,13 @@ export class PluginManager {
       })
     }
     return this.a2uiBridge
+  }
+
+  private ensureThemesBridge(): PluginThemesBridge {
+    if (!this.themesBridge) {
+      this.themesBridge = new PluginThemesBridge()
+    }
+    return this.themesBridge
   }
 
   private buildDiscoveryProjection(
@@ -1712,6 +1721,23 @@ export class PluginManager {
         await this.registerPluginSlashCommand(pluginId, manifestCommand, command.id)
       }
     }
+
+    // Register theme contributions. Failures inside the bridge are collected
+    // and logged per-contribution; we never throw here so a single bad theme
+    // can't block the rest of the plugin's contributions.
+    if (plugin.manifest.themes?.length) {
+      const result = await this.ensureThemesBridge().registerPluginThemes(
+        pluginId,
+        plugin.manifest.name,
+        plugin.manifest,
+        plugin.path
+      )
+      if (result.errors.length > 0) {
+        loggers.manager.warn(
+          `[plugin:${pluginId}] ${result.errors.length} theme contribution(s) failed; ${result.registered} registered.`
+        )
+      }
+    }
   }
 
   private async unregisterPluginContributions(pluginId: string): Promise<void> {
@@ -1722,6 +1748,7 @@ export class PluginManager {
 
     this.a2uiBridge?.unregisterPluginComponents(pluginId)
     this.a2uiBridge?.unregisterPluginTemplates(pluginId)
+    this.themesBridge?.unregisterPluginThemes(pluginId)
     clearPluginExtensions(pluginId)
 
     // Unregister all tools

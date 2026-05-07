@@ -153,6 +153,10 @@ const ConnectionsSection = dynamic(
   () => import("./connections/connections-section").then((m) => m.ConnectionsSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
+const NetworkSection = dynamic(
+  () => import("./network/network-section").then((m) => m.NetworkSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 
 interface Props {
   /** Renders an actions menu (e.g., Reset/Export/Import) in the header. */
@@ -319,6 +323,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <RemoteControlSection />
     case "external-bridge":
       return <ExternalBridgeSection />
+    case "network":
+      return <NetworkSection />
     case "logs":
       return <LogsSection onClose={onClose} />
     case "diagnostics":

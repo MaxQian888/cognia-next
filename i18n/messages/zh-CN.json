@@ -1033,7 +1033,8 @@
       "externalBridge": "外部桥接 (MCP)",
       "providers": "提供商",
       "connections": "平台连接",
-      "subscription": "Claude 订阅"
+      "subscription": "Claude 订阅",
+      "network": "网络代理"
     },
     "descriptions": {
       "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",
@@ -1068,7 +1069,8 @@
       "externalBridge": "把 Cognia 的 wiki / RAG / 运行时实体通过 MCP 暴露给外部 Agent（Claude Code、Cursor、Cline）。每个 scope 默认 OFF，需手动启用。",
       "providers": "AI 提供商的 API 密钥、模型与连接设置。",
       "connections": "配置消息平台适配器（Telegram、Discord、Slack 等）并管理出站队列。",
-      "subscription": "用 Claude Pro/Max 订阅登录，监控 5 小时 / 7 天速率限制窗口，OAuth 凭据保存在系统钥匙串。"
+      "subscription": "用 Claude Pro/Max 订阅登录，监控 5 小时 / 7 天速率限制窗口，OAuth 凭据保存在系统钥匙串。",
+      "network": "为所有出站请求配置 HTTP / HTTPS / SOCKS5 代理，并支持自动检测 Clash Verge、Mihomo、V2Ray 等本地代理工具。"
     },
     "externalBridge": {
       "wikiIndex": "Wiki 索引",
@@ -1088,6 +1090,68 @@
       "rebuildResult": "Wiki 已重建：{added} 新增，{changed} 更新，{removed} 移除，{errors} 失败",
       "webModeWarning": "Wiki 重建需要 Tauri 桌面应用。",
       "noApiKeyError": "未配置 LLM API 密钥，请在 设置 → 提供商 中添加。"
+    },
+    "network": {
+      "title": "网络代理",
+      "description": "把所有 HTTP / HTTPS / WebSocket 出站请求统一走本地代理 — Clash Verge、Mihomo、V2Ray、Shadowsocks 等。",
+      "tabs": {
+        "general": "通用",
+        "detection": "自动检测",
+        "test": "连通性测试"
+      },
+      "modeLabel": "代理模式",
+      "mode": {
+        "off": "关闭",
+        "manual": "手动配置",
+        "auto": "自动检测"
+      },
+      "modeHint": {
+        "off": "直连，所有代理设置无效。",
+        "manual": "使用下方填写的 host / port / 凭据。",
+        "auto": "由「自动检测」填入，行为同手动配置。"
+      },
+      "form": {
+        "protocol": "协议",
+        "host": "主机",
+        "port": "端口",
+        "username": "用户名",
+        "password": "密码",
+        "optionalPlaceholder": "可选",
+        "bypass": "绕过列表",
+        "bypassHint": "命中以下主机或域名后缀的请求直接走直连。以「.」开头表示匹配域名后缀，例如「.internal」。",
+        "addBypass": "添加",
+        "removeBypass": "从绕过列表中移除 {entry}",
+        "proxyWebsocketsLabel": "WebSocket 走代理",
+        "proxyWebsocketsHint": "通过 HTTP CONNECT 隧道或 SOCKS5 转发 Discord Gateway、Slack Socket Mode 等 WSS 长连接。"
+      },
+      "detection": {
+        "heading": "扫描本地代理",
+        "subheading": "探测 127.0.0.1 端口 7890/7891/1080/10808/8080/8888，并尝试访问 Clash / Mihomo 控制台 API。",
+        "button": "立即检测",
+        "empty": "未在常见端口找到本地代理，可在「通用」分页手动配置。",
+        "running": "正在扫描端口…",
+        "results": "发现的代理",
+        "apply": "应用",
+        "currentBadge": "当前使用",
+        "webUnsupported": "自动检测仅支持 Tauri 桌面端。"
+      },
+      "test": {
+        "urlLabel": "测试 URL",
+        "run": "发送请求",
+        "running": "发送中…",
+        "success": "可达",
+        "failure": "失败",
+        "statusLabel": "HTTP 状态码",
+        "latencyMs": "延迟",
+        "proxyUrl": "代理通道",
+        "directConnection": "直连，未应用代理。",
+        "webUnsupported": "实时连通性测试仅支持 Tauri 桌面端。"
+      },
+      "candidates": {
+        "clash": "Clash / Mihomo",
+        "http": "HTTP 代理",
+        "socks5": "SOCKS5 代理"
+      }
     },
     "canvas": {
       "title": "画布",
@@ -1433,6 +1497,34 @@
         "variant": {
           "light": "浅色",
           "dark": "深色"
+        },
+        "importShort": "导入…",
+        "noResults": "没有匹配当前筛选的主题。",
+        "search": {
+          "placeholder": "搜索 VSCode 主题…"
+        },
+        "filter": {
+          "all": "全部",
+          "light": "浅色",
+          "dark": "深色"
+        },
+        "source": {
+          "builtin": "内置",
+          "imported": "已导入",
+          "fromPlugin": "来自插件「{name}」"
+        },
+        "menu": {
+          "aria": "{name} 操作菜单",
+          "setActive": "设为活跃",
+          "editCopy": "编辑副本",
+          "delete": "删除导入",
+          "disablePlugin": "禁用来源插件"
+        },
+        "disablePlugin": {
+          "title": "禁用插件？",
+          "body": "禁用插件「{name}」？该插件提供的主题会从画廊中移除。已经激活并复制到本地的自定义主题会保留。",
+          "cancel": "取消",
+          "confirm": "禁用"
         }
       },
       "advanced": {
@@ -4451,6 +4543,7 @@
       "transportRetries": "重试次数",
       "transportDropped": "丢弃数",
       "transportLastFailure": "上次失败",
+      "transportHealthOverflow": "显示更多传输",
       "viewDiagnostics": "查看诊断",
       "logRatePulse": "实时日志流活动",
       "nativeLoggingDetails": "原生日志详情",

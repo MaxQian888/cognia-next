@@ -97,6 +97,61 @@ describe("saveSettings", () => {
     expect(fetched.theme).toBe("dark")
     expect(fetched.apiKey).toBe("sk-test")
   })
+
+  it("serializes concurrent writes so no patch is lost to a read-modify-write race", async () => {
+    // Without serialization, two concurrent saveSettings calls both call
+    // getSettings() against the persisted DB row, then each `put` overwrites
+    // the other. This is the exact race that wiped customThemes when
+    // createCustomTheme + setActiveCustomTheme fired together — we lock
+    // it down here.
+    const [a, b] = await Promise.all([
+      saveSettings({ theme: "dark" }),
+      saveSettings({ apiKey: "sk-test" }),
+    ])
+    // Both observed the merged result of the chain (the second to land sees
+    // the first's write). At minimum, the final fetch must contain BOTH.
+    expect(a.id).toBe("singleton")
+    expect(b.id).toBe("singleton")
+    const fetched = await getSettings()
+    expect(fetched.theme).toBe("dark")
+    expect(fetched.apiKey).toBe("sk-test")
+  })
+
+  it("serializes a long chain of concurrent patches into the same row", async () => {
+    // 8 concurrent writes touching disjoint fields — every patch must
+    // survive when the queue drains.
+    const results = await Promise.all([
+      saveSettings({ theme: "dark" }),
+      saveSettings({ apiKey: "sk-1" }),
+      saveSettings({ language: "zh-CN" }),
+      saveSettings({ defaultModel: "model-x" }),
+      saveSettings({ activeCustomThemeId: "ct-7" }),
+      saveSettings({ colorTheme: "ocean" }),
+      saveSettings({ customThemes: [{ id: "ct-7", name: "Imported" }] }),
+      saveSettings({
+        importedVscodeThemes: [
+          {
+            customThemeId: "ct-7",
+            sourceName: "Imported",
+            sourceVariant: "dark",
+            importedAt: 0,
+            origin: { kind: "json", fileName: "x.json" },
+          },
+        ],
+      }),
+    ])
+    expect(results).toHaveLength(8)
+    const fetched = await getSettings()
+    expect(fetched.theme).toBe("dark")
+    expect(fetched.apiKey).toBe("sk-1")
+    expect(fetched.language).toBe("zh-CN")
+    expect(fetched.defaultModel).toBe("model-x")
+    expect(fetched.activeCustomThemeId).toBe("ct-7")
+    expect(fetched.colorTheme).toBe("ocean")
+    expect(fetched.customThemes).toEqual([{ id: "ct-7", name: "Imported" }])
+    expect(fetched.importedVscodeThemes).toHaveLength(1)
+    expect(fetched.importedVscodeThemes?.[0].customThemeId).toBe("ct-7")
+  })
 })
 
 describe("addAlwaysAllow", () => {

@@ -69,6 +69,7 @@ export type SettingsSectionId =
   | "scheduled-tasks"
   | "remote-control"
   | "external-bridge"
+  | "network"
   | "logs"
   | "diagnostics"
   | "desktop"
@@ -320,6 +321,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "externalBridge",
     group: "system",
     icon: WebhookIcon,
+  },
+  {
+    id: "network",
+    labelKey: "network",
+    descriptionKey: "network",
+    group: "system",
+    icon: NetworkIcon,
   },
   {
     id: "desktop",
@@ -724,6 +732,25 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "外部桥接",
     "插件桥",
     "知识对外",
+  ],
+  network: [
+    "network",
+    "proxy",
+    "http proxy",
+    "https proxy",
+    "socks",
+    "socks5",
+    "clash",
+    "clash verge",
+    "mihomo",
+    "v2ray",
+    "shadowsocks",
+    "代理",
+    "网络代理",
+    "翻墙",
+    "fanqiang",
+    "internet",
+    "outbound",
   ],
   desktop: ["tauri", "tray", "autostart", "window"],
   about: ["version", "build", "credits"],

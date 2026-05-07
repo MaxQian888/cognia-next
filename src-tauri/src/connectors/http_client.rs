@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use reqwest::{Client, Method};
 
 use super::types::{TauriHttpRequest, TauriHttpResponse};
+use crate::proxy_config;
 
 // ---------------------------------------------------------------------------
 // Simple token-bucket rate limiter (per host)
@@ -83,8 +84,17 @@ pub async fn http_request(req: TauriHttpRequest) -> Result<TauriHttpResponse, St
     }
 
     let timeout = Duration::from_millis(req.timeout_ms.unwrap_or(30_000));
-    let client = Client::builder()
-        .timeout(timeout)
+    let proxy_cfg = proxy_config::current();
+    let mut builder = Client::builder().timeout(timeout);
+    // Only attach the proxy when active AND the target isn't on the bypass
+    // list — otherwise localhost dev servers would round-trip through the
+    // user's external proxy.
+    if proxy_cfg.is_active() && !proxy_cfg.should_bypass(&req.url) {
+        if let Some(proxy) = proxy_cfg.build_reqwest_proxy() {
+            builder = builder.proxy(proxy);
+        }
+    }
+    let client = builder
         .build()
         .map_err(|e| format!("reqwest build failed: {e}"))?;
 

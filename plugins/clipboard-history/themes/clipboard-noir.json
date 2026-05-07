@@ -1,0 +1,31 @@
+{
+  "name": "Clipboard Noir",
+  "type": "dark",
+  "colors": {
+    "editor.background": "#1a1a1f",
+    "editor.foreground": "#e6e6e8",
+    "button.background": "#a78bfa",
+    "button.foreground": "#1a1a1f",
+    "list.activeSelectionBackground": "#2d2d33",
+    "list.activeSelectionForeground": "#e6e6e8",
+    "list.hoverBackground": "#2d2d3375",
+    "sideBar.background": "#1a1a1f",
+    "sideBar.foreground": "#e6e6e8",
+    "sideBar.border": "#0f0f12",
+    "activityBar.background": "#1a1a1f",
+    "activityBar.foreground": "#e6e6e8",
+    "activityBarBadge.background": "#a78bfa",
+    "activityBarBadge.foreground": "#1a1a1f",
+    "editorWidget.background": "#15151a",
+    "input.background": "#1a1a1f",
+    "input.foreground": "#e6e6e8",
+    "input.border": "#0f0f12",
+    "focusBorder": "#5b6299",
+    "errorForeground": "#fb7185",
+    "descriptionForeground": "#5b6299",
+    "tab.activeBackground": "#15151a",
+    "tab.inactiveBackground": "#0f0f12",
+    "panel.background": "#0f0f12",
+    "panel.border": "#a78bfa"
+  }
+}

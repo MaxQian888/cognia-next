@@ -138,7 +138,12 @@ function buildCredential(
 }
 
 async function postTokenForm(body: URLSearchParams): Promise<RawTokenResponse> {
-  const res = await fetch(CLAUDE_OAUTH_TOKEN_URL, {
+  // Routed through `proxyFetch` so users behind a corporate firewall or
+  // CN network can still reach `platform.claude.com`. In Tauri the call
+  // hops through the Rust `proxy_http_request` command; in the browser
+  // build the system proxy is honoured automatically.
+  const { proxyFetch } = await import("@/lib/network/proxy-fetch")
+  const res = await proxyFetch(CLAUDE_OAUTH_TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,

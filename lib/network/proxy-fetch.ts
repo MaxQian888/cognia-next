@@ -44,7 +44,9 @@ async function tauriProxiedFetch(
   const method = init?.method || "GET"
   const timeoutSecs = init?.timeout ? Math.ceil(init.timeout / 1000) : undefined
 
-  // Convert headers to Record<string, string>
+  // Convert headers to Record<string, string>. Layer the
+  // `Proxy-Authorization` header in last so the active proxy auth (if any)
+  // doesn't get clobbered by an empty caller-supplied bag.
   const headers: Record<string, string> = {}
   if (init?.headers) {
     if (init.headers instanceof Headers) {
@@ -58,6 +60,9 @@ async function tauriProxiedFetch(
     } else {
       Object.assign(headers, init.headers)
     }
+  }
+  if (proxyUrl) {
+    Object.assign(headers, getProxyAuthHeaders())
   }
 
   // Get body as string

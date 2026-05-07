@@ -13,9 +13,13 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use futures_util::{SinkExt, StreamExt};
+use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::{client_async_tls, tungstenite::Message};
 use uuid::Uuid;
+
+use crate::proxy_config;
+use crate::proxy_config::wsproxy::{AsyncReadWrite, ProxyStream};
 
 // ---------------------------------------------------------------------------
 // Handle registry (global, process-scoped)
@@ -66,10 +70,45 @@ pub async fn open_ws(
     }
 
     let id = Uuid::new_v4().to_string();
-    let (ws_stream, _) = connect_async(request)
-        .await
-        .map_err(|e| format!("WS connect failed: {e}"))?;
+    let proxy_cfg = proxy_config::current();
+    let proxy_url_for_log = proxy_cfg.proxy_url();
+    let use_proxy =
+        proxy_cfg.is_active() && proxy_cfg.proxy_websockets && !proxy_cfg.should_bypass(&url);
 
+    // Pre-parse the target so both paths know what to dial.
+    let parsed = url::Url::parse(&url).map_err(|e| format!("invalid WS URL: {e}"))?;
+    let target_host = parsed
+        .host_str()
+        .ok_or_else(|| "WS URL missing host".to_string())?
+        .to_string();
+    let is_secure = parsed.scheme() == "wss";
+    let target_port = parsed.port_or_known_default().unwrap_or(if is_secure {
+        443
+    } else {
+        80
+    });
+
+    // Both branches produce the same erased `ProxyStream` type so the
+    // downstream split() / send / recv plumbing has a single concrete type.
+    let raw_stream: ProxyStream = if use_proxy {
+        log::info!(
+            "WS connecting via proxy {:?} → {target_host}:{target_port}",
+            proxy_url_for_log
+        );
+        proxy_config::wsproxy::connect_via_proxy(&proxy_cfg, &target_host, target_port)
+            .await
+            .map_err(|e| format!("WS proxy tunnel failed: {e}"))?
+    } else {
+        let tcp = TcpStream::connect((target_host.as_str(), target_port))
+            .await
+            .map_err(|e| format!("WS connect failed: {e}"))?;
+        let boxed: Box<dyn AsyncReadWrite + Send + Unpin> = Box::new(tcp);
+        boxed
+    };
+
+    let (ws_stream, _) = client_async_tls(request, raw_stream)
+        .await
+        .map_err(|e| format!("WS handshake failed: {e}"))?;
     let (mut sink, mut stream) = ws_stream.split();
     let (tx, mut rx) = mpsc::channel::<Message>(64);
 

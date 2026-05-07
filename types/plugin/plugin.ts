@@ -383,7 +383,45 @@ export interface PluginManifest {
    * instantiate a `PlatformAdapter`.
    */
   connectors?: PluginConnectorDef[]
+
+  // Themes (capability "themes")
+  /**
+   * UI theme contributions surfaced in Settings → Appearance → Theme as
+   * VSCode-style preset cards. Two declaration shapes:
+   *   - inline `{ id, name, colors, isDark? }` — direct ThemeColors object.
+   *   - `{ id, name, vscodeJsonPath }` — path (relative to the plugin root)
+   *     to a VSCode color theme `.json` file; parsed through the same
+   *     pipeline the import dialog uses.
+   * Both shapes register an in-memory `PluginTheme`; the `themes-bridge`
+   * resolves them on plugin enable and unregisters them on disable.
+   */
+  themes?: PluginThemeContribution[]
 }
+
+/**
+ * One theme entry inside `PluginManifest.themes`. Plugins may either inline
+ * a full ThemeColors object or point at a VSCode `.json` file shipped with
+ * the plugin. The bridge uses path-traversal guards on `vscodeJsonPath`.
+ *
+ * Note: `ThemeColors` lives in `types/plugin/plugin-extended.ts`; we use a
+ * structural alias here to avoid importing across the plugin/type boundary
+ * (which would otherwise pull `Skill` and the agent-mode chain into this
+ * module). The bridge enforces the full shape at runtime.
+ */
+export type PluginManifestThemeColors = Record<string, string>
+
+export type PluginThemeContribution =
+  | {
+      id: string
+      name: string
+      isDark?: boolean
+      colors: PluginManifestThemeColors
+    }
+  | {
+      id: string
+      name: string
+      vscodeJsonPath: string
+    }
 
 /**
  * One connector adapter definition inside `PluginManifest.connectors`.
