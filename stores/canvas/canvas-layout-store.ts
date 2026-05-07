@@ -40,6 +40,17 @@ export interface CanvasLayoutState {
   isPinned: (id: string) => boolean
 }
 
+interface PersistedCanvasLayoutState {
+  leftSize: number
+  centerSize: number
+  rightSize: number
+  leftCollapsed: boolean
+  rightCollapsed: boolean
+  activeRightTab: CanvasRightTab
+  layoutVersion: number
+  pinnedDocIds: string[]
+}
+
 export const CANVAS_LAYOUT_DEFAULTS = {
   leftSize: 16,
   centerSize: 64,
@@ -135,7 +146,8 @@ export const useCanvasLayoutStore = create<CanvasLayoutState>()(
         mobileLeftOpen: false,
         mobileRightOpen: false,
       }),
-      partialize: (state) => ({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Set → array serialization
+      partialize: (state): any => ({
         leftSize: state.leftSize,
         centerSize: state.centerSize,
         rightSize: state.rightSize,
@@ -146,12 +158,12 @@ export const useCanvasLayoutStore = create<CanvasLayoutState>()(
         pinnedDocIds: [...state.pinnedDocIds],
       }),
       merge: (persisted: unknown, current: CanvasLayoutState) => {
-        const p = persisted as Partial<CanvasLayoutState> & { pinnedDocIds?: string[] }
+        const p = persisted as PersistedCanvasLayoutState
         return {
           ...current,
           ...p,
           pinnedDocIds: new Set(p.pinnedDocIds ?? []),
-        }
+        } as CanvasLayoutState
       },
     }
   )

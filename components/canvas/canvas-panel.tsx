@@ -11,7 +11,7 @@
  * `components/canvas/canvas-side-panels.tsx`.
  */
 
-import { Suspense, useCallback, useEffect, useMemo, useRef } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import type { editor as MonacoEditor } from "monaco-editor"
 import { useTheme } from "next-themes"
@@ -28,16 +28,26 @@ import {
   Minimize2,
   Maximize2,
   Lightbulb,
+  Search,
+  Plus,
+  FileCode,
+  FileText,
+  X,
+  Copy,
+  Trash2,
+  Edit2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import type { CanvasDocument } from "@/types/artifact/artifact"
@@ -46,13 +56,13 @@ import { useCanvasActions } from "@/hooks/canvas/use-canvas-actions"
 import { useCanvasSuggestions } from "@/hooks/canvas/use-canvas-suggestions"
 import { useCanvasKeyboardShortcuts } from "@/hooks/canvas/use-canvas-keyboard-shortcuts"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
-import { CanvasDocumentTabs } from "./canvas-document-tabs"
+import type { CanvasActionType } from "@/lib/ai/generation/canvas-actions"
+import { RenameDialog } from "./rename-dialog"
 import {
   DocumentFormatToolbar,
   type FormatAction,
 } from "@/components/document/document-format-toolbar"
 import { FORMAT_ACTION_MAP, TRANSLATE_LANGUAGES } from "@/lib/canvas/constants"
-import type { CanvasActionType } from "@/lib/ai/generation/canvas-actions"
 
 const MonacoEditorView = dynamic(() => import("@monaco-editor/react").then((mod) => mod.default), {
   ssr: false,
@@ -100,6 +110,7 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   const actions = useCanvasActions()
   const suggestions = useCanvasSuggestions()
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
+  const editorContainerRef = useRef<HTMLDivElement | null>(null)
   const { resolvedTheme } = useTheme()
   // Monaco accepts only specific theme ids ("vs", "vs-dark", etc).
   // Resolve "auto" to vs / vs-dark via the next-themes resolved theme
@@ -152,6 +163,20 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
     )
     return () => clearInterval(timer)
   }, [activeId, autoSaveSeconds, saveVersion, updateDoc])
+
+  // Monaco flex-shrink fix: Monaco's internal div sets a fixed pixel width
+  // via JS that prevents the flex container from shrinking (microsoft/monaco-editor#3393).
+  // A ResizeObserver on the container explicitly calls editor.layout() to
+  // override Monaco's stale inline dimensions when the panel is resized.
+  useEffect(() => {
+    const container = editorContainerRef.current
+    if (!container || typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(() => {
+      editorRef.current?.layout()
+    })
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [])
 
   const handleEditorChange = useCallback(
     (value: string | undefined) => {
@@ -262,9 +287,12 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
 
   return (
     <div className={cn("flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden", className)}>
-      <CanvasDocumentTabs
+      <CanvasToolbar
         documents={documents}
         activeDocumentId={activeId}
+        activeDocLanguage={activeDoc?.language ?? "markdown"}
+        isText={activeDoc?.type === "text"}
+        running={actions.running}
         onSelectDocument={setActive}
         onCloseDocument={(id) => {
           if (activeId === id) {
@@ -289,19 +317,13 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
           remove(id)
           if (activeId === id) setActive(null)
         }}
-      />
-
-      <ActionToolbar
-        activeDocLanguage={activeDoc?.language ?? "markdown"}
-        isText={activeDoc?.type === "text"}
         onAction={runAction}
         onTriggerSuggestions={triggerSuggestions}
-        running={actions.running}
         onSaveVersion={() => activeDoc && saveVersion(activeDoc.id, "manual")}
         onFormat={handleFormat}
       />
 
-      <div className="relative min-h-0 flex-1">
+      <div ref={editorContainerRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
         {activeDoc ? (
           <Suspense fallback={<EditorLoading />}>
             <MonacoEditorView
@@ -342,10 +364,18 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   )
 }
 
-interface ActionToolbarProps {
+interface CanvasToolbarProps {
+  documents: CanvasDocument[]
+  activeDocumentId: string | null
   activeDocLanguage: string
   isText: boolean
   running: boolean
+  onSelectDocument: (id: string) => void
+  onCloseDocument: (id: string) => void
+  onCreateDocument: () => void
+  onRenameDocument: (id: string, title: string) => void
+  onDuplicateDocument: (id: string) => void
+  onDeleteDocument: (id: string) => void
   onAction: (
     actionType: CanvasActionType,
     opts?: { targetLanguage?: string; prompt?: string }
@@ -355,137 +385,255 @@ interface ActionToolbarProps {
   onFormat: (action: FormatAction) => void
 }
 
-function ActionToolbar({
+function CanvasToolbar({
+  documents,
+  activeDocumentId,
   isText,
   running,
+  onSelectDocument,
+  onCloseDocument,
+  onCreateDocument,
+  onRenameDocument,
+  onDuplicateDocument,
+  onDeleteDocument,
   onAction,
   onTriggerSuggestions,
   onSaveVersion,
   onFormat,
-}: ActionToolbarProps) {
-  const t = useTranslations("canvas.actions")
+}: CanvasToolbarProps) {
+  const t = useTranslations("canvas")
+  const tActions = useTranslations("canvas.actions")
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false)
+  const [renameDocId, setRenameDocId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState("")
+
+  const showTabs = documents.length > 1
+
+  const handleStartRename = (doc: CanvasDocument) => {
+    setRenameDocId(doc.id)
+    setRenameValue(doc.title)
+    setRenameDialogOpen(true)
+  }
+
+  const handleConfirmRename = (newTitle: string) => {
+    if (renameDocId) onRenameDocument(renameDocId, newTitle)
+    setRenameDialogOpen(false)
+    setRenameDocId(null)
+    setRenameValue("")
+  }
+
   return (
-    <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap border-b bg-muted/20 px-2 py-1.5 [scrollbar-width:thin]">
-      <ActionButton
-        icon={<Wand2 className="size-3.5" />}
-        label={t("review")}
-        onClick={() => void onAction("review")}
-        disabled={running}
-      />
-      <ActionButton
-        icon={<Bug className="size-3.5" />}
-        label={t("fix")}
-        onClick={() => void onAction("fix")}
-        disabled={running}
-      />
-      <ActionButton
-        icon={<Sparkles className="size-3.5" />}
-        label={t("improve")}
-        onClick={() => void onAction("improve")}
-        disabled={running}
-      />
-
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 shrink-0 gap-1 px-2 text-xs"
-            disabled={running}
+    <>
+      <div className="flex items-center border-b bg-muted/30 h-9 shrink-0">
+        {showTabs ? (
+          <Tabs
+            value={activeDocumentId ?? ""}
+            onValueChange={onSelectDocument}
+            className="flex-1 min-w-0"
           >
-            <Languages className="size-3.5" /> {t("translate")}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          {TRANSLATE_LANGUAGES.map((l) => (
-            <DropdownMenuItem
-              key={l.value}
-              onClick={() => void onAction("translate", { targetLanguage: l.value })}
-            >
-              {l.label}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+            <ScrollArea className="w-full">
+              <TabsList className="bg-transparent h-9 rounded-none gap-0 p-0">
+                {documents.map((doc) => (
+                  <TabsTrigger
+                    key={doc.id}
+                    value={doc.id}
+                    className="group flex items-center gap-1.5 px-3 h-9 rounded-none border-b-2 transition-colors data-[state=active]:bg-background data-[state=active]:border-primary border-transparent hover:bg-muted/50"
+                    asChild
+                  >
+                    <div className="flex items-center gap-1.5">
+                      {doc.type === "code" ? (
+                        <FileCode className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      ) : (
+                        <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      )}
+                      <span className="text-xs font-medium truncate max-w-[100px]">
+                        {doc.title}
+                      </span>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <MoreHorizontal className="h-3 w-3" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-40">
+                          <DropdownMenuItem onClick={() => handleStartRename(doc)}>
+                            <Edit2 className="h-3.5 w-3.5 mr-2" />
+                            {t("rename")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => onDuplicateDocument(doc.id)}>
+                            <Copy className="h-3.5 w-3.5 mr-2" />
+                            {t("duplicate")}
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => onDeleteDocument(doc.id)}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-2" />
+                            {t("delete")}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onCloseDocument(doc.id)
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+              <ScrollBar orientation="horizontal" className="h-1" />
+            </ScrollArea>
+          </Tabs>
+        ) : (
+          <div className="flex-1" />
+        )}
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
+        <div className="flex items-center gap-0.5 shrink-0 px-1">
           <Tooltip delayDuration={300}>
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-7 shrink-0"
+                className="size-7"
+                onClick={onCreateDocument}
+                aria-label={t("newDocument")}
+              >
+                <Plus className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("newDocument")}</TooltipContent>
+          </Tooltip>
+
+          <Tooltip delayDuration={300}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7"
+                aria-label={t("commandPalette", { default: "Command palette" })}
+                onClick={() => {
+                  const isMac =
+                    typeof navigator !== "undefined" &&
+                    navigator.platform.toLowerCase().includes("mac")
+                  window.dispatchEvent(
+                    new KeyboardEvent("keydown", {
+                      key: "k",
+                      metaKey: isMac,
+                      ctrlKey: !isMac,
+                      bubbles: true,
+                    })
+                  )
+                }}
+              >
+                <Search className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {t("commandPalette", { default: "Command palette" })}
+            </TooltipContent>
+          </Tooltip>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7"
                 disabled={running}
-                aria-label={t("more", { default: "More" })}
+                aria-label={tActions("more", { default: "More actions" })}
               >
                 <MoreHorizontal className="size-3.5" />
               </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{t("more", { default: "More" })}</TooltipContent>
-          </Tooltip>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={() => void onAction("explain")} disabled={running}>
-            <HelpCircle className="mr-2 size-3.5" />
-            {t("explain")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => void onAction("simplify")} disabled={running}>
-            <Minimize2 className="mr-2 size-3.5" />
-            {t("simplify")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => void onAction("expand")} disabled={running}>
-            <Maximize2 className="mr-2 size-3.5" />
-            {t("expand")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={onTriggerSuggestions} disabled={running}>
-            <Lightbulb className="mr-2 size-3.5" />
-            {t("suggest", { default: "Suggest" })}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem onClick={() => void onAction("review")} disabled={running}>
+                <Wand2 className="mr-2 size-3.5" />
+                {tActions("review")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => void onAction("fix")} disabled={running}>
+                <Bug className="mr-2 size-3.5" />
+                {tActions("fix")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => void onAction("improve")} disabled={running}>
+                <Sparkles className="mr-2 size-3.5" />
+                {tActions("improve")}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <DropdownMenuItem disabled={running} onSelect={(e) => e.preventDefault()}>
+                    <Languages className="mr-2 size-3.5" />
+                    {tActions("translate")}
+                  </DropdownMenuItem>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" side="left">
+                  {TRANSLATE_LANGUAGES.map((l) => (
+                    <DropdownMenuItem
+                      key={l.value}
+                      onClick={() => void onAction("translate", { targetLanguage: l.value })}
+                    >
+                      {l.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => void onAction("explain")} disabled={running}>
+                <HelpCircle className="mr-2 size-3.5" />
+                {tActions("explain")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => void onAction("simplify")} disabled={running}>
+                <Minimize2 className="mr-2 size-3.5" />
+                {tActions("simplify")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => void onAction("expand")} disabled={running}>
+                <Maximize2 className="mr-2 size-3.5" />
+                {tActions("expand")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onTriggerSuggestions} disabled={running}>
+                <Lightbulb className="mr-2 size-3.5" />
+                {tActions("suggest", { default: "Suggest" })}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={onSaveVersion} disabled={running}>
+                <Save className="mr-2 size-3.5" />
+                {tActions("saveVersion", { default: "Save version" })}
+              </DropdownMenuItem>
+              {isText && (
+                <>
+                  <DropdownMenuSeparator />
+                  <div className="px-2 py-1.5">
+                    <DocumentFormatToolbar
+                      onAction={onFormat}
+                      className="border-0 bg-transparent p-0 justify-start"
+                    />
+                  </div>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
 
-      <Separator orientation="vertical" className="mx-1 h-5" />
-
-      <ActionButton
-        icon={<Save className="size-3.5" />}
-        label={t("saveVersion", { default: "Save version" })}
-        onClick={onSaveVersion}
-        disabled={running}
+      <RenameDialog
+        open={renameDialogOpen}
+        onOpenChange={setRenameDialogOpen}
+        currentTitle={renameValue}
+        onRename={handleConfirmRename}
       />
-
-      {isText && (
-        <>
-          <Separator orientation="vertical" className="mx-1 h-5" />
-          <DocumentFormatToolbar onAction={onFormat} className="border-0 bg-transparent p-0" />
-        </>
-      )}
-    </div>
-  )
-}
-
-interface ActionButtonProps {
-  icon: React.ReactNode
-  label: string
-  onClick: () => void
-  disabled?: boolean
-}
-
-function ActionButton({ icon, label, onClick, disabled }: ActionButtonProps) {
-  return (
-    <Tooltip delayDuration={300}>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 shrink-0 gap-1 px-2 text-xs"
-          onClick={onClick}
-          disabled={disabled}
-        >
-          {icon} <span>{label}</span>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{label}</TooltipContent>
-    </Tooltip>
+    </>
   )
 }
