@@ -16,12 +16,12 @@
  * branches — no duplication.
  */
 
-import { PanelLeft, PanelLeftOpen, PanelRight, PanelRightOpen } from "lucide-react"
+import { PanelLeft, PanelRight } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/ui"
 import { useCanvasLayoutShortcuts } from "@/hooks/canvas/use-canvas-layout-shortcuts"
 import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
@@ -32,9 +32,9 @@ import { CanvasWorkspace } from "./canvas-workspace"
 export const CANVAS_SHELL_EDITOR_MIN_WIDTH = 480
 export const CANVAS_SHELL_LEFT_MIN = 12
 export const CANVAS_SHELL_LEFT_MAX = 32
-export const CANVAS_SHELL_CENTER_MIN = 38
+export const CANVAS_SHELL_CENTER_MIN = 46
 export const CANVAS_SHELL_RIGHT_MIN = 16
-export const CANVAS_SHELL_RIGHT_MAX = 36
+export const CANVAS_SHELL_RIGHT_MAX = 28
 
 export function CanvasShell() {
   useCanvasLayoutShortcuts()
@@ -44,17 +44,16 @@ export function CanvasShell() {
 }
 
 function CanvasDesktopShell() {
-  const t = useTranslations("canvas.shell")
   const leftSize = useCanvasLayoutStore((s) => s.leftSize)
   const centerSize = useCanvasLayoutStore((s) => s.centerSize)
   const rightSize = useCanvasLayoutStore((s) => s.rightSize)
   const leftCollapsed = useCanvasLayoutStore((s) => s.leftCollapsed)
   const rightCollapsed = useCanvasLayoutStore((s) => s.rightCollapsed)
+  const layoutVersion = useCanvasLayoutStore((s) => s.layoutVersion)
   const setSizes = useCanvasLayoutStore((s) => s.setSizes)
   const setLeftCollapsed = useCanvasLayoutStore((s) => s.setLeftCollapsed)
   const setRightCollapsed = useCanvasLayoutStore((s) => s.setRightCollapsed)
 
-  // Derive panel sizes that always sum to 100 so the library gets valid flex proportions.
   const clampedLeft = Math.max(CANVAS_SHELL_LEFT_MIN, Math.min(CANVAS_SHELL_LEFT_MAX, leftSize))
   const clampedRight = Math.max(CANVAS_SHELL_RIGHT_MIN, Math.min(CANVAS_SHELL_RIGHT_MAX, rightSize))
   const derivedCenter = Math.max(CANVAS_SHELL_CENTER_MIN, 100 - clampedLeft - clampedRight)
@@ -65,41 +64,9 @@ function CanvasDesktopShell() {
   const panelRight = clampedRight * scale
 
   return (
-    <div className="relative flex w-full flex-1 min-h-0 overflow-hidden" data-bg-target="canvas">
-      {leftCollapsed && (
-        <Tooltip delayDuration={300}>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute left-1 top-1 z-10 size-7 rounded-md bg-background/70 shadow-sm backdrop-blur"
-              aria-label={t("expandLeft")}
-              onClick={() => setLeftCollapsed(false)}
-            >
-              <PanelLeftOpen className="size-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="right">{t("expandLeft")}</TooltipContent>
-        </Tooltip>
-      )}
-      {rightCollapsed && (
-        <Tooltip delayDuration={300}>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute right-1 top-1 z-10 size-7 rounded-md bg-background/70 shadow-sm backdrop-blur"
-              aria-label={t("expandRight")}
-              onClick={() => setRightCollapsed(false)}
-            >
-              <PanelRightOpen className="size-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="left">{t("expandRight")}</TooltipContent>
-        </Tooltip>
-      )}
-
+    <div className="flex w-full flex-1 min-h-0 overflow-hidden" data-bg-target="canvas">
       <ResizablePanelGroup
+        key={layoutVersion}
         orientation="horizontal"
         className="flex-1 min-h-0"
         onLayoutChanged={(layout) => {
@@ -110,47 +77,57 @@ function CanvasDesktopShell() {
           if (sizes.length === 3) setSizes(sizes)
         }}
       >
-        {!leftCollapsed && (
-          <>
-            <ResizablePanel
-              id="canvas-left"
-              defaultSize={panelLeft}
-              minSize={CANVAS_SHELL_LEFT_MIN}
-              maxSize={CANVAS_SHELL_LEFT_MAX}
-            >
-              <CanvasDocumentRail />
-            </ResizablePanel>
-            <ResizableHandle withHandle />
-          </>
-        )}
+        <ResizablePanel
+          id="canvas-left"
+          defaultSize={leftCollapsed ? 0 : panelLeft}
+          minSize={leftCollapsed ? 0 : CANVAS_SHELL_LEFT_MIN}
+          maxSize={CANVAS_SHELL_LEFT_MAX}
+          collapsible
+          collapsedSize={0}
+          onCollapse={() => setLeftCollapsed(true)}
+          onExpand={() => setLeftCollapsed(false)}
+        >
+          <div
+            className={cn(
+              "flex h-full min-w-0 overflow-hidden transition-opacity duration-200",
+              leftCollapsed && "opacity-0"
+            )}
+          >
+            <CanvasDocumentRail />
+          </div>
+        </ResizablePanel>
+        <ResizableHandle withHandle className={cn(leftCollapsed && "hidden")} />
 
         <ResizablePanel
           id="canvas-center"
           defaultSize={panelCenter}
           minSize={CANVAS_SHELL_CENTER_MIN}
         >
-          {/* Pixel-based safety floor to complement the percentage-based
-              `minSize` on the Resizable panel — keeps the editor usable on
-              very wide windows where the percentage clamp could allow the
-              center pane to compress past a comfortable width. */}
-          <div className="flex h-full min-h-0 min-w-[480px] overflow-hidden">
+          <div className="flex h-full min-h-0 min-w-0 overflow-hidden">
             <CanvasWorkspace />
           </div>
         </ResizablePanel>
 
-        {!rightCollapsed && (
-          <>
-            <ResizableHandle withHandle />
-            <ResizablePanel
-              id="canvas-right"
-              defaultSize={panelRight}
-              minSize={CANVAS_SHELL_RIGHT_MIN}
-              maxSize={CANVAS_SHELL_RIGHT_MAX}
-            >
-              <CanvasSidePanels />
-            </ResizablePanel>
-          </>
-        )}
+        <ResizableHandle withHandle className={cn(rightCollapsed && "hidden")} />
+        <ResizablePanel
+          id="canvas-right"
+          defaultSize={rightCollapsed ? 0 : panelRight}
+          minSize={rightCollapsed ? 0 : CANVAS_SHELL_RIGHT_MIN}
+          maxSize={CANVAS_SHELL_RIGHT_MAX}
+          collapsible
+          collapsedSize={0}
+          onCollapse={() => setRightCollapsed(true)}
+          onExpand={() => setRightCollapsed(false)}
+        >
+          <div
+            className={cn(
+              "flex h-full min-w-0 overflow-hidden transition-opacity duration-200",
+              rightCollapsed && "opacity-0"
+            )}
+          >
+            <CanvasSidePanels />
+          </div>
+        </ResizablePanel>
       </ResizablePanelGroup>
     </div>
   )

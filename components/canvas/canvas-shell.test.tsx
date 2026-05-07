@@ -4,6 +4,7 @@
 
 import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import "@testing-library/jest-dom"
 import { CanvasShell } from "./canvas-shell"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
@@ -96,37 +97,34 @@ describe("CanvasShell", () => {
       expect(screen.getAllByTestId("panel-resize-handle")).toHaveLength(2)
     })
 
-    it("clamps the editor pane with a 480px min-width safety floor", () => {
+    it("wraps the center pane with min-w-0 to allow flex shrinking", () => {
       const { container } = renderWithProviders(<CanvasShell />)
-      const minWrapped = container.querySelector(".min-w-\\[480px\\]")
+      const minWrapped = container.querySelector(".min-w-0")
       expect(minWrapped).not.toBeNull()
     })
 
-    it("hides the document rail and one handle when leftCollapsed=true and shows expand affordance", async () => {
+    it("keeps all panels in DOM when leftCollapsed=true (opacity-0, collapsible handles collapse)", () => {
       act(() => {
         useCanvasLayoutStore.getState().setLeftCollapsed(true)
       })
       renderWithProviders(<CanvasShell />)
-      expect(screen.queryByTestId("document-rail")).not.toBeInTheDocument()
-      expect(screen.getAllByTestId("panel")).toHaveLength(2)
-      expect(screen.getAllByTestId("panel-resize-handle")).toHaveLength(1)
-      const expandBtn = screen.getByRole("button", { name: /Show document rail/i })
-      expect(expandBtn).toBeInTheDocument()
-      await userEvent.setup().click(expandBtn)
-      expect(useCanvasLayoutStore.getState().leftCollapsed).toBe(false)
+      // Panels are always mounted — the library handles collapse via size=0.
+      expect(screen.getByTestId("document-rail")).toBeInTheDocument()
+      expect(screen.getAllByTestId("panel")).toHaveLength(3)
+      expect(screen.getAllByTestId("panel-resize-handle")).toHaveLength(2)
+      // No floating expand button — react-resizable-panels collapsible handles expand.
+      expect(screen.queryByRole("button", { name: /Show document rail/i })).not.toBeInTheDocument()
     })
 
-    it("hides the side panels and one handle when rightCollapsed=true and shows expand affordance", async () => {
+    it("keeps all panels in DOM when rightCollapsed=true (opacity-0, collapsible handles collapse)", () => {
       act(() => {
         useCanvasLayoutStore.getState().setRightCollapsed(true)
       })
       renderWithProviders(<CanvasShell />)
-      expect(screen.queryByTestId("side-panels")).not.toBeInTheDocument()
-      expect(screen.getAllByTestId("panel")).toHaveLength(2)
-      expect(screen.getAllByTestId("panel-resize-handle")).toHaveLength(1)
-      const expandBtn = screen.getByRole("button", { name: /Show tools rail/i })
-      await userEvent.setup().click(expandBtn)
-      expect(useCanvasLayoutStore.getState().rightCollapsed).toBe(false)
+      expect(screen.getByTestId("side-panels")).toBeInTheDocument()
+      expect(screen.getAllByTestId("panel")).toHaveLength(3)
+      expect(screen.getAllByTestId("panel-resize-handle")).toHaveLength(2)
+      expect(screen.queryByRole("button", { name: /Show tools rail/i })).not.toBeInTheDocument()
     })
   })
 

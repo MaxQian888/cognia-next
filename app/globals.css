@@ -313,3 +313,29 @@ html[data-bg-preview="all"] [data-bg-target] {
   outline: 2px dashed color-mix(in oklch, var(--primary) 70%, transparent);
   outline-offset: -2px;
 }
+
+/* Monaco editor flex-shrink fix (microsoft/monaco-editor#3393, #1482).
+   Monaco creates a fixed-size internal div that prevents its flex parent
+   from shrinking. Setting min-width: 0 on the wrapper section allows the
+   flex item to shrink below Monaco's intrinsic width. */
+.monaco-flex-wrapper {
+  min-width: 0 !important;
+}
+.monaco-flex-wrapper .monaco-editor {
+  min-width: 0 !important;
+}
+
+/* Canvas drag handle — VS Code-style: invisible by default, 4px wide hover
+   zone with a subtle accent bar on hover / drag. */
+[data-panel-group] > [data-resize-handle] {
+  background-color: transparent;
+  transition: background-color 150ms ease;
+  width: 4px;
+}
+[data-panel-group] > [data-resize-handle]:hover,
+[data-panel-group] > [data-resize-handle][data-resize-handle-active] {
+  background-color: color-mix(in oklch, var(--primary) 30%, transparent);
+}
+[data-panel-group] > [data-resize-handle] > div {
+  width: 2px;
+}
