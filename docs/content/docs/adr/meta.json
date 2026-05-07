@@ -12,6 +12,7 @@
     "0009-platform-connectors",
     "0010-claude-subscription-oauth",
     "0011-workflows-subsystem",
-    "0012-transport-abstraction"
+    "0012-transport-abstraction",
+    "0013-command-manifest"
   ]
 }
