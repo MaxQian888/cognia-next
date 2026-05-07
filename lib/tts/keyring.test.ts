@@ -54,9 +54,9 @@ describe("keyringProviderFor", () => {
 })
 
 describe("KEYRING_PROVIDER_IDS", () => {
-  it("matches the seven non-system, non-edge providers", () => {
-    expect(KEYRING_PROVIDER_IDS).toHaveLength(7)
-    expect(new Set(KEYRING_PROVIDER_IDS).size).toBe(7)
+  it("matches the eight non-system, non-edge providers", () => {
+    expect(KEYRING_PROVIDER_IDS).toHaveLength(8)
+    expect(new Set(KEYRING_PROVIDER_IDS).size).toBe(8)
   })
 })
 

@@ -633,6 +633,25 @@ describe("useAgentTeamStore Messages", () => {
     expect(useAgentTeamStore.getState().teams[team2.id].messageIds).toContain(m.id)
   })
 
+  it("removeMessage deletes the message and prunes it from team.messageIds", () => {
+    const team = useAgentTeamStore.getState().createTeam({ name: "M", task: "" })
+    const m = useAgentTeamStore.getState().addMessage({
+      teamId: team.id,
+      senderId: team.leadId,
+      content: "delete me",
+    })
+    expect(useAgentTeamStore.getState().teams[team.id].messageIds).toContain(m.id)
+    useAgentTeamStore.getState().removeMessage(m.id)
+    expect(useAgentTeamStore.getState().messages[m.id]).toBeUndefined()
+    expect(useAgentTeamStore.getState().teams[team.id].messageIds).not.toContain(m.id)
+  })
+
+  it("removeMessage is a no-op for unknown ids", () => {
+    const before = useAgentTeamStore.getState().messages
+    useAgentTeamStore.getState().removeMessage("ghost-id")
+    expect(useAgentTeamStore.getState().messages).toEqual(before)
+  })
+
   it("markMessageRead toggles read=true and is a no-op for unknown ids", () => {
     const team = useAgentTeamStore.getState().createTeam({ name: "M", task: "" })
     const m = useAgentTeamStore.getState().addMessage({

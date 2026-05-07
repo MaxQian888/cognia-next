@@ -159,6 +159,9 @@ export function preprocessTextForProvider(text: string, provider: TTSProvider): 
     case "cartesia":
       processed = processed.replace(/[<>]/g, "")
       break
+    case "xiaomi":
+      processed = processed.replace(/[<>]/g, "")
+      break
   }
   return processed
 }
@@ -186,4 +189,31 @@ export function generateSSML(
   const inner = `<prosody rate="${rateStr}" pitch="${pitchStr}" volume="${volumeStr}">${escaped}</prosody>`
   const wrapped = voice ? `<voice name="${voice}">${inner}</voice>` : inner
   return `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${language}">${wrapped}</speak>`
+}
+
+/**
+ * Replace words in `text` according to a pronunciation dictionary.
+ * Keys are matched case-insensitively as whole words.
+ */
+export function applyPronunciationDictionary(
+  text: string,
+  dictionary: Record<string, string>
+): string {
+  // Use placeholder substitution to prevent chain replacements where a
+  // replacement from one entry is re-matched by a later entry.
+  const placeholders = new Map<string, string>()
+  let result = text
+  let i = 0
+  for (const [word, replacement] of Object.entries(dictionary)) {
+    if (!word) continue
+    const placeholder = `__PD_${i}__`
+    placeholders.set(placeholder, replacement)
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    result = result.replace(new RegExp(`\\b${escaped}\\b`, "gi"), placeholder)
+    i++
+  }
+  for (const [placeholder, replacement] of placeholders) {
+    result = result.replace(new RegExp(placeholder, "g"), replacement)
+  }
+  return result
 }

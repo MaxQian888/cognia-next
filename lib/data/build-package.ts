@@ -70,6 +70,11 @@ export async function buildBackupPackage(
     a2uiApps,
     a2uiTemplates,
     a2uiEventHistory,
+    twinSources,
+    twinChunks,
+    twinProfile,
+    twinDrafts,
+    twinJobs,
   ] = await Promise.all([
     getSettings(),
     db.characters.toArray(),
@@ -90,6 +95,11 @@ export async function buildBackupPackage(
     db.a2uiApps.toArray(),
     db.a2uiTemplates.toArray(),
     db.a2uiEventHistory.toArray(),
+    db.twinSources.toArray(),
+    db.twinChunks.toArray(),
+    db.twinProfile.toArray(),
+    db.twinDrafts.toArray(),
+    db.twinJobs.toArray(),
   ])
 
   // Strip the API key unless the user opted in.
@@ -126,6 +136,14 @@ export async function buildBackupPackage(
     a2uiApps: includeBuiltIns ? a2uiApps : a2uiApps.filter((a) => !a.isBuiltIn),
     a2uiTemplates,
     a2uiEventHistory,
+    // Twin tables (schema v14): no built-in concept, so includeBuiltIns
+    // is a no-op here. Profile is exported in full — the apply path will
+    // overwrite by twinId so the import side never accumulates duplicates.
+    twinSources,
+    twinChunks,
+    twinProfile,
+    twinDrafts,
+    twinJobs,
   }
   if (opts.includeSessions) {
     payload.sessions = sessions

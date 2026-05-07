@@ -1,43 +1,174 @@
 "use client"
 
 /**
- * Agent Teams workspace — landing page.
+ * Agent Teams — management hub.
  *
- * Lists every team the user has created plus the eight built-in
- * templates as a Quick Start card grid. Selecting a team navigates
- * to `/agent-teams/[teamId]`. Picking a template instantiates a fresh
- * team via the store's `createTeam` action and routes to its workspace.
+ * Lists user teams with rich cards, actions, and search, plus built-in
+ * templates behind a tab. Creating a team (from scratch or template)
+ * opens a Dialog and navigates to the workspace on success.
  */
 
+import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { useTranslations } from "next-intl"
+import { useLocale, useTranslations } from "next-intl"
+import {
+  CopyIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  PlayIcon,
+  PlusIcon,
+  SearchIcon,
+  SparklesIcon,
+  Trash2Icon,
+  UsersIcon,
+  XIcon,
+} from "lucide-react"
+
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { Badge } from "@/components/ui/badge"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Switch } from "@/components/ui/switch"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
+import { toast } from "sonner"
+
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import { BUILT_IN_TEAM_TEMPLATES, type AgentTeamTemplate } from "@/types/agent/agent-team"
+import { TEAM_STATUS_CONFIG, type AgentTeamTemplate } from "@/types/agent/agent-team"
+import type { AgentTeam } from "@/types/agent/agent-team"
+import { createSampleTeam } from "@/lib/ai/agent/sample-team"
+import { createLogger } from "@/lib/logger"
+
+const log = createLogger("agentTeams.list")
+
+const TEMPLATE_CATEGORIES = [
+  "all",
+  "review",
+  "research",
+  "development",
+  "debugging",
+  "analysis",
+  "general",
+  "documentation",
+  "security",
+] as const
+
+/* ------------------------------------------------------------------ */
+/*  Time-ago helper                                                     */
+/* ------------------------------------------------------------------ */
+
+function timeAgo(date: Date, locale: string): string {
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" })
+  const diff = new Date(date).getTime() - Date.now()
+  const secs = Math.round(diff / 1000)
+  const absSecs = Math.abs(secs)
+  if (absSecs < 60) return rtf.format(secs, "second")
+  const mins = Math.round(diff / 60_000)
+  if (Math.abs(mins) < 60) return rtf.format(mins, "minute")
+  const hours = Math.round(diff / 3_600_000)
+  if (Math.abs(hours) < 24) return rtf.format(hours, "hour")
+  const days = Math.round(diff / 86_400_000)
+  if (Math.abs(days) < 30) return rtf.format(days, "day")
+  return rtf.format(Math.round(days / 30), "month")
+}
+
+/* ------------------------------------------------------------------ */
+/*  Page component                                                     */
+/* ------------------------------------------------------------------ */
 
 export default function AgentTeamsListPage() {
   const router = useRouter()
+  const locale = useLocale()
   const t = useTranslations("agentTeamsWorkspace")
   const tCat = useTranslations("agentTeamsWorkspace.templates.categories")
+
   const teams = useAgentTeamStore((s) => s.teams)
+  const teammates = useAgentTeamStore((s) => s.teammates)
+  const templates = useAgentTeamStore((s) => s.templates)
   const createTeam = useAgentTeamStore((s) => s.createTeam)
   const addTeammate = useAgentTeamStore((s) => s.addTeammate)
+  const deleteTeam = useAgentTeamStore((s) => s.deleteTeam)
+  const updateTeam = useAgentTeamStore((s) => s.updateTeam)
 
-  const teamList = Object.values(teams).sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  )
+  const [search, setSearch] = useState("")
+  const [activeTab, setActiveTab] = useState("my-teams")
+  const [categoryFilter, setCategoryFilter] = useState("all")
+  const [createOpen, setCreateOpen] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editName, setEditName] = useState("")
+  const [deletingTeam, setDeletingTeam] = useState<AgentTeam | null>(null)
 
-  const onPickTemplate = (tpl: AgentTeamTemplate) => {
+  /* ---- derived data ---- */
+  const teamList = useMemo(() => {
+    const all = Object.values(teams)
+    all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    if (!search.trim()) return all
+    const q = search.toLowerCase()
+    return all.filter(
+      (t) => t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q)
+    )
+  }, [teams, search])
+
+  const stats = useMemo(() => {
+    const all = Object.values(teams)
+    const active = all.filter((t) => t.status === "executing" || t.status === "planning").length
+    const totalTeammates = Object.values(teammates).length
+    return { total: all.length, active, totalTeammates }
+  }, [teams, teammates])
+
+  const filteredTemplates = useMemo(() => {
+    const all = Object.values(templates).sort((a, b) => {
+      const aBuilt = a.isBuiltIn ?? false
+      const bBuilt = b.isBuiltIn ?? false
+      if (aBuilt !== bBuilt) return aBuilt ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
+    if (categoryFilter === "all") return all
+    return all.filter((tpl) => tpl.category === categoryFilter)
+  }, [templates, categoryFilter])
+
+  /* ---- actions ---- */
+  const handlePickTemplate = (tpl: AgentTeamTemplate) => {
     const team = createTeam({
       name: tpl.name,
       description: tpl.description,
       task: tpl.description,
       config: tpl.config,
     })
-    // Spawn a teammate slot per template entry. The template's own teammate
-    // metadata (specialization, config) carries over.
     for (const tm of tpl.teammates) {
       addTeammate({
         teamId: team.id,
@@ -47,65 +178,607 @@ export default function AgentTeamsListPage() {
         config: tm.config,
       })
     }
-    router.push(`/agent-teams/${team.id}`)
+    log.info("template_used", { templateId: tpl.id, teamId: team.id })
+    router.push(`/agent-teams/workspace?teamId=${team.id}`)
+  }
+
+  const handleDelete = (team: AgentTeam) => {
+    deleteTeam(team.id)
+    toast.success(t("teamDeleted", { name: team.name }))
+    setDeletingTeam(null)
+  }
+
+  const handleDuplicate = (team: AgentTeam) => {
+    const copy = createTeam({
+      name: `${team.name} (copy)`,
+      description: team.description,
+      task: team.task,
+      config: { ...team.config },
+    })
+    for (const tid of team.teammateIds) {
+      const src = teammates[tid]
+      if (src) {
+        addTeammate({
+          teamId: copy.id,
+          name: src.name,
+          description: src.description,
+          role: src.role,
+          config: { ...src.config },
+        })
+      }
+    }
+    toast.success(t("teamDuplicated", { name: copy.name }))
+  }
+
+  const startRename = (team: AgentTeam) => {
+    setEditingId(team.id)
+    setEditName(team.name)
+  }
+
+  const commitRename = (id: string) => {
+    if (editName.trim()) {
+      updateTeam(id, { name: editName.trim() })
+    }
+    setEditingId(null)
+  }
+
+  /* ---- render ---- */
+  return (
+    <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6" data-testid="agent-teams-list-page">
+      {/* Header */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1">
+          <Label className="text-lg font-semibold">{t("listTitle")}</Label>
+          <p className="text-sm text-muted-foreground">{t("listDescription")}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              const { teamId } = createSampleTeam()
+              toast.success(t("sampleTeamCreated"))
+              log.info("sample_team_created", { teamId })
+              router.push(`/agent-teams/workspace?teamId=${teamId}`)
+            }}
+            data-testid="agent-teams-try-sample"
+          >
+            <SparklesIcon className="mr-2 size-4" />
+            {t("trySampleTeam")}
+          </Button>
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <PlusIcon className="mr-2 size-4" />
+            {t("createTeam")}
+          </Button>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <Card className="space-y-1 p-3 text-center sm:p-4">
+          <p className="text-2xl font-semibold tabular-nums">{stats.total}</p>
+          <p className="text-xs text-muted-foreground">{t("stats.totalTeams")}</p>
+        </Card>
+        <Card className="space-y-1 p-3 text-center sm:p-4">
+          <p className="text-2xl font-semibold tabular-nums text-primary">{stats.active}</p>
+          <p className="text-xs text-muted-foreground">{t("stats.activeTeams")}</p>
+        </Card>
+        <Card className="space-y-1 p-3 text-center sm:p-4">
+          <p className="text-2xl font-semibold tabular-nums">{stats.totalTeammates}</p>
+          <p className="text-xs text-muted-foreground">{t("stats.totalTeammates")}</p>
+        </Card>
+      </div>
+
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="my-teams">{t("myTeams")}</TabsTrigger>
+          <TabsTrigger value="templates">{t("templatesTab")}</TabsTrigger>
+        </TabsList>
+
+        {/* ---- My Teams ---- */}
+        <TabsContent value="my-teams" className="space-y-4 pt-4">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <SearchIcon className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={t("searchTeams")}
+                className="h-8 pl-8 text-xs"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <XIcon className="size-3" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {teamList.length === 0 ? (
+            search ? (
+              <Empty>
+                <EmptyMedia variant="icon">
+                  <SearchIcon />
+                </EmptyMedia>
+                <EmptyHeader>
+                  <EmptyTitle>{t("noResults")}</EmptyTitle>
+                </EmptyHeader>
+              </Empty>
+            ) : (
+              <Empty>
+                <EmptyMedia variant="icon">
+                  <UsersIcon />
+                </EmptyMedia>
+                <EmptyHeader>
+                  <EmptyTitle>{t("listEmpty")}</EmptyTitle>
+                  <EmptyDescription>{t("listDescription")}</EmptyDescription>
+                </EmptyHeader>
+                <EmptyContent>
+                  <Button size="sm" onClick={() => setCreateOpen(true)}>
+                    <PlusIcon className="mr-2 size-4" />
+                    {t("createTeam")}
+                  </Button>
+                </EmptyContent>
+              </Empty>
+            )
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {teamList.map((team) => (
+                <TeamCard
+                  key={team.id}
+                  team={team}
+                  teammates={teammates}
+                  editing={editingId === team.id}
+                  editName={editName}
+                  onEditNameChange={setEditName}
+                  onCommitRename={() => commitRename(team.id)}
+                  onCancelRename={() => setEditingId(null)}
+                  onOpen={() => router.push(`/agent-teams/workspace?teamId=${team.id}`)}
+                  onRename={() => startRename(team)}
+                  onDuplicate={() => handleDuplicate(team)}
+                  onDelete={() => setDeletingTeam(team)}
+                />
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ---- Templates ---- */}
+        <TabsContent value="templates" className="space-y-4 pt-4">
+          <div className="flex flex-wrap gap-1.5">
+            {TEMPLATE_CATEGORIES.map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setCategoryFilter(cat)}
+                className={
+                  "rounded-full border px-2.5 py-0.5 text-xs transition-colors " +
+                  (categoryFilter === cat
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border text-muted-foreground hover:bg-muted")
+                }
+              >
+                {cat === "all" ? t("allCategories") : tCat(cat)}
+              </button>
+            ))}
+          </div>
+
+          {filteredTemplates.length === 0 ? (
+            <p className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
+              {t("noResults")}
+            </p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {filteredTemplates.map((tpl) => (
+                <Card
+                  key={tpl.id}
+                  className="space-y-2 p-4"
+                  data-testid={`template-card-${tpl.id}`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-medium">{tpl.name}</p>
+                    {tpl.isBuiltIn && (
+                      <Badge variant="secondary" className="text-[10px] shrink-0">
+                        built-in
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="line-clamp-3 text-xs text-muted-foreground">{tpl.description}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] text-muted-foreground">
+                      {tCat(tpl.category)} · {tpl.teammates.length} teammates
+                    </span>
+                    <Button size="sm" variant="outline" onClick={() => handlePickTemplate(tpl)}>
+                      <PlayIcon className="mr-1 size-3" />
+                      {t("createTeam")}
+                    </Button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
+
+      {/* ---- Create Dialog ---- */}
+      <CreateTeamDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        templates={Object.values(templates)}
+        onCreated={(teamId) => {
+          setCreateOpen(false)
+          router.push(`/agent-teams/workspace?teamId=${teamId}`)
+        }}
+      />
+
+      {/* ---- Delete confirm ---- */}
+      <AlertDialog
+        open={!!deletingTeam}
+        onOpenChange={(o) => {
+          if (!o) setDeletingTeam(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("deleteTeam")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("deleteConfirm", { name: deletingTeam?.name ?? "" })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => deletingTeam && handleDelete(deletingTeam)}
+            >
+              {t("deleteTeam")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Team Card                                                          */
+/* ------------------------------------------------------------------ */
+
+interface TeamCardProps {
+  team: AgentTeam
+  teammates: Record<string, { name: string }>
+  editing: boolean
+  editName: string
+  onEditNameChange: (v: string) => void
+  onCommitRename: () => void
+  onCancelRename: () => void
+  onOpen: () => void
+  onRename: () => void
+  onDuplicate: () => void
+  onDelete: () => void
+}
+
+function TeamCard({
+  team,
+  teammates,
+  editing,
+  editName,
+  onEditNameChange,
+  onCommitRename,
+  onCancelRename,
+  onOpen,
+  onRename,
+  onDuplicate,
+  onDelete,
+}: TeamCardProps) {
+  const t = useTranslations("agentTeamsWorkspace")
+  const locale = useLocale()
+  const statusCfg = TEAM_STATUS_CONFIG[team.status]
+  const memberNames = team.teammateIds.map((id) => teammates[id]?.name ?? "?").slice(0, 3)
+  const overflow = Math.max(0, team.teammateIds.length - 3)
+
+  return (
+    <Card
+      className="group cursor-pointer space-y-2 p-4 transition hover:border-primary"
+      onClick={onOpen}
+      data-testid={`team-card-${team.id}`}
+    >
+      <div className="flex items-start gap-3">
+        {/* Avatar */}
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-medium">
+          {team.name.charAt(0).toUpperCase()}
+        </span>
+
+        <div className="min-w-0 flex-1">
+          {/* Name row */}
+          <div className="flex items-center gap-2">
+            {editing ? (
+              <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                <Input
+                  value={editName}
+                  onChange={(e) => onEditNameChange(e.target.value)}
+                  className="h-7 w-32 text-xs"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") onCommitRename()
+                    if (e.key === "Escape") onCancelRename()
+                  }}
+                  autoFocus
+                />
+                <Button size="icon" variant="ghost" className="size-6" onClick={onCommitRename}>
+                  ✓
+                </Button>
+                <Button size="icon" variant="ghost" className="size-6" onClick={onCancelRename}>
+                  ✕
+                </Button>
+              </span>
+            ) : (
+              <p className="text-sm font-medium truncate">{team.name}</p>
+            )}
+            {statusCfg && (
+              <Badge variant="outline" className="text-[10px] shrink-0">
+                {team.status}
+              </Badge>
+            )}
+          </div>
+
+          {/* Description */}
+          {team.description && (
+            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{team.description}</p>
+          )}
+
+          {/* Meta */}
+          <div className="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground">
+            {memberNames.length > 0 && (
+              <span className="inline-flex items-center gap-1">
+                <span className="flex -space-x-1.5">
+                  {memberNames.map((n, i) => (
+                    <span
+                      key={i}
+                      className="flex size-4 items-center justify-center rounded-full border border-background bg-muted text-[8px]"
+                    >
+                      {n.charAt(0)}
+                    </span>
+                  ))}
+                </span>
+                {overflow > 0 && <span>+{overflow}</span>}
+              </span>
+            )}
+            <span>{team.teammateIds.length} members</span>
+            {team.startedAt && <span>{timeAgo(team.startedAt, locale)}</span>}
+          </div>
+        </div>
+
+        {/* Actions menu */}
+        <div
+          className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="size-7">
+                <MoreHorizontalIcon className="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={onOpen}>
+                <PlayIcon className="mr-2 size-3.5" />
+                {team.status === "executing" || team.status === "planning"
+                  ? t("viewWorkspace")
+                  : t("openWorkspace")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onRename}>
+                <PencilIcon className="mr-2 size-3.5" />
+                {t("rename")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onDuplicate}>
+                <CopyIcon className="mr-2 size-3.5" />
+                {t("duplicate")}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="text-destructive" onClick={onDelete}>
+                <Trash2Icon className="mr-2 size-3.5" />
+                {t("delete")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Create Team Dialog                                                 */
+/* ------------------------------------------------------------------ */
+
+interface CreateTeamDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  templates: AgentTeamTemplate[]
+  onCreated: (teamId: string) => void
+}
+
+function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTeamDialogProps) {
+  const t = useTranslations("agentTeamsWorkspace")
+  const createTeam = useAgentTeamStore((s) => s.createTeam)
+  const addTeammate = useAgentTeamStore((s) => s.addTeammate)
+
+  const [mode, setMode] = useState<"template" | "scratch">("template")
+  const [name, setName] = useState("")
+  const [description, setDescription] = useState("")
+  const [requirePlanApproval, setRequirePlanApproval] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const handleCreateFromScratch = () => {
+    if (!name.trim()) {
+      toast.error("Team name is required.")
+      return
+    }
+    setSaving(true)
+    try {
+      const team = createTeam({
+        name: name.trim(),
+        description: description.trim() || "A new agent team",
+        task: description.trim() || name.trim(),
+        config: { requirePlanApproval },
+      })
+      addTeammate({
+        teamId: team.id,
+        name: "Team Lead",
+        description: "Lead agent",
+        role: "lead",
+      })
+      toast.success(t("teamCreated", { name: team.name }))
+      onCreated(team.id)
+      reset()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handlePickTemplate = (tpl: AgentTeamTemplate) => {
+    setSaving(true)
+    try {
+      const team = createTeam({
+        name: tpl.name,
+        description: tpl.description,
+        task: tpl.description,
+        config: tpl.config,
+      })
+      for (const tm of tpl.teammates) {
+        addTeammate({
+          teamId: team.id,
+          name: tm.name,
+          description: tm.description,
+          role: "teammate",
+          config: tm.config,
+        })
+      }
+      toast.success(t("teamCreated", { name: team.name }))
+      onCreated(team.id)
+      reset()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const reset = () => {
+    setName("")
+    setDescription("")
+    setRequirePlanApproval(false)
+    setMode("template")
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-6" data-testid="agent-teams-list-page">
-      <div className="space-y-1">
-        <Label className="text-lg font-semibold">{t("listTitle")}</Label>
-        <p className="text-sm text-muted-foreground">{t("listDescription")}</p>
-      </div>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) reset()
+        onOpenChange(o)
+      }}
+    >
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t("createTeamTitle")}</DialogTitle>
+          <DialogDescription>{t("createTeamDescription")}</DialogDescription>
+        </DialogHeader>
 
-      {teamList.length === 0 ? (
-        <Card className="p-6 text-center text-sm text-muted-foreground" data-testid="teams-empty">
-          {t("listEmpty")}
-        </Card>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {teamList.map((team) => (
-            <Card
-              key={team.id}
-              className="cursor-pointer space-y-2 p-4 transition hover:border-primary"
-              data-testid={`team-card-${team.id}`}
-              onClick={() => router.push(`/agent-teams/${team.id}`)}
-            >
-              <p className="text-sm font-medium">{team.name}</p>
-              <p className="line-clamp-2 text-xs text-muted-foreground">{team.description}</p>
-              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                {team.status}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setMode("template")}
+            className={
+              "flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors " +
+              (mode === "template"
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border text-muted-foreground hover:bg-muted")
+            }
+          >
+            {t("createFromTemplate")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("scratch")}
+            className={
+              "flex-1 rounded-md border px-3 py-2 text-xs font-medium transition-colors " +
+              (mode === "scratch"
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border text-muted-foreground hover:bg-muted")
+            }
+          >
+            {t("createFromScratch")}
+          </button>
+        </div>
+
+        {mode === "template" ? (
+          <div className="grid max-h-64 gap-2 overflow-y-auto">
+            {templates.length === 0 ? (
+              <p className="text-center text-xs text-muted-foreground py-4">
+                No templates available.
               </p>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      <div className="space-y-2 pt-4">
-        <Label className="text-sm font-semibold">{t("newFromTemplate")}</Label>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {BUILT_IN_TEAM_TEMPLATES.map((tpl) => (
-            <Card key={tpl.id} className="space-y-2 p-4" data-testid={`template-card-${tpl.id}`}>
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-sm font-medium">{tpl.name}</p>
-                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  {tCat(tpl.category)}
-                </span>
-              </div>
-              <p className="line-clamp-3 text-xs text-muted-foreground">{tpl.description}</p>
-              <div className="flex justify-end">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onPickTemplate(tpl)}
-                  data-testid={`template-pick-${tpl.id}`}
+            ) : (
+              templates.map((tpl) => (
+                <button
+                  key={tpl.id}
+                  type="button"
+                  disabled={saving}
+                  onClick={() => handlePickTemplate(tpl)}
+                  className="flex items-start gap-3 rounded-md border p-3 text-left transition hover:border-primary disabled:opacity-50"
                 >
-                  {t("createTeam")}
-                </Button>
-              </div>
-            </Card>
-          ))}
-        </div>
-      </div>
-    </div>
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium">
+                    {tpl.name.charAt(0)}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">{tpl.name}</p>
+                    <p className="line-clamp-2 text-xs text-muted-foreground">{tpl.description}</p>
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Team name</Label>
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g., Security Audit Team"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Description / Task</Label>
+              <Textarea
+                rows={3}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="What should this team accomplish?"
+                className="text-xs"
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">Require plan approval</Label>
+              <Switch checked={requirePlanApproval} onCheckedChange={setRequirePlanApproval} />
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          {mode === "scratch" && (
+            <Button size="sm" onClick={handleCreateFromScratch} disabled={saving}>
+              {saving ? "Creating..." : t("createTeam")}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

@@ -24,6 +24,39 @@ jest.mock("@/components/ui/sonner", () => ({
   },
 }))
 
+// Stub Collapsible so advanced config sections are always visible in jsdom.
+jest.mock("@/components/ui/collapsible", () => {
+  const Collapsible = ({
+    children,
+  }: {
+    children: React.ReactNode
+    open?: boolean
+    onOpenChange?: (open: boolean) => void
+  }) => <>{children}</>
+  const CollapsibleContent = ({ children }: { children: React.ReactNode }) => <>{children}</>
+  const CollapsibleTrigger = ({
+    children,
+    asChild,
+    onClick,
+  }: {
+    children: React.ReactNode
+    asChild?: boolean
+    onClick?: () => void
+  }) => {
+    if (asChild && React.isValidElement(children)) {
+      return React.cloneElement(children as React.ReactElement<{ onClick?: () => void }>, {
+        onClick,
+      })
+    }
+    return (
+      <button type="button" onClick={onClick}>
+        {children}
+      </button>
+    )
+  }
+  return { Collapsible, CollapsibleContent, CollapsibleTrigger }
+})
+
 // Stub Select primitives so jsdom tests don't depend on Radix's pointer logic.
 jest.mock("@/components/ui/select", () => {
   const Select = ({
@@ -141,5 +174,108 @@ describe("SubagentTemplatesTab", () => {
     // Click the alert's Action button (last "delete" button is the confirm).
     fireEvent.click(confirmButtons[confirmButtons.length - 1])
     expect(useSubagentRuntimeStore.getState().templates.u).toBeUndefined()
+  })
+
+  it("search filters templates by name", () => {
+    useSubagentRuntimeStore.getState().addTemplate({
+      id: "u",
+      name: "My Custom Agent",
+      description: "",
+      category: "general",
+      taskTemplate: "",
+      config: {},
+      isBuiltIn: false,
+    })
+    render(<SubagentTemplatesTab />)
+    // Built-ins are visible, custom template is visible.
+    expect(screen.getByTestId("subagent-template-row-u")).toBeInTheDocument()
+    // Type a search that only matches the custom template.
+    fireEvent.change(screen.getByTestId("subagent-template-search"), {
+      target: { value: "Custom" },
+    })
+    expect(screen.getByTestId("subagent-template-row-u")).toBeInTheDocument()
+    // Built-ins should be filtered out.
+    expect(screen.queryByTestId("subagent-template-row-research-web")).not.toBeInTheDocument()
+  })
+
+  it("category filter shows only matching templates", () => {
+    render(<SubagentTemplatesTab />)
+    // All templates visible initially.
+    expect(screen.getByTestId("subagent-template-row-research-web")).toBeInTheDocument()
+    expect(screen.getByTestId("subagent-template-row-code-review")).toBeInTheDocument()
+    // Filter by "coding" category.
+    fireEvent.click(screen.getByTestId("category-filter-coding"))
+    expect(screen.getByTestId("subagent-template-row-code-review")).toBeInTheDocument()
+    expect(screen.queryByTestId("subagent-template-row-research-web")).not.toBeInTheDocument()
+  })
+
+  it("shows no-results empty state when search matches nothing", () => {
+    render(<SubagentTemplatesTab />)
+    fireEvent.change(screen.getByTestId("subagent-template-search"), {
+      target: { value: "zzz_nonexistent" },
+    })
+    expect(screen.getByText("noResults")).toBeInTheDocument()
+  })
+
+  it("editor includes icon field that saves", () => {
+    render(<SubagentTemplatesTab />)
+    fireEvent.click(screen.getByTestId("subagent-template-new"))
+    fireEvent.change(screen.getByTestId("editor-name"), {
+      target: { value: "Icon Agent" },
+    })
+    fireEvent.change(screen.getByTestId("editor-icon"), {
+      target: { value: "Search" },
+    })
+    fireEvent.click(screen.getByTestId("editor-submit"))
+    expect(useSubagentRuntimeStore.getState().templates["fixed-id"]?.icon).toBe("Search")
+  })
+
+  it("editor can add and remove variables", () => {
+    render(<SubagentTemplatesTab />)
+    fireEvent.click(screen.getByTestId("subagent-template-new"))
+    fireEvent.change(screen.getByTestId("editor-name"), {
+      target: { value: "Var Agent" },
+    })
+    // Add a variable.
+    fireEvent.click(screen.getByTestId("editor-add-variable"))
+    expect(screen.getByTestId("editor-variable-row-0")).toBeInTheDocument()
+    // Fill it in.
+    fireEvent.change(screen.getByTestId("editor-var-name-0"), {
+      target: { value: "topic" },
+    })
+    fireEvent.change(screen.getByTestId("editor-var-desc-0"), {
+      target: { value: "Research topic" },
+    })
+    // Submit and verify variables are saved.
+    fireEvent.click(screen.getByTestId("editor-submit"))
+    const saved = useSubagentRuntimeStore.getState().templates["fixed-id"]
+    expect(saved?.variables?.length).toBe(1)
+    expect(saved?.variables?.[0].name).toBe("topic")
+  })
+
+  it("editor advanced config fields save correctly", () => {
+    render(<SubagentTemplatesTab />)
+    fireEvent.click(screen.getByTestId("subagent-template-new"))
+    fireEvent.change(screen.getByTestId("editor-name"), {
+      target: { value: "Config Agent" },
+    })
+    fireEvent.change(screen.getByTestId("editor-max-steps"), {
+      target: { value: "20" },
+    })
+    fireEvent.change(screen.getByTestId("editor-timeout"), {
+      target: { value: "300000" },
+    })
+    fireEvent.change(screen.getByTestId("editor-model"), {
+      target: { value: "claude-opus-4-5" },
+    })
+    fireEvent.change(screen.getByTestId("editor-temperature"), {
+      target: { value: "0.7" },
+    })
+    fireEvent.click(screen.getByTestId("editor-submit"))
+    const saved = useSubagentRuntimeStore.getState().templates["fixed-id"]
+    expect(saved?.config?.maxSteps).toBe(20)
+    expect(saved?.config?.timeout).toBe(300000)
+    expect(saved?.config?.model).toBe("claude-opus-4-5")
+    expect(saved?.config?.temperature).toBe(0.7)
   })
 })

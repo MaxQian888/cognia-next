@@ -253,3 +253,96 @@ describe("buildBackupPackage — localStorage snapshots", () => {
     expect(pkg.payload.localStorageSnapshots).toBeUndefined()
   })
 })
+
+describe("buildBackupPackage — twin tables", () => {
+  it("captures every twin table in the payload", async () => {
+    const db = getDb()
+    await db.twinSources.put({
+      id: "tsrc_1",
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "manual",
+      title: "demo.md",
+      bytes: 12,
+      fingerprint: "fp",
+      chunkCount: 1,
+      status: "parsed",
+      importedAt: 1,
+      redacted: true,
+    })
+    await db.twinChunks.put({
+      id: "tchk_1",
+      twinId: "twin_alice",
+      sourceId: "tsrc_1",
+      content: "hello",
+      contentRedacted: "hello",
+      charStart: 0,
+      charEnd: 5,
+      vectorBackend: "qdrant",
+      vectorCollection: "cognia_twin_twin_alice",
+      vectorDocId: "vec_1",
+      strategy: "paragraph",
+      tokenCount: 1,
+      metadata: {},
+      createdAt: 2,
+    })
+    await db.twinProfile.put({
+      id: "twin_alice",
+      twinId: "twin_alice",
+      styleSamples: [],
+      playbooks: [],
+      entities: [],
+      decisions: [],
+      voiceSummary: "",
+      updatedAt: 3,
+    })
+    await db.twinDrafts.put({
+      id: "tdr_1",
+      twinId: "twin_alice",
+      jobId: "twj_1",
+      kind: "skill",
+      payload: { kind: "skill", data: { name: "Demo" } },
+      provenance: { chunkIds: ["tchk_1"], rationale: "test" },
+      status: "pending",
+      createdAt: 4,
+    })
+    await db.twinJobs.put({
+      id: "twj_1",
+      twinId: "twin_alice",
+      kind: "ingest",
+      sourceIds: ["tsrc_1"],
+      status: "completed",
+      phase: "completed",
+      progress: 100,
+      queuedAt: 5,
+      retryCount: 0,
+    })
+
+    const pkg = await buildBackupPackage(
+      { includeSessions: false, includeApiKey: false },
+      { storage: null }
+    )
+
+    expect(pkg.payload.twinSources).toHaveLength(1)
+    expect(pkg.payload.twinSources?.[0].id).toBe("tsrc_1")
+    expect(pkg.payload.twinChunks).toHaveLength(1)
+    expect(pkg.payload.twinChunks?.[0].vectorDocId).toBe("vec_1")
+    expect(pkg.payload.twinProfile).toHaveLength(1)
+    expect(pkg.payload.twinProfile?.[0].twinId).toBe("twin_alice")
+    expect(pkg.payload.twinDrafts).toHaveLength(1)
+    expect(pkg.payload.twinJobs).toHaveLength(1)
+  })
+
+  it("emits empty arrays when no twin data exists (legacy users)", async () => {
+    const pkg = await buildBackupPackage(
+      { includeSessions: false, includeApiKey: false },
+      { storage: null }
+    )
+    expect(pkg.payload.twinSources).toEqual([])
+    expect(pkg.payload.twinChunks).toEqual([])
+    expect(pkg.payload.twinProfile).toEqual([])
+    expect(pkg.payload.twinDrafts).toEqual([])
+    expect(pkg.payload.twinJobs).toEqual([])
+  })
+})

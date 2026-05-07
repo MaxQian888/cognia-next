@@ -38,17 +38,20 @@ export function generateCacheKey(
   const params = {
     text,
     provider,
+    pronunciationDict: settings.ttsPronunciationDictionary,
     ...(provider === "openai" && {
       voice: settings.openaiVoice,
       model: settings.openaiModel,
       speed: settings.openaiSpeed,
       instructions: settings.openaiInstructions,
+      responseFormat: settings.openaiResponseFormat,
     }),
     ...(provider === "gemini" && { voice: settings.geminiVoice }),
     ...(provider === "edge" && {
       voice: settings.edgeVoice,
       rate: settings.edgeRate,
       pitch: settings.edgePitch,
+      customSSML: settings.ttsCustomSSMLEnabled ? settings.ttsCustomSSML : undefined,
     }),
     ...(provider === "elevenlabs" && {
       voice: settings.elevenlabsVoice,
@@ -69,6 +72,12 @@ export function generateCacheKey(
       emotion: settings.cartesiaEmotion,
     }),
     ...(provider === "deepgram" && { voice: settings.deepgramVoice }),
+    ...(provider === "xiaomi" && {
+      voice: settings.xiaomiVoice,
+      model: settings.xiaomiModel,
+      style: settings.xiaomiStyle,
+      dialect: settings.xiaomiDialect,
+    }),
   }
   return hashString(JSON.stringify(params))
 }

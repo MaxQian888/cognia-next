@@ -43,6 +43,12 @@ import type {
   ConnectorDraftRow,
   ConnectorAttachmentRow,
 } from "./connector-types"
+import type {
+  WorkflowRow,
+  WorkflowRunRow,
+  WorkflowRunEventRow,
+  WorkflowTriggerRow,
+} from "@/types/workflow/visual"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -98,6 +104,18 @@ export class CogniaDB extends Dexie {
   // unified-*` header snapshot; capped at 1 000 rows newest-first by
   // `lib/anthropic-subscription/usage-collector.ts`.
   subscriptionUsage!: Table<SubscriptionUsageRow, number>
+  // v22 — Visual workflows subsystem (n8n-style). The `workflows` table holds
+  // user-authored definitions; `workflowRuns` is one row per execution with
+  // a frozen snapshot of the def at run start; `workflowRunEvents` is the
+  // durable per-step event log live-queried by the editor + Runs UI;
+  // `workflowTriggers` holds registered triggers (cron, webhook, inbound,
+  // chat-message, ...) that wake workflows. Run-state mirroring for crash
+  // recovery happens in a separate SQLite DB managed by Rust — Dexie is the
+  // source of truth for definitions and the event log.
+  workflows!: Table<WorkflowRow, string>
+  workflowRuns!: Table<WorkflowRunRow, string>
+  workflowRunEvents!: Table<WorkflowRunEventRow, string>
+  workflowTriggers!: Table<WorkflowTriggerRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -735,6 +753,54 @@ export class CogniaDB extends Dexie {
     // by `[fetchedAt+source]` for time-windowed views.
     this.version(20).stores({
       subscriptionUsage: "++localId, fetchedAt, status, source, [source+fetchedAt]",
+    })
+
+    // v21 — Pure index addition: `outboundQueue` now has `createdAt` indexed
+    // standalone so the Outbound settings tab can drive a global newest-first
+    // listing via `orderBy("createdAt").reverse()`. The existing
+    // `[conversationKey+createdAt]` compound index only supports per-lane
+    // ordering and Dexie rejects a standalone `orderBy("createdAt")` against
+    // it ("KeyPath createdAt … is not indexed"). No upgrade hook needed —
+    // existing rows already carry `createdAt` (set by the writer), Dexie just
+    // needs the keyPath registered on the object store.
+    this.version(21).stores({
+      outboundQueue:
+        "&id, conversationKey, [conversationKey+createdAt], status, nextAttemptAt, idempotencyKey, [adapterId+status], createdAt",
+    })
+
+    // v22 — Visual workflows (ADR-0011). Pure additions; no upgrade hook
+    // because we don't migrate existing rows (no prior workflow data exists).
+    // Indexes are calibrated to the hot paths in lib/workflow/ and components/workflow/:
+    //   • workflows         — &id is the primary; `name` for the library list
+    //                         orderBy("name"), `updatedAt` for "Recently edited",
+    //                         `isBuiltIn` / `isTemplate` for the gallery filters,
+    //                         `*tags` (multi-entry) for tag-driven discovery,
+    //                         `schemaVersion` so the migrator can pick out
+    //                         legacy rows without scanning the blob.
+    //   • workflowRuns      — &id primary; per-workflow filtering + sort uses
+    //                         [workflowId+startedAt] (timeline) and
+    //                         [workflowId+status] (status-filter chips). The
+    //                         standalone `status` index drives the global
+    //                         "Recent runs" tab; `startedAt` is also indexed
+    //                         standalone so the same tab can sort newest-first
+    //                         across all workflows.
+    //   • workflowRunEvents — &id primary; the per-step timeline binds to
+    //                         [runId+ts] for in-order render and [runId+stepId]
+    //                         to scroll/highlight a specific node's events.
+    //                         `type` is indexed for the "errors only" filter.
+    //   • workflowTriggers  — &id primary; [workflowId+enabled] is the lookup
+    //                         the editor uses to render the trigger pane; the
+    //                         standalone `kind` and `cron` indexes power the
+    //                         Settings → Defaults overview without scans.
+    //                         `nextFireAt` is indexed so the cron preview
+    //                         (TS-side) can list the next N firings cheaply
+    //                         without re-evaluating every cron expression.
+    this.version(22).stores({
+      workflows: "&id, name, updatedAt, createdAt, isBuiltIn, isTemplate, *tags, schemaVersion",
+      workflowRuns:
+        "&id, workflowId, status, startedAt, completedAt, [workflowId+startedAt], [workflowId+status]",
+      workflowRunEvents: "&id, runId, [runId+ts], stepId, [runId+stepId], type",
+      workflowTriggers: "&id, workflowId, kind, enabled, [workflowId+enabled], cron, nextFireAt",
     })
   }
 

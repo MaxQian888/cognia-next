@@ -26,6 +26,7 @@ import type {
   CanvasSessionRow,
 } from "@/lib/db/canvas-types"
 import type { A2UIAppRow, A2UITemplateRow, A2UIEventHistoryRow } from "@/lib/db/a2ui-types"
+import type { TwinChunk, TwinDraft, TwinJob, TwinProfile, TwinSource } from "@/types/twin"
 import type { LocalStorageSnapshot } from "./snapshots/types"
 
 /** Schema version currently emitted by `buildBackupPackage`. */
@@ -107,6 +108,26 @@ export interface BackupPayloadV3 {
   pluginReviews?: unknown[]
   pluginAnalytics?: unknown[]
   pluginScheduledJobs?: unknown[]
+  /**
+   * Digital-twin tables (schema v14). Always-additive: legacy v3 envelopes
+   * that pre-date the twin subsystem omit these fields, and the importer
+   * treats `undefined` as "no rows to apply".
+   *
+   * `twinSources.redactionMapEnc` is encrypted with the source device's
+   * stronghold key — round-tripping into a fresh device that doesn't share
+   * the key leaves the placeholders intact (the redacted form is what the
+   * runtime uses anyway), but the redaction map can no longer be reversed.
+   * `applyBackupPackage` surfaces this via the import summary.
+   */
+  twinSources?: TwinSource[]
+  twinChunks?: TwinChunk[]
+  /**
+   * Single-row-per-twin; the importer overwrites by `id` (== twinId) so a
+   * fresh device doesn't end up with two profile rows for the same twin.
+   */
+  twinProfile?: TwinProfile[]
+  twinDrafts?: TwinDraft[]
+  twinJobs?: TwinJob[]
 }
 
 /** The on-disk plaintext shape. JSON-serialized verbatim. */

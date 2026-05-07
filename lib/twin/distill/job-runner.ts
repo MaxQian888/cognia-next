@@ -9,6 +9,8 @@
 import { listTwinChunksByTwin, updateTwinChunk } from "@/lib/db/twin-chunks"
 import { bulkCreateTwinDrafts } from "@/lib/db/twin-drafts"
 import { updateJobProgress } from "@/lib/db/twin-jobs"
+import { hasNoLeakingPii, redactText } from "@/lib/twin/ingest/redact"
+import { loggers } from "@/lib/logger"
 import {
   appendPlaybooks,
   appendStyleSamples,
@@ -33,6 +35,10 @@ export interface RunDistillResult {
   styleSampleCount: number
   playbookCount: number
   entityCount: number
+  /** Total prompt + completion tokens consumed across the five agents. */
+  llmTokensUsed: number
+  /** Per-agent failure messages when isolation kicked in (empty on a clean run). */
+  partialFailures: Record<string, string>
 }
 
 export async function runDistillJob(input: RunDistillInput): Promise<RunDistillResult> {
@@ -46,6 +52,8 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
       styleSampleCount: 0,
       playbookCount: 0,
       entityCount: 0,
+      llmTokensUsed: 0,
+      partialFailures: {},
     }
   }
   const chunks =
@@ -90,11 +98,19 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
 
   // ───── Persist drafts (with evaluations) ─────
   await updateJobProgress(job.id, { phase: "persisting-drafts", progress: 96 })
+  // Post-flight PII check: even though we redact at ingest, the synthesizer
+  // could in theory hallucinate a PII-shaped string back into a draft body.
+  // Run hasNoLeakingPii on every draft and re-redact (in place) when it
+  // fires, logging the event so the audit trail makes the cause clear.
+  const sanitizedDrafts = result.synthesizedDrafts.map((draft) =>
+    sanitizeDraftPayload(draft, job.id, job.twinId)
+  )
+
   // The orchestrator returned drafts with placeholder ids ("tmp_0", "tmp_1").
   // Use the same placeholder index to look up the evaluation, then drop the
   // placeholder so Dexie mints the real id.
   const draftRows = await bulkCreateTwinDrafts(
-    result.synthesizedDrafts.map(
+    sanitizedDrafts.map(
       (draft, i): Omit<TwinDraft, "id" | "status" | "createdAt"> => ({
         twinId: job.twinId,
         jobId: job.id,
@@ -117,5 +133,41 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
     styleSampleCount: result.styleSamples.length,
     playbookCount: result.playbooks.length,
     entityCount: result.entities.length,
+    llmTokensUsed: result.llmTokensUsed ?? 0,
+    partialFailures: result.partialFailures ?? {},
   }
+}
+
+/**
+ * Run the no-leak gate on a single synthesized draft. Walks the draft's
+ * `payload.data` and re-redacts any string field whose contents look like
+ * recognised PII. Drafts come from the LLM, which doesn't have access to
+ * the redaction map — so any PII that lands here is "hallucinated" and
+ * worth recording.
+ *
+ * Mutates a *new* draft object (no in-place mutation of the orchestrator
+ * output) so partial-failure code paths don't see surprises.
+ */
+function sanitizeDraftPayload<
+  T extends { payload: { kind: string; data: Record<string, unknown> } },
+>(draft: T, jobId: string, twinId: string): T {
+  const data = draft.payload.data
+  let mutated = false
+  const sanitizedData: Record<string, unknown> = { ...data }
+  for (const [key, value] of Object.entries(data)) {
+    if (typeof value !== "string") continue
+    if (hasNoLeakingPii(value)) continue
+    mutated = true
+    sanitizedData[key] = redactText(value).redacted
+  }
+  if (!mutated) return draft
+  loggers.scheduler.warn("twin distill: re-redacted draft payload after PII leak", {
+    jobId,
+    twinId,
+    kind: draft.payload.kind,
+  })
+  return {
+    ...draft,
+    payload: { ...draft.payload, data: sanitizedData },
+  } as T
 }

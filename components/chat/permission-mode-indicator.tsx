@@ -37,9 +37,11 @@ export interface PermissionModeIndicatorProps {
    * persistence — this component just emits the desired next mode.
    */
   onCycle: (next: PermissionMode | null) => void
+  /** Disable the indicator externally (e.g. while a turn is streaming). */
+  disabled?: boolean
 }
 
-export function PermissionModeIndicator({ onCycle }: PermissionModeIndicatorProps) {
+export function PermissionModeIndicator({ onCycle, disabled }: PermissionModeIndicatorProps) {
   const t = useTranslations("chat.permissionMode")
   const mode = useChatStore((s) => s.permissionMode)
   const key = TRANSLATION_KEY_BY_MODE[String(mode)] ?? "default"
@@ -51,6 +53,7 @@ export function PermissionModeIndicator({ onCycle }: PermissionModeIndicatorProp
       <TooltipTrigger asChild>
         <button
           type="button"
+          disabled={disabled}
           onClick={() => onCycle(nextPermissionMode(mode))}
           className={cn(
             "rounded border px-2 py-0.5 font-mono text-[11px] transition-colors hover:bg-accent",

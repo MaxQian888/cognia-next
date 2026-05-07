@@ -105,6 +105,10 @@ const CustomModeSettings = dynamic(
   () => import("./agent/custom-mode-settings").then((m) => m.CustomModeSettings),
   { ssr: false, loading: () => <SectionLoading /> }
 )
+const AgentRuntimeSection = dynamic(
+  () => import("./agent-runtime/agent-runtime-section").then((m) => m.AgentRuntimeSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const AgentTeamTemplatesSection = dynamic(
   () => import("./agent/agent-team-templates-section").then((m) => m.AgentTeamTemplatesSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -155,6 +159,10 @@ const ConnectionsSection = dynamic(
 )
 const NetworkSection = dynamic(
   () => import("./network/network-section").then((m) => m.NetworkSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const WorkflowsSection = dynamic(
+  () => import("./workflows/workflows-section").then((m) => m.WorkflowsSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
 
@@ -279,6 +287,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <ExternalAgentSettings />
     case "agent-modes":
       return <CustomModeSettings />
+    case "agent-runtime":
+      return <AgentRuntimeSection />
     case "agent-teams":
       return <AgentTeamTemplatesSection />
     case "hooks":
@@ -317,6 +327,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <ConnectionsSection />
     case "data":
       return <DataSection />
+    case "workflows":
+      return <WorkflowsSection />
     case "scheduled-tasks":
       return <ScheduledTasksSection />
     case "remote-control":

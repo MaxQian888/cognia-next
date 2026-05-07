@@ -29,6 +29,19 @@ export interface LlmClientCallOptions {
   stopSequences?: string[]
 }
 
+/**
+ * Cumulative token-usage snapshot maintained by `createLlmClient`.
+ *
+ * The orchestrator reads this after the run via `getUsageSnapshot()` so
+ * we can persist a single `llmTokensUsed` figure on the parent
+ * `twinJobs` row. Mocks may omit `getUsageSnapshot` — callers must guard.
+ */
+export interface LlmUsageSnapshot {
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+}
+
 export interface LlmClient {
   /**
    * Ask the LLM with a free-form prompt; return the raw text response.
@@ -37,6 +50,12 @@ export interface LlmClient {
    * caller.
    */
   complete(prompt: string, options?: LlmClientCallOptions): Promise<string>
+  /**
+   * Cumulative tokens consumed by this client since construction. Optional
+   * so test mocks can ignore it; production clients (`createLlmClient`)
+   * always implement it.
+   */
+  getUsageSnapshot?(): LlmUsageSnapshot
 }
 
 /**
@@ -121,6 +140,12 @@ export function createLlmClient(config: LlmConfig): LlmClient {
     return modelPromise
   }
 
+  // Cumulative usage snapshot; updated after every `complete()` call.
+  // Provider responses sometimes omit usage (rare on Anthropic, more common
+  // on locally-hosted OpenAI-compatible endpoints) — we coalesce missing
+  // values to 0 rather than NaN-poisoning the running total.
+  const usage: LlmUsageSnapshot = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+
   return {
     async complete(prompt, options) {
       const model = await getModel()
@@ -131,7 +156,15 @@ export function createLlmClient(config: LlmConfig): LlmClient {
         temperature: options?.temperature ?? config.defaultTemperature ?? 0,
         stopSequences: options?.stopSequences,
       })
+      const inputTokens = Number(result.usage?.inputTokens ?? 0) || 0
+      const outputTokens = Number(result.usage?.outputTokens ?? 0) || 0
+      usage.inputTokens += inputTokens
+      usage.outputTokens += outputTokens
+      usage.totalTokens = usage.inputTokens + usage.outputTokens
       return result.text
+    },
+    getUsageSnapshot() {
+      return { ...usage }
     },
   }
 }

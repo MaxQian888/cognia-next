@@ -39,6 +39,12 @@ export type BridgeScope =
   | "wiki:user-repo"
   | "rag:cognia"
   | "rag:user-repo"
+  /**
+   * RAG over the user's digital twin chunks. Default OFF; users must opt in
+   * explicitly because twin data is significantly more sensitive than the
+   * generated wiki (it can contain personal documents, chat history, etc.).
+   */
+  | "rag:twin"
   | "runtime:skills"
   | "runtime:characters"
   | "runtime:twins"
@@ -50,6 +56,7 @@ export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "wiki:user-repo",
   "rag:cognia",
   "rag:user-repo",
+  "rag:twin",
   "runtime:skills",
   "runtime:characters",
   "runtime:twins",

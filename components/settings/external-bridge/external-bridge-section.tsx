@@ -100,6 +100,8 @@ const SCOPE_DESCRIPTIONS: Record<BridgeScope, string> = {
   "wiki:user-repo": "Wiki for user-supplied repos. Phase 3 — disabled in Phase 1.",
   "rag:cognia": "Code-level retrieval over Cognia source.",
   "rag:user-repo": "Retrieval over user-supplied repos. Phase 3 — disabled.",
+  "rag:twin":
+    "⚠ Retrieval over your digital twin's chunks (personal documents / chat / code). Default OFF.",
   "runtime:skills": "⚠ Exposes your installed skills' content.",
   "runtime:characters": "⚠ Exposes character configs (may contain personal prompts).",
   "runtime:twins": "⚠ Exposes Twin profiles. PII redaction has run, but review before enabling.",

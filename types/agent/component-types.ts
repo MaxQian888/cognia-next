@@ -121,6 +121,10 @@ export interface AddAgentFormData {
   transport: ExternalAgentTransport
   command: string
   args: string
+  /** Convenience: append `--bare` to spawn args. Maps to `process.bare`. */
+  bare: boolean
+  /** Convenience: append `--debug` to spawn args. Maps to `process.debug`. */
+  debug: boolean
   endpoint: string
   timeoutMs: string
   retryMaxRetries: string

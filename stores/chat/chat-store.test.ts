@@ -1,7 +1,12 @@
 import { act, renderHook } from "@testing-library/react"
 import type { UIMessage } from "ai"
-import type { PendingApproval } from "@/lib/claude/types"
-import { useChatStore, type FileReference, type PendingCommandOverrides } from "./chat-store"
+import type { PendingApproval, SendOptions } from "@/lib/claude/types"
+import {
+  useChatStore,
+  type FileReference,
+  type LastSendCacheEntry,
+  type PendingCommandOverrides,
+} from "./chat-store"
 // Touch the barrel so its `export * from "./chat-store"` line is covered.
 import * as barrel from "./"
 
@@ -293,6 +298,91 @@ describe("useChatStore", () => {
       expect(result.current.pendingCommandOverrides).toBeNull()
       expect(result.current.bookmarkedIds).toEqual([])
       expect(result.current.webSearchOnForNextSend).toBe(false)
+    })
+  })
+
+  describe("lastSendBySession", () => {
+    const makeEntry = (provider = "openai", attemptIndex = 0): LastSendCacheEntry => ({
+      content: "hi",
+      options: {
+        provider,
+        model: "m",
+        aliasResolution: {
+          alias: "fast",
+          resolvedTo: { providerId: provider, modelId: "m" },
+          fallbackEntries: [
+            { providerId: "openai", modelId: "gpt-4o-mini" },
+            { providerId: "anthropic", modelId: "claude-haiku-4-5" },
+          ],
+        },
+      } as SendOptions,
+      attemptIndex,
+    })
+
+    it("starts with an empty cache", () => {
+      const { result } = renderHook(() => useChatStore())
+      expect(result.current.lastSendBySession).toEqual({})
+    })
+
+    it("setLastSend writes the entry under the session id", () => {
+      const { result } = renderHook(() => useChatStore())
+      const entry = makeEntry()
+      act(() => result.current.setLastSend("s1", entry))
+      expect(result.current.lastSendBySession.s1).toBe(entry)
+      expect(Object.keys(result.current.lastSendBySession)).toEqual(["s1"])
+    })
+
+    it("bumpLastSendAttempt increments only the targeted session", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => {
+        result.current.setLastSend("s1", makeEntry("openai", 0))
+        result.current.setLastSend("s2", makeEntry("openai", 0))
+      })
+      act(() => result.current.bumpLastSendAttempt("s1"))
+      expect(result.current.lastSendBySession.s1?.attemptIndex).toBe(1)
+      expect(result.current.lastSendBySession.s2?.attemptIndex).toBe(0)
+    })
+
+    it("bumpLastSendAttempt is a no-op when session has no cache", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.bumpLastSendAttempt("missing"))
+      expect(result.current.lastSendBySession).toEqual({})
+    })
+
+    it("clearLastSend removes only the targeted session", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => {
+        result.current.setLastSend("s1", makeEntry())
+        result.current.setLastSend("s2", makeEntry("anthropic"))
+      })
+      act(() => result.current.clearLastSend("s1"))
+      expect(result.current.lastSendBySession.s1).toBeUndefined()
+      expect(result.current.lastSendBySession.s2).toBeDefined()
+    })
+
+    it("clearLastSend is a no-op when session has no cache", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.clearLastSend("nope"))
+      expect(result.current.lastSendBySession).toEqual({})
+    })
+
+    it("setActiveSession wipes all cached entries", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => {
+        result.current.setLastSend("s1", makeEntry())
+        result.current.setLastSend("s2", makeEntry())
+      })
+      act(() => result.current.setActiveSession("s3"))
+      expect(result.current.lastSendBySession).toEqual({})
+    })
+
+    it("clear() wipes all cached entries", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => {
+        result.current.setLastSend("s1", makeEntry())
+      })
+      act(() => result.current.clear())
+      expect(result.current.lastSendBySession).toEqual({})
     })
   })
 })

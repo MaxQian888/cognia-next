@@ -21,6 +21,7 @@ mod skills;
 mod tts;
 mod vector;
 mod wallpaper;
+mod workflow;
 
 mod window_behavior;
 
@@ -359,6 +360,11 @@ pub fn run() {
             remote_control::commands::remote_control_update_config,
             remote_control::commands::remote_control_set_signing_secret,
             remote_control::commands::remote_control_get_signing_secret,
+            workflow::commands::workflow_register_trigger,
+            workflow::commands::workflow_unregister_trigger,
+            workflow::commands::workflow_persist_run_state,
+            workflow::commands::workflow_reload_in_flight_runs,
+            workflow::commands::workflow_ack_completed,
         ])
         .setup(|app| {
             // Bootstrap native logging in *all* builds. Installs tauri-plugin-log
@@ -368,6 +374,36 @@ pub fn run() {
             // `log://log` events.
             if let Err(error) = logging::bootstrap(app) {
                 log::warn!("native_logging bootstrap failed: {error}");
+            }
+
+            // Workflow subsystem (ADR 0011) — construct the cron daemon +
+            // SQLite run-state mirror once we have an AppHandle (needed for
+            // the trigger emitter). Skip silently if the data dir resolution
+            // fails; web mode never reaches this branch and `manage` falls
+            // back to a no-op state via the empty in-memory mirror.
+            match dirs::data_dir() {
+                Some(data_dir) => {
+                    let mirror_path = workflow::default_mirror_path(&data_dir);
+                    let emitter = std::sync::Arc::new(workflow::AppHandleEmitter {
+                        handle: app.handle().clone(),
+                    });
+                    match workflow::WorkflowState::open(mirror_path, emitter) {
+                        Ok(state) => {
+                            // Spawn the cron loop once. Cloning is cheap — the
+                            // inner Arc is shared, so the daemon held by the
+                            // managed state and the spawned loop drive the same
+                            // schedule registry.
+                            state.cron.clone().spawn();
+                            app.manage(state);
+                        }
+                        Err(err) => {
+                            log::warn!("workflow mirror open failed: {err}");
+                        }
+                    }
+                }
+                None => {
+                    log::warn!("dirs::data_dir() unavailable — workflow mirror not initialized");
+                }
             }
 
             // Register the default global shortcuts. Routing logic lives in the

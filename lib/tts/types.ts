@@ -14,6 +14,7 @@ export type TTSProvider =
   | "hume"
   | "cartesia"
   | "deepgram"
+  | "xiaomi"
 
 export interface TTSProviderInfo {
   id: TTSProvider
@@ -105,6 +106,15 @@ export const TTS_PROVIDERS: Record<TTSProvider, TTSProviderInfo> = {
     apiKeyProvider: "deepgram",
     supportsStreaming: true,
     maxTextLength: 10000,
+  },
+  xiaomi: {
+    id: "xiaomi",
+    name: "Xiaomi MiMo TTS",
+    description: "Xiaomi MiMo TTS with style tags and dialect support",
+    requiresApiKey: true,
+    apiKeyProvider: "xiaomi",
+    supportsStreaming: false,
+    maxTextLength: 8000,
   },
 }
 
@@ -325,6 +335,37 @@ export const DEEPGRAM_TTS_VOICES = [
 
 export type DeepgramTTSVoice = (typeof DEEPGRAM_TTS_VOICES)[number]["id"]
 
+export const XIAOMI_TTS_VOICES = [
+  { id: "mimo_default", name: "MiMo Default", description: "Default multilingual voice" },
+  { id: "default_zh", name: "Default Chinese", description: "Chinese female voice" },
+  { id: "default_en", name: "Default English", description: "English female voice" },
+] as const
+
+export type XiaomiTTSVoice = (typeof XIAOMI_TTS_VOICES)[number]["id"]
+
+export const XIAOMI_TTS_MODELS = [
+  { id: "mimo-v2-tts", name: "MiMo V2 TTS", description: "Latest MiMo TTS model" },
+] as const
+
+export type XiaomiTTSModel = (typeof XIAOMI_TTS_MODELS)[number]["id"]
+
+export const XIAOMI_TTS_STYLES = [
+  { id: "开心", name: "Happy", tag: "[开心]" },
+  { id: "悲伤", name: "Sad", tag: "[悲伤]" },
+  { id: "生气", name: "Angry", tag: "[生气]" },
+  { id: "东北话", name: "Dongbei dialect", tag: "[东北话]" },
+  { id: "四川话", name: "Sichuan dialect", tag: "[四川话]" },
+  { id: "粤语", name: "Cantonese", tag: "[粤语]" },
+  { id: "台湾腔", name: "Taiwanese accent", tag: "[台湾腔]" },
+  { id: "变快", name: "Faster", tag: "[变快]" },
+  { id: "变慢", name: "Slower", tag: "[变慢]" },
+  { id: "唱歌", name: "Singing", tag: "[唱歌]" },
+  { id: "孙悟空", name: "Sun Wukong", tag: "[孙悟空]" },
+  { id: "林黛玉", name: "Lin Daiyu", tag: "[林黛玉]" },
+] as const
+
+export type XiaomiTTSStyle = (typeof XIAOMI_TTS_STYLES)[number]["id"]
+
 /**
  * Full TTS settings — flattened into AppSettings on the cognia-next side.
  * Names match the sibling Cognia project so the ported orchestrator
@@ -339,6 +380,7 @@ export interface TTSSettings {
   openaiModel: OpenAITTSModel
   openaiSpeed: number
   openaiInstructions: string
+  openaiResponseFormat: "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm"
 
   geminiVoice: GeminiTTSVoice
 
@@ -364,6 +406,11 @@ export interface TTSSettings {
 
   deepgramVoice: DeepgramTTSVoice
 
+  xiaomiVoice: XiaomiTTSVoice
+  xiaomiModel: XiaomiTTSModel
+  xiaomiStyle: XiaomiTTSStyle | ""
+  xiaomiDialect: string
+
   ttsEnabled: boolean
   ttsRate: number
   ttsPitch: number
@@ -371,6 +418,10 @@ export interface TTSSettings {
   ttsAutoPlay: boolean
   ttsCacheEnabled: boolean
   ttsStreamingEnabled: boolean
+
+  ttsCustomSSMLEnabled: boolean
+  ttsCustomSSML: string
+  ttsPronunciationDictionary: Record<string, string>
 }
 
 export const DEFAULT_TTS_SETTINGS: TTSSettings = {
@@ -382,6 +433,7 @@ export const DEFAULT_TTS_SETTINGS: TTSSettings = {
   openaiModel: "gpt-4o-mini-tts",
   openaiSpeed: 1.0,
   openaiInstructions: "",
+  openaiResponseFormat: "mp3",
 
   geminiVoice: "Kore",
 
@@ -407,6 +459,11 @@ export const DEFAULT_TTS_SETTINGS: TTSSettings = {
 
   deepgramVoice: "aura-2-asteria-en",
 
+  xiaomiVoice: "mimo_default",
+  xiaomiModel: "mimo-v2-tts",
+  xiaomiStyle: "",
+  xiaomiDialect: "",
+
   ttsEnabled: false,
   ttsRate: 1.0,
   ttsPitch: 1.0,
@@ -414,6 +471,10 @@ export const DEFAULT_TTS_SETTINGS: TTSSettings = {
   ttsAutoPlay: false,
   ttsCacheEnabled: true,
   ttsStreamingEnabled: true,
+
+  ttsCustomSSMLEnabled: false,
+  ttsCustomSSML: "",
+  ttsPronunciationDictionary: {},
 }
 
 export interface TTSRequest {
@@ -499,6 +560,7 @@ export const KEYED_TTS_PROVIDERS: TTSProvider[] = [
   "hume",
   "cartesia",
   "deepgram",
+  "xiaomi",
 ]
 
 /** Stable list of TTS provider IDs in display order (system first). */
@@ -510,6 +572,7 @@ export const ORDERED_TTS_PROVIDERS: TTSProvider[] = [
   "elevenlabs",
   "cartesia",
   "deepgram",
+  "xiaomi",
   "lmnt",
   "hume",
 ]

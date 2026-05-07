@@ -48,7 +48,12 @@ jest.mock("@/components/ui/tabs", () => {
       </button>
     )
   }
-  return { Tabs, TabsList, TabsTrigger }
+  const TabsContent = ({ value, children }: { value?: string; children: React.ReactNode }) => {
+    const ctx = React.useContext(TabsContext)
+    if (value !== ctx.value) return null
+    return <>{children}</>
+  }
+  return { Tabs, TabsList, TabsTrigger, TabsContent }
 })
 
 // Children are tested in their own files; stub them here so the section's

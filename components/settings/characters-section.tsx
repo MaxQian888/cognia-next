@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -34,6 +35,10 @@ import {
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import { listSkills } from "@/lib/db/skills"
 import type { AppSettings, Character, McpServer, Skill } from "@/lib/claude/types"
+import {
+  TwinBindingSection,
+  type TwinBindingValue,
+} from "@/components/settings/character/twin-binding-section"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CopyIcon, PencilIcon, PlusIcon, Trash2Icon, UsersRoundIcon } from "lucide-react"
 import { useEffect, useState } from "react"
@@ -155,6 +160,11 @@ export function CharactersSection() {
             mcpServerIds: undefined,
             skillIds: [],
             workingDir: "",
+            bareMode: false,
+            debugMode: false,
+            briefMode: false,
+            twinId: undefined,
+            twinSettings: undefined,
           }}
           skillsCatalog={skills}
           mcpCatalog={mcpServers}
@@ -206,6 +216,7 @@ function CharacterRow({
   if (editing) {
     return (
       <CharacterEditor
+        editingId={character.id}
         initial={{
           name: character.name,
           description: character.description ?? "",
@@ -219,6 +230,11 @@ function CharacterRow({
           mcpServerIds: character.mcpServerIds,
           skillIds: character.skillIds ?? [],
           workingDir: character.workingDir ?? "",
+          bareMode: Boolean(character.bareMode),
+          debugMode: Boolean(character.debugMode),
+          briefMode: Boolean(character.briefMode),
+          twinId: character.twinId,
+          twinSettings: character.twinSettings,
         }}
         skillsCatalog={skillsCatalog}
         mcpCatalog={mcpCatalog}
@@ -341,6 +357,11 @@ type EditorState = {
   mcpServerIds: string[] | undefined
   skillIds: string[]
   workingDir: string
+  bareMode: boolean
+  debugMode: boolean
+  briefMode: boolean
+  twinId?: string
+  twinSettings?: Character["twinSettings"]
 }
 
 type EditorOutput = {
@@ -356,6 +377,11 @@ type EditorOutput = {
   mcpServerIds?: string[]
   skillIds?: string[]
   workingDir?: string
+  bareMode?: boolean
+  debugMode?: boolean
+  briefMode?: boolean
+  twinId?: string
+  twinSettings?: Character["twinSettings"]
 }
 
 interface EditorProps {
@@ -365,6 +391,8 @@ interface EditorProps {
   submitLabel: string
   onCancel: () => void
   onSave: (data: EditorOutput) => Promise<void>
+  /** Id of the character being edited. Omitted when creating. */
+  editingId?: string
 }
 
 function CharacterEditor({
@@ -374,6 +402,7 @@ function CharacterEditor({
   submitLabel,
   onCancel,
   onSave,
+  editingId,
 }: EditorProps) {
   const t = useTranslations("settings.characters")
   const tEditor = useTranslations("settings.characters.editor")
@@ -418,6 +447,11 @@ function CharacterEditor({
         mcpServerIds: s.mcpServerIds,
         skillIds: s.skillIds.length > 0 ? s.skillIds : undefined,
         workingDir: s.workingDir.trim() || undefined,
+        bareMode: s.bareMode || undefined,
+        debugMode: s.debugMode || undefined,
+        briefMode: s.briefMode || undefined,
+        twinId: s.twinId,
+        twinSettings: s.twinSettings,
       })
     } finally {
       setSaving(false)
@@ -577,6 +611,41 @@ function CharacterEditor({
           className="font-mono text-xs"
         />
       </div>
+
+      <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <Label className="cursor-pointer text-xs">{tGeneral("bareMode")}</Label>
+          <Switch
+            checked={s.bareMode}
+            onCheckedChange={(v) => setS({ ...s, bareMode: v })}
+            aria-label={tGeneral("bareMode")}
+          />
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <Label className="cursor-pointer text-xs">{tGeneral("debugMode")}</Label>
+          <Switch
+            checked={s.debugMode}
+            onCheckedChange={(v) => setS({ ...s, debugMode: v })}
+            aria-label={tGeneral("debugMode")}
+          />
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <Label className="cursor-pointer text-xs">{tGeneral("briefMode")}</Label>
+          <Switch
+            checked={s.briefMode}
+            onCheckedChange={(v) => setS({ ...s, briefMode: v })}
+            aria-label={tGeneral("briefMode")}
+          />
+        </div>
+      </div>
+
+      <TwinBindingSection
+        value={{ twinId: s.twinId, twinSettings: s.twinSettings }}
+        onChange={(next: TwinBindingValue) =>
+          setS({ ...s, twinId: next.twinId, twinSettings: next.twinSettings })
+        }
+        excludeCharacterId={editingId}
+      />
 
       <ItemMultiSelect
         label={tEditor("skills")}

@@ -10,7 +10,16 @@
 
 import { useMemo, useState, useCallback } from "react"
 import { useTranslations } from "next-intl"
-import { CopyIcon, DownloadIcon, PencilIcon, PlusIcon, Trash2Icon, NetworkIcon } from "lucide-react"
+import {
+  CopyIcon,
+  DownloadIcon,
+  PencilIcon,
+  PlusIcon,
+  Trash2Icon,
+  NetworkIcon,
+  SearchIcon,
+  XIcon,
+} from "lucide-react"
 import { nanoid } from "nanoid"
 
 import { Button } from "@/components/ui/button"
@@ -19,6 +28,7 @@ import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Select,
   SelectContent,
@@ -39,8 +49,17 @@ import {
 } from "@/components/ui/alert-dialog"
 import { toast } from "@/components/ui/sonner"
 
+import {
+  SettingsCard,
+  SettingsGrid,
+  SettingsGroup,
+  SettingsEmptyState,
+  SettingsDivider,
+} from "@/components/settings/common/settings-section"
+
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
-import type { SubAgentTemplate } from "@/types/agent/sub-agent"
+import type { SubAgentTemplate, SubAgentPriority } from "@/types/agent/sub-agent"
+import { SUB_AGENT_PRIORITY_CONFIG } from "@/types/agent/sub-agent"
 import { createLogger } from "@/lib/logger"
 import { SubagentImportDialog } from "./subagent-import-dialog"
 
@@ -54,10 +73,12 @@ const CATEGORIES: SubAgentTemplate["category"][] = [
   "general",
 ]
 
+const PRIORITIES: SubAgentPriority[] = ["critical", "high", "normal", "low", "background"]
+
 export function SubagentTemplatesTab() {
   const t = useTranslations("settings.subagents.templates")
+  const tImport = useTranslations("settings.subagents.import")
   const tCommon = useTranslations("common")
-
   const templates = useSubagentRuntimeStore((s) => s.templates)
   const addTemplate = useSubagentRuntimeStore((s) => s.addTemplate)
   const updateTemplate = useSubagentRuntimeStore((s) => s.updateTemplate)
@@ -66,10 +87,25 @@ export function SubagentTemplatesTab() {
   const [editing, setEditing] = useState<SubAgentTemplate | null>(null)
   const [creating, setCreating] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [search, setSearch] = useState("")
+  const [categoryFilter, setCategoryFilter] = useState<SubAgentTemplate["category"] | null>(null)
 
-  const sortedTemplates = useMemo(() => {
+  const filteredTemplates = useMemo(() => {
     const all = Object.values(templates)
-    return all.sort((a, b) => {
+    let list = all
+
+    if (categoryFilter) {
+      list = list.filter((tpl) => tpl.category === categoryFilter)
+    }
+
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      list = list.filter(
+        (tpl) => tpl.name.toLowerCase().includes(q) || tpl.description.toLowerCase().includes(q)
+      )
+    }
+
+    return list.sort((a, b) => {
       const aBuilt = a.isBuiltIn ?? false
       const bBuilt = b.isBuiltIn ?? false
       if (aBuilt !== bBuilt) return aBuilt ? -1 : 1
@@ -78,7 +114,7 @@ export function SubagentTemplatesTab() {
       }
       return a.name.localeCompare(b.name)
     })
-  }, [templates])
+  }, [templates, categoryFilter, search])
 
   const handleDuplicate = useCallback(
     (source: SubAgentTemplate) => {
@@ -108,7 +144,8 @@ export function SubagentTemplatesTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
+      {/* Header with actions */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
           <Label className="flex items-center gap-2">
             <NetworkIcon className="size-4" />
@@ -124,7 +161,7 @@ export function SubagentTemplatesTab() {
             data-testid="subagent-template-import"
           >
             <DownloadIcon className="mr-2 size-4" />
-            {t("import.trigger")}
+            {tImport("trigger")}
           </Button>
           <Button
             size="sm"
@@ -141,29 +178,89 @@ export function SubagentTemplatesTab() {
         </div>
       </div>
 
-      <SubagentImportDialog open={importing} onOpenChange={setImporting} />
+      <SubagentImportDialog
+        open={importing}
+        onOpenChange={setImporting}
+        onImported={() => setCreating(false)}
+      />
 
-      <div className="grid gap-2" data-testid="subagent-template-grid">
-        {sortedTemplates.map((tpl) => (
-          <TemplateRow
-            key={tpl.id}
-            template={tpl}
-            editing={editing?.id === tpl.id}
-            onEditStart={() => setEditing(tpl)}
-            onEditCancel={() => setEditing(null)}
-            onSave={(patch) => {
-              updateTemplate(tpl.id, patch)
-              setEditing(null)
-              toast.success(t("updatedToast", { name: patch.name ?? tpl.name }))
-            }}
-            onDuplicate={() => handleDuplicate(tpl)}
-            onDelete={() => handleDelete(tpl)}
-            t={t}
-            tCommon={tCommon}
+      {/* Search + category filter bar */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative w-full sm:max-w-xs">
+          <SearchIcon className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t("searchPlaceholder")}
+            className="h-8 pl-8 text-xs"
+            data-testid="subagent-template-search"
           />
-        ))}
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              aria-label={tCommon("close")}
+            >
+              <XIcon className="size-3" />
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-1" data-testid="subagent-category-filter">
+          <Badge
+            variant={categoryFilter === null ? "default" : "outline"}
+            className="cursor-pointer text-[10px]"
+            onClick={() => setCategoryFilter(null)}
+            data-testid="category-filter-all"
+          >
+            {t("filterAll")}
+          </Badge>
+          {CATEGORIES.map((cat) => (
+            <Badge
+              key={cat}
+              variant={categoryFilter === cat ? "default" : "outline"}
+              className="cursor-pointer text-[10px]"
+              onClick={() => setCategoryFilter(cat)}
+              data-testid={`category-filter-${cat}`}
+            >
+              {t(`categories.${cat}`)}
+            </Badge>
+          ))}
+        </div>
       </div>
 
+      {/* Empty states */}
+      {filteredTemplates.length === 0 && (
+        <SettingsEmptyState
+          title={search || categoryFilter ? t("noResults") : t("noUserTemplates")}
+          description={search || categoryFilter ? undefined : t("noUserTemplatesDescription")}
+        />
+      )}
+
+      {/* Template grid */}
+      <div data-testid="subagent-template-grid">
+        <SettingsGrid columns={2}>
+          {filteredTemplates.map((tpl) => (
+            <TemplateRow
+              key={tpl.id}
+              template={tpl}
+              editing={editing?.id === tpl.id}
+              onEditStart={() => setEditing(tpl)}
+              onEditCancel={() => setEditing(null)}
+              onSave={(patch) => {
+                updateTemplate(tpl.id, patch)
+                setEditing(null)
+                toast.success(t("updatedToast", { name: patch.name ?? tpl.name }))
+              }}
+              onDuplicate={() => handleDuplicate(tpl)}
+              onDelete={() => handleDelete(tpl)}
+              t={t}
+              tCommon={tCommon}
+            />
+          ))}
+        </SettingsGrid>
+      </div>
+
+      {/* Create editor */}
       {creating && (
         <TemplateEditor
           initial={{
@@ -192,6 +289,10 @@ export function SubagentTemplatesTab() {
     </div>
   )
 }
+
+/* ------------------------------------------------------------------ */
+/*  TemplateRow                                                        */
+/* ------------------------------------------------------------------ */
 
 interface RowProps {
   template: SubAgentTemplate
@@ -227,38 +328,49 @@ function TemplateRow({
     )
   }
 
+  const iconChar = template.icon?.charAt(0) ?? template.name.charAt(0).toUpperCase()
+
   return (
-    <Card
-      className="p-3"
+    <div
       data-testid={`subagent-template-row-${template.id}`}
       data-builtin={template.isBuiltIn ? "true" : "false"}
     >
-      <div className="flex items-start gap-3">
-        <span
-          className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-base"
-          aria-hidden
-        >
-          {template.icon?.charAt(0) ?? template.name.charAt(0).toUpperCase()}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-medium">{template.name}</p>
-            {template.isBuiltIn ? (
-              <Badge variant="secondary" className="text-[10px]">
-                {t("builtIn")}
-              </Badge>
-            ) : null}
+      <SettingsCard
+        icon={
+          <span
+            className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm"
+            aria-hidden
+          >
+            {iconChar}
+          </span>
+        }
+        title={template.name}
+        description={template.description || undefined}
+        badge={template.isBuiltIn ? t("builtIn") : undefined}
+        badgeVariant={template.isBuiltIn ? "secondary" : "outline"}
+        variant={template.isBuiltIn ? "ghost" : "default"}
+        headerAction={
+          <div className="flex items-center gap-1">
             <Badge variant="outline" className="text-[10px]">
-              {template.category}
+              {t(`categories.${template.category}`)}
             </Badge>
           </div>
-          {template.description ? (
-            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-              {template.description}
-            </p>
-          ) : null}
+        }
+      >
+        {/* Template metadata summary */}
+        <div className="flex flex-wrap items-center gap-2">
+          {template.config?.model && (
+            <span className="text-[11px] text-muted-foreground">{template.config.model}</span>
+          )}
+          {(template.variables?.length ?? 0) > 0 && (
+            <span className="text-[11px] text-muted-foreground">
+              {template.variables!.length} variable{template.variables!.length !== 1 ? "s" : ""}
+            </span>
+          )}
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-1 pt-2">
           <Button
             variant="ghost"
             size="icon"
@@ -310,10 +422,14 @@ function TemplateRow({
             </AlertDialogContent>
           </AlertDialog>
         </div>
-      </div>
-    </Card>
+      </SettingsCard>
+    </div>
   )
 }
+
+/* ------------------------------------------------------------------ */
+/*  TemplateEditor                                                     */
+/* ------------------------------------------------------------------ */
 
 interface EditorProps {
   initial: SubAgentTemplate
@@ -325,6 +441,7 @@ interface EditorProps {
 function TemplateEditor({ initial, submitLabel, onCancel, onSave }: EditorProps) {
   const t = useTranslations("settings.subagents.templates")
   const tCommon = useTranslations("common")
+  const tPriority = useTranslations("agentPriority")
   const [draft, setDraft] = useState<SubAgentTemplate>(initial)
 
   const submit = () => {
@@ -335,8 +452,36 @@ function TemplateEditor({ initial, submitLabel, onCancel, onSave }: EditorProps)
     onSave({ ...draft, name: draft.name.trim() })
   }
 
+  const updateConfig = (key: string, value: unknown) => {
+    setDraft({ ...draft, config: { ...draft.config, [key]: value } })
+  }
+
+  const addVariable = () => {
+    const vars = draft.variables ?? []
+    setDraft({
+      ...draft,
+      variables: [...vars, { name: "", description: "", required: false }],
+    })
+  }
+
+  const updateVariable = (
+    index: number,
+    patch: Partial<{ name: string; description: string; required: boolean; defaultValue?: string }>
+  ) => {
+    const vars = [...(draft.variables ?? [])]
+    vars[index] = { ...vars[index], ...patch }
+    setDraft({ ...draft, variables: vars })
+  }
+
+  const removeVariable = (index: number) => {
+    const vars = [...(draft.variables ?? [])]
+    vars.splice(index, 1)
+    setDraft({ ...draft, variables: vars.length > 0 ? vars : undefined })
+  }
+
   return (
     <Card className="space-y-3 p-4" data-testid="subagent-template-editor">
+      {/* Name */}
       <div className="space-y-1">
         <Label className="text-xs">{t("editorName")}</Label>
         <Input
@@ -346,6 +491,8 @@ function TemplateEditor({ initial, submitLabel, onCancel, onSave }: EditorProps)
           data-testid="editor-name"
         />
       </div>
+
+      {/* Description */}
       <div className="space-y-1">
         <Label className="text-xs">{t("editorDescription")}</Label>
         <Textarea
@@ -355,24 +502,41 @@ function TemplateEditor({ initial, submitLabel, onCancel, onSave }: EditorProps)
           className="text-xs"
         />
       </div>
-      <div className="space-y-1">
-        <Label className="text-xs">{t("editorCategory")}</Label>
-        <Select
-          value={draft.category}
-          onValueChange={(v) => setDraft({ ...draft, category: v as SubAgentTemplate["category"] })}
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {CATEGORIES.map((c) => (
-              <SelectItem key={c} value={c}>
-                {c}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+
+      {/* Icon + Category row */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <Label className="text-xs">{t("editorIcon")}</Label>
+          <Input
+            value={draft.icon ?? ""}
+            onChange={(e) => setDraft({ ...draft, icon: e.target.value || undefined })}
+            placeholder={t("editorIconPlaceholder")}
+            data-testid="editor-icon"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">{t("editorCategory")}</Label>
+          <Select
+            value={draft.category}
+            onValueChange={(v) =>
+              setDraft({ ...draft, category: v as SubAgentTemplate["category"] })
+            }
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CATEGORIES.map((c) => (
+                <SelectItem key={c} value={c}>
+                  {t(`categories.${c}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
+
+      {/* Task template */}
       <div className="space-y-1">
         <Label className="text-xs">{t("editorTaskTemplate")}</Label>
         <Textarea
@@ -384,6 +548,184 @@ function TemplateEditor({ initial, submitLabel, onCancel, onSave }: EditorProps)
           data-testid="editor-task-template"
         />
       </div>
+
+      {/* Variables editor */}
+      <SettingsDivider label={t("editorVariables")} />
+      {(draft.variables ?? []).map((v, i) => (
+        <div
+          key={i}
+          className="space-y-2 rounded border p-2"
+          data-testid={`editor-variable-row-${i}`}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-medium text-muted-foreground">Variable {i + 1}</span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6"
+              onClick={() => removeVariable(i)}
+              title={t("editorRemoveVariable")}
+              data-testid={`editor-variable-remove-${i}`}
+            >
+              <XIcon className="size-3" />
+            </Button>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-[10px]">{t("editorVariableName")}</Label>
+              <Input
+                value={v.name}
+                onChange={(e) => updateVariable(i, { name: e.target.value })}
+                placeholder={t("editorVariableNamePlaceholder")}
+                className="h-7 text-xs"
+                data-testid={`editor-var-name-${i}`}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px]">{t("editorVariableDescription")}</Label>
+              <Input
+                value={v.description}
+                onChange={(e) => updateVariable(i, { description: e.target.value })}
+                placeholder={t("editorVariableDescriptionPlaceholder")}
+                className="h-7 text-xs"
+                data-testid={`editor-var-desc-${i}`}
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <Checkbox
+                checked={v.required}
+                onCheckedChange={(c) => updateVariable(i, { required: !!c })}
+                data-testid={`editor-var-required-${i}`}
+              />
+              <span className="text-[10px]">{t("editorVariableRequired")}</span>
+            </label>
+            <div className="flex-1 space-y-1">
+              <Input
+                value={v.defaultValue ?? ""}
+                onChange={(e) => updateVariable(i, { defaultValue: e.target.value || undefined })}
+                placeholder={t("editorVariableDefaultValue")}
+                className="h-7 text-xs"
+                data-testid={`editor-var-default-${i}`}
+              />
+            </div>
+          </div>
+        </div>
+      ))}
+      <Button variant="outline" size="sm" onClick={addVariable} data-testid="editor-add-variable">
+        <PlusIcon className="mr-1 size-3" />
+        {t("editorAddVariable")}
+      </Button>
+
+      {/* Advanced configuration */}
+      <SettingsGroup title={t("configTitle")} defaultOpen={false}>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs">{t("editorMaxSteps")}</Label>
+            <Input
+              type="number"
+              min={1}
+              max={100}
+              value={draft.config?.maxSteps ?? ""}
+              onChange={(e) =>
+                updateConfig("maxSteps", e.target.value ? Number(e.target.value) : undefined)
+              }
+              className="h-8 text-xs"
+              data-testid="editor-max-steps"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{t("editorTimeout")}</Label>
+            <div className="flex items-center gap-1">
+              <Input
+                type="number"
+                min={1000}
+                step={1000}
+                value={draft.config?.timeout ?? ""}
+                onChange={(e) =>
+                  updateConfig("timeout", e.target.value ? Number(e.target.value) : undefined)
+                }
+                className="h-8 text-xs flex-1"
+                data-testid="editor-timeout"
+              />
+              <span className="text-[10px] text-muted-foreground shrink-0">
+                {t("editorTimeoutUnit")}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs">{t("editorPriority")}</Label>
+            <Select
+              value={draft.config?.priority ?? ""}
+              onValueChange={(v) =>
+                updateConfig("priority", v ? (v as SubAgentPriority) : undefined)
+              }
+            >
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PRIORITIES.map((p) => (
+                  <SelectItem key={p} value={p}>
+                    {tPriority(SUB_AGENT_PRIORITY_CONFIG[p].labelKey)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{t("editorTemperature")}</Label>
+            <Input
+              type="number"
+              min={0}
+              max={2}
+              step={0.1}
+              value={draft.config?.temperature ?? ""}
+              onChange={(e) =>
+                updateConfig("temperature", e.target.value ? Number(e.target.value) : undefined)
+              }
+              className="h-8 text-xs"
+              data-testid="editor-temperature"
+            />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">{t("editorModel")}</Label>
+          <Input
+            value={draft.config?.model ?? ""}
+            onChange={(e) => updateConfig("model", e.target.value || undefined)}
+            placeholder={t("editorModelPlaceholder")}
+            className="h-8 text-xs"
+            data-testid="editor-model"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">{t("editorProvider")}</Label>
+          <Input
+            value={draft.config?.provider ?? ""}
+            onChange={(e) => updateConfig("provider", e.target.value || undefined)}
+            placeholder={t("editorProviderPlaceholder")}
+            className="h-8 text-xs"
+            data-testid="editor-provider"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">{t("editorSystemPrompt")}</Label>
+          <Textarea
+            rows={2}
+            value={draft.config?.systemPrompt ?? ""}
+            onChange={(e) => updateConfig("systemPrompt", e.target.value || undefined)}
+            className="text-xs"
+            placeholder={t("editorSystemPromptPlaceholder")}
+            data-testid="editor-system-prompt"
+          />
+        </div>
+      </SettingsGroup>
+
+      {/* Action buttons */}
       <div className="flex justify-end gap-2 pt-1">
         <Button variant="ghost" size="sm" onClick={onCancel}>
           {tCommon("cancel")}

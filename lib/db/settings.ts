@@ -20,6 +20,7 @@ const DEFAULTS: AppSettings = {
   permissionMode: "default",
   alwaysAllowTools: [],
   builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
+  routingFallbackEnabled: true,
   apiKey: undefined,
   apiBaseUrl: undefined,
   activeProviderId: undefined,

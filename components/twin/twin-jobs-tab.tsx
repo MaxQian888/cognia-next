@@ -1,6 +1,7 @@
 "use client"
 
 import { useLiveQuery } from "dexie-react-hooks"
+import { useTranslations } from "next-intl"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
@@ -9,6 +10,7 @@ import { listTwinJobsByTwin } from "@/lib/db/twin-jobs"
 import { listTwinSourcesByTwinAndStatus } from "@/lib/db/twin-sources"
 import { enqueueIngestJob } from "@/lib/twin/ingest"
 import { enqueueDistillJob } from "@/lib/twin/distill"
+import { parseDeadLetter } from "@/lib/twin/job-retry"
 import type { TwinJob, TwinJobStatus } from "@/types/twin"
 
 const STATUS_VARIANT: Record<TwinJobStatus, "default" | "secondary" | "destructive" | "outline"> = {
@@ -20,6 +22,7 @@ const STATUS_VARIANT: Record<TwinJobStatus, "default" | "secondary" | "destructi
 }
 
 export function TwinJobsTab({ twinId }: { twinId: string }) {
+  const t = useTranslations("twin.jobs")
   const jobs = useLiveQuery(() => listTwinJobsByTwin(twinId), [twinId], [])
 
   const queueIngest = async () => {
@@ -35,28 +38,25 @@ export function TwinJobsTab({ twinId }: { twinId: string }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-medium">Jobs ({jobs.length})</h2>
+        <h2 className="text-lg font-medium">{t("headerCount", { count: jobs.length })}</h2>
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={() => void queueIngest()}>
-            Queue ingest for pending sources
+            {t("queueIngest")}
           </Button>
           <Button size="sm" onClick={() => void queueDistill()}>
-            Queue distill
+            {t("queueDistill")}
           </Button>
         </div>
       </div>
 
       {jobs.length === 0 ? (
         <Card className="p-6 text-center">
-          <p className="text-muted-foreground text-sm">
-            No jobs yet. Add sources, then queue an ingest run; queue a distill once the chunks are
-            indexed.
-          </p>
+          <p className="text-muted-foreground text-sm">{t("emptyHint")}</p>
         </Card>
       ) : (
         <ul className="flex flex-col gap-2">
           {jobs.map((job) => (
-            <JobRow key={job.id} job={job} />
+            <JobRow key={job.id} job={job} t={t} />
           ))}
         </ul>
       )}
@@ -64,7 +64,8 @@ export function TwinJobsTab({ twinId }: { twinId: string }) {
   )
 }
 
-function JobRow({ job }: { job: TwinJob }) {
+function JobRow({ job, t }: { job: TwinJob; t: ReturnType<typeof useTranslations> }) {
+  const deadLetter = parseDeadLetter(job.errorMessage)
   return (
     <Card className="flex flex-col gap-2 p-3">
       <div className="flex items-center justify-between gap-2">
@@ -75,17 +76,31 @@ function JobRow({ job }: { job: TwinJob }) {
           <Badge variant="outline" className="capitalize">
             {job.kind}
           </Badge>
+          {job.retryCount > 0 && (
+            <Badge variant="secondary" className="font-mono text-[10px]">
+              attempt {job.retryCount + 1}
+            </Badge>
+          )}
+          {deadLetter ? (
+            <Badge variant="destructive" className="text-[10px]">
+              dead-letter
+            </Badge>
+          ) : null}
           <span className="text-sm font-medium">{job.phase}</span>
         </div>
         <span className="text-muted-foreground text-xs">
-          queued {new Date(job.queuedAt).toLocaleString()}
+          {t("queuedAt", { when: new Date(job.queuedAt).toLocaleString() })}
         </span>
       </div>
       <Progress value={job.progress} max={100} />
-      {job.errorMessage ? <p className="text-destructive text-xs">⚠ {job.errorMessage}</p> : null}
+      {job.errorMessage ? (
+        <p className="text-destructive text-xs">
+          {t("errorPrefix")} {deadLetter ? deadLetter.message : job.errorMessage}
+        </p>
+      ) : null}
       {job.outputDraftIds && job.outputDraftIds.length > 0 ? (
         <p className="text-muted-foreground text-xs">
-          {job.outputDraftIds.length} draft{job.outputDraftIds.length === 1 ? "" : "s"} produced
+          {t("draftsProduced", { count: job.outputDraftIds.length })}
         </p>
       ) : null}
     </Card>

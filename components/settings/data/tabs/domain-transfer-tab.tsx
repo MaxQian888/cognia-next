@@ -146,6 +146,7 @@ function DomainRow({ domain, labelKey }: { domain: DomainKey; labelKey: string }
         </Button>
         <DomainImportDialog
           domain={domain}
+          labelKey={labelKey}
           trigger={
             <Button variant="outline" size="sm" className="h-8 flex-1 text-xs sm:flex-none">
               <UploadIcon className="mr-1 size-3.5" />

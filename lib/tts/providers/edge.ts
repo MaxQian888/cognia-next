@@ -15,6 +15,8 @@ export interface EdgeTTSOptions {
   rate?: string
   pitch?: string
   volume?: string
+  customSSMLEnabled?: boolean
+  customSSML?: string
 }
 
 interface EdgeTauriResponse {
@@ -26,10 +28,20 @@ export async function generateEdgeTTS(
   text: string,
   options: EdgeTTSOptions = {}
 ): Promise<TTSResponse> {
-  const { voice = "en-US-JennyNeural", rate = "+0%", pitch = "+0Hz", volume = "+0%" } = options
+  const {
+    voice = "en-US-JennyNeural",
+    rate = "+0%",
+    pitch = "+0Hz",
+    volume = "+0%",
+    customSSMLEnabled,
+    customSSML,
+  } = options
+
+  // Use custom SSML if enabled and provided
+  const effectiveText = customSSMLEnabled && customSSML ? customSSML : text
 
   const max = TTS_PROVIDERS.edge.maxTextLength
-  if (text.length > max) {
+  if (effectiveText.length > max) {
     return {
       success: false,
       error: getTTSError("text-too-long", `Maximum ${max} characters`).message,
@@ -46,7 +58,7 @@ export async function generateEdgeTTS(
   try {
     const { invoke } = await import("@tauri-apps/api/core")
     const response = await invoke<EdgeTauriResponse>("tts_edge_synthesize", {
-      request: { text, voice, rate, pitch, volume },
+      request: { text: effectiveText, voice, rate, pitch, volume },
     })
     const bytes = base64ToBytes(response.body_b64)
     return {

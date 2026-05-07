@@ -427,6 +427,7 @@ describe("simple search setters delegating to saveSettings", () => {
     ["setSearchSafeSearchLevel", "strict", "searchSafeSearchLevel"],
     ["setSourceVerificationSettings", { enabled: true }, "sourceVerificationSettings"],
     ["setDefaultSearchSources", ["src-1"], "defaultSearchSources"],
+    ["setRoutingFallbackEnabled", false, "routingFallbackEnabled"],
   ]
 
   it.each(cases)("%s persists patch and updates state", async (action, value, fieldName) => {
@@ -1043,8 +1044,8 @@ describe("appearance setters", () => {
 })
 
 describe("repairImportedVscodeThemes", () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { repairImportedVscodeThemes } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     require("./settings-store") as typeof import("./settings-store")
 
   it("returns the same object reference when nothing needs repair", () => {

@@ -1,30 +1,25 @@
+"use client"
+
 /**
- * Agent Teams workspace page (server entry).
- *
- * Next.js `output: "export"` requires every dynamic route segment to declare
- * the params it should pre-render via `generateStaticParams`. teamIds are
- * stored in Dexie and only known at runtime in the Tauri shell, so we ship
- * an empty list — the route is reachable via client-side navigation from
- * `/agent-teams`. Splitting the actual UI into a `"use client"` child
- * (`workspace-client.tsx`) keeps `generateStaticParams` valid (it can only
- * be exported from a Server Component).
+ * Redirects `/agent-teams/[teamId]` to `/agent-teams/workspace?teamId=…`
+ * so the canonical workspace route is the search-param form, which is
+ * compatible with Next.js `output: "export"`.
  */
 
-import { AgentTeamWorkspaceClient } from "./workspace-client"
+import { use, useEffect } from "react"
+import { useRouter } from "next/navigation"
 
 interface PageProps {
   params: Promise<{ teamId: string }>
 }
 
-// Static export requires `dynamicParams = false`; teamIds aren't known at
-// build time so we pre-render a single sentinel and let the client child
-// resolve the real id from the URL at runtime via `usePromise(params)`.
-export function generateStaticParams(): Array<{ teamId: string }> {
-  return [{ teamId: "_" }]
-}
+export default function AgentTeamRedirectPage({ params }: PageProps) {
+  const { teamId } = use(params)
+  const router = useRouter()
 
-export const dynamicParams = false
+  useEffect(() => {
+    router.replace(`/agent-teams/workspace?teamId=${encodeURIComponent(teamId)}`)
+  }, [teamId, router])
 
-export default function AgentTeamWorkspacePage({ params }: PageProps) {
-  return <AgentTeamWorkspaceClient params={params} />
+  return null
 }

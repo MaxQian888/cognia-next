@@ -2,11 +2,28 @@
 
 import type { UIMessage } from "ai"
 import { create } from "zustand"
-import type { PendingApproval, SendOptions } from "@/lib/claude/types"
+import type { PendingApproval, SendContent, SendOptions } from "@/lib/claude/types"
 
 export type ChatStatus = "idle" | "streaming" | "awaiting_approval" | "error"
 
 export type PermissionMode = NonNullable<SendOptions["permissionMode"]>
+
+/**
+ * Snapshot of a session's most recent send. The renderer holds this so that
+ * `lib/claude/routing-fallback.ts` can re-issue the turn against the next
+ * entry in `options.aliasResolution.fallbackEntries` when the SDK reports a
+ * transient error. Transient — never persisted to Dexie.
+ *
+ * `attemptIndex` is the index into `fallbackEntries` for the swap that
+ * produced the current `options.provider`/`model` pair: 0 on the original
+ * send (alias resolved to its primary), N for retry against `fallbackEntries[N]`.
+ * Capping retries at `fallbackEntries.length` keeps us bounded.
+ */
+export interface LastSendCacheEntry {
+  content: SendContent
+  options: SendOptions
+  attemptIndex: number
+}
 
 export interface FileReference {
   /** Absolute path on disk; what the SDK needs in `additionalDirectories`. */
@@ -56,6 +73,13 @@ interface ChatState {
    * an opt-in for *one* message, not a sticky setting.
    */
   webSearchOnForNextSend: boolean
+  /**
+   * Per-session snapshot of the last send so a `session_ended` with a
+   * transient error can re-issue the turn through the alias's fallback
+   * chain without re-running `resolveSendOptions`. Cleared on a clean
+   * session_ended and on session change. See `lib/claude/routing-fallback.ts`.
+   */
+  lastSendBySession: Record<string, LastSendCacheEntry>
 
   setActiveSession: (id: string | null) => void
   setMessages: (msgs: UIMessage[]) => void
@@ -72,6 +96,9 @@ interface ChatState {
   setPendingCommandOverrides: (overrides: PendingCommandOverrides | null) => void
   toggleBookmark: (messageId: string) => void
   setWebSearchOnForNextSend: (v: boolean) => void
+  setLastSend: (sessionId: string, entry: LastSendCacheEntry) => void
+  bumpLastSendAttempt: (sessionId: string) => void
+  clearLastSend: (sessionId: string) => void
   clear: () => void
 }
 
@@ -86,6 +113,7 @@ export const useChatStore = create<ChatState>((set) => ({
   pendingCommandOverrides: null,
   bookmarkedIds: [],
   webSearchOnForNextSend: false,
+  lastSendBySession: {},
 
   setActiveSession: (id) =>
     set({
@@ -99,6 +127,7 @@ export const useChatStore = create<ChatState>((set) => ({
       pendingCommandOverrides: null,
       bookmarkedIds: [],
       webSearchOnForNextSend: false,
+      lastSendBySession: {},
     }),
   setMessages: (msgs) => set({ messages: msgs }),
   appendMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
@@ -141,6 +170,28 @@ export const useChatStore = create<ChatState>((set) => ({
       }
     }),
   setWebSearchOnForNextSend: (v) => set({ webSearchOnForNextSend: v }),
+  setLastSend: (sessionId, entry) =>
+    set((s) => ({
+      lastSendBySession: { ...s.lastSendBySession, [sessionId]: entry },
+    })),
+  bumpLastSendAttempt: (sessionId) =>
+    set((s) => {
+      const cur = s.lastSendBySession[sessionId]
+      if (!cur) return s
+      return {
+        lastSendBySession: {
+          ...s.lastSendBySession,
+          [sessionId]: { ...cur, attemptIndex: cur.attemptIndex + 1 },
+        },
+      }
+    }),
+  clearLastSend: (sessionId) =>
+    set((s) => {
+      if (!s.lastSendBySession[sessionId]) return s
+      const next = { ...s.lastSendBySession }
+      delete next[sessionId]
+      return { lastSendBySession: next }
+    }),
   clear: () =>
     set({
       activeSessionId: null,
@@ -153,5 +204,6 @@ export const useChatStore = create<ChatState>((set) => ({
       pendingCommandOverrides: null,
       bookmarkedIds: [],
       webSearchOnForNextSend: false,
+      lastSendBySession: {},
     }),
 }))

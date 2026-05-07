@@ -1,0 +1,169 @@
+"use client"
+
+// Defaults tab — permission mode, default model, working directory, append
+// system prompt, routing fallback toggle. All fields back AppSettings.* and
+// persist via `useSettingsStore.save`. Local state mirrors `settings` so
+// blur-persist works without flicker.
+
+import { useEffect, useState } from "react"
+import { useTranslations } from "next-intl"
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Switch } from "@/components/ui/switch"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { useSettingsStore } from "@/stores/settings"
+import type { AppSettings } from "@/lib/claude/types"
+import { DefaultModelPicker } from "../parts/default-model-picker"
+
+type PermissionMode = NonNullable<AppSettings["permissionMode"]>
+
+const PERMISSION_MODES: PermissionMode[] = ["default", "acceptEdits", "bypassPermissions", "plan"]
+
+const PERMISSION_MODE_LABEL_KEY: Record<PermissionMode, string> = {
+  default: "permDefault",
+  acceptEdits: "permAcceptEdits",
+  bypassPermissions: "permBypass",
+  plan: "permPlan",
+}
+
+export function DefaultsTab() {
+  const t = useTranslations("settings.agentRuntimeSection.defaults")
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>("default")
+  const [workingDir, setWorkingDir] = useState("")
+  const [appendSystem, setAppendSystem] = useState("")
+  const [routingFallback, setRoutingFallback] = useState(true)
+
+  useEffect(() => {
+    if (!settings) return
+    // Mirror persisted settings into local state so the inputs blur-persist
+    // without flicker. The cascading-render warning is acceptable here —
+    // settings only changes on initial load + rare external writes.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setPermissionMode((settings.permissionMode ?? "default") as PermissionMode)
+    setWorkingDir(settings.defaultWorkingDir ?? "")
+    setAppendSystem(settings.defaultSystemPrompt ?? "")
+    setRoutingFallback(settings.routingFallbackEnabled !== false)
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [settings])
+
+  const persistPermission = (next: string) => {
+    if (!PERMISSION_MODES.includes(next as PermissionMode)) return
+    const value = next as PermissionMode
+    setPermissionMode(value)
+    void save({ permissionMode: value })
+  }
+
+  const persistWorkingDir = () => {
+    const trimmed = workingDir.trim()
+    void save({ defaultWorkingDir: trimmed || undefined })
+  }
+
+  const persistAppend = () => {
+    const trimmed = appendSystem.trim()
+    void save({ defaultSystemPrompt: trimmed || undefined })
+  }
+
+  const persistRouting = (value: boolean) => {
+    setRoutingFallback(value)
+    void save({ routingFallbackEnabled: value })
+  }
+
+  return (
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <Card className="md:col-span-2">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">{t("permissionTitle")}</CardTitle>
+          <CardDescription className="text-xs">{t("permissionDesc")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <Label htmlFor="agent-runtime-perm" className="text-xs">
+            {t("permissionMode")}
+          </Label>
+          <Select value={permissionMode} onValueChange={persistPermission}>
+            <SelectTrigger id="agent-runtime-perm" className="w-full md:w-[280px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PERMISSION_MODES.map((mode) => (
+                <SelectItem key={mode} value={mode}>
+                  {t(PERMISSION_MODE_LABEL_KEY[mode])}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">{t("modelTitle")}</CardTitle>
+          <CardDescription className="text-xs">{t("modelDesc")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <DefaultModelPicker />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">{t("workingDirTitle")}</CardTitle>
+          <CardDescription className="text-xs">{t("workingDirDesc")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Input
+            value={workingDir}
+            onChange={(e) => setWorkingDir(e.target.value)}
+            onBlur={persistWorkingDir}
+            placeholder={t("workingDirPlaceholder")}
+            aria-label={t("workingDirTitle")}
+          />
+        </CardContent>
+      </Card>
+
+      <Card className="md:col-span-2">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">{t("appendTitle")}</CardTitle>
+          <CardDescription className="text-xs">{t("appendDesc")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Textarea
+            value={appendSystem}
+            onChange={(e) => setAppendSystem(e.target.value)}
+            onBlur={persistAppend}
+            rows={4}
+            aria-label={t("appendTitle")}
+            placeholder={t("appendPlaceholder")}
+          />
+        </CardContent>
+      </Card>
+
+      <Card className="md:col-span-2">
+        <CardHeader className="flex flex-row items-center justify-between gap-3 pb-3">
+          <div className="space-y-0.5">
+            <CardTitle className="text-sm">{t("routingTitle")}</CardTitle>
+            <CardDescription className="text-xs">{t("routingDesc")}</CardDescription>
+          </div>
+          <Switch
+            checked={routingFallback}
+            onCheckedChange={persistRouting}
+            aria-label={t("routingTitle")}
+          />
+        </CardHeader>
+      </Card>
+    </div>
+  )
+}
+
+export default DefaultsTab

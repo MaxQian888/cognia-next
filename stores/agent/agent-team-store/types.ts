@@ -77,6 +77,7 @@ export interface AgentTeamState {
   // Messages
   addMessage: (input: SendMessageInput) => AgentTeamMessage
   upsertMessage: (message: AgentTeamMessage) => void
+  removeMessage: (messageId: string) => void
   markMessageRead: (messageId: string) => void
   markAllMessagesRead: (teammateId: string) => void
   markTeamMessagesRead: (teamId: string) => void

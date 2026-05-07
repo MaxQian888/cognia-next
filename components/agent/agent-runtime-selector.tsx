@@ -28,12 +28,14 @@ import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 
 interface Props {
   className?: string
+  /** Disable the selector externally (e.g. while a turn is streaming). */
+  disabled?: boolean
 }
 
 // Picks runtime type only (claude-sdk | external). The external-agent
 // record itself is selected by the sibling `<ExternalAgentSelector>` in
 // the composer toolbar — keeping this widget single-purpose.
-export function AgentRuntimeSelector({ className }: Props) {
+export function AgentRuntimeSelector({ className, disabled }: Props) {
   const t = useTranslations("agentRuntime")
   const runtime = useAgentRuntimeStore((s) => s.runtime)
   const setRuntime = useAgentRuntimeStore((s) => s.setRuntime)
@@ -51,6 +53,7 @@ export function AgentRuntimeSelector({ className }: Props) {
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger
+            disabled={disabled}
             className={cn(
               "inline-flex h-6 items-center gap-1 rounded-md border border-transparent px-1.5 text-[11px] hover:border-border hover:bg-accent",
               className

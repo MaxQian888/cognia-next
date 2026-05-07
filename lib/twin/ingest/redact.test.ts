@@ -113,3 +113,74 @@ describe("redactText", () => {
     expect(out).toBe("hello <UNKNOWN_001>")
   })
 })
+
+describe("redactText — extended PII coverage", () => {
+  it("redacts public IPv4 addresses but leaves private/loopback alone", () => {
+    const text = "Server at 8.8.8.8 (cache 192.168.1.1, local 127.0.0.1, link 169.254.1.5)"
+    const { redacted } = redactText(text)
+    expect(redacted).toContain("<IP_ADDR_001>")
+    expect(redacted).toContain("192.168.1.1") // private — left alone
+    expect(redacted).toContain("127.0.0.1") // loopback — left alone
+    expect(redacted).toContain("169.254.1.5") // link-local — left alone
+  })
+
+  it("redacts uncompressed IPv6 addresses", () => {
+    const { redacted } = redactText("endpoint 2001:0db8:85a3:0000:0000:8a2e:0370:7334 talks back")
+    expect(redacted).toContain("<IP_ADDR_001>")
+    expect(redacted).not.toContain("2001:0db8")
+  })
+
+  it("redacts known API key prefixes", () => {
+    const cases = [
+      "OpenAI: sk-proj-abc123def456ghi789jkl012",
+      "Anthropic: sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxx",
+      "GitHub PAT: ghp_abcdefghijklmnopqrst1234",
+      "Slack bot: xoxb-1234567890-abcdefghijkl",
+      "Google: AIzaSyA-aaaabbbbccccdddd1234567",
+    ]
+    for (const c of cases) {
+      const { redacted } = redactText(c)
+      expect(redacted).toMatch(/<API_KEY_\d{3}>/)
+    }
+  })
+
+  it("redacts hint-driven secrets even without recognized prefixes", () => {
+    const text = `api_key="ZyAaaaabbbbccccddddeeeeffffgggg"\nbearer: ${"b".repeat(40)}`
+    const { redacted } = redactText(text)
+    expect(redacted).toMatch(/<API_KEY_\d{3}>/)
+    expect(redacted).not.toContain("b".repeat(40))
+  })
+
+  it("redacts CN passport prefixes (E/G)", () => {
+    const text = "Passport E12345678 + G87654321"
+    const { redacted } = redactText(text)
+    expect(redacted).not.toContain("E12345678")
+    expect(redacted).not.toContain("G87654321")
+  })
+
+  it("redacts CN driver licenses only with hint context", () => {
+    // With hint — gets redacted
+    const hinted = redactText("驾照 123456789012 (二级)")
+    expect(hinted.redacted).toContain("<DRIVER_LICENSE_001>")
+    // Without hint — 12 random digits left alone
+    const bare = redactText("Order id 123456789012 confirmed")
+    expect(bare.redacted).toContain("123456789012")
+  })
+
+  it("hasNoLeakingPii flags every new kind", () => {
+    expect(hasNoLeakingPii("Server at 8.8.8.8")).toBe(false)
+    expect(hasNoLeakingPii("2001:0db8:85a3:0000:0000:8a2e:0370:7334")).toBe(false)
+    expect(hasNoLeakingPii("token sk-proj-abc123def456ghi789jkl012")).toBe(false)
+    expect(hasNoLeakingPii("Passport E12345678")).toBe(false)
+  })
+
+  it("hasNoLeakingPii is idempotent across consecutive calls", () => {
+    // Regression guard for the regex .lastIndex bug — running the gate
+    // twice in a row used to flip the second result because the global
+    // regexes mutated state between calls.
+    expect(hasNoLeakingPii("Server at 8.8.8.8")).toBe(false)
+    expect(hasNoLeakingPii("Server at 8.8.8.8")).toBe(false)
+    expect(hasNoLeakingPii("clean text")).toBe(true)
+    expect(hasNoLeakingPii("clean text")).toBe(true)
+  })
+})

@@ -26,16 +26,28 @@ jest.mock("@/components/agent/agent-mode-selector", () => ({
   },
 }))
 jest.mock("@/components/agent/agent-runtime-selector", () => ({
-  AgentRuntimeSelector: () => null,
+  AgentRuntimeSelector: (props: Record<string, unknown>) => {
+    Object.assign(lastSelectorProps, props)
+    return <div data-testid="agent-runtime-selector" />
+  },
 }))
 jest.mock("@/components/agent/external-agent-selector", () => ({
-  ExternalAgentSelector: () => null,
+  ExternalAgentSelector: (props: Record<string, unknown>) => {
+    Object.assign(lastSelectorProps, props)
+    return <div data-testid="external-agent-selector" />
+  },
 }))
 jest.mock("../permission-mode-indicator", () => ({
-  PermissionModeIndicator: () => null,
+  PermissionModeIndicator: (props: Record<string, unknown>) => {
+    Object.assign(lastSelectorProps, props)
+    return <div data-testid="permission-mode-indicator" />
+  },
 }))
 jest.mock("./web-search-toggle", () => ({
-  WebSearchToggle: () => null,
+  WebSearchToggle: (props: Record<string, unknown>) => {
+    Object.assign(lastSelectorProps, props)
+    return <div data-testid="web-search-toggle" />
+  },
 }))
 jest.mock("@/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -55,29 +67,35 @@ jest.mock("@/components/ai-elements/context", () => ({
   ContextCacheUsage: () => null,
 }))
 
-// Force the selector branch we care about: runtime === "claude-sdk".
+// Agent store state — mutated by tests that need different runtime/mode.
+let agentRuntimeState = {
+  runtime: "claude-sdk" as string,
+  modeId: "general" as string,
+  setModeId: jest.fn(),
+  externalAgentId: null as string | null,
+  setExternalAgentId: jest.fn(),
+}
+
 jest.mock("@/stores/agent", () => ({
-  useAgentRuntimeStore: <T,>(
-    selector: (s: {
-      runtime: string
-      modeId: string
-      setModeId: (s: string) => void
-      externalAgentId: string | null
-      setExternalAgentId: (id: string | null) => void
-    }) => T
-  ) =>
-    selector({
-      runtime: "claude-sdk",
-      modeId: "general",
-      setModeId: jest.fn(),
-      externalAgentId: null,
-      setExternalAgentId: jest.fn(),
-    }),
+  useAgentRuntimeStore: <T,>(selector: (s: typeof agentRuntimeState) => T) =>
+    selector(agentRuntimeState),
 }))
 
+const setActiveAgentMock = jest.fn()
+jest.mock("@/stores/agent/external-agent-store", () => ({
+  useExternalAgentStore: {
+    getState: () => ({ setActiveAgent: setActiveAgentMock }),
+  },
+}))
+
+let chatStoreState = {
+  messages: [] as unknown[],
+  status: "idle" as string,
+  setPermissionMode: jest.fn(),
+}
+
 jest.mock("@/stores/chat", () => ({
-  useChatStore: <T,>(selector: (s: { messages: unknown[]; setPermissionMode: jest.Mock }) => T) =>
-    selector({ messages: [], setPermissionMode: jest.fn() }),
+  useChatStore: <T,>(selector: (s: typeof chatStoreState) => T) => selector(chatStoreState),
 }))
 
 jest.mock("@/stores/settings", () => ({
@@ -95,6 +113,19 @@ const session: ChatSession = {
 
 beforeEach(() => {
   pushSpy.mockClear()
+  setActiveAgentMock.mockClear()
+  chatStoreState = {
+    messages: [],
+    status: "idle",
+    setPermissionMode: jest.fn(),
+  }
+  agentRuntimeState = {
+    runtime: "claude-sdk",
+    modeId: "general",
+    setModeId: jest.fn(),
+    externalAgentId: null,
+    setExternalAgentId: jest.fn(),
+  }
   for (const key of Object.keys(lastSelectorProps)) delete lastSelectorProps[key]
 })
 
@@ -119,5 +150,25 @@ describe("BottomToolbar — agent-mode wiring", () => {
     render(<BottomToolbar session={session} />)
     expect(lastSelectorProps.selectedModeId).toBe("general")
     expect(typeof lastSelectorProps.onModeChange).toBe("function")
+  })
+
+  it("passes disabled=true to child controls when streaming", () => {
+    chatStoreState.status = "streaming"
+    render(<BottomToolbar session={session} />)
+    expect(lastSelectorProps.disabled).toBe(true)
+  })
+
+  it("passes disabled=false to child controls when idle", () => {
+    render(<BottomToolbar session={session} />)
+    expect(lastSelectorProps.disabled).toBe(false)
+  })
+
+  it("syncs externalAgentId to useExternalAgentStore on agent change", () => {
+    agentRuntimeState.runtime = "external"
+    render(<BottomToolbar session={session} />)
+    const onAgentChange = lastSelectorProps.onAgentChange as (id: string | null) => void
+    expect(typeof onAgentChange).toBe("function")
+    onAgentChange("agent-1")
+    expect(setActiveAgentMock).toHaveBeenCalledWith("agent-1")
   })
 })

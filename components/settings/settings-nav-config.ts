@@ -35,6 +35,7 @@ import {
   NetworkIcon,
   TerminalSquareIcon,
   LinkIcon,
+  WorkflowIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
@@ -47,6 +48,7 @@ export type SettingsSectionId =
   | "ccswitch"
   | "agents"
   | "agent-modes"
+  | "agent-runtime"
   | "agent-teams"
   | "hooks"
   | "slash-commands"
@@ -66,6 +68,7 @@ export type SettingsSectionId =
   | "plugins"
   | "connections"
   | "data"
+  | "workflows"
   | "scheduled-tasks"
   | "remote-control"
   | "external-bridge"
@@ -139,6 +142,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "agentModes",
     group: "ai",
     icon: BotIcon,
+  },
+  {
+    id: "agent-runtime",
+    labelKey: "agentRuntime",
+    descriptionKey: "agentRuntime",
+    group: "ai",
+    icon: WorkflowIcon,
   },
   {
     id: "agent-teams",
@@ -281,6 +291,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "data",
     group: "data",
     icon: DatabaseIcon,
+  },
+  {
+    id: "workflows",
+    labelKey: "workflows",
+    descriptionKey: "workflows",
+    group: "data",
+    icon: WorkflowIcon,
   },
   {
     id: "scheduled-tasks",
@@ -439,6 +456,27 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "designer",
     "代理模式",
   ],
+  "agent-runtime": [
+    "agent runtime",
+    "built-in agent",
+    "builtin agent",
+    "sidecar",
+    "permission mode",
+    "always allow",
+    "builtin tools",
+    "a2ui bridge",
+    "routing fallback",
+    "default model",
+    "default system prompt",
+    "working directory",
+    "内置代理",
+    "代理运行时",
+    "侧载",
+    "路由回退",
+    "始终允许",
+    "权限模式",
+    "默认模型",
+  ],
   tools: [
     "tools",
     "builtin",
@@ -569,6 +607,24 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "代理界面",
   ],
   data: ["export", "import", "backup", "wipe", "indexeddb"],
+  workflows: [
+    "workflow",
+    "workflows",
+    "automation",
+    "orchestration",
+    "n8n",
+    "trigger",
+    "node",
+    "graph",
+    "flow",
+    "pipeline",
+    "工作流",
+    "编排",
+    "自动化",
+    "流程",
+    "可视化",
+    "节点",
+  ],
   "scheduled-tasks": [
     "schedule",
     "scheduler",

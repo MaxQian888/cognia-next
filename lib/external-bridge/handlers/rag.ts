@@ -1,46 +1,56 @@
 /**
  * MCP tool handler — `rag_search`.
  *
- * For the Phase 1 MVP we run RAG over the wiki *sections* table because:
- *   1. Sections give chunk-level granularity without needing a configured
- *      vector store at the bridge layer.
- *   2. Bring-your-own-embedding lives in lib/twin (`twinChunks`) and that
- *      table is twin-scoped, so reusing it for repo-wide search would
- *      require synthetic twinIds + a vector backend that may not be
- *      configured at all.
- *   3. The MCP tool's contract — "give me code passages relevant to my
- *      query" — is satisfied by section-level snippets with their
- *      sourceRefs intact.
+ * Two retrieval surfaces:
  *
- * Phase 2 expansion: when the user has a vector backend configured, this
- * handler swaps in the contextual-retrieval pipeline (`lib/ai/rag/...`)
- * and falls back to the BM25-ish path here when the backend is offline.
+ *   1. **Wiki RAG** (`scope: "cognia-self" | "user-repo" | "all"`) — the
+ *      Phase 1 default. Section-level snippets over the generated wiki.
+ *      Pure BM25-ish keyword scoring; no vector backend required.
+ *   2. **Twin RAG** (`scope: "twin"`) — Phase 2 expansion that lights up
+ *      the user's digital-twin chunks for external coding agents. Falls
+ *      back to BM25 over Dexie when the configured vector backend isn't
+ *      available, so a misconfigured embedding key doesn't lock external
+ *      agents out of the surface.
+ *
+ * Permission gating is the caller's job (`permission-gate.ts`); this
+ * handler only does retrieval. The `rag:twin` scope MUST be on the
+ * enabledScopes list before the gate dispatches to us.
  */
 
 import { listWikiArticlesByScope, listAllWikiArticles } from "@/lib/db/wiki-articles"
 import { listWikiSectionsByArticle } from "@/lib/db/wiki-sections"
+import { listTwinChunksByTwin } from "@/lib/db/twin-chunks"
+import { listTwinSourcesByTwin } from "@/lib/db/twin-sources"
 import type { WikiArticle, WikiScope, WikiSourceRef } from "@/types/wiki"
+
+export type RagSearchScope = WikiScope | "all" | "twin"
 
 export interface RagSearchInput {
   query: string
-  /** Defaults to "all". */
-  scope?: WikiScope | "all"
+  /** Defaults to "all". `"twin"` requires `rag:twin` scope. */
+  scope?: RagSearchScope
   /** Defaults to 8; clamped to [1, 30]. */
   k?: number
   /** Currently a no-op; reserved for vector-backed reranking in Phase 2. */
   rerank?: boolean
+  /** Required when `scope === "twin"`. */
+  twinId?: string
 }
 
 export interface RagSearchHit {
   filePath: string
   lineStart: number
   lineEnd: number
-  /** Snippet body — the section's bodyMd. */
+  /** Snippet body — the section's bodyMd or twin chunk content. */
   content: string
   /** Combined keyword score + parent article pageRank tie-break. */
   score: number
-  /** The wiki article slug this section was sliced from. */
-  articleSlug: string
+  /** The wiki article slug this section was sliced from (wiki only). */
+  articleSlug?: string
+  /** The twin source id this chunk came from (twin only). */
+  twinSourceId?: string
+  /** The twin id (twin only). */
+  twinId?: string
 }
 
 export interface RagSearchOutput {
@@ -58,6 +68,21 @@ export async function ragSearch(input: RagSearchInput): Promise<RagSearchOutput>
   const k = clamp(input.k ?? DEFAULT_K, MIN_K, MAX_K)
   if (query.length === 0) return { chunks: [], considered: 0 }
 
+  if (scope === "twin") {
+    if (!input.twinId) {
+      throw new Error("rag_search: scope='twin' requires twinId")
+    }
+    return ragSearchTwin(input.twinId, query, k)
+  }
+
+  return ragSearchWiki(scope, query, k)
+}
+
+async function ragSearchWiki(
+  scope: Exclude<RagSearchScope, "twin">,
+  query: string,
+  k: number
+): Promise<RagSearchOutput> {
   const articles =
     scope === "all" ? await listAllWikiArticles() : await listWikiArticlesByScope(scope)
   const tokens = tokenize(query)
@@ -83,6 +108,55 @@ export async function ragSearch(input: RagSearchInput): Promise<RagSearchOutput>
   }
   hits.sort((a, b) => b.score - a.score)
   return { chunks: hits.slice(0, k), considered }
+}
+
+/**
+ * BM25-ish retrieval over the user's twin chunks for a single twinId.
+ *
+ * Scores each chunk against the query tokens; ties broken by source title
+ * tokens (matching "send me code from notes.md" promotes notes-derived
+ * chunks). The redacted form is what we score against (the redacted text
+ * is what the twin's runtime would see), but the *original* content is
+ * what we return — external agents see the user's real text, which is the
+ * point of the surface.
+ */
+async function ragSearchTwin(twinId: string, query: string, k: number): Promise<RagSearchOutput> {
+  const tokens = tokenize(query)
+  if (tokens.length === 0) return { chunks: [], considered: 0 }
+
+  const [chunks, sources] = await Promise.all([
+    listTwinChunksByTwin(twinId),
+    listTwinSourcesByTwin(twinId),
+  ])
+  const sourceById = new Map(sources.map((s) => [s.id, s]))
+
+  const hits: RagSearchHit[] = []
+  for (const chunk of chunks) {
+    const haystack = tokenize(chunk.contentRedacted || chunk.content)
+    if (haystack.length === 0) continue
+    const set = new Set(haystack)
+    let score = 0
+    for (const t of tokens) if (set.has(t)) score += 1
+    if (score === 0) continue
+    // Title boost — tokens that hit the source title (e.g. "notes.md")
+    // promote chunks from that source.
+    const source = sourceById.get(chunk.sourceId)
+    if (source) {
+      const titleTokens = new Set(tokenize(source.title))
+      for (const t of tokens) if (titleTokens.has(t)) score += 0.5
+    }
+    hits.push({
+      twinId,
+      twinSourceId: chunk.sourceId,
+      filePath: source?.title ?? chunk.sourceId,
+      lineStart: 0,
+      lineEnd: 0,
+      content: chunk.content,
+      score,
+    })
+  }
+  hits.sort((a, b) => b.score - a.score)
+  return { chunks: hits.slice(0, k), considered: chunks.length }
 }
 
 function scoreSection(

@@ -79,15 +79,26 @@ export async function listActiveJobsByTwin(twinId: string): Promise<TwinJob[]> {
  * Pull the oldest queued job for a twin (FIFO scheduler). Atomic: marks
  * the picked job `running` inside a transaction so two concurrent
  * executors can't claim the same row.
+ *
+ * Skips jobs whose `nextAttemptAt` is in the future — those are queued
+ * retries waiting out their backoff. Pass `now` as a deterministic clock
+ * source for tests; production callers can leave it omitted.
  */
-export async function claimNextQueuedJob(twinId?: string): Promise<TwinJob | undefined> {
+export async function claimNextQueuedJob(
+  twinId?: string,
+  now: number = Date.now()
+): Promise<TwinJob | undefined> {
   const db = getDb()
   return db.transaction("rw", db.twinJobs, async () => {
     const candidates = twinId
       ? await db.twinJobs.where(["twinId", "status"]).equals([twinId, "queued"]).toArray()
       : await db.twinJobs.where("status").equals("queued").toArray()
     if (candidates.length === 0) return undefined
-    const oldest = candidates.sort((a, b) => a.queuedAt - b.queuedAt)[0]
+    const eligible = candidates
+      .filter((j) => (j.nextAttemptAt ?? 0) <= now)
+      .sort((a, b) => a.queuedAt - b.queuedAt)
+    if (eligible.length === 0) return undefined
+    const oldest = eligible[0]
     const claimed: TwinJob = {
       ...oldest,
       status: "running",
@@ -130,6 +141,46 @@ export async function failJob(id: string, errorMessage: string): Promise<void> {
     errorMessage,
     completedAt: Date.now(),
     retryCount: (job?.retryCount ?? 0) + 1,
+  })
+}
+
+/**
+ * Requeue a transient failure for another attempt.
+ *
+ * Increments `retryCount`, flips `status` back to `queued`, and stores
+ * `nextAttemptAt` so `claimNextQueuedJob` waits out the backoff. Clears
+ * `errorMessage` so the workbench doesn't show stale failure text on a
+ * row that's about to retry.
+ */
+export async function requeueJob(id: string, nextAttemptAt: number): Promise<void> {
+  const job = await getDb().twinJobs.get(id)
+  await getDb().twinJobs.update(id, {
+    status: "queued",
+    phase: "queued",
+    progress: 0,
+    errorMessage: undefined,
+    startedAt: undefined,
+    completedAt: undefined,
+    retryCount: (job?.retryCount ?? 0) + 1,
+    nextAttemptAt,
+  })
+}
+
+/**
+ * Pause a queued or running job. The worker treats `paused` as a terminal
+ * state (won't claim, won't process) but keeps the row so the user can
+ * resume later.
+ */
+export async function pauseJob(id: string): Promise<void> {
+  await getDb().twinJobs.update(id, { status: "paused", phase: "paused" })
+}
+
+/** Resume a paused job — restores status to `queued`. */
+export async function resumeJob(id: string): Promise<void> {
+  await getDb().twinJobs.update(id, {
+    status: "queued",
+    phase: "queued",
+    nextAttemptAt: undefined,
   })
 }
 

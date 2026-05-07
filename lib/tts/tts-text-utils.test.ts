@@ -1,4 +1,5 @@
 import {
+  applyPronunciationDictionary,
   detectLanguage,
   estimateSpeechDuration,
   generateSSML,
@@ -98,5 +99,33 @@ describe("generateSSML", () => {
     expect(ssml).toContain("Aria")
     expect(ssml).toContain("hi")
     expect(ssml).toContain("rate=")
+  })
+})
+
+describe("applyPronunciationDictionary", () => {
+  it("replaces whole words case-insensitively", () => {
+    expect(applyPronunciationDictionary("Hello world", { hello: "hi" })).toBe("hi world")
+  })
+
+  it("does not replace partial matches", () => {
+    expect(applyPronunciationDictionary("helloWorld", { hello: "hi" })).toBe("helloWorld")
+  })
+
+  it("prevents chain replacements", () => {
+    expect(applyPronunciationDictionary("hello", { hello: "hi", hi: "hey" })).toBe("hi")
+  })
+
+  it("returns the original text when dictionary is empty", () => {
+    expect(applyPronunciationDictionary("hello", {})).toBe("hello")
+  })
+
+  it("skips empty dictionary keys", () => {
+    expect(applyPronunciationDictionary("hello", { "": "x", hello: "hi" })).toBe("hi")
+  })
+
+  it("replaces multiple different words", () => {
+    expect(applyPronunciationDictionary("hello world", { hello: "hi", world: "earth" })).toBe(
+      "hi earth"
+    )
   })
 })

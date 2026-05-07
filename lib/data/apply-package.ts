@@ -27,6 +27,7 @@ import type {
   PluginRow,
   PluginScheduledJobRow,
 } from "@/lib/db/plugin-types"
+import type { TwinChunk, TwinDraft, TwinJob, TwinProfile, TwinSource } from "@/types/twin"
 import {
   emptySummary,
   type BackupPackageV3,
@@ -119,6 +120,11 @@ export async function applyBackupPackage(
       db.pluginPermissions,
       db.pluginAnalytics,
       db.pluginScheduledJobs,
+      db.twinSources,
+      db.twinChunks,
+      db.twinProfile,
+      db.twinDrafts,
+      db.twinJobs,
     ],
     async () => {
       // --- settings (singleton) -------------------------------------------
@@ -362,6 +368,57 @@ export async function applyBackupPackage(
           }
         }
       }
+
+      // --- twin tables (schema v14) --------------------------------------
+      // Sources / chunks / drafts / jobs use the standard applyCollection
+      // strategy switch (skip / overwrite / duplicate). Profile is special:
+      // 1:1 with twinId, so duplicating would shadow the original — we
+      // collapse "duplicate" to "overwrite" here, matching the pattern used
+      // for other natural-key tables (trustedWorkspaces, sessionState).
+      await applyCollection<TwinSource>({
+        rows: env.twinSources,
+        table: db.twinSources,
+        kind: "twinSources",
+        opts,
+        summary,
+        idPrefix: "tsrc",
+        respectBuiltIn: false,
+      })
+      await applyCollection<TwinChunk>({
+        rows: env.twinChunks,
+        table: db.twinChunks,
+        kind: "twinChunks",
+        opts,
+        summary,
+        idPrefix: "tchk",
+        respectBuiltIn: false,
+      })
+      await applyKeyedCollection<TwinProfile>({
+        rows: env.twinProfile,
+        table: db.twinProfile,
+        kind: "twinProfile",
+        opts,
+        summary,
+        keyOf: (r) => r.id,
+      })
+      await applyCollection<TwinDraft>({
+        rows: env.twinDrafts,
+        table: db.twinDrafts,
+        kind: "twinDrafts",
+        opts,
+        summary,
+        idPrefix: "tdr",
+        respectBuiltIn: false,
+      })
+      await applyCollection<TwinJob>({
+        rows: env.twinJobs,
+        table: db.twinJobs,
+        kind: "twinJobs",
+        opts,
+        summary,
+        idPrefix: "twj",
+        respectBuiltIn: false,
+      })
 
       // --- sessions + messages + sessionState (off by default) -----------
       if (opts.includeSessions) {

@@ -18,7 +18,12 @@ import {
 } from "@/lib/search/types"
 import { cn } from "@/lib/utils"
 
-export function WebSearchToggle() {
+interface WebSearchToggleProps {
+  /** Disable the toggle externally (e.g. while a turn is streaming). */
+  disabled?: boolean
+}
+
+export function WebSearchToggle({ disabled: streamingDisabled }: WebSearchToggleProps = {}) {
   const t = useTranslations("webSearchToggle")
   const tComposer = useTranslations("chat.composer")
 
@@ -34,7 +39,7 @@ export function WebSearchToggle() {
     (p) => p.enabled && isProviderConfigured(p.providerId, p)
   )
   const hasEnabledProvider = enabledProviders.length > 0
-  const disabled = !searchEnabled || !hasEnabledProvider
+  const disabled = streamingDisabled || !searchEnabled || !hasEnabledProvider
 
   const activeProvider = providers[defaultProvider]?.enabled
     ? defaultProvider

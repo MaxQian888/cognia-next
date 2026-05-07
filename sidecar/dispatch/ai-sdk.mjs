@@ -228,6 +228,7 @@ export function dispatchAiSdk({
       inputStream.close()
     },
     pendingApprovals: new Map(),
+    sendOptions,
   }
 }
 

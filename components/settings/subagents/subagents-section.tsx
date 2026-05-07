@@ -11,7 +11,9 @@
 import { useCallback, useMemo } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { NetworkIcon } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { SettingsPageHeader } from "@/components/settings/common/settings-section"
 import { SubagentTemplatesTab } from "./subagent-templates-tab"
 import { SubagentRuntimeTab } from "./subagent-runtime-tab"
 
@@ -37,26 +39,31 @@ export function SubagentsSection() {
   )
 
   return (
-    <div className="space-y-4" data-testid="subagents-section">
-      <div className="space-y-1">
-        <h2 className="text-base font-semibold">{t("title")}</h2>
-        <p className="text-xs text-muted-foreground">{t("description")}</p>
-      </div>
+    <div className="space-y-6" data-testid="subagents-section">
+      <SettingsPageHeader
+        icon={<NetworkIcon className="size-4" />}
+        title={t("title")}
+        description={t("description")}
+      />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
-        <TabsList>
-          <TabsTrigger value="templates" data-testid="subagent-tab-templates">
-            {t("tabs.templates")}
-          </TabsTrigger>
-          <TabsTrigger value="runtime" data-testid="subagent-tab-runtime">
-            {t("tabs.runtime")}
-          </TabsTrigger>
-        </TabsList>
+        <div className="-mx-1 overflow-x-auto px-1">
+          <TabsList className="w-max">
+            <TabsTrigger value="templates" data-testid="subagent-tab-templates">
+              {t("tabs.templates")}
+            </TabsTrigger>
+            <TabsTrigger value="runtime" data-testid="subagent-tab-runtime">
+              {t("tabs.runtime")}
+            </TabsTrigger>
+          </TabsList>
+        </div>
+        <TabsContent value="templates" className="mt-4">
+          <SubagentTemplatesTab />
+        </TabsContent>
+        <TabsContent value="runtime" className="mt-4">
+          <SubagentRuntimeTab />
+        </TabsContent>
       </Tabs>
-
-      <div className="pt-2">
-        {tab === "templates" ? <SubagentTemplatesTab /> : <SubagentRuntimeTab />}
-      </div>
     </div>
   )
 }

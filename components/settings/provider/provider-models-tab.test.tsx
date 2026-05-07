@@ -108,8 +108,8 @@ const defaultProps = {
   models: mockModels,
   enabledModels: ["gpt-4o"],
   onEnabledModelsChange: jest.fn(),
-  onRefreshModels: jest.fn(),
-  isRefreshing: false,
+  onTestConnection: jest.fn(),
+  isTesting: false,
 }
 
 describe("ProviderModelsTab", () => {
@@ -233,18 +233,18 @@ describe("ProviderModelsTab", () => {
     expect(screen.queryByTestId("switch")).not.toBeInTheDocument()
   })
 
-  // ── 6. Refresh button calls onRefreshModels ───────────────────────────────
+  // ── 6. Refresh button calls onTestConnection ───────────────────────────────
 
-  it("calls onRefreshModels when refresh button is clicked", () => {
-    const onRefreshModels = jest.fn()
-    render(<ProviderModelsTab {...defaultProps} onRefreshModels={onRefreshModels} />)
+  it("calls onTestConnection when refresh button is clicked", () => {
+    const onTestConnection = jest.fn()
+    render(<ProviderModelsTab {...defaultProps} onTestConnection={onTestConnection} />)
     const refreshButton = screen.getByText("Refresh Model List")
     fireEvent.click(refreshButton)
-    expect(onRefreshModels).toHaveBeenCalledTimes(1)
+    expect(onTestConnection).toHaveBeenCalledTimes(1)
   })
 
   it("disables refresh button while refreshing", () => {
-    render(<ProviderModelsTab {...defaultProps} isRefreshing={true} />)
+    render(<ProviderModelsTab {...defaultProps} isTesting={true} />)
     const refreshButton = screen.getByText("Refresh Model List").closest("button")
     expect(refreshButton).toBeDisabled()
   })

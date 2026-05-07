@@ -1,9 +1,12 @@
 "use client"
 
+import { useState } from "react"
 import { Volume2Icon } from "lucide-react"
 import { useTranslations } from "next-intl"
 
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Slider } from "@/components/ui/slider"
@@ -15,11 +18,152 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
+import { Textarea } from "@/components/ui/textarea"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { useSettingsStore } from "@/stores/settings"
 import { ORDERED_TTS_PROVIDERS, TTS_PROVIDERS, type TTSProvider } from "@/lib/tts/types"
+import { generateSSML } from "@/lib/tts/tts-text-utils"
 import { TestTtsButton } from "./test-tts-button"
 import { PROVIDER_CONFIG_COMPONENTS } from "./provider-config"
 import { loggers } from "@/lib/logger"
+
+// -- SSML Preview (Edge / System) --------------------------------------------
+
+function SSMLPreviewSection({ provider }: { provider: "edge" | "system" }) {
+  const t = useTranslations("settings.speech.tts")
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+  const [open, setOpen] = useState(false)
+
+  const customEnabled = settings?.ttsCustomSSMLEnabled ?? false
+  const customSSML = settings?.ttsCustomSSML ?? ""
+  const voice = provider === "edge" ? settings?.edgeVoice : settings?.systemVoice
+  const rate = provider === "edge" ? undefined : settings?.ttsRate
+  const pitch = provider === "edge" ? undefined : settings?.ttsPitch
+  const volume = provider === "edge" ? undefined : settings?.ttsVolume
+
+  const preview = generateSSML(t("ssmlSampleText"), {
+    voice: voice || undefined,
+    rate,
+    pitch,
+    volume,
+  })
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <Button variant="ghost" size="sm" className="w-full justify-between text-xs">
+          {t("ssmlPreview")}
+          <span className="text-muted-foreground">{open ? "▲" : "▼"}</span>
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="space-y-3 pt-2">
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <Label className="text-xs">{t("customSSML")}</Label>
+            <p className="text-[10px] text-muted-foreground">{t("customSSMLHint")}</p>
+          </div>
+          <Switch
+            checked={customEnabled}
+            onCheckedChange={(v) => void save({ ttsCustomSSMLEnabled: v })}
+          />
+        </div>
+        {customEnabled ? (
+          <Textarea
+            value={customSSML}
+            onChange={(e) => void save({ ttsCustomSSML: e.target.value })}
+            placeholder={t("customSSMLPlaceholder")}
+            rows={6}
+            className="font-mono text-xs"
+          />
+        ) : (
+          <pre className="overflow-x-auto rounded-md bg-muted p-3 text-[10px] leading-relaxed">
+            {preview}
+          </pre>
+        )}
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+// -- Pronunciation Dictionary ------------------------------------------------
+
+function PronunciationDictionarySection() {
+  const t = useTranslations("settings.speech.tts")
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+  const [open, setOpen] = useState(false)
+  const [newWord, setNewWord] = useState("")
+  const [newReplacement, setNewReplacement] = useState("")
+
+  const dict = settings?.ttsPronunciationDictionary ?? {}
+  const entries = Object.entries(dict)
+
+  const addEntry = () => {
+    if (!newWord.trim()) return
+    void save({ ttsPronunciationDictionary: { ...dict, [newWord.trim()]: newReplacement } })
+    setNewWord("")
+    setNewReplacement("")
+  }
+
+  const removeEntry = (key: string) => {
+    const next = { ...dict }
+    delete next[key]
+    void save({ ttsPronunciationDictionary: next })
+  }
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <Button variant="ghost" size="sm" className="w-full justify-between text-xs">
+          {t("pronunciationDict")}
+          <span className="text-muted-foreground">
+            {entries.length > 0 ? `(${entries.length})` : ""} {open ? "▲" : "▼"}
+          </span>
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="space-y-3 pt-2">
+        <p className="text-[10px] text-muted-foreground">{t("pronunciationDictHint")}</p>
+        {entries.length > 0 && (
+          <div className="space-y-1">
+            {entries.map(([word, replacement]) => (
+              <div key={word} className="flex items-center gap-2 text-xs">
+                <span className="font-medium">{word}</span>
+                <span className="text-muted-foreground">→</span>
+                <span>{replacement}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto h-5 px-1.5 text-[10px]"
+                  onClick={() => removeEntry(word)}
+                >
+                  {t("remove")}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2">
+          <Input
+            value={newWord}
+            onChange={(e) => setNewWord(e.target.value)}
+            placeholder={t("pronunciationWord")}
+            className="h-8 text-xs"
+          />
+          <Input
+            value={newReplacement}
+            onChange={(e) => setNewReplacement(e.target.value)}
+            placeholder={t("pronunciationReplacement")}
+            className="h-8 text-xs"
+          />
+          <Button variant="outline" size="sm" className="h-8 shrink-0" onClick={addEntry}>
+            {t("add")}
+          </Button>
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
 
 /**
  * Text-to-speech card. Shows the master toggle, provider switch, the
@@ -210,6 +354,18 @@ export function TtsCard() {
                 />
               </div>
             </div>
+
+            <Separator />
+
+            {/* SSML preview (Edge / System) */}
+            {(provider === "edge" || provider === "system") && (
+              <SSMLPreviewSection provider={provider} />
+            )}
+
+            <Separator />
+
+            {/* Pronunciation dictionary */}
+            <PronunciationDictionarySection />
           </>
         )}
       </CardContent>

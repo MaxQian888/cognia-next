@@ -114,6 +114,18 @@ describe("WebSearchToggle", () => {
     expect(button).toHaveAttribute("aria-pressed", "true")
   })
 
+  it("is disabled when the external disabled prop is true, even if search is configured", () => {
+    settingsState = {
+      searchEnabled: true,
+      defaultSearchProvider: "tavily",
+      searchProviders: {
+        tavily: { providerId: "tavily", apiKey: "k", enabled: true, priority: 1 },
+      },
+    }
+    renderWithTooltip(<WebSearchToggle disabled />)
+    expect(screen.getByRole("button")).toBeDisabled()
+  })
+
   it("falls back to first enabled provider when default disabled", () => {
     settingsState = {
       searchEnabled: true,

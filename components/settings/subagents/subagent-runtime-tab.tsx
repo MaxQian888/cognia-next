@@ -9,16 +9,38 @@
  */
 
 import { useEffect, useMemo, useState } from "react"
+import Link from "next/link"
 import { useTranslations } from "next-intl"
+import { ArrowRightIcon, ClockIcon, InfoIcon } from "lucide-react"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
-import { Card } from "@/components/ui/card"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
-import { SUB_AGENT_STATUS_CONFIG } from "@/types/agent/sub-agent"
+import {
+  SettingsCard,
+  SettingsEmptyState,
+  SettingsGroup,
+} from "@/components/settings/common/settings-section"
+import { SUB_AGENT_STATUS_CONFIG, SUB_AGENT_PRIORITY_CONFIG } from "@/types/agent/sub-agent"
+
+/** Format milliseconds into a human-readable duration. */
+function formatDuration(ms: number): string {
+  ms = Math.max(0, ms)
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`
+  const minutes = Math.floor(ms / 60_000)
+  const seconds = Math.round((ms % 60_000) / 1000)
+  if (minutes < 60) return `${minutes}m ${seconds}s`
+  const hours = Math.floor(minutes / 60)
+  const remainingMin = minutes % 60
+  return `${hours}h ${remainingMin}m`
+}
 
 export function SubagentRuntimeTab() {
   const t = useTranslations("settings.subagents.runtime")
   const tStatus = useTranslations("agentStatus")
+  const tPriority = useTranslations("agentPriority")
   const subAgents = useSubagentRuntimeStore((s) => s.subAgents)
 
   const sorted = useMemo(() => {
@@ -40,15 +62,33 @@ export function SubagentRuntimeTab() {
     return () => clearInterval(id)
   }, [hasRunning])
 
+  const calloutBanner = (
+    <Alert data-testid="subagent-runtime-callout">
+      <InfoIcon />
+      <AlertTitle>{t("callout.title")}</AlertTitle>
+      <AlertDescription>
+        <p>{t("callout.body")}</p>
+        <Button variant="link" size="sm" className="h-auto p-0 text-xs" asChild>
+          <Link href="/agent-teams">
+            {t("callout.cta")}
+            <ArrowRightIcon className="ml-1 size-3" />
+          </Link>
+        </Button>
+      </AlertDescription>
+    </Alert>
+  )
+
   if (sorted.length === 0) {
     return (
-      <div className="space-y-2" data-testid="subagent-runtime-empty">
+      <div className="space-y-3" data-testid="subagent-runtime-empty">
         <h3 className="text-sm font-medium">{t("title")}</h3>
         <p className="text-xs text-muted-foreground">{t("description")}</p>
-        <Card className="border-dashed bg-muted/30 p-6 text-center">
-          <p className="text-sm font-medium">{t("emptyTitle")}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{t("emptyBody")}</p>
-        </Card>
+        {calloutBanner}
+        <SettingsEmptyState
+          icon={<ClockIcon className="size-5" />}
+          title={t("emptyTitle")}
+          description={t("emptyBody")}
+        />
       </div>
     )
   }
@@ -57,43 +97,81 @@ export function SubagentRuntimeTab() {
     <div className="space-y-3" data-testid="subagent-runtime-list">
       <h3 className="text-sm font-medium">{t("title")}</h3>
       <p className="text-xs text-muted-foreground">{t("description")}</p>
+      {calloutBanner}
       {sorted.map((sa) => {
-        const cfg = SUB_AGENT_STATUS_CONFIG[sa.status]
-        const lastLog = sa.logs[sa.logs.length - 1]
+        const statusCfg = SUB_AGENT_STATUS_CONFIG[sa.status]
+        const priorityCfg = sa.config?.priority
+          ? SUB_AGENT_PRIORITY_CONFIG[sa.config.priority]
+          : null
         const startedAt = sa.startedAt instanceof Date ? sa.startedAt.getTime() : null
         const completedAt = sa.completedAt instanceof Date ? sa.completedAt.getTime() : null
         const durationMs = startedAt ? (completedAt ?? now) - startedAt : null
+        const recentLogs = sa.logs.slice(-3)
+
         return (
-          <Card
-            key={sa.id}
-            className="space-y-2 p-3"
-            data-testid={`subagent-runtime-row-${sa.id}`}
-            data-status={sa.status}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-sm font-medium">{sa.name}</p>
-                <Badge variant="outline" className={`text-[10px] ${cfg.color}`}>
-                  {tStatus(cfg.labelKey)}
-                </Badge>
-                <span className="text-[11px] text-muted-foreground">
-                  {t("parent", { id: sa.parentAgentId })}
-                </span>
+          <div key={sa.id} data-testid={`subagent-runtime-row-${sa.id}`} data-status={sa.status}>
+            <SettingsCard
+              title={sa.name}
+              description={
+                durationMs !== null
+                  ? `${t("duration", { ms: durationMs })} (${formatDuration(durationMs)})`
+                  : undefined
+              }
+              badge={tStatus(statusCfg.labelKey)}
+              badgeVariant={
+                sa.status === "failed" || sa.status === "timeout"
+                  ? "destructive"
+                  : sa.status === "completed"
+                    ? "default"
+                    : "secondary"
+              }
+              headerAction={
+                priorityCfg ? (
+                  <Badge variant="outline" className="text-[10px]">
+                    {tPriority(priorityCfg.labelKey)}
+                  </Badge>
+                ) : null
+              }
+            >
+              {/* Progress */}
+              <Progress value={sa.progress} className="h-1.5" />
+
+              {/* Metadata */}
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                <span>{t("parent", { id: sa.parentAgentId })}</span>
+                {sa.config?.model && <span>{sa.config.model}</span>}
+                {sa.config?.tools && sa.config.tools.length > 0 && (
+                  <span>{t("toolsCount", { count: sa.config.tools.length })}</span>
+                )}
               </div>
-              {durationMs !== null ? (
-                <span className="text-[11px] text-muted-foreground">
-                  {t("duration", { ms: durationMs })}
-                </span>
-              ) : null}
-            </div>
-            <Progress value={sa.progress} className="h-1.5" />
-            {lastLog ? (
-              <p className="line-clamp-1 font-mono text-[11px] text-muted-foreground">
-                <span className="mr-1 uppercase">[{lastLog.level}]</span>
-                {lastLog.message}
-              </p>
-            ) : null}
-          </Card>
+
+              {/* Recent logs */}
+              {recentLogs.length > 0 && (
+                <div className="space-y-0.5">
+                  {recentLogs.map((log, i) => (
+                    <p key={i} className="line-clamp-1 font-mono text-[11px] text-muted-foreground">
+                      <span className="mr-1 uppercase">[{log.level}]</span>
+                      {log.message}
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              {/* Expandable full log */}
+              {sa.logs.length > 3 && (
+                <SettingsGroup title={t("allLogs", { count: sa.logs.length })} defaultOpen={false}>
+                  <div className="max-h-40 space-y-0.5 overflow-y-auto font-mono text-[11px]">
+                    {sa.logs.map((log, i) => (
+                      <p key={i} className="text-muted-foreground">
+                        <span className="mr-1 uppercase">[{log.level}]</span>
+                        {log.message}
+                      </p>
+                    ))}
+                  </div>
+                </SettingsGroup>
+              )}
+            </SettingsCard>
+          </div>
         )
       })}
     </div>

@@ -43,6 +43,7 @@ export { ProviderModelsTab } from "./provider-models-tab"
 export { ProviderCostTab } from "./provider-cost-tab"
 export { ProviderAdvancedTab } from "./provider-advanced-tab"
 export { ProviderComparisonView } from "./provider-comparison-view"
+export { ProviderCompareDialog } from "./provider-compare-dialog"
 export { AddProviderPopover } from "./add-provider-popover"
 export { AddProviderWizard } from "./add-provider-wizard"
 

@@ -23,8 +23,44 @@ jest.mock("@/lib/network/proxy-fetch", () => ({
   proxyFetch: jest.fn(),
 }))
 
-import { AcpClientAdapter, createAcpClient } from "./acp-client"
+import { AcpClientAdapter, buildSpawnArgs, createAcpClient } from "./acp-client"
 import type { ExternalAgentConfig, AcpPermissionResponse } from "@/types/agent/external-agent"
+
+describe("buildSpawnArgs", () => {
+  it("returns the original args verbatim when no toggles are on", () => {
+    expect(buildSpawnArgs({ args: ["-y", "@anthropics/claude-code", "--stdio"] })).toEqual([
+      "-y",
+      "@anthropics/claude-code",
+      "--stdio",
+    ])
+  })
+
+  it("appends --bare and --debug when their toggles are true", () => {
+    expect(
+      buildSpawnArgs({
+        args: ["-y", "@anthropics/claude-code", "--stdio"],
+        bare: true,
+        debug: true,
+      })
+    ).toEqual(["-y", "@anthropics/claude-code", "--stdio", "--bare", "--debug"])
+  })
+
+  it("is idempotent — does not add a flag that's already present in args", () => {
+    expect(buildSpawnArgs({ args: ["--bare", "--debug"], bare: true, debug: true })).toEqual([
+      "--bare",
+      "--debug",
+    ])
+  })
+
+  it("handles undefined args by starting from an empty list", () => {
+    expect(buildSpawnArgs({ bare: true })).toEqual(["--bare"])
+  })
+
+  it("appends only the toggles that are on", () => {
+    expect(buildSpawnArgs({ args: ["x"], bare: true })).toEqual(["x", "--bare"])
+    expect(buildSpawnArgs({ args: ["x"], debug: true })).toEqual(["x", "--debug"])
+  })
+})
 
 describe("AcpClientAdapter — basic state", () => {
   it("starts disconnected with no capabilities or tools", () => {

@@ -9,6 +9,8 @@
     "deleteConfirm": "Permanently delete \"{name}\"?",
     "deleteWarning": "This cannot be undone. All tasks, messages, and member data will be removed.",
     "createTeam": "Create team",
+    "trySampleTeam": "Try sample team",
+    "sampleTeamCreated": "Demo Research Squad ready — click Run on the Overview tab.",
     "teamCreated": "Team \"{name}\" created.",
     "teamDeleted": "Team \"{name}\" deleted.",
     "teamUpdated": "Team updated.",
@@ -68,6 +70,9 @@
     },
     "chat": {
       "empty": "No messages yet.",
+      "emptyHint": "Try @claude, @codex, or @<member-name> to dispatch this message to that agent.",
+      "streaming": "Thinking…",
+      "mentionAgents": "Mention an agent",
       "messageTypes": {
         "direct": "Direct",
         "broadcast": "Broadcast",
@@ -80,6 +85,53 @@
         "idle": "Idle",
         "task_assignment": "Assignment",
         "consensus": "Consensus"
+      },
+      "composer": {
+        "placeholder": "Type @ to mention an agent — try @claude or @codex",
+        "mentionTitle": "Mention an agent",
+        "noAgents": "No agents available — add a teammate first",
+        "noMatches": "No agent matches \"{query}\"",
+        "unknownAgent": "Unknown agent: @{name}",
+        "missingMention": "Start your message with @<agent-name> to dispatch it.",
+        "missingPrompt": "Add a message after the mention.",
+        "imageNotSupported": "Image attachments aren't supported in team chat yet.",
+        "sendingFailed": "Failed to send to {agent}: {reason}",
+        "stop": "Stop"
+      },
+      "runtime": {
+        "claude": "Claude",
+        "codex": "Codex",
+        "claudeCode": "Claude Code",
+        "geminiCli": "Gemini",
+        "cursorCli": "Cursor"
+      },
+      "runtimeStatus": {
+        "missingKey": "Set an Anthropic API key in Settings → Providers to enable @claude.",
+        "noAgent": "No external agent configured for {runtime}. Add one in Settings → External Agents.",
+        "disconnected": "{runtime} is configured but not connected. Open Settings → External Agents to connect."
+      },
+      "toolCall": {
+        "toggleDetails": "Toggle details for {name}",
+        "input": "Input",
+        "output": "Output",
+        "running": "running",
+        "complete": "complete",
+        "error": "error"
+      },
+      "tokenUsage": {
+        "label": "Tokens",
+        "input": "in",
+        "output": "out",
+        "total": "total"
+      },
+      "messageActions": {
+        "open": "Message actions",
+        "copy": "Copy",
+        "copied": "Copied to clipboard",
+        "retry": "Retry",
+        "retrying": "Retrying…",
+        "delete": "Delete",
+        "deleteFailed": "Couldn't delete this message"
       }
     },
     "activity": {
@@ -100,6 +152,8 @@
       "configOverrides": "Configuration overrides",
       "provider": "Provider",
       "model": "Model",
+      "runtime": "Runtime",
+      "runtimeUpdated": "{name}'s runtime updated.",
       "save": "Add",
       "saved": "\"{name}\" added.",
       "removeTitle": "Remove teammate?",
@@ -325,6 +379,15 @@
     "slashCommand": {
       "ranSlashCommand": "ran slash command"
     },
+    "twinBadge": {
+      "label": "twin · {chunks}",
+      "openWorkbench": "Open twin workbench",
+      "statSummary": "{sources} sources · {chunks} chunks",
+      "ragOn": "RAG on (top-{topK})",
+      "ragOff": "RAG off",
+      "fewShotOn": "Style few-shot on ({k} samples)",
+      "fewShotOff": "Style few-shot off"
+    },
     "header": {
       "untitledSession": "(untitled)",
       "noApiKey": "No API key",
@@ -355,6 +418,13 @@
       "pickDirTitle": "Working directory for this session",
       "cwdReset": "Reset",
       "cwdFallbackHint": "Character default: {path}",
+      "bareMode": "Bare mode",
+      "debugMode": "Debug mode",
+      "briefMode": "Brief output",
+      "forkAria": "Fork session",
+      "forkTooltip": "Fork conversation — branches a new session from this one's history",
+      "forkSuccess": "Session forked. The new branch is now active.",
+      "forkUnsupported": "This agent doesn't support session forking.",
       "cancel": "Cancel",
       "save": "Save",
       "groups": {
@@ -1117,6 +1187,7 @@
       "ccswitch": "CCSwitch",
       "agents": "Agents",
       "agentModes": "Agent modes",
+      "agentRuntime": "Built-in agent runtime",
       "agentTeams": "Agent teams",
       "hooks": "Hooks",
       "slashCommands": "Slash commands",
@@ -1144,7 +1215,8 @@
       "providers": "Providers",
       "connections": "Connections",
       "subscription": "Claude Subscription",
-      "network": "Network Proxy"
+      "network": "Network Proxy",
+      "workflows": "Workflows"
     },
     "descriptions": {
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
@@ -1153,6 +1225,7 @@
       "ccswitch": "Reuse providers, MCP servers, prompts and skills from CCSwitch — switch the active subscription with one click.",
       "agents": "External agents — Claude Code CLI, Codex, Gemini CLI, Cursor and any custom command speaking ACP / OpenCode / HTTP.",
       "agentModes": "Built-in and custom agent modes — system prompt, tool list, output format and live preview presets.",
+      "agentRuntime": "Built-in Anthropic SDK sidecar — defaults, permission mode, always-allow tools, built-in tool categories, sidecar diagnostics, and the A2UI bridge.",
       "agentTeams": "Multi-agent team templates — manager-worker, parallel specialists, research squad. Browse built-ins, duplicate to fork, or create new templates.",
       "hooks": "Lifecycle hooks for ~/.claude/settings.json (User / Project / Local). 21 events × matcher × command-or-webhook handlers.",
       "slashCommands": "Built-in, custom, and plugin-contributed slash commands — browse, search, and copy a command into the composer.",
@@ -1180,7 +1253,8 @@
       "providers": "AI provider API keys, models, and connection settings.",
       "connections": "Configure messaging platform adapters (Telegram, Discord, Slack, ...) and manage the outbound delivery queue.",
       "subscription": "Sign in with your Claude Pro/Max subscription, monitor 5h/7d rate-limit windows, and manage OAuth credentials in your OS keychain.",
-      "network": "HTTP / HTTPS / SOCKS5 proxy for all outbound network traffic. Auto-detect Clash Verge, Mihomo, V2Ray and other local proxy tools."
+      "network": "HTTP / HTTPS / SOCKS5 proxy for all outbound network traffic. Auto-detect Clash Verge, Mihomo, V2Ray and other local proxy tools.",
+      "workflows": "Visual n8n-style orchestration over characters, teams, skills, twins, and connectors. Trigger via cron, webhook, platform message, or manual run."
     },
     "externalBridge": {
       "wikiIndex": "Wiki Index",
@@ -1665,6 +1739,97 @@
         "placeholder": "/* your CSS here */\nbody '{' letter-spacing: 0.2px; '}'",
         "removed": "Removed {count, plural, one {# remote rule} other {# remote rules}} on save.",
         "saveButton": "Save"
+      }
+    },
+    "agentRuntimeSection": {
+      "title": "Built-in agent runtime",
+      "description": "Configure defaults for the in-process Claude SDK sidecar — these flow into every new chat unless a character or session overrides them.",
+      "tabs": {
+        "defaults": "Defaults",
+        "permissions": "Permissions & tools",
+        "sidecar": "Sidecar",
+        "a2ui": "A2UI bridge"
+      },
+      "defaults": {
+        "permissionTitle": "Permission mode",
+        "permissionDesc": "Default for new sessions — characters and individual sessions can still override.",
+        "permissionMode": "Mode",
+        "permDefault": "Default — ask before edits",
+        "permAcceptEdits": "Accept edits — auto-allow file writes",
+        "permBypass": "Bypass — allow everything (dangerous)",
+        "permPlan": "Plan — read-only, propose changes",
+        "modelTitle": "Default model",
+        "modelDesc": "Used when neither the character nor the session pins a model.",
+        "modelLabel": "Default model picker",
+        "modelSearch": "Search models…",
+        "modelEmpty": "No providers configured. Add one in Settings → Providers.",
+        "modelClear": "Clear default",
+        "modelUnset": "No default selected",
+        "workingDirTitle": "Default working directory",
+        "workingDirDesc": "Sent to the sidecar as cwd. Useful when most chats target the same project.",
+        "workingDirPlaceholder": "/path/to/project",
+        "appendTitle": "Append to system prompt",
+        "appendDesc": "Appended to every default character's system prompt. Use sparingly — large appendices inflate token cost.",
+        "appendPlaceholder": "e.g., 'Always reply in concise bullet points.'",
+        "routingTitle": "Routing fallback",
+        "routingDesc": "When a turn fails, retry against the next entry in the alias's fallback chain. Disable to keep the original error visible."
+      },
+      "permissions": {
+        "alwaysAllowTitle": "Always-allow tools",
+        "alwaysAllowDesc": "Tools listed here skip the per-call approval prompt for every chat.",
+        "addToolPlaceholder": "Tool name (e.g. mcp__cognia-tools__file_hash)",
+        "addBtn": "Add",
+        "approveAllBuiltin": "Approve all built-in tools",
+        "approveAllBuiltinDoneToast": "Approved {count} built-in tools.",
+        "addedToast": "Added {tool} to always-allow.",
+        "infoLabel": "Tools in {name}",
+        "infoListTitle": "{count} tools",
+        "desktopOnlyHint": "Built-in tool categories run inside the desktop sidecar — switch to the desktop app to enable them.",
+        "risk": {
+          "low": "Low risk",
+          "medium": "Medium risk",
+          "high": "High risk"
+        },
+        "categories": {
+          "fileExtras": {
+            "name": "File extras",
+            "desc": "Hash, structured diff, content search — beyond the SDK's built-in Read / Write / Edit."
+          },
+          "git": {
+            "name": "Git",
+            "desc": "Structured wrappers around git_status, git_diff, git_log — easier on the agent than parsing raw shell output."
+          },
+          "process": {
+            "name": "Process",
+            "desc": "List, start, and terminate processes. High risk — only enable for trusted workflows."
+          },
+          "environment": {
+            "name": "Environment",
+            "desc": "Read environment variables and system information. Secrets are redacted before they reach the agent."
+          },
+          "shellAdvanced": {
+            "name": "Shell (advanced)",
+            "desc": "Allowlist-gated single-program shell. Useful for project-specific build commands."
+          }
+        }
+      },
+      "sidecar": {
+        "title": "Sidecar diagnostics",
+        "description": "Read-only view of the in-process Claude SDK sidecar.",
+        "statusLabel": "Status",
+        "running": "Running",
+        "stopped": "Stopped",
+        "checking": "Checking…",
+        "webOnly": "Desktop only",
+        "sdkSessionLabel": "Most recent SDK session id",
+        "restartBtn": "Restart sidecar",
+        "restartedToast": "Sidecar restart requested.",
+        "desktopOnlyHint": "Restart is only available in the desktop build."
+      },
+      "a2ui": {
+        "title": "A2UI bridge",
+        "description": "Allow the agent to drive A2UI mini-apps via the bridge MCP server.",
+        "hint": "When off, characters never see the mcp__a2ui-bridge__* tools by default. Per-mode overrides remain available in the Custom Mode editor."
       }
     },
     "data": {
@@ -2187,6 +2352,12 @@
       "alwaysAllowedTools": "Always-allowed tools",
       "noneYet": "None yet. Tools you mark \"Allow always\" in approval dialogs appear here.",
       "removeFromAllowList": "Remove {tool} from always-allow list",
+      "bareMode": "Bare mode",
+      "bareModeHint": "Skip on-disk auto-discovery (CLAUDE.md, hooks, plugins, MCP). Faster cold starts; the agent won't see your project's settings.",
+      "debugMode": "Debug mode",
+      "debugModeHint": "Verbose logs from the SDK and any spawned MCP / sub-process. Look for them in the Tauri dev console or the sidecar log file.",
+      "briefMode": "Brief output",
+      "briefModeHint": "Append a concise-output instruction to every send. Useful for chat triage and one-shot questions.",
       "saved": "Settings saved.",
       "cancel": "Cancel",
       "save": "Save",
@@ -2303,7 +2474,38 @@
         "skillsHint": "Order matters — earlier skills are appended first to the system prompt.",
         "mcpServers": "MCP servers",
         "mcpServersHint": "Leave all unselected to mean \"use every enabled server\".",
-        "mcpServersEmptyHint": "(uses all enabled MCP servers)"
+        "mcpServersEmptyHint": "(uses all enabled MCP servers)",
+        "twinBinding": {
+          "titleUnbound": "Digital twin (optional)",
+          "titleBound": "Digital twin",
+          "unboundDescription": "Link this character to a Digital Twin to inject RAG-retrieved chunks and writing-style few-shots into every send.",
+          "pickExisting": "Use an existing twin",
+          "pickExistingPlaceholder": "Choose…",
+          "createNew": "Create new twin",
+          "newTwinId": "Twin id",
+          "newTwinIdPlaceholder": "twin_xxxxxxxx",
+          "newTwinIdHint": "Letters, digits, and underscores. Must be unique across your characters.",
+          "confirmBind": "Bind",
+          "cancel": "Cancel",
+          "openWorkbench": "Open workbench",
+          "unbind": "Unbind twin",
+          "unbindTitle": "Unbind twin?",
+          "unbindBody": "The twin's data is preserved — only this character's link to it is removed.",
+          "unbindConfirm": "Unbind",
+          "statsSources": "Sources",
+          "statsChunks": "Chunks",
+          "statsStyleSamples": "Style samples",
+          "statsPlaybooks": "Playbooks",
+          "statsLastDistilled": "Profile updated",
+          "never": "(never)",
+          "runtimeTitle": "Runtime",
+          "enableRag": "Enable RAG",
+          "enableRagHint": "Retrieve top-K twin chunks at send time and inject them into the system prompt.",
+          "ragTopK": "Retrieve top K",
+          "enableStyleFewShot": "Style few-shot",
+          "enableStyleFewShotHint": "Pick representative writing samples from the twin profile for tone matching.",
+          "styleSamplesK": "Samples per send"
+        }
       },
       "multiselect": {
         "noneDefined": "(none defined yet)",
@@ -2441,7 +2643,14 @@
         "emptyTitle": "No sub-agents are running.",
         "emptyBody": "Sub-agents spawned by an active chat will appear here. The runtime is in-memory and resets when the app restarts.",
         "parent": "parent: {id}",
-        "duration": "{ms}ms"
+        "duration": "{ms}ms",
+        "callout": {
+          "title": "Live registry, populated during runs",
+          "body": "Sub-agents spawned by an Agent Team or chat session appear here while running. The list is in-memory and clears on app restart. Start a teammate task in Agent Teams to see this fill.",
+          "cta": "Open Agent Teams"
+        },
+        "toolsCount": "{count, plural, one {# tool} other {# tools}}",
+        "allLogs": "All logs ({count})"
       },
       "import": {
         "trigger": "Import",
@@ -5146,6 +5355,10 @@
       "transport": "Transport",
       "command": "Command",
       "arguments": "Arguments",
+      "passBareFlag": "Pass --bare",
+      "passBareFlagHint": "Skip on-disk auto-discovery (CLAUDE.md, hooks, plugins, MCP). Appended to args at spawn time.",
+      "passDebugFlag": "Pass --debug",
+      "passDebugFlagHint": "Verbose stderr logging from the spawned agent.",
       "workingDirectory": "Working Directory",
       "cwdPlaceholder": "Leave empty for current directory",
       "endpoint": "Endpoint URL",
@@ -5181,7 +5394,17 @@
       "presetGalleryEmpty": "No presets available.",
       "quickStartPreset": "Quick start preset",
       "selectPresetOrCustom": "Select a preset or configure manually",
-      "customConfiguration": "Custom configuration"
+      "customConfiguration": "Custom configuration",
+      "transport.stdio.label": "Stdio (local process)",
+      "transport.http.label": "HTTP (remote)",
+      "details.adapter": "Adapter",
+      "details.surface": "Surface",
+      "details.supportTier": "Support tier",
+      "details.prerequisiteStatus": "Prerequisite status",
+      "details.officialDocs": "Official docs",
+      "details.docsLink": "View documentation",
+      "details.limitation": "Limitation",
+      "details.recommendedActions": "Recommended actions"
     }
   },
   "tools": {
@@ -5416,6 +5639,8 @@
     "failedToParseFile": "Failed to parse file",
     "deletedModes": "Deleted {count} modes",
     "searchModes": "Search modes…",
+    "categoryLabel": "Category",
+    "sortByLabel": "Sort by",
     "allCategories": "All categories",
     "sortByName": "Sort by name",
     "sortByCreated": "Sort by created",
@@ -5433,7 +5658,21 @@
     "tools": "{count} tools",
     "usedTimes": "Used {count} times",
     "duplicate": "Duplicate",
-    "deleteConfirmDesc": "This action cannot be undone. The custom mode will be permanently removed."
+    "deleteConfirmDesc": "This action cannot be undone. The custom mode will be permanently removed.",
+    "moreActions": "More actions for {name}",
+    "editMode": "Edit {name}",
+    "resultsCount": "Showing {shown} of {total}"
+  },
+  "planModeTasks": {
+    "triggerText": "Plan / tasks ({count})",
+    "triggerLabel": "Open plan-mode tasks ({count})",
+    "headerTitle": "Plan-mode tasks",
+    "headerDescription": "Tasks the agent emitted while running in plan mode. They live for this session only."
+  },
+  "routingFallback": {
+    "retryingWithFallback": "Provider failed — retrying with {provider}…",
+    "fallbackExhausted": "All fallback providers failed: {error}",
+    "answeredVia": "Answered via {provider} ({model})"
   },
   "scheduler": {
     "title": "Task Scheduler",
@@ -7523,5 +7762,70 @@
     },
     "invalidJson": "Invalid JSON format",
     "outOfRange": "Value must be between {min} and {max}"
+  },
+  "twin": {
+    "panel": {
+      "title": "Digital twin",
+      "noTwinTitle": "No digital twins yet",
+      "noTwinHint": "Bind a character to a twin via its settings to start ingesting documents, chats, and code. Every twin lives alongside its character — there is no separate identity to create up front.",
+      "activeTwin": "Active twin",
+      "workerActive": "worker ● active",
+      "workerIdle": "worker ○ idle",
+      "tabs": {
+        "sources": "Sources",
+        "jobs": "Jobs",
+        "drafts": "Drafts",
+        "settings": "Settings"
+      }
+    },
+    "charts": {
+      "title": "Activity overview",
+      "description": "Live indexing stats — refreshes as ingest jobs complete in any tab.",
+      "growthHeading": "Chunks added (last 7 days)",
+      "growthChunks": "Chunks",
+      "kindHeading": "Source mix",
+      "strategyHeading": "Chunking strategies",
+      "strategyChunks": "Chunks",
+      "noSources": "No sources registered yet — head to the Sources tab to upload one.",
+      "status": {
+        "parsed": "Parsed",
+        "parsing": "Parsing",
+        "pending": "Pending",
+        "failed": "Failed",
+        "deleted": "Deleted"
+      }
+    },
+    "sources": {
+      "headerCount": "Sources ({count})",
+      "addSource": "Add source",
+      "cancelAdd": "Cancel",
+      "emptyHint": "No sources yet. Click Add source to paste in some text or import a file.",
+      "delete": "Delete",
+      "chunks": "{count, plural, =0 {0 chunks} =1 {1 chunk} other {# chunks}}",
+      "imported": "imported {when}",
+      "errorPrefix": "⚠"
+    },
+    "jobs": {
+      "headerCount": "Jobs ({count})",
+      "queueIngest": "Queue ingest for pending sources",
+      "queueDistill": "Queue distill",
+      "emptyHint": "No jobs yet. Add sources, then queue an ingest run; queue a distill once the chunks are indexed.",
+      "queuedAt": "queued {when}",
+      "errorPrefix": "⚠",
+      "draftsProduced": "{count, plural, =0 {No drafts produced} =1 {1 draft produced} other {# drafts produced}}"
+    },
+    "drafts": {
+      "headerCount": "Drafts ({count})",
+      "emptyHint": "No drafts yet. Queue a distill run from the Jobs tab once at least one source has been parsed into chunks.",
+      "qualityLabel": "quality: {label}",
+      "qualityHigh": "high",
+      "qualityMedium": "medium",
+      "qualityLow": "low",
+      "qualityUnscored": "unscored",
+      "untitled": "(untitled)",
+      "emptyBody": "(empty body)",
+      "accept": "Accept",
+      "reject": "Reject"
+    }
   }
 }

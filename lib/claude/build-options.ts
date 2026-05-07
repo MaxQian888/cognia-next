@@ -37,6 +37,14 @@ import {
 } from "@/lib/ai/routing"
 import { DEFAULT_ROUTING_CONFIG } from "@/types/provider/model-mapping"
 
+/**
+ * Snippet appended to `appendSystemPrompt` when brief mode is on. Exported so
+ * the ACP route can reuse it when threading `briefMode` into a `session/new`
+ * payload — keeping a single source of truth for the wording.
+ */
+export const BRIEF_OUTPUT_SNIPPET =
+  "Respond concisely. Skip preamble, headers, and bullet-list filler. Direct answers only — match length to the question."
+
 export interface BuildOptionsContext {
   session?: ChatSession | null
   /** Override the resolving character — used by team chat per-member sends. */
@@ -468,14 +476,51 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     opts.builtinTools = appSettings.builtinTools
   }
 
-  // --- Resume continuity ---------------------------------------------------
+  // --- Convenience modes (bare / debug / brief) ----------------------------
+  // Precedence: session > character > appSettings. memberOverride is omitted
+  // intentionally — these are runtime-feel toggles, not per-team-slot config.
+
+  const bareMode = session?.bareMode ?? character?.bareMode ?? appSettings?.bareMode
+  if (bareMode) {
+    // `--bare` reproduction: ignore on-disk settings and any MCP discoveries
+    // outside the explicit `mcpServers` map we already built.
+    opts.settingSources = []
+    opts.strictMcpConfig = true
+  }
+
+  const debugMode = session?.debugMode ?? character?.debugMode ?? appSettings?.debugMode
+  if (debugMode) {
+    // SDK has no `debug` option, so we lean on env vars the SDK + spawned
+    // MCP/sub-processes both honour. Sidecar dispatcher merges this onto
+    // `process.env` (see `sidecar/dispatch/anthropic.mjs:94`).
+    opts.env = {
+      ...(opts.env ?? {}),
+      DEBUG: "*",
+      CLAUDE_CODE_DEBUG: "1",
+    }
+  }
+
+  const briefMode = session?.briefMode ?? character?.briefMode ?? appSettings?.briefMode
+  if (briefMode) {
+    const existing = opts.appendSystemPrompt?.trim() ?? ""
+    opts.appendSystemPrompt = existing
+      ? `${existing}\n\n${BRIEF_OUTPUT_SNIPPET}`
+      : BRIEF_OUTPUT_SNIPPET
+  }
+
+  // --- Resume / fork continuity --------------------------------------------
   // The sidecar persists the SDK-issued `session_id` onto the ChatSession row
   // (see hooks/use-claude-chat.ts). Re-passing it as `resumeSessionId` on
   // every send is harmless — the sidecar only honours `resume` when it has to
   // start a fresh SDK Query (e.g. after a sidecar restart or app reload). When
   // an in-flight session already has streaming input wired up, options are
   // ignored. Skip on team sub-sessions and when the session is being forked.
-  if (session?.sdkSessionId && !session?.forkedFromSdkSessionId) {
+  if (session?.forkedFromSdkSessionId) {
+    // Fork: tell the SDK to branch from the parent's session id rather than
+    // resume it. The sidecar dispatcher converts this to `forkSession: true`
+    // and passes the parent id via `resume` (see `anthropic.mjs:92-93`).
+    opts.forkFromSessionId = session.forkedFromSdkSessionId
+  } else if (session?.sdkSessionId) {
     opts.resumeSessionId = session.sdkSessionId
   }
 

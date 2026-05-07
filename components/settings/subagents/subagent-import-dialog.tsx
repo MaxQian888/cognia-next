@@ -7,7 +7,7 @@
  * library. Triggered from the Subagents settings tab toolbar.
  */
 
-import { useCallback, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { DownloadIcon, FolderOpenIcon, FileTextIcon, AlertCircleIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -60,51 +60,6 @@ const SOURCE_CHOICES: { id: SourceChoice; labelKey: string }[] = [
   ...SUBAGENT_SOURCE_ADAPTERS.map((a) => ({ id: a.id, labelKey: a.labelKey })),
 ]
 
-/** Read all picked files via the Tauri filesystem plugin (recursive). */
-async function readFilesFromTauri(): Promise<ImportFile[]> {
-  const { open: openDialog } = await import("@tauri-apps/plugin-dialog")
-  const { readTextFile, readDir } = await import("@tauri-apps/plugin-fs")
-
-  const picked = await openDialog({
-    multiple: true,
-    directory: false,
-    filters: [{ name: "Markdown", extensions: ["md", "markdown", "mdc", "yaml", "yml"] }],
-  })
-  const paths = !picked ? [] : Array.isArray(picked) ? picked : [picked]
-  if (paths.length === 0) {
-    // Try directory mode as a second option.
-    const dir = await openDialog({ multiple: false, directory: true })
-    if (typeof dir === "string") {
-      const entries = await readDir(dir)
-      for (const e of entries) {
-        if (e.name && /\.(md|markdown|mdc|yaml|yml)$/i.test(e.name)) {
-          paths.push(`${dir}/${e.name}`)
-        }
-      }
-    }
-  }
-
-  const out: ImportFile[] = []
-  for (const path of paths) {
-    try {
-      const content = await readTextFile(path)
-      const filename = path.split(/[\\/]/).pop() ?? path
-      // Convert absolute path to a relative-ish hint for adapter detection.
-      // We keep the last 4 path segments — enough for path-keyed detection
-      // (".claude/agents/foo.md") without leaking a long absolute prefix.
-      const parts = path.split(/[\\/]/)
-      const tail = parts.slice(Math.max(0, parts.length - 4)).join("/")
-      out.push({ filename, sourcePath: tail, content })
-    } catch (err) {
-      log.warn("read_failed", {
-        path,
-        error: err instanceof Error ? err.message : String(err),
-      })
-    }
-  }
-  return out
-}
-
 /** Convert a browser FileList to ImportFile[]. */
 async function readFilesFromBrowser(list: FileList): Promise<ImportFile[]> {
   const out: ImportFile[] = []
@@ -142,6 +97,8 @@ export function SubagentImportDialog({ open, onOpenChange, onImported }: Props) 
   const [target, setTarget] = useState<ImportTarget>("subagent-template")
   const [strategy, setStrategy] = useState<ImportMergeStrategy>("skip")
   const [busy, setBusy] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
 
   const reset = useCallback(() => {
     setStage("source")
@@ -163,25 +120,85 @@ export function SubagentImportDialog({ open, onOpenChange, onImported }: Props) 
     [onOpenChange, reset]
   )
 
+  /** Tauri file picker — multiple individual files. */
   const handlePickFiles = useCallback(async () => {
     setBusy(true)
     try {
-      const picked = isTauri() ? await readFilesFromTauri() : []
-      if (picked.length === 0) {
-        // Web mode handled via the <input> element below; if Tauri picker
-        // returned nothing, we just stay on this step.
-        return
+      const { open: openDialog } = await import("@tauri-apps/plugin-dialog")
+      const { readTextFile } = await import("@tauri-apps/plugin-fs")
+      const picked = await openDialog({
+        multiple: true,
+        directory: false,
+        filters: [{ name: "Markdown", extensions: ["md", "markdown", "mdc", "yaml", "yml"] }],
+      })
+      const paths = !picked ? [] : Array.isArray(picked) ? picked : [picked]
+      if (paths.length === 0) return
+
+      const files: ImportFile[] = []
+      for (const path of paths) {
+        try {
+          const content = await readTextFile(path)
+          const filename = path.split(/[\\/]/).pop() ?? path
+          const parts = path.split(/[\\/]/)
+          const tail = parts.slice(Math.max(0, parts.length - 4)).join("/")
+          files.push({ filename, sourcePath: tail, content })
+        } catch (err) {
+          log.warn("read_failed", { path, error: err instanceof Error ? err.message : String(err) })
+        }
       }
-      const r = parseWith(sourceChoice, picked)
+      if (files.length === 0) return
+
+      const r = parseWith(sourceChoice, files)
       setDrafts(r.drafts)
       setParseErrors(r.errors)
       setResolvedSource(r.resolvedSource)
       setSelected(new Set(r.drafts.map((d) => d.sourceKey)))
       setStage("review")
     } catch (err) {
-      log.error("pick_failed", {
-        error: err instanceof Error ? err.message : String(err),
-      })
+      log.error("pick_failed", { error: err instanceof Error ? err.message : String(err) })
+      toast.error(t("errors.pickFailed"))
+    } finally {
+      setBusy(false)
+    }
+  }, [sourceChoice, t])
+
+  /** Tauri folder picker — selects a directory and reads matching files. */
+  const handlePickFolder = useCallback(async () => {
+    setBusy(true)
+    try {
+      const { open: openDialog } = await import("@tauri-apps/plugin-dialog")
+      const { readTextFile, readDir } = await import("@tauri-apps/plugin-fs")
+      const dir = await openDialog({ multiple: false, directory: true })
+      if (typeof dir !== "string") return
+
+      const entries = await readDir(dir)
+      const files: ImportFile[] = []
+      for (const e of entries) {
+        if (e.name && /\.(md|markdown|mdc|yaml|yml)$/i.test(e.name)) {
+          try {
+            const fullPath = `${dir}/${e.name}`
+            const content = await readTextFile(fullPath)
+            const parts = fullPath.split(/[\\/]/)
+            const tail = parts.slice(Math.max(0, parts.length - 4)).join("/")
+            files.push({ filename: e.name, sourcePath: tail, content })
+          } catch (err) {
+            log.warn("read_failed", {
+              path: `${dir}/${e.name}`,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          }
+        }
+      }
+      if (files.length === 0) return
+
+      const r = parseWith(sourceChoice, files)
+      setDrafts(r.drafts)
+      setParseErrors(r.errors)
+      setResolvedSource(r.resolvedSource)
+      setSelected(new Set(r.drafts.map((d) => d.sourceKey)))
+      setStage("review")
+    } catch (err) {
+      log.error("pick_failed", { error: err instanceof Error ? err.message : String(err) })
       toast.error(t("errors.pickFailed"))
     } finally {
       setBusy(false)
@@ -249,7 +266,16 @@ export function SubagentImportDialog({ open, onOpenChange, onImported }: Props) 
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-2xl" data-testid="subagent-import-dialog">
         <DialogHeader>
-          <DialogTitle>{t("title")}</DialogTitle>
+          <div className="flex items-center gap-2">
+            <DialogTitle>{t("title")}</DialogTitle>
+            <Badge
+              variant="secondary"
+              className="text-[10px]"
+              data-testid="subagent-import-step-indicator"
+            >
+              {stage === "source" ? "1/3" : stage === "files" ? "2/3" : "3/3"}
+            </Badge>
+          </div>
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
@@ -288,29 +314,47 @@ export function SubagentImportDialog({ open, onOpenChange, onImported }: Props) 
             <Label className="text-sm font-medium">{t("step2Title")}</Label>
 
             {isTauri() ? (
-              <div className="rounded border border-dashed p-6 text-center">
-                <FolderOpenIcon className="mx-auto mb-2 size-6 text-muted-foreground" />
-                <p className="text-sm text-muted-foreground mb-3">{t("tauriPickHint")}</p>
-                <Button
-                  onClick={handlePickFiles}
-                  disabled={busy}
-                  data-testid="subagent-import-tauri-pick"
-                >
-                  {t("pickFiles")}
-                </Button>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded border border-dashed p-4 text-center">
+                  <FileTextIcon className="mx-auto mb-2 size-6 text-muted-foreground" />
+                  <p className="text-xs text-muted-foreground mb-3">{t("tauriPickFilesHint")}</p>
+                  <Button
+                    size="sm"
+                    onClick={handlePickFiles}
+                    disabled={busy}
+                    data-testid="subagent-import-tauri-pick"
+                  >
+                    {t("pickFiles")}
+                  </Button>
+                </div>
+                <div className="rounded border border-dashed p-4 text-center">
+                  <FolderOpenIcon className="mx-auto mb-2 size-6 text-muted-foreground" />
+                  <p className="text-xs text-muted-foreground mb-3">{t("tauriPickFolderHint")}</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handlePickFolder}
+                    disabled={busy}
+                    data-testid="subagent-import-tauri-pick-folder"
+                  >
+                    {t("pickFolder")}
+                  </Button>
+                </div>
               </div>
             ) : (
-              <div className="space-y-2">
-                <label
-                  htmlFor="subagent-import-file-input"
-                  className="block rounded border border-dashed p-6 text-center cursor-pointer hover:bg-accent"
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="rounded border border-dashed p-4 text-center cursor-pointer hover:bg-accent transition-colors"
+                  data-testid="subagent-import-web-pick-files"
                 >
                   <FileTextIcon className="mx-auto mb-2 size-6 text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground mb-1">{t("webPickHint")}</p>
+                  <p className="text-sm font-medium">{t("pickFiles")}</p>
                   <p className="text-xs text-muted-foreground">{t("webPickFormats")}</p>
-                </label>
+                </button>
                 <input
-                  id="subagent-import-file-input"
+                  ref={fileInputRef}
                   data-testid="subagent-import-file-input"
                   type="file"
                   multiple
@@ -318,7 +362,18 @@ export function SubagentImportDialog({ open, onOpenChange, onImported }: Props) 
                   className="hidden"
                   onChange={handleBrowserFiles}
                 />
+                <button
+                  type="button"
+                  onClick={() => folderInputRef.current?.click()}
+                  className="rounded border border-dashed p-4 text-center cursor-pointer hover:bg-accent transition-colors"
+                  data-testid="subagent-import-web-pick-folder"
+                >
+                  <FolderOpenIcon className="mx-auto mb-2 size-6 text-muted-foreground" />
+                  <p className="text-sm font-medium">{t("pickFolder")}</p>
+                  <p className="text-xs text-muted-foreground">{t("webPickFormats")}</p>
+                </button>
                 <input
+                  ref={folderInputRef}
                   data-testid="subagent-import-folder-input"
                   type="file"
                   multiple

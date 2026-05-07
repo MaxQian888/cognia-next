@@ -25,6 +25,9 @@ import {
   type SpeechSettings,
   type TTSProvider,
   type TTSSettings,
+  type XiaomiTTSModel,
+  type XiaomiTTSVoice,
+  type XiaomiTTSStyle,
 } from "@/lib/tts/types"
 
 export function selectSpeechSettings(settings: AppSettings | null | undefined): SpeechSettings {
@@ -41,6 +44,9 @@ export function selectSpeechSettings(settings: AppSettings | null | undefined): 
       (settings.openaiModel as OpenAITTSModel | undefined) ?? DEFAULT_SPEECH_SETTINGS.openaiModel,
     openaiSpeed: settings.openaiSpeed ?? DEFAULT_SPEECH_SETTINGS.openaiSpeed,
     openaiInstructions: settings.openaiInstructions ?? DEFAULT_SPEECH_SETTINGS.openaiInstructions,
+    openaiResponseFormat:
+      (settings.openaiResponseFormat as TTSSettings["openaiResponseFormat"] | undefined) ??
+      DEFAULT_SPEECH_SETTINGS.openaiResponseFormat,
 
     geminiVoice:
       (settings.geminiVoice as GeminiTTSVoice | undefined) ?? DEFAULT_SPEECH_SETTINGS.geminiVoice,
@@ -82,6 +88,14 @@ export function selectSpeechSettings(settings: AppSettings | null | undefined): 
       (settings.deepgramVoice as DeepgramTTSVoice | undefined) ??
       DEFAULT_SPEECH_SETTINGS.deepgramVoice,
 
+    xiaomiVoice:
+      (settings.xiaomiVoice as XiaomiTTSVoice | undefined) ?? DEFAULT_SPEECH_SETTINGS.xiaomiVoice,
+    xiaomiModel:
+      (settings.xiaomiModel as XiaomiTTSModel | undefined) ?? DEFAULT_SPEECH_SETTINGS.xiaomiModel,
+    xiaomiStyle:
+      (settings.xiaomiStyle as XiaomiTTSStyle | undefined) ?? DEFAULT_SPEECH_SETTINGS.xiaomiStyle,
+    xiaomiDialect: settings.xiaomiDialect ?? DEFAULT_SPEECH_SETTINGS.xiaomiDialect,
+
     ttsEnabled: settings.ttsEnabled ?? DEFAULT_SPEECH_SETTINGS.ttsEnabled,
     ttsRate: settings.ttsRate ?? DEFAULT_SPEECH_SETTINGS.ttsRate,
     ttsPitch: settings.ttsPitch ?? DEFAULT_SPEECH_SETTINGS.ttsPitch,
@@ -90,6 +104,12 @@ export function selectSpeechSettings(settings: AppSettings | null | undefined): 
     ttsCacheEnabled: settings.ttsCacheEnabled ?? DEFAULT_SPEECH_SETTINGS.ttsCacheEnabled,
     ttsStreamingEnabled:
       settings.ttsStreamingEnabled ?? DEFAULT_SPEECH_SETTINGS.ttsStreamingEnabled,
+
+    ttsCustomSSMLEnabled:
+      settings.ttsCustomSSMLEnabled ?? DEFAULT_SPEECH_SETTINGS.ttsCustomSSMLEnabled,
+    ttsCustomSSML: settings.ttsCustomSSML ?? DEFAULT_SPEECH_SETTINGS.ttsCustomSSML,
+    ttsPronunciationDictionary:
+      settings.ttsPronunciationDictionary ?? DEFAULT_SPEECH_SETTINGS.ttsPronunciationDictionary,
 
     sttLanguage: settings.sttLanguage ?? DEFAULT_SPEECH_SETTINGS.sttLanguage,
   }
@@ -121,11 +141,18 @@ export function getProviderRuntimeOptions(
         model: s.openaiModel,
         speed: s.openaiSpeed,
         instructions: s.openaiInstructions,
+        responseFormat: s.openaiResponseFormat,
       }
     case "gemini":
       return { voice: s.geminiVoice }
     case "edge":
-      return { voice: s.edgeVoice, rate: s.edgeRate, pitch: s.edgePitch }
+      return {
+        voice: s.edgeVoice,
+        rate: s.edgeRate,
+        pitch: s.edgePitch,
+        customSSMLEnabled: s.ttsCustomSSMLEnabled,
+        customSSML: s.ttsCustomSSML,
+      }
     case "elevenlabs":
       return {
         voice: s.elevenlabsVoice,
@@ -147,6 +174,13 @@ export function getProviderRuntimeOptions(
       }
     case "deepgram":
       return { voice: s.deepgramVoice }
+    case "xiaomi":
+      return {
+        voice: s.xiaomiVoice,
+        model: s.xiaomiModel,
+        style: s.xiaomiStyle,
+        dialect: s.xiaomiDialect,
+      }
     default:
       return {}
   }

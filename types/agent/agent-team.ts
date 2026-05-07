@@ -246,6 +246,33 @@ export const DEFAULT_TEAM_CONFIG: AgentTeamConfig = {
 // ============================================================================
 
 /**
+ * Runtime that executes a teammate's tasks. `claude` goes through the Tauri
+ * Anthropic sidecar; the other values dispatch to an external ACP agent
+ * matched by preset id (see `lib/ai/agent/external/presets.ts`).
+ */
+export type TeammateRuntime = "claude" | "codex" | "claude-code" | "gemini-cli" | "cursor-cli"
+
+/** Default runtime when a teammate has no explicit runtime configured. */
+export const DEFAULT_TEAMMATE_RUNTIME: TeammateRuntime = "claude"
+
+/**
+ * Reserved virtual teammate IDs for `@claude` / `@codex` mentions that work
+ * even when no real teammate with that name is in the team.
+ */
+export const VIRTUAL_AGENT_IDS = {
+  CLAUDE: "__virtual_claude__",
+  CODEX: "__virtual_codex__",
+} as const
+
+export type VirtualAgentId = (typeof VIRTUAL_AGENT_IDS)[keyof typeof VIRTUAL_AGENT_IDS]
+
+/** Reserved mention names — case-insensitive, must not collide with teammate names. */
+export const RESERVED_MENTION_NAMES = ["claude", "codex"] as const
+
+/** Sentinel sender id used when the human operator sends a message in workspace chat. */
+export const TEAM_USER_SENDER_ID = "__user__"
+
+/**
  * Teammate configuration (per-member overrides)
  */
 export interface TeammateConfig {
@@ -271,6 +298,11 @@ export interface TeammateConfig {
   requirePlanApproval?: boolean
   /** Specialization area (e.g., "security", "performance", "testing") */
   specialization?: string
+  /**
+   * Which runtime executes this teammate. `"claude"` (default) goes through
+   * the Anthropic sidecar; the others dispatch to an external ACP agent.
+   */
+  runtime?: TeammateRuntime
   /** Custom metadata */
   metadata?: Record<string, unknown>
 }

@@ -1057,6 +1057,17 @@ export interface ExternalAgentProcessConfig {
   restartOnCrash?: boolean
   /** Maximum restart attempts */
   maxRestarts?: number
+  /**
+   * Convenience: append `--bare` to `args` at spawn time so the agent skips
+   * on-disk auto-discovery (hooks, skills, plugins, MCP, CLAUDE.md). Useful
+   * for the Claude Code preset; ignored if `args` already contains `--bare`.
+   */
+  bare?: boolean
+  /**
+   * Convenience: append `--debug` to `args` at spawn time so the agent emits
+   * verbose stderr logs. Ignored if `args` already contains `--debug`.
+   */
+  debug?: boolean
 }
 
 /**
@@ -1755,6 +1766,13 @@ export interface ExternalAgentExecutionOptions {
   systemPrompt?: string
   /** Permission mode override */
   permissionMode?: AcpPermissionMode
+  /**
+   * Cognia-specific brief-output mode. When true, the ACP client prepends a
+   * concise-output snippet to the resolved `systemPrompt` for `session/new`.
+   * No-op if the spawned agent doesn't honour `systemPrompt` (we ship a
+   * best-effort fallback rather than fail the connect).
+   */
+  briefMode?: boolean
   /** Execution timeout (ms) */
   timeout?: number
   /** Maximum steps */

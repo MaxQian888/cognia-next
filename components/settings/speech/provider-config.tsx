@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 
+import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -35,6 +36,9 @@ import {
   LMNT_TTS_VOICES,
   OPENAI_TTS_MODELS,
   OPENAI_TTS_VOICES,
+  XIAOMI_TTS_VOICES,
+  XIAOMI_TTS_MODELS,
+  XIAOMI_TTS_STYLES,
 } from "@/lib/tts/types"
 import { ApiKeyInput } from "./api-key-input"
 
@@ -120,6 +124,15 @@ export function SystemConfig() {
 
 // -- OpenAI ------------------------------------------------------------------
 
+const OPENAI_RESPONSE_FORMATS = [
+  { id: "mp3", name: "MP3" },
+  { id: "opus", name: "Opus" },
+  { id: "aac", name: "AAC" },
+  { id: "flac", name: "FLAC" },
+  { id: "wav", name: "WAV" },
+  { id: "pcm", name: "PCM" },
+] as const
+
 export function OpenAiConfig() {
   const t = useTranslations("settings.speech.provider")
   const settings = useSettingsStore((s) => s.settings)
@@ -128,6 +141,7 @@ export function OpenAiConfig() {
   const model = settings?.openaiModel ?? "gpt-4o-mini-tts"
   const speed = settings?.openaiSpeed ?? 1.0
   const instructions = settings?.openaiInstructions ?? ""
+  const responseFormat = settings?.openaiResponseFormat ?? "mp3"
 
   return (
     <div className="space-y-3">
@@ -157,6 +171,24 @@ export function OpenAiConfig() {
             {OPENAI_TTS_MODELS.map((m) => (
               <SelectItem key={m.id} value={m.id}>
                 {m.name} — {m.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-xs">{t("audioFormat")}</Label>
+        <Select
+          value={responseFormat}
+          onValueChange={(v) => void save({ openaiResponseFormat: v })}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {OPENAI_RESPONSE_FORMATS.map((f) => (
+              <SelectItem key={f.id} value={f.id}>
+                {f.name}
               </SelectItem>
             ))}
           </SelectContent>
@@ -414,6 +446,17 @@ export function HumeConfig() {
 
 // -- Cartesia ----------------------------------------------------------------
 
+const CARTESIA_EMOTION_PRESETS = [
+  { id: "positivity:high", label: "Positive" },
+  { id: "sadness:high", label: "Sad" },
+  { id: "anger:high", label: "Angry" },
+  { id: "surprise:high", label: "Surprised" },
+  { id: "fear:high", label: "Fearful" },
+  { id: "positivity:medium", label: "Warm" },
+  { id: "sadness:medium", label: "Melancholy" },
+  { id: "curiosity:high", label: "Curious" },
+] as const
+
 export function CartesiaConfig() {
   const t = useTranslations("settings.speech.provider")
   const settings = useSettingsStore((s) => s.settings)
@@ -457,23 +500,33 @@ export function CartesiaConfig() {
           </SelectContent>
         </Select>
       </div>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t("cartesiaLanguage")}</Label>
-          <Input
-            value={language}
-            onChange={(e) => void save({ cartesiaLanguage: e.target.value })}
-            placeholder="en"
-          />
+      <div className="space-y-1.5">
+        <Label className="text-xs">{t("cartesiaLanguage")}</Label>
+        <Input
+          value={language}
+          onChange={(e) => void save({ cartesiaLanguage: e.target.value })}
+          placeholder="en"
+        />
+      </div>
+      <div className="space-y-2">
+        <Label className="text-xs">{t("cartesiaEmotion")}</Label>
+        <div className="flex flex-wrap gap-1.5">
+          {CARTESIA_EMOTION_PRESETS.map((e) => (
+            <Badge
+              key={e.id}
+              variant={emotion === e.id ? "default" : "outline"}
+              className="cursor-pointer text-xs hover:bg-primary/10"
+              onClick={() => void save({ cartesiaEmotion: emotion === e.id ? "" : e.id })}
+            >
+              {e.label}
+            </Badge>
+          ))}
         </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t("cartesiaEmotion")}</Label>
-          <Input
-            value={emotion}
-            onChange={(e) => void save({ cartesiaEmotion: e.target.value })}
-            placeholder="positivity:high"
-          />
-        </div>
+        <Input
+          value={emotion}
+          onChange={(e) => void save({ cartesiaEmotion: e.target.value })}
+          placeholder={t("cartesiaEmotionPlaceholder")}
+        />
       </div>
       <NumberSlider
         label={t("speed")}
@@ -518,6 +571,79 @@ export function DeepgramConfig() {
   )
 }
 
+// -- Xiaomi ------------------------------------------------------------------
+
+export function XiaomiConfig() {
+  const t = useTranslations("settings.speech.provider")
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+  const voice = settings?.xiaomiVoice ?? "mimo_default"
+  const model = settings?.xiaomiModel ?? "mimo-v2-tts"
+  const style = settings?.xiaomiStyle ?? ""
+  const dialect = settings?.xiaomiDialect ?? ""
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">{t("xiaomiIntro")}</p>
+      <ApiKeyInput provider="xiaomi" label={t("label.xiaomi")} placeholder="sk-…" />
+      <div className="space-y-2">
+        <Label className="text-xs">{t("voice")}</Label>
+        <Select value={voice} onValueChange={(v) => void save({ xiaomiVoice: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {XIAOMI_TTS_VOICES.map((v) => (
+              <SelectItem key={v.id} value={v.id}>
+                {v.name} — {v.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-xs">{t("model")}</Label>
+        <Select value={model} onValueChange={(v) => void save({ xiaomiModel: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {XIAOMI_TTS_MODELS.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {m.name} — {m.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-xs">{t("xiaomiStyle")}</Label>
+        <div className="flex flex-wrap gap-1.5">
+          {XIAOMI_TTS_STYLES.map((s) => (
+            <Badge
+              key={s.id}
+              variant={style === s.id ? "default" : "outline"}
+              className="cursor-pointer text-xs hover:bg-primary/10"
+              onClick={() => void save({ xiaomiStyle: style === s.id ? "" : s.id })}
+            >
+              {s.tag}
+            </Badge>
+          ))}
+        </div>
+        <p className="text-[10px] text-muted-foreground">{t("xiaomiStyleHint")}</p>
+      </div>
+      <div className="space-y-1.5">
+        <Label className="text-xs">{t("xiaomiDialect")}</Label>
+        <Input
+          value={dialect}
+          onChange={(e) => void save({ xiaomiDialect: e.target.value })}
+          placeholder={t("xiaomiDialectPlaceholder")}
+        />
+      </div>
+    </div>
+  )
+}
+
 // -- Mapping -----------------------------------------------------------------
 
 import type { TTSProvider } from "@/lib/tts/types"
@@ -532,4 +658,5 @@ export const PROVIDER_CONFIG_COMPONENTS: Record<TTSProvider, () => React.ReactEl
   hume: HumeConfig,
   cartesia: CartesiaConfig,
   deepgram: DeepgramConfig,
+  xiaomi: XiaomiConfig,
 }

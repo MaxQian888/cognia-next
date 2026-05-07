@@ -19,6 +19,7 @@ export type KeyringProviderId =
   | "hume"
   | "cartesia"
   | "deepgram"
+  | "xiaomi"
 
 export const KEYRING_PROVIDER_IDS: KeyringProviderId[] = [
   "openai",
@@ -28,6 +29,7 @@ export const KEYRING_PROVIDER_IDS: KeyringProviderId[] = [
   "hume",
   "cartesia",
   "deepgram",
+  "xiaomi",
 ]
 
 /** Map a TTSProvider → the keyring account it consumes. */
@@ -47,6 +49,8 @@ export function keyringProviderFor(provider: TTSProvider): KeyringProviderId | n
       return "cartesia"
     case "deepgram":
       return "deepgram"
+    case "xiaomi":
+      return "xiaomi"
     default:
       return null
   }

@@ -16,6 +16,7 @@ interface ProviderSidebarProps {
     icon?: string | React.ReactNode
     subtitle: string
     status: ProviderConnectionStatus
+    modelCount?: number
   }>
   selectedId: string | null
   onSelect: (id: string) => void
@@ -97,6 +98,7 @@ export function ProviderSidebar({
             status={p.status}
             isSelected={p.id === selectedId}
             onClick={onSelect}
+            modelCount={p.modelCount}
           />
         ))}
       </div>

@@ -34,6 +34,7 @@ import {
   type TwinRuntimeSettings,
   type VectorBackend,
 } from "@/types/twin"
+import { TwinOverviewCard } from "./twin-overview-card"
 
 const VECTOR_BACKENDS: VectorBackend[] = [
   "qdrant",
@@ -69,6 +70,7 @@ export function TwinSettingsTab({ twinId }: { twinId: string }) {
           value={profile?.updatedAt ? new Date(profile.updatedAt).toLocaleString() : "(never)"}
         />
       </Card>
+      <TwinOverviewCard twinId={twinId} />
       <Card className="p-4">
         <h3 className="mb-2 text-sm font-medium">RAG defaults</h3>
         <p className="text-muted-foreground text-xs">

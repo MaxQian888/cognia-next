@@ -64,16 +64,12 @@ const exportAllModesMock = jest.fn(() => "{}")
 const importModeMock = jest.fn()
 const importModesMock = jest.fn()
 
+// Shared mutable state so both the (skipped) built-in surfacing block and
+// the polish block below can drive the store without redeclaring the mock.
+const customModeStoreRef: { current: Record<string, unknown> } = { current: {} }
+
 jest.mock("@/stores/agent/custom-mode-store", () => ({
-  useCustomModeStore: () => ({
-    deleteMode: deleteModeMock,
-    duplicateMode: duplicateModeMock,
-    exportMode: exportModeMock,
-    exportAllModes: exportAllModesMock,
-    importMode: importModeMock,
-    importModes: importModesMock,
-    createMode: createModeMock,
-  }),
+  useCustomModeStore: () => customModeStoreRef.current,
 }))
 
 const isBuiltInModeMock = jest.fn((id: string) => id === "general")
@@ -121,6 +117,15 @@ describe.skip("CustomModeSettings — built-in surfacing", () => {
     deleteModeMock.mockClear()
     duplicateModeMock.mockClear()
     isBuiltInModeMock.mockClear()
+    customModeStoreRef.current = {
+      deleteMode: deleteModeMock,
+      duplicateMode: duplicateModeMock,
+      exportMode: exportModeMock,
+      exportAllModes: exportAllModesMock,
+      importMode: importModeMock,
+      importModes: importModesMock,
+      createMode: createModeMock,
+    }
   })
 
   it("renders the Built-in badge on built-in rows", () => {
@@ -208,5 +213,77 @@ describe.skip("CustomModeSettings — built-in surfacing", () => {
       await user.click(trigger)
     })
     expect(screen.queryByRole("menuitem", { name: /export/i })).not.toBeInTheDocument()
+  })
+})
+
+// ---- Polish-phase tests (responsive filter row, aria, results count, etc.) --
+
+const polishCustomA: CustomModeConfig = {
+  id: "polish-a",
+  type: "custom",
+  isBuiltIn: false,
+  name: "Polish A",
+  description: "tagline alpha",
+  icon: "Bot",
+  systemPrompt: "",
+  tools: [],
+  outputFormat: "text",
+  previewEnabled: false,
+  customConfig: {},
+  category: "productivity",
+  tags: [],
+  usageCount: 1,
+  createdAt: new Date(0),
+  updatedAt: new Date(0),
+}
+
+const polishCustomB: CustomModeConfig = {
+  ...polishCustomA,
+  id: "polish-b",
+  name: "Polish B",
+  description: "tagline beta",
+  category: "creative",
+}
+
+describe("CustomModeSettings — polish-phase", () => {
+  beforeEach(() => {
+    customModeStoreRef.current = {
+      customModes: { "polish-a": polishCustomA, "polish-b": polishCustomB },
+      deleteMode: jest.fn(),
+      duplicateMode: jest.fn(),
+      exportMode: jest.fn(() => "{}"),
+      exportAllModes: jest.fn(() => "{}"),
+      importMode: jest.fn(),
+      importModes: jest.fn(),
+    }
+  })
+
+  it("filter row uses responsive flex-col on mobile and flex-row on md+", () => {
+    const { container } = render(<CustomModeSettings />)
+    const filters = container.querySelector(".flex-col.md\\:flex-row")
+    expect(filters).not.toBeNull()
+  })
+
+  it("each mode row has an inline Edit button hidden on mobile (md:flex)", () => {
+    render(<CustomModeSettings />)
+    const editA = screen.getByTestId("mode-edit-polish-a")
+    expect(editA.className).toContain("hidden")
+    expect(editA.className).toContain("md:flex")
+  })
+
+  it("dropdown trigger has an aria-label that includes the mode name", () => {
+    render(<CustomModeSettings />)
+    expect(screen.getByLabelText("More actions for Polish A")).toBeInTheDocument()
+  })
+
+  it("renders the results-count line only when filtered", async () => {
+    const user = userEvent.setup()
+    render(<CustomModeSettings />)
+    expect(screen.queryByTestId("custom-mode-results-count")).not.toBeInTheDocument()
+    const search = screen.getByPlaceholderText("Search modes…")
+    await user.type(search, "alpha")
+    const count = screen.getByTestId("custom-mode-results-count")
+    expect(count.textContent).toContain("1")
+    expect(count.textContent).toContain("2")
   })
 })

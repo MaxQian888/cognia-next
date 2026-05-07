@@ -9,6 +9,8 @@
     "deleteConfirm": "确定要永久删除 \"{name}\" 吗？",
     "deleteWarning": "此操作不可撤销。所有任务、消息和成员数据将被删除。",
     "createTeam": "创建团队",
+    "trySampleTeam": "试用示例团队",
+    "sampleTeamCreated": "示例研究小队已就绪 — 在概览页点击「运行」即可启动。",
     "teamCreated": "团队 \"{name}\" 已创建。",
     "teamDeleted": "团队 \"{name}\" 已删除。",
     "teamUpdated": "团队已更新。",
@@ -68,6 +70,9 @@
     },
     "chat": {
       "empty": "暂无消息。",
+      "emptyHint": "试试 @claude、@codex 或 @<成员名> 把消息发给对应的智能体。",
+      "streaming": "思考中…",
+      "mentionAgents": "@ 提及智能体",
       "messageTypes": {
         "direct": "私聊",
         "broadcast": "广播",
@@ -80,6 +85,53 @@
         "idle": "空闲",
         "task_assignment": "任务分配",
         "consensus": "共识"
+      },
+      "composer": {
+        "placeholder": "输入 @ 提及智能体 —— 试试 @claude 或 @codex",
+        "mentionTitle": "提及一个智能体",
+        "noAgents": "暂无可用智能体 —— 请先添加队友",
+        "noMatches": "没有匹配 \"{query}\" 的智能体",
+        "unknownAgent": "未知的智能体：@{name}",
+        "missingMention": "请用 @<智能体名> 开头的方式发送消息。",
+        "missingPrompt": "在 @ 提及之后请输入消息内容。",
+        "imageNotSupported": "团队对话暂不支持图片附件。",
+        "sendingFailed": "发送给 {agent} 失败：{reason}",
+        "stop": "停止"
+      },
+      "runtime": {
+        "claude": "Claude",
+        "codex": "Codex",
+        "claudeCode": "Claude Code",
+        "geminiCli": "Gemini",
+        "cursorCli": "Cursor"
+      },
+      "runtimeStatus": {
+        "missingKey": "请在「设置 → Providers」配置 Anthropic API Key 后再使用 @claude。",
+        "noAgent": "尚未为 {runtime} 配置外部 Agent。请到「设置 → 外部 Agent」添加。",
+        "disconnected": "{runtime} 已配置但未连接。请到「设置 → 外部 Agent」连接。"
+      },
+      "toolCall": {
+        "toggleDetails": "展开 / 折叠 {name} 的详情",
+        "input": "输入",
+        "output": "输出",
+        "running": "运行中",
+        "complete": "完成",
+        "error": "出错"
+      },
+      "tokenUsage": {
+        "label": "Token",
+        "input": "输入",
+        "output": "输出",
+        "total": "总计"
+      },
+      "messageActions": {
+        "open": "消息操作",
+        "copy": "复制",
+        "copied": "已复制到剪贴板",
+        "retry": "重试",
+        "retrying": "正在重试…",
+        "delete": "删除",
+        "deleteFailed": "删除消息失败"
       }
     },
     "activity": {
@@ -100,6 +152,8 @@
       "configOverrides": "配置覆盖",
       "provider": "模型提供商",
       "model": "模型",
+      "runtime": "运行时",
+      "runtimeUpdated": "{name} 的运行时已更新。",
       "save": "添加",
       "saved": "\"{name}\" 已添加。",
       "removeTitle": "移除队友？",
@@ -325,6 +379,15 @@
     "slashCommand": {
       "ranSlashCommand": "执行了斜杠命令"
     },
+    "twinBadge": {
+      "label": "孪生 · {chunks}",
+      "openWorkbench": "打开孪生工作台",
+      "statSummary": "{sources} 个数据源 · {chunks} 个切片",
+      "ragOn": "RAG 已开启（top-{topK}）",
+      "ragOff": "RAG 已关闭",
+      "fewShotOn": "风格少样本已启用（{k} 条）",
+      "fewShotOff": "风格少样本已关闭"
+    },
     "header": {
       "untitledSession": "（未命名）",
       "noApiKey": "未配置 API Key",
@@ -355,6 +418,13 @@
       "pickDirTitle": "为本会话选择工作目录",
       "cwdReset": "重置",
       "cwdFallbackHint": "角色默认: {path}",
+      "bareMode": "极简模式",
+      "debugMode": "调试模式",
+      "briefMode": "简短输出",
+      "forkAria": "派生会话",
+      "forkTooltip": "派生会话 — 从当前会话的历史新建一条分支",
+      "forkSuccess": "已派生新会话，已切换到该分支。",
+      "forkUnsupported": "此 agent 不支持派生会话。",
       "cancel": "取消",
       "save": "保存",
       "groups": {
@@ -1117,6 +1187,7 @@
       "ccswitch": "CCSwitch",
       "agents": "外部代理",
       "agentModes": "代理模式",
+      "agentRuntime": "内置代理运行时",
       "agentTeams": "代理团队",
       "hooks": "钩子",
       "slashCommands": "斜杠命令",
@@ -1144,7 +1215,8 @@
       "providers": "提供商",
       "connections": "平台连接",
       "subscription": "Claude 订阅",
-      "network": "网络代理"
+      "network": "网络代理",
+      "workflows": "工作流"
     },
     "descriptions": {
       "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",
@@ -1153,6 +1225,7 @@
       "ccswitch": "复用 CCSwitch 中的服务商、MCP 服务器、提示词与技能，一键切换激活订阅。",
       "agents": "外部代理 — Claude Code CLI、Codex、Gemini CLI、Cursor，以及任何使用 ACP / OpenCode / HTTP 协议的自定义命令。",
       "agentModes": "内置与自定义代理模式 — 系统提示词、工具列表、输出格式与实时预览预设。",
+      "agentRuntime": "内置 Anthropic SDK 侧载 — 默认值、权限模式、始终允许的工具、内置工具分类、侧载诊断与 A2UI 桥接。",
       "agentTeams": "多代理团队模板 — 经理-工作者、并行专家、研究小组。可浏览内置模板、复制为自定义副本，或新建模板。",
       "hooks": "生命周期钩子（~/.claude/settings.json）。21 种事件 × 匹配器 × 命令或 webhook 处理器。整文档原样写回，不会丢失未识别字段。",
       "slashCommands": "内置、自定义、插件贡献的斜杠命令统一浏览,可搜索并将命令复制到聊天输入框。",
@@ -1180,7 +1253,8 @@
       "providers": "AI 提供商的 API 密钥、模型与连接设置。",
       "connections": "配置消息平台适配器（Telegram、Discord、Slack 等）并管理出站队列。",
       "subscription": "用 Claude Pro/Max 订阅登录，监控 5 小时 / 7 天速率限制窗口，OAuth 凭据保存在系统钥匙串。",
-      "network": "为所有出站请求配置 HTTP / HTTPS / SOCKS5 代理，并支持自动检测 Clash Verge、Mihomo、V2Ray 等本地代理工具。"
+      "network": "为所有出站请求配置 HTTP / HTTPS / SOCKS5 代理，并支持自动检测 Clash Verge、Mihomo、V2Ray 等本地代理工具。",
+      "workflows": "面向角色、团队、技能、孪生与连接器的 n8n 风格可视化编排。可通过定时、Webhook、平台消息或手动触发。"
     },
     "externalBridge": {
       "wikiIndex": "Wiki 索引",
@@ -1666,6 +1740,97 @@
       "persistAcrossSessionsLabel": "跨会话保留",
       "persistAcrossSessionsHint": "开启后 Artifact 通过 localStorage 持久化；关闭则随会话清理。",
       "resetDefaults": "恢复默认"
+    },
+    "agentRuntimeSection": {
+      "title": "内置代理运行时",
+      "description": "配置进程内 Claude SDK 侧载的默认行为——这些值会用于所有新会话，除非角色或会话级别覆盖。",
+      "tabs": {
+        "defaults": "默认值",
+        "permissions": "权限与工具",
+        "sidecar": "侧载诊断",
+        "a2ui": "A2UI 桥接"
+      },
+      "defaults": {
+        "permissionTitle": "权限模式",
+        "permissionDesc": "新会话的默认权限模式，角色和会话仍可覆盖。",
+        "permissionMode": "模式",
+        "permDefault": "默认 — 编辑前询问",
+        "permAcceptEdits": "接受编辑 — 自动允许写文件",
+        "permBypass": "绕过 — 允许全部（危险）",
+        "permPlan": "计划 — 仅读取并提出建议",
+        "modelTitle": "默认模型",
+        "modelDesc": "在角色和会话都未指定模型时使用。",
+        "modelLabel": "默认模型选择器",
+        "modelSearch": "搜索模型…",
+        "modelEmpty": "暂未配置任何提供商。请前往「设置 → 提供商」添加。",
+        "modelClear": "清除默认值",
+        "modelUnset": "未选择默认模型",
+        "workingDirTitle": "默认工作目录",
+        "workingDirDesc": "作为 cwd 传给侧载。当大部分会话面向同一项目时很方便。",
+        "workingDirPlaceholder": "/path/to/project",
+        "appendTitle": "追加到系统提示词",
+        "appendDesc": "追加到所有默认角色的系统提示词末尾。请适度使用——长文会显著抬高 token 成本。",
+        "appendPlaceholder": "例如：始终用简洁的项目要点回答。",
+        "routingTitle": "路由回退",
+        "routingDesc": "某次发送失败时，自动尝试别名回退链中的下一项。关闭后会保留原始错误，便于排查。"
+      },
+      "permissions": {
+        "alwaysAllowTitle": "始终允许的工具",
+        "alwaysAllowDesc": "下列工具在所有聊天中都会跳过逐次审批弹窗。",
+        "addToolPlaceholder": "工具名（例如 mcp__cognia-tools__file_hash）",
+        "addBtn": "添加",
+        "approveAllBuiltin": "批准全部内置工具",
+        "approveAllBuiltinDoneToast": "已批准 {count} 个内置工具。",
+        "addedToast": "已添加 {tool} 到始终允许列表。",
+        "infoLabel": "查看 {name} 包含的工具",
+        "infoListTitle": "{count} 个工具",
+        "desktopOnlyHint": "内置工具分类运行在桌面侧载中，请切换到桌面端启用。",
+        "risk": {
+          "low": "低风险",
+          "medium": "中风险",
+          "high": "高风险"
+        },
+        "categories": {
+          "fileExtras": {
+            "name": "文件扩展",
+            "desc": "在 SDK 内置 Read/Write/Edit 之外，额外提供哈希、结构化 diff、内容搜索等。"
+          },
+          "git": {
+            "name": "Git",
+            "desc": "对 git_status / git_diff / git_log 的结构化封装，比解析原始 shell 输出更稳。"
+          },
+          "process": {
+            "name": "进程",
+            "desc": "列出、启动、终止进程。高风险，仅在受信任工作流中开启。"
+          },
+          "environment": {
+            "name": "环境变量",
+            "desc": "读取环境变量与系统信息，密钥在到达代理前已脱敏。"
+          },
+          "shellAdvanced": {
+            "name": "Shell（高级）",
+            "desc": "白名单单程序 shell，常用于项目特有的构建命令。"
+          }
+        }
+      },
+      "sidecar": {
+        "title": "侧载诊断",
+        "description": "进程内 Claude SDK 侧载的只读视图。",
+        "statusLabel": "状态",
+        "running": "运行中",
+        "stopped": "已停止",
+        "checking": "检查中…",
+        "webOnly": "仅桌面端可用",
+        "sdkSessionLabel": "最近一次 SDK 会话 id",
+        "restartBtn": "重启侧载",
+        "restartedToast": "已请求重启侧载。",
+        "desktopOnlyHint": "重启功能仅在桌面端版本中提供。"
+      },
+      "a2ui": {
+        "title": "A2UI 桥接",
+        "description": "允许代理通过桥接 MCP 服务器驱动 A2UI 小应用。",
+        "hint": "关闭后，角色默认看不到 mcp__a2ui-bridge__* 工具；自定义模式编辑器中的逐模式覆盖仍然可用。"
+      }
     },
     "data": {
       "title": "数据与隐私",
@@ -2187,6 +2352,12 @@
       "alwaysAllowedTools": "始终允许的工具",
       "noneYet": "暂无。在审批弹窗中选择「始终允许」的工具会出现在这里。",
       "removeFromAllowList": "从始终允许列表中移除 {tool}",
+      "bareMode": "极简模式",
+      "bareModeHint": "跳过磁盘上的自动发现（CLAUDE.md、hooks、插件、MCP）。冷启动更快；但 agent 看不到你的项目设置。",
+      "debugMode": "调试模式",
+      "debugModeHint": "为 SDK 和派生的 MCP / 子进程开启详细日志。可在 Tauri dev 控制台或 sidecar 日志中查看。",
+      "briefMode": "简短输出",
+      "briefModeHint": "在每次发送时附加一段「精简输出」指令。适合一问一答、快速分流。",
       "saved": "设置已保存。",
       "cancel": "取消",
       "save": "保存",
@@ -2303,7 +2474,38 @@
         "skillsHint": "顺序很重要——靠前的技能会先附加到系统提示词。",
         "mcpServers": "MCP 服务器",
         "mcpServersHint": "全部不选表示「使用所有已启用的服务器」。",
-        "mcpServersEmptyHint": "（使用所有已启用的 MCP 服务器）"
+        "mcpServersEmptyHint": "（使用所有已启用的 MCP 服务器）",
+        "twinBinding": {
+          "titleUnbound": "数字孪生（可选）",
+          "titleBound": "数字孪生",
+          "unboundDescription": "把当前角色绑定到一个数字孪生（Digital Twin），系统会在每次发送前注入 RAG 检索到的片段以及写作风格的少样本示例。",
+          "pickExisting": "选择已有的孪生",
+          "pickExistingPlaceholder": "请选择…",
+          "createNew": "新建孪生",
+          "newTwinId": "孪生 ID",
+          "newTwinIdPlaceholder": "twin_xxxxxxxx",
+          "newTwinIdHint": "支持字母、数字与下划线。必须在所有角色中唯一。",
+          "confirmBind": "绑定",
+          "cancel": "取消",
+          "openWorkbench": "打开工作台",
+          "unbind": "解绑孪生",
+          "unbindTitle": "确认解绑孪生？",
+          "unbindBody": "孪生的数据会保留，仅断开当前角色与它之间的关联。",
+          "unbindConfirm": "解绑",
+          "statsSources": "源数",
+          "statsChunks": "切片",
+          "statsStyleSamples": "风格样本",
+          "statsPlaybooks": "Playbook",
+          "statsLastDistilled": "档案更新",
+          "never": "（暂无）",
+          "runtimeTitle": "运行时",
+          "enableRag": "启用 RAG",
+          "enableRagHint": "发送时检索 top-K 个孪生切片，注入到系统提示词。",
+          "ragTopK": "检索 top K",
+          "enableStyleFewShot": "风格少样本",
+          "enableStyleFewShotHint": "从孪生档案中挑选代表性写作示例，帮助语气对齐。",
+          "styleSamplesK": "每次发送的样本数"
+        }
       },
       "multiselect": {
         "noneDefined": "（暂未定义）",
@@ -2441,7 +2643,14 @@
         "emptyTitle": "当前没有运行中的子代理。",
         "emptyBody": "由活跃会话派发的子代理会显示在这里。运行时数据存于内存,重启后清空。",
         "parent": "父代理：{id}",
-        "duration": "{ms}ms"
+        "duration": "{ms}ms",
+        "callout": {
+          "title": "实时注册表，运行时填充",
+          "body": "由 Agent 团队或对话派发的子代理会在执行时显示在此。列表存于内存，应用重启后清空。前往 Agent 团队启动队员任务即可看到列表填充。",
+          "cta": "打开 Agent 团队"
+        },
+        "toolsCount": "{count, plural, other {# 个工具}}",
+        "allLogs": "全部日志 ({count})"
       },
       "import": {
         "trigger": "导入",
@@ -5146,6 +5355,10 @@
       "transport": "传输",
       "command": "命令",
       "arguments": "参数",
+      "passBareFlag": "附加 --bare",
+      "passBareFlagHint": "跳过磁盘自动发现（CLAUDE.md、hooks、插件、MCP）。会在启动时追加到 args 末尾。",
+      "passDebugFlag": "附加 --debug",
+      "passDebugFlagHint": "为派生的 agent 进程打开详细 stderr 日志。",
       "workingDirectory": "工作目录",
       "cwdPlaceholder": "留空使用当前目录",
       "endpoint": "Endpoint URL",
@@ -5181,7 +5394,17 @@
       "presetGalleryEmpty": "暂无可用预设。",
       "quickStartPreset": "快速预设",
       "selectPresetOrCustom": "选择预设或手动配置",
-      "customConfiguration": "自定义配置"
+      "customConfiguration": "自定义配置",
+      "transport.stdio.label": "Stdio (本地进程)",
+      "transport.http.label": "HTTP (远程)",
+      "details.adapter": "适配器",
+      "details.surface": "接入面",
+      "details.supportTier": "支持级别",
+      "details.prerequisiteStatus": "前置条件",
+      "details.officialDocs": "官方文档",
+      "details.docsLink": "查看文档",
+      "details.limitation": "已知限制",
+      "details.recommendedActions": "建议操作"
     }
   },
   "tools": {
@@ -5416,6 +5639,8 @@
     "failedToParseFile": "文件解析失败",
     "deletedModes": "已删除 {count} 个模式",
     "searchModes": "搜索模式…",
+    "categoryLabel": "分类",
+    "sortByLabel": "排序",
     "allCategories": "全部分类",
     "sortByName": "按名称排序",
     "sortByCreated": "按创建时间排序",
@@ -5433,7 +5658,21 @@
     "tools": "{count} 个工具",
     "usedTimes": "使用 {count} 次",
     "duplicate": "复制",
-    "deleteConfirmDesc": "此操作无法撤消，自定义模式将被永久删除。"
+    "deleteConfirmDesc": "此操作无法撤消，自定义模式将被永久删除。",
+    "moreActions": "对 {name} 的更多操作",
+    "editMode": "编辑 {name}",
+    "resultsCount": "显示 {shown} / {total}"
+  },
+  "planModeTasks": {
+    "triggerText": "计划任务（{count}）",
+    "triggerLabel": "打开计划任务面板（{count}）",
+    "headerTitle": "计划模式任务",
+    "headerDescription": "代理在计划模式下提交的任务，仅在当前会话有效。"
+  },
+  "routingFallback": {
+    "retryingWithFallback": "提供商失败 — 正在改用 {provider} 重试…",
+    "fallbackExhausted": "所有回退提供商都失败：{error}",
+    "answeredVia": "已通过 {provider}（{model}）回应"
   },
   "scheduler": {
     "title": "定时任务",
@@ -7565,5 +7804,70 @@
     },
     "invalidJson": "JSON 格式不正确",
     "outOfRange": "值须在 {min} 到 {max} 之间"
+  },
+  "twin": {
+    "panel": {
+      "title": "数字孪生",
+      "noTwinTitle": "还没有数字孪生",
+      "noTwinHint": "在角色设置中绑定一个孪生，即可开始摄取文档、对话和代码。每个孪生都依附于角色，无需单独创建身份。",
+      "activeTwin": "当前孪生",
+      "workerActive": "工作器 ● 运行中",
+      "workerIdle": "工作器 ○ 空闲",
+      "tabs": {
+        "sources": "数据源",
+        "jobs": "任务",
+        "drafts": "草稿",
+        "settings": "设置"
+      }
+    },
+    "charts": {
+      "title": "活动概览",
+      "description": "实时索引统计 —— 任意标签页完成摄取任务后立即刷新。",
+      "growthHeading": "近 7 天新增切片",
+      "growthChunks": "切片",
+      "kindHeading": "数据源类型分布",
+      "strategyHeading": "分块策略",
+      "strategyChunks": "切片",
+      "noSources": "还没有任何数据源 —— 切到「数据源」标签上传文件即可。",
+      "status": {
+        "parsed": "已解析",
+        "parsing": "解析中",
+        "pending": "等待中",
+        "failed": "失败",
+        "deleted": "已删除"
+      }
+    },
+    "sources": {
+      "headerCount": "数据源（{count}）",
+      "addSource": "添加数据源",
+      "cancelAdd": "取消",
+      "emptyHint": "还没有任何数据源。点击「添加数据源」粘贴文本或导入文件。",
+      "delete": "删除",
+      "chunks": "{count} 个切片",
+      "imported": "导入于 {when}",
+      "errorPrefix": "⚠"
+    },
+    "jobs": {
+      "headerCount": "任务（{count}）",
+      "queueIngest": "为待处理源排队摄取",
+      "queueDistill": "排队蒸馏",
+      "emptyHint": "还没有任务。先添加数据源，再排队摄取；切片建立索引后即可排队蒸馏。",
+      "queuedAt": "入队于 {when}",
+      "errorPrefix": "⚠",
+      "draftsProduced": "已生成 {count} 个草稿"
+    },
+    "drafts": {
+      "headerCount": "草稿（{count}）",
+      "emptyHint": "还没有草稿。当至少一个数据源完成切片后，从「任务」标签排队一次蒸馏即可。",
+      "qualityLabel": "质量：{label}",
+      "qualityHigh": "高",
+      "qualityMedium": "中",
+      "qualityLow": "低",
+      "qualityUnscored": "未评分",
+      "untitled": "（未命名）",
+      "emptyBody": "（空内容）",
+      "accept": "接受",
+      "reject": "拒绝"
+    }
   }
 }

@@ -40,10 +40,11 @@ const log = createLogger("data-import")
 
 interface Props {
   domain: DomainKey
+  labelKey: string
   trigger: React.ReactNode
 }
 
-export function DomainImportDialog({ domain, trigger }: Props) {
+export function DomainImportDialog({ domain, labelKey, trigger }: Props) {
   const t = useTranslations("settings.data")
   const tImport = useTranslations("import")
   const [open, setOpen] = useState(false)
@@ -111,8 +112,8 @@ export function DomainImportDialog({ domain, trigger }: Props) {
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{t(`domain.${domain}.importTitle` as never)}</DialogTitle>
-          <DialogDescription>{t(`domain.${domain}.importBody` as never)}</DialogDescription>
+          <DialogTitle>{t(`domain.${labelKey}.importTitle` as never)}</DialogTitle>
+          <DialogDescription>{t(`domain.${labelKey}.importBody` as never)}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3 py-2">

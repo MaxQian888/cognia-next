@@ -12,7 +12,11 @@ import { toast } from "sonner"
 
 import { generateCacheKey, getCachedOrGenerate } from "@/lib/tts/tts-cache"
 import { getProviderRuntimeOptions, toTTSSettings } from "@/lib/tts/speech-settings"
-import { preprocessTextForProvider, splitTextForTTS } from "@/lib/tts/tts-text-utils"
+import {
+  applyPronunciationDictionary,
+  preprocessTextForProvider,
+  splitTextForTTS,
+} from "@/lib/tts/tts-text-utils"
 import {
   DEFAULT_SPEECH_SETTINGS,
   TTS_PROVIDERS,
@@ -31,6 +35,7 @@ import { generateLMNTTTS } from "@/lib/tts/providers/lmnt"
 import { generateHumeTTS } from "@/lib/tts/providers/hume"
 import { generateCartesiaTTS } from "@/lib/tts/providers/cartesia"
 import { generateDeepgramTTS } from "@/lib/tts/providers/deepgram"
+import { generateXiaomiTTS } from "@/lib/tts/providers/xiaomi"
 
 export type TTSActiveSource = "chat" | "chat-widget" | "selection" | "settings" | "unknown"
 
@@ -123,8 +128,14 @@ export class TTSOrchestrator {
       activeSource: source,
     })
 
-    const normalizedText = preprocessTextForProvider(text, provider)
-    const chunks = splitTextForTTS(normalizedText, provider)
+    let normalizedText = preprocessTextForProvider(text, provider)
+    const dict = speechSettings.ttsPronunciationDictionary
+    if (dict && Object.keys(dict).length > 0) {
+      normalizedText = applyPronunciationDictionary(normalizedText, dict)
+    }
+    const skipSplit =
+      provider === "edge" && speechSettings.ttsCustomSSMLEnabled && !!speechSettings.ttsCustomSSML
+    const chunks = skipSplit ? [normalizedText] : splitTextForTTS(normalizedText, provider)
 
     try {
       options.onStart?.()
@@ -352,6 +363,11 @@ export class TTSOrchestrator {
             ...(options as object),
             apiKey,
           } as Parameters<typeof generateDeepgramTTS>[1])
+        case "xiaomi":
+          return generateXiaomiTTS(text, {
+            ...(options as object),
+            apiKey,
+          } as Parameters<typeof generateXiaomiTTS>[1])
         default:
           return { success: false, error: `Provider ${provider} not supported` }
       }

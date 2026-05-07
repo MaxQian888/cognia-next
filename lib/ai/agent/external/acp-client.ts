@@ -259,6 +259,21 @@ function createDefaultSessionExtensionSupport(): ExternalAgentSessionExtensionSu
 // ============================================================================
 
 /**
+ * Pure helper exported for testing. Computes the final spawn args by appending
+ * the `--bare` / `--debug` flags when their convenience toggles are on, while
+ * preserving any user-supplied raw args verbatim. Idempotent — never adds a
+ * flag that's already present.
+ */
+export function buildSpawnArgs(
+  proc: Pick<NonNullable<ExternalAgentConfig["process"]>, "args" | "bare" | "debug">
+): string[] {
+  const out = [...(proc.args ?? [])]
+  if (proc.bare && !out.includes("--bare")) out.push("--bare")
+  if (proc.debug && !out.includes("--debug")) out.push("--debug")
+  return out
+}
+
+/**
  * ACP Client Adapter
  *
  * Handles communication with ACP-compatible agents via stdio (local process)
@@ -367,12 +382,14 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     const { invoke } = await import("@tauri-apps/api/core")
     const { listen } = await import("@tauri-apps/api/event")
 
+    const finalArgs = buildSpawnArgs(config.process)
+
     // Spawn the external agent process
     this.processId = await invoke<string>("spawn_external_agent", {
       config: {
         id: config.id,
         command: config.process.command,
-        args: config.process.args || [],
+        args: finalArgs,
         env: config.process.env || {},
         cwd: config.process.cwd,
       },
@@ -583,8 +600,21 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       Object.entries(codexOptions).filter(([, value]) => value !== undefined && value !== "")
     )
 
+    // Brief-mode: prepend cognia's concise-output snippet to whatever
+    // systemPrompt the caller supplied (or set it as the only instruction
+    // when no systemPrompt was given). Agents that don't honour
+    // `_meta.systemPrompt` silently ignore this — best-effort by design.
+    const briefSnippet =
+      "Respond concisely. Skip preamble, headers, and bullet-list filler. Direct answers only — match length to the question."
+    let resolvedSystemPrompt = options?.systemPrompt
+    if (options?.briefMode) {
+      resolvedSystemPrompt = resolvedSystemPrompt
+        ? `${briefSnippet}\n\n${resolvedSystemPrompt}`
+        : briefSnippet
+    }
+
     const meta: AcpSessionRequestMeta = {
-      systemPrompt: options?.systemPrompt ? { append: options.systemPrompt } : undefined,
+      systemPrompt: resolvedSystemPrompt ? { append: resolvedSystemPrompt } : undefined,
       claudeCode: Object.keys(customContext).length > 0 ? { options: customContext } : undefined,
       codex:
         Object.keys(filteredCodexOptions).length > 0

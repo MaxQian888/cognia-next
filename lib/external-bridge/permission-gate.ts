@@ -85,3 +85,34 @@ export function checkRuntimeCall(
   }
   return checkScope(settings, scope)
 }
+
+/**
+ * Convenience wrapper for `rag_search` calls. The required scope depends
+ * on the requested rag scope:
+ *   • "twin" → `rag:twin` (default OFF)
+ *   • "user-repo" → `rag:user-repo`
+ *   • "cognia-self" or "all" → `rag:cognia`
+ */
+export function checkRagCall(
+  settings: ExternalBridgeSettings | undefined,
+  ragScope: string
+): ScopeCheckResult {
+  let scope: BridgeScope
+  switch (ragScope) {
+    case "twin":
+      scope = "rag:twin"
+      break
+    case "user-repo":
+      scope = "rag:user-repo"
+      break
+    case "cognia-self":
+    case "all":
+    case undefined:
+    case "":
+      scope = "rag:cognia"
+      break
+    default:
+      return { allowed: false, reason: `unknown rag scope '${ragScope}'` }
+  }
+  return checkScope(settings, scope)
+}

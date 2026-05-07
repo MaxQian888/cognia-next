@@ -72,6 +72,13 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     }
   }
 
+  // Allowlist construction — only fields listed below reach the SDK. This is
+  // intentional: cognia-next sends a few sidecar-protocol-only fields
+  // (`builtinTools`, `bareMode`, `debugMode`, `briefMode`, `aliasResolution`,
+  // `routingDecision`, `provider`, `providerCredentials`) that the SDK doesn't
+  // recognise. They're consumed earlier in `resolveSendOptions` (translated
+  // into env / settingSources / appendSystemPrompt / etc.) or in this
+  // dispatcher before this object is built (`builtinTools` → `mergedMcpServers`).
   const options = {
     cwd: sendOptions.cwd,
     model: sendOptions.model,
@@ -143,6 +150,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       }),
     closeInput: inputStream.close,
     pendingApprovals,
+    sendOptions,
   }
 
   // Push the first turn immediately.

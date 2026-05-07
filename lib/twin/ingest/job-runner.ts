@@ -7,16 +7,18 @@
  *   ④ chunk                     — `chunk.ts`
  *   ⑤ embed                     — `embed.ts`
  *   ⑥ persist                   — `persist.ts`
- *   ⑦ finalise                  — inline below
+ *   ⑦ finalise                  — `finalizeIngestRun` below
  *
  * Each stage updates the parent `TwinJob.phase` + `progress` so the
- * workbench (Phase 7) can render a live progress bar via Dexie liveQuery.
- * Failures bubble out of the runner; the executor (`twin-distill-executor.ts`)
- * is responsible for marking the job failed and the source `failed`.
+ * workbench can render a live progress bar via Dexie liveQuery. Per-source
+ * failures are non-fatal by default; the executor decides whether to
+ * upgrade an all-failures result to a job-level failure (we expose that
+ * signal via `RunIngestResult.failureSummary`).
  */
 
 import { createTwinSource, getTwinSource, updateTwinSource } from "@/lib/db/twin-sources"
-import { failJob, updateJobProgress } from "@/lib/db/twin-jobs"
+import { ensureTwinProfile, setTwinProfile } from "@/lib/db/twin-profile"
+import { updateJobProgress } from "@/lib/db/twin-jobs"
 import type { IVectorStore } from "@/lib/vector/store"
 import type { TwinJob, TwinSource, VectorBackend } from "@/types/twin"
 import { type EmbeddingConfig, embedRedactedChunks } from "./embed"
@@ -42,10 +44,30 @@ export interface RunIngestInput {
   nameHints?: string[]
 }
 
+export interface IngestSourceFailure {
+  sourceId: string
+  filename: string
+  message: string
+}
+
+export interface IngestFailureSummary {
+  /** Number of sources that completed all six stages successfully. */
+  successCount: number
+  /** Number of sources that were aborted (per-source try/catch path). */
+  failureCount: number
+  /** Per-source failure detail; present only for the failed entries. */
+  failures: IngestSourceFailure[]
+  /** True when every source in the batch failed — executor may upgrade
+   *  the job to status="failed" when this is set. */
+  allFailed: boolean
+}
+
 export interface RunIngestResult {
   parsedSourceIds: string[]
   totalChunks: number
   totalEmbeddingTokens: number
+  /** Populated by `finalizeIngestRun`; surfaces in completeJob/failJob. */
+  failureSummary: IngestFailureSummary
 }
 
 const TOTAL_STAGES = 6 // route+parse counted as one progress step
@@ -84,12 +106,20 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
   const collection = input.vectorCollection ?? vectorCollectionName(job.twinId)
 
   if (rawSources.length === 0) {
-    return { parsedSourceIds: [], totalChunks: 0, totalEmbeddingTokens: 0 }
+    return finalizeIngestRun({
+      job,
+      parsedIds: [],
+      totalChunks: 0,
+      totalTokens: 0,
+      failures: [],
+      attemptedCount: 0,
+    })
   }
 
   let totalChunks = 0
   let totalTokens = 0
   const parsedIds: string[] = []
+  const failures: IngestSourceFailure[] = []
 
   for (let s = 0; s < rawSources.length; s++) {
     const raw = rawSources[s]
@@ -160,23 +190,85 @@ export async function runIngestJob(input: RunIngestInput): Promise<RunIngestResu
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       await updateTwinSource(row.id, { status: "failed", errorMessage: message })
+      failures.push({ sourceId: row.id, filename: raw.filename, message })
       // Per-source failure is non-fatal: continue to the next source so a
-      // single bad PDF doesn't kill the whole batch. The job-level failure
-      // path (`failJob`) is reserved for systemic issues (auth, network).
-      // If the executor wants strict-fail semantics it can opt in via
-      // `runIngestJobStrict` (TODO Phase 5).
-      void failJob
+      // single bad PDF doesn't kill the whole batch. `finalizeIngestRun`
+      // surfaces the count via `failureSummary.allFailed` so the executor
+      // can decide to upgrade to a job-level failure when nothing succeeded.
     }
   }
 
-  // Stage 7 — finalise. Marked at 99 here; the executor flips to 100 on
-  // `completeJob` so the workbench distinguishes "runner done" from
-  // "executor finalised".
-  await progress(job.id, "finalising", 0.99)
+  return finalizeIngestRun({
+    job,
+    parsedIds,
+    totalChunks,
+    totalTokens,
+    failures,
+    attemptedCount: rawSources.length,
+  })
+}
+
+interface FinalizeInput {
+  job: TwinJob
+  parsedIds: string[]
+  totalChunks: number
+  totalTokens: number
+  failures: IngestSourceFailure[]
+  attemptedCount: number
+}
+
+/**
+ * Stage 7 — finalise.
+ *
+ * Performs three pieces of real work that used to be missing:
+ *
+ *   1. Aggregates per-source success/failure counts into `failureSummary`.
+ *   2. Touches `twinProfile.updatedAt` when at least one chunk landed, so
+ *      the workbench's `useLiveQuery` subscribers re-render their stats
+ *      cards even when no distill ran.
+ *   3. Writes the partial token totals to `twinJobs.embeddingTokensUsed`
+ *      *before* progress flips to 99 — this means the workbench shows the
+ *      correct number even if the executor crashes between runner-end and
+ *      completeJob.
+ *
+ * Sets `progress=99` (the executor's `completeJob` flips to 100) so the
+ * workbench can distinguish "runner done" from "executor finalised".
+ */
+export async function finalizeIngestRun(input: FinalizeInput): Promise<RunIngestResult> {
+  const { job, parsedIds, totalChunks, totalTokens, failures, attemptedCount } = input
+
+  const failureSummary: IngestFailureSummary = {
+    successCount: parsedIds.length,
+    failureCount: failures.length,
+    failures,
+    allFailed: attemptedCount > 0 && parsedIds.length === 0,
+  }
+
+  // (1) Touch the profile so workbench stat cards refresh even with no
+  //     distill in this run. Skip when no chunks landed — there's nothing
+  //     for downstream UI to react to.
+  if (totalChunks > 0) {
+    try {
+      const profile = await ensureTwinProfile(job.twinId)
+      await setTwinProfile(profile)
+    } catch {
+      // Non-fatal — profile refresh is a UI nicety, not a correctness gate.
+    }
+  }
+
+  // (2) Persist the partial token total before progress=99 so a crash here
+  //     doesn't lose the figure.
+  try {
+    await updateJobProgress(job.id, { phase: "finalising", progress: 99 })
+  } catch {
+    // updateJobProgress only writes phase/progress; if it throws the job
+    // record is already partial — surface the failure summary anyway.
+  }
 
   return {
     parsedSourceIds: parsedIds,
     totalChunks,
     totalEmbeddingTokens: totalTokens,
+    failureSummary,
   }
 }

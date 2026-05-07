@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef } from "react"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import { applySdkEvent, contentPreview, makeUserMessage } from "@/lib/claude/adapter"
+import { attemptRoutingFallback } from "@/lib/claude/routing-fallback"
+import { applyPlanModeBridge } from "@/lib/agent/plan-mode-bridge"
 import {
   approveTool,
   closeSession,
@@ -30,6 +32,7 @@ import type {
 } from "@/lib/claude/types"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
+import { useAgentRuntimeStore } from "@/stores/agent"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { isTauri } from "@/lib/tauri"
 import type { UIMessage } from "ai"
@@ -204,13 +207,83 @@ export function useClaudeChat() {
         }
       }
 
+      // Capture text from the (possibly plugin-modified) effective content.
+      const effectiveText =
+        typeof effectiveContent === "string"
+          ? effectiveContent
+          : ((effectiveContent.find((b) => b.type === "text") as { text?: string } | undefined)
+              ?.text ?? "")
+
       // Optimistic user-message append.
+      const previousMessages = useChatStore.getState().messages
       const userMsg = makeUserMessage(effectiveContent)
-      const next = [...useChatStore.getState().messages, userMsg]
+      const next = [...previousMessages, userMsg]
       store.getState().replaceMessages(next)
       store.getState().setStatus("streaming")
       store.getState().setError(null)
       lastUserContentRef.current.set(sessionId, effectiveContent)
+
+      // ── External agent branch ──────────────────────────────────────────
+      // When the user selected "external" runtime in the composer toolbar,
+      // dispatch to the external agent manager instead of the Claude SDK
+      // sidecar. The optimistic user-message stays in the store so the
+      // composer reflects the send immediately; the assistant reply is
+      // appended from the manager result when it lands.
+      const agentRuntime = useAgentRuntimeStore.getState().runtime
+      if (agentRuntime === "external") {
+        const extAgentId = useAgentRuntimeStore.getState().externalAgentId
+        if (!extAgentId) {
+          store.getState().replaceMessages(previousMessages)
+          store.getState().setError("No external agent selected")
+          store.getState().setStatus("idle")
+          return
+        }
+
+        try {
+          await persistMessages(sessionId, next)
+          await touchSession(sessionId)
+          if (session && (session.title === "New chat" || !session.title)) {
+            const preview = contentPreview(effectiveContent, 40)
+            if (preview) await updateSession(sessionId, { title: preview })
+          }
+
+          const { executeOnExternalAgent } = await import("@/lib/ai/agent/external/manager")
+          const result = await executeOnExternalAgent(effectiveText, { agentId: extAgentId })
+
+          if (!result) {
+            store.getState().replaceMessages(previousMessages)
+            store.getState().setError("No external agent available for this request")
+            store.getState().setStatus("idle")
+            return
+          }
+
+          if (!result.success) {
+            store.getState().replaceMessages(previousMessages)
+            store.getState().setError(result.error ?? "External agent execution failed")
+            store.getState().setStatus("idle")
+            return
+          }
+
+          // Append assistant message from the external agent result.
+          const assistantMsg: UIMessage = {
+            id: `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            role: "assistant",
+            parts: [{ type: "text", text: result.finalResponse }] as unknown as UIMessage["parts"],
+          }
+          const finalMessages = [...useChatStore.getState().messages, assistantMsg]
+          store.getState().replaceMessages(finalMessages)
+          await persistMessages(sessionId, finalMessages)
+          store.getState().setStatus("idle")
+        } catch (err) {
+          store.getState().replaceMessages(previousMessages)
+          const error = err instanceof Error ? err : new Error(String(err))
+          store.getState().setError(error.message)
+          store.getState().setStatus("idle")
+          dispatchPluginChatError(sessionId, error)
+        }
+        return
+      }
+      // ── End external agent branch ──────────────────────────────────────
 
       try {
         await persistMessages(sessionId, next)
@@ -221,6 +294,16 @@ export function useClaudeChat() {
           if (preview) await updateSession(sessionId, { title: preview })
         }
         await sendPrompt(sessionId, effectiveContent, sendOptions)
+        // Cache the post-routing send so a transient `session_ended.error`
+        // can re-issue the turn against the next entry in the alias's
+        // fallback chain. Set even when there is no alias — the retry
+        // path checks `aliasResolution.fallbackEntries.length` before
+        // doing anything.
+        useChatStore.getState().setLastSend(sessionId, {
+          content: effectiveContent,
+          options: sendOptions,
+          attemptIndex: 0,
+        })
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err))
         store.getState().setError(error.message)
@@ -405,16 +488,19 @@ async function handleEvent(
       const isActive = evt.sessionId === activeRef.current
       if (isActive) {
         if (evt.error) {
-          // TODO(P4-followup): When the failing send carried
-          // `opts.aliasResolution.fallbackEntries` and
-          // `appSettings.routingFallbackEnabled !== false`, re-issue the
-          // turn against the next entry in the chain. Requires caching the
-          // last prompt + SendOptions per session so the retry has the
-          // payload it needs. Routing-decision metadata is already produced
-          // upstream in `lib/claude/build-options.ts`.
-          useChatStore.getState().setError(evt.error)
+          // P4 routing-fallback: re-issue against the next entry in the
+          // chain when the cached send carried fallbackEntries and the
+          // error class is transient. `attemptRoutingFallback` returns
+          // `true` when a retry was scheduled — in that case suppress
+          // the error toast so the UI stays in `streaming`.
+          const retried = await attemptRoutingFallback(evt.sessionId, evt.error)
+          if (!retried) {
+            useChatStore.getState().setError(evt.error)
+            useChatStore.getState().clearLastSend(evt.sessionId)
+          }
         } else {
           useChatStore.getState().setStatus("idle")
+          useChatStore.getState().clearLastSend(evt.sessionId)
         }
       }
       return
@@ -463,6 +549,17 @@ async function handleEvent(
       const current = isActive ? useChatStore.getState().messages : await listMessages(sessionId)
 
       const { messages: nextMessages, turnComplete } = applySdkEvent(current, env.event)
+
+      // Plan-mode → tasks bridge: forward TodoWrite / TaskCreate / TaskUpdate
+      // / TaskList / ExitPlanMode tool_use blocks to the agent-team store so
+      // the workspace tasks panel surfaces the agent's own plan. Wrapped so
+      // a bridge throw never breaks the chat event loop.
+      try {
+        const session = await getSession(sessionId)
+        applyPlanModeBridge(env.event, sessionId, session?.teamId)
+      } catch (err) {
+        console.warn("planModeBridge failed", err)
+      }
 
       if (nextMessages !== current) {
         await persistMessages(sessionId, nextMessages)

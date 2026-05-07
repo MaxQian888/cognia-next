@@ -17,6 +17,11 @@ import { useExternalAgent } from "@/hooks/agent/use-external-agent"
 import { ExternalAgentCommands } from "./external-agent-commands"
 import { ExternalAgentConfigOptions } from "./external-agent-config-options"
 import { ExternalAgentPlan } from "./external-agent-plan"
+import { Button } from "@/components/ui/button"
+import { GitBranchIcon } from "lucide-react"
+import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session-extension-errors"
+import { toast } from "sonner"
+import { useTranslations } from "next-intl"
 
 interface Props {
   className?: string
@@ -24,14 +29,17 @@ interface Props {
 
 export function ExternalAgentSessionPanel({ className }: Props) {
   const runtime = useAgentRuntimeStore((s) => s.runtime)
+  const t = useTranslations("chat.header")
   const {
     isExecuting,
+    activeSession,
     availableCommands,
     planEntries,
     planStep,
     configOptions,
     setConfigOption,
     execute,
+    forkSession,
   } = useExternalAgent()
 
   if (runtime !== "external") return null
@@ -39,8 +47,23 @@ export function ExternalAgentSessionPanel({ className }: Props) {
   const hasCommands = availableCommands.length > 0
   const hasPlan = planEntries.length > 0
   const hasConfigOptions = configOptions.length > 0
+  const canFork = Boolean(activeSession)
 
-  if (!hasCommands && !hasPlan && !hasConfigOptions) return null
+  if (!hasCommands && !hasPlan && !hasConfigOptions && !canFork) return null
+
+  const handleFork = async () => {
+    if (!activeSession) return
+    try {
+      await forkSession(activeSession.id)
+      toast.success(t("forkSuccess"))
+    } catch (err) {
+      if (isExternalAgentSessionExtensionUnsupportedForMethod(err, "session/fork")) {
+        toast.error(t("forkUnsupported"))
+        return
+      }
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
 
   return (
     <div
@@ -51,7 +74,7 @@ export function ExternalAgentSessionPanel({ className }: Props) {
         .filter(Boolean)
         .join(" ")}
     >
-      {(hasCommands || hasConfigOptions) && (
+      {(hasCommands || hasConfigOptions || canFork) && (
         <div className="flex flex-wrap items-center gap-2">
           {hasCommands && (
             <ExternalAgentCommands
@@ -70,6 +93,20 @@ export function ExternalAgentSessionPanel({ className }: Props) {
               disabled={isExecuting}
               compact
             />
+          )}
+          {canFork && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1.5 text-xs"
+              onClick={() => void handleFork()}
+              disabled={isExecuting}
+              aria-label={t("forkAria")}
+              title={t("forkTooltip")}
+            >
+              <GitBranchIcon className="size-3.5" />
+              {t("forkAria")}
+            </Button>
           )}
         </div>
       )}

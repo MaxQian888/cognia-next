@@ -20,7 +20,7 @@ import {
   usePromptInputController,
 } from "@/components/ai-elements/prompt-input"
 import type { ChatStatus as PromptStatus } from "ai"
-import { ArrowUpIcon, Loader2Icon, PaperclipIcon, SquareIcon } from "lucide-react"
+import { ArrowUpIcon, FolderIcon, Loader2Icon, PaperclipIcon, SquareIcon } from "lucide-react"
 import {
   ChangeEvent,
   ClipboardEvent as ReactClipboardEvent,
@@ -44,8 +44,14 @@ import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { detectTrigger, spliceToken, type ComposerTrigger } from "./composer-trigger"
+import {
+  detectTrigger,
+  spliceToken,
+  type ComposerTrigger,
+  type MentionMode,
+} from "./composer-trigger"
 import { ComposerPopover, type ComposerPopoverHandle, type PopoverItem } from "./composer-popover"
+import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import { ReferenceChips } from "./reference-chips"
 import { nextPermissionMode } from "./permission-mode-indicator"
 import { useResolvedConnectorMode } from "./use-resolved-connector-mode"
@@ -91,6 +97,21 @@ interface Props {
   onSend: (content: SendContent) => void | Promise<void>
   onStop: () => void | Promise<void>
   disabled?: boolean
+  /**
+   * What `@` should mean in this composer. Defaults to `"files"` (the
+   * standard chat). Set to `"agents"` in the agent-team workspace where
+   * `@` opens the team-member / virtual-runtime picker instead.
+   */
+  mentionMode?: MentionMode
+  /**
+   * Mentionable agents — required when `mentionMode === "agents"`.
+   */
+  mentionables?: readonly MentionTarget[]
+  /**
+   * Override the default placeholder. Useful for the team workspace which
+   * needs a different hint text.
+   */
+  placeholder?: string
 }
 
 /**
@@ -177,6 +198,9 @@ interface InnerProps {
   handleRef?: Ref<ComposerHandle>
   /** Non-zero when the session has pending connector drafts to review. */
   pendingDraftCount?: number
+  mentionMode?: MentionMode
+  mentionables?: readonly MentionTarget[]
+  placeholder?: string
 }
 
 function ComposerInner(props: InnerProps) {
@@ -274,7 +298,9 @@ function ComposerInner(props: InnerProps) {
   )
 
   const trigger = useMemo<ComposerTrigger | null>(() => {
-    const tg = detectTrigger(controller.textInput.value, caret)
+    const tg = detectTrigger(controller.textInput.value, caret, {
+      mentionMode: props.mentionMode,
+    })
     if (!tg) return null
     if (
       popoverDismissed &&
@@ -284,16 +310,18 @@ function ComposerInner(props: InnerProps) {
       return null
     }
     return tg
-  }, [controller.textInput.value, caret, popoverDismissed])
+  }, [controller.textInput.value, caret, popoverDismissed, props.mentionMode])
 
   useEffect(() => {
     if (!popoverDismissed) return
-    const tg = detectTrigger(controller.textInput.value, caret)
+    const tg = detectTrigger(controller.textInput.value, caret, {
+      mentionMode: props.mentionMode,
+    })
     if (!tg || tg.kind !== popoverDismissed.kind || tg.tokenStart !== popoverDismissed.tokenStart) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPopoverDismissed(null)
     }
-  }, [controller.textInput.value, caret, popoverDismissed])
+  }, [controller.textInput.value, caret, popoverDismissed, props.mentionMode])
 
   const dismissPopover = useCallback(() => {
     if (trigger) {
@@ -378,6 +406,9 @@ function ComposerInner(props: InnerProps) {
         const ok = await props.onSubmitMemory(item.scope, text)
         if (ok) controller.textInput.clear()
         dismissPopover()
+      } else if (item.kind === "agent") {
+        const replacement = `@${item.target.name}`
+        insertReplacement(replacement)
       }
     },
     [
@@ -646,7 +677,9 @@ function ComposerInner(props: InnerProps) {
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             onSelect={onSelect}
-            placeholder={props.disabled ? t("placeholderDisabled") : t("placeholder")}
+            placeholder={
+              props.disabled ? t("placeholderDisabled") : (props.placeholder ?? t("placeholder"))
+            }
             ref={textareaRef}
             rows={1}
             style={{ maxHeight: "12rem" }}
@@ -702,12 +735,22 @@ function ComposerInner(props: InnerProps) {
         </div>
       </div>
 
+      {cwd && (
+        <div className="flex items-center gap-1 px-2 pb-1 text-[11px] text-muted-foreground">
+          <FolderIcon className="size-3 shrink-0" />
+          <span className="truncate font-mono" title={cwd}>
+            {cwd}
+          </span>
+        </div>
+      )}
+
       <ComposerPopover
         ref={popoverRef}
         trigger={trigger}
         cwd={cwd}
         slashCommands={slashCommands}
         anchor={containerEl}
+        mentionables={props.mentionables}
         onPick={onPickPopoverItem}
         onDismiss={dismissPopover}
       />
@@ -732,7 +775,17 @@ function VoiceTranscriptionBridge({ disabled }: { disabled?: boolean }) {
 // --- Outer component ------------------------------------------------------
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { session, onStartNewSession, onOpenSettings, onSend, onStop, disabled },
+  {
+    session,
+    onStartNewSession,
+    onOpenSettings,
+    onSend,
+    onStop,
+    disabled,
+    mentionMode,
+    mentionables,
+    placeholder,
+  },
   ref
 ) {
   const tCommands = useTranslations("chat.composer.commands")
@@ -1025,6 +1078,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           onSubmitMemory={handleMemorySubmit}
           handleRef={ref}
           pendingDraftCount={pendingDrafts.length}
+          mentionMode={mentionMode}
+          mentionables={mentionables}
+          placeholder={placeholder}
         />
         <BottomToolbar session={session ?? null} />
         <HelperHints />

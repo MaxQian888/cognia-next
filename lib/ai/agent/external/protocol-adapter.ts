@@ -240,6 +240,12 @@ export interface SessionCreateOptions {
   }
   /** System prompt override */
   systemPrompt?: string
+  /**
+   * Cognia-specific brief-output mode. When true, the adapter prepends a
+   * concise-output instruction to the resolved `systemPrompt` so the agent
+   * favours short answers. No-op for agents that ignore `_meta.systemPrompt`.
+   */
+  briefMode?: boolean
   /** Session timeout (ms) */
   timeout?: number
   /** Session metadata */

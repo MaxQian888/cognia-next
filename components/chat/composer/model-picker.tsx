@@ -117,6 +117,17 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
   const [open, setOpen] = useState(false)
+  // Optimistic state so the button label reflects the user's selection
+  // immediately, before the parent re-renders with the updated session prop.
+  const [optimisticModel, setOptimisticModel] = useState<string | null>(null)
+  const [optimisticProvider, setOptimisticProvider] = useState<string | null>(null)
+  // Reset the optimistic overlay when the session id changes (render-time setState).
+  const [prevSessionId, setPrevSessionId] = useState(session?.id)
+  if (prevSessionId !== session?.id) {
+    setPrevSessionId(session?.id)
+    setOptimisticModel(null)
+    setOptimisticProvider(null)
+  }
 
   const options = useMemo(
     () => collectModelOptions(providerSettings, customProviders),
@@ -124,12 +135,15 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
   )
   const groups = useMemo(() => groupByProvider(options), [options])
 
-  const activeModel = session?.model ?? defaultModel ?? "claude-sonnet-4-5"
-  const activeProvider = session?.providerOverride ?? defaultProvider ?? "anthropic"
+  const activeModel = optimisticModel ?? session?.model ?? defaultModel ?? "claude-sonnet-4-5"
+  const activeProvider =
+    optimisticProvider ?? session?.providerOverride ?? defaultProvider ?? "anthropic"
 
   const handleSelect = (providerId: string, modelId: string) => {
     setOpen(false)
     if (!session?.id) return
+    setOptimisticModel(modelId)
+    setOptimisticProvider(providerId)
     void updateSession(session.id, {
       model: modelId,
       providerOverride: providerId,

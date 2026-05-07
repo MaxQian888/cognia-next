@@ -13,7 +13,9 @@
 //   - The token ends at the next whitespace; backspacing over the trigger
 //     char dismisses the popover.
 
-export type TriggerKind = "slash" | "file" | "bash" | "memory"
+export type TriggerKind = "slash" | "file" | "bash" | "memory" | "agent"
+
+export type MentionMode = "files" | "agents"
 
 export interface ComposerTrigger {
   kind: TriggerKind
@@ -25,16 +27,34 @@ export interface ComposerTrigger {
   query: string
 }
 
+export interface DetectTriggerOptions {
+  /**
+   * What `@` should mean in this composer:
+   *   - `"files"` (default) → file picker (workspace search), as in the
+   *     general chat.
+   *   - `"agents"` → agent picker (used by the agent-team workspace chat).
+   *
+   * The token-boundary rules are identical; only the `kind` of the returned
+   * trigger differs.
+   */
+  mentionMode?: MentionMode
+}
+
 const SLASH_TRIGGER: TriggerKind = "slash"
 const FILE_TRIGGER: TriggerKind = "file"
 const BASH_TRIGGER: TriggerKind = "bash"
 const MEMORY_TRIGGER: TriggerKind = "memory"
+const AGENT_TRIGGER: TriggerKind = "agent"
 
 /**
  * Detect whether the caret in `value` is inside an autocomplete trigger token.
  * Returns null when no trigger applies.
  */
-export function detectTrigger(value: string, caret: number): ComposerTrigger | null {
+export function detectTrigger(
+  value: string,
+  caret: number,
+  opts?: DetectTriggerOptions
+): ComposerTrigger | null {
   if (caret < 0 || caret > value.length) return null
 
   // Whole-textarea triggers (only when the textarea starts with the char).
@@ -61,8 +81,10 @@ export function detectTrigger(value: string, caret: number): ComposerTrigger | n
     }
   }
 
-  // `@file` trigger — search backwards from the caret for an `@` whose left
-  // neighbour is whitespace or the start of input. Stop at whitespace.
+  // `@file` / `@agent` trigger — search backwards from the caret for an `@`
+  // whose left neighbour is whitespace or the start of input. Stop at
+  // whitespace. The kind depends on the composer's `mentionMode`.
+  const atKind: TriggerKind = opts?.mentionMode === "agents" ? AGENT_TRIGGER : FILE_TRIGGER
   for (let i = caret - 1; i >= 0; i--) {
     const ch = value[i]
     if (ch === "@") {
@@ -77,7 +99,7 @@ export function detectTrigger(value: string, caret: number): ComposerTrigger | n
       // token range.
       if (caret > queryEnd) return null
       return {
-        kind: FILE_TRIGGER,
+        kind: atKind,
         tokenStart: i,
         tokenEnd: queryEnd,
         query: value.slice(i + 1, caret),

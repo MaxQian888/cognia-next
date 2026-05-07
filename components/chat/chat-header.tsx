@@ -44,20 +44,27 @@ import type { UIMessage } from "ai"
 import {
   CircleDollarSignIcon,
   FolderOpenIcon,
+  GitBranchIcon,
   KeyRoundIcon,
   Settings2Icon,
   SparklesIcon,
   StarIcon,
+  XIcon,
 } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { open as openDialog } from "@tauri-apps/plugin-dialog"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { isTauri } from "@/lib/tauri"
-import { hasApiKey } from "@/lib/claude/ipc"
+import { closeSession, hasApiKey } from "@/lib/claude/ipc"
 import { Badge } from "@/components/ui/badge"
 import { SingleExportTrigger } from "@/components/chat/dialogs/single-export-trigger"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TwinHeaderBadge } from "@/components/chat/twin-header-badge"
+import { forkSessionFromParent } from "@/lib/db/sessions"
+import { useChatStore } from "@/stores/chat"
+import { toast } from "sonner"
 import { loggers } from "@/lib/logger"
 
 const MODEL_PRESETS: {
@@ -96,6 +103,9 @@ interface FormState {
   systemPrompt: string
   workingDir: string
   permissionMode: AppSettings["permissionMode"]
+  bareMode: boolean
+  debugMode: boolean
+  briefMode: boolean
 }
 
 export function ChatHeader({ session, messages, onOpenSettings }: Props) {
@@ -119,23 +129,37 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
     systemPrompt: session.systemPrompt ?? "",
     workingDir: session.workingDir ?? "",
     permissionMode: session.permissionMode,
+    bareMode: Boolean(session.bareMode),
+    debugMode: Boolean(session.debugMode),
+    briefMode: Boolean(session.briefMode),
   })
   const [presetId, setPresetId] = useState<string>("")
   const [pendingApply, setPendingApply] = useState<PendingPresetApply | null>(null)
 
+  // Hydrate the form ONLY on the false→true transition of `open`. A naive
+  // `[open, session, presets]` deps list re-fires whenever the parent
+  // re-renders with a new session reference (every send bumps `updatedAt`
+  // via `touchSession`; `setSdkSessionId` writes the SDK id; presets
+  // liveQuery refreshes on any presets-table write) and would clobber the
+  // user's in-progress edits — that's the "I typed a new working dir, hit
+  // save, and got the old value back" bug.
+  const prevOpenRef = useRef(false)
   useEffect(() => {
-    if (!open) return
-    /* eslint-disable react-hooks/set-state-in-effect */
+    const wasOpen = prevOpenRef.current
+    prevOpenRef.current = open
+    if (!open || wasOpen) return
+
     setForm({
       model: session.model ?? "",
       systemPrompt: session.systemPrompt ?? "",
       workingDir: session.workingDir ?? "",
       permissionMode: session.permissionMode,
+      bareMode: Boolean(session.bareMode),
+      debugMode: Boolean(session.debugMode),
+      briefMode: Boolean(session.briefMode),
     })
-    // Match preset by content if any.
     const matched = presets.find((p) => p.content === session.systemPrompt)
     setPresetId(matched?.id ?? "")
-    /* eslint-enable react-hooks/set-state-in-effect */
   }, [open, session, presets])
 
   // Periodically check API key status (useful for the badge).
@@ -169,17 +193,48 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
     if (typeof picked === "string") setForm((f) => ({ ...f, workingDir: picked }))
   }
 
+  const handleFork = async () => {
+    try {
+      const fork = await forkSessionFromParent(session.id)
+      useChatStore.getState().setActiveSession(fork.id)
+      toast.success(t("forkSuccess"))
+      loggers.chat.info("session.forked", {
+        parentSessionId: session.id,
+        parentSdkSessionId: session.sdkSessionId,
+        forkId: fork.id,
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      toast.error(msg)
+      loggers.chat.warn("session.fork failed", { sessionId: session.id, err: msg })
+    }
+  }
+
   const handleSave = async () => {
+    const prevWorkingDir = session.workingDir ?? ""
+    const newWorkingDir = form.workingDir.trim()
     try {
       await updateSession(session.id, {
         model: form.model.trim() || undefined,
         systemPrompt: form.systemPrompt.trim() || undefined,
-        workingDir: form.workingDir.trim() || undefined,
+        workingDir: newWorkingDir || undefined,
         permissionMode: form.permissionMode,
+        bareMode: form.bareMode || undefined,
+        debugMode: form.debugMode || undefined,
+        briefMode: form.briefMode || undefined,
       })
     } catch (err) {
       loggers.chat.error("session settings save failed", err, { sessionId: session.id })
       throw err
+    }
+    // If the working directory changed and there's an active sidecar session,
+    // close it so the next send creates a fresh session with the new cwd.
+    if (newWorkingDir !== prevWorkingDir && session.sdkSessionId && isTauri()) {
+      closeSession(session.id).catch((err) => {
+        loggers.chat.warn("closeSession after cwd change failed", {
+          err: err instanceof Error ? err.message : String(err),
+        })
+      })
     }
     setOpen(false)
   }
@@ -196,6 +251,7 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
       strategy
     )
     setForm((prev) => ({
+      ...prev,
       model: plan.sessionPatch.model ?? prev.model,
       systemPrompt: plan.sessionPatch.systemPrompt ?? prev.systemPrompt,
       workingDir: plan.sessionPatch.workingDir ?? prev.workingDir,
@@ -274,6 +330,9 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
             {session.model || character?.model}
           </Badge>
         )}
+        {character?.twinId && (
+          <TwinHeaderBadge twinId={character.twinId} twinSettings={character.twinSettings} />
+        )}
         {(skills?.length ?? 0) > 0 && (
           <SkillsBadge
             skills={skills ?? []}
@@ -321,6 +380,22 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
       )}
 
       <SingleExportTrigger session={session} />
+
+      {session.sdkSessionId && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => void handleFork()}
+              aria-label={t("forkAria")}
+            >
+              <GitBranchIcon className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t("forkTooltip")}</TooltipContent>
+        </Tooltip>
+      )}
 
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
@@ -457,6 +532,17 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
                   placeholder={t("workingDirPlaceholder")}
                   className="text-xs"
                 />
+                {form.workingDir && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setForm((f) => ({ ...f, workingDir: "" }))}
+                    type="button"
+                    aria-label={t("cwdReset")}
+                  >
+                    <XIcon className="size-4" />
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="icon"
@@ -468,6 +554,32 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
                   <FolderOpenIcon className="size-4" />
                 </Button>
               </div>
+              {!form.workingDir && character?.workingDir && (
+                <p className="text-[11px] text-muted-foreground">
+                  {t("cwdFallbackHint", { path: character.workingDir })}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2 rounded-md border bg-muted/20 p-2.5">
+              <SessionModeToggle
+                id="session-bare-mode"
+                label={t("bareMode")}
+                checked={form.bareMode}
+                onCheckedChange={(v) => setForm((f) => ({ ...f, bareMode: v }))}
+              />
+              <SessionModeToggle
+                id="session-debug-mode"
+                label={t("debugMode")}
+                checked={form.debugMode}
+                onCheckedChange={(v) => setForm((f) => ({ ...f, debugMode: v }))}
+              />
+              <SessionModeToggle
+                id="session-brief-mode"
+                label={t("briefMode")}
+                checked={form.briefMode}
+                onCheckedChange={(v) => setForm((f) => ({ ...f, briefMode: v }))}
+              />
             </div>
 
             <div className="flex justify-end gap-2 pt-1">
@@ -494,6 +606,27 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
         />
       )}
     </header>
+  )
+}
+
+function SessionModeToggle({
+  id,
+  label,
+  checked,
+  onCheckedChange,
+}: {
+  id: string
+  label: string
+  checked: boolean
+  onCheckedChange: (v: boolean) => void
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <Label htmlFor={id} className="cursor-pointer text-xs">
+        {label}
+      </Label>
+      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} aria-label={label} />
+    </div>
   )
 }
 

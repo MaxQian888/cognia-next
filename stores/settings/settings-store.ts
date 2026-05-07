@@ -89,6 +89,15 @@ interface SettingsState {
   setTtsPitch: (pitch: number) => Promise<void>
   setTtsVolume: (volume: number) => Promise<void>
 
+  // ---- Built-in agent runtime actions ----
+  /**
+   * Toggle automatic routing fallback retries. When `true` (default), a
+   * `session_ended` with a transient error and a non-empty
+   * `aliasResolution.fallbackEntries` will re-issue the turn against the
+   * next entry. Setting `false` keeps the original error visible.
+   */
+  setRoutingFallbackEnabled: (enabled: boolean) => Promise<void>
+
   // ---- Web search actions (all persist via saveSettings) ----
   setSearchEnabled: (v: boolean) => Promise<void>
   setSearchMaxResults: (n: number) => Promise<void>
@@ -500,6 +509,12 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
           console.warn("restartSidecar failed", err)
         }
       }
+    },
+
+    // ---- Built-in agent runtime ----
+    setRoutingFallbackEnabled: async (routingFallbackEnabled) => {
+      const next = await saveSettings({ routingFallbackEnabled })
+      set({ settings: next })
     },
 
     // ---- Web search ----

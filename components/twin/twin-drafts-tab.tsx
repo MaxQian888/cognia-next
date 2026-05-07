@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useTranslations } from "next-intl"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -24,14 +25,17 @@ const STATUS_VARIANT: Record<
   edited: "secondary",
 }
 
-function qualityBadge(score?: number): string {
-  if (typeof score !== "number") return "unscored"
-  if (score >= 0.75) return "high"
-  if (score >= 0.5) return "medium"
-  return "low"
+type QualityKey = "qualityHigh" | "qualityMedium" | "qualityLow" | "qualityUnscored"
+
+function qualityKey(score?: number): QualityKey {
+  if (typeof score !== "number") return "qualityUnscored"
+  if (score >= 0.75) return "qualityHigh"
+  if (score >= 0.5) return "qualityMedium"
+  return "qualityLow"
 }
 
 export function TwinDraftsTab({ twinId }: { twinId: string }) {
+  const t = useTranslations("twin.drafts")
   const drafts = useLiveQuery(() => listTwinDraftsByTwin(twinId), [twinId], [])
   const sorted = [...drafts].sort((a, b) => {
     // Pending first; among pending, lowest qualityScore first.
@@ -43,18 +47,15 @@ export function TwinDraftsTab({ twinId }: { twinId: string }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <h2 className="text-lg font-medium">Drafts ({drafts.length})</h2>
+      <h2 className="text-lg font-medium">{t("headerCount", { count: drafts.length })}</h2>
       {drafts.length === 0 ? (
         <Card className="p-6 text-center">
-          <p className="text-muted-foreground text-sm">
-            No drafts yet. Queue a distill run from the Jobs tab once at least one source has been
-            parsed into chunks.
-          </p>
+          <p className="text-muted-foreground text-sm">{t("emptyHint")}</p>
         </Card>
       ) : (
         <ul className="flex flex-col gap-2">
           {sorted.map((draft) => (
-            <DraftRow key={draft.id} draft={draft} />
+            <DraftRow key={draft.id} draft={draft} t={t} />
           ))}
         </ul>
       )}
@@ -62,11 +63,11 @@ export function TwinDraftsTab({ twinId }: { twinId: string }) {
   )
 }
 
-function DraftRow({ draft }: { draft: TwinDraft }) {
+function DraftRow({ draft, t }: { draft: TwinDraft; t: ReturnType<typeof useTranslations> }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const data = draft.payload.data as Record<string, unknown>
-  const name = typeof data.name === "string" ? data.name : "(untitled)"
+  const name = typeof data.name === "string" ? data.name : t("untitled")
   const description = typeof data.description === "string" ? data.description : undefined
   const body =
     typeof data.systemPrompt === "string"
@@ -74,6 +75,9 @@ function DraftRow({ draft }: { draft: TwinDraft }) {
       : typeof data.content === "string"
         ? data.content
         : ""
+
+  const qKey = qualityKey(draft.evaluation?.qualityScore)
+  const qualityText = t(qKey)
 
   const accept = async () => {
     setBusy(true)
@@ -127,7 +131,7 @@ function DraftRow({ draft }: { draft: TwinDraft }) {
           <Badge variant={STATUS_VARIANT[draft.status]} className="capitalize">
             {draft.status}
           </Badge>
-          <Badge variant="outline">quality: {qualityBadge(draft.evaluation?.qualityScore)}</Badge>
+          <Badge variant="outline">{t("qualityLabel", { label: qualityText })}</Badge>
           <span className="font-medium">{name}</span>
         </div>
         <span className="text-muted-foreground text-xs">
@@ -136,7 +140,7 @@ function DraftRow({ draft }: { draft: TwinDraft }) {
       </div>
       {description ? <p className="text-muted-foreground text-sm">{description}</p> : null}
       <pre className="bg-muted max-h-48 overflow-auto rounded p-2 text-xs whitespace-pre-wrap">
-        {body || "(empty body)"}
+        {body || t("emptyBody")}
       </pre>
       {draft.evaluation && draft.evaluation.concerns.length > 0 ? (
         <ul className="text-destructive list-disc pl-5 text-xs">
@@ -161,10 +165,10 @@ function DraftRow({ draft }: { draft: TwinDraft }) {
       {draft.status === "pending" ? (
         <div className="flex justify-end gap-2">
           <Button size="sm" variant="outline" onClick={() => void reject()} disabled={busy}>
-            Reject
+            {t("reject")}
           </Button>
           <Button size="sm" onClick={() => void accept()} disabled={busy}>
-            Accept
+            {t("accept")}
           </Button>
         </div>
       ) : null}

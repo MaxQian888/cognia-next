@@ -1,0 +1,205 @@
+/**
+ * Visual workflow CRUD — mirrors `lib/db/characters.ts` shape so callers find
+ * the same `list / get / create / update / delete / duplicate / seed` API.
+ *
+ * The runtime tables (`workflowRuns`, `workflowRunEvents`, `workflowTriggers`)
+ * have their own modules to keep this file focused on definitions.
+ */
+
+import type {
+  VisualWorkflow,
+  WorkflowRow,
+  WorkflowSettings,
+  WorkflowEdge,
+  WorkflowNode,
+} from "@/types/workflow/visual"
+import { DEFAULT_WORKFLOW_SETTINGS } from "@/types/workflow/visual"
+import { getDb } from "./schema"
+
+function newWorkflowId(): string {
+  return "wf_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
+}
+
+function nowMs(): number {
+  return Date.now()
+}
+
+export async function listWorkflows(): Promise<WorkflowRow[]> {
+  return getDb().workflows.orderBy("name").toArray()
+}
+
+export async function listWorkflowsByUpdated(): Promise<WorkflowRow[]> {
+  return getDb().workflows.orderBy("updatedAt").reverse().toArray()
+}
+
+export async function listTemplateWorkflows(): Promise<WorkflowRow[]> {
+  // IndexedDB doesn't index booleans reliably across browsers — the boolean
+  // is in the schema's index list so Dexie tracks the keyPath, but we filter
+  // in memory here. Same pattern as `lib/db/prompt-presets.ts` for `isBuiltIn`.
+  const rows = await listWorkflowsByUpdated()
+  return rows.filter((w) => w.isTemplate)
+}
+
+export async function getWorkflow(id: string): Promise<WorkflowRow | undefined> {
+  return getDb().workflows.get(id)
+}
+
+export type WorkflowDraft = Pick<VisualWorkflow, "name"> &
+  Partial<
+    Pick<
+      VisualWorkflow,
+      | "description"
+      | "icon"
+      | "tags"
+      | "nodes"
+      | "edges"
+      | "settings"
+      | "credentials"
+      | "viewport"
+      | "isTemplate"
+    >
+  >
+
+export async function createWorkflow(draft: WorkflowDraft): Promise<WorkflowRow> {
+  const now = nowMs()
+  const workflow: VisualWorkflow = {
+    id: newWorkflowId(),
+    schemaVersion: 1,
+    name: draft.name.trim() || "Untitled workflow",
+    description: draft.description,
+    icon: draft.icon,
+    tags: draft.tags ?? [],
+    isTemplate: draft.isTemplate ?? false,
+    isBuiltIn: false,
+    createdAt: now,
+    updatedAt: now,
+    nodes: draft.nodes ?? [],
+    edges: draft.edges ?? [],
+    settings: draft.settings ?? cloneSettings(DEFAULT_WORKFLOW_SETTINGS),
+    credentials: draft.credentials,
+    viewport: draft.viewport ?? { x: 0, y: 0, zoom: 1 },
+  }
+  await getDb().workflows.put(workflow)
+  return workflow
+}
+
+export type WorkflowPatch = Partial<
+  Omit<VisualWorkflow, "id" | "createdAt" | "isBuiltIn" | "schemaVersion">
+>
+
+/**
+ * Applies a patch to an existing workflow. The `updatedAt` field is bumped
+ * automatically; callers must not pass it manually (otherwise concurrent
+ * editors with stale clocks could rewind it).
+ */
+export async function updateWorkflow(id: string, patch: WorkflowPatch): Promise<void> {
+  await getDb().workflows.update(id, { ...patch, updatedAt: nowMs() })
+}
+
+/**
+ * Replaces the full workflow row. Used by the editor's "Save" action where the
+ * whole graph round-trips. Refuses to write if the id doesn't already exist
+ * (use `createWorkflow` for new rows). Bumps `updatedAt`.
+ */
+export async function replaceWorkflow(workflow: VisualWorkflow): Promise<void> {
+  const existing = await getDb().workflows.get(workflow.id)
+  if (!existing) {
+    throw new Error(`Workflow ${workflow.id} not found`)
+  }
+  await getDb().workflows.put({ ...workflow, updatedAt: nowMs() })
+}
+
+export async function deleteWorkflow(id: string): Promise<void> {
+  const existing = await getDb().workflows.get(id)
+  if (existing?.isBuiltIn) {
+    throw new Error("Built-in workflows cannot be deleted. Duplicate first.")
+  }
+  await getDb().workflows.delete(id)
+}
+
+/**
+ * Clone a workflow (built-in or otherwise) into a new editable copy. The copy
+ * is never marked built-in regardless of the source, and node ids are
+ * preserved (callers wishing to reset ids can call `regenerateNodeIds`).
+ */
+export async function duplicateWorkflow(id: string): Promise<WorkflowRow> {
+  const source = await getDb().workflows.get(id)
+  if (!source) throw new Error(`Workflow ${id} not found`)
+  const now = nowMs()
+  const copy: VisualWorkflow = {
+    ...source,
+    id: newWorkflowId(),
+    name: `${source.name} (copy)`,
+    isBuiltIn: false,
+    isTemplate: false,
+    createdAt: now,
+    updatedAt: now,
+  }
+  await getDb().workflows.put(copy)
+  return copy
+}
+
+/**
+ * Returns workflows the library page should show as "yours" (excludes
+ * templates and built-ins). Callers that want every workflow should use
+ * `listWorkflows()` directly.
+ */
+export async function listUserWorkflows(): Promise<WorkflowRow[]> {
+  const all = await listWorkflowsByUpdated()
+  return all.filter((w) => !w.isTemplate && !w.isBuiltIn)
+}
+
+/**
+ * Bulk seed built-in templates. Idempotent — uses stable ids so reseeding
+ * never duplicates rows. Built-in rows are protected from `deleteWorkflow`.
+ *
+ * The actual template content is owned by `lib/workflow/definition/seed.ts`,
+ * which is the single source of truth for the bundled gallery. This function
+ * is the database-write half of that module.
+ */
+export async function seedBuiltInWorkflows(builtIns: VisualWorkflow[]): Promise<void> {
+  if (builtIns.length === 0) return
+  const db = getDb()
+  // Carry forward isBuiltIn=true so the protection in deleteWorkflow stays.
+  const stamped = builtIns.map((w) => ({
+    ...w,
+    isBuiltIn: true,
+  }))
+  await db.workflows.bulkPut(stamped)
+}
+
+/**
+ * Helper for `replaceWorkflow` callers: deep-clones a settings object so the
+ * caller can mutate without touching the constant.
+ */
+function cloneSettings(s: WorkflowSettings): WorkflowSettings {
+  return {
+    errorPolicy: s.errorPolicy,
+    timeoutMs: s.timeoutMs,
+    concurrency: s.concurrency,
+    retryDefaults: { ...s.retryDefaults },
+    timezone: s.timezone,
+  }
+}
+
+/**
+ * Returns a fresh copy of the workflow with new node ids assigned. Used by
+ * the editor's "Duplicate workflow" path when the caller wants a graph that
+ * can coexist with the original on the same canvas (rare; most duplicates
+ * keep ids).
+ */
+export function regenerateNodeIds(w: VisualWorkflow): VisualWorkflow {
+  const idMap = new Map<string, string>()
+  const fresh = (): string => "n_" + Math.random().toString(36).slice(2, 10)
+  const nodes: WorkflowNode[] = w.nodes.map((n) => {
+    const next = fresh()
+    idMap.set(n.id, next)
+    return { ...n, id: next }
+  })
+  const edges: WorkflowEdge[] = w.edges.map((e) => ({
+    ...e,
+    source: idMap.get(e.source) ?? e.source,
+    target: idMap.get(e.target) ?? e.target,
+  }))
+  return { ...w, nodes, edges }
+}

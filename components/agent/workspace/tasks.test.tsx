@@ -10,6 +10,20 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+jest.mock("@/stores/agent/agent-team-store", () => ({
+  useAgentTeamStore: (selector: (s: unknown) => unknown) => {
+    const state = {
+      createTask: () => {},
+      deleteTask: () => {},
+    }
+    return selector(state)
+  },
+}))
+
+jest.mock("sonner", () => ({
+  toast: { success: () => {}, error: () => {} },
+}))
+
 function makeTask(id: string, overrides: Partial<AgentTeamTask> = {}): AgentTeamTask {
   return {
     id,
@@ -28,18 +42,19 @@ function makeTask(id: string, overrides: Partial<AgentTeamTask> = {}): AgentTeam
 
 describe("AgentTeamTasks", () => {
   it("renders the empty state when no tasks are provided", () => {
-    render(<AgentTeamTasks tasks={[]} />)
-    expect(screen.getByTestId("tasks-empty")).toBeInTheDocument()
+    render(<AgentTeamTasks teamId="t1" tasks={[]} teammates={[]} />)
     expect(screen.getByText("empty")).toBeInTheDocument()
   })
 
   it("renders a card per task with status badge", () => {
     render(
       <AgentTeamTasks
+        teamId="t1"
         tasks={[
           makeTask("a", { status: "completed", result: "ok" }),
           makeTask("b", { status: "failed", error: "boom" }),
         ]}
+        teammates={[]}
       />
     )
     expect(screen.getByTestId("task-a")).toBeInTheDocument()
@@ -51,10 +66,12 @@ describe("AgentTeamTasks", () => {
   it("shows error text for failed tasks and result text for completed tasks", () => {
     render(
       <AgentTeamTasks
+        teamId="t1"
         tasks={[
           makeTask("a", { status: "completed", result: "all good" }),
           makeTask("b", { status: "failed", error: "kaboom" }),
         ]}
+        teammates={[]}
       />
     )
     expect(screen.getByText("all good")).toBeInTheDocument()

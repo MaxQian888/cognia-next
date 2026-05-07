@@ -146,6 +146,42 @@ describe("ChatHeader", () => {
     expect(screen.getByLabelText(/skills/i)).toBeInTheDocument()
   })
 
+  it("typed working dir survives a background session refresh (touchSession bumping updatedAt while popover open)", async () => {
+    // Regression: hydration effect previously had `[open, session, presets]`
+    // deps and re-fired on every parent re-render with a fresh session
+    // reference (every send bumps updatedAt via touchSession). That wiped
+    // the user's in-progress edits — they'd save the OLD value and see it
+    // on the next reopen.
+    const adapter = makeAdapter()
+    let session = mkSession({ id: "ses_42", workingDir: "/old" })
+
+    const { rerender } = render(
+      <DataAdapterProvider adapter={adapter}>
+        <ChatHeader session={session} messages={[]} />
+      </DataAdapterProvider>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /session settings/i }))
+    const input = (await screen.findByLabelText(/working/i)) as HTMLInputElement
+    fireEvent.change(input, { target: { value: "/new" } })
+    expect(input.value).toBe("/new")
+
+    // Simulate touchSession firing during a parallel send: same session, new
+    // updatedAt — Dexie liveQuery hands the parent a fresh array, the
+    // `find()` returns a new object, ChatHeader's `session` prop changes ref.
+    session = { ...session, updatedAt: Date.now() }
+    await act(async () => {
+      rerender(
+        <DataAdapterProvider adapter={adapter}>
+          <ChatHeader session={session} messages={[]} />
+        </DataAdapterProvider>
+      )
+    })
+
+    const inputAfter = (await screen.findByLabelText(/working/i)) as HTMLInputElement
+    expect(inputAfter.value).toBe("/new")
+  })
+
   it("forwards usePresets() return into the popover preset list", async () => {
     const presets: SystemPromptPreset[] = [
       {

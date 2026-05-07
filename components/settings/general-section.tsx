@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { isTauri } from "@/lib/tauri"
 import type { AppSettings } from "@/lib/claude/types"
@@ -36,6 +37,9 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
   const [workingDir, setWorkingDir] = useState<string>("")
   const [permissionMode, setPermissionMode] =
     useState<NonNullable<AppSettings["permissionMode"]>>("default")
+  const [bareMode, setBareMode] = useState<boolean>(false)
+  const [debugMode, setDebugMode] = useState<boolean>(false)
+  const [briefMode, setBriefMode] = useState<boolean>(false)
 
   useEffect(() => {
     if (!settings) return
@@ -44,6 +48,9 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
     setSystemPrompt(settings.defaultSystemPrompt ?? "")
     setWorkingDir(settings.defaultWorkingDir ?? "")
     setPermissionMode(settings.permissionMode ?? "default")
+    setBareMode(Boolean(settings.bareMode))
+    setDebugMode(Boolean(settings.debugMode))
+    setBriefMode(Boolean(settings.briefMode))
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [settings])
 
@@ -68,12 +75,18 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
         defaultSystemPrompt: systemPrompt.trim() || undefined,
         defaultWorkingDir: workingDir.trim() || undefined,
         permissionMode,
+        bareMode: bareMode || undefined,
+        debugMode: debugMode || undefined,
+        briefMode: briefMode || undefined,
       })
       log.info("general.defaultsSaved", {
         modelSet: Boolean(model.trim()),
         systemPromptSet: Boolean(systemPrompt.trim()),
         workingDirSet: Boolean(workingDir.trim()),
         permissionMode,
+        bareMode,
+        debugMode,
+        briefMode,
       })
       toast.success(t("saved"))
     } catch (err) {
@@ -161,6 +174,53 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
           placeholder={t("defaultSystemPromptPlaceholder")}
           rows={4}
         />
+      </div>
+
+      <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <Label htmlFor="settings-bare-mode" className="text-sm">
+              {t("bareMode")}
+            </Label>
+            <p className="text-xs text-muted-foreground">{t("bareModeHint")}</p>
+          </div>
+          <Switch
+            id="settings-bare-mode"
+            checked={bareMode}
+            onCheckedChange={setBareMode}
+            aria-label={t("bareMode")}
+          />
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <Label htmlFor="settings-debug-mode" className="text-sm">
+              {t("debugMode")}
+            </Label>
+            <p className="text-xs text-muted-foreground">{t("debugModeHint")}</p>
+          </div>
+          <Switch
+            id="settings-debug-mode"
+            checked={debugMode}
+            onCheckedChange={setDebugMode}
+            aria-label={t("debugMode")}
+          />
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <Label htmlFor="settings-brief-mode" className="text-sm">
+              {t("briefMode")}
+            </Label>
+            <p className="text-xs text-muted-foreground">{t("briefModeHint")}</p>
+          </div>
+          <Switch
+            id="settings-brief-mode"
+            checked={briefMode}
+            onCheckedChange={setBriefMode}
+            aria-label={t("briefMode")}
+          />
+        </div>
       </div>
 
       <div className="space-y-2">

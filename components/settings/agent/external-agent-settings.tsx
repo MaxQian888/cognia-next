@@ -401,18 +401,6 @@ function AgentEditorDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="acp">ACP (Agent Client Protocol)</SelectItem>
-                <SelectItem value="a2a" disabled>
-                  A2A (Coming Soon)
-                </SelectItem>
-                <SelectItem value="http" disabled>
-                  HTTP (Coming Soon)
-                </SelectItem>
-                <SelectItem value="websocket" disabled>
-                  WebSocket (Coming Soon)
-                </SelectItem>
-                <SelectItem value="custom" disabled>
-                  Custom (Coming Soon)
-                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -433,13 +421,13 @@ function AgentEditorDialog({
                 <SelectItem value="stdio">
                   <div className="flex items-center gap-2">
                     <Terminal className="h-4 w-4" />
-                    <span>Stdio (本地进程)</span>
+                    <span>{t("transport.stdio.label")}</span>
                   </div>
                 </SelectItem>
                 <SelectItem value="http">
                   <div className="flex items-center gap-2">
                     <Globe className="h-4 w-4" />
-                    <span>HTTP (远程)</span>
+                    <span>{t("transport.http.label")}</span>
                   </div>
                 </SelectItem>
               </SelectContent>
@@ -1172,31 +1160,41 @@ export function ExternalAgentSettings() {
                             )}
                             {ecosystem?.adapterName && (
                               <div>
-                                <span className="text-muted-foreground">Adapter:</span>
+                                <span className="text-muted-foreground">
+                                  {t("details.adapter")}:
+                                </span>
                                 <span className="ml-2">{ecosystem.adapterName}</span>
                               </div>
                             )}
                             {ecosystem?.surfaceName && (
                               <div>
-                                <span className="text-muted-foreground">Surface:</span>
+                                <span className="text-muted-foreground">
+                                  {t("details.surface")}:
+                                </span>
                                 <span className="ml-2">{ecosystem.surfaceName}</span>
                               </div>
                             )}
                             {supportTier && (
                               <div>
-                                <span className="text-muted-foreground">Support Tier:</span>
-                                <span className="ml-2">{`Support Tier: ${supportTier}`}</span>
+                                <span className="text-muted-foreground">
+                                  {t("details.supportTier")}:
+                                </span>
+                                <span className="ml-2">{supportTier}</span>
                               </div>
                             )}
                             {ecosystem?.prerequisiteStatus && (
                               <div>
-                                <span className="text-muted-foreground">Prerequisite Status:</span>
+                                <span className="text-muted-foreground">
+                                  {t("details.prerequisiteStatus")}:
+                                </span>
                                 <span className="ml-2">{ecosystem.prerequisiteStatus}</span>
                               </div>
                             )}
                             {ecosystem?.docsUrl && (
                               <div className="col-span-2">
-                                <span className="text-muted-foreground">Official Docs:</span>
+                                <span className="text-muted-foreground">
+                                  {t("details.officialDocs")}:
+                                </span>
                                 <a
                                   href={ecosystem.docsUrl}
                                   target="_blank"
@@ -1204,19 +1202,23 @@ export function ExternalAgentSettings() {
                                   className="ml-2 inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
                                 >
                                   <ExternalLink className="h-3.5 w-3.5" />
-                                  Official Docs
+                                  {t("details.docsLink")}
                                 </a>
                               </div>
                             )}
                             {ecosystem?.limitationNote && (
                               <div className="col-span-2">
-                                <span className="text-muted-foreground">Limitation:</span>
+                                <span className="text-muted-foreground">
+                                  {t("details.limitation")}:
+                                </span>
                                 <span className="ml-2">{ecosystem.limitationNote}</span>
                               </div>
                             )}
                             {ecosystem?.recommendedActions?.length ? (
                               <div className="col-span-2">
-                                <span className="text-muted-foreground">Recommended Actions:</span>
+                                <span className="text-muted-foreground">
+                                  {t("details.recommendedActions")}:
+                                </span>
                                 <span className="ml-2">
                                   {ecosystem.recommendedActions.join(" | ")}
                                 </span>

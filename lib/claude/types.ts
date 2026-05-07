@@ -91,6 +91,35 @@ export interface SendOptions {
    */
   builtinTools?: BuiltinToolsConfig
 
+  // ---- Convenience modes (sidecar-protocol fields) -------------------------
+  // The dispatcher in `sidecar/dispatch/anthropic.mjs` strips these three
+  // fields before calling `query()`. Translation to real SDK options happens
+  // in `resolveSendOptions` (lib/claude/build-options.ts).
+  //
+  // Why these are distinct from the SDK options they expand to: surfacing them
+  // as a single boolean each gives the UI one switch per intent — users don't
+  // have to know that "bare" means `settingSources: [] + strictMcpConfig: true`.
+
+  /**
+   * Reproduces the `claude --bare` CLI flag for the SDK path: skip auto-loading
+   * of on-disk settings (CLAUDE.md, hooks, plugins, MCP discoveries).
+   * `resolveSendOptions` translates this to `settingSources: []` +
+   * `strictMcpConfig: true`.
+   */
+  bareMode?: boolean
+  /**
+   * Mirrors `claude --debug`: turn on verbose logging in the SDK + any
+   * spawned MCP / sub-process. `resolveSendOptions` translates this to
+   * `env: { DEBUG: "*", CLAUDE_CODE_DEBUG: "1" }`.
+   */
+  debugMode?: boolean
+  /**
+   * Cognia-specific "brief output" pseudo-flag (no Claude Code CLI equivalent).
+   * `resolveSendOptions` appends a concise-output snippet to
+   * `appendSystemPrompt` so the model favours short answers.
+   */
+  briefMode?: boolean
+
   // ---- Provider routing (added in the multi-provider port) -----------------
 
   /**
@@ -391,10 +420,19 @@ export interface ChatSession {
    */
   sdkSessionId?: string
   /**
-   * When forking, the SDK session id this branch was created from. Stored only
-   * for diagnostics; not auto-applied to subsequent sends.
+   * When forking, the SDK session id this branch was created from. The next
+   * send on a session whose `forkedFromSdkSessionId` is set populates
+   * `SendOptions.forkFromSessionId` (see `lib/claude/build-options.ts`) so the
+   * SDK starts a fork instead of resuming. Cleared by the sidecar once the
+   * fork completes (a fresh `sdkSessionId` is captured).
    */
   forkedFromSdkSessionId?: string
+  /** Per-session override for `--bare` (skip on-disk auto-discovery). */
+  bareMode?: boolean
+  /** Per-session override for `--debug` (verbose logging). */
+  debugMode?: boolean
+  /** Per-session override for cognia-next's brief-output mode. */
+  briefMode?: boolean
   /** Set when this session is bound to an external IM platform conversation. */
   platformBinding?: import("@/types/connectors/binding").PlatformBinding
   createdAt: number
@@ -440,6 +478,12 @@ export interface AppSettings {
   defaultSystemPrompt?: string
   defaultWorkingDir?: string
   permissionMode?: SendOptions["permissionMode"]
+  /** App-wide default for `--bare` (skip on-disk auto-discovery). Overridden by character + session. */
+  bareMode?: boolean
+  /** App-wide default for `--debug` (verbose logging). Overridden by character + session. */
+  debugMode?: boolean
+  /** App-wide default for cognia-next's brief-output mode. Overridden by character + session. */
+  briefMode?: boolean
   // Tools the user has chosen to always allow for this app (per-tool name).
   alwaysAllowTools: string[]
   /**
@@ -527,6 +571,7 @@ export interface AppSettings {
     | "hume"
     | "cartesia"
     | "deepgram"
+    | "xiaomi"
   /** Browser SpeechSynthesisVoice.voiceURI (system provider). */
   systemVoice?: string
 
@@ -535,6 +580,7 @@ export interface AppSettings {
   openaiModel?: string
   openaiSpeed?: number
   openaiInstructions?: string
+  openaiResponseFormat?: string
 
   /** Gemini TTS settings. */
   geminiVoice?: string
@@ -567,6 +613,12 @@ export interface AppSettings {
   /** Deepgram TTS settings. */
   deepgramVoice?: string
 
+  /** Xiaomi MiMo TTS settings. */
+  xiaomiVoice?: string
+  xiaomiModel?: string
+  xiaomiStyle?: string
+  xiaomiDialect?: string
+
   /** Common TTS controls. */
   ttsEnabled?: boolean
   ttsRate?: number
@@ -575,6 +627,10 @@ export interface AppSettings {
   ttsAutoPlay?: boolean
   ttsCacheEnabled?: boolean
   ttsStreamingEnabled?: boolean
+
+  ttsCustomSSMLEnabled?: boolean
+  ttsCustomSSML?: string
+  ttsPronunciationDictionary?: Record<string, string>
 
   // ---- Web search (multi-provider) ----
   /** Master toggle. When false, the composer's web-search button is disabled. */
@@ -971,6 +1027,12 @@ export interface Character {
   /** Ordered list of skills appended to the system prompt at send time. */
   skillIds?: string[]
   workingDir?: string
+  /** Per-character default for `--bare` (skip on-disk auto-discovery). */
+  bareMode?: boolean
+  /** Per-character default for `--debug` (verbose logging). */
+  debugMode?: boolean
+  /** Per-character default for cognia-next's brief-output mode. */
+  briefMode?: boolean
   /** Seeded built-ins are read-only (UI offers "Duplicate" instead of edit). */
   isBuiltIn?: boolean
   /** Whether this character is allowed to drive A2UI surfaces (4-tool whitelist + system prompt). */

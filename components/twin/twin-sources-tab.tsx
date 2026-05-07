@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
@@ -27,15 +28,17 @@ function formatBytes(n: number): string {
 }
 
 export function TwinSourcesTab({ twinId }: { twinId: string }) {
+  const t = useTranslations("twin.sources")
+  const tCharts = useTranslations("twin.charts.status")
   const [showUploader, setShowUploader] = useState(false)
   const sources = useLiveQuery(() => listTwinSourcesByTwin(twinId), [twinId], [])
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Sources ({sources.length})</h2>
+        <h2 className="text-lg font-medium">{t("headerCount", { count: sources.length })}</h2>
         <Button size="sm" onClick={() => setShowUploader((v) => !v)}>
-          {showUploader ? "Cancel" : "Add source"}
+          {showUploader ? t("cancelAdd") : t("addSource")}
         </Button>
       </div>
 
@@ -45,15 +48,17 @@ export function TwinSourcesTab({ twinId }: { twinId: string }) {
 
       {sources.length === 0 ? (
         <Card className="p-6 text-center">
-          <p className="text-muted-foreground text-sm">
-            No sources yet. Click <span className="font-medium">Add source</span> to paste in some
-            text or import a file.
-          </p>
+          <p className="text-muted-foreground text-sm">{t("emptyHint")}</p>
         </Card>
       ) : (
         <ul className="flex flex-col gap-2">
           {sources.map((source) => (
-            <SourceRow key={source.id} source={source} />
+            <SourceRow
+              key={source.id}
+              source={source}
+              t={t}
+              statusLabel={(s) => tCharts(s as Exclude<TwinSourceStatus, never>)}
+            />
           ))}
         </ul>
       )}
@@ -61,14 +66,22 @@ export function TwinSourcesTab({ twinId }: { twinId: string }) {
   )
 }
 
-function SourceRow({ source }: { source: TwinSource }) {
+function SourceRow({
+  source,
+  t,
+  statusLabel,
+}: {
+  source: TwinSource
+  t: ReturnType<typeof useTranslations>
+  statusLabel: (s: TwinSourceStatus) => string
+}) {
   return (
     <Card className="flex items-center justify-between gap-3 p-3">
       <div className="flex min-w-0 flex-col gap-1">
         <div className="flex items-center gap-2">
           <span className="truncate font-medium">{source.title}</span>
-          <Badge variant={STATUS_VARIANT[source.status]} className="shrink-0 capitalize">
-            {source.status}
+          <Badge variant={STATUS_VARIANT[source.status]} className="shrink-0">
+            {statusLabel(source.status)}
           </Badge>
           <Badge variant="outline" className="shrink-0 uppercase">
             {source.format}
@@ -77,13 +90,15 @@ function SourceRow({ source }: { source: TwinSource }) {
         <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
           <span>{formatBytes(source.bytes)}</span>
           <span>·</span>
-          <span>{source.chunkCount} chunks</span>
+          <span>{t("chunks", { count: source.chunkCount })}</span>
           <span>·</span>
-          <span>imported {new Date(source.importedAt).toLocaleString()}</span>
+          <span>{t("imported", { when: new Date(source.importedAt).toLocaleString() })}</span>
           {source.errorMessage ? (
             <>
               <span>·</span>
-              <span className="text-destructive truncate">⚠ {source.errorMessage}</span>
+              <span className="text-destructive truncate">
+                {t("errorPrefix")} {source.errorMessage}
+              </span>
             </>
           ) : null}
         </div>
@@ -95,7 +110,7 @@ function SourceRow({ source }: { source: TwinSource }) {
           void deleteTwinSource(source.id)
         }}
       >
-        Delete
+        {t("delete")}
       </Button>
     </Card>
   )

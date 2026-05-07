@@ -24,8 +24,8 @@ export interface ProviderModelsTabProps {
   models: ModelConfig[]
   enabledModels: string[]
   onEnabledModelsChange: (modelIds: string[]) => void
-  onRefreshModels: () => void
-  isRefreshing?: boolean
+  onTestConnection: () => void
+  isTesting?: boolean
 }
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
@@ -91,8 +91,8 @@ export function ProviderModelsTab({
   models,
   enabledModels,
   onEnabledModelsChange,
-  onRefreshModels,
-  isRefreshing = false,
+  onTestConnection,
+  isTesting = false,
 }: ProviderModelsTabProps) {
   const t = useTranslations("providers")
   const [search, setSearch] = useState("")
@@ -142,8 +142,8 @@ export function ProviderModelsTab({
             className="pl-8"
           />
         </div>
-        <Button variant="outline" size="sm" onClick={onRefreshModels} disabled={isRefreshing}>
-          {isRefreshing ? (
+        <Button variant="outline" size="sm" onClick={onTestConnection} disabled={isTesting}>
+          {isTesting ? (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
           ) : (
             <RefreshCw className="h-4 w-4 mr-2" />

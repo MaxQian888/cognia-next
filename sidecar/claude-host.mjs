@@ -90,7 +90,15 @@ function handleSend(msg) {
   }
   const existing = sessions.get(sessionId)
   if (existing) {
-    existing.pushUserMessage(prompt)
+    // If the working directory changed, restart the session so the SDK
+    // picks up the new cwd. Other option changes (model, system prompt)
+    // are handled by the frontend closing the session explicitly.
+    if (options?.cwd !== undefined && options.cwd !== existing.sendOptions?.cwd) {
+      handleClose({ sessionId })
+      startSession(sessionId, prompt, options)
+    } else {
+      existing.pushUserMessage(prompt)
+    }
   } else {
     startSession(sessionId, prompt, options)
   }

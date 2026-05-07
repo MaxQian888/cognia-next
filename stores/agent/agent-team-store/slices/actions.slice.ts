@@ -612,6 +612,26 @@ export const createAgentTeamActionsSlice = (
     })
   },
 
+  removeMessage: (messageId) => {
+    set((state) => {
+      const msg = state.messages[messageId]
+      if (!msg) return state
+      const team = state.teams[msg.teamId]
+      const nextMessages = { ...state.messages }
+      delete nextMessages[messageId]
+      const nextTeams = team
+        ? {
+            ...state.teams,
+            [msg.teamId]: {
+              ...team,
+              messageIds: removeId(team.messageIds, messageId),
+            },
+          }
+        : state.teams
+      return { messages: nextMessages, teams: nextTeams }
+    })
+  },
+
   markAllMessagesRead: (teammateId) => {
     set((state) => {
       const updated = { ...state.messages }

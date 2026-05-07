@@ -377,6 +377,13 @@ export interface TwinJob {
 
   errorMessage?: string
   retryCount: number
+  /**
+   * ms-since-epoch — set by the worker when a transient failure schedules
+   * the next attempt with exponential backoff. The job stays `status="queued"`
+   * but `claimNextQueuedJob` skips rows whose `nextAttemptAt` is still in
+   * the future. Absent on first-attempt jobs.
+   */
+  nextAttemptAt?: number
 
   /** FK → twinDrafts.id[] — produced by `distill` runs. */
   outputDraftIds?: string[]

@@ -34,6 +34,9 @@ export type CharacterDraft = Pick<Character, "name" | "systemPrompt"> &
       | "mcpServerIds"
       | "skillIds"
       | "workingDir"
+      | "bareMode"
+      | "debugMode"
+      | "briefMode"
       | "twinId"
       | "twinSettings"
     >
@@ -55,6 +58,9 @@ export async function createCharacter(draft: CharacterDraft): Promise<Character>
     mcpServerIds: draft.mcpServerIds,
     skillIds: draft.skillIds,
     workingDir: draft.workingDir,
+    bareMode: draft.bareMode,
+    debugMode: draft.debugMode,
+    briefMode: draft.briefMode,
     twinId: draft.twinId,
     twinSettings: draft.twinSettings,
     createdAt: now,

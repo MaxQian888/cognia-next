@@ -79,6 +79,10 @@ export async function createSession(
     systemPrompt: partial?.systemPrompt ?? autoApplied.systemPrompt,
     workingDir: partial?.workingDir ?? autoApplied.workingDir,
     permissionMode: partial?.permissionMode ?? autoApplied.permissionMode,
+    bareMode: partial?.bareMode,
+    debugMode: partial?.debugMode,
+    briefMode: partial?.briefMode,
+    forkedFromSdkSessionId: partial?.forkedFromSdkSessionId,
     scratchpad: partial?.scratchpad,
     createdAt: now,
     updatedAt: now,
@@ -98,6 +102,40 @@ export async function updateSession(
   patch: Partial<Omit<ChatSession, "id" | "createdAt">>
 ): Promise<void> {
   await getDb().sessions.update(id, { ...patch, updatedAt: Date.now() })
+}
+
+/**
+ * Fork an existing chat session: creates a new ChatSession that inherits the
+ * parent's character / team / per-session overrides, with `forkedFromSdkSessionId`
+ * set to the parent's `sdkSessionId`. The next send on the new session will
+ * tell the SDK to branch from that id (see `lib/claude/build-options.ts` and
+ * `sidecar/dispatch/anthropic.mjs`).
+ *
+ * Throws when the parent has no `sdkSessionId` yet (the SDK has nothing to
+ * fork from until at least one turn has completed).
+ */
+export async function forkSessionFromParent(parentId: string): Promise<ChatSession> {
+  const parent = await getDb().sessions.get(parentId)
+  if (!parent) throw new Error(`Session ${parentId} not found`)
+  if (!parent.sdkSessionId) {
+    throw new Error("Cannot fork: the session hasn't started a SDK conversation yet")
+  }
+  return createSession({
+    title: `${parent.title} (fork)`,
+    kind: parent.kind,
+    characterId: parent.characterId,
+    teamId: parent.teamId,
+    disabledSkillIds: parent.disabledSkillIds,
+    model: parent.model,
+    providerOverride: parent.providerOverride,
+    systemPrompt: parent.systemPrompt,
+    workingDir: parent.workingDir,
+    permissionMode: parent.permissionMode,
+    bareMode: parent.bareMode,
+    debugMode: parent.debugMode,
+    briefMode: parent.briefMode,
+    forkedFromSdkSessionId: parent.sdkSessionId,
+  })
 }
 
 export async function deleteSession(id: string): Promise<void> {

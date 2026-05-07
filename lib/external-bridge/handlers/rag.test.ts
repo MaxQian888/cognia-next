@@ -119,6 +119,82 @@ describe("ragSearch", () => {
   })
 })
 
+describe("ragSearch — twin scope", () => {
+  it("rejects twin scope without a twinId", async () => {
+    await expect(ragSearch({ query: "anything", scope: "twin" })).rejects.toThrow(/requires twinId/)
+  })
+
+  it("returns empty for an unknown twin", async () => {
+    const out = await ragSearch({ query: "anything", scope: "twin", twinId: "twin_missing" })
+    expect(out).toEqual({ chunks: [], considered: 0 })
+  })
+
+  it("scores twin chunks and returns the original (un-redacted) content", async () => {
+    const db = getDb()
+    await db.twinSources.put({
+      id: "tsrc_1",
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "manual",
+      title: "Onboarding notes",
+      bytes: 0,
+      fingerprint: "fp",
+      chunkCount: 2,
+      status: "parsed",
+      importedAt: 1,
+      redacted: true,
+    })
+    await db.twinChunks.bulkPut([
+      {
+        id: "tchk_1",
+        twinId: "twin_alice",
+        sourceId: "tsrc_1",
+        content: "How to triage P1 incidents step by step",
+        contentRedacted: "How to triage P1 incidents step by step",
+        charStart: 0,
+        charEnd: 40,
+        vectorBackend: "qdrant",
+        vectorCollection: "c",
+        vectorDocId: "vec_1",
+        strategy: "paragraph",
+        tokenCount: 5,
+        metadata: {},
+        createdAt: 1,
+      },
+      {
+        id: "tchk_2",
+        twinId: "twin_alice",
+        sourceId: "tsrc_1",
+        content: "Unrelated content about cooking",
+        contentRedacted: "Unrelated content about cooking",
+        charStart: 0,
+        charEnd: 30,
+        vectorBackend: "qdrant",
+        vectorCollection: "c",
+        vectorDocId: "vec_2",
+        strategy: "paragraph",
+        tokenCount: 5,
+        metadata: {},
+        createdAt: 2,
+      },
+    ])
+
+    const out = await ragSearch({
+      query: "triage incidents",
+      scope: "twin",
+      twinId: "twin_alice",
+    })
+    expect(out.chunks).toHaveLength(1)
+    expect(out.chunks[0].content).toContain("triage")
+    expect(out.chunks[0].twinId).toBe("twin_alice")
+    expect(out.chunks[0].twinSourceId).toBe("tsrc_1")
+    expect(out.chunks[0].filePath).toBe("Onboarding notes")
+    // considered counts ALL twin chunks for the twin (not just hits)
+    expect(out.considered).toBe(2)
+  })
+})
+
 describe("internal helpers", () => {
   it("scoreSection returns 0 for empty inputs", () => {
     const article = articleDraft() as unknown as Parameters<typeof __TESTING__.scoreSection>[0]

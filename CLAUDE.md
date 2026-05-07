@@ -375,6 +375,76 @@ Lark (Feishu), and QQ/NapCat (OneBot v11). The subsystem lives under
 
 See `docs/content/docs/adr/0009-platform-connectors.md` for the full ADR.
 
+## Visual Workflows
+
+cognia-next ships an n8n-style visual orchestration layer that lets users
+wire characters, teams, skills, twins, connectors, and AI primitives into
+executable graphs with a durable run history. The subsystem lives entirely
+under `lib/workflow/`, `types/workflow/visual.ts`, `components/workflow/`,
+and `components/settings/workflows/`, with four Dexie tables added at
+schema **v22** (`workflows` / `workflowRuns` / `workflowRunEvents` /
+`workflowTriggers`).
+
+- **Type model** (`types/workflow/visual.ts`): namespaced separately from
+  the existing PPT-focused `./workflow.ts` so the two families coexist —
+  the visual graph's top-level shape is exported as `VisualWorkflow` (NOT
+  `WorkflowDefinition`). 38 node kinds across 7 categories
+  (`trigger.* / action.* / ai.* / flow.* / data.* / io.* / annotation.*`).
+- **Editor** (`components/workflow/editor/`, `lib/workflow/editor/`):
+  React Flow v12 + Zustand+zundo store + elkjs auto-layout. Single-renderer
+  `WorkflowNodeComponent` covers every kind with category-colored cards.
+  Left-rail `NodeSearchSidebar` (drag-from-sidebar via custom MIME), right-
+  rail `InspectorPanel` (per-kind config form pulled from a registry),
+  toolbar with Save / Run / Undo / Redo / Auto-layout. Ctrl+S / Ctrl+Z /
+  Ctrl+Shift+Z keyboard shortcuts.
+- **Per-kind inspector forms** (`components/workflow/editor/inspector/forms/`):
+  18 dedicated forms (cron, character/team/skill pickers, AI prompt with
+  full provider routing, branch, set, wait, HTTP, code, template,
+  transform, note, generic-JSON fallback). Drives node `params`.
+- **Runtime engine** (`lib/workflow/runtime/`): six modules — orchestrator,
+  step-executor, event-log, idempotency cache, expression resolver, topo-sort.
+  Inngest-style memoization by `(runId, stepId)` so resumed runs replay
+  nothing. Retries respect per-workflow policy with exponential / fixed
+  backoff. Timeout via `AbortController`. Branch decisions skip non-chosen
+  edges via `propagateSkip`. Workflow snapshots are frozen at run start —
+  re-runs from history use the snapshot, not the live workflow.
+- **Node executor registry** (`lib/workflow/nodes/registry.ts`): plugins can
+  register new executors via `registerNodeExecutor`. Phase 1 ships 14 real
+  executors (manual, set, branch, switch, split, join, loop, wait, transform,
+  template, code, http, skill.invoke, real-or-stub ai.prompt). Remaining
+  kinds land as their TS subsystem integrations are wired.
+- **Trigger taxonomy**: manual (Run button), cron (existing TS scheduler;
+  Rust daemon for "fires when minimized" is Phase 5a), connector inbound
+  (ConnectorBus tap; Phase 5b), chat message (build-options hook; Phase 5b),
+  webhook (Rust axum; Phase 5a, Tauri-only — web shows "desktop only").
+- **Hybrid runtime split** (Phase 5a/b — Rust pieces pending): Rust owns
+  cron firing + webhook receive + connector inbound tap + run-state mirror
+  in SQLite for crash recovery. TS owns orchestration + node execution +
+  Dexie definition / event-log storage. Crossing happens only at
+  `workflow:trigger` / `workflow:resume` Tauri events and the IPC commands
+  in `lib/workflow/runtime/tauri-bridge.ts` (web mode no-ops gracefully).
+- **Run history** (`components/workflow/runs/`): Gantt-style horizontal
+  timeline at `/workflows/[id]/runs/[runId]` builds spans from the durable
+  event log via `buildSpans`; collapses retries into a single bar with an
+  attempt counter; per-step inspector surfaces resolved params, output,
+  error, and structured logs. Re-run-from-snapshot button re-invokes the
+  orchestrator with the same snapshot.
+- **Settings UI** (`components/settings/workflows/`): tab under Settings →
+  Data (`?section=workflows`). 5-tab shell — Library / Runs / Templates /
+  Defaults / Audit (`?wfTab=…`). The Library tab embeds the same
+  `<WorkflowLibrary />` rendered at `/workflows` so users can manage from
+  Settings without leaving the shell.
+- **Built-in templates** (`lib/workflow/definition/seed.ts`): 4 templates
+  ship in Phase 1 — Hello world, HTTP→transform→summarize, Classify then
+  branch, Skills + AI. All compose only registered executors so they run
+  out of the box.
+- **Web-mode degradation**: when `!isTauri()`, cron triggers fire only
+  while the webview is alive; webhook triggers show "desktop only";
+  manual / chat-message / connector triggers (TS-side) work unchanged.
+  Library, editor, run history, and templates UI all work fully.
+
+See `docs/content/docs/adr/0011-workflows-subsystem.md` for the full ADR.
+
 ## Testing Standards
 
 - **Coverage requirement**: every source file must reach **≥90% test coverage** (lines, branches, functions). Verify with `pnpm test:coverage`.

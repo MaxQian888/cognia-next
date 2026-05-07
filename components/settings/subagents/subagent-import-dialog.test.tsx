@@ -243,6 +243,28 @@ describe("SubagentImportDialog", () => {
     expect(screen.getByText("sources.generic-md")).toBeInTheDocument()
   })
 
+  it("shows step indicator 1/3 on source, 2/3 on files, 3/3 on review", async () => {
+    render(<SubagentImportDialog open={true} onOpenChange={() => {}} />)
+    expect(screen.getByTestId("subagent-import-step-indicator")).toHaveTextContent("1/3")
+    fireEvent.click(screen.getByTestId("subagent-import-next"))
+    expect(screen.getByTestId("subagent-import-step-indicator")).toHaveTextContent("2/3")
+    // Upload a file to reach review.
+    const input = screen.getByTestId("subagent-import-file-input") as HTMLInputElement
+    const file = makeFile(
+      "code-reviewer.md",
+      SAMPLE_FILE_CONTENT,
+      ".claude/agents/code-reviewer.md"
+    )
+    await act(async () => {
+      Object.defineProperty(input, "files", { value: [file], writable: false })
+      fireEvent.change(input)
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId("subagent-import-step-review")).toBeInTheDocument()
+    )
+    expect(screen.getByTestId("subagent-import-step-indicator")).toHaveTextContent("3/3")
+  })
+
   it("returns null when closed", () => {
     const { container } = render(<SubagentImportDialog open={false} onOpenChange={() => {}} />)
     expect(container.querySelector("[data-testid='subagent-import-dialog']")).toBeNull()
@@ -421,11 +443,9 @@ describe("SubagentImportDialog", () => {
       expect(tauriReadTextMock).toHaveBeenCalledWith("/abs/path/.claude/agents/code-reviewer.md")
     })
 
-    it("falls back to directory mode when file picker returns nothing", async () => {
+    it("folder picker reads from directory and parses files", async () => {
       isTauriMock.mockReturnValue(true)
-      tauriOpenMock
-        .mockResolvedValueOnce(null) // file picker cancelled
-        .mockResolvedValueOnce("/abs/path/.claude/agents") // dir picker
+      tauriOpenMock.mockResolvedValueOnce("/abs/path/.claude/agents")
       tauriReadDirMock.mockResolvedValueOnce([
         { name: "code-reviewer.md", isFile: true },
         { name: "README.txt", isFile: true },
@@ -436,7 +456,7 @@ describe("SubagentImportDialog", () => {
       fireEvent.click(screen.getByTestId("subagent-import-next"))
 
       await act(async () => {
-        fireEvent.click(screen.getByTestId("subagent-import-tauri-pick"))
+        fireEvent.click(screen.getByTestId("subagent-import-tauri-pick-folder"))
       })
       await waitFor(() =>
         expect(screen.getByTestId("subagent-import-step-review")).toBeInTheDocument()

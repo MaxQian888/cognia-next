@@ -12,6 +12,7 @@ import { SettingsSyncProvider } from "@/components/providers/settings-sync-provi
 import { TauriProvider } from "@/components/providers/tauri-provider"
 import { LoggerProvider } from "@/components/providers/logger-provider"
 import { ExternalAgentInitializer } from "@/components/providers/initializers/external-agent-initializer"
+import { AgentTeamRuntimeInitializer } from "@/components/providers/initializers/agent-team-runtime-initializer"
 import { SchedulerInitializer } from "@/components/scheduler"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provider"
@@ -62,6 +63,7 @@ export default function RootLayout({
                 <TooltipProvider>
                   <LoggerProvider>
                     <ExternalAgentInitializer />
+                    <AgentTeamRuntimeInitializer />
                     <SchedulerInitializer />
                     <BackupSchedulerProvider>
                       <CanvasBridgeProvider>

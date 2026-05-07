@@ -581,3 +581,137 @@ describe("applyBackupPackage — plugins domain", () => {
     expect(summary.skipped.plugins).toBe(1)
   })
 })
+
+describe("applyBackupPackage — twin tables", () => {
+  function twinSnapshot(): BackupPayloadV3 {
+    return {
+      twinSources: [
+        {
+          id: "tsrc_1",
+          twinId: "twin_alice",
+          kind: "document",
+          format: "markdown",
+          source: "manual",
+          title: "demo.md",
+          bytes: 12,
+          fingerprint: "fp",
+          chunkCount: 1,
+          status: "parsed",
+          importedAt: 1,
+          redacted: true,
+        },
+      ],
+      twinChunks: [
+        {
+          id: "tchk_1",
+          twinId: "twin_alice",
+          sourceId: "tsrc_1",
+          content: "hello",
+          contentRedacted: "hello",
+          charStart: 0,
+          charEnd: 5,
+          vectorBackend: "qdrant",
+          vectorCollection: "cognia_twin_twin_alice",
+          vectorDocId: "vec_1",
+          strategy: "paragraph",
+          tokenCount: 1,
+          metadata: {},
+          createdAt: 2,
+        },
+      ],
+      twinProfile: [
+        {
+          id: "twin_alice",
+          twinId: "twin_alice",
+          styleSamples: [],
+          playbooks: [],
+          entities: [],
+          decisions: [],
+          voiceSummary: "",
+          updatedAt: 3,
+        },
+      ],
+      twinDrafts: [
+        {
+          id: "tdr_1",
+          twinId: "twin_alice",
+          jobId: "twj_1",
+          kind: "skill",
+          payload: { kind: "skill", data: { name: "Demo" } },
+          provenance: { chunkIds: ["tchk_1"], rationale: "test" },
+          status: "pending",
+          createdAt: 4,
+        },
+      ],
+      twinJobs: [
+        {
+          id: "twj_1",
+          twinId: "twin_alice",
+          kind: "ingest",
+          sourceIds: ["tsrc_1"],
+          status: "completed",
+          phase: "completed",
+          progress: 100,
+          queuedAt: 5,
+          retryCount: 0,
+        },
+      ],
+    }
+  }
+
+  it("imports a fresh twin snapshot end to end", async () => {
+    const db = getDb()
+    const summary = await applyBackupPackage(
+      pkg(twinSnapshot()),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+
+    expect(await db.twinSources.toArray()).toHaveLength(1)
+    expect(await db.twinChunks.toArray()).toHaveLength(1)
+    expect((await db.twinProfile.get("twin_alice"))?.twinId).toBe("twin_alice")
+    expect(await db.twinDrafts.toArray()).toHaveLength(1)
+    expect(await db.twinJobs.toArray()).toHaveLength(1)
+
+    expect(summary.added.twinSources).toBe(1)
+    expect(summary.added.twinChunks).toBe(1)
+    expect(summary.added.twinProfile).toBe(1)
+    expect(summary.added.twinDrafts).toBe(1)
+    expect(summary.added.twinJobs).toBe(1)
+  })
+
+  it("twin profile uses overwrite-by-id even with duplicate strategy", async () => {
+    const db = getDb()
+    // Pre-existing profile for the same twin.
+    await db.twinProfile.put({
+      id: "twin_alice",
+      twinId: "twin_alice",
+      styleSamples: [],
+      playbooks: [],
+      entities: [],
+      decisions: [],
+      voiceSummary: "OLD",
+      updatedAt: 1,
+    })
+    await applyBackupPackage(
+      pkg(twinSnapshot()),
+      { mergeStrategy: "duplicate", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    // Profile should still be a single row keyed by twinId — no duplicate.
+    expect(await db.twinProfile.toArray()).toHaveLength(1)
+    expect((await db.twinProfile.get("twin_alice"))?.voiceSummary).toBe("")
+  })
+
+  it("legacy v3 envelopes without twin fields apply cleanly (no errors)", async () => {
+    // No twin* properties at all — verifies the importer treats undefined as
+    // "no rows to apply" (additive forward-compat).
+    const summary = await applyBackupPackage(
+      pkg({ promptPresets: [] }),
+      { mergeStrategy: "skip", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    expect(summary.added.twinSources).toBeUndefined()
+    expect(summary.added.twinJobs).toBeUndefined()
+  })
+})

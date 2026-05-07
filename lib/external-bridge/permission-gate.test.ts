@@ -5,6 +5,7 @@
 
 import type { ExternalBridgeSettings } from "@/types/wiki"
 import {
+  checkRagCall,
   checkRuntimeCall,
   checkScope,
   checkToolCall,
@@ -102,5 +103,29 @@ describe("requiredScopeForRuntimeEntity / checkRuntimeCall", () => {
   it("checkRuntimeCall allows when entity scope is enabled", () => {
     const result = checkRuntimeCall(settings({ enabledScopes: ["runtime:skills"] }), "skill")
     expect(result.allowed).toBe(true)
+  })
+
+  it("checkRagCall maps cognia/all/empty to rag:cognia", () => {
+    const s = settings({ enabledScopes: ["rag:cognia"] })
+    expect(checkRagCall(s, "all").allowed).toBe(true)
+    expect(checkRagCall(s, "cognia-self").allowed).toBe(true)
+    expect(checkRagCall(s, "").allowed).toBe(true)
+  })
+
+  it("checkRagCall denies twin scope by default (rag:twin not enabled)", () => {
+    const result = checkRagCall(settings(), "twin")
+    expect(result.allowed).toBe(false)
+    if (!result.allowed) expect(result.reason).toMatch(/rag:twin/)
+  })
+
+  it("checkRagCall allows twin scope when rag:twin is in the whitelist", () => {
+    const result = checkRagCall(settings({ enabledScopes: ["rag:cognia", "rag:twin"] }), "twin")
+    expect(result.allowed).toBe(true)
+  })
+
+  it("checkRagCall rejects unknown rag scopes", () => {
+    const result = checkRagCall(settings(), "made-up")
+    expect(result.allowed).toBe(false)
+    if (!result.allowed) expect(result.reason).toMatch(/unknown rag scope/)
   })
 })

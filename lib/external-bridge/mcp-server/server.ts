@@ -22,7 +22,7 @@ import { listAllWikiArticles, getWikiArticleBySlug } from "@/lib/db/wiki-article
 import { listSkills, getSkill } from "@/lib/db/skills"
 import { listCharacters, getCharacter } from "@/lib/db/characters"
 import { recordCall } from "../audit-log"
-import { checkRuntimeCall, checkScope, checkToolCall } from "../permission-gate"
+import { checkRagCall, checkRuntimeCall, checkScope, checkToolCall } from "../permission-gate"
 import { ragSearch } from "../handlers/rag"
 import { parseResourceUri } from "../handlers/resources"
 import { runtimeQuery, type RuntimeEntityType } from "../handlers/runtime"
@@ -133,8 +133,9 @@ function registerRagTool(server: McpServer, settingsGetter: SettingsGetter) {
     {
       title: "Search Cognia code (RAG)",
       description:
-        "Chunk-level retrieval over Cognia's wiki sections. Use for fine-grained " +
-        "code passages; for module-level overviews use wiki_search.",
+        "Chunk-level retrieval over Cognia's wiki sections OR over a digital " +
+        "twin's chunks (when scope='twin' and rag:twin is enabled). For " +
+        "module-level overviews use wiki_search.",
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -143,24 +144,31 @@ function registerRagTool(server: McpServer, settingsGetter: SettingsGetter) {
       },
       inputSchema: {
         query: z.string(),
-        scope: z.enum(["cognia-self", "user-repo", "runtime", "all"]).optional(),
+        scope: z.enum(["cognia-self", "user-repo", "runtime", "all", "twin"]).optional(),
+        twinId: z.string().optional(),
         k: z.number().int().min(1).max(30).optional(),
         rerank: z.boolean().optional(),
       },
     },
-    async (args) =>
-      runWithGate({
+    async (args) => {
+      const ragScope = args.scope ?? "all"
+      const settings = await settingsGetter()
+      // Per-call gate: rag:cognia for everything except twin (rag:twin),
+      // which the user must opt into separately.
+      return runWithGate({
         tool: "rag_search",
-        scope: "rag:cognia",
-        check: checkToolCall(await settingsGetter(), "rag_search"),
+        scope: ragScope === "twin" ? "rag:twin" : "rag:cognia",
+        check: checkRagCall(settings, ragScope),
         body: () =>
           ragSearch({
             query: args.query,
             scope: args.scope,
+            twinId: args.twinId,
             k: args.k,
             rerank: args.rerank,
           }),
       })
+    }
   )
 }
 

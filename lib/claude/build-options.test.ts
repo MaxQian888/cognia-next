@@ -559,7 +559,7 @@ describe("resolveSendOptions — resume", () => {
     expect(opts.resumeSessionId).toBe("sdk-1")
   })
 
-  it("omits resumeSessionId when the session is forked", async () => {
+  it("populates forkFromSessionId (not resumeSessionId) when the session is forked", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({
         id: "s1",
@@ -567,7 +567,11 @@ describe("resolveSendOptions — resume", () => {
         forkedFromSdkSessionId: "sdk-0",
       }),
     })
+    // Forking takes precedence: the dispatcher uses forkFromSessionId both as
+    // the resume target AND as the "isFork" flag, so we must NOT also set
+    // resumeSessionId (mutually exclusive in the SDK).
     expect(opts.resumeSessionId).toBeUndefined()
+    expect(opts.forkFromSessionId).toBe("sdk-0")
   })
 
   it("omits resumeSessionId when no sdkSessionId is set", async () => {
@@ -575,6 +579,133 @@ describe("resolveSendOptions — resume", () => {
       session: makeSession({ id: "s1" }),
     })
     expect(opts.resumeSessionId).toBeUndefined()
+    expect(opts.forkFromSessionId).toBeUndefined()
+  })
+})
+
+describe("resolveSendOptions — bare mode", () => {
+  it("translates bareMode to settingSources [] + strictMcpConfig true", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", bareMode: true }),
+    })
+    expect(opts.settingSources).toEqual([])
+    expect(opts.strictMcpConfig).toBe(true)
+  })
+
+  it("does nothing when bareMode is false / unset at every level", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar(),
+      appSettings: { id: "singleton" } as AppSettings,
+    })
+    expect(opts.settingSources).toBeUndefined()
+    expect(opts.strictMcpConfig).toBeUndefined()
+  })
+
+  it("session.bareMode wins over character + app default", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", bareMode: false }),
+      character: makeChar({ bareMode: true }),
+      appSettings: { id: "singleton", bareMode: true } as AppSettings,
+    })
+    expect(opts.settingSources).toBeUndefined()
+  })
+
+  it("character.bareMode beats app default", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar({ bareMode: true }),
+      appSettings: { id: "singleton", bareMode: false } as AppSettings,
+    })
+    expect(opts.settingSources).toEqual([])
+    expect(opts.strictMcpConfig).toBe(true)
+  })
+
+  it("appSettings.bareMode applies when nothing closer is set", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar(),
+      appSettings: { id: "singleton", bareMode: true } as AppSettings,
+    })
+    expect(opts.settingSources).toEqual([])
+    expect(opts.strictMcpConfig).toBe(true)
+  })
+})
+
+describe("resolveSendOptions — debug mode", () => {
+  it("populates env.DEBUG and env.CLAUDE_CODE_DEBUG when debugMode is on", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", debugMode: true }),
+    })
+    expect(opts.env?.DEBUG).toBe("*")
+    expect(opts.env?.CLAUDE_CODE_DEBUG).toBe("1")
+  })
+
+  it("leaves env unset when debugMode is off everywhere", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+    })
+    expect(opts.env).toBeUndefined()
+  })
+
+  it("character.debugMode applies when no session override", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar({ debugMode: true }),
+    })
+    expect(opts.env?.DEBUG).toBe("*")
+  })
+
+  it("session.debugMode === false beats character + app default", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", debugMode: false }),
+      character: makeChar({ debugMode: true }),
+      appSettings: { id: "singleton", debugMode: true } as AppSettings,
+    })
+    expect(opts.env).toBeUndefined()
+  })
+})
+
+describe("resolveSendOptions — brief mode", () => {
+  it("appends BRIEF_OUTPUT_SNIPPET to appendSystemPrompt when set", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", briefMode: true }),
+    })
+    expect(opts.appendSystemPrompt).toContain("Respond concisely")
+  })
+
+  it("merges with an existing appendSystemPrompt (e.g., A2UI block) under a blank line", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", briefMode: true, a2uiEnabled: true } as ChatSession & {
+        a2uiEnabled?: boolean
+      }),
+      character: makeChar({ a2uiEnabled: true }),
+    })
+    expect(opts.appendSystemPrompt).toMatch(/A2UI[\s\S]+\n\nRespond concisely/i)
+  })
+
+  it("omits the snippet when briefMode is off", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+    })
+    expect(opts.appendSystemPrompt ?? "").not.toContain("Respond concisely")
+  })
+
+  it("character.briefMode applies in absence of session override", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar({ briefMode: true }),
+    })
+    expect(opts.appendSystemPrompt).toContain("Respond concisely")
+  })
+
+  it("appSettings.briefMode applies when nothing closer set", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar(),
+      appSettings: { id: "singleton", briefMode: true } as AppSettings,
+    })
+    expect(opts.appendSystemPrompt).toContain("Respond concisely")
   })
 })
 

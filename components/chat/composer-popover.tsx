@@ -12,13 +12,25 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { FileIcon, FolderIcon, SlashIcon, TerminalIcon, BookMarkedIcon } from "lucide-react"
+import {
+  AtSignIcon,
+  BookMarkedIcon,
+  FileIcon,
+  FolderIcon,
+  SlashIcon,
+  TerminalIcon,
+} from "lucide-react"
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { searchWorkspace } from "@/lib/files/workspace-search"
 import type { WorkspaceEntry } from "@/lib/files/types"
 import type { SlashCommand } from "@/lib/slash-commands/builtin"
 import { cn } from "@/lib/utils"
 import { loggers } from "@/lib/logger"
+import {
+  AgentMentionRow,
+  filterMentionables,
+} from "@/components/agent/workspace/agent-mention-picker"
+import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 
 import type { ComposerTrigger, TriggerKind } from "./composer-trigger"
 
@@ -26,6 +38,7 @@ export type PopoverItem =
   | { kind: "slash"; command: SlashCommand }
   | { kind: "file"; entry: WorkspaceEntry }
   | { kind: "memory"; scope: "project" | "user"; preview: string }
+  | { kind: "agent"; target: MentionTarget }
 
 export interface ComposerPopoverHandle {
   /** Move the highlighted index by `delta` (-1 for up, +1 for down). */
@@ -43,6 +56,11 @@ interface Props {
   slashCommands: SlashCommand[]
   /** Anchor element — typically the composer container. */
   anchor: HTMLElement | null
+  /**
+   * Mentionable agents for the agent picker. Required when the composer's
+   * `mentionMode` is `"agents"`. Empty in file mode.
+   */
+  mentionables?: readonly MentionTarget[]
   /** Called when the user picks an item. */
   onPick: (item: PopoverItem) => void
   /** Called when the user dismisses the popover (Escape / outside click). */
@@ -57,11 +75,12 @@ interface ItemList {
 }
 
 export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function ComposerPopover(
-  { trigger, cwd, slashCommands, anchor, onPick, onDismiss },
+  { trigger, cwd, slashCommands, anchor, mentionables, onPick, onDismiss },
   ref
 ) {
   const t = useTranslations("chat.composer.popover")
   const tMemory = useTranslations("chat.composer.memory")
+  const tAgent = useTranslations("agentTeamsWorkspace.chat.composer")
   const [highlight, setHighlight] = useState(0)
   // The async file-search produces an `ItemList` over time; for slash, memory
   // and bash kinds we derive the list synchronously below. The combined view
@@ -167,6 +186,21 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     if (trigger.kind === "bash") {
       return { items: [], loading: false, error: null, emptyMessage: "" }
     }
+    if (trigger.kind === "agent") {
+      const list = mentionables ?? []
+      const filtered = filterMentionables(list, trigger.query)
+      return {
+        items: filtered.map((target) => ({ kind: "agent" as const, target })),
+        loading: false,
+        error: null,
+        emptyMessage:
+          list.length === 0
+            ? safeLookup(tAgent, "noAgents", "No agents available")
+            : safeLookup(tAgent, "noMatches", `No agent matches "${trigger.query}"`, {
+                query: trigger.query,
+              }),
+      }
+    }
     // file
     return (
       fileList ?? {
@@ -176,7 +210,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
         emptyMessage: "",
       }
     )
-  }, [trigger, slashCommands, fileList, t, tMemory])
+  }, [trigger, slashCommands, fileList, t, tMemory, tAgent, mentionables])
 
   // Clamp the highlight whenever the visible list shrinks below it. The
   // updater form means the clamp is idempotent if it fires multiple times.
@@ -208,7 +242,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
   )
 
   const open = trigger !== null && anchor !== null
-  const title = useMemo(() => triggerTitle(trigger?.kind, t), [trigger?.kind, t])
+  const title = useMemo(() => triggerTitle(trigger?.kind, t, tAgent), [trigger?.kind, t, tAgent])
 
   return (
     <Popover open={open} onOpenChange={(v) => (!v ? onDismiss() : undefined)}>
@@ -263,7 +297,8 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
 
 function triggerTitle(
   kind: TriggerKind | undefined,
-  t: (key: string) => string
+  t: (key: string) => string,
+  tAgent: (key: string) => string
 ): {
   icon: React.ReactNode
   label: string
@@ -280,15 +315,36 @@ function triggerTitle(
       }
     case "bash":
       return { icon: <TerminalIcon className="size-3.5" />, label: t("bashTitle") }
+    case "agent":
+      return {
+        icon: <AtSignIcon className="size-3.5" />,
+        label: safeLookup(tAgent, "mentionTitle", "Mention an agent"),
+      }
     default:
       return { icon: null, label: "" }
   }
+}
+
+function safeLookup(
+  t: (key: string, params?: Record<string, string | number | Date>) => string,
+  key: string,
+  fallback: string,
+  params?: Record<string, string | number | Date>
+): string {
+  try {
+    const value = t(key, params)
+    if (value && value !== key) return value
+  } catch {
+    /* fall through */
+  }
+  return fallback
 }
 
 function itemKey(item: PopoverItem, idx: number): string {
   if (item.kind === "slash") return `slash-${item.command.name}`
   if (item.kind === "file") return `file-${item.entry.absolutePath}`
   if (item.kind === "memory") return `memory-${item.scope}`
+  if (item.kind === "agent") return `agent-${item.target.id}`
   return `idx-${idx}`
 }
 
@@ -339,6 +395,9 @@ function ItemRow({ item }: { item: PopoverItem }) {
         <span className="ml-auto truncate text-xs text-muted-foreground">{item.preview}</span>
       </>
     )
+  }
+  if (item.kind === "agent") {
+    return <AgentMentionRow target={item.target} />
   }
   return null
 }

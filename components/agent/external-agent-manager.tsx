@@ -57,6 +57,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/sonner"
 import { cn, isTauri } from "@/lib/utils"
@@ -103,6 +104,8 @@ const DEFAULT_ADD_AGENT_FORM_DATA: AddAgentFormData = {
   transport: "stdio",
   command: "",
   args: "",
+  bare: false,
+  debug: false,
   endpoint: "",
   timeoutMs: DEFAULT_TIMEOUT_MS,
   retryMaxRetries: DEFAULT_RETRY_MAX_RETRIES,
@@ -533,6 +536,40 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                     placeholder="@anthropics/claude-code --stdio"
                   />
                 </div>
+                <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="bare-flag" className="cursor-pointer text-sm">
+                        {tSettings("passBareFlag")}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {tSettings("passBareFlagHint")}
+                      </p>
+                    </div>
+                    <Switch
+                      id="bare-flag"
+                      checked={formData.bare}
+                      onCheckedChange={(v) => setFormData({ ...formData, bare: v })}
+                      aria-label={tSettings("passBareFlag")}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="debug-flag" className="cursor-pointer text-sm">
+                        {tSettings("passDebugFlag")}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {tSettings("passDebugFlagHint")}
+                      </p>
+                    </div>
+                    <Switch
+                      id="debug-flag"
+                      checked={formData.debug}
+                      onCheckedChange={(v) => setFormData({ ...formData, debug: v })}
+                      aria-label={tSettings("passDebugFlag")}
+                    />
+                  </div>
+                </div>
               </>
             ) : (
               <div className="grid gap-2">
@@ -736,6 +773,8 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
         config.process = {
           command: data.command,
           args: data.args.split(" ").filter(Boolean),
+          bare: data.bare || undefined,
+          debug: data.debug || undefined,
         }
       } else {
         config.network = {

@@ -85,6 +85,17 @@ function ModeIcon({ name, className }: { name: string; className?: string }) {
   return <IconComponent className={className} />
 }
 
+const CATEGORY_TRANSLATION_KEYS: Record<CustomModeCategory, string> = {
+  productivity: "categoryProductivity",
+  creative: "categoryCreative",
+  technical: "categoryTechnical",
+  research: "categoryResearch",
+  education: "categoryEducation",
+  business: "categoryBusiness",
+  personal: "categoryPersonal",
+  other: "categoryOther",
+}
+
 // =============================================================================
 // Main Component
 // =============================================================================
@@ -316,17 +327,14 @@ export function CustomModeSettings() {
             <div>
               <CardTitle className="flex items-center gap-2">
                 <Bot className="h-5 w-5" />
-                {tSettings("customModes") || "Custom Agent Modes"}
+                {tSettings("customModes")}
               </CardTitle>
-              <CardDescription>
-                {tSettings("customModesDesc") ||
-                  "Create and manage custom agent modes with specific tools, prompts, and behaviors"}
-              </CardDescription>
+              <CardDescription>{tSettings("customModesDesc")}</CardDescription>
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
                 <Upload className="h-4 w-4 mr-2" />
-                {tCommon("import") || "Import"}
+                {tCommon("import")}
               </Button>
               <Button
                 variant="outline"
@@ -335,7 +343,7 @@ export function CustomModeSettings() {
                 disabled={modesArray.length === 0}
               >
                 <Download className="h-4 w-4 mr-2" />
-                {tCommon("export") || "Export All"}
+                {tCommon("export")}
               </Button>
               <Button size="sm" onClick={handleCreateNew}>
                 <Plus className="h-4 w-4 mr-2" />
@@ -346,7 +354,7 @@ export function CustomModeSettings() {
         </CardHeader>
         <CardContent>
           {/* Filters */}
-          <div className="flex items-center gap-4 mb-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-4 mb-4">
             <div className="flex-1">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -362,9 +370,9 @@ export function CustomModeSettings() {
               value={filterCategory}
               onValueChange={(v) => setFilterCategory(v as FilterCategory)}
             >
-              <SelectTrigger className="w-[150px]">
+              <SelectTrigger className="w-full md:w-[150px]">
                 <Filter className="h-4 w-4 mr-2" />
-                <SelectValue placeholder="Category" />
+                <SelectValue placeholder={tCustomMode("categoryLabel")} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">{tCustomMode("allCategories")}</SelectItem>
@@ -379,8 +387,8 @@ export function CustomModeSettings() {
               </SelectContent>
             </Select>
             <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="Sort by" />
+              <SelectTrigger className="w-full md:w-[150px]">
+                <SelectValue placeholder={tCustomMode("sortByLabel")} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="name">{tCustomMode("sortByName")}</SelectItem>
@@ -393,8 +401,11 @@ export function CustomModeSettings() {
 
           {/* Bulk actions */}
           {selectedModes.size > 0 && (
-            <div className="flex items-center gap-2 mb-4 p-2 bg-muted rounded-md">
-              <span className="text-sm text-muted-foreground">
+            <div
+              className="flex flex-wrap items-center gap-2 mb-4 p-3 border bg-muted/50 rounded-md"
+              role="status"
+            >
+              <span className="text-sm text-muted-foreground" aria-live="polite">
                 {tCustomMode("selected", { count: selectedModes.size })}
               </span>
               <Button variant="ghost" size="sm" onClick={clearSelection}>
@@ -411,8 +422,22 @@ export function CustomModeSettings() {
             </div>
           )}
 
+          {/* Results count — visible only when filters narrow the list */}
+          {(searchQuery || filterCategory !== "all") && modesArray.length > 0 && (
+            <p
+              className="text-xs text-muted-foreground mb-2"
+              aria-live="polite"
+              data-testid="custom-mode-results-count"
+            >
+              {tCustomMode("resultsCount", {
+                shown: filteredModes.length,
+                total: modesArray.length,
+              })}
+            </p>
+          )}
+
           {/* Mode list */}
-          <ScrollArea className="h-[400px]">
+          <ScrollArea className="h-[min(60vh,calc(100dvh-280px))] min-h-[320px]">
             {filteredModes.length === 0 ? (
               <Empty className="h-[300px] border-0">
                 <EmptyHeader>
@@ -443,7 +468,7 @@ export function CustomModeSettings() {
                   <div
                     key={mode.id}
                     className={cn(
-                      "flex items-center gap-3 p-3 rounded-lg border transition-colors",
+                      "flex items-center gap-3 p-3 rounded-lg border transition-colors focus-within:ring-2 focus-within:ring-ring",
                       selectedModes.has(mode.id) ? "bg-accent border-accent" : "hover:bg-muted/50"
                     )}
                   >
@@ -464,7 +489,7 @@ export function CustomModeSettings() {
                         <span className="font-medium">{mode.name}</span>
                         {mode.category && (
                           <Badge variant="outline" className="text-xs">
-                            {mode.category}
+                            {t(CATEGORY_TRANSLATION_KEYS[mode.category as CustomModeCategory])}
                           </Badge>
                         )}
                       </div>
@@ -478,10 +503,27 @@ export function CustomModeSettings() {
                       </div>
                     </div>
 
+                    {/* Inline edit (md+ only — mobile uses dropdown) */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 hidden md:flex"
+                      onClick={() => handleEdit(mode)}
+                      aria-label={tCustomMode("editMode", { name: mode.name })}
+                      data-testid={`mode-edit-${mode.id}`}
+                    >
+                      <Edit className="h-4 w-4" />
+                    </Button>
+
                     {/* Actions */}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          aria-label={tCustomMode("moreActions", { name: mode.name })}
+                        >
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
@@ -496,7 +538,7 @@ export function CustomModeSettings() {
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleExportSingle(mode.id)}>
                           <Download className="h-4 w-4 mr-2" />
-                          {tCommon("export") || "Export"}
+                          {tCommon("export")}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
