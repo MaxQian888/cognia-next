@@ -52,8 +52,8 @@ describe("useCanvasLayoutStore", () => {
     })
 
     it("clamps each rail into its rail-specific range and renormalizes to sum 100", () => {
-      // cognia-next applies per-rail minimums (left: [12,32], right: [16,36],
-      // center derived as the remainder with a 38 floor) and then scales the
+      // cognia-next applies per-rail minimums (left: [12,32], right: [16,28],
+      // center derived as the remainder with a 46 floor) and then scales the
       // three sizes so they always sum to exactly 100. This is more
       // restrictive than a flat [0, 100] clamp.
       const { result } = renderHook(() => useCanvasLayoutStore())
@@ -61,8 +61,8 @@ describe("useCanvasLayoutStore", () => {
         result.current.setSizes([-5, 200, 50])
       })
       expect(result.current.leftSize).toBe(12) // clamped up to the left-rail floor
-      expect(result.current.rightSize).toBe(36) // clamped down to the right-rail ceiling
-      expect(result.current.centerSize).toBe(100 - 12 - 36)
+      expect(result.current.rightSize).toBe(28) // clamped down to the right-rail ceiling
+      expect(result.current.centerSize).toBe(100 - 12 - 28)
       expect(
         Math.round(result.current.leftSize + result.current.centerSize + result.current.rightSize)
       ).toBe(100)
@@ -172,6 +172,70 @@ describe("useCanvasLayoutStore", () => {
       expect(persisted?.state).not.toHaveProperty("mobileLeftOpen")
       expect(persisted?.state).not.toHaveProperty("mobileRightOpen")
       jest.useRealTimers()
+    })
+  })
+
+  describe("pinnedDocIds", () => {
+    it("starts empty by default", () => {
+      const { result } = renderHook(() => useCanvasLayoutStore())
+      expect(result.current.pinnedDocIds.size).toBe(0)
+    })
+
+    it("pinDocument adds an id to the set", () => {
+      const { result } = renderHook(() => useCanvasLayoutStore())
+      act(() => {
+        result.current.pinDocument("doc-1")
+      })
+      expect(result.current.pinnedDocIds.has("doc-1")).toBe(true)
+      expect(result.current.pinnedDocIds.size).toBe(1)
+    })
+
+    it("unpinDocument removes an id from the set", () => {
+      const { result } = renderHook(() => useCanvasLayoutStore())
+      act(() => {
+        result.current.pinDocument("doc-1")
+        result.current.pinDocument("doc-2")
+      })
+      act(() => {
+        result.current.unpinDocument("doc-1")
+      })
+      expect(result.current.pinnedDocIds.has("doc-1")).toBe(false)
+      expect(result.current.pinnedDocIds.has("doc-2")).toBe(true)
+      expect(result.current.pinnedDocIds.size).toBe(1)
+    })
+
+    it("isPinned returns correct boolean for each id", () => {
+      const { result } = renderHook(() => useCanvasLayoutStore())
+      act(() => {
+        result.current.pinDocument("doc-a")
+      })
+      expect(result.current.isPinned("doc-a")).toBe(true)
+      expect(result.current.isPinned("doc-b")).toBe(false)
+    })
+
+    it("serializes pinnedDocIds as an array in persistence", () => {
+      jest.useFakeTimers()
+      const { result } = renderHook(() => useCanvasLayoutStore())
+      act(() => {
+        result.current.pinDocument("doc-1")
+        result.current.pinDocument("doc-2")
+        result.current.setSizes([20, 55, 25])
+        jest.advanceTimersByTime(CANVAS_LAYOUT_PERSIST_DEBOUNCE_MS + 5)
+      })
+      const persisted = readPersisted()
+      expect(persisted?.state.pinnedDocIds).toEqual(["doc-1", "doc-2"])
+      jest.useRealTimers()
+    })
+
+    it("resetLayout clears pinnedDocIds", () => {
+      const { result } = renderHook(() => useCanvasLayoutStore())
+      act(() => {
+        result.current.pinDocument("doc-1")
+      })
+      act(() => {
+        result.current.resetLayout()
+      })
+      expect(result.current.pinnedDocIds.size).toBe(0)
     })
   })
 

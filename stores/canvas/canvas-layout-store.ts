@@ -21,6 +21,10 @@ export interface CanvasLayoutState {
   activeRightTab: CanvasRightTab
   mobileLeftOpen: boolean
   mobileRightOpen: boolean
+  /** Bumped on migrate / reset so ResizablePanelGroup remounts with new defaults. */
+  layoutVersion: number
+  /** Pinned document IDs — persisted as string[] and hydrated back to Set. */
+  pinnedDocIds: Set<string>
 
   setSizes: (sizes: number[]) => void
   toggleLeft: () => void
@@ -31,15 +35,20 @@ export interface CanvasLayoutState {
   setMobileLeftOpen: (open: boolean) => void
   setMobileRightOpen: (open: boolean) => void
   resetLayout: () => void
+  pinDocument: (id: string) => void
+  unpinDocument: (id: string) => void
+  isPinned: (id: string) => boolean
 }
 
 export const CANVAS_LAYOUT_DEFAULTS = {
-  leftSize: 18,
-  centerSize: 60,
-  rightSize: 22,
+  leftSize: 16,
+  centerSize: 64,
+  rightSize: 20,
   leftCollapsed: false,
   rightCollapsed: false,
   activeRightTab: "suggestions" as CanvasRightTab,
+  layoutVersion: 0,
+  pinnedDocIds: new Set<string>(),
 }
 
 export const CANVAS_LAYOUT_PERSIST_DEBOUNCE_MS = 150
@@ -73,8 +82,8 @@ export const useCanvasLayoutStore = create<CanvasLayoutState>()(
         // Clamp each rail to its allowed range, derive center from remainder,
         // then scale so all three always sum to exactly 100.
         const clampedLeft = clamp(Math.max(12, Math.min(32, left)))
-        const clampedRight = clamp(Math.max(16, Math.min(36, right)))
-        const clampedCenter = clamp(Math.max(38, 100 - clampedLeft - clampedRight))
+        const clampedRight = clamp(Math.max(16, Math.min(28, right)))
+        const clampedCenter = clamp(Math.max(46, 100 - clampedLeft - clampedRight))
         const total = clampedLeft + clampedCenter + clampedRight
         const scale = total > 0 ? 100 / total : 1
         set({
@@ -99,17 +108,30 @@ export const useCanvasLayoutStore = create<CanvasLayoutState>()(
       setMobileLeftOpen: (open) => set({ mobileLeftOpen: open }),
       setMobileRightOpen: (open) => set({ mobileRightOpen: open }),
       resetLayout: () =>
-        set({
+        set((state) => ({
           ...CANVAS_LAYOUT_DEFAULTS,
+          layoutVersion: state.layoutVersion + 1,
           mobileLeftOpen: false,
           mobileRightOpen: false,
+        })),
+      pinDocument: (id) =>
+        set((state) => ({
+          pinnedDocIds: new Set([...state.pinnedDocIds, id]),
+        })),
+      unpinDocument: (id) =>
+        set((state) => {
+          const next = new Set(state.pinnedDocIds)
+          next.delete(id)
+          return { pinnedDocIds: next }
         }),
+      isPinned: (id) => get().pinnedDocIds.has(id),
     }),
     {
       name: "cognia-canvas-layout",
-      version: 3,
+      version: 5,
       migrate: (_oldState: unknown, _oldVersion: number) => ({
         ...CANVAS_LAYOUT_DEFAULTS,
+        layoutVersion: 1,
         mobileLeftOpen: false,
         mobileRightOpen: false,
       }),
@@ -120,7 +142,17 @@ export const useCanvasLayoutStore = create<CanvasLayoutState>()(
         leftCollapsed: state.leftCollapsed,
         rightCollapsed: state.rightCollapsed,
         activeRightTab: state.activeRightTab,
+        layoutVersion: state.layoutVersion,
+        pinnedDocIds: [...state.pinnedDocIds],
       }),
+      merge: (persisted: unknown, current: CanvasLayoutState) => {
+        const p = persisted as Partial<CanvasLayoutState> & { pinnedDocIds?: string[] }
+        return {
+          ...current,
+          ...p,
+          pinnedDocIds: new Set(p.pinnedDocIds ?? []),
+        }
+      },
     }
   )
 )
