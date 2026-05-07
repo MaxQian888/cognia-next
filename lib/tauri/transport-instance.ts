@@ -9,11 +9,11 @@
  *
  * Selection happens once at module load:
  *   - Tauri desktop  → `TauriTransport`
- *   - Capacitor mobile → `CompanionTransportStub` (M2.7 swaps in the real impl)
+ *   - Capacitor mobile → `CompanionTransport` (real HTTP+WS impl, M2.7)
  *   - Plain web      → `WebStubTransport`
  */
 
-import { CompanionTransportStub } from "./transport-companion-stub"
+import { CompanionTransport } from "./transport-companion"
 import { TauriTransport } from "./transport-tauri"
 import type { Transport } from "./transport-types"
 import { WebStubTransport } from "./transport-web"
@@ -34,7 +34,7 @@ function isCapacitor(): boolean {
 
 function pickTransport(): Transport {
   if (isTauri()) return new TauriTransport()
-  if (isCapacitor()) return new CompanionTransportStub()
+  if (isCapacitor()) return new CompanionTransport()
   return new WebStubTransport()
 }
 
