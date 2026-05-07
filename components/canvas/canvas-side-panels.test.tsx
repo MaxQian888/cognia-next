@@ -29,6 +29,15 @@ jest.mock("./collaboration-panel", () => ({
 jest.mock("./code-execution-panel", () => ({
   CodeExecutionPanel: () => <div data-testid="host-execution" />,
 }))
+jest.mock("@/stores/canvas/comment-store", () => {
+  const store = {
+    getComments: () => [],
+  }
+  return {
+    useCommentStore: (selector?: (s: typeof store) => unknown) =>
+      selector ? selector(store) : store,
+  }
+})
 jest.mock("@/hooks/canvas", () => ({
   useCanvasCodeExecution: () => ({
     execute: jest.fn(),
