@@ -17,7 +17,7 @@ use axum::{
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
+    Extension, Json,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -25,6 +25,7 @@ use uuid::Uuid;
 
 use super::{
     jwt::{issue_device_jwt, issue_pair_jwt, verify, JwtError},
+    middleware::DeviceContext,
     SharedState,
 };
 
@@ -196,6 +197,22 @@ pub async fn pair_handler(
         .into_response()
 }
 
+/// `GET /api/v1/whoami`
+///
+/// Protected endpoint (behind [`super::middleware::require_device_jwt`]).
+/// Returns the device ID and server version so the mobile app can verify
+/// that its JWT is still valid after pairing.
+pub async fn whoami_handler(Extension(ctx): Extension<DeviceContext>) -> Response {
+    (
+        StatusCode::OK,
+        Json(json!({
+            "device_id": ctx.device_id,
+            "server_version": env!("CARGO_PKG_VERSION"),
+        })),
+    )
+        .into_response()
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -233,9 +250,11 @@ mod tests {
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
 
     fn test_state() -> SharedState {
+        use crate::companion_api::deny_list::DenyList;
         Arc::new(crate::companion_api::CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
+            deny_list: Arc::new(DenyList::new()),
             app_handle: None,
         })
     }

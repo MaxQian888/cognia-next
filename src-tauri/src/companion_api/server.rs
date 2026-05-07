@@ -24,11 +24,11 @@
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-use axum::{routing::post, Router};
+use axum::{middleware::from_fn_with_state, routing::{get, post}, Router};
 use tokio::sync::watch;
 use tower_http::limit::RequestBodyLimitLayer;
 
-use super::{auth, SharedState};
+use super::{auth, middleware, SharedState};
 
 /// 64 KiB — pair request bodies are tiny; the generous limit leaves room for
 /// future endpoints (e.g., push-token registration in M4.6).
@@ -137,16 +137,37 @@ pub async fn spawn_server(
 /// Build the axum `Router` for the companion API.
 ///
 /// Extracted so tests can call it without binding a TCP port (via
-/// `Router::oneshot`).  M2.4 will layer the JWT verifier middleware here;
-/// M2.5 will add `route("/api/v1/_rpc/:name", post(rpc_handler))`; M2.6 will
-/// add the WS upgrade route.
+/// `Router::oneshot`).  M2.5 will add `/api/v1/_rpc/:name`; M2.6 will add
+/// the WS upgrade route.
+///
+/// # Route structure
+///
+/// ```text
+/// public_routes   — no middleware (pre-auth)
+///   POST /api/v1/auth/pair/issue
+///   POST /api/v1/auth/pair
+///
+/// protected_routes — require_device_jwt middleware applied
+///   GET  /api/v1/whoami   — identity check for the mobile app post-pair
+/// ```
 pub fn build_router(state: SharedState) -> Router {
-    Router::new()
-        // Loopback-only endpoints — the listener is bound to 127.0.0.1 when
-        // `bind_loopback_only = true`, so no additional IP check is needed here.
+    // Pre-auth routes — no JWT middleware.
+    let public_routes = Router::new()
         .route("/api/v1/auth/pair/issue", post(auth::issue_handler))
-        // LAN-accessible endpoints.
-        .route("/api/v1/auth/pair", post(auth::pair_handler))
+        .route("/api/v1/auth/pair", post(auth::pair_handler));
+
+    // Authenticated routes — JWT verifier middleware applied.
+    // M2.5/M2.6 will add more routes inside this block.
+    let protected_routes = Router::new()
+        .route("/api/v1/whoami", get(auth::whoami_handler))
+        .layer(from_fn_with_state(
+            state.clone(),
+            middleware::require_device_jwt,
+        ));
+
+    Router::new()
+        .merge(public_routes)
+        .merge(protected_routes)
         // Body-size limit applied to all routes.  JWT payloads are tiny; the
         // generous limit leaves room for future multipart (M4.6 push-token).
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
@@ -167,9 +188,11 @@ mod tests {
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
 
     fn test_state() -> SharedState {
+        use crate::companion_api::deny_list::DenyList;
         Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
+            deny_list: Arc::new(DenyList::new()),
             app_handle: None,
         })
     }

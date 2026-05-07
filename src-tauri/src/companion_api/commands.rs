@@ -1,7 +1,8 @@
 //! Tauri commands for the companion API server lifecycle.
 //!
-//! `companion_server_start` is the only command in M2.3.  M2.4–M2.8 will add
-//! commands for server status, stop, LAN-bind toggle, mDNS, and token rotation.
+//! Commands shipped in M2.3: `companion_server_start`.
+//! Commands added in M2.4: `companion_seed_deny_list`, `companion_revoke_device`,
+//! `companion_unrevoke_device`.
 
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -52,13 +53,71 @@ pub async fn companion_server_start(
         source: std::io::Error::other(e),
     })?;
 
+    // Clone the deny_list Arc so both the Tauri command layer and the axum
+    // server share the same live deny list.
     let shared: SharedState = Arc::new(CompanionState {
         secret: RwLock::new(signing_secret),
         redemption_lru: super::redemption_lru::RedemptionLru::new(),
+        deny_list: Arc::clone(&state.deny_list),
         app_handle: Some(app_handle),
     });
 
     state.start(port, bind_loopback_only, shared).await
+}
+
+// ---------------------------------------------------------------------------
+// Deny-list management commands (M2.4)
+// ---------------------------------------------------------------------------
+
+/// Bulk-load revoked device IDs into the in-memory deny list.
+///
+/// Called once at server startup so the Rust layer reflects the persisted
+/// Dexie `pairedDevices` rows without reading the database itself.
+/// Idempotent — existing entries are preserved (union semantics).
+#[tauri::command]
+pub async fn companion_seed_deny_list(
+    device_ids: Vec<String>,
+    state: State<'_, CompanionServerState>,
+) -> Result<(), String> {
+    // The deny list lives on the SharedState inside the server, but the
+    // CompanionServerState wraps the server lifecycle, not the SharedState
+    // directly.  The deny list is therefore also mirrored on CompanionServerState
+    // itself so commands can mutate it regardless of whether the server is
+    // currently running.
+    //
+    // For M2.4 the canonical approach is: the TS layer calls
+    // `companion_server_start` first (which builds a fresh SharedState with an
+    // empty deny list), then calls `companion_seed_deny_list`.  The seed
+    // reaches the server-side deny list through the `CompanionServerState`
+    // accessor below.
+    state.seed_deny_list(device_ids);
+    Ok(())
+}
+
+/// Revoke a paired device so its JWT is rejected on the next request.
+///
+/// The TS layer calls this when the user unpairs a device from the Settings
+/// UI.  The revocation takes effect immediately for all in-flight requests
+/// after this command returns.
+#[tauri::command]
+pub async fn companion_revoke_device(
+    device_id: String,
+    state: State<'_, CompanionServerState>,
+) -> Result<(), String> {
+    state.revoke_device(device_id);
+    Ok(())
+}
+
+/// Un-revoke a device (e.g. after a re-pair).
+///
+/// Returns silently whether or not the device was previously revoked.
+#[tauri::command]
+pub async fn companion_unrevoke_device(
+    device_id: String,
+    state: State<'_, CompanionServerState>,
+) -> Result<(), String> {
+    state.unrevoke_device(&device_id);
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

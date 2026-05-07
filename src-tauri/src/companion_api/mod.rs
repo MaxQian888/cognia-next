@@ -29,16 +29,25 @@
 //! `addPairedDevice` from `lib/db/paired-devices.ts`.
 
 pub mod auth;
+pub mod deny_list;
 pub mod jwt;
+pub mod middleware;
 pub mod redemption_lru;
 pub mod secret;
 pub mod server;
 
 pub mod commands;
 
+/// Re-export so handlers can read the device identity without reaching into
+/// the middleware module by full path.  Not yet consumed by any handler in
+/// M2.4 — M2.5+ routes will use it.
+#[allow(unused_imports)]
+pub use middleware::DeviceContext;
+
 use parking_lot::RwLock;
 use std::sync::Arc;
 
+use deny_list::DenyList;
 use redemption_lru::RedemptionLru;
 
 // ---------------------------------------------------------------------------
@@ -57,6 +66,10 @@ pub struct CompanionState {
     pub secret: RwLock<Vec<u8>>,
     /// Single-use redemption tracker for pair JWTs.
     pub redemption_lru: RedemptionLru,
+    /// In-memory set of revoked device IDs.  Shared with [`CompanionServerState`]
+    /// via `Arc` so Tauri commands (`companion_revoke_device`, etc.) can mutate
+    /// it even when the axum server holds a clone of the same `SharedState`.
+    pub deny_list: Arc<DenyList>,
     /// Tauri `AppHandle` — `None` in unit tests, `Some` in production.
     pub app_handle: Option<tauri::AppHandle>,
 }
@@ -73,6 +86,11 @@ use server::ServerHandle;
 /// Mirrors the pattern in `mcp_server/mod.rs::McpServerState`.
 pub struct CompanionServerState {
     inner: Mutex<CompanionServerInner>,
+    /// The deny list is kept here (behind `Arc`) so Tauri commands can reach it
+    /// regardless of whether the HTTP server is currently running.  When the
+    /// server is started, the same `Arc<DenyList>` is cloned into the
+    /// `SharedState`, giving both sides a live view of the same data.
+    pub deny_list: Arc<DenyList>,
 }
 
 struct CompanionServerInner {
@@ -87,6 +105,7 @@ impl CompanionServerState {
                 handle: None,
                 bound_port: None,
             }),
+            deny_list: Arc::new(DenyList::new()),
         }
     }
 
@@ -135,6 +154,20 @@ impl CompanionServerState {
         }
         inner.bound_port = None;
     }
+
+    // ── Deny-list pass-throughs (used by Tauri commands) ───────────────────
+
+    pub fn seed_deny_list(&self, device_ids: Vec<String>) {
+        self.deny_list.seed(device_ids);
+    }
+
+    pub fn revoke_device(&self, device_id: String) {
+        self.deny_list.revoke(device_id);
+    }
+
+    pub fn unrevoke_device(&self, device_id: &str) {
+        self.deny_list.unrevoke(device_id);
+    }
 }
 
 impl Default for CompanionServerState {
@@ -155,6 +188,7 @@ mod tests {
         Arc::new(CompanionState {
             secret: RwLock::new(vec![0u8; 32]),
             redemption_lru: RedemptionLru::new(),
+            deny_list: Arc::new(DenyList::new()),
             app_handle: None,
         })
     }
