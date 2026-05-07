@@ -250,13 +250,16 @@ mod tests {
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
 
     fn test_state() -> SharedState {
-        use crate::companion_api::{deny_list::DenyList, idempotency::IdempotencyCache};
+        use crate::companion_api::{
+            deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache,
+        };
         Arc::new(crate::companion_api::CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
+            event_bus: EventBus::new(),
         })
     }
 

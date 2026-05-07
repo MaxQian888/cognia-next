@@ -9,7 +9,10 @@ use std::sync::Arc;
 use tauri::State;
 
 use super::{
-    secret, server::CompanionServerError, CompanionServerState, CompanionState, SharedState,
+    event_bus::{register_tauri_event, EventBus},
+    secret,
+    server::CompanionServerError,
+    CompanionServerState, CompanionState, SharedState,
 };
 
 // ---------------------------------------------------------------------------
@@ -53,6 +56,11 @@ pub async fn companion_server_start(
         source: std::io::Error::other(e),
     })?;
 
+    // Build the event bus and register default Tauri event channels before
+    // starting the server so no events are missed.
+    let event_bus = EventBus::new();
+    register_default_event_channels(&app_handle, Arc::clone(&event_bus));
+
     // Clone the deny_list Arc so both the Tauri command layer and the axum
     // server share the same live deny list.
     let shared: SharedState = Arc::new(CompanionState {
@@ -61,6 +69,7 @@ pub async fn companion_server_start(
         deny_list: Arc::clone(&state.deny_list),
         app_handle: Some(app_handle),
         idempotency: Arc::new(super::idempotency::IdempotencyCache::new()),
+        event_bus,
     });
 
     state.start(port, bind_loopback_only, shared).await
@@ -119,6 +128,25 @@ pub async fn companion_unrevoke_device(
 ) -> Result<(), String> {
     state.unrevoke_device(&device_id);
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Event-channel registration (M2.6)
+// ---------------------------------------------------------------------------
+
+/// Register the default set of Tauri event channels that the companion API
+/// should forward to connected WebSocket clients.
+///
+/// Called once from [`companion_server_start`] before the axum server is
+/// spawned.  Adding a channel here is the canonical way to expose a new
+/// Tauri event to mobile clients.
+pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus>) {
+    // Primary chat-streaming channel — the most latency-sensitive event.
+    register_tauri_event(app, Arc::clone(&bus), "claude://message");
+    // Pairing-lifecycle events — useful for multi-device observation.
+    register_tauri_event(app, Arc::clone(&bus), "companion://device-paired");
+    // Heartbeat / presence signal emitted by the JWT middleware on each request.
+    register_tauri_event(app, bus, "companion://device-seen");
 }
 
 // ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@
 
 pub mod auth;
 pub mod deny_list;
+pub mod event_bus;
 pub mod idempotency;
 pub mod jwt;
 pub mod middleware;
@@ -37,6 +38,7 @@ pub mod redemption_lru;
 pub mod rpc;
 pub mod secret;
 pub mod server;
+pub mod ws;
 
 pub mod commands;
 
@@ -50,6 +52,7 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 
 use deny_list::DenyList;
+use event_bus::EventBus;
 use idempotency::IdempotencyCache;
 use redemption_lru::RedemptionLru;
 
@@ -80,6 +83,9 @@ pub struct CompanionState {
     /// Keyed by `(device_id, Idempotency-Key header)`.  Successful responses
     /// are stored for 60 s; read-only commands skip caching entirely.
     pub idempotency: Arc<IdempotencyCache>,
+    /// Event bus — broadcasts Tauri events to all connected WS clients and
+    /// maintains a replay buffer for reconnecting clients (M2.6).
+    pub event_bus: Arc<EventBus>,
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +205,7 @@ mod tests {
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
+            event_bus: EventBus::new(),
         })
     }
 

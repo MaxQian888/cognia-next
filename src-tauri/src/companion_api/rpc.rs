@@ -489,12 +489,14 @@ mod tests {
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
 
     fn test_state() -> super::super::SharedState {
+        use crate::companion_api::event_bus::EventBus;
         Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
+            event_bus: EventBus::new(),
         })
     }
 
@@ -630,6 +632,7 @@ mod tests {
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: cache,
+            event_bus: crate::companion_api::event_bus::EventBus::new(),
         });
 
         let router = build_router(state);
@@ -666,6 +669,7 @@ mod tests {
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: cache,
+            event_bus: crate::companion_api::event_bus::EventBus::new(),
         });
         let jwt = device_jwt("dev2");
 
@@ -696,6 +700,7 @@ mod tests {
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::clone(&cache),
+            event_bus: crate::companion_api::event_bus::EventBus::new(),
         });
 
         let router = build_router(state);
@@ -734,6 +739,7 @@ mod tests {
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: cache,
+            event_bus: crate::companion_api::event_bus::EventBus::new(),
         });
 
         let router = build_router(state);

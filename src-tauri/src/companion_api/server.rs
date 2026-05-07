@@ -24,8 +24,8 @@
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-use axum::{middleware::from_fn_with_state, routing::{get, post}, Router};
-use super::rpc;
+use axum::{middleware::from_fn_with_state, routing::{any, get, post}, Router};
+use super::{rpc, ws};
 use tokio::sync::watch;
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -158,10 +158,15 @@ pub fn build_router(state: SharedState) -> Router {
         .route("/api/v1/auth/pair", post(auth::pair_handler));
 
     // Authenticated routes — JWT verifier middleware applied.
-    // M2.6 will add the WS event channel route inside this block.
+    //
+    // The WS upgrade route uses `any()` rather than `get()` so it handles both
+    // HTTP/1.1 GET upgrades and HTTP/2 CONNECT upgrades transparently.
+    // It is intentionally outside the `RequestBodyLimitLayer` applied below
+    // because that layer can interfere with the WS upgrade handshake.
     let protected_routes = Router::new()
         .route("/api/v1/whoami", get(auth::whoami_handler))
         .route("/api/v1/_rpc/:name", post(rpc::rpc_handler))
+        .route("/ws/v1/events", any(ws::ws_handler))
         .layer(from_fn_with_state(
             state.clone(),
             middleware::require_device_jwt,
@@ -190,13 +195,16 @@ mod tests {
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
 
     fn test_state() -> SharedState {
-        use crate::companion_api::{deny_list::DenyList, idempotency::IdempotencyCache};
+        use crate::companion_api::{
+            deny_list::DenyList, event_bus::EventBus, idempotency::IdempotencyCache,
+        };
         Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
+            event_bus: EventBus::new(),
         })
     }
 
