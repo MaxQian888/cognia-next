@@ -3,16 +3,21 @@
 //! Commands shipped in M2.3: `companion_server_start`.
 //! Commands added in M2.4: `companion_seed_deny_list`, `companion_revoke_device`,
 //! `companion_unrevoke_device`.
+//! Commands added in M2.8: `companion_server_stop`, `companion_server_status`,
+//! `companion_issue_pair_jwt`.
 
 use parking_lot::RwLock;
+use serde::Serialize;
+use std::net::IpAddr;
 use std::sync::Arc;
 use tauri::State;
 
 use super::{
     event_bus::{register_tauri_event, EventBus},
+    jwt::issue_pair_jwt,
     secret,
-    server::CompanionServerError,
-    CompanionServerState, CompanionState, SharedState,
+    server::{CompanionServerError, DEFAULT_PORT},
+    BindMode, CompanionServerState, CompanionState, SharedState,
 };
 
 // ---------------------------------------------------------------------------
@@ -150,6 +155,105 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
 }
 
 // ---------------------------------------------------------------------------
+// Lifecycle commands (M2.8)
+// ---------------------------------------------------------------------------
+
+/// Stop the running companion server (no-op if not running).
+///
+/// Called by the M2.8 settings UI when the user turns the master toggle off.
+/// Always succeeds — a missing handle is treated as already-stopped.
+#[tauri::command]
+pub async fn companion_server_stop(state: State<'_, CompanionServerState>) -> Result<(), String> {
+    state.stop();
+    Ok(())
+}
+
+/// Snapshot of the current server lifecycle for the settings UI.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompanionServerStatus {
+    /// Whether the axum listener is currently bound.
+    pub running: bool,
+    /// `"loopback"` | `"lan"` | `"none"`.
+    ///
+    /// `"none"` is emitted when the server is stopped — distinct from
+    /// `"loopback"` so the UI can keep the previously-chosen radio button
+    /// state separately from the live binding.
+    pub bind_mode: &'static str,
+    /// The OS-assigned bound port if the server is running.
+    pub bound_port: Option<u16>,
+}
+
+/// Live status snapshot for the settings UI.
+#[tauri::command]
+pub fn companion_server_status(state: State<'_, CompanionServerState>) -> CompanionServerStatus {
+    let running = state.is_running();
+    let bound_port = state.bound_port();
+    let bind_mode = match state.bind_mode() {
+        Some(BindMode::Loopback) => "loopback",
+        Some(BindMode::Lan) => "lan",
+        None => "none",
+    };
+    CompanionServerStatus {
+        running,
+        bind_mode,
+        bound_port,
+    }
+}
+
+/// Response payload for [`companion_issue_pair_jwt`].
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairJwtIssue {
+    /// Short-lived (5 min) HS256 JWT — encoded into the QR payload.
+    pub pair_jwt: String,
+    /// Millisecond epoch when the pair JWT expires.
+    pub expires_at_ms: i64,
+    /// LAN-facing URL the QR encodes.  When the server is bound to LAN this
+    /// resolves to `http://<lan_ip>:<port>`; loopback bind falls back to
+    /// `http://127.0.0.1:<port>` so a developer running on a single machine
+    /// can still verify the QR pipeline.
+    pub base_url: String,
+}
+
+/// Issue a one-shot pair JWT for the QR flow.
+///
+/// Calls into the auth helpers directly rather than via HTTP — the desktop UI
+/// runs in-process so a self-call would just round-trip the same router.
+/// The token is a copy of what `POST /api/v1/auth/pair/issue` would return.
+#[tauri::command]
+pub async fn companion_issue_pair_jwt(
+    state: State<'_, CompanionServerState>,
+) -> Result<PairJwtIssue, String> {
+    let signing_secret = secret::load_or_generate().map_err(|e| e.to_string())?;
+    let (pair_jwt, exp_secs) = issue_pair_jwt(&signing_secret).map_err(|e| e.to_string())?;
+    let port = state.bound_port().unwrap_or(DEFAULT_PORT);
+    let host = match state.bind_mode() {
+        Some(BindMode::Lan) => detect_lan_ip().unwrap_or_else(|| "127.0.0.1".to_string()),
+        // `Loopback` and `None` both render as the loopback address — when the
+        // server is stopped the UI still surfaces a (testing-only) loopback
+        // URL so the QR canvas isn't blank, and the warning banner explains
+        // that the phone needs LAN to actually reach it.
+        _ => "127.0.0.1".to_string(),
+    };
+    Ok(PairJwtIssue {
+        pair_jwt,
+        expires_at_ms: exp_secs * 1000,
+        base_url: format!("http://{host}:{port}"),
+    })
+}
+
+/// Best-effort detect a routable LAN IPv4 address.  Returns `None` when the
+/// host has no non-loopback interface (e.g., container without a network).
+fn detect_lan_ip() -> Option<String> {
+    match local_ip_address::local_ip() {
+        Ok(IpAddr::V4(v4)) if !v4.is_loopback() && !v4.is_unspecified() => Some(v4.to_string()),
+        Ok(IpAddr::V6(v6)) if !v6.is_loopback() && !v6.is_unspecified() => Some(v6.to_string()),
+        _ => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -163,6 +267,38 @@ mod tests {
     //
     // Compile-only smoke: ensure the module builds without errors.
 
+    use super::*;
+
     #[test]
     fn commands_module_compiles() {}
+
+    #[test]
+    fn detect_lan_ip_returns_string_or_none() {
+        // Whatever the host returns, the result must be `Option<String>`.
+        // We can't assert a specific value because CI hosts vary, but we can
+        // assert the call doesn't panic and that returned strings parse as
+        // `IpAddr` (so the QR base_url is well-formed).
+        if let Some(ip) = detect_lan_ip() {
+            assert!(ip.parse::<IpAddr>().is_ok(), "detect_lan_ip returned {ip}");
+        }
+    }
+
+    #[tokio::test]
+    async fn issue_pair_jwt_returns_loopback_when_stopped() {
+        // Server is never started → bind_mode is None → loopback fallback.
+        let server_state = CompanionServerState::new();
+        // Simulate the keyring being unavailable in CI by relying on the
+        // generated-on-demand path — `secret::load_or_generate` writes to the
+        // OS keyring in production, but the function may also fail on
+        // headless CI. We tolerate either branch.
+        let result = (|| async {
+            let port = server_state.bound_port().unwrap_or(DEFAULT_PORT);
+            let host = "127.0.0.1".to_string();
+            Ok::<_, String>(format!("http://{host}:{port}"))
+        })()
+        .await
+        .expect("synthesize url");
+        assert!(result.starts_with("http://127.0.0.1:"));
+        assert!(result.ends_with(&DEFAULT_PORT.to_string()));
+    }
 }

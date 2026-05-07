@@ -110,6 +110,19 @@ pub struct CompanionServerState {
 struct CompanionServerInner {
     handle: Option<ServerHandle>,
     bound_port: Option<u16>,
+    /// Mirror of the `bind_loopback_only` flag passed to the most recent
+    /// `start` so the settings UI can read back the bind mode without a
+    /// separate state lookup. `None` means the server is stopped.
+    bind_mode: Option<BindMode>,
+}
+
+/// Bind selection persisted alongside the listener handle so the M2.8
+/// settings UI can render the current mode without re-reading prefs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BindMode {
+    Loopback,
+    Lan,
 }
 
 impl CompanionServerState {
@@ -118,6 +131,7 @@ impl CompanionServerState {
             inner: Mutex::new(CompanionServerInner {
                 handle: None,
                 bound_port: None,
+                bind_mode: None,
             }),
             deny_list: Arc::new(DenyList::new()),
         }
@@ -151,22 +165,37 @@ impl CompanionServerState {
         }
         let handle = server::spawn_server(port, bind_loopback_only, state).await?;
         let bound_port = handle.bound_port;
+        let mode = if bind_loopback_only {
+            BindMode::Loopback
+        } else {
+            BindMode::Lan
+        };
         {
             let mut inner = self.inner.lock();
             inner.handle = Some(handle);
             inner.bound_port = Some(bound_port);
+            inner.bind_mode = Some(mode);
         }
         Ok(bound_port)
     }
 
     /// Stop the server gracefully.  Called by M2.8 settings UI.
-    #[allow(dead_code)]
     pub fn stop(&self) {
         let mut inner = self.inner.lock();
         if let Some(handle) = inner.handle.take() {
             let _ = handle.shutdown.send(());
         }
         inner.bound_port = None;
+        inner.bind_mode = None;
+    }
+
+    /// Whether the most recent `start` was loopback-only.  `None` if the
+    /// server is currently stopped.
+    ///
+    /// Mirror tracked alongside the listener so the M2.8 settings UI can
+    /// render the bind mode without re-reading from a pref file.
+    pub fn bind_mode(&self) -> Option<BindMode> {
+        self.inner.lock().bind_mode
     }
 
     // ── Deny-list pass-throughs (used by Tauri commands) ───────────────────
@@ -228,10 +257,24 @@ mod tests {
         assert!(port > 0);
         assert!(server_state.is_running());
         assert_eq!(server_state.bound_port(), Some(port));
+        assert_eq!(server_state.bind_mode(), Some(BindMode::Loopback));
 
         server_state.stop();
         assert!(!server_state.is_running());
         assert!(server_state.bound_port().is_none());
+        assert!(server_state.bind_mode().is_none());
+    }
+
+    #[tokio::test]
+    async fn lan_bind_records_lan_mode() {
+        let server_state = CompanionServerState::new();
+        let shared = test_shared_state();
+
+        let _ = server_state.start(0, false, shared).await.expect("start");
+        assert_eq!(server_state.bind_mode(), Some(BindMode::Lan));
+
+        server_state.stop();
+        assert!(server_state.bind_mode().is_none());
     }
 
     #[tokio::test]

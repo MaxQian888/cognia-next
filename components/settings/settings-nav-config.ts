@@ -36,6 +36,7 @@ import {
   TerminalSquareIcon,
   LinkIcon,
   WorkflowIcon,
+  SmartphoneIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
@@ -72,6 +73,7 @@ export type SettingsSectionId =
   | "scheduled-tasks"
   | "remote-control"
   | "external-bridge"
+  | "companion"
   | "network"
   | "logs"
   | "diagnostics"
@@ -338,6 +340,14 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "externalBridge",
     group: "system",
     icon: WebhookIcon,
+  },
+  {
+    id: "companion",
+    labelKey: "companion",
+    descriptionKey: "companion",
+    group: "system",
+    icon: SmartphoneIcon,
+    desktopOnly: true,
   },
   {
     id: "network",
@@ -788,6 +798,21 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "外部桥接",
     "插件桥",
     "知识对外",
+  ],
+  companion: [
+    "mobile",
+    "phone",
+    "qr",
+    "pair",
+    "ios",
+    "android",
+    "companion",
+    "device",
+    "lan",
+    "手机",
+    "配对",
+    "扫码",
+    "移动端",
   ],
   network: [
     "network",

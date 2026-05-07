@@ -37,7 +37,6 @@ const BODY_LIMIT_BYTES: usize = 64 * 1024;
 
 /// Default companion API port.  Configurable via `companion_server_start`.
 /// Used by M2.8 settings UI.
-#[allow(dead_code)]
 pub const DEFAULT_PORT: u16 = 7890;
 
 // ---------------------------------------------------------------------------
