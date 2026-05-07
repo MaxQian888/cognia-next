@@ -1,13 +1,20 @@
-import { invoke } from "@tauri-apps/api/core"
-import { greet, isTauri } from "./tauri"
+import { greet, isTauri, transport } from "./tauri"
 
-jest.mock("@tauri-apps/api/core")
+const TAURI_KEY = "__TAURI_INTERNALS__"
 
-const mockedInvoke = invoke as jest.MockedFunction<typeof invoke>
+function setTauri(on: boolean) {
+  if (on) (window as unknown as Record<string, unknown>)[TAURI_KEY] = {}
+  else delete (window as unknown as Record<string, unknown>)[TAURI_KEY]
+}
 
 describe("lib/tauri", () => {
   beforeEach(() => {
-    mockedInvoke.mockReset()
+    setTauri(false)
+  })
+
+  afterEach(() => {
+    setTauri(false)
+    jest.restoreAllMocks()
   })
 
   describe("isTauri", () => {
@@ -16,22 +23,21 @@ describe("lib/tauri", () => {
     })
 
     it("returns true when __TAURI_INTERNALS__ is on window", () => {
-      ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
+      setTauri(true)
       expect(isTauri()).toBe(true)
-      delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
     })
   })
 
   describe("greet", () => {
-    it("invokes the greet command with the name argument", async () => {
-      mockedInvoke.mockResolvedValue("Hello, X!")
+    it("delegates to transport.call('greet', {name}) and returns its result", async () => {
+      const callSpy = jest.spyOn(transport, "call").mockResolvedValueOnce("Hello, X!")
       const result = await greet("X")
-      expect(mockedInvoke).toHaveBeenCalledWith("greet", { name: "X" })
+      expect(callSpy).toHaveBeenCalledWith("greet", { name: "X" })
       expect(result).toBe("Hello, X!")
     })
 
-    it("propagates rejection from invoke", async () => {
-      mockedInvoke.mockRejectedValue(new Error("boom"))
+    it("propagates rejection from transport.call", async () => {
+      jest.spyOn(transport, "call").mockRejectedValueOnce(new Error("boom"))
       await expect(greet("X")).rejects.toThrow("boom")
     })
   })
