@@ -6,6 +6,7 @@ import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 // Importing built-ins triggers their side-effecting registrations.
 import "./built-ins"
 import { getExecutor } from "./registry"
+import type { Skill } from "@/lib/claude/types"
 import type {
   StepExecutionContext,
   StepExecutionResult,
@@ -796,7 +797,7 @@ describe("action.skill.invoke", () => {
         isBuiltIn: false,
         createdAt: 0,
         updatedAt: 0,
-      } as unknown as Parameters<(typeof getDb)["prototype"]["skills"]["bulkPut"]>[0][number],
+      } as unknown as Skill,
       {
         id: "skill_b",
         name: "Beta",
@@ -805,7 +806,7 @@ describe("action.skill.invoke", () => {
         isBuiltIn: false,
         createdAt: 0,
         updatedAt: 0,
-      } as unknown as Parameters<(typeof getDb)["prototype"]["skills"]["bulkPut"]>[0][number],
+      } as unknown as Skill,
     ])
     const r = await exec(
       "action.skill.invoke",

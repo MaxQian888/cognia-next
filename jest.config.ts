@@ -303,11 +303,13 @@ const config: Config = {
     "/src-tauri/",
     "/sidecar/",
     "/tests/e2e/", // Playwright E2E tests — run via `pnpx playwright test`, not Jest
-    // NOTE: the master jest.config.ts also ignores `/.claude/worktrees/` so
-    // tests in worktrees aren't double-run from the main tree. That guard is
-    // intentionally removed *here* — when running inside this worktree, our
-    // own absolute path contains `/.claude/worktrees/` and the ignore would
-    // otherwise mask 100% of our tests. Each worktree owns this exemption.
+    // Worktree leftovers — `.claude/worktrees/`, `.claire/worktrees/`, and
+    // `.clone/worktrees/` carry placeholder copies of test files that would
+    // otherwise re-run (and fail) from the main tree. Each worktree's local
+    // jest.config.ts removes this ignore so tests run inside the worktree.
+    "/\\.claude/worktrees/",
+    "/\\.claire/worktrees/",
+    "/\\.clone/worktrees/",
   ],
 
   // The regexp pattern or array of patterns that Jest uses to detect test files

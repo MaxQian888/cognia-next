@@ -132,6 +132,7 @@ export const ProviderSidebarItem = React.memo(function ProviderSidebarItem({
       </div>
       <Badge
         variant="outline"
+        data-status={status}
         className={cn("shrink-0 gap-1 text-[10px] px-1.5 py-0", statusCfg.className)}
       >
         <StatusIcon className="h-3 w-3" />

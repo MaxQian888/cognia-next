@@ -682,10 +682,10 @@ registerNodeExecutor({
       adapterId,
       conversationKey,
       request: {
-        conversationRef: { adapterId, conversationKey } as Parameters<
+        conversationRef: { adapterId, conversationKey } as unknown as Parameters<
           typeof enqueueOutbound
         >[0]["request"]["conversationRef"],
-        segments: [{ kind: "text", text: content }],
+        segments: [{ type: "text", text: content }],
         replyTo: params.replyToMessageId ? { messageId: params.replyToMessageId } : undefined,
         metadata: { idempotencyKey },
       },
@@ -726,7 +726,7 @@ registerNodeExecutor({
     const draft = await createDraft({
       conversationKey,
       sessionId,
-      segments: [{ kind: "text", text: content }],
+      segments: [{ type: "text", text: content }],
       sourceMessageId: params.sourceMessageId,
       expiresAt,
     })

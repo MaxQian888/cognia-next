@@ -21,13 +21,21 @@ const mockSetDefaultProvider = jest.fn()
 let mockHookState: ReturnType<typeof makeHookState>
 
 function makeHookState(overrides?: {
-  filteredProviders?: Array<[string, { name: string; defaultModel: string }]>
+  filteredProviders?: Array<
+    [string, { name: string; defaultModel: string; models?: Array<Record<string, unknown>> }]
+  >
   visibleCustomProviderIds?: string[]
   customProviders?: Record<string, Record<string, unknown>>
   selectedProviderId?: string | null
 }) {
+  const filtered = (overrides?.filteredProviders ?? []).map(([id, cfg]) => [
+    id,
+    { models: [], ...cfg },
+  ])
   return {
-    filteredProviders: overrides?.filteredProviders ?? [],
+    filteredProviders: filtered as unknown as ReturnType<
+      typeof import("@/hooks/settings/use-provider-settings").useProviderSettings
+    >["filteredProviders"],
     providerSettings: {} as Record<string, Record<string, unknown>>,
     testResults: {} as Record<string, { success: boolean; latency_ms?: number; message?: string }>,
     testingProviders: {} as Record<string, boolean>,

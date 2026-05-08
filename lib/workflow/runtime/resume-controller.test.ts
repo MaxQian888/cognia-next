@@ -4,6 +4,7 @@
 import "fake-indexeddb/auto"
 import { resumeInFlightRuns } from "./resume-controller"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import type { VisualWorkflow } from "@/types/workflow/visual"
 
 // Mock the Tauri bridge so tests don't depend on a Tauri window. Each test
 // overrides `reloadInFlightRuns` with a fixture set of rows.
@@ -44,13 +45,13 @@ describe("resumeInFlightRuns", () => {
         runId: "run_a",
         workflowId: "wf_x",
         startedAt: 0,
-        snapshot: null as unknown as object,
+        snapshot: null as unknown as VisualWorkflow,
       },
       {
         runId: "run_b",
         workflowId: "wf_x",
         startedAt: 0,
-        snapshot: { name: "missing id" } as unknown as object,
+        snapshot: { name: "missing id" } as unknown as VisualWorkflow,
       },
     ])
     const r = await resumeInFlightRuns()
@@ -89,7 +90,7 @@ describe("resumeInFlightRuns", () => {
         runId: "run_resumed",
         workflowId: snapshot.id,
         startedAt: 1,
-        snapshot: snapshot as unknown as object,
+        snapshot: snapshot as unknown as VisualWorkflow,
       },
     ])
     const r = await resumeInFlightRuns()
@@ -135,7 +136,7 @@ describe("resumeInFlightRuns", () => {
         runId: "run_failing",
         workflowId: snapshot.id,
         startedAt: 1,
-        snapshot: snapshot as unknown as object,
+        snapshot: snapshot as unknown as VisualWorkflow,
       },
     ])
     const r = await resumeInFlightRuns()

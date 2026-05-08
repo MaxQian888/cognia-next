@@ -6,7 +6,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Label } from "@/components/ui/label"
 import { useA2UIData } from "../a2ui-context"
 import { getBindingPath } from "@/lib/a2ui/data-model"
-import type { A2UIComponentProps, A2UIBaseComponent } from "@/types/a2ui/schema"
+import type { A2UIComponentProps, A2UIBaseComponent, A2UIPathValue } from "@/types/a2ui/schema"
 
 export interface A2UIToggleGroupOption {
   value: string
@@ -46,18 +46,33 @@ export const A2UIToggleGroup = memo(function A2UIToggleGroup({
       style={component.style as React.CSSProperties}
     >
       {component.label && <Label>{component.label}</Label>}
-      <ToggleGroup
-        type={component.multiple !== false ? "multiple" : "single"}
-        value={component.multiple !== false ? value : value}
-        onValueChange={handleChange}
-        size={component.size || "default"}
-      >
-        {component.options.map((opt) => (
-          <ToggleGroupItem key={opt.value} value={opt.value} disabled={opt.disabled}>
-            {opt.label}
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
+      {component.multiple !== false ? (
+        <ToggleGroup
+          type="multiple"
+          value={value}
+          onValueChange={handleChange}
+          size={component.size || "default"}
+        >
+          {component.options.map((opt) => (
+            <ToggleGroupItem key={opt.value} value={opt.value} disabled={opt.disabled}>
+              {opt.label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      ) : (
+        <ToggleGroup
+          type="single"
+          value={value[0] ?? ""}
+          onValueChange={handleChange}
+          size={component.size || "default"}
+        >
+          {component.options.map((opt) => (
+            <ToggleGroupItem key={opt.value} value={opt.value} disabled={opt.disabled}>
+              {opt.label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      )}
     </div>
   )
 })

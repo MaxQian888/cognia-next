@@ -13,7 +13,12 @@ import {
 import { Label } from "@/components/ui/label"
 import { useA2UIData } from "../a2ui-context"
 import { getBindingPath } from "@/lib/a2ui/data-model"
-import type { A2UIComponentProps, A2UIBaseComponent, A2UIStringOrPath } from "@/types/a2ui/schema"
+import type {
+  A2UIComponentProps,
+  A2UIBaseComponent,
+  A2UIPathValue,
+  A2UIStringOrPath,
+} from "@/types/a2ui/schema"
 
 export interface A2UIComboboxOption {
   value: string
@@ -44,9 +49,9 @@ export const A2UICombobox = memo(function A2UICombobox({
   const selectedLabel = options.find((o) => o.value === currentValue)?.label || ""
 
   const handleChange = useCallback(
-    (newValue: string) => {
+    (newValue: string | null) => {
       if (bindingPath) {
-        onDataChange(bindingPath, newValue)
+        onDataChange(bindingPath, newValue ?? "")
       }
       setOpen(false)
     },

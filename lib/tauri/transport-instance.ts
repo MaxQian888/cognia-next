@@ -27,8 +27,9 @@ function isCapacitor(): boolean {
     typeof window !== "undefined" &&
     typeof (window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
       ?.isNativePlatform === "function" &&
-    (window as { Capacitor: { isNativePlatform: () => boolean } }).Capacitor.isNativePlatform() ===
-      true
+    (
+      window as unknown as { Capacitor: { isNativePlatform: () => boolean } }
+    ).Capacitor.isNativePlatform() === true
   )
 }
 
