@@ -111,10 +111,16 @@ describe("CompanionSection", () => {
 
     const qr = await screen.findByTestId("qr-mock")
     const value = qr.getAttribute("data-value") || ""
-    const parsed = JSON.parse(value) as Record<string, string>
-    expect(parsed.baseUrl).toBe("http://192.168.1.42:7890")
-    expect(parsed.pair_jwt).toBe("header.payload.signature")
-    expect(parsed.server_version).toBe("0.1.0")
+    // Wave 1.7 v2 payload: `cgnp2|<base64url>`. Decode through the
+    // canonical helper so the test is implementation-agnostic.
+    const { decodePairPayload } = await import("@/lib/qr/pair-payload")
+    const decoded = decodePairPayload(value)
+    expect(decoded.kind).toBe("ok")
+    if (decoded.kind === "ok") {
+      expect(decoded.payload.baseUrl).toBe("http://192.168.1.42:7890")
+      expect(decoded.payload.pairJwt).toBe("header.payload.signature")
+      expect(decoded.payload.version).toBe("0.1.0")
+    }
     expect(screen.getByText(/Expires in/i)).toBeInTheDocument()
   })
 

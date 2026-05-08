@@ -342,6 +342,14 @@ pub fn run() {
             companion_api::commands::companion_seed_deny_list,
             companion_api::commands::companion_revoke_device,
             companion_api::commands::companion_unrevoke_device,
+            companion_api::commands::companion_sync_pull_response,
+            companion_api::commands::companion_get_tls_fingerprint,
+            companion_api::commands::companion_mdns_start,
+            companion_api::commands::companion_mdns_stop,
+            companion_api::commands::companion_mdns_status,
+            companion_api::commands::companion_tunnel_start,
+            companion_api::commands::companion_tunnel_stop,
+            companion_api::commands::companion_tunnel_current,
             proxy_config::commands::proxy_set,
             proxy_config::commands::proxy_get_active,
             proxy_config::commands::proxy_detect,
@@ -374,6 +382,7 @@ pub fn run() {
             workflow::commands::workflow_persist_run_state,
             workflow::commands::workflow_reload_in_flight_runs,
             workflow::commands::workflow_ack_completed,
+            workflow::commands::workflow_get_webhook_url,
         ])
         .setup(|app| {
             // Bootstrap native logging in *all* builds. Installs tauri-plugin-log
@@ -396,13 +405,31 @@ pub fn run() {
                     let emitter = std::sync::Arc::new(workflow::AppHandleEmitter {
                         handle: app.handle().clone(),
                     });
-                    match workflow::WorkflowState::open(mirror_path, emitter) {
+                    match workflow::WorkflowState::open(mirror_path, emitter.clone()) {
                         Ok(state) => {
                             // Spawn the cron loop once. Cloning is cheap — the
                             // inner Arc is shared, so the daemon held by the
                             // managed state and the spawned loop drive the same
                             // schedule registry.
                             state.cron.clone().spawn();
+
+                            // Spawn the webhook router on a tokio task so the
+                            // axum listener is up by the time the renderer
+                            // calls `workflow_get_webhook_url`. Port 0 lets
+                            // the OS pick — the bound port flows back through
+                            // the URL command. Errors (port collision, etc.)
+                            // are logged but don't block app startup.
+                            let webhook_clone = state.webhook.clone();
+                            let webhook_emitter = emitter.clone();
+                            tauri::async_runtime::spawn(async move {
+                                if let Err(err) = webhook_clone
+                                    .start(webhook_emitter, 0)
+                                    .await
+                                {
+                                    log::warn!("workflow webhook router start failed: {err}");
+                                }
+                            });
+
                             app.manage(state);
                         }
                         Err(err) => {

@@ -46,6 +46,8 @@ import {
 } from "@/components/ui/table"
 import { isTauri, transport } from "@/lib/tauri"
 import { listPairedDevices, revokePairedDevice } from "@/lib/db/paired-devices"
+import { encodePairPayload } from "@/lib/qr/pair-payload"
+import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { cn } from "@/lib/utils"
 
 // ---------------------------------------------------------------------------
@@ -66,6 +68,15 @@ interface PairJwtIssue {
   pairJwt: string
   expiresAtMs: number
   baseUrl: string
+  /** SHA-256 SubjectPublicKeyInfo fingerprint (Wave 1.4). Empty if absent. */
+  fingerprint?: string
+  /** Server app version (Wave 1.7 v2 payload). */
+  appVersion?: string
+}
+
+interface TunnelInfo {
+  publicUrl: string
+  localUrl: string
 }
 
 async function fetchStatus(): Promise<CompanionServerStatus> {
@@ -95,6 +106,36 @@ async function revokeDeviceRustSide(deviceId: string): Promise<void> {
   await transport.call<void>("companion_revoke_device", { deviceId })
 }
 
+async function startMdnsBroadcast(args: {
+  port: number
+  appVersion: string
+  tlsFingerprint: string
+}): Promise<string> {
+  return transport.call<string>("companion_mdns_start", args)
+}
+
+async function stopMdnsBroadcast(): Promise<void> {
+  await transport.call<void>("companion_mdns_stop")
+}
+
+async function getMdnsStatus(): Promise<boolean> {
+  if (!isTauri()) return false
+  return transport.call<boolean>("companion_mdns_status")
+}
+
+async function startTunnel(localUrl: string): Promise<TunnelInfo> {
+  return transport.call<TunnelInfo>("companion_tunnel_start", { localUrl })
+}
+
+async function stopTunnel(): Promise<void> {
+  await transport.call<void>("companion_tunnel_stop")
+}
+
+async function getTunnelInfo(): Promise<TunnelInfo | null> {
+  if (!isTauri()) return null
+  return transport.call<TunnelInfo | null>("companion_tunnel_current")
+}
+
 // ---------------------------------------------------------------------------
 // Top-level section
 // ---------------------------------------------------------------------------
@@ -103,9 +144,172 @@ export function CompanionSection() {
   return (
     <div className="space-y-4 p-4" data-testid="companion-section">
       <ServerStatusCard />
+      <TunnelCard />
+      <MdnsCard />
       <PairDeviceCard />
       <PairedDevicesCard />
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Tunnel card (Wave 1.6) — Cloudflared launcher
+// ---------------------------------------------------------------------------
+
+function TunnelCard() {
+  const desktop = isTauri()
+  const [info, setInfo] = useState<TunnelInfo | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  // Hydrate current tunnel state on mount.
+  useEffect(() => {
+    let cancelled = false
+    void getTunnelInfo()
+      .then((current) => {
+        if (!cancelled) setInfo(current)
+      })
+      .catch(() => {
+        // Best effort.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const onToggle = useCallback(
+    async (enabled: boolean) => {
+      if (!desktop) {
+        toast.error("隧道仅在桌面运行时可用。")
+        return
+      }
+      setBusy(true)
+      try {
+        if (enabled) {
+          // For now we point the tunnel at the loopback HTTP companion server
+          // (Wave 1.4 TLS server is wired but cargo bind is HITL). When the
+          // HTTPS port lands the localUrl will switch to https://127.0.0.1:7891.
+          const next = await startTunnel(`http://127.0.0.1:${DEFAULT_PORT}`)
+          setInfo(next)
+          toast.success("隧道已启动。")
+        } else {
+          await stopTunnel()
+          setInfo(null)
+          toast.success("隧道已停止。")
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (/cloudflared.*not.found|not.installed/i.test(msg)) {
+          toast.error("找不到 cloudflared，先 brew/winget/apt 安装。")
+        } else {
+          toast.error(msg)
+        }
+      } finally {
+        setBusy(false)
+      }
+    },
+    [desktop]
+  )
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium">
+          <span className="flex items-center gap-2">Cloudflared 隧道</span>
+          <Switch
+            checked={!!info}
+            onCheckedChange={onToggle}
+            disabled={!desktop || busy}
+            aria-label="Enable cloudflared tunnel"
+          />
+        </CardTitle>
+        <CardDescription className="text-xs">
+          出门在外时让手机能连上桌面。需先安装 cloudflared CLI。
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="text-xs text-muted-foreground">
+        {info ? (
+          <p className="break-all font-mono" data-testid="tunnel-public-url">
+            {info.publicUrl}
+          </p>
+        ) : (
+          <p>关闭中。开关打开后会以子进程方式拉起 cloudflared。</p>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// mDNS card (Wave 1.5) — LAN broadcast toggle
+// ---------------------------------------------------------------------------
+
+function MdnsCard() {
+  const desktop = isTauri()
+  const [running, setRunning] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void getMdnsStatus()
+      .then((s) => {
+        if (!cancelled) setRunning(s)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const onToggle = useCallback(
+    async (enabled: boolean) => {
+      if (!desktop) {
+        toast.error("LAN 广播仅在桌面运行时可用。")
+        return
+      }
+      setBusy(true)
+      try {
+        if (enabled) {
+          const fingerprint = await transport
+            .call<string>("companion_get_tls_fingerprint")
+            .catch(() => "")
+          await startMdnsBroadcast({
+            port: DEFAULT_PORT,
+            appVersion: SERVER_VERSION,
+            tlsFingerprint: fingerprint,
+          })
+          setRunning(true)
+          toast.success("LAN 广播已启动。")
+        } else {
+          await stopMdnsBroadcast()
+          setRunning(false)
+          toast.success("LAN 广播已停止。")
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err))
+      } finally {
+        setBusy(false)
+      }
+    },
+    [desktop]
+  )
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium">
+          <span>LAN 自动发现 (mDNS)</span>
+          <Switch
+            checked={running}
+            onCheckedChange={onToggle}
+            disabled={!desktop || busy}
+            aria-label="Enable mDNS broadcast"
+          />
+        </CardTitle>
+        <CardDescription className="text-xs">
+          在局域网广播 <code>_cognia._tcp</code>，手机不用扫码也能找到桌面。
+        </CardDescription>
+      </CardHeader>
+    </Card>
   )
 }
 
@@ -345,13 +549,17 @@ function PairDeviceCard() {
   const expired = issue ? now >= issue.expiresAtMs : false
   const remainingSecs = issue ? Math.max(0, Math.floor((issue.expiresAtMs - now) / 1000)) : 0
 
-  // QR payload — what the M4.5 phone scanner expects.
+  // QR payload v2 — `cgnp2|<base64url(json)>` carrying the TLS fingerprint
+  // alongside baseUrl + pair JWT. The mobile scanner pins the fingerprint
+  // against the desktop's actual cert (Wave 1.4). Falls back to the legacy
+  // bare-JSON shape when the desktop doesn't yet surface a fingerprint.
   const qrPayload = useMemo(() => {
     if (!issue) return null
-    return JSON.stringify({
+    return encodePairPayload({
       baseUrl: issue.baseUrl,
-      pair_jwt: issue.pairJwt,
-      server_version: SERVER_VERSION,
+      pairJwt: issue.pairJwt,
+      version: issue.appVersion ?? SERVER_VERSION,
+      fingerprint: issue.fingerprint ?? "",
     })
   }, [issue])
 
@@ -419,16 +627,33 @@ function formatRemaining(secs: number): string {
 
 function PairedDevicesCard() {
   const rows = useLiveQuery(() => listPairedDevices(), [], [])
+  const guard = useBiometricGuard()
 
-  const onRevoke = useCallback(async (deviceId: string) => {
-    try {
-      await revokePairedDevice(deviceId)
-      await revokeDeviceRustSide(deviceId)
+  const onRevoke = useCallback(
+    async (deviceId: string, label: string) => {
+      const result = await guard(
+        {
+          reason: `确认解除 ${label} 的配对`,
+          title: "解除配对",
+          description: "解除后此设备将立即失去访问权限。",
+        },
+        async () => {
+          await revokePairedDevice(deviceId)
+          await revokeDeviceRustSide(deviceId)
+        }
+      )
+      if (result.kind === "blocked") {
+        if (result.reason === "cancelled") {
+          // Silent — user backed out.
+          return
+        }
+        toast.error(`解除配对未完成（${result.reason}）。`)
+        return
+      }
       toast.success("Device revoked.")
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
-    }
-  }, [])
+    },
+    [guard]
+  )
 
   return (
     <Card>
@@ -482,7 +707,7 @@ function PairedDevicesCard() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => onRevoke(row.deviceId)}
+                        onClick={() => onRevoke(row.deviceId, row.label)}
                         disabled={row.revokedAt !== undefined}
                         aria-label={`Revoke ${row.label}`}
                       >

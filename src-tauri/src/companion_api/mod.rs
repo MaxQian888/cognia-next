@@ -38,6 +38,10 @@ pub mod redemption_lru;
 pub mod rpc;
 pub mod secret;
 pub mod server;
+pub mod sync_bridge;
+pub mod mdns;
+pub mod tls;
+pub mod tunnel;
 pub mod ws;
 
 pub mod commands;
@@ -86,6 +90,9 @@ pub struct CompanionState {
     /// Event bus — broadcasts Tauri events to all connected WS clients and
     /// maintains a replay buffer for reconnecting clients (M2.6).
     pub event_bus: Arc<EventBus>,
+    /// Sync-pull bridge between the Rust handler and the desktop WebView's
+    /// Dexie store (M4.7).  See [`sync_bridge`] for the wire protocol.
+    pub sync_bridge: Arc<sync_bridge::SyncBridge>,
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +112,21 @@ pub struct CompanionServerState {
     /// server is started, the same `Arc<DenyList>` is cloned into the
     /// `SharedState`, giving both sides a live view of the same data.
     pub deny_list: Arc<DenyList>,
+    /// Sync-pull bridge — shared with the axum SharedState so the
+    /// `companion_sync_pull_response` Tauri command (called from the TS
+    /// side when it has the requested Dexie delta in hand) can resolve the
+    /// pending oneshot regardless of whether the HTTP handler that opened
+    /// the request still holds a reference. Same Arc-cloning trick as
+    /// `deny_list` above.
+    pub sync_bridge: Arc<sync_bridge::SyncBridge>,
+    /// mDNS broadcaster (Wave 1.5) — exposes the running server on the LAN
+    /// so paired phones can discover the desktop without manual baseUrl
+    /// entry. Optional — broadcast must be opted into via Settings.
+    pub mdns: mdns::BroadcasterState,
+    /// Cloudflared tunnel (Wave 1.6) — when active, the QR pair payload
+    /// encodes the public trycloudflare URL instead of the LAN IP. Default
+    /// off — opt-in via Settings.
+    pub tunnel: tunnel::TunnelState,
 }
 
 struct CompanionServerInner {
@@ -134,6 +156,9 @@ impl CompanionServerState {
                 bind_mode: None,
             }),
             deny_list: Arc::new(DenyList::new()),
+            sync_bridge: sync_bridge::SyncBridge::new(),
+            mdns: mdns::BroadcasterState::new(),
+            tunnel: tunnel::TunnelState::new(),
         }
     }
 
@@ -235,6 +260,7 @@ mod tests {
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
             event_bus: EventBus::new(),
+            sync_bridge: sync_bridge::SyncBridge::new(),
         })
     }
 

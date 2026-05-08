@@ -17,6 +17,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2.5.0", features = [] }
 
+# Embed a Common-Controls v6 manifest into every artifact (incl. test binaries)
+# so the Windows loader picks up comctl32 v6 from WinSxS — required by the
+# static `TaskDialogIndirect` import that `rfd` + `muda` emit under their
+# `common-controls-v6` feature. tauri-build only stamps the bin's manifest;
+# this covers `cargo test` too.
+[target.'cfg(windows)'.build-dependencies]
+embed-manifest = "1.4"
+
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -105,6 +113,22 @@ serde_urlencoded = "0.7"
 # Falls back to loopback if no usable interface is present (e.g., headless
 # CI). Pure-Rust, MIT-licensed, no transitive system deps.
 local-ip-address = "0.6"
+
+# Companion TLS (Wave 1.4 / M2.8) — self-signed certificate generation +
+# SHA-256 SubjectPublicKeyInfo fingerprint computation. The mobile client
+# pins the fingerprint via the QR pair payload, so the cert chain is never
+# validated by hostname; this avoids needing a real CA.
+rcgen = "0.13"
+time = { version = "0.3", features = ["std"] }
+
+# mDNS (Wave 1.5 / M2.9) — service advertisement for `_cognia._tcp.local.`
+# so the mobile app can pick the desktop server out of the LAN without
+# manual baseUrl entry.
+mdns-sd = "0.13"
+
+# Cloudflared launcher (Wave 1.6) — runs the cloudflared subprocess and
+# parses the trycloudflare URL out of stderr. We use std::process via
+# tokio::process; no extra crate is required.
 
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-window-state = "2"

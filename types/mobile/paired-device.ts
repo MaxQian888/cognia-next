@@ -51,4 +51,13 @@ export interface PairedDeviceRow {
    * paired-devices table so the owner can spot stale clients.
    */
   appVersion: string
+
+  /**
+   * SHA-256 fingerprint (lower-case hex, 64 chars) of the desktop server's
+   * TLS SubjectPublicKeyInfo at pair time. The mobile transport layer pins
+   * this fingerprint and refuses to talk to a peer whose presented cert
+   * doesn't match. Wave 1.4. Optional for backwards-compat with rows
+   * paired before TLS landed.
+   */
+  serverFingerprint?: string
 }

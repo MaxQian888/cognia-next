@@ -17,6 +17,12 @@ export interface AddPairedDeviceInput {
   platform: DevicePlatform
   pubkey: string
   appVersion: string
+  /**
+   * SHA-256 fingerprint of the server's TLS SubjectPublicKeyInfo at pair
+   * time. Optional — rows paired before Wave 1.4 lacked TLS so the field
+   * stays absent.
+   */
+  serverFingerprint?: string
   /** Defaults to `Date.now()` — pass an explicit value in tests. */
   nowMs?: number
 }
@@ -32,7 +38,25 @@ export async function addPairedDevice(input: AddPairedDeviceInput): Promise<void
     pairedAt: now,
     lastSeenAt: now,
   }
+  if (input.serverFingerprint) {
+    row.serverFingerprint = input.serverFingerprint
+  }
   await getDb().pairedDevices.put(row)
+}
+
+/**
+ * Update the stored TLS fingerprint for a device. Used when the desktop
+ * server rotates its self-signed cert and the user re-pairs to refresh the
+ * pin without losing other state (push token, etc.).
+ */
+export async function setServerFingerprint(
+  deviceId: string,
+  fingerprint: string
+): Promise<boolean> {
+  const updated = await getDb().pairedDevices.update(deviceId, {
+    serverFingerprint: fingerprint,
+  })
+  return updated > 0
 }
 
 /**

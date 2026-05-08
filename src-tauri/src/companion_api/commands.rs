@@ -10,13 +10,16 @@ use parking_lot::RwLock;
 use serde::Serialize;
 use std::net::IpAddr;
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Manager, State};
 
 use super::{
     event_bus::{register_tauri_event, EventBus},
     jwt::issue_pair_jwt,
+    mdns::{self, BroadcastConfig},
     secret,
     server::{CompanionServerError, DEFAULT_PORT},
+    tls,
+    tunnel::{self, TunnelInfo},
     BindMode, CompanionServerState, CompanionState, SharedState,
 };
 
@@ -75,9 +78,48 @@ pub async fn companion_server_start(
         app_handle: Some(app_handle),
         idempotency: Arc::new(super::idempotency::IdempotencyCache::new()),
         event_bus,
+        // Same Arc as the long-lived CompanionServerState — keeps the
+        // `companion_sync_pull_response` Tauri command and the in-flight
+        // HTTP handler talking to the same registry of pending requests.
+        sync_bridge: Arc::clone(&state.sync_bridge),
     });
 
     state.start(port, bind_loopback_only, shared).await
+}
+
+// ---------------------------------------------------------------------------
+// Sync-down bridge response command (M4.7)
+// ---------------------------------------------------------------------------
+
+/// Resolve a pending `companion://sync-pull-request` event with the delta
+/// the WebView fetched from Dexie.
+///
+/// The flow:
+///   1. Phone calls `_rpc/sync_pull` against the desktop's HTTP server.
+///   2. The Rust handler emits `companion://sync-pull-request` and awaits.
+///   3. The desktop WebView's `lib/sync/desktop-sync-source.ts` listener
+///      runs the table-specific Dexie query, then invokes this command.
+///   4. We resolve the matching oneshot — the HTTP handler returns to the
+///      phone with the delta in its response body.
+///
+/// `delta` should be the JSON the phone expects (`{ rows, deleted_ids,
+/// next_since }`) or `None` paired with a non-empty `error`. Either is
+/// allowed but not both.
+#[tauri::command]
+pub fn companion_sync_pull_response(
+    request_id: String,
+    delta: Option<serde_json::Value>,
+    error: Option<String>,
+    state: State<'_, CompanionServerState>,
+) -> Result<(), String> {
+    state
+        .sync_bridge
+        .resolve(super::sync_bridge::SyncPullResponse {
+            request_id,
+            delta,
+            error,
+        });
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -209,11 +251,20 @@ pub struct PairJwtIssue {
     pub pair_jwt: String,
     /// Millisecond epoch when the pair JWT expires.
     pub expires_at_ms: i64,
-    /// LAN-facing URL the QR encodes.  When the server is bound to LAN this
-    /// resolves to `http://<lan_ip>:<port>`; loopback bind falls back to
-    /// `http://127.0.0.1:<port>` so a developer running on a single machine
-    /// can still verify the QR pipeline.
+    /// Best-reachable URL the QR encodes. Tunnel takes priority over LAN
+    /// when active. When the server is bound loopback-only, falls back to
+    /// `http://127.0.0.1:<port>` so the developer can still verify the
+    /// QR pipeline on a single machine.
     pub base_url: String,
+    /// SHA-256 SubjectPublicKeyInfo fingerprint of the desktop server's
+    /// TLS certificate (lower-case hex). The mobile client pins this in
+    /// SecureStorage and refuses to talk to a peer whose presented cert
+    /// doesn't match. Empty string when the cert subsystem is uninitialized
+    /// (Wave 1.4 cert generation guarantees this is non-empty in practice).
+    pub fingerprint: String,
+    /// App version surfaced in the QR for forward-compat — phone uses this
+    /// to gate breaking pair-payload changes.
+    pub app_version: String,
 }
 
 /// Issue a one-shot pair JWT for the QR flow.
@@ -224,23 +275,133 @@ pub struct PairJwtIssue {
 #[tauri::command]
 pub async fn companion_issue_pair_jwt(
     state: State<'_, CompanionServerState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<PairJwtIssue, String> {
     let signing_secret = secret::load_or_generate().map_err(|e| e.to_string())?;
     let (pair_jwt, exp_secs) = issue_pair_jwt(&signing_secret).map_err(|e| e.to_string())?;
     let port = state.bound_port().unwrap_or(DEFAULT_PORT);
-    let host = match state.bind_mode() {
-        Some(BindMode::Lan) => detect_lan_ip().unwrap_or_else(|| "127.0.0.1".to_string()),
-        // `Loopback` and `None` both render as the loopback address — when the
-        // server is stopped the UI still surfaces a (testing-only) loopback
-        // URL so the QR canvas isn't blank, and the warning banner explains
-        // that the phone needs LAN to actually reach it.
-        _ => "127.0.0.1".to_string(),
+
+    // URL priority: active tunnel > LAN > loopback fallback.
+    let base_url = if let Some(info) = state.tunnel.current() {
+        info.public_url
+    } else {
+        let host = match state.bind_mode() {
+            Some(BindMode::Lan) => detect_lan_ip().unwrap_or_else(|| "127.0.0.1".to_string()),
+            _ => "127.0.0.1".to_string(),
+        };
+        format!("http://{host}:{port}")
     };
+
+    let fingerprint = ensure_tls_fingerprint(&app_handle).unwrap_or_default();
+    let app_version = app_handle.package_info().version.to_string();
+
     Ok(PairJwtIssue {
         pair_jwt,
         expires_at_ms: exp_secs * 1000,
-        base_url: format!("http://{host}:{port}"),
+        base_url,
+        fingerprint,
+        app_version,
     })
+}
+
+// ---------------------------------------------------------------------------
+// TLS / mDNS / Tunnel commands (Wave 1.4 / 1.5 / 1.6)
+// ---------------------------------------------------------------------------
+
+fn data_dir(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("could not resolve app data dir: {e}"))
+}
+
+fn ensure_tls_fingerprint(app_handle: &tauri::AppHandle) -> Result<String, String> {
+    let dir = data_dir(app_handle)?;
+    let material = tls::ensure_certificate(&dir).map_err(|e| e.to_string())?;
+    Ok(material.fingerprint_sha256)
+}
+
+/// Lazily generate (or load) the companion-server TLS cert and return its
+/// SHA-256 SubjectPublicKeyInfo fingerprint. The mobile pair flow encodes
+/// this into the QR payload so the phone can pin the cert.
+#[tauri::command]
+pub fn companion_get_tls_fingerprint(app_handle: tauri::AppHandle) -> Result<String, String> {
+    ensure_tls_fingerprint(&app_handle)
+}
+
+/// Begin advertising the running companion server over mDNS so phones on
+/// the same LAN can discover it without typing a URL. Idempotent — repeat
+/// calls replace the existing broadcast.
+#[tauri::command]
+pub fn companion_mdns_start(
+    state: State<'_, CompanionServerState>,
+    app_handle: tauri::AppHandle,
+    port: u16,
+    app_version: String,
+    tls_fingerprint: String,
+    instance_name: Option<String>,
+) -> Result<String, String> {
+    let local_ip = local_ip_address::local_ip()
+        .map_err(|e| format!("local ip lookup failed: {e}"))?;
+    let instance_name = instance_name.unwrap_or_else(|| {
+        let suffix: String = uuid::Uuid::new_v4().simple().to_string()[..6].to_string();
+        format!("cognia-{suffix}")
+    });
+    let _ = app_handle; // reserved for future logging-by-app-id
+    state
+        .mdns
+        .start(BroadcastConfig {
+            instance_name,
+            port,
+            local_ip,
+            app_version,
+            tls_fingerprint,
+        })
+        .map_err(|e| e.to_string())
+}
+
+/// Stop the mDNS broadcaster. No-op if not running.
+#[tauri::command]
+pub fn companion_mdns_stop(state: State<'_, CompanionServerState>) {
+    state.mdns.stop();
+}
+
+/// Whether the mDNS broadcaster is currently active.
+#[tauri::command]
+pub fn companion_mdns_status(state: State<'_, CompanionServerState>) -> bool {
+    state.mdns.is_running()
+}
+
+/// Start a Cloudflared tunnel to the loopback companion server. Returns the
+/// public trycloudflare URL once it appears in the cloudflared subprocess
+/// stderr. Errors with "not_installed" if cloudflared is missing from PATH.
+#[tauri::command]
+pub async fn companion_tunnel_start(
+    state: State<'_, CompanionServerState>,
+    local_url: String,
+) -> Result<TunnelInfo, String> {
+    state
+        .tunnel
+        .start(&local_url)
+        .await
+        .map_err(|e| match e {
+            tunnel::TunnelError::NotInstalled => {
+                "cloudflared not found in PATH (install: https://developers.cloudflare.com/cloudflared/install/)".to_string()
+            }
+            other => other.to_string(),
+        })
+}
+
+/// Stop the Cloudflared tunnel. No-op if not running.
+#[tauri::command]
+pub fn companion_tunnel_stop(state: State<'_, CompanionServerState>) {
+    state.tunnel.stop();
+}
+
+/// Return the active tunnel info, or null when no tunnel is running.
+#[tauri::command]
+pub fn companion_tunnel_current(state: State<'_, CompanionServerState>) -> Option<TunnelInfo> {
+    state.tunnel.current()
 }
 
 /// Best-effort detect a routable LAN IPv4 address.  Returns `None` when the
