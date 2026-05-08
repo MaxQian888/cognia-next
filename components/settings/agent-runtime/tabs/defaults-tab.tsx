@@ -1,16 +1,18 @@
 "use client"
 
 // Defaults tab — permission mode, default model, working directory, append
-// system prompt, routing fallback toggle. All fields back AppSettings.* and
-// persist via `useSettingsStore.save`. Local state mirrors `settings` so
-// blur-persist works without flicker.
+// system prompt, thinking budget, routing fallback toggle. All fields back
+// AppSettings.* and persist via `useSettingsStore.save`. Local state mirrors
+// `settings` so blur-persist works without flicker.
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
+import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -23,6 +25,10 @@ import {
 import { useSettingsStore } from "@/stores/settings"
 import type { AppSettings } from "@/lib/claude/types"
 import { DefaultModelPicker } from "../parts/default-model-picker"
+
+const THINKING_BUDGET_MIN = 0
+const THINKING_BUDGET_MAX = 64000
+const THINKING_BUDGET_STEP = 1024
 
 type PermissionMode = NonNullable<AppSettings["permissionMode"]>
 
@@ -44,6 +50,7 @@ export function DefaultsTab() {
   const [workingDir, setWorkingDir] = useState("")
   const [appendSystem, setAppendSystem] = useState("")
   const [routingFallback, setRoutingFallback] = useState(true)
+  const [thinkingBudget, setThinkingBudget] = useState<number>(0)
 
   useEffect(() => {
     if (!settings) return
@@ -55,6 +62,7 @@ export function DefaultsTab() {
     setWorkingDir(settings.defaultWorkingDir ?? "")
     setAppendSystem(settings.defaultSystemPrompt ?? "")
     setRoutingFallback(settings.routingFallbackEnabled !== false)
+    setThinkingBudget(settings.defaultMaxThinkingTokens ?? 0)
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [settings])
 
@@ -78,6 +86,18 @@ export function DefaultsTab() {
   const persistRouting = (value: boolean) => {
     setRoutingFallback(value)
     void save({ routingFallbackEnabled: value })
+  }
+
+  // Clamp + round to the slider step so the number input can't drift away
+  // from the slider thumb. Persists `undefined` when zero so the sidecar
+  // falls back to the SDK default rather than serialising an explicit 0.
+  const persistThinkingBudget = (raw: number) => {
+    const clamped = Math.max(
+      THINKING_BUDGET_MIN,
+      Math.min(THINKING_BUDGET_MAX, Number.isFinite(raw) ? Math.round(raw) : 0)
+    )
+    setThinkingBudget(clamped)
+    void save({ defaultMaxThinkingTokens: clamped > 0 ? clamped : undefined })
   }
 
   return (
@@ -146,6 +166,58 @@ export function DefaultsTab() {
             aria-label={t("appendTitle")}
             placeholder={t("appendPlaceholder")}
           />
+        </CardContent>
+      </Card>
+
+      <Card className="md:col-span-2">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">{t("thinkingTitle")}</CardTitle>
+          <CardDescription className="text-xs">{t("thinkingDesc")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Slider
+              className="flex-1"
+              value={[thinkingBudget]}
+              min={THINKING_BUDGET_MIN}
+              max={THINKING_BUDGET_MAX}
+              step={THINKING_BUDGET_STEP}
+              onValueChange={(v) => setThinkingBudget(v[0] ?? 0)}
+              onValueCommit={(v) => persistThinkingBudget(v[0] ?? 0)}
+              aria-label={t("thinkingTitle")}
+              data-testid="thinking-budget-slider"
+            />
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={THINKING_BUDGET_MIN}
+                max={THINKING_BUDGET_MAX}
+                step={THINKING_BUDGET_STEP}
+                className="w-32 sm:w-28"
+                value={thinkingBudget}
+                onChange={(e) => setThinkingBudget(Number(e.target.value) || 0)}
+                onBlur={() => persistThinkingBudget(thinkingBudget)}
+                aria-label={t("thinkingNumberLabel")}
+                data-testid="thinking-budget-input"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => persistThinkingBudget(0)}
+                disabled={thinkingBudget === 0}
+                data-testid="thinking-budget-reset"
+              >
+                {t("thinkingReset")}
+              </Button>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {thinkingBudget > 0
+              ? t("thinkingActiveHint", { budget: thinkingBudget })
+              : t("thinkingDisabledHint")}
+          </p>
         </CardContent>
       </Card>
 

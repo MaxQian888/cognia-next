@@ -258,6 +258,34 @@ describe("buildMcpServerMap", () => {
     expect(Object.keys(out)).toEqual(["alpha"])
     expect(out.alpha).toMatchObject({ type: "stdio", command: "x" })
   })
+
+  it("forwards http transport with url + headers verbatim", async () => {
+    const row = await createMcpServer({
+      name: "wiki",
+      transport: "http",
+      config: { url: "https://mcp.deepwiki.com/mcp", headers: { "X-Trace": "1" } },
+    })
+    const out = buildMcpServerMap([row])
+    expect(out.wiki).toMatchObject({
+      type: "http",
+      url: "https://mcp.deepwiki.com/mcp",
+      headers: { "X-Trace": "1" },
+    })
+  })
+
+  it("forwards sse transport with url + headers verbatim", async () => {
+    const row = await createMcpServer({
+      name: "stream",
+      transport: "sse",
+      config: { url: "https://example.com/sse", headers: { Authorization: "Bearer x" } },
+    })
+    const out = buildMcpServerMap([row])
+    expect(out.stream).toMatchObject({
+      type: "sse",
+      url: "https://example.com/sse",
+      headers: { Authorization: "Bearer x" },
+    })
+  })
 })
 
 describe("MCP_TRANSPORTS", () => {

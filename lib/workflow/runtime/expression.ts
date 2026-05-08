@@ -157,7 +157,13 @@ export function evalToken(expr: string, scope: ExpressionScope): unknown {
         cursor = scope.params
         break
       default:
-        return undefined
+        // Fallback: look the ident up in `upstream`. Executors that need to
+        // expose iteration-local state (e.g. `flow.loop` injecting `$item`
+        // and `$loop`) write the value into a copy of `upstream` before
+        // calling `resolveExpression`. Returning `undefined` for an unknown
+        // ident keeps the original "missing path → undefined" semantics.
+        cursor = scope.upstream[head.name]
+        if (cursor === undefined) return undefined
     }
   } else {
     return undefined

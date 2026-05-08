@@ -12,7 +12,7 @@
 //   { type: "event",              sessionId, event: SDKMessage }
 //   { type: "permission_request", sessionId, requestId, toolName, input, title?, displayName?, description? }
 //   { type: "session_ended",      sessionId, result?: SDKResultMessage, error?: string }
-//   { type: "ready" }
+//   { type: "ready",              sdkVersion?, sidecarVersion?, builtinToolsCount? }
 //   { type: "log",                level, message }
 
 // Side-effect import — must come first so the global fetch is patched
@@ -22,7 +22,28 @@
 import "./fetch-interceptor.mjs"
 
 import readline from "node:readline"
+import { createRequire } from "node:module"
 import { dispatch } from "./dispatch/index.mjs"
+
+// Resolve sidecar + SDK versions for the `ready` payload. createRequire is
+// used so we can read package.json without taking JSON-import dependency on
+// runtime flags. Best-effort — failures degrade to `undefined`.
+const _require = createRequire(import.meta.url)
+function readVersionInfo() {
+  let sdkVersion
+  let sidecarVersion
+  try {
+    sdkVersion = _require("@anthropic-ai/claude-agent-sdk/package.json").version
+  } catch {
+    sdkVersion = undefined
+  }
+  try {
+    sidecarVersion = _require("./package.json").version
+  } catch {
+    sidecarVersion = undefined
+  }
+  return { sdkVersion, sidecarVersion }
+}
 
 // ---- IO helpers -----------------------------------------------------------
 
@@ -208,5 +229,6 @@ if (process.argv.includes("--smoke")) {
     process.exit(0)
   })
 
-  emit({ type: "ready" })
+  const { sdkVersion, sidecarVersion } = readVersionInfo()
+  emit({ type: "ready", sdkVersion, sidecarVersion })
 }

@@ -40,6 +40,10 @@ describe("BUILTIN_SLASH_COMMANDS registry", () => {
       "permissions",
       "init",
       "review",
+      "compact",
+      "context",
+      "doctor",
+      "export",
     ]) {
       expect(names).toContain(expected)
     }
@@ -57,10 +61,21 @@ describe("BUILTIN_SLASH_COMMANDS registry", () => {
     expect(clear?.template).toBeUndefined()
   })
 
-  it("/compact is a disabled placeholder (sidecar support pending)", () => {
+  it("/compact is enabled and forwards as a template prompt", () => {
     const compact = BUILTIN_SLASH_COMMANDS.find((c) => c.name === "compact")
-    expect(compact?.disabled).toBe(true)
+    expect(compact?.disabled).not.toBe(true)
+    // The SDK intercepts `/compact` as a user prompt, so we ship it as a
+    // template that the composer drops into the input verbatim.
+    expect(compact?.template).toBe("/compact")
     expect(compact?.handler).toBeUndefined()
+  })
+
+  it("/context, /doctor, /export are implemented as handlers", () => {
+    for (const name of ["context", "doctor", "export"]) {
+      const c = BUILTIN_SLASH_COMMANDS.find((cmd) => cmd.name === name)
+      expect(c?.disabled).not.toBe(true)
+      expect(c?.handler).toBeDefined()
+    }
   })
 
   it("/cost is implemented (handler present, not disabled)", () => {

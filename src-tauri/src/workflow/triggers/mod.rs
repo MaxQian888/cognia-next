@@ -1,9 +1,13 @@
 //! Workflow trigger daemons.
 //!
-//! Phase 5a ships only the cron daemon (the highest-value trigger that
-//! genuinely needs Rust because cron must keep firing while the webview is
-//! minimized). The webhook receiver and connector inbound tap will mount on
-//! the existing `connectors::axum_app` instance once Phase 5b lands the TS
-//! bridge that consumes the events.
+//! Phase 5a ships:
+//!   • `cron_daemon` — the cron firing loop that survives webview minimize.
+//!   • `webhook_router` — the local axum HTTP receiver that turns inbound
+//!     requests into `workflow:trigger` events.
+//!
+//! The connector inbound tap and the chat-message tap remain TS-side hooks
+//! into existing subsystems; they don't need Rust because the bus / chat
+//! pipeline already runs in the webview.
 
 pub mod cron_daemon;
+pub mod webhook_router;

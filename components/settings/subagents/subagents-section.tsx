@@ -16,6 +16,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { SettingsPageHeader } from "@/components/settings/common/settings-section"
 import { SubagentTemplatesTab } from "./subagent-templates-tab"
 import { SubagentRuntimeTab } from "./subagent-runtime-tab"
+import {
+  CLAUDE_CODE_RELATED,
+  RelatedSectionsStrip,
+} from "@/components/settings/common/related-sections-strip"
 
 type Tab = "templates" | "runtime"
 
@@ -45,6 +49,8 @@ export function SubagentsSection() {
         title={t("title")}
         description={t("description")}
       />
+
+      <RelatedSectionsStrip current="subagents" targets={CLAUDE_CODE_RELATED} />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
         <div className="-mx-1 overflow-x-auto px-1">

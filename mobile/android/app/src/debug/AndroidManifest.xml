@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      Debug-only override: allow cleartext HTTP for LAN companion server
+      development. M2.8 deferred TLS (self-signed cert + cloudflared) to
+      M2.9; until that lands, the debug build pairs over plain HTTP on
+      LAN. Release builds inherit the default (cleartext disabled).
+    -->
+    <application
+        android:usesCleartextTraffic="true"
+        tools:replace="android:usesCleartextTraffic"
+        xmlns:tools="http://schemas.android.com/tools" />
+
+</manifest>

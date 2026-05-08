@@ -1,7 +1,7 @@
 // NOTE: The Tauri production CSP is set in src-tauri/tauri.conf.json.
 // If you call an external API from the browser, add its origin to the
 // `connect-src` directive there, otherwise the request will be blocked.
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import { ThemeProvider } from "next-themes"
 import { Toaster } from "@/components/ui/sonner"
@@ -15,7 +15,9 @@ import { ExternalAgentInitializer } from "@/components/providers/initializers/ex
 import { AgentTeamRuntimeInitializer } from "@/components/providers/initializers/agent-team-runtime-initializer"
 import { SchedulerInitializer } from "@/components/scheduler"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
+import { CompanionBootProvider } from "@/components/providers/companion-boot-provider"
 import { CompanionEventBridgeProvider } from "@/components/providers/companion-event-bridge-provider"
+import { DesktopSyncSourceProvider } from "@/components/providers/desktop-sync-source-provider"
 import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provider"
 import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provider"
 import { ConnectorBusProvider } from "@/components/connectors/connector-bus-provider"
@@ -40,6 +42,17 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Cognia · Claude Code",
   description: "Claude Code web client built on top of the Claude Agent SDK",
+}
+
+// `viewport-fit: cover` lets the Capacitor WebView paint into the iPhone notch
+// and below the Android gesture indicator. Combined with the `.safe-area-*`
+// utilities in globals.css (M4.3 / #47) this gives the mobile shell room to
+// breathe without leaking into the unsafe edges. Width / scale defaults match
+// the Next.js conventions; on desktop the value is a no-op.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 }
 
 export default function RootLayout({
@@ -78,9 +91,13 @@ export default function RootLayout({
                               <ConnectorBusProvider>
                                 <ConnectorDeepLinkRouter>
                                   <SubscriptionUsageProvider>
-                                    <div data-bg-target="global" className="contents">
-                                      {children}
-                                    </div>
+                                    <CompanionBootProvider>
+                                      <DesktopSyncSourceProvider>
+                                        <div data-bg-target="global" className="contents">
+                                          {children}
+                                        </div>
+                                      </DesktopSyncSourceProvider>
+                                    </CompanionBootProvider>
                                   </SubscriptionUsageProvider>
                                 </ConnectorDeepLinkRouter>
                               </ConnectorBusProvider>

@@ -50,6 +50,7 @@ import type {
   WorkflowTriggerRow,
 } from "@/types/workflow/visual"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
+import type { SessionUsageRow } from "./session-usage"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -124,6 +125,12 @@ export class CogniaDB extends Dexie {
   // in-memory deny-list mirror of revoked rows. Per-row types live in
   // `@/types/mobile/paired-device.ts`; CRUD helpers in `./paired-devices.ts`.
   pairedDevices!: Table<PairedDeviceRow, string>
+  // v24 — Per-message usage + cost rows captured by the SDK adapter on each
+  // `result` event. Primary key `messageId` is the Anthropic assistant
+  // message id, which is unique across all sessions, so the writer is
+  // naturally idempotent. Aggregation helpers + UI consumers live in
+  // `./session-usage.ts` and `components/settings/agent-runtime/tabs/sessions-tab.tsx`.
+  sessionUsage!: Table<SessionUsageRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -818,6 +825,20 @@ export class CogniaDB extends Dexie {
     // server boot without scanning the full table.
     this.version(23).stores({
       pairedDevices: "&deviceId, lastSeenAt, revokedAt, platform",
+    })
+
+    // v24 — Per-turn usage + cost rows. Pure additive, no upgrade hook.
+    //   • `&messageId`        — primary key (Anthropic assistant message id,
+    //                            unique across sessions). put() is idempotent.
+    //   • `sessionId`         — equality lookup for per-session aggregations
+    //                            and cascade delete in `deleteSession`.
+    //   • `[sessionId+at]`    — used by the chat header / sessions tab to
+    //                            render rows in chronological order without
+    //                            an in-memory sort.
+    //   • `at`                — global newest-first listing (audit / debug).
+    //   • `model`             — power the per-model breakdown popover.
+    this.version(24).stores({
+      sessionUsage: "&messageId, sessionId, [sessionId+at], at, model, characterId",
     })
   }
 

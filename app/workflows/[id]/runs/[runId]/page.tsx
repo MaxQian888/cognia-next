@@ -1,21 +1,23 @@
-"use client"
-
 /**
  * /workflows/[id]/runs/[runId] — Gantt timeline + step inspector for one run.
+ *
+ * Server component entry for `output: "export"`. The UI lives in
+ * page-client.tsx so this file can export generateStaticParams without
+ * being a "use client" module.
  */
 
-import { use } from "react"
-import { RunDetail } from "@/components/workflow/runs/run-detail"
+import { WorkflowRunDetailPageClient } from "./page-client"
+
+export function generateStaticParams(): Array<{ id: string; runId: string }> {
+  return [{ id: "_", runId: "_" }]
+}
+
+export const dynamicParams = false
 
 interface PageProps {
   params: Promise<{ id: string; runId: string }>
 }
 
 export default function WorkflowRunDetailPage({ params }: PageProps) {
-  const { id, runId } = use(params)
-  return (
-    <div className="h-screen w-screen overflow-hidden">
-      <RunDetail workflowId={id} runId={runId} />
-    </div>
-  )
+  return <WorkflowRunDetailPageClient params={params} />
 }

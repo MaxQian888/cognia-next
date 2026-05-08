@@ -1,6 +1,9 @@
 "use client"
 
+import { type CompanionConfig, companionStorage } from "./companion-storage"
 import type { Transport } from "./transport-types"
+
+export type { CompanionConfig } from "./companion-storage"
 
 // ---------------------------------------------------------------------------
 // Read-only command set — mirrors READ_ONLY_COMMANDS in rpc.rs exactly.
@@ -21,43 +24,45 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
 // ---------------------------------------------------------------------------
 // Config storage
 //
-// M3.4 will swap the localStorage backend for
-// @capacitor-community/secure-storage-plugin. For now we use localStorage so
-// tests can drive the whole path with jsdom without pulling Capacitor SDKs.
+// Backed by lib/tauri/companion-storage.ts — picks LocalStorage on web /
+// jsdom and SecureStorage (Keychain / Android Keystore) on Capacitor.
+//
+// The on-disk backends are async (SecureStorage has no sync API), but
+// reads happen on every RPC call so we keep them sync via a module-level
+// cache. The cache is primed by:
+//   - explicit hydration at app boot (`hydrateCompanionConfig()`), or
+//   - any successful `saveCompanionConfig()` (writes update the cache
+//     synchronously before the storage round-trip).
 // ---------------------------------------------------------------------------
 
-const CONFIG_KEY = "cognia.companion.config.v1"
+let cachedConfig: CompanionConfig | null = null
 
-export interface CompanionConfig {
-  /** e.g. "https://192.168.1.42:7890" */
-  baseUrl: string
-  /** Long-lived JWT returned by POST /api/v1/auth/pair */
-  deviceJwt: string
-  /** Stable device identifier, used for logging and idempotency-key namespacing */
-  deviceId: string
-  /** Server semver, populated at pair time, used only for diagnostics */
-  serverVersion: string
-}
-
+/** Synchronous read used on the hot path (every `call()` / WS open). */
 export function loadCompanionConfig(): CompanionConfig | null {
-  if (typeof window === "undefined") return null
-  try {
-    const raw = window.localStorage.getItem(CONFIG_KEY)
-    if (!raw) return null
-    return JSON.parse(raw) as CompanionConfig
-  } catch {
-    return null
-  }
+  return cachedConfig
 }
 
-export function saveCompanionConfig(config: CompanionConfig): void {
-  if (typeof window === "undefined") return
-  window.localStorage.setItem(CONFIG_KEY, JSON.stringify(config))
+/** Read storage and prime the cache. Call once at app boot. Idempotent. */
+export async function hydrateCompanionConfig(): Promise<CompanionConfig | null> {
+  cachedConfig = await companionStorage().load()
+  return cachedConfig
 }
 
-export function clearCompanionConfig(): void {
-  if (typeof window === "undefined") return
-  window.localStorage.removeItem(CONFIG_KEY)
+export async function saveCompanionConfig(config: CompanionConfig): Promise<void> {
+  // Cache update must run before the await so any synchronous reader (a
+  // `transport.call()` chained right after) sees the new config.
+  cachedConfig = config
+  await companionStorage().save(config)
+}
+
+export async function clearCompanionConfig(): Promise<void> {
+  cachedConfig = null
+  await companionStorage().clear()
+}
+
+/** Test-only — reset the cache between cases. */
+export function __resetCompanionConfigCacheForTests(): void {
+  cachedConfig = null
 }
 
 // ---------------------------------------------------------------------------

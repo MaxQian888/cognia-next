@@ -41,7 +41,7 @@ import { search, formatSearchResultsForLLM } from "@/lib/search/search-service"
 import type { SendContent, SendContentBlock, ChatSession } from "@/lib/claude/types"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
-import { isTauri } from "@/lib/tauri"
+import { usePlatform } from "@/hooks/use-platform"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
@@ -208,6 +208,8 @@ function ComposerInner(props: InnerProps) {
   const tAttach = useTranslations("chat.composer.attachments")
   const tCommands = useTranslations("chat.composer.commands")
   const tMemory = useTranslations("chat.composer.memory")
+  const platform = usePlatform()
+  const isDesktop = platform === "tauri"
   const hasPendingDrafts = (props.pendingDraftCount ?? 0) > 0
   const controller = usePromptInputController()
   const attachments = usePromptInputAttachments()
@@ -658,7 +660,7 @@ function ComposerInner(props: InnerProps) {
             <TooltipContent>{t("attachImageTooltip")}</TooltipContent>
           </Tooltip>
 
-          {isTauri() && <ScreenshotButton disabled={props.disabled} />}
+          {isDesktop && <ScreenshotButton disabled={props.disabled} />}
 
           <VoiceTranscriptionBridge disabled={props.disabled} />
         </div>
@@ -708,7 +710,7 @@ function ComposerInner(props: InnerProps) {
                   className="size-9 rounded-full"
                   disabled={
                     // In web mode, platform-bound sessions cannot send outbound messages.
-                    (!isTauri() && !!props.session?.platformBinding) ||
+                    (!isDesktop && !!props.session?.platformBinding) ||
                     (!isStreaming &&
                       (props.disabled ||
                         (controller.textInput.value.trim().length === 0 &&

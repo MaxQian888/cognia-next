@@ -260,6 +260,7 @@ mod tests {
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
             event_bus: EventBus::new(),
+            sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
         })
     }
 

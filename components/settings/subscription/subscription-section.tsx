@@ -16,6 +16,10 @@ import { SubscriptionOverviewTab } from "./tabs/overview-tab"
 import { SubscriptionAccountTab } from "./tabs/account-tab"
 import { SubscriptionUsageTab } from "./tabs/usage-tab"
 import { SubscriptionSettingsTab } from "./tabs/settings-tab"
+import {
+  CLAUDE_CODE_RELATED,
+  RelatedSectionsStrip,
+} from "@/components/settings/common/related-sections-strip"
 
 const SUBSCRIPTION_TAB_PARAM = "subTab"
 
@@ -50,6 +54,8 @@ export function SubscriptionSection() {
         </Label>
         <p className="text-xs text-muted-foreground">{t("description")}</p>
       </div>
+
+      <RelatedSectionsStrip current="subscription" targets={CLAUDE_CODE_RELATED} />
 
       <Tabs value={activeTab} onValueChange={onTabChange}>
         <div className="-mx-1 overflow-x-auto px-1">

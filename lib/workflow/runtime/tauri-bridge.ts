@@ -71,6 +71,19 @@ export async function ackRunCompleted(runId: string): Promise<void> {
 }
 
 /**
+ * Returns the http URL that fires a registered webhook trigger. The Rust
+ * router binds to an ephemeral 127.0.0.1 port, so the URL is only known
+ * after `register_trigger` has been called for the same `triggerId`.
+ *
+ * In web mode (no Tauri) this returns null — the inspector form surfaces
+ * a "desktop-only" hint in that case.
+ */
+export async function getWebhookUrl(triggerId: string): Promise<string | null> {
+  const result = await safeInvoke<string | null>("workflow_get_webhook_url", { triggerId })
+  return result ?? null
+}
+
+/**
  * Subscribe to Rust-side trigger events. Returns an unsubscribe function.
  * In web mode, returns a no-op unsubscribe immediately.
  */

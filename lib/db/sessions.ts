@@ -140,8 +140,9 @@ export async function forkSessionFromParent(parentId: string): Promise<ChatSessi
 
 export async function deleteSession(id: string): Promise<void> {
   const db = getDb()
-  await db.transaction("rw", db.sessions, db.messages, async () => {
+  await db.transaction("rw", db.sessions, db.messages, db.sessionUsage, async () => {
     await db.messages.where("sessionId").equals(id).delete()
+    await db.sessionUsage.where("sessionId").equals(id).delete()
     await db.sessions.delete(id)
   })
 }

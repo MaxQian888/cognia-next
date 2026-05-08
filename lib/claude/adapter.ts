@@ -288,7 +288,7 @@ function attachUsageToLastAssistant(messages: UIMessage[], result: SDKResultMess
   return messages
 }
 
-function extractUsage(result: SDKResultMessage): UsageInfo | null {
+export function extractUsage(result: SDKResultMessage): UsageInfo | null {
   const top = result as unknown as {
     usage?: Record<string, unknown>
     message?: { usage?: Record<string, unknown> }

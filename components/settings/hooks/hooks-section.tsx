@@ -35,6 +35,10 @@ import {
 import type { HookEvent, HookGroup, HooksConfig } from "@/lib/claude/hooks"
 import { HookGroupEditor, validateMatcher } from "./hook-group-editor"
 import { createLogger } from "@/lib/logger"
+import {
+  CLAUDE_CODE_RELATED,
+  RelatedSectionsStrip,
+} from "@/components/settings/common/related-sections-strip"
 
 const log = createLogger("settings.hooks")
 
@@ -228,6 +232,8 @@ export function HooksSection({ cwd }: Props) {
         <h2 className="text-base font-semibold">{t("title")}</h2>
         <p className="text-xs text-muted-foreground">{t("description")}</p>
       </div>
+
+      <RelatedSectionsStrip current="hooks" targets={CLAUDE_CODE_RELATED} />
 
       <Tabs value={scope} onValueChange={(v) => setScope(v as Scope)}>
         <TabsList>

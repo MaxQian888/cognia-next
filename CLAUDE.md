@@ -398,9 +398,33 @@ schema **v22** (`workflows` / `workflowRuns` / `workflowRunEvents` /
   toolbar with Save / Run / Undo / Redo / Auto-layout. Ctrl+S / Ctrl+Z /
   Ctrl+Shift+Z keyboard shortcuts.
 - **Per-kind inspector forms** (`components/workflow/editor/inspector/forms/`):
-  18 dedicated forms (cron, character/team/skill pickers, AI prompt with
-  full provider routing, branch, set, wait, HTTP, code, template,
-  transform, note, generic-JSON fallback). Drives node `params`.
+  **All 38 node kinds have dedicated forms** (Phase 5 expansion). Pickers for
+  Character / Team / Skill / Twin / MCP server / Plugin / Subworkflow are
+  Dexie-live-query-backed. Dynamic-row UIs power flow.switch's cases array
+  and flow.split's branch labels. Forms with "supports {{ }} expressions"
+  hints accept the runtime expression syntax in any string field. The
+  generic-JSON fallback remains as a safety net for plugin-extended kinds.
+- **CodeMirror 6 expression editor**
+  (`components/workflow/editor/inspector/forms/shared/expression-field.tsx`):
+  Replaces the plain Textarea for every "supports {{ }} expressions" field
+  (branch condition, ai prompts, set-variable value, http body, template,
+  transform expression, character.send content, …). Provides syntax
+  highlighting via `lib/workflow/editor/expression-language.ts`,
+  context-aware autocomplete from `expression-suggestions.ts` (every other
+  node's `$node['id'].out.<field>` plus `$trigger` / `$static` / `$params`),
+  and a live-preview footer that resolves the expression against the most
+  recent successful run's output snapshot. Inspector forms reach the editor
+  store through `InspectorExpressionProvider` (a React context) so each
+  form gets the current node id without prop drilling.
+- **Command palette + Resizable layout** (`components/workflow/editor/`):
+  `Ctrl+K` opens a cmdk palette (`command-palette.tsx`) listing every
+  catalog node, every editor action, and the 5 most-recent workflows. The
+  editor shell uses three Resizable panels (left palette / canvas / right
+  inspector) with `react-resizable-panels` and an `autoSaveId` so the
+  user's column widths persist across sessions.
+- **JSON import / export** in the toolbar — bundles the live workflow into
+  a downloadable file, accepts a re-uploaded JSON to overwrite the current
+  workflow's nodes / edges (id is preserved so the row stays the same).
 - **Runtime engine** (`lib/workflow/runtime/`): six modules — orchestrator,
   step-executor, event-log, idempotency cache, expression resolver, topo-sort.
   Inngest-style memoization by `(runId, stepId)` so resumed runs replay
@@ -409,20 +433,33 @@ schema **v22** (`workflows` / `workflowRuns` / `workflowRunEvents` /
   edges via `propagateSkip`. Workflow snapshots are frozen at run start —
   re-runs from history use the snapshot, not the live workflow.
 - **Node executor registry** (`lib/workflow/nodes/registry.ts`): plugins can
-  register new executors via `registerNodeExecutor`. Phase 1 ships 14 real
-  executors (manual, set, branch, switch, split, join, loop, wait, transform,
-  template, code, http, skill.invoke, real-or-stub ai.prompt). Remaining
-  kinds land as their TS subsystem integrations are wired.
+  register new executors via `registerNodeExecutor`. **Phase 5 ships 32 real
+  executors** covering every action / ai / flow / data / io kind. Newly
+  added in Phase 5: `action.character.send` (posts a message into a
+  character session), `action.team.run` (drives `runTeamLifecycle`),
+  `action.twin.rag` (vector-search the bound twin and return chunks),
+  `action.twin.ingest` (queues a TwinSource + TwinJob into the existing
+  ingest pipeline), `action.mcp.invokeTool` (one-shot MCP client over
+  stdio / HTTP), `action.plugin.invoke` (dispatches to a plugin's
+  `workflow.task` extension). Triggers (`trigger.cron / webhook /
+connector.inbound / chat.message`) route through `trigger-bridge.ts`
+  rather than executors.
 - **Trigger taxonomy**: manual (Run button), cron (existing TS scheduler;
   Rust daemon for "fires when minimized" is Phase 5a), connector inbound
   (ConnectorBus tap; Phase 5b), chat message (build-options hook; Phase 5b),
   webhook (Rust axum; Phase 5a, Tauri-only — web shows "desktop only").
-- **Hybrid runtime split** (Phase 5a/b — Rust pieces pending): Rust owns
-  cron firing + webhook receive + connector inbound tap + run-state mirror
-  in SQLite for crash recovery. TS owns orchestration + node execution +
-  Dexie definition / event-log storage. Crossing happens only at
-  `workflow:trigger` / `workflow:resume` Tauri events and the IPC commands
-  in `lib/workflow/runtime/tauri-bridge.ts` (web mode no-ops gracefully).
+- **Hybrid runtime split** (Phase 5a complete on Rust + TS sides):
+  - **Rust** owns cron firing (`src-tauri/src/workflow/triggers/cron_daemon.rs`),
+    the webhook receiver (`triggers/webhook_router.rs`, axum on
+    `127.0.0.1:<random-port>`), the SQLite run-state mirror, and the IPC
+    surface in `commands.rs` (six commands incl. `workflow_get_webhook_url`).
+  - **TS** owns orchestration + node execution + Dexie definition /
+    event-log storage. `lib/workflow/runtime/webhook-bridge.ts:syncWorkflowTriggers`
+    pushes every trigger node to Rust on workflow save (idempotent, web-mode
+    no-ops gracefully).
+  - Crossing happens only at `workflow:trigger` / `workflow:resume` Tauri
+    events and the IPC commands in `lib/workflow/runtime/tauri-bridge.ts`
+    (`getWebhookUrl` returns the bound URL once registration succeeds).
 - **Run history** (`components/workflow/runs/`): Gantt-style horizontal
   timeline at `/workflows/[id]/runs/[runId]` builds spans from the durable
   event log via `buildSpans`; collapses retries into a single bar with an
@@ -434,10 +471,28 @@ schema **v22** (`workflows` / `workflowRuns` / `workflowRunEvents` /
   Defaults / Audit (`?wfTab=…`). The Library tab embeds the same
   `<WorkflowLibrary />` rendered at `/workflows` so users can manage from
   Settings without leaving the shell.
-- **Built-in templates** (`lib/workflow/definition/seed.ts`): 4 templates
-  ship in Phase 1 — Hello world, HTTP→transform→summarize, Classify then
-  branch, Skills + AI. All compose only registered executors so they run
-  out of the box.
+- **Built-in templates** (`lib/workflow/definition/seed.ts`): **10 templates**
+  — Phase 1 (Hello world, HTTP pipeline, Classify-and-branch, Skills + AI)
+  plus Phase 5 (Inbound triage, Daily digest, RAG-backed FAQ reply, Webhook
+  → AI → respond, Loop over items, Subworkflow orchestrator). All compose
+  only registered executors so they run out of the box.
+- **Live run-status overlay** (`lib/workflow/runtime/run-status-bridge.ts`):
+  Subscribes to `workflowRunEvents` for the currently-edited workflow and
+  pushes per-step state (`running` / `succeeded` / `failed` / `skipped` /
+  `waiting`) into the editor store. The canvas merges these into each
+  node's data so users see green / red / spinning rings on nodes during
+  a run. The `useRunStatusBridge` hook handles subscription lifecycle.
+- **Connection validation** (`lib/workflow/editor/connection-validator.ts`):
+  React Flow's `isValidConnection` callback prevents users from drawing
+  edges that the orchestrator would reject — triggers as targets, edges
+  to/from annotations, self-loops, duplicate edges. Invalid attempts
+  surface a Sonner toast with the exact reason.
+- **Runtime hardening** (Phase 5): subworkflow recursion is hard-capped at
+  depth 10 (depth piggybacks on the trigger payload from parent to child).
+  `flow.loop` enforces a per-instance `maxIterations` (default 10000) and
+  a global hard ceiling of 100000 across all modes (`forEach` / `times` /
+  `while`). `WorkflowSettings.timeoutMs > 0` arms a wall-clock timer that
+  aborts the whole run on expiry.
 - **Web-mode degradation**: when `!isTauri()`, cron triggers fire only
   while the webview is alive; webhook triggers show "desktop only";
   manual / chat-message / connector triggers (TS-side) work unchanged.

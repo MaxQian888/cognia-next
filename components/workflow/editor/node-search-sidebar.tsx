@@ -56,7 +56,7 @@ export function NodeSearchSidebar({
 
   return (
     <aside
-      className={cn("flex w-72 shrink-0 flex-col border-r bg-card/50 backdrop-blur", className)}
+      className={cn("flex h-full w-full flex-col border-r bg-card/50 backdrop-blur", className)}
       data-testid="workflow-node-sidebar"
       aria-label="Node palette"
     >

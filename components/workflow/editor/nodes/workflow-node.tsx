@@ -26,11 +26,17 @@ import {
   Network as McpIcon,
   Send as SendIcon,
   PencilLine as DraftIcon,
+  Loader2 as LoadingIcon,
+  CheckCircle2 as SuccessIcon,
+  XCircle as FailedIcon,
+  CircleDashed as SkippedIcon,
+  AlertTriangle as WarnIcon,
   type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { workflowNodeCategory, type WorkflowNodeKind } from "@/types/workflow/visual"
 import type { WorkflowNodeData } from "@/types/workflow/visual"
+import type { NodeRunStatus } from "@/lib/workflow/editor/store"
 
 const ICONS: Partial<Record<WorkflowNodeKind, LucideIcon>> = {
   "trigger.manual": PlayIcon,
@@ -86,6 +92,33 @@ const CATEGORY_COLORS = {
 export type WorkflowNodeRenderData = WorkflowNodeData & {
   kind: WorkflowNodeKind
   typeVersion: number
+  /** Live execution status, merged in by the canvas from the run-status bridge. */
+  runStatus?: NodeRunStatus
+  /** Validation errors, merged in by the canvas from the inspector. */
+  validationErrors?: string[]
+}
+
+const STATUS_RING: Record<NodeRunStatus, string> = {
+  idle: "",
+  running: "ring-2 ring-amber-500/70 animate-pulse",
+  succeeded: "ring-2 ring-emerald-500/70",
+  failed: "ring-2 ring-rose-500/70",
+  skipped: "ring-2 ring-zinc-500/40 ring-dashed",
+  waiting: "ring-2 ring-sky-500/60",
+}
+
+function StatusBadge({ status }: { status: NodeRunStatus }) {
+  if (status === "running")
+    return <LoadingIcon className="size-3.5 text-amber-500 animate-spin" aria-label="Running" />
+  if (status === "succeeded")
+    return <SuccessIcon className="size-3.5 text-emerald-500" aria-label="Succeeded" />
+  if (status === "failed")
+    return <FailedIcon className="size-3.5 text-rose-500" aria-label="Failed" />
+  if (status === "skipped")
+    return <SkippedIcon className="size-3.5 text-zinc-400" aria-label="Skipped" />
+  if (status === "waiting")
+    return <TimerIcon className="size-3.5 text-sky-500" aria-label="Waiting" />
+  return null
 }
 
 export const WorkflowNodeComponent = memo(function WorkflowNodeComponent({
@@ -97,6 +130,8 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent({
   const isAnnotation = category === "annotation"
   const showInput = !data.kind.startsWith("trigger.")
   const showOutput = data.kind !== "annotation.note" && data.kind !== "annotation.group"
+  const status: NodeRunStatus = data.runStatus ?? "idle"
+  const hasErrors = (data.validationErrors?.length ?? 0) > 0
 
   return (
     <div
@@ -104,10 +139,13 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent({
         "group relative min-w-[200px] max-w-[280px] rounded-md border-2 bg-card text-card-foreground shadow-sm transition-shadow",
         CATEGORY_COLORS[category],
         selected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
+        // Status ring takes precedence over selection when present.
+        !selected && STATUS_RING[status],
         data.disabled && "opacity-50",
         isAnnotation && "italic"
       )}
       data-testid={`wf-node-${data.kind}`}
+      data-run-status={status}
     >
       {showInput ? (
         <Handle
@@ -119,7 +157,15 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent({
       <div className="flex items-start gap-2 px-3 py-2.5">
         <Icon className="size-4 shrink-0 mt-0.5" aria-hidden="true" />
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium truncate text-foreground">{data.label}</div>
+          <div className="flex items-center gap-1.5">
+            <div className="text-sm font-medium truncate text-foreground flex-1">{data.label}</div>
+            {status !== "idle" ? <StatusBadge status={status} /> : null}
+            {hasErrors ? (
+              <span title={data.validationErrors?.join("\n")}>
+                <WarnIcon className="size-3.5 text-amber-600" aria-label="Validation errors" />
+              </span>
+            ) : null}
+          </div>
           <div className="text-[10px] uppercase tracking-wide opacity-70">{data.kind}</div>
           {data.notes ? (
             <div className="mt-1.5 text-xs text-muted-foreground line-clamp-2">{data.notes}</div>

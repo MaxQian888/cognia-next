@@ -128,6 +128,10 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "skills_scan_native",
     "mcp_server_status",
     "read_agent_config",
+    // Sync-down (M4.7) is structurally idempotent: same `(table, since)`
+    // returns the same delta. Skip the cache to avoid stalling phone clients
+    // behind a 60-second TTL when the desktop has fresh writes.
+    "sync_pull",
 ];
 
 // ---------------------------------------------------------------------------
@@ -232,7 +236,7 @@ fn optional<T: DeserializeOwned>(
 async fn dispatch(
     name: &str,
     args: Value,
-    _state: &SharedState,
+    state: &SharedState,
     app: &tauri::AppHandle,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     use tauri::Manager as _;
@@ -439,6 +443,31 @@ async fn dispatch(
             serde_json::to_value(status).map_err(|e| RpcError::internal(e.to_string()))
         }
 
+        // ── Sync down (M4.7) ──────────────────────────────────────────────────
+
+        "sync_pull" => {
+            let table: String = required(&args, "table")?;
+            let since: i64 = optional::<i64>(&args, "since")?.unwrap_or(0);
+            // Allowlist the table names so a malicious phone can't ask for
+            // arbitrary Dexie tables. Mirror lib/sync/types.ts SyncableTable.
+            const ALLOWED: &[&str] = &["characters", "skills", "sessions", "messages"];
+            if !ALLOWED.contains(&table.as_str()) {
+                return Err(RpcError::malformed(format!(
+                    "table '{table}' is not exposed to mobile sync"
+                )));
+            }
+            let bridge = std::sync::Arc::clone(&state.sync_bridge);
+            bridge
+                .pull(
+                    app,
+                    table,
+                    since,
+                    crate::companion_api::sync_bridge::DEFAULT_TIMEOUT,
+                )
+                .await
+                .map_err(RpcError::internal)
+        }
+
         // ── Test MCP ──────────────────────────────────────────────────────────
 
         "test_mcp_server" => {
@@ -497,6 +526,7 @@ mod tests {
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
             event_bus: EventBus::new(),
+            sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
         })
     }
 
@@ -633,6 +663,7 @@ mod tests {
             app_handle: None,
             idempotency: cache,
             event_bus: crate::companion_api::event_bus::EventBus::new(),
+            sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
         });
 
         let router = build_router(state);
@@ -670,6 +701,7 @@ mod tests {
             app_handle: None,
             idempotency: cache,
             event_bus: crate::companion_api::event_bus::EventBus::new(),
+            sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
         });
         let jwt = device_jwt("dev2");
 
@@ -701,6 +733,7 @@ mod tests {
             app_handle: None,
             idempotency: Arc::clone(&cache),
             event_bus: crate::companion_api::event_bus::EventBus::new(),
+            sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
         });
 
         let router = build_router(state);
@@ -740,6 +773,7 @@ mod tests {
             app_handle: None,
             idempotency: cache,
             event_bus: crate::companion_api::event_bus::EventBus::new(),
+            sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
         });
 
         let router = build_router(state);

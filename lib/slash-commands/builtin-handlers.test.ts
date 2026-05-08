@@ -160,10 +160,11 @@ describe("/add-dir handler", () => {
   })
 })
 
-describe("/compact is disabled", () => {
-  it("has disabled flag and no handler", () => {
+describe("/compact is enabled and forwards as a template", () => {
+  it("ships the literal `/compact` template that the SDK intercepts", () => {
     const c = find("compact")
-    expect(c.disabled).toBe(true)
+    expect(c.disabled).not.toBe(true)
+    expect(c.template).toBe("/compact")
     expect(c.handler).toBeUndefined()
   })
 })

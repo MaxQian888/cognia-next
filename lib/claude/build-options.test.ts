@@ -709,6 +709,53 @@ describe("resolveSendOptions — brief mode", () => {
   })
 })
 
+describe("resolveSendOptions — extended thinking budget", () => {
+  it("session > character > appSettings — session wins when all three set", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", maxThinkingTokens: 8000 }),
+      character: makeChar({ maxThinkingTokens: 4000 }),
+      appSettings: { id: "singleton", defaultMaxThinkingTokens: 2000 } as AppSettings,
+    })
+    expect(opts.maxThinkingTokens).toBe(8000)
+  })
+
+  it("falls through to character when session is unset", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar({ maxThinkingTokens: 4000 }),
+      appSettings: { id: "singleton", defaultMaxThinkingTokens: 2000 } as AppSettings,
+    })
+    expect(opts.maxThinkingTokens).toBe(4000)
+  })
+
+  it("falls through to appSettings when session and character are unset", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar(),
+      appSettings: { id: "singleton", defaultMaxThinkingTokens: 2000 } as AppSettings,
+    })
+    expect(opts.maxThinkingTokens).toBe(2000)
+  })
+
+  it("omits the field entirely when budget is 0 (= use SDK default)", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", maxThinkingTokens: 0 }),
+      character: makeChar({ maxThinkingTokens: 0 }),
+      appSettings: { id: "singleton", defaultMaxThinkingTokens: 0 } as AppSettings,
+    })
+    expect(opts.maxThinkingTokens).toBeUndefined()
+  })
+
+  it("omits the field when nothing is configured", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar(),
+      appSettings: { id: "singleton" } as AppSettings,
+    })
+    expect(opts.maxThinkingTokens).toBeUndefined()
+  })
+})
+
 describe("listTeamMembers", () => {
   it("delegates to listCharactersByIds", async () => {
     mListCharsByIds.mockResolvedValueOnce([makeChar({ id: "c1" })])

@@ -11,7 +11,7 @@
  * Phase 9 adds the runtime-state badges.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Background,
   BackgroundVariant,
@@ -37,12 +37,18 @@ import { replaceWorkflow } from "@/lib/db/workflows"
 import { autoLayout, applyAutoLayoutPositions } from "@/lib/workflow/editor/auto-layout"
 import { createEditorStore, type EditorStore, type EditorState } from "@/lib/workflow/editor/store"
 import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
+import { useRunStatusBridge } from "@/lib/workflow/runtime/run-status-bridge"
+import { syncWorkflowTriggers } from "@/lib/workflow/runtime/webhook-bridge"
+import { validateConnection } from "@/lib/workflow/editor/connection-validator"
 import type { TriggerEvent } from "@/types/workflow/visual"
 import { WorkflowNodeComponent } from "./nodes/workflow-node"
 import { EditorToolbar } from "./toolbar"
 import { EditorEmptyState } from "./empty-state"
 import { NodeSearchSidebar, NODE_DRAG_MIME } from "./node-search-sidebar"
 import { InspectorPanel } from "./inspector-panel"
+import { CommandPalette } from "./command-palette"
+import * as ResizablePrimitive from "react-resizable-panels"
+import { GripVerticalIcon } from "lucide-react"
 import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 
 const nodeTypes: NodeTypes = {
@@ -63,6 +69,9 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     viewport,
     dirty,
     workflowName,
+    workflowId,
+    runStatusByStepId,
+    validationByStepId,
     setNodes,
     setEdges,
     setViewport,
@@ -78,6 +87,9 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       viewport: s.viewport,
       dirty: s.dirty,
       workflowName: s.baseWorkflow.name,
+      workflowId: s.baseWorkflow.id,
+      runStatusByStepId: s.runStatusByStepId,
+      validationByStepId: s.validationByStepId,
       setNodes: s.setNodes,
       setEdges: s.setEdges,
       setViewport: s.setViewport,
@@ -88,6 +100,29 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       toWorkflow: s.toWorkflow,
     }))
   )
+
+  // Wire the live run-status bridge so the canvas reflects what the
+  // orchestrator is doing in real time.
+  useRunStatusBridge(workflowId, useStore)
+
+  // Merge the live runStatus + validation errors into each node's `data` so
+  // `WorkflowNodeComponent` can render the status ring without the runtime
+  // events plumbing leaking down to each node.
+  const decoratedNodes = useMemo(() => {
+    return nodes.map((n) => {
+      const status = runStatusByStepId[n.id]
+      const errors = validationByStepId[n.id]
+      if (!status && !errors) return n
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          ...(status ? { runStatus: status } : {}),
+          ...(errors ? { validationErrors: errors } : {}),
+        },
+      }
+    })
+  }, [nodes, runStatusByStepId, validationByStepId])
 
   const [saving, setSaving] = useState(false)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
@@ -132,6 +167,11 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
 
   const onConnect = useCallback(
     (connection: Connection) => {
+      const result = validateConnection(connection, nodes, edges)
+      if (!result.valid) {
+        toast.error(result.reason)
+        return
+      }
       setEdges(
         addEdge(
           {
@@ -143,7 +183,13 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         ) as typeof edges
       )
     },
-    [edges, setEdges]
+    [nodes, edges, setEdges]
+  )
+
+  const isValidConnection = useCallback(
+    (connection: Connection | { source: string | null; target: string | null }) =>
+      validateConnection(connection, nodes, edges).valid,
+    [nodes, edges]
   )
 
   const onMoveEnd = useCallback((_e: unknown, v: Viewport) => setViewport(v), [setViewport])
@@ -154,6 +200,11 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     try {
       const wf: VisualWorkflow = toWorkflow()
       await replaceWorkflow(wf)
+      // Push the workflow's trigger nodes to the Rust side so cron / webhook
+      // triggers fire even when the editor is closed. Web-mode no-ops.
+      await syncWorkflowTriggers(wf).catch((err: unknown) => {
+        console.warn("syncWorkflowTriggers failed:", err)
+      })
       markSaved()
       toast.success("Workflow saved")
     } catch (err) {
@@ -214,7 +265,63 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     requestAnimationFrame(() => reactFlowInstance?.fitView({ duration: 250, padding: 0.2 }))
   }, [nodes, edges, setNodes, reactFlowInstance])
 
-  // Keyboard shortcuts: Ctrl/Cmd+S, Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z
+  // ── JSON export / import ──────────────────────────────────────────────────
+  const handleExportJson = useCallback(() => {
+    const wf = toWorkflow()
+    const blob = new Blob([JSON.stringify(wf, null, 2)], {
+      type: "application/json",
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `${wf.name.replace(/[^a-z0-9-_]+/gi, "_") || "workflow"}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    toast.success("Workflow JSON downloaded")
+  }, [toWorkflow])
+
+  const handleImportJson = useCallback(
+    (jsonText: string) => {
+      try {
+        const parsed = JSON.parse(jsonText) as Partial<VisualWorkflow>
+        if (!parsed || typeof parsed !== "object") throw new Error("Top-level must be an object")
+        if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
+          throw new Error("Missing 'nodes' or 'edges' array")
+        }
+        useStore.getState().loadWorkflow({
+          ...useStore.getState().toWorkflow(),
+          ...parsed,
+          // Preserve current id so we don't accidentally overwrite a different
+          // workflow on save. If the user wants a fresh row, they should
+          // duplicate from the library afterwards.
+          id: useStore.getState().baseWorkflow.id,
+        } as VisualWorkflow)
+        toast.success("Workflow imported")
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? `Import failed: ${err.message}` : "Import failed: invalid JSON"
+        )
+      }
+    },
+    [useStore]
+  )
+
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const handleAddFromPalette = useCallback(
+    (kind: WorkflowNodeKind) => {
+      const center = reactFlowInstance?.screenToFlowPosition({
+        x: window.innerWidth / 2,
+        y: window.innerHeight / 2,
+      })
+      const id = useStore.getState().addNode(kind, center ?? { x: 80, y: 80 })
+      setSelectedNodes([id])
+    },
+    [reactFlowInstance, useStore, setSelectedNodes]
+  )
+
+  // Keyboard shortcuts: Ctrl/Cmd+S, Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+K
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey
@@ -228,6 +335,9 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       } else if ((e.key.toLowerCase() === "z" && e.shiftKey) || e.key.toLowerCase() === "y") {
         e.preventDefault()
         handleRedo()
+      } else if (e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        setPaletteOpen((v) => !v)
       }
     }
     window.addEventListener("keydown", onKey)
@@ -289,6 +399,26 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     return "#71717a"
   }, [])
 
+  // Open the file picker programmatically when the command palette asks us to.
+  const importInputRef = useRef<HTMLInputElement | null>(null)
+  const handleImportRequest = useCallback(() => {
+    importInputRef.current?.click()
+  }, [])
+  const handleImportInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      e.target.value = ""
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = () => {
+        const text = typeof reader.result === "string" ? reader.result : ""
+        if (text) handleImportJson(text)
+      }
+      reader.readAsText(file)
+    },
+    [handleImportJson]
+  )
+
   return (
     <div className="flex h-full w-full flex-col">
       <EditorToolbar
@@ -303,50 +433,94 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         canUndo={canUndo}
         canRedo={canRedo}
         onAutoLayout={handleAutoLayout}
+        onExportJson={handleExportJson}
+        onImportJson={handleImportJson}
+        onOpenCommandPalette={() => setPaletteOpen(true)}
       />
-      <div className="flex flex-1 overflow-hidden">
-        <NodeSearchSidebar onAddNodeAtCenter={handleAddAtCenter} />
-        <div
-          className="relative flex-1 overflow-hidden bg-muted/30"
-          data-testid="workflow-canvas"
-          onDrop={handleDrop}
-          onDragOver={handleDragOver}
-        >
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            viewport={viewport}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onMoveEnd={onMoveEnd}
-            onInit={setReactFlowInstance}
-            nodeTypes={nodeTypes}
-            fitView={false}
-            minZoom={0.2}
-            maxZoom={2}
-            snapToGrid
-            snapGrid={[16, 16]}
-            deleteKeyCode={["Backspace", "Delete"]}
-            multiSelectionKeyCode={["Shift", "Meta", "Control"]}
-            panOnScroll
-            selectionOnDrag
-            proOptions={{ hideAttribution: true }}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept="application/json,.json"
+        className="hidden"
+        onChange={handleImportInputChange}
+      />
+      <ResizablePrimitive.Group
+        orientation="horizontal"
+        className="flex flex-1 overflow-hidden"
+        id="cognia-workflow-editor-layout"
+      >
+        <ResizablePrimitive.Panel defaultSize={20} minSize={14} maxSize={32}>
+          <NodeSearchSidebar onAddNodeAtCenter={handleAddAtCenter} />
+        </ResizablePrimitive.Panel>
+        <ResizablePrimitive.Separator className="relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:outline-none">
+          <div className="z-10 flex h-4 w-3 items-center justify-center rounded border bg-border">
+            <GripVerticalIcon className="size-2.5" />
+          </div>
+        </ResizablePrimitive.Separator>
+        <ResizablePrimitive.Panel defaultSize={56} minSize={30}>
+          <div
+            className="relative h-full w-full overflow-hidden bg-muted/30"
+            data-testid="workflow-canvas"
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
           >
-            <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
-            <Controls position="bottom-left" />
-            <MiniMap
-              position="bottom-right"
-              pannable
-              zoomable
-              nodeColor={minimapNodeColor as unknown as () => string}
-              className="!rounded-md !border !bg-background"
-            />
-          </ReactFlow>
-          {showEmpty ? <EditorEmptyState onAddNode={addManualTrigger} /> : null}
-        </div>
-        <InspectorPanel useStore={store} />
-      </div>
+            <ReactFlow
+              nodes={decoratedNodes}
+              edges={edges}
+              viewport={viewport}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              isValidConnection={isValidConnection}
+              onMoveEnd={onMoveEnd}
+              onInit={setReactFlowInstance}
+              nodeTypes={nodeTypes}
+              fitView={false}
+              minZoom={0.2}
+              maxZoom={2}
+              snapToGrid
+              snapGrid={[16, 16]}
+              deleteKeyCode={["Backspace", "Delete"]}
+              multiSelectionKeyCode={["Shift", "Meta", "Control"]}
+              panOnScroll
+              selectionOnDrag
+              proOptions={{ hideAttribution: true }}
+            >
+              <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+              <Controls position="bottom-left" />
+              <MiniMap
+                position="bottom-right"
+                pannable
+                zoomable
+                nodeColor={minimapNodeColor as unknown as () => string}
+                className="!rounded-md !border !bg-background"
+              />
+            </ReactFlow>
+            {showEmpty ? <EditorEmptyState onAddNode={addManualTrigger} /> : null}
+          </div>
+        </ResizablePrimitive.Panel>
+        <ResizablePrimitive.Separator className="relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:outline-none">
+          <div className="z-10 flex h-4 w-3 items-center justify-center rounded border bg-border">
+            <GripVerticalIcon className="size-2.5" />
+          </div>
+        </ResizablePrimitive.Separator>
+        <ResizablePrimitive.Panel defaultSize={24} minSize={18} maxSize={40}>
+          <InspectorPanel useStore={store} className="h-full w-full" />
+        </ResizablePrimitive.Panel>
+      </ResizablePrimitive.Group>
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        currentWorkflowId={workflowId}
+        onAddNode={handleAddFromPalette}
+        onSave={handleSave}
+        onRun={handleRun}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onAutoLayout={handleAutoLayout}
+        onExportJson={handleExportJson}
+        onImportJsonRequest={handleImportRequest}
+      />
     </div>
   )
 }

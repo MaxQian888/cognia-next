@@ -19,6 +19,32 @@ jest.mock("@/lib/claude/ipc", () => ({
 }))
 jest.mock("@/lib/db/sessions", () => ({
   getSession: (...args: unknown[]) => getSessionMock(...args),
+  listSessions: () => Promise.resolve([]),
+}))
+jest.mock("@/lib/db/mcp-servers", () => ({
+  listMcpServers: () => Promise.resolve([]),
+}))
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: (fn: () => unknown) => {
+    const out = fn()
+    if (out instanceof Promise) return undefined
+    return out
+  },
+}))
+const sidecarInfoRef = {
+  current: { ready: false } as { ready: boolean; sdkVersion?: string; sidecarVersion?: string },
+}
+jest.mock("@/lib/claude/sidecar-info", () => ({
+  useSidecarInfo: () => sidecarInfoRef.current,
+}))
+jest.mock("@/lib/slash-commands/builtin", () => ({
+  BUILTIN_SLASH_COMMANDS: [{ name: "x" }],
+}))
+jest.mock("@/lib/slash-commands/registry", () => ({
+  listSlashCommands: () => [],
+}))
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: jest.fn() }),
 }))
 jest.mock("@/stores/chat", () => ({
   useChatStore: (selector: (state: unknown) => unknown) =>
@@ -57,14 +83,17 @@ describe("SidecarTab", () => {
     getSidecarStatusMock.mockResolvedValue({ ready: true })
     getSessionMock.mockResolvedValue({})
     render(<SidecarTab />)
-    await waitFor(() => expect(screen.getByText("—")).toBeInTheDocument())
+    // Multiple "—" instances (sdkVersion, sidecarVersion, sdkSession). Asserting
+    // ≥1 is enough — a more specific assertion would need a test-id and the
+    // `—` literal is the only fallback marker we render.
+    await waitFor(() => expect(screen.getAllByText("—").length).toBeGreaterThan(0))
   })
 
   it("shows '—' when there is no active session at all", async () => {
     activeSessionRef.current = null
     getSidecarStatusMock.mockResolvedValue({ ready: true })
     render(<SidecarTab />)
-    expect(screen.getByText("—")).toBeInTheDocument()
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0)
   })
 
   it("clicking Restart calls restartSidecar exactly once", async () => {
@@ -81,5 +110,24 @@ describe("SidecarTab", () => {
     getSidecarStatusMock.mockRejectedValue(new Error("boom"))
     render(<SidecarTab />)
     await waitFor(() => expect(screen.getByText("stopped")).toBeInTheDocument())
+  })
+
+  it("renders the SDK version as a link to npm when sidecar reported one", () => {
+    sidecarInfoRef.current = { ready: true, sdkVersion: "0.42.0", sidecarVersion: "0.1.0" }
+    getSidecarStatusMock.mockResolvedValue({ ready: true })
+    render(<SidecarTab />)
+    const link = screen.getByTestId("sidecar-sdk-version") as HTMLAnchorElement
+    expect(link).toBeInTheDocument()
+    expect(link.href).toContain("0.42.0")
+    expect(link.target).toBe("_blank")
+  })
+
+  it("renders 4 count tiles", () => {
+    getSidecarStatusMock.mockResolvedValue({ ready: true })
+    render(<SidecarTab />)
+    expect(screen.getByTestId("count-tile-sessions")).toBeInTheDocument()
+    expect(screen.getByTestId("count-tile-slash-commands")).toBeInTheDocument()
+    expect(screen.getByTestId("count-tile-hooks")).toBeInTheDocument()
+    expect(screen.getByTestId("count-tile-mcp")).toBeInTheDocument()
   })
 })

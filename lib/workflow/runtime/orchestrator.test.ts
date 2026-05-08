@@ -220,7 +220,9 @@ describe("runWorkflow — branch decisions", () => {
 
 describe("runWorkflow — failure handling", () => {
   it("reports a failed run when an executor is missing for a node kind", async () => {
-    // Use a kind we know isn't registered yet (action.team.run lands in Phase 6).
+    // Use annotation.note — annotations are intentionally not executable
+    // (they're display-only) so they exercise the "no executor registered"
+    // failure path. action.* and ai.* kinds are now all registered.
     const wf = buildWorkflow(
       [
         {
@@ -231,18 +233,18 @@ describe("runWorkflow — failure handling", () => {
           data: { label: "start", params: {} },
         },
         {
-          id: "n_team",
-          type: "action.team.run",
+          id: "n_note",
+          type: "annotation.note",
           typeVersion: 1,
           position: { x: 200, y: 0 },
-          data: { label: "team", params: { teamId: "team_1", goal: "x" } },
+          data: { label: "note", params: { text: "blocking annotation" } },
         },
       ],
-      [{ id: "e1", source: "n_start", target: "n_team" }]
+      [{ id: "e1", source: "n_start", target: "n_note" }]
     )
     const r = await runWorkflow({ workflow: wf, trigger })
     expect(r.status).toBe("failed")
-    expect(r.error?.nodeId).toBe("n_team")
+    expect(r.error?.nodeId).toBe("n_note")
     expect(r.error?.message).toMatch(/no executor registered/i)
   })
 

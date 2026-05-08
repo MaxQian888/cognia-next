@@ -339,3 +339,77 @@ html[data-bg-preview="all"] [data-bg-target] {
 [data-panel-group] > [data-resize-handle] > div {
   width: 2px;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Mobile safe-area + iOS auto-zoom prevention (M4.3 / #47).
+ *
+ * Capacitor on iOS lets the WebView paint into the notch / Dynamic Island /
+ * home-indicator area only when the viewport meta tag carries
+ * `viewport-fit=cover` (set in app/layout.tsx). The layout then adds these
+ * utility classes to lift its top bar past the notch and its bottom bar
+ * above the gesture indicator. On Tauri / web the env() values are 0 so
+ * the utilities are inert.
+ *
+ * Add `font-size: max(16px, …)` on text inputs to prevent iOS Safari /
+ * WkWebView from auto-zooming when an input gains focus.
+ *
+ * The CSS-side of M4.3 is reusable from the Tauri shell too — wider safe-
+ * area handling never hurts the desktop layout.
+ * ──────────────────────────────────────────────────────────────────────────*/
+
+@layer utilities {
+  .safe-area-pt {
+    padding-top: env(safe-area-inset-top);
+  }
+  .safe-area-pb {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .safe-area-pl {
+    padding-left: env(safe-area-inset-left);
+  }
+  .safe-area-pr {
+    padding-right: env(safe-area-inset-right);
+  }
+  .safe-area-px {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  .safe-area-py {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  /* Add to fixed-position UI that sits flush against the screen edge. */
+  .safe-area-mt {
+    margin-top: env(safe-area-inset-top);
+  }
+  .safe-area-mb {
+    margin-bottom: env(safe-area-inset-bottom);
+  }
+  /* Touch-target floor — iOS HIG mandates 44pt × 44pt. */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* iOS auto-zoom prevention: any text input that's <16px on focus triggers
+ * an unwanted zoom-in. Apply to every native form control globally so we
+ * don't have to remember per-component. The visual size at the desktop's
+ * higher density still feels small — balance by setting the input's
+ * design-token size in component-level utilities. */
+input[type="text"],
+input[type="email"],
+input[type="number"],
+input[type="password"],
+input[type="search"],
+input[type="tel"],
+input[type="url"],
+input[type="date"],
+input[type="datetime-local"],
+input[type="time"],
+input[type="month"],
+input[type="week"],
+textarea,
+select {
+  font-size: max(16px, 1rem);
+}

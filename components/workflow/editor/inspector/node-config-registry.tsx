@@ -12,25 +12,45 @@
 import type { ComponentType } from "react"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
 import {
+  AiClassifyConfig,
+  AiEmbedConfig,
+  AiExtractConfig,
   AiPromptConfig,
   BranchConfig,
+  CharacterCreateConfig,
   CharacterSendConfig,
+  CharacterUpdateConfig,
   ChatMessageTriggerConfig,
   CodeConfig,
+  ConnectorDraftConfig,
   ConnectorInboundConfig,
   ConnectorSendConfig,
   CronConfig,
   GenericJsonConfig,
+  GroupAnnotationConfig,
   HttpRequestConfig,
+  JoinConfig,
+  LoopConfig,
   ManualTriggerConfig,
+  McpInvokeToolConfig,
   NoteConfig,
+  PluginInvokeConfig,
   SetVariableConfig,
   SkillInvokeConfig,
+  SkillUpsertConfig,
+  SplitConfig,
+  SubworkflowConfig,
+  SwitchConfig,
+  TeamCreateConfig,
   TeamRunConfig,
+  TeamUpdateConfig,
   TemplateConfig,
   TransformConfig,
+  TwinIngestConfig,
   TwinRagConfig,
   WaitConfig,
+  WebhookRespondConfig,
+  WebhookTriggerConfig,
 } from "./forms"
 
 export type NodeConfigComponent = ComponentType<{
@@ -39,24 +59,56 @@ export type NodeConfigComponent = ComponentType<{
 }>
 
 const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
+  // Triggers
   "trigger.manual": ManualTriggerConfig,
   "trigger.cron": CronConfig,
   "trigger.connector.inbound": ConnectorInboundConfig,
   "trigger.chat.message": ChatMessageTriggerConfig,
+  "trigger.webhook": WebhookTriggerConfig,
+  // Actions: characters
   "action.character.send": CharacterSendConfig,
+  "action.character.create": CharacterCreateConfig,
+  "action.character.update": CharacterUpdateConfig,
+  // Actions: teams
   "action.team.run": TeamRunConfig,
+  "action.team.create": TeamCreateConfig,
+  "action.team.update": TeamUpdateConfig,
+  // Actions: skills
   "action.skill.invoke": SkillInvokeConfig,
+  "action.skill.upsert": SkillUpsertConfig,
+  // Actions: twins
   "action.twin.rag": TwinRagConfig,
+  "action.twin.ingest": TwinIngestConfig,
+  // Actions: connectors
   "action.connector.send": ConnectorSendConfig,
+  "action.connector.draft": ConnectorDraftConfig,
+  // Actions: extensibility
+  "action.mcp.invokeTool": McpInvokeToolConfig,
+  "action.plugin.invoke": PluginInvokeConfig,
+  // AI
   "ai.prompt": AiPromptConfig,
+  "ai.classify": AiClassifyConfig,
+  "ai.extract": AiExtractConfig,
+  "ai.embed": AiEmbedConfig,
+  // Flow
   "flow.branch": BranchConfig,
-  "flow.set": SetVariableConfig,
+  "flow.switch": SwitchConfig,
+  "flow.split": SplitConfig,
+  "flow.join": JoinConfig,
+  "flow.loop": LoopConfig,
   "flow.wait": WaitConfig,
-  "io.http": HttpRequestConfig,
+  "flow.set": SetVariableConfig,
+  "flow.subworkflow": SubworkflowConfig,
+  // Data
+  "data.transform": TransformConfig,
   "data.code": CodeConfig,
   "data.template": TemplateConfig,
-  "data.transform": TransformConfig,
+  // I/O
+  "io.http": HttpRequestConfig,
+  "io.webhook.respond": WebhookRespondConfig,
+  // Annotations
   "annotation.note": NoteConfig,
+  "annotation.group": GroupAnnotationConfig,
 }
 
 /**

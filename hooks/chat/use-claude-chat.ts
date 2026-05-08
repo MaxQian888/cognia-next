@@ -14,6 +14,7 @@ import {
 } from "@/lib/claude/ipc"
 import { listMessages, persistMessages, truncateAfter } from "@/lib/db/messages"
 import { getSession, setSdkSessionId, touchSession, updateSession } from "@/lib/db/sessions"
+import { recordResultUsage } from "@/lib/db/session-usage"
 import { bumpUnread } from "@/lib/db/session-state"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import {
@@ -548,7 +549,11 @@ async function handleEvent(
       // Source of truth lives in Dexie. Load → apply → save → maybe sync store.
       const current = isActive ? useChatStore.getState().messages : await listMessages(sessionId)
 
-      const { messages: nextMessages, turnComplete } = applySdkEvent(current, env.event)
+      const {
+        messages: nextMessages,
+        turnComplete,
+        result: sdkResult,
+      } = applySdkEvent(current, env.event)
 
       // Plan-mode → tasks bridge: forward TodoWrite / TaskCreate / TaskUpdate
       // / TaskList / ExitPlanMode tool_use blocks to the agent-team store so
@@ -572,6 +577,25 @@ async function handleEvent(
           // Background reply landed for a non-active session — bump the
           // unread count so the channel list shows a dot.
           await bumpUnread(sessionId).catch(() => {})
+        }
+      }
+
+      // Persist per-turn usage + cost. Runs for every result event regardless
+      // of `isActive` so background sessions still accumulate cost. Idempotent
+      // on (messageId) — re-applying the same result overwrites the row.
+      if (sdkResult) {
+        const lastAssistant = [...nextMessages].reverse().find((m) => m.role === "assistant")
+        if (lastAssistant) {
+          const session = await getSession(sessionId).catch(() => undefined)
+          await recordResultUsage({
+            sessionId,
+            messageId: lastAssistant.id,
+            characterId: session?.characterId,
+            model: session?.model,
+            result: sdkResult,
+          }).catch((err) => {
+            console.warn("recordResultUsage failed", err)
+          })
         }
       }
 

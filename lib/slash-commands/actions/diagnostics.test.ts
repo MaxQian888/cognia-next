@@ -1,6 +1,10 @@
 jest.mock("@/lib/claude/ipc", () => ({
   getSidecarStatus: jest.fn(),
   hasApiKey: jest.fn(),
+  hasOauthBearer: jest.fn(),
+}))
+jest.mock("@/lib/tauri", () => ({
+  isTauri: jest.fn(() => false),
 }))
 jest.mock("@/lib/db/sessions", () => ({
   getSession: jest.fn(),
@@ -18,8 +22,9 @@ jest.mock("@/stores/settings", () => ({
   useSettingsStore: { getState: jest.fn() },
 }))
 
-import { handleStatus, handleCost } from "./diagnostics"
-import { getSidecarStatus, hasApiKey } from "@/lib/claude/ipc"
+import { handleStatus, handleCost, handleContext, handleDoctor } from "./diagnostics"
+import { getSidecarStatus, hasApiKey, hasOauthBearer } from "@/lib/claude/ipc"
+import { isTauri } from "@/lib/tauri"
 import { getSession } from "@/lib/db/sessions"
 import { listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import { resolveSendOptions } from "@/lib/claude/build-options"
@@ -29,6 +34,8 @@ import type { SlashContext } from "../builtin"
 
 const mockedSidecar = getSidecarStatus as unknown as jest.Mock
 const mockedHasApiKey = hasApiKey as unknown as jest.Mock
+const mockedHasOauthBearer = hasOauthBearer as unknown as jest.Mock
+const mockedIsTauri = isTauri as unknown as jest.Mock
 const mockedGetSession = getSession as unknown as jest.Mock
 const mockedMcp = listEnabledMcpServers as unknown as jest.Mock
 const mockedResolve = resolveSendOptions as unknown as jest.Mock
@@ -57,6 +64,8 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockedChatGetState.mockReturnValue({ messages: [], referencedPaths: [] })
   mockedSettingsGetState.mockReturnValue({ settings: null })
+  mockedHasOauthBearer.mockResolvedValue(false)
+  mockedIsTauri.mockReturnValue(false)
 })
 
 describe("handleStatus", () => {
@@ -231,5 +240,138 @@ describe("handleCost", () => {
     expect(md).not.toContain("Cache**")
     expect(md).not.toContain("Cost**")
     expect(md).not.toContain("Duration**")
+  })
+})
+
+describe("handleDoctor", () => {
+  it("reports OAuth path when bearer present", async () => {
+    mockedSidecar.mockResolvedValue({ ready: true })
+    mockedHasApiKey.mockResolvedValue(false)
+    mockedHasOauthBearer.mockResolvedValue(true)
+    mockedMcp.mockResolvedValue([{ name: "fs", transport: "stdio" }])
+    mockedSettingsGetState.mockReturnValue({
+      settings: {
+        defaultModel: "claude-3",
+        permissionMode: "acceptEdits",
+        defaultWorkingDir: "/work",
+        defaultMaxThinkingTokens: 8000,
+      },
+    })
+    mockedIsTauri.mockReturnValue(true)
+    const ctx = makeCtx()
+    await handleDoctor(ctx)
+    const md = ctx._pushed[0]
+    expect(md).toContain("**Doctor**")
+    expect(md).toContain("Mode: Tauri desktop")
+    expect(md).toContain("Sidecar: ready")
+    expect(md).toContain("Claude OAuth bearer: present")
+    expect(md).toContain("Default model: claude-3")
+    expect(md).toContain("Permission mode: acceptEdits")
+    expect(md).toContain("Working dir: /work")
+    expect(md).toContain("Thinking budget: 8000 tokens")
+    expect(md).toContain("`fs` (stdio)")
+    expect(md).toContain("Settings → Agent runtime → Sidecar")
+  })
+
+  it("reports API key path + web mode when no OAuth", async () => {
+    mockedSidecar.mockResolvedValue({ ready: false })
+    mockedHasApiKey.mockResolvedValue(true)
+    mockedHasOauthBearer.mockResolvedValue(false)
+    mockedMcp.mockResolvedValue([])
+    mockedSettingsGetState.mockReturnValue({ settings: null })
+    mockedIsTauri.mockReturnValue(false)
+    const ctx = makeCtx()
+    await handleDoctor(ctx)
+    const md = ctx._pushed[0]
+    expect(md).toContain("Mode: Web (browser)")
+    expect(md).toContain("Sidecar: not ready")
+    expect(md).toContain("Anthropic API key: present")
+    expect(md).toContain("Default model: (SDK default)")
+    expect(md).toContain("Permission mode: default")
+    expect(md).toContain("Working dir: (none)")
+    expect(md).toContain("Thinking budget: disabled")
+    expect(md).toContain("No enabled MCP servers.")
+    expect(md).toContain("require the desktop build")
+  })
+
+  it("warns when neither credential is present", async () => {
+    mockedSidecar.mockResolvedValue({ ready: true })
+    mockedHasApiKey.mockResolvedValue(false)
+    mockedHasOauthBearer.mockResolvedValue(false)
+    mockedMcp.mockResolvedValue([])
+    const ctx = makeCtx()
+    await handleDoctor(ctx)
+    expect(ctx._pushed[0]).toContain("⚠ No credentials")
+  })
+
+  it("tolerates probe failures", async () => {
+    mockedSidecar.mockRejectedValue(new Error("fail"))
+    mockedHasApiKey.mockRejectedValue(new Error("fail"))
+    mockedHasOauthBearer.mockRejectedValue(new Error("fail"))
+    mockedMcp.mockRejectedValue(new Error("fail"))
+    const ctx = makeCtx()
+    await handleDoctor(ctx)
+    expect(ctx._pushed[0]).toContain("Sidecar: not ready")
+    expect(ctx._pushed[0]).toContain("⚠ No credentials")
+  })
+})
+
+describe("handleContext", () => {
+  it("reports a fresh window when there are no assistant turns", async () => {
+    mockedChatGetState.mockReturnValue({ messages: [{ role: "user" }] })
+    const ctx = makeCtx()
+    await handleContext(ctx)
+    const md = ctx._pushed[0]
+    expect(md).toContain("**Context**")
+    expect(md).toContain("Messages: 1 user · 0 assistant")
+    expect(md).toContain("context window is fresh")
+  })
+
+  it("aggregates input/output/cache totals across assistant turns", async () => {
+    mockedChatGetState.mockReturnValue({
+      messages: [
+        { role: "user" },
+        {
+          role: "assistant",
+          metadata: {
+            usage: {
+              inputTokens: 1000,
+              outputTokens: 500,
+              cacheCreationInputTokens: 200,
+              cacheReadInputTokens: 100,
+            },
+          },
+        },
+        {
+          role: "assistant",
+          metadata: { usage: { inputTokens: 200, outputTokens: 300 } },
+        },
+      ],
+    })
+    const ctx = makeCtx()
+    await handleContext(ctx)
+    const md = ctx._pushed[0]
+    expect(md).toContain("Messages: 1 user · 2 assistant")
+    // input + cache reads + cache creation = 1200 + 100 + 200 = 1500
+    expect(md).toContain("Input tokens (incl. cache): 1,500")
+    expect(md).toContain("Output tokens: 800")
+    expect(md).toContain("write 200 / read 100")
+    expect(md).toContain("/compact")
+  })
+
+  it("omits the cache line when no cache hits", async () => {
+    mockedChatGetState.mockReturnValue({
+      messages: [
+        {
+          role: "assistant",
+          metadata: { usage: { inputTokens: 10, outputTokens: 5 } },
+        },
+      ],
+    })
+    const ctx = makeCtx()
+    await handleContext(ctx)
+    const md = ctx._pushed[0]
+    expect(md).toContain("Input tokens (incl. cache): 10")
+    expect(md).not.toContain("Cache hits")
   })
 })

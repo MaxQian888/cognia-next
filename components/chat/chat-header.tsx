@@ -42,7 +42,6 @@ import type { AppSettings, ChatSession, SystemPromptPreset } from "@/lib/claude/
 import type { UsageInfo } from "@/lib/claude/adapter"
 import type { UIMessage } from "ai"
 import {
-  CircleDollarSignIcon,
   FolderOpenIcon,
   GitBranchIcon,
   KeyRoundIcon,
@@ -62,6 +61,7 @@ import { Badge } from "@/components/ui/badge"
 import { SingleExportTrigger } from "@/components/chat/dialogs/single-export-trigger"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { TwinHeaderBadge } from "@/components/chat/twin-header-badge"
+import { SessionCostBadge } from "@/components/chat/session-cost-badge"
 import { forkSessionFromParent } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
 import { toast } from "sonner"
@@ -365,18 +365,11 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
       </div>
 
       {usage && (
-        <div className="hidden items-center gap-1 text-xs text-muted-foreground sm:flex">
-          <CircleDollarSignIcon className="size-3.5" />
-          <span title={`Input ${usage.inputTokens ?? 0} · Output ${usage.outputTokens ?? 0}`}>
-            {t("tokensLabel", {
-              input: formatTokens(usage.inputTokens ?? 0),
-              output: formatTokens(usage.outputTokens ?? 0),
-            })}
-          </span>
-          {usage.totalCostUsd !== undefined && (
-            <span className="font-mono">· ${usage.totalCostUsd.toFixed(4)}</span>
-          )}
-        </div>
+        <SessionCostBadge
+          sessionId={session.id}
+          inMemoryUsage={usage}
+          tokensLabel={(input, output) => t("tokensLabel", { input, output })}
+        />
       )}
 
       <SingleExportTrigger session={session} />
@@ -730,12 +723,6 @@ function PresetConflictDialog({ preset, conflicts, onCancel, onConfirm }: Confli
       </AlertDialogContent>
     </AlertDialog>
   )
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
-  return String(n)
 }
 
 interface SkillsBadgeProps {

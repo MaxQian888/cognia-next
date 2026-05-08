@@ -7,11 +7,18 @@
 import type { McpTransport } from "./types"
 
 export interface McpPresetField {
-  /** The key under which the user's value lives. For env vars: env name. */
+  /** The key under which the user's value lives. For env vars: env name.
+   *  For headers: header name. For url: ignored (single field per preset). */
   key: string
   label: string
-  /** Where this value plugs into the config: env var or args index. */
-  placement: "env" | "arg-replace"
+  /**
+   * Where this value plugs into the config:
+   *   - "env": stdio-only environment variable.
+   *   - "arg-replace": stdio-only argv token swap.
+   *   - "url": http/sse URL — replaces `config.url` directly.
+   *   - "header": http/sse header — written under `config.headers[key]`.
+   */
+  placement: "env" | "arg-replace" | "url" | "header"
   /** When placement === "arg-replace", which token to swap (e.g. "<PATH>"). */
   token?: string
   description?: string
@@ -265,6 +272,77 @@ export const MCP_PRESETS: McpPreset[] = [
     tags: ["util"],
   },
   {
+    id: "deepwiki",
+    name: "DeepWiki",
+    description:
+      "Q&A over public GitHub repos (architecture, code paths, Why-this-decision). No auth needed.",
+    icon: "📘",
+    transport: "http",
+    config: {
+      url: "https://mcp.deepwiki.com/mcp",
+    },
+    fields: [],
+    docsUrl: "https://docs.devin.ai/work-with-devin/deepwiki-mcp",
+    tags: ["docs", "search"],
+  },
+  {
+    id: "http-generic",
+    name: "Streamable HTTP server",
+    description: "Connect to any HTTP MCP endpoint. Optional Bearer token under Authorization.",
+    icon: "🌐",
+    transport: "http",
+    config: {
+      url: "",
+      headers: {} as Record<string, string>,
+    },
+    fields: [
+      {
+        key: "url",
+        label: "Endpoint URL",
+        placement: "url",
+        placeholder: "https://example.com/mcp",
+        description: "The streamable-HTTP MCP endpoint exposed by your service.",
+      },
+      {
+        key: "Authorization",
+        label: "Authorization header",
+        placement: "header",
+        placeholder: "Bearer …",
+        secret: true,
+        description: "Optional. Leave empty for unauthenticated servers.",
+      },
+    ],
+    tags: ["custom", "http"],
+  },
+  {
+    id: "sse-generic",
+    name: "SSE server",
+    description: "Connect to a server-sent-events MCP endpoint. Streams responses over SSE.",
+    icon: "📡",
+    transport: "sse",
+    config: {
+      url: "",
+      headers: {} as Record<string, string>,
+    },
+    fields: [
+      {
+        key: "url",
+        label: "Endpoint URL",
+        placement: "url",
+        placeholder: "https://example.com/sse",
+      },
+      {
+        key: "Authorization",
+        label: "Authorization header",
+        placement: "header",
+        placeholder: "Bearer …",
+        secret: true,
+        description: "Optional. Leave empty for unauthenticated servers.",
+      },
+    ],
+    tags: ["custom", "sse"],
+  },
+  {
     id: "custom",
     name: "Custom server",
     description: "Configure any MCP server by hand. Skips the form.",
@@ -277,8 +355,12 @@ export const MCP_PRESETS: McpPreset[] = [
 ]
 
 /**
- * Apply the user's field values to a preset's config. Replaces arg tokens and
- * fills env vars. Returns a fresh config object — does NOT mutate the preset.
+ * Apply the user's field values to a preset's config. Replaces arg tokens,
+ * fills env vars, and writes URL / header fields for http/sse presets.
+ * Returns a fresh config object — does NOT mutate the preset.
+ *
+ * Empty values for `header` and `env` fields are skipped so we don't
+ * persist stray `Authorization: ""` headers that some servers reject.
  */
 export function applyPresetFields(
   preset: McpPreset,
@@ -295,7 +377,18 @@ export function applyPresetFields(
     } else if (field.placement === "arg-replace" && field.token) {
       const args = (config.args as unknown[]) ?? []
       config.args = args.map((a) => (typeof a === "string" ? a.replaceAll(field.token!, value) : a))
+    } else if (field.placement === "url") {
+      config.url = value
+    } else if (field.placement === "header") {
+      if (!value) continue
+      const headers = (config.headers as Record<string, string>) ?? {}
+      headers[field.key] = value
+      config.headers = headers
     }
+  }
+  // Drop the empty `headers` map for cleanliness when the user filled none.
+  if (config.headers && Object.keys(config.headers as Record<string, string>).length === 0) {
+    delete config.headers
   }
   return config
 }

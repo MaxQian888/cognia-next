@@ -11,8 +11,38 @@ jest.mock("next-intl", () => ({
 }))
 
 const mockLoadCustom = jest.fn()
+const mockDeleteCustom = jest.fn()
 jest.mock("@/lib/slash-commands/custom", () => ({
   loadCustomSlashCommands: () => mockLoadCustom(),
+  deleteCustomSlashCommand: (...args: unknown[]) => mockDeleteCustom(...args),
+}))
+
+// Stub the editor dialog so we don't drag the form into this test surface.
+jest.mock("./command-editor-dialog", () => ({
+  CommandEditorDialog: ({
+    open,
+    onOpenChange,
+    initial,
+  }: {
+    open: boolean
+    onOpenChange: (open: boolean) => void
+    initial?: unknown
+  }) =>
+    open ? (
+      <div data-testid="editor-stub" data-mode={initial ? "edit" : "create"}>
+        <button onClick={() => onOpenChange(false)} data-testid="editor-stub-close">
+          close
+        </button>
+      </div>
+    ) : null,
+}))
+
+jest.mock("@/stores/chat", () => ({
+  useChatStore: (selector: (s: unknown) => unknown) => selector({ activeSessionId: null }),
+}))
+
+jest.mock("@/lib/db/sessions", () => ({
+  getSession: jest.fn().mockResolvedValue(null),
 }))
 
 const mockListRegistry = jest.fn()
@@ -24,8 +54,9 @@ jest.mock("@/lib/slash-commands/registry", () => ({
   seedBuiltinSlashCommands: jest.fn(),
 }))
 
+const isTauriMock = jest.fn(() => true)
 jest.mock("@/lib/tauri", () => ({
-  isTauri: () => true,
+  isTauri: () => isTauriMock(),
 }))
 
 const toastSuccess = jest.fn()
@@ -56,6 +87,8 @@ beforeEach(() => {
   toastMessage.mockReset()
   mockLoadCustom.mockReset()
   mockListRegistry.mockReset()
+  mockDeleteCustom.mockReset().mockResolvedValue(undefined)
+  isTauriMock.mockReturnValue(true)
   Object.defineProperty(navigator, "clipboard", {
     value: { writeText: jest.fn(() => Promise.resolve()) },
     configurable: true,
@@ -171,5 +204,72 @@ describe("SlashCommandsSection", () => {
     render(<SlashCommandsSection />)
     // Section should still render; the empty-custom placeholder should appear.
     await waitFor(() => expect(screen.getByText("emptyCustom")).toBeInTheDocument())
+  })
+
+  it("New button opens the editor in create mode", async () => {
+    mockLoadCustom.mockResolvedValue([])
+    mockListRegistry.mockReturnValue([])
+    render(<SlashCommandsSection />)
+    await waitFor(() => expect(mockLoadCustom).toHaveBeenCalled())
+    fireEvent.click(screen.getByTestId("slash-commands-new"))
+    expect(screen.getByTestId("editor-stub")).toHaveAttribute("data-mode", "create")
+  })
+
+  it("Edit on a custom row opens the editor in edit mode prefilled", async () => {
+    mockLoadCustom.mockResolvedValue([
+      {
+        name: "ship-it",
+        description: "Ship",
+        scope: "user",
+        filePath: "/p",
+        template: "ship",
+      },
+    ])
+    mockListRegistry.mockReturnValue([])
+    render(<SlashCommandsSection />)
+    await waitFor(() => expect(screen.getByTestId("slash-command-row-ship-it")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("edit-ship-it"))
+    expect(screen.getByTestId("editor-stub")).toHaveAttribute("data-mode", "edit")
+  })
+
+  it("Delete confirms and calls deleteCustomSlashCommand", async () => {
+    mockLoadCustom.mockResolvedValue([
+      {
+        name: "ship-it",
+        description: "Ship",
+        scope: "user",
+        filePath: "/p",
+        template: "ship",
+      },
+    ])
+    mockListRegistry.mockReturnValue([])
+    render(<SlashCommandsSection />)
+    await waitFor(() => expect(screen.getByTestId("slash-command-row-ship-it")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("delete-ship-it"))
+    fireEvent.click(await screen.findByTestId("slash-commands-delete-confirm"))
+    await waitFor(() => expect(mockDeleteCustom).toHaveBeenCalled())
+    const arg = mockDeleteCustom.mock.calls[0][0] as { name: string; scope: string }
+    expect(arg.name).toBe("ship-it")
+    expect(arg.scope).toBe("user")
+  })
+
+  it("hides the New button + edit/delete actions in web mode", async () => {
+    isTauriMock.mockReturnValue(false)
+    mockLoadCustom.mockResolvedValue([
+      {
+        name: "ship-it",
+        description: "Ship",
+        scope: "user",
+        filePath: "/p",
+        template: "ship",
+      },
+    ])
+    mockListRegistry.mockReturnValue([])
+    render(<SlashCommandsSection />)
+    await waitFor(() => expect(screen.getByTestId("slash-command-row-ship-it")).toBeInTheDocument())
+    expect(screen.getByTestId("slash-commands-new")).toBeDisabled()
+    expect(screen.getByTestId("slash-commands-web-banner")).toBeInTheDocument()
+    expect(screen.queryByTestId("edit-ship-it")).toBeNull()
+    expect(screen.queryByTestId("delete-ship-it")).toBeNull()
   })
 })

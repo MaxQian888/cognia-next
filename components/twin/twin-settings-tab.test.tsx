@@ -20,6 +20,13 @@ jest.mock("@/lib/utils", () => ({
   isTauri: jest.fn(),
 }))
 
+// usePlatform is the M4.1 replacement for the inline isTauri() UI gate in
+// twin-settings-tab.tsx. We mirror the isTauri mock value so existing test
+// cases keep working.
+jest.mock("@/hooks/use-platform", () => ({
+  usePlatform: jest.fn(),
+}))
+
 jest.mock("@/lib/tauri/opener", () => ({
   revealInExplorer: jest.fn().mockResolvedValue(undefined),
 }))
@@ -66,6 +73,7 @@ jest.mock("dexie-react-hooks", () => ({
 // ── Import after mocks ────────────────────────────────────────────────────────
 
 import { isTauri } from "@/lib/utils"
+import { usePlatform } from "@/hooks/use-platform"
 import { verifyVectorBackendReadiness } from "@/lib/vector/readiness"
 import { invoke } from "@tauri-apps/api/core"
 import { toast } from "sonner"
@@ -76,6 +84,7 @@ import { TwinSettingsTab } from "./twin-settings-tab"
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const mockedIsTauri = isTauri as jest.Mock
+const mockedUsePlatform = usePlatform as jest.Mock
 const mockedVerify = verifyVectorBackendReadiness as jest.Mock
 const mockedInvoke = invoke as jest.Mock
 const mockedToast = toast as unknown as { success: jest.Mock; error: jest.Mock }
@@ -104,6 +113,7 @@ describe("TwinSettingsTab — native vector backend", () => {
   // 1a. "Native" option renders when isTauri() is true
   it("shows the Native option in the backend select when running in Tauri", () => {
     mockedIsTauri.mockReturnValue(true)
+    mockedUsePlatform.mockReturnValue("tauri")
     renderTab()
 
     // The select element is labelled "Backend"
@@ -119,6 +129,7 @@ describe("TwinSettingsTab — native vector backend", () => {
   // 1b. "Native" option is hidden when isTauri() is false
   it("hides the Native option in the backend select when running in the browser", () => {
     mockedIsTauri.mockReturnValue(false)
+    mockedUsePlatform.mockReturnValue("web")
     renderTab()
 
     const select = screen.getByLabelText("Backend") as HTMLSelectElement
@@ -129,6 +140,7 @@ describe("TwinSettingsTab — native vector backend", () => {
   // 2. Selecting native saves via saveTwinRuntimeSettings
   it("saves vectorBackend='native' when the Native option is selected", async () => {
     mockedIsTauri.mockReturnValue(true)
+    mockedUsePlatform.mockReturnValue("tauri")
     const user = userEvent.setup()
     renderTab()
 
@@ -151,6 +163,7 @@ describe("TwinSettingsTab — native vector backend", () => {
   // 3. "Test connection" calls verifyVectorBackendReadiness and shows the result
   it("calls verifyVectorBackendReadiness on test click and shows Operational badge", async () => {
     mockedIsTauri.mockReturnValue(true)
+    mockedUsePlatform.mockReturnValue("tauri")
     mockedVerify.mockResolvedValue({ state: "operational", diagnostic: undefined })
 
     const user = userEvent.setup()
@@ -177,6 +190,7 @@ describe("TwinSettingsTab — native vector backend", () => {
   // 4a. Reset: cancel does NOT call invoke
   it("does not call invoke when the reset dialog is cancelled", async () => {
     mockedIsTauri.mockReturnValue(true)
+    mockedUsePlatform.mockReturnValue("tauri")
     const user = userEvent.setup()
     renderTab()
 
@@ -202,6 +216,7 @@ describe("TwinSettingsTab — native vector backend", () => {
   // 4b. Reset: confirm calls invoke and triggers success toast
   it("calls vector_reset_store and shows success toast on confirm", async () => {
     mockedIsTauri.mockReturnValue(true)
+    mockedUsePlatform.mockReturnValue("tauri")
     mockedInvoke.mockResolvedValue(undefined)
     const user = userEvent.setup()
     renderTab()
@@ -227,6 +242,7 @@ describe("TwinSettingsTab — native vector backend", () => {
   // 4c. Reset: invoke error triggers error toast
   it("shows error toast when vector_reset_store rejects", async () => {
     mockedIsTauri.mockReturnValue(true)
+    mockedUsePlatform.mockReturnValue("tauri")
     mockedInvoke.mockRejectedValue(new Error("disk full"))
     const user = userEvent.setup()
     renderTab()

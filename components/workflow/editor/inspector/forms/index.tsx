@@ -10,11 +10,13 @@
  * Phase 9 polish.
  */
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
+import { Button } from "@/components/ui/button"
+import { Plus, Trash2 } from "lucide-react"
 import {
   Select,
   SelectContent,
@@ -23,7 +25,16 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Field, FieldGroup, readBoolean, readNumber, readString, patchParam } from "./shared"
+import { ExpressionField } from "./shared/expression-field"
+import { useInspectorExpressionCtx } from "./shared/inspector-context"
+import { getWebhookUrl } from "@/lib/workflow/runtime/webhook-bridge"
 import { listCharacters } from "@/lib/db/characters"
+import { listTeams } from "@/lib/db/teams"
+import { listSkills } from "@/lib/db/skills"
+import { listMcpServers } from "@/lib/db/mcp-servers"
+import { listPlugins } from "@/lib/db/plugins"
+import { listAdapterInstances } from "@/lib/db/adapter-instances"
+import { listWorkflows } from "@/lib/db/workflows"
 
 type Params = Record<string, unknown>
 type ChangeFn = (next: Params) => void
@@ -161,10 +172,11 @@ export function CharacterSendConfig({ params, onChange }: ConfigProps) {
         htmlFor="cs-content"
         hint="Supports {{ $node['id'].out.field }} expressions."
       >
-        <Textarea
+        <ExpressionField
           id="cs-content"
           value={content}
-          onChange={(e) => onChange(patchParam(params, "content", e.target.value))}
+          onChange={(v) => onChange(patchParam(params, "content", v))}
+          multiline
           rows={4}
           placeholder="Hello, {{ $trigger.payload.userName }}"
         />
@@ -370,18 +382,20 @@ export function AiPromptConfig({ params, onChange }: ConfigProps) {
         />
       </Field>
       <Field label="System prompt" htmlFor="ai-system">
-        <Textarea
+        <ExpressionField
           id="ai-system"
           value={systemPrompt}
-          onChange={(e) => onChange(patchParam(params, "systemPrompt", e.target.value))}
+          onChange={(v) => onChange(patchParam(params, "systemPrompt", v))}
+          multiline
           rows={3}
         />
       </Field>
       <Field label="User prompt" htmlFor="ai-user">
-        <Textarea
+        <ExpressionField
           id="ai-user"
           value={userPrompt}
-          onChange={(e) => onChange(patchParam(params, "userPrompt", e.target.value))}
+          onChange={(v) => onChange(patchParam(params, "userPrompt", v))}
+          multiline
           rows={5}
         />
       </Field>
@@ -416,13 +430,13 @@ export function BranchConfig({ params, onChange }: ConfigProps) {
         htmlFor="br-cond"
         hint="Expression that resolves to a truthy value. Supports {{ }} expressions."
       >
-        <Textarea
+        <ExpressionField
           id="br-cond"
           value={condition}
-          onChange={(e) => onChange(patchParam(params, "condition", e.target.value))}
+          onChange={(v) => onChange(patchParam(params, "condition", v))}
+          multiline
           rows={2}
           placeholder="{{ $node['n_classify'].out.label }} === 'urgent'"
-          className="font-mono text-xs"
         />
       </Field>
       <div className="grid grid-cols-2 gap-3">
@@ -460,12 +474,12 @@ export function SetVariableConfig({ params, onChange }: ConfigProps) {
         />
       </Field>
       <Field label="Value" htmlFor="sv-value" hint="Expression. Stored on the run's static data.">
-        <Textarea
+        <ExpressionField
           id="sv-value"
           value={value}
-          onChange={(e) => onChange(patchParam(params, "value", e.target.value))}
+          onChange={(v) => onChange(patchParam(params, "value", v))}
+          multiline
           rows={2}
-          className="font-mono text-xs"
         />
       </Field>
     </FieldGroup>
@@ -542,12 +556,12 @@ export function HttpRequestConfig({ params, onChange }: ConfigProps) {
       </Field>
       {method !== "GET" ? (
         <Field label="Body" htmlFor="http-body" hint="Sent as application/json.">
-          <Textarea
+          <ExpressionField
             id="http-body"
             value={body}
-            onChange={(e) => onChange(patchParam(params, "body", e.target.value))}
+            onChange={(v) => onChange(patchParam(params, "body", v))}
+            multiline
             rows={4}
-            className="font-mono text-xs"
           />
         </Field>
       ) : null}
@@ -604,10 +618,11 @@ export function TemplateConfig({ params, onChange }: ConfigProps) {
         htmlFor="tmpl"
         hint="Mustache-like {{ }} expressions are evaluated against upstream / trigger / static data."
       >
-        <Textarea
+        <ExpressionField
           id="tmpl"
           value={template}
-          onChange={(e) => onChange(patchParam(params, "template", e.target.value))}
+          onChange={(v) => onChange(patchParam(params, "template", v))}
+          multiline
           rows={6}
         />
       </Field>
@@ -640,12 +655,12 @@ export function TransformConfig({ params, onChange }: ConfigProps) {
         htmlFor="tr-expr"
         hint="Per-operation expression. For map: 'x.field'. For filter: 'x.value > 0'."
       >
-        <Textarea
+        <ExpressionField
           id="tr-expr"
           value={expression}
-          onChange={(e) => onChange(patchParam(params, "expression", e.target.value))}
+          onChange={(v) => onChange(patchParam(params, "expression", v))}
+          multiline
           rows={3}
-          className="font-mono text-xs"
         />
       </Field>
     </FieldGroup>
@@ -718,6 +733,1304 @@ export function GenericJsonConfig({ params, onChange }: ConfigProps) {
   )
 }
 
+// Banner that fetches the live webhook URL for the current node and shows
+// it (or a "save first" hint when the trigger hasn't been registered yet).
+function WebhookUrlBanner() {
+  const ctx = useInspectorExpressionCtx()
+  const [url, setUrl] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+  const triggerId = ctx?.currentNodeId
+  useEffect(() => {
+    if (!triggerId) return
+    let cancelled = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPending(true)
+    void getWebhookUrl(triggerId)
+      .then((u) => {
+        if (!cancelled) setUrl(u)
+      })
+      .finally(() => {
+        if (!cancelled) setPending(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [triggerId])
+  return (
+    <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-2.5 py-2 text-[11px] space-y-1">
+      <p className="text-amber-700 dark:text-amber-300">
+        Desktop only. The webhook receiver runs inside the Tauri sidecar.
+      </p>
+      {url ? (
+        <p className="font-mono break-all text-foreground">
+          <span className="text-muted-foreground">URL: </span>
+          {url}
+        </p>
+      ) : (
+        <p className="text-muted-foreground">
+          {pending
+            ? "Loading webhook URL…"
+            : "Save the workflow to register the webhook and reveal its URL."}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ── trigger.webhook ───────────────────────────────────────────────────────
+export function WebhookTriggerConfig({ params, onChange }: ConfigProps) {
+  const path = readString(params, "path")
+  const method = readString(params, "method", "POST")
+  const hmacSecret = readString(params, "hmacSecret")
+  const responseStatus = readNumber(params, "responseStatus", 200)
+  const responseTemplate = readString(params, "responseTemplate")
+  return (
+    <FieldGroup>
+      <WebhookUrlBanner />
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Method" htmlFor="wh-method">
+          <Select value={method} onValueChange={(v) => onChange(patchParam(params, "method", v))}>
+            <SelectTrigger id="wh-method">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="POST">POST</SelectItem>
+              <SelectItem value="GET">GET</SelectItem>
+              <SelectItem value="PUT">PUT</SelectItem>
+              <SelectItem value="PATCH">PATCH</SelectItem>
+              <SelectItem value="DELETE">DELETE</SelectItem>
+              <SelectItem value="*">Any</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Path" htmlFor="wh-path" hint="Mounted at /webhook/<path>">
+          <Input
+            id="wh-path"
+            value={path}
+            onChange={(e) => onChange(patchParam(params, "path", e.target.value))}
+            placeholder="incoming-events"
+            className="font-mono text-xs"
+          />
+        </Field>
+      </div>
+      <Field
+        label="HMAC secret (optional)"
+        htmlFor="wh-hmac"
+        hint="Verifies the X-Signature-256 header. Leave blank to skip verification."
+      >
+        <Input
+          id="wh-hmac"
+          type="password"
+          value={hmacSecret}
+          onChange={(e) => onChange(patchParam(params, "hmacSecret", e.target.value))}
+        />
+      </Field>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Response status" htmlFor="wh-status" className="col-span-1">
+          <Input
+            id="wh-status"
+            type="number"
+            min={100}
+            max={599}
+            value={responseStatus}
+            onChange={(e) =>
+              onChange(patchParam(params, "responseStatus", Number(e.target.value) || 200))
+            }
+          />
+        </Field>
+        <Field
+          label="Response body template"
+          htmlFor="wh-resp"
+          hint="Optional. Defaults to the workflow run id."
+          className="col-span-2"
+        >
+          <Input
+            id="wh-resp"
+            value={responseTemplate}
+            onChange={(e) => onChange(patchParam(params, "responseTemplate", e.target.value))}
+            placeholder='{ "ok": true, "runId": "{{ $run.id }}" }'
+            className="font-mono text-xs"
+          />
+        </Field>
+      </div>
+    </FieldGroup>
+  )
+}
+
+// ── action.character.create ───────────────────────────────────────────────
+export function CharacterCreateConfig({ params, onChange }: ConfigProps) {
+  const name = readString(params, "name")
+  const systemPrompt = readString(params, "systemPrompt")
+  const description = readString(params, "description")
+  const avatarColor = readString(params, "avatarColor")
+  const avatarEmoji = readString(params, "avatarEmoji")
+  const model = readString(params, "model")
+  return (
+    <FieldGroup>
+      <Field label="Name" htmlFor="cc-name">
+        <Input
+          id="cc-name"
+          value={name}
+          onChange={(e) => onChange(patchParam(params, "name", e.target.value))}
+          placeholder="Research assistant"
+        />
+      </Field>
+      <Field
+        label="System prompt"
+        htmlFor="cc-sys"
+        hint="Required. Supports {{ }} expressions for dynamic content."
+      >
+        <Textarea
+          id="cc-sys"
+          value={systemPrompt}
+          onChange={(e) => onChange(patchParam(params, "systemPrompt", e.target.value))}
+          rows={5}
+        />
+      </Field>
+      <Field label="Description (optional)" htmlFor="cc-desc">
+        <Textarea
+          id="cc-desc"
+          value={description}
+          onChange={(e) => onChange(patchParam(params, "description", e.target.value))}
+          rows={2}
+        />
+      </Field>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Avatar color" htmlFor="cc-color">
+          <Input
+            id="cc-color"
+            value={avatarColor}
+            onChange={(e) => onChange(patchParam(params, "avatarColor", e.target.value))}
+            placeholder="#6d28d9"
+          />
+        </Field>
+        <Field label="Avatar emoji" htmlFor="cc-emoji">
+          <Input
+            id="cc-emoji"
+            value={avatarEmoji}
+            onChange={(e) => onChange(patchParam(params, "avatarEmoji", e.target.value))}
+            placeholder="🤖"
+          />
+        </Field>
+        <Field label="Default model (optional)" htmlFor="cc-model">
+          <Input
+            id="cc-model"
+            value={model}
+            onChange={(e) => onChange(patchParam(params, "model", e.target.value))}
+            placeholder="claude-sonnet-4-6"
+          />
+        </Field>
+      </div>
+    </FieldGroup>
+  )
+}
+
+// ── action.character.update ───────────────────────────────────────────────
+export function CharacterUpdateConfig({ params, onChange }: ConfigProps) {
+  const characterId = readString(params, "characterId")
+  const patchJson = readString(params, "patchJson")
+  return (
+    <FieldGroup>
+      <Field label="Character" htmlFor="cu-char">
+        <CharacterPicker
+          id="cu-char"
+          value={characterId}
+          onChange={(v) => {
+            const next = patchParam(params, "characterId", v) as Record<string, unknown>
+            onChange(next)
+          }}
+        />
+      </Field>
+      <Field
+        label="Patch (JSON)"
+        htmlFor="cu-patch"
+        hint='Fields to update. Example: { "systemPrompt": "{{ $node.n_extract.out.text }}" }'
+      >
+        <Textarea
+          id="cu-patch"
+          value={patchJson}
+          onChange={(e) => {
+            const next = patchParam(params, "patchJson", e.target.value) as Record<string, unknown>
+            try {
+              const parsed = JSON.parse(e.target.value)
+              if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                ;(next as Record<string, unknown>).patch = parsed
+              }
+            } catch {
+              // ignore parse errors during typing — `patch` stays whatever it was
+            }
+            onChange(next)
+          }}
+          rows={6}
+          className="font-mono text-xs"
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── action.team.create ────────────────────────────────────────────────────
+export function TeamCreateConfig({ params, onChange }: ConfigProps) {
+  const name = readString(params, "name")
+  const description = readString(params, "description")
+  const orchestration = readString(params, "orchestration", "round_robin")
+  const supervisorCharacterId = readString(params, "supervisorCharacterId")
+  const membersJson = readString(params, "membersJson", "[]")
+  return (
+    <FieldGroup>
+      <Field label="Team name" htmlFor="tc-name">
+        <Input
+          id="tc-name"
+          value={name}
+          onChange={(e) => onChange(patchParam(params, "name", e.target.value))}
+        />
+      </Field>
+      <Field label="Description" htmlFor="tc-desc">
+        <Textarea
+          id="tc-desc"
+          value={description}
+          onChange={(e) => onChange(patchParam(params, "description", e.target.value))}
+          rows={2}
+        />
+      </Field>
+      <Field label="Orchestration" htmlFor="tc-orc">
+        <Select
+          value={orchestration}
+          onValueChange={(v) => onChange(patchParam(params, "orchestration", v))}
+        >
+          <SelectTrigger id="tc-orc">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="round_robin">Round robin</SelectItem>
+            <SelectItem value="supervisor">Supervisor</SelectItem>
+            <SelectItem value="mention_round_robin">Mention round robin</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      {orchestration === "supervisor" ? (
+        <Field label="Supervisor character" htmlFor="tc-sup">
+          <CharacterPicker
+            id="tc-sup"
+            value={supervisorCharacterId}
+            onChange={(v) => onChange(patchParam(params, "supervisorCharacterId", v))}
+          />
+        </Field>
+      ) : null}
+      <Field
+        label="Members (JSON array)"
+        htmlFor="tc-members"
+        hint='[{ "characterId": "...", "role": "researcher" }]'
+      >
+        <Textarea
+          id="tc-members"
+          value={membersJson}
+          onChange={(e) => {
+            const next = patchParam(params, "membersJson", e.target.value) as Record<
+              string,
+              unknown
+            >
+            try {
+              const parsed = JSON.parse(e.target.value)
+              if (Array.isArray(parsed)) (next as Record<string, unknown>).members = parsed
+            } catch {
+              // ignore
+            }
+            onChange(next)
+          }}
+          rows={5}
+          className="font-mono text-xs"
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── action.team.update ────────────────────────────────────────────────────
+export function TeamUpdateConfig({ params, onChange }: ConfigProps) {
+  const teamId = readString(params, "teamId")
+  const patchJson = readString(params, "patchJson")
+  return (
+    <FieldGroup>
+      <Field label="Team" htmlFor="tu-team">
+        <TeamPicker
+          id="tu-team"
+          value={teamId}
+          onChange={(v) => onChange(patchParam(params, "teamId", v))}
+        />
+      </Field>
+      <Field
+        label="Patch (JSON)"
+        htmlFor="tu-patch"
+        hint='Example: { "orchestration": "supervisor" }'
+      >
+        <Textarea
+          id="tu-patch"
+          value={patchJson}
+          onChange={(e) => {
+            const next = patchParam(params, "patchJson", e.target.value) as Record<string, unknown>
+            try {
+              const parsed = JSON.parse(e.target.value)
+              if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                ;(next as Record<string, unknown>).patch = parsed
+              }
+            } catch {
+              // ignore
+            }
+            onChange(next)
+          }}
+          rows={5}
+          className="font-mono text-xs"
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── action.skill.upsert ───────────────────────────────────────────────────
+export function SkillUpsertConfig({ params, onChange }: ConfigProps) {
+  const skillId = readString(params, "skillId")
+  const name = readString(params, "name")
+  const description = readString(params, "description")
+  const content = readString(params, "content")
+  const tagsRaw = readString(params, "tagsRaw")
+  return (
+    <FieldGroup>
+      <Field
+        label="Skill id (optional)"
+        htmlFor="su-id"
+        hint="If set, updates that skill. Otherwise creates a new one."
+      >
+        <SkillPicker
+          id="su-id"
+          value={skillId}
+          onChange={(v) => onChange(patchParam(params, "skillId", v))}
+          allowEmpty
+        />
+      </Field>
+      <Field label="Name" htmlFor="su-name">
+        <Input
+          id="su-name"
+          value={name}
+          onChange={(e) => onChange(patchParam(params, "name", e.target.value))}
+          placeholder="Research framework"
+        />
+      </Field>
+      <Field label="Description" htmlFor="su-desc">
+        <Input
+          id="su-desc"
+          value={description}
+          onChange={(e) => onChange(patchParam(params, "description", e.target.value))}
+        />
+      </Field>
+      <Field
+        label="Markdown body"
+        htmlFor="su-content"
+        hint="The skill body. Supports expressions; rendered into AI prompts when invoked."
+      >
+        <Textarea
+          id="su-content"
+          value={content}
+          onChange={(e) => onChange(patchParam(params, "content", e.target.value))}
+          rows={8}
+          className="font-mono text-xs"
+        />
+      </Field>
+      <Field label="Tags" htmlFor="su-tags" hint="Comma separated">
+        <Input
+          id="su-tags"
+          value={tagsRaw}
+          onChange={(e) => {
+            const next = patchParam(params, "tagsRaw", e.target.value) as Record<string, unknown>
+            ;(next as Record<string, unknown>).tags = e.target.value
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
+            onChange(next)
+          }}
+          placeholder="research, planning"
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── action.twin.ingest ────────────────────────────────────────────────────
+export function TwinIngestConfig({ params, onChange }: ConfigProps) {
+  const twinId = readString(params, "twinId")
+  const sourceMode = readString(params, "sourceMode", "paste")
+  const format = readString(params, "format", "markdown")
+  const content = readString(params, "content")
+  const url = readString(params, "url")
+  const title = readString(params, "title")
+  return (
+    <FieldGroup>
+      <Field label="Twin id" htmlFor="ti-twin">
+        <Input
+          id="ti-twin"
+          value={twinId}
+          onChange={(e) => onChange(patchParam(params, "twinId", e.target.value))}
+          placeholder="twin_alex"
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Source mode" htmlFor="ti-mode">
+          <Select
+            value={sourceMode}
+            onValueChange={(v) => onChange(patchParam(params, "sourceMode", v))}
+          >
+            <SelectTrigger id="ti-mode">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="paste">Paste content</SelectItem>
+              <SelectItem value="fetch">Fetch URL</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Format" htmlFor="ti-fmt">
+          <Select value={format} onValueChange={(v) => onChange(patchParam(params, "format", v))}>
+            <SelectTrigger id="ti-fmt">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="markdown">Markdown</SelectItem>
+              <SelectItem value="text">Plain text</SelectItem>
+              <SelectItem value="code">Code</SelectItem>
+              <SelectItem value="chat">Chat export</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+      <Field label="Title (optional)" htmlFor="ti-title">
+        <Input
+          id="ti-title"
+          value={title}
+          onChange={(e) => onChange(patchParam(params, "title", e.target.value))}
+        />
+      </Field>
+      {sourceMode === "fetch" ? (
+        <Field label="URL" htmlFor="ti-url" hint="Supports {{ }} expressions.">
+          <Input
+            id="ti-url"
+            value={url}
+            onChange={(e) => onChange(patchParam(params, "url", e.target.value))}
+            placeholder="https://..."
+          />
+        </Field>
+      ) : (
+        <Field label="Content" htmlFor="ti-content" hint="Supports {{ }} expressions.">
+          <Textarea
+            id="ti-content"
+            value={content}
+            onChange={(e) => onChange(patchParam(params, "content", e.target.value))}
+            rows={8}
+            className="font-mono text-xs"
+          />
+        </Field>
+      )}
+    </FieldGroup>
+  )
+}
+
+// ── action.mcp.invokeTool ─────────────────────────────────────────────────
+export function McpInvokeToolConfig({ params, onChange }: ConfigProps) {
+  const serverId = readString(params, "serverId")
+  const toolName = readString(params, "toolName")
+  const argsJson = readString(params, "argsJson", "{}")
+  return (
+    <FieldGroup>
+      <Field label="MCP server" htmlFor="mi-server">
+        <McpServerPicker
+          id="mi-server"
+          value={serverId}
+          onChange={(v) => onChange(patchParam(params, "serverId", v))}
+        />
+      </Field>
+      <Field label="Tool name" htmlFor="mi-tool">
+        <Input
+          id="mi-tool"
+          value={toolName}
+          onChange={(e) => onChange(patchParam(params, "toolName", e.target.value))}
+          placeholder="search_repos"
+        />
+      </Field>
+      <Field
+        label="Arguments (JSON)"
+        htmlFor="mi-args"
+        hint="Forwarded as the tool call's arguments. Supports expressions."
+      >
+        <Textarea
+          id="mi-args"
+          value={argsJson}
+          onChange={(e) => {
+            const next = patchParam(params, "argsJson", e.target.value) as Record<string, unknown>
+            try {
+              const parsed = JSON.parse(e.target.value)
+              if (parsed && typeof parsed === "object") {
+                ;(next as Record<string, unknown>).args = parsed
+              }
+            } catch {
+              // ignore
+            }
+            onChange(next)
+          }}
+          rows={5}
+          className="font-mono text-xs"
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── action.plugin.invoke ──────────────────────────────────────────────────
+export function PluginInvokeConfig({ params, onChange }: ConfigProps) {
+  const pluginId = readString(params, "pluginId")
+  const taskId = readString(params, "taskId")
+  const argsJson = readString(params, "argsJson", "{}")
+  return (
+    <FieldGroup>
+      <Field label="Plugin" htmlFor="pi-plug">
+        <PluginPicker
+          id="pi-plug"
+          value={pluginId}
+          onChange={(v) => onChange(patchParam(params, "pluginId", v))}
+        />
+      </Field>
+      <Field label="Task id" htmlFor="pi-task">
+        <Input
+          id="pi-task"
+          value={taskId}
+          onChange={(e) => onChange(patchParam(params, "taskId", e.target.value))}
+          placeholder="generate-report"
+        />
+      </Field>
+      <Field
+        label="Arguments (JSON)"
+        htmlFor="pi-args"
+        hint="Forwarded to the plugin task handler."
+      >
+        <Textarea
+          id="pi-args"
+          value={argsJson}
+          onChange={(e) => {
+            const next = patchParam(params, "argsJson", e.target.value) as Record<string, unknown>
+            try {
+              const parsed = JSON.parse(e.target.value)
+              if (parsed && typeof parsed === "object") {
+                ;(next as Record<string, unknown>).args = parsed
+              }
+            } catch {
+              // ignore
+            }
+            onChange(next)
+          }}
+          rows={5}
+          className="font-mono text-xs"
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── action.connector.draft ────────────────────────────────────────────────
+export function ConnectorDraftConfig({ params, onChange }: ConfigProps) {
+  const conversationKey = readString(params, "conversationKey")
+  const sessionId = readString(params, "sessionId")
+  const content = readString(params, "content")
+  const sourceMessageId = readString(params, "sourceMessageId")
+  const ttlMs = readNumber(params, "ttlMs", 0)
+  return (
+    <FieldGroup>
+      <Field label="Conversation key" htmlFor="cd-conv">
+        <Input
+          id="cd-conv"
+          value={conversationKey}
+          onChange={(e) => onChange(patchParam(params, "conversationKey", e.target.value))}
+        />
+      </Field>
+      <Field label="Session id" htmlFor="cd-session">
+        <Input
+          id="cd-session"
+          value={sessionId}
+          onChange={(e) => onChange(patchParam(params, "sessionId", e.target.value))}
+        />
+      </Field>
+      <Field label="Draft content" htmlFor="cd-content">
+        <Textarea
+          id="cd-content"
+          value={content}
+          onChange={(e) => onChange(patchParam(params, "content", e.target.value))}
+          rows={4}
+        />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Source message id (optional)" htmlFor="cd-src">
+          <Input
+            id="cd-src"
+            value={sourceMessageId}
+            onChange={(e) => onChange(patchParam(params, "sourceMessageId", e.target.value))}
+          />
+        </Field>
+        <Field label="TTL (ms, optional)" htmlFor="cd-ttl" hint="0 = no expiry">
+          <Input
+            id="cd-ttl"
+            type="number"
+            min={0}
+            value={ttlMs}
+            onChange={(e) => onChange(patchParam(params, "ttlMs", Number(e.target.value) || 0))}
+          />
+        </Field>
+      </div>
+    </FieldGroup>
+  )
+}
+
+// ── ai.classify ───────────────────────────────────────────────────────────
+export function AiClassifyConfig({ params, onChange }: ConfigProps) {
+  const provider = readString(params, "provider")
+  const model = readString(params, "model")
+  const apiKey = readString(params, "apiKey")
+  const baseURL = readString(params, "baseURL")
+  const input = readString(params, "input")
+  const labelsRaw = readString(params, "labelsRaw")
+  const hint = readString(params, "hint")
+  return (
+    <FieldGroup>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Provider" htmlFor="ac-provider">
+          <Select
+            value={provider || undefined}
+            onValueChange={(v) => onChange(patchParam(params, "provider", v))}
+          >
+            <SelectTrigger id="ac-provider">
+              <SelectValue placeholder="Provider" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="anthropic">Anthropic</SelectItem>
+              <SelectItem value="openai">OpenAI</SelectItem>
+              <SelectItem value="google">Google</SelectItem>
+              <SelectItem value="mistral">Mistral</SelectItem>
+              <SelectItem value="cohere">Cohere</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Model" htmlFor="ac-model">
+          <Input
+            id="ac-model"
+            value={model}
+            onChange={(e) => onChange(patchParam(params, "model", e.target.value))}
+            placeholder="claude-haiku-4-5-20251001"
+          />
+        </Field>
+      </div>
+      <Field label="API key" htmlFor="ac-key">
+        <Input
+          id="ac-key"
+          type="password"
+          value={apiKey}
+          onChange={(e) => onChange(patchParam(params, "apiKey", e.target.value))}
+        />
+      </Field>
+      <Field label="Base URL (optional)" htmlFor="ac-base">
+        <Input
+          id="ac-base"
+          value={baseURL}
+          onChange={(e) => onChange(patchParam(params, "baseURL", e.target.value))}
+        />
+      </Field>
+      <Field
+        label="Labels (comma-separated)"
+        htmlFor="ac-labels"
+        hint="The classifier picks one of these. Order is the deterministic fallback."
+      >
+        <Input
+          id="ac-labels"
+          value={labelsRaw}
+          onChange={(e) => {
+            const next = patchParam(params, "labelsRaw", e.target.value) as Record<string, unknown>
+            ;(next as Record<string, unknown>).labels = e.target.value
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
+            onChange(next)
+          }}
+          placeholder="urgent, normal, spam"
+        />
+      </Field>
+      <Field label="Input" htmlFor="ac-input" hint="Supports {{ }} expressions.">
+        <Textarea
+          id="ac-input"
+          value={input}
+          onChange={(e) => onChange(patchParam(params, "input", e.target.value))}
+          rows={4}
+        />
+      </Field>
+      <Field label="Guidance (optional)" htmlFor="ac-hint">
+        <Input
+          id="ac-hint"
+          value={hint}
+          onChange={(e) => onChange(patchParam(params, "hint", e.target.value))}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── ai.extract ────────────────────────────────────────────────────────────
+export function AiExtractConfig({ params, onChange }: ConfigProps) {
+  const provider = readString(params, "provider")
+  const model = readString(params, "model")
+  const apiKey = readString(params, "apiKey")
+  const baseURL = readString(params, "baseURL")
+  const input = readString(params, "input")
+  const schemaJson = readString(params, "schemaJson", "{}")
+  const hint = readString(params, "hint")
+  return (
+    <FieldGroup>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Provider" htmlFor="ae-provider">
+          <Select
+            value={provider || undefined}
+            onValueChange={(v) => onChange(patchParam(params, "provider", v))}
+          >
+            <SelectTrigger id="ae-provider">
+              <SelectValue placeholder="Provider" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="anthropic">Anthropic</SelectItem>
+              <SelectItem value="openai">OpenAI</SelectItem>
+              <SelectItem value="google">Google</SelectItem>
+              <SelectItem value="mistral">Mistral</SelectItem>
+              <SelectItem value="cohere">Cohere</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Model" htmlFor="ae-model">
+          <Input
+            id="ae-model"
+            value={model}
+            onChange={(e) => onChange(patchParam(params, "model", e.target.value))}
+          />
+        </Field>
+      </div>
+      <Field label="API key" htmlFor="ae-key">
+        <Input
+          id="ae-key"
+          type="password"
+          value={apiKey}
+          onChange={(e) => onChange(patchParam(params, "apiKey", e.target.value))}
+        />
+      </Field>
+      <Field label="Base URL (optional)" htmlFor="ae-base">
+        <Input
+          id="ae-base"
+          value={baseURL}
+          onChange={(e) => onChange(patchParam(params, "baseURL", e.target.value))}
+        />
+      </Field>
+      <Field
+        label="Schema (JSON)"
+        htmlFor="ae-schema"
+        hint='Field → expected type. Example: { "name": "string", "amount": "number" }'
+      >
+        <Textarea
+          id="ae-schema"
+          value={schemaJson}
+          onChange={(e) => {
+            const next = patchParam(params, "schemaJson", e.target.value) as Record<string, unknown>
+            try {
+              const parsed = JSON.parse(e.target.value)
+              if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                ;(next as Record<string, unknown>).schema = parsed
+              }
+            } catch {
+              // ignore
+            }
+            onChange(next)
+          }}
+          rows={5}
+          className="font-mono text-xs"
+        />
+      </Field>
+      <Field label="Input" htmlFor="ae-input">
+        <Textarea
+          id="ae-input"
+          value={input}
+          onChange={(e) => onChange(patchParam(params, "input", e.target.value))}
+          rows={4}
+        />
+      </Field>
+      <Field label="Guidance (optional)" htmlFor="ae-hint">
+        <Input
+          id="ae-hint"
+          value={hint}
+          onChange={(e) => onChange(patchParam(params, "hint", e.target.value))}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── ai.embed ──────────────────────────────────────────────────────────────
+export function AiEmbedConfig({ params, onChange }: ConfigProps) {
+  const input = readString(params, "input")
+  const dimension = readNumber(params, "dimension", 384)
+  return (
+    <FieldGroup>
+      <Field label="Input" htmlFor="aem-input" hint="Supports {{ }} expressions.">
+        <Textarea
+          id="aem-input"
+          value={input}
+          onChange={(e) => onChange(patchParam(params, "input", e.target.value))}
+          rows={4}
+        />
+      </Field>
+      <Field
+        label="Dimension"
+        htmlFor="aem-dim"
+        hint="Phase 4 ships a deterministic hash-based embedder; real semantic embeddings land later."
+      >
+        <Input
+          id="aem-dim"
+          type="number"
+          min={32}
+          max={4096}
+          value={dimension}
+          onChange={(e) => onChange(patchParam(params, "dimension", Number(e.target.value) || 384))}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── flow.switch ───────────────────────────────────────────────────────────
+export function SwitchConfig({ params, onChange }: ConfigProps) {
+  const subject = readString(params, "subject")
+  const cases = Array.isArray(params.cases)
+    ? (params.cases as Array<{ value: unknown; label: string }>)
+    : []
+  const defaultLabel = readString(params, "defaultLabel", "default")
+
+  function updateCases(next: Array<{ value: unknown; label: string }>) {
+    onChange(patchParam(params, "cases", next))
+  }
+
+  return (
+    <FieldGroup>
+      <Field
+        label="Subject"
+        htmlFor="sw-subject"
+        hint="Expression evaluated and matched against cases."
+      >
+        <Textarea
+          id="sw-subject"
+          value={subject}
+          onChange={(e) => onChange(patchParam(params, "subject", e.target.value))}
+          rows={2}
+          className="font-mono text-xs"
+          placeholder="{{ $node['n_classify'].out.label }}"
+        />
+      </Field>
+      <Field label="Cases" htmlFor="sw-cases" hint="First match wins. Strict equality.">
+        <div className="space-y-2">
+          {cases.map((c, i) => (
+            <div key={i} className="flex gap-2 items-start">
+              <Input
+                value={typeof c.value === "string" ? c.value : JSON.stringify(c.value)}
+                onChange={(e) => {
+                  const next = [...cases]
+                  next[i] = { ...c, value: e.target.value }
+                  updateCases(next)
+                }}
+                placeholder="value"
+              />
+              <Input
+                value={c.label}
+                onChange={(e) => {
+                  const next = [...cases]
+                  next[i] = { ...c, label: e.target.value }
+                  updateCases(next)
+                }}
+                placeholder="label"
+              />
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                onClick={() => updateCases(cases.filter((_, j) => j !== i))}
+                aria-label="Remove case"
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            </div>
+          ))}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => updateCases([...cases, { value: "", label: "" }])}
+          >
+            <Plus className="size-3.5 mr-1" /> Add case
+          </Button>
+        </div>
+      </Field>
+      <Field label="Default label" htmlFor="sw-default">
+        <Input
+          id="sw-default"
+          value={defaultLabel}
+          onChange={(e) => onChange(patchParam(params, "defaultLabel", e.target.value))}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── flow.split ────────────────────────────────────────────────────────────
+export function SplitConfig({ params, onChange }: ConfigProps) {
+  const labels = Array.isArray(params.branchLabels) ? (params.branchLabels as string[]) : ["A", "B"]
+
+  function updateLabels(next: string[]) {
+    onChange(patchParam(params, "branchLabels", next))
+  }
+
+  return (
+    <FieldGroup>
+      <Field
+        label="Branch labels"
+        htmlFor="sp-labels"
+        hint="Each label corresponds to one outgoing edge from this split."
+      >
+        <div className="space-y-2">
+          {labels.map((label, i) => (
+            <div key={i} className="flex gap-2">
+              <Input
+                value={label}
+                onChange={(e) => {
+                  const next = [...labels]
+                  next[i] = e.target.value
+                  updateLabels(next)
+                }}
+                placeholder={`Branch ${i + 1}`}
+              />
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                onClick={() => updateLabels(labels.filter((_, j) => j !== i))}
+                aria-label="Remove branch"
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            </div>
+          ))}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => updateLabels([...labels, `Branch ${labels.length + 1}`])}
+          >
+            <Plus className="size-3.5 mr-1" /> Add branch
+          </Button>
+        </div>
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── flow.join ─────────────────────────────────────────────────────────────
+export function JoinConfig({ params, onChange }: ConfigProps) {
+  const joinPolicy = readString(params, "joinPolicy", "all")
+  const timeoutMs = readNumber(params, "timeoutMs", 0)
+  return (
+    <FieldGroup>
+      <Field label="Join policy" htmlFor="jn-policy">
+        <Select
+          value={joinPolicy}
+          onValueChange={(v) => onChange(patchParam(params, "joinPolicy", v))}
+        >
+          <SelectTrigger id="jn-policy">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All — wait for every parent</SelectItem>
+            <SelectItem value="any">Any — proceed when any parent succeeds</SelectItem>
+            <SelectItem value="race">Race — first parent&apos;s output wins</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field
+        label="Timeout (ms, optional)"
+        htmlFor="jn-timeout"
+        hint="0 = wait forever. Otherwise abort the join after this long."
+      >
+        <Input
+          id="jn-timeout"
+          type="number"
+          min={0}
+          value={timeoutMs}
+          onChange={(e) => onChange(patchParam(params, "timeoutMs", Number(e.target.value) || 0))}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── flow.loop ─────────────────────────────────────────────────────────────
+export function LoopConfig({ params, onChange }: ConfigProps) {
+  const mode = readString(params, "mode", "forEach")
+  const times = readNumber(params, "times", 1)
+  const inputExpr = readString(params, "inputExpression")
+  const bodyExpr = readString(params, "bodyExpression")
+  const whileCondition = readString(params, "whileCondition")
+  const maxIterations = readNumber(params, "maxIterations", 10000)
+  return (
+    <FieldGroup>
+      <Field label="Mode" htmlFor="lp-mode">
+        <Select value={mode} onValueChange={(v) => onChange(patchParam(params, "mode", v))}>
+          <SelectTrigger id="lp-mode">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="forEach">For each item in array</SelectItem>
+            <SelectItem value="times">Repeat N times</SelectItem>
+            <SelectItem value="while">While condition is truthy</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      {mode === "times" ? (
+        <Field label="Times" htmlFor="lp-times">
+          <Input
+            id="lp-times"
+            type="number"
+            min={0}
+            value={times}
+            onChange={(e) => onChange(patchParam(params, "times", Number(e.target.value) || 0))}
+          />
+        </Field>
+      ) : null}
+      {mode === "forEach" ? (
+        <Field
+          label="Input expression"
+          htmlFor="lp-input"
+          hint="Resolves to the array to iterate. If empty, the first upstream output is used."
+        >
+          <Textarea
+            id="lp-input"
+            value={inputExpr}
+            onChange={(e) => onChange(patchParam(params, "inputExpression", e.target.value))}
+            rows={2}
+            className="font-mono text-xs"
+            placeholder="{{ $node['n_search'].out.results }}"
+          />
+        </Field>
+      ) : null}
+      {mode === "while" ? (
+        <Field
+          label="While condition"
+          htmlFor="lp-while"
+          hint="Re-evaluated each iteration. Loop ends when this is falsy or maxIterations is reached."
+        >
+          <Textarea
+            id="lp-while"
+            value={whileCondition}
+            onChange={(e) => onChange(patchParam(params, "whileCondition", e.target.value))}
+            rows={2}
+            className="font-mono text-xs"
+          />
+        </Field>
+      ) : null}
+      <Field
+        label="Body expression"
+        htmlFor="lp-body"
+        hint="Per-iteration value. $item is the current array element (forEach mode)."
+      >
+        <Textarea
+          id="lp-body"
+          value={bodyExpr}
+          onChange={(e) => onChange(patchParam(params, "bodyExpression", e.target.value))}
+          rows={2}
+          className="font-mono text-xs"
+          placeholder="$item.name"
+        />
+      </Field>
+      <Field
+        label="Max iterations"
+        htmlFor="lp-max"
+        hint="Hard cap. Loop breaks early at this count."
+      >
+        <Input
+          id="lp-max"
+          type="number"
+          min={1}
+          max={1000000}
+          value={maxIterations}
+          onChange={(e) =>
+            onChange(patchParam(params, "maxIterations", Number(e.target.value) || 10000))
+          }
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── flow.subworkflow ──────────────────────────────────────────────────────
+export function SubworkflowConfig({ params, onChange }: ConfigProps) {
+  const workflowId = readString(params, "workflowId")
+  const inputJson = readString(params, "inputJson", "{}")
+  return (
+    <FieldGroup>
+      <Field label="Sub workflow" htmlFor="sw-wf">
+        <SubworkflowPicker
+          id="sw-wf"
+          value={workflowId}
+          onChange={(v) => onChange(patchParam(params, "workflowId", v))}
+        />
+      </Field>
+      <Field
+        label="Input (JSON)"
+        htmlFor="sw-input"
+        hint="Forwarded as the subworkflow's trigger payload."
+      >
+        <Textarea
+          id="sw-input"
+          value={inputJson}
+          onChange={(e) => {
+            const next = patchParam(params, "inputJson", e.target.value) as Record<string, unknown>
+            try {
+              const parsed = JSON.parse(e.target.value)
+              ;(next as Record<string, unknown>).input = parsed
+            } catch {
+              // ignore
+            }
+            onChange(next)
+          }}
+          rows={5}
+          className="font-mono text-xs"
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── io.webhook.respond ────────────────────────────────────────────────────
+export function WebhookRespondConfig({ params, onChange }: ConfigProps) {
+  const status = readNumber(params, "status", 200)
+  const headersJson = readString(params, "headersJson", "{}")
+  const body = readString(params, "body")
+  return (
+    <FieldGroup>
+      <p className="text-[11px] text-amber-600 dark:text-amber-400">
+        Desktop only. Respond is delivered via the Tauri webhook router.
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Status code" htmlFor="wr-status">
+          <Input
+            id="wr-status"
+            type="number"
+            min={100}
+            max={599}
+            value={status}
+            onChange={(e) => onChange(patchParam(params, "status", Number(e.target.value) || 200))}
+          />
+        </Field>
+        <Field
+          label="Headers (JSON)"
+          htmlFor="wr-headers"
+          hint='Example: { "Content-Type": "application/json" }'
+        >
+          <Input
+            id="wr-headers"
+            value={headersJson}
+            onChange={(e) => {
+              const next = patchParam(params, "headersJson", e.target.value) as Record<
+                string,
+                unknown
+              >
+              try {
+                const parsed = JSON.parse(e.target.value)
+                if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                  ;(next as Record<string, unknown>).headers = parsed
+                }
+              } catch {
+                // ignore
+              }
+              onChange(next)
+            }}
+            placeholder='{ "Content-Type": "application/json" }'
+            className="font-mono text-xs"
+          />
+        </Field>
+      </div>
+      <Field label="Body" htmlFor="wr-body" hint="Supports {{ }} expressions.">
+        <Textarea
+          id="wr-body"
+          value={body}
+          onChange={(e) => onChange(patchParam(params, "body", e.target.value))}
+          rows={5}
+          className="font-mono text-xs"
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── annotation.group ──────────────────────────────────────────────────────
+export function GroupAnnotationConfig({ params, onChange }: ConfigProps) {
+  const title = readString(params, "title")
+  const color = readString(params, "color", "zinc")
+  const width = readNumber(params, "width", 480)
+  const height = readNumber(params, "height", 320)
+  return (
+    <FieldGroup>
+      <Field label="Title" htmlFor="grp-title">
+        <Input
+          id="grp-title"
+          value={title}
+          onChange={(e) => onChange(patchParam(params, "title", e.target.value))}
+          placeholder="Validation pipeline"
+        />
+      </Field>
+      <Field label="Color token" htmlFor="grp-color">
+        <Select value={color} onValueChange={(v) => onChange(patchParam(params, "color", v))}>
+          <SelectTrigger id="grp-color">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="zinc">Zinc</SelectItem>
+            <SelectItem value="emerald">Emerald</SelectItem>
+            <SelectItem value="sky">Sky</SelectItem>
+            <SelectItem value="violet">Violet</SelectItem>
+            <SelectItem value="amber">Amber</SelectItem>
+            <SelectItem value="rose">Rose</SelectItem>
+            <SelectItem value="cyan">Cyan</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Width (px)" htmlFor="grp-w">
+          <Input
+            id="grp-w"
+            type="number"
+            min={200}
+            value={width}
+            onChange={(e) => onChange(patchParam(params, "width", Number(e.target.value) || 480))}
+          />
+        </Field>
+        <Field label="Height (px)" htmlFor="grp-h">
+          <Input
+            id="grp-h"
+            type="number"
+            min={100}
+            value={height}
+            onChange={(e) => onChange(patchParam(params, "height", Number(e.target.value) || 320))}
+          />
+        </Field>
+      </div>
+    </FieldGroup>
+  )
+}
+
 // ── Picker helpers ────────────────────────────────────────────────────────
 function CharacterPicker({
   id,
@@ -748,3 +2061,165 @@ function CharacterPicker({
     </Select>
   )
 }
+
+function TeamPicker({
+  id,
+  value,
+  onChange,
+}: {
+  id: string
+  value: string
+  onChange: (v: string) => void
+}) {
+  const teams = useLiveQuery(() => listTeams(), [])
+  const options = useMemo(() => teams?.map((t) => ({ value: t.id, label: t.name })) ?? [], [teams])
+  return (
+    <Select value={value || undefined} onValueChange={onChange}>
+      <SelectTrigger id={id}>
+        <SelectValue placeholder="Select a team" />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((o) => (
+          <SelectItem key={o.value} value={o.value}>
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+function SkillPicker({
+  id,
+  value,
+  onChange,
+  allowEmpty = false,
+}: {
+  id: string
+  value: string
+  onChange: (v: string) => void
+  allowEmpty?: boolean
+}) {
+  const skills = useLiveQuery(() => listSkills(), [])
+  const options = useMemo(
+    () => skills?.map((s) => ({ value: s.id, label: s.name })) ?? [],
+    [skills]
+  )
+  return (
+    <Select value={value || undefined} onValueChange={(v) => onChange(v === "__none__" ? "" : v)}>
+      <SelectTrigger id={id}>
+        <SelectValue placeholder={allowEmpty ? "Create new" : "Select a skill"} />
+      </SelectTrigger>
+      <SelectContent>
+        {allowEmpty ? <SelectItem value="__none__">— create new —</SelectItem> : null}
+        {options.map((o) => (
+          <SelectItem key={o.value} value={o.value}>
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+function McpServerPicker({
+  id,
+  value,
+  onChange,
+}: {
+  id: string
+  value: string
+  onChange: (v: string) => void
+}) {
+  const servers = useLiveQuery(() => listMcpServers(), [])
+  const options = useMemo(
+    () =>
+      servers?.map((s) => ({
+        value: s.id,
+        label: s.name ?? s.id,
+      })) ?? [],
+    [servers]
+  )
+  return (
+    <Select value={value || undefined} onValueChange={onChange}>
+      <SelectTrigger id={id}>
+        <SelectValue placeholder="Select an MCP server" />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((o) => (
+          <SelectItem key={o.value} value={o.value}>
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+function PluginPicker({
+  id,
+  value,
+  onChange,
+}: {
+  id: string
+  value: string
+  onChange: (v: string) => void
+}) {
+  const plugins = useLiveQuery(() => listPlugins(), [])
+  const options = useMemo(
+    () =>
+      plugins?.map((p) => ({
+        value: p.id,
+        label: p.name ?? p.id,
+      })) ?? [],
+    [plugins]
+  )
+  return (
+    <Select value={value || undefined} onValueChange={onChange}>
+      <SelectTrigger id={id}>
+        <SelectValue placeholder="Select a plugin" />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((o) => (
+          <SelectItem key={o.value} value={o.value}>
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+function SubworkflowPicker({
+  id,
+  value,
+  onChange,
+}: {
+  id: string
+  value: string
+  onChange: (v: string) => void
+}) {
+  const workflows = useLiveQuery(() => listWorkflows(), [])
+  const options = useMemo(
+    () => workflows?.map((w) => ({ value: w.id, label: w.name })) ?? [],
+    [workflows]
+  )
+  return (
+    <Select value={value || undefined} onValueChange={onChange}>
+      <SelectTrigger id={id}>
+        <SelectValue placeholder="Select a workflow" />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((o) => (
+          <SelectItem key={o.value} value={o.value}>
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+// Suppress unused-import warnings when only one of these helpers is exercised
+// in a given form's tests. They're real call sites in production.
+void listAdapterInstances

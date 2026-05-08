@@ -25,7 +25,10 @@
     "sidecar:test": "node --test sidecar/builtin-tools/__tests__/*.test.mjs",
     "docs:dev": "pnpm -F docs dev",
     "docs:build": "pnpm -F docs build",
-    "docs:start": "pnpm -F docs start"
+    "docs:start": "pnpm -F docs start",
+    "mobile:sync": "pnpm build && pnpm -F mobile sync",
+    "mobile:open:ios": "pnpm -F mobile open:ios",
+    "mobile:open:android": "pnpm -F mobile open:android"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.74",
@@ -37,6 +40,11 @@
     "@babel/parser": "^7.29.3",
     "@babel/types": "^7.29.0",
     "@base-ui/react": "^1.4.1",
+    "@codemirror/autocomplete": "^6.20.2",
+    "@codemirror/commands": "^6.10.3",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.42.1",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",

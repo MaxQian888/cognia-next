@@ -80,6 +80,13 @@ export interface SendOptions {
   strictMcpConfig?: boolean
   /** SDK effort level. */
   effort?: "low" | "medium" | "high" | "xhigh" | "max"
+  /**
+   * Token budget for the SDK's extended-thinking pass. Positive values turn on
+   * the SDK's `thinking` block; `undefined` (or `0`) leaves the SDK's default
+   * in place. SDK note: streaming partial events are not emitted when this is
+   * set, so leave `includePartialMessages` off when budgeting thinking.
+   */
+  maxThinkingTokens?: number
   /** Resume an existing SDK session by id. Mutually exclusive with `forkFromSessionId`. */
   resumeSessionId?: string
   /** Fork a new branch from an existing SDK session id. */
@@ -200,6 +207,10 @@ export type ApprovalDecision = "allow" | "allow_always" | "deny"
 
 export interface ReadyEvent {
   type: "ready"
+  /** Resolved version of `@anthropic-ai/claude-agent-sdk` inside the sidecar. */
+  sdkVersion?: string
+  /** Sidecar package version (sidecar/package.json). */
+  sidecarVersion?: string
 }
 
 export interface SidecarExitedEvent {
@@ -433,6 +444,11 @@ export interface ChatSession {
   debugMode?: boolean
   /** Per-session override for cognia-next's brief-output mode. */
   briefMode?: boolean
+  /**
+   * Per-session extended-thinking budget. Highest precedence — wins over both
+   * the character and the app default. `undefined` falls through.
+   */
+  maxThinkingTokens?: number
   /** Set when this session is bound to an external IM platform conversation. */
   platformBinding?: import("@/types/connectors/binding").PlatformBinding
   createdAt: number
@@ -478,6 +494,12 @@ export interface AppSettings {
   defaultSystemPrompt?: string
   defaultWorkingDir?: string
   permissionMode?: SendOptions["permissionMode"]
+  /**
+   * App-wide default for the SDK's extended-thinking budget. `undefined` or
+   * `0` keeps thinking off. Overridden per-character (`Character.maxThinkingTokens`)
+   * and per-session (`ChatSession.maxThinkingTokens`).
+   */
+  defaultMaxThinkingTokens?: number
   /** App-wide default for `--bare` (skip on-disk auto-discovery). Overridden by character + session. */
   bareMode?: boolean
   /** App-wide default for `--debug` (verbose logging). Overridden by character + session. */
@@ -1027,6 +1049,11 @@ export interface Character {
   /** Ordered list of skills appended to the system prompt at send time. */
   skillIds?: string[]
   workingDir?: string
+  /**
+   * Per-character extended-thinking budget. Beats the app default but loses to
+   * a per-session override. `undefined` falls through to the app default.
+   */
+  maxThinkingTokens?: number
   /** Per-character default for `--bare` (skip on-disk auto-discovery). */
   bareMode?: boolean
   /** Per-character default for `--debug` (verbose logging). */

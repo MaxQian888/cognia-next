@@ -332,6 +332,12 @@ export interface WorkflowRunError {
   nodeId?: string
   /** Whether the underlying error is retryable (per the node implementation). */
   retryable?: boolean
+  /**
+   * Discriminator for engine-level failure modes consumers may want to handle
+   * differently from a generic node failure (e.g. `"timeout"` for wall-clock
+   * expiry). Absent on ordinary executor errors.
+   */
+  code?: "timeout" | "aborted" | string
 }
 
 export type RunEventType =
@@ -447,6 +453,14 @@ export interface RegisterTriggerInput {
   kind: WorkflowNodeKind
   cron?: string
   webhookPath?: string
+  /** HTTP method the receiver allows. Defaults to POST. */
+  webhookMethod?: string
+  /** Optional HMAC secret for X-Signature-256 verification. */
+  webhookHmacSecret?: string
+  /** HTTP status code returned to the caller. Defaults to 200. */
+  webhookResponseStatus?: number
+  /** Optional response body template. */
+  webhookResponseBody?: string
   binding?: WorkflowTriggerBinding
   enabled: boolean
 }

@@ -42,6 +42,14 @@ export interface EditorStateSnapshot {
   viewport: Viewport
 }
 
+/**
+ * Live execution state for each node. The run-status bridge subscribes to
+ * `workflowRunEvents` for the currently-edited workflow and pushes per-step
+ * states here; the canvas merges these into node `data` so the user sees
+ * a green/red/spinning ring on each node as the run progresses.
+ */
+export type NodeRunStatus = "idle" | "running" | "succeeded" | "failed" | "skipped" | "waiting"
+
 export interface EditorState extends EditorStateSnapshot {
   /** The persisted workflow envelope; `nodes`/`edges`/`viewport` live above. */
   baseWorkflow: VisualWorkflow
@@ -49,6 +57,10 @@ export interface EditorState extends EditorStateSnapshot {
   selectedEdgeIds: string[]
   dirty: boolean
   savedAt: number | null
+  /** Per-stepId live execution status, keyed by node id. */
+  runStatusByStepId: Record<string, NodeRunStatus>
+  /** Per-node validation errors surfaced from the inspector / save path. */
+  validationByStepId: Record<string, string[]>
 
   // ── mutators (graph) ──────────────────────────────────────────────────────
   setNodes: (nodes: RFWorkflowNode[]) => void
@@ -85,6 +97,13 @@ export interface EditorState extends EditorStateSnapshot {
   /** Mark the editor as saved at the current timestamp. */
   markSaved: () => void
   resetDirty: () => void
+
+  // ── runtime status (not undoable) ────────────────────────────────────────
+  setRunStatus: (stepId: string, status: NodeRunStatus) => void
+  setRunStatusBatch: (entries: Record<string, NodeRunStatus>) => void
+  clearRunStatus: () => void
+  setValidation: (stepId: string, errors: string[]) => void
+  clearValidation: () => void
 }
 
 export type EditorStore = UseBoundStore<StoreApi<EditorState>> & {
@@ -124,6 +143,8 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         selectedEdgeIds: [],
         dirty: false,
         savedAt: initial.updatedAt > 0 ? initial.updatedAt : null,
+        runStatusByStepId: {},
+        validationByStepId: {},
 
         setNodes: (nodes) => set({ nodes, dirty: true }),
         setEdges: (edges) => set({ edges, dirty: true }),
@@ -221,6 +242,20 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
 
         markSaved: () => set({ dirty: false, savedAt: Date.now() }),
         resetDirty: () => set({ dirty: false }),
+
+        setRunStatus: (stepId, status) =>
+          set({
+            runStatusByStepId: { ...get().runStatusByStepId, [stepId]: status },
+          }),
+        setRunStatusBatch: (entries) =>
+          set({ runStatusByStepId: { ...get().runStatusByStepId, ...entries } }),
+        clearRunStatus: () => set({ runStatusByStepId: {} }),
+
+        setValidation: (stepId, errors) =>
+          set({
+            validationByStepId: { ...get().validationByStepId, [stepId]: errors },
+          }),
+        clearValidation: () => set({ validationByStepId: {} }),
       }),
       {
         // Track only nodes + edges in the temporal slice. Viewport and

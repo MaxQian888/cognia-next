@@ -56,7 +56,7 @@ export interface RunWorkflowResult {
   runId: string
   status: RunStatus
   output?: unknown
-  error?: { message: string; nodeId?: string }
+  error?: { message: string; nodeId?: string; code?: string }
 }
 
 export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowResult> {
@@ -103,6 +103,21 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   if (input.signal) {
     if (input.signal.aborted) ac.abort(new Error("Workflow run aborted"))
     else input.signal.addEventListener("abort", externalAbort, { once: true })
+  }
+  // Wall-clock timeout for the whole run. Step-level timeouts already exist;
+  // this guards against scenarios where many short steps + retries collectively
+  // run past the user's expectation. Set to 0 to disable.
+  const wallClockTimeoutMs =
+    typeof validated.settings.timeoutMs === "number" && validated.settings.timeoutMs > 0
+      ? validated.settings.timeoutMs
+      : 0
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+  let wallClockExpired = false
+  if (wallClockTimeoutMs > 0) {
+    timeoutHandle = setTimeout(() => {
+      wallClockExpired = true
+      ac.abort(new Error(`Workflow run exceeded ${wallClockTimeoutMs}ms wall-clock timeout`))
+    }, wallClockTimeoutMs)
   }
   const cache = await IdempotencyCache.hydrate(runId)
   const secretResolver = input.secretResolver ?? NoopSecretResolver
@@ -184,13 +199,21 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
         }
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const baseMessage = err instanceof Error ? err.message : String(err)
+      const message = wallClockExpired
+        ? `Wall-clock timeout (${wallClockTimeoutMs}ms) exceeded — aborted at ${stepId}`
+        : baseMessage
+      if (timeoutHandle) clearTimeout(timeoutHandle)
       await logger.runFailed({ message, nodeId: stepId })
+      // `RunStatus` does not (yet) carry a dedicated "timed_out" variant — we
+      // surface the wall-clock expiry through `error.code` so consumers can
+      // discriminate without parsing the message string.
+      const errorCode = wallClockExpired ? "timeout" : undefined
       runRow = {
         ...runRow,
         status: "failed",
         completedAt: Date.now(),
-        error: { message, nodeId: stepId },
+        error: { message, nodeId: stepId, code: errorCode },
       }
       await getDb().workflowRuns.put(runRow)
       await persistRunState({
@@ -199,9 +222,10 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
         status: "failed",
         lastStepId: stepId,
       })
-      return { runId, status: "failed", error: { message, nodeId: stepId } }
+      return { runId, status: "failed", error: { message, nodeId: stepId, code: errorCode } }
     }
   }
+  if (timeoutHandle) clearTimeout(timeoutHandle)
 
   // 6. Wrap up. The "output" of a run is the output of its terminal node(s).
   const terminalIds = computeTerminalNodes(validated as VisualWorkflow)

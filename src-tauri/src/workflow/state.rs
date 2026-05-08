@@ -9,23 +9,27 @@ use std::sync::Arc;
 
 use crate::workflow::run_mirror::{self, RunMirror};
 use crate::workflow::triggers::cron_daemon::{CronDaemon, TriggerEmitter};
+use crate::workflow::triggers::webhook_router::WebhookRouter;
 
 pub struct WorkflowState {
     pub mirror: RunMirror,
     pub cron: CronDaemon,
+    pub webhook: WebhookRouter,
 }
 
 impl WorkflowState {
-    /// Open the mirror DB and wire the cron daemon. Does NOT spawn the
-    /// daemon's run loop — call `cron.clone().spawn()` once after this so the
-    /// loop runs once per process.
+    /// Open the mirror DB and wire the cron daemon + webhook router. Does NOT
+    /// spawn the daemons' loops — callers run `cron.clone().spawn()` and
+    /// `webhook.start(emitter, port)` once after this so they run once per
+    /// process.
     pub fn open(
         mirror_path: PathBuf,
         emitter: Arc<dyn TriggerEmitter>,
     ) -> Result<Self, run_mirror::MirrorError> {
         let mirror = RunMirror::open(mirror_path)?;
         let cron = CronDaemon::new(emitter);
-        Ok(Self { mirror, cron })
+        let webhook = WebhookRouter::new();
+        Ok(Self { mirror, cron, webhook })
     }
 
     /// Test-only: open both the mirror and the cron daemon backed by an
@@ -39,7 +43,8 @@ impl WorkflowState {
         let recorder = crate::workflow::triggers::cron_daemon::RecordingEmitter::default();
         let mirror = RunMirror::open_in_memory().expect("in-memory mirror");
         let cron = CronDaemon::new(Arc::new(recorder.clone()));
-        (Self { mirror, cron }, recorder)
+        let webhook = WebhookRouter::new();
+        (Self { mirror, cron, webhook }, recorder)
     }
 }
 

@@ -23,6 +23,7 @@ import {
 import { listMessages, persistMessages, truncateAfter } from "@/lib/db/messages"
 import { getSession, touchSession, updateSession } from "@/lib/db/sessions"
 import { listCharactersByIds } from "@/lib/db/characters"
+import { recordResultUsage } from "@/lib/db/session-usage"
 import { bumpUnread } from "@/lib/db/session-state"
 import { getTeam } from "@/lib/db/teams"
 import type {
@@ -667,6 +668,7 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
   // Stash extras on the resolver so the event handler can apply them.
   const ctx: SubResolverCtx = {
     senderId: character.id,
+    model: opts.model,
     extraMetadata: messageMetadata,
     postProcessText,
   }
@@ -693,6 +695,8 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
 
 interface SubResolverCtx {
   senderId: string
+  /** Model id resolved for this member's turn — stamped on sessionUsage. */
+  model?: string
   extraMetadata?: Record<string, unknown>
   postProcessText?: (text: string) => string
 }
@@ -767,7 +771,27 @@ async function handleTeamEvent(
         : await listMessages(teamSessionId)
 
       const existingIds = new Set(teamMsgs.map((m) => m.id))
-      const { messages: nextMessages } = applySdkEvent(teamMsgs, evt.event)
+      const { messages: nextMessages, result: sdkResult } = applySdkEvent(teamMsgs, evt.event)
+
+      // Persist per-turn usage + cost for the speaking member. The team
+      // assistant message id is the same id we're tagging with senderId
+      // below, so capture it before the post-processing slice.
+      if (sdkResult) {
+        const newAssistant = [...nextMessages]
+          .reverse()
+          .find((m) => m.role === "assistant" && !existingIds.has(m.id))
+        if (newAssistant) {
+          await recordResultUsage({
+            sessionId: teamSessionId,
+            messageId: newAssistant.id,
+            characterId: senderId,
+            model: ctx?.model,
+            result: sdkResult,
+          }).catch((err) => {
+            console.warn("recordResultUsage (team) failed", err)
+          })
+        }
+      }
 
       if (nextMessages !== teamMsgs) {
         let tagged = nextMessages.map((m) => {

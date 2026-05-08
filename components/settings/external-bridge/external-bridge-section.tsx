@@ -42,7 +42,7 @@ import {
   stopMcpServer,
   type McpServerStatus,
 } from "@/lib/external-bridge/tauri-control"
-import { isTauri } from "@/lib/tauri"
+import { usePlatform } from "@/hooks/use-platform"
 import {
   ALL_BRIDGE_SCOPES,
   DEFAULT_EXTERNAL_BRIDGE_SETTINGS,
@@ -167,7 +167,7 @@ function ServerStatusCard({
     port: null,
     startedAt: null,
   })
-  const desktop = isTauri()
+  const desktop = usePlatform() === "tauri"
 
   // Poll the Rust HTTP server status every 3 s while the section is mounted —
   // covers external `mcp_server_stop` triggers (e.g. Tauri shutdown handler)

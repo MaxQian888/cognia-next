@@ -26,6 +26,7 @@ import { listTwinSourcesByTwin } from "@/lib/db/twin-sources"
 import { getTwinProfile } from "@/lib/db/twin-profile"
 import { observeTwinRuntimeSettings, saveTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
 import { isTauri } from "@/lib/utils"
+import { usePlatform } from "@/hooks/use-platform"
 import { revealInExplorer } from "@/lib/tauri/opener"
 import { verifyVectorBackendReadiness } from "@/lib/vector/readiness"
 import type { StorageBackendReadinessState } from "@/lib/storage/persistence/types"
@@ -97,9 +98,10 @@ function RuntimeConfigCard() {
 
   // Hide the "native" option when not running under Tauri — it requires
   // the Tauri IPC bridge and will never work in the web browser.
+  const platform = usePlatform()
   const visibleBackends = useMemo(
-    () => VECTOR_BACKENDS.filter((b) => b !== "native" || isTauri()),
-    []
+    () => VECTOR_BACKENDS.filter((b) => b !== "native" || platform === "tauri"),
+    [platform]
   )
 
   // Sync the form whenever Dexie reports new settings AND the user hasn't

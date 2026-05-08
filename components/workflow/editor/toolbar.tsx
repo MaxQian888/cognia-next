@@ -1,5 +1,6 @@
 "use client"
 
+import { useRef } from "react"
 import {
   Save as SaveIcon,
   Play as PlayIcon,
@@ -7,6 +8,9 @@ import {
   Redo2 as RedoIcon,
   LayoutGrid as LayoutIcon,
   ArrowLeft as BackIcon,
+  Download as ExportIcon,
+  Upload as ImportIcon,
+  Command as CommandIcon,
 } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -26,6 +30,9 @@ export interface EditorToolbarProps {
   canUndo?: boolean
   canRedo?: boolean
   onAutoLayout?: () => void
+  onExportJson?: () => void
+  onImportJson?: (json: string) => void
+  onOpenCommandPalette?: () => void
 }
 
 export function EditorToolbar({
@@ -40,7 +47,28 @@ export function EditorToolbar({
   canUndo,
   canRedo,
   onAutoLayout,
+  onExportJson,
+  onImportJson,
+  onOpenCommandPalette,
 }: EditorToolbarProps) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  function handleImportClick() {
+    fileInputRef.current?.click()
+  }
+  function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || !onImportJson) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const text = typeof reader.result === "string" ? reader.result : ""
+      if (text) onImportJson(text)
+    }
+    reader.readAsText(file)
+    // Reset input so the same file can be re-picked.
+    e.target.value = ""
+  }
+
   return (
     <div
       className="flex items-center gap-2 border-b bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80"
@@ -118,6 +146,64 @@ export function EditorToolbar({
           </TooltipTrigger>
           <TooltipContent side="bottom">Auto-layout</TooltipContent>
         </Tooltip>
+        {onOpenCommandPalette ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={onOpenCommandPalette}
+                aria-label="Command palette"
+                data-testid="workflow-command-palette"
+              >
+                <CommandIcon className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Commands (Ctrl+K)</TooltipContent>
+          </Tooltip>
+        ) : null}
+        {onExportJson ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={onExportJson}
+                aria-label="Export JSON"
+                data-testid="workflow-export-json"
+              >
+                <ExportIcon className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Export workflow as JSON</TooltipContent>
+          </Tooltip>
+        ) : null}
+        {onImportJson ? (
+          <>
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept="application/json,.json"
+              className="hidden"
+              onChange={handleImportFile}
+              data-testid="workflow-import-input"
+            />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={handleImportClick}
+                  aria-label="Import JSON"
+                  data-testid="workflow-import-json"
+                >
+                  <ImportIcon className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Import workflow JSON</TooltipContent>
+            </Tooltip>
+          </>
+        ) : null}
         <Button
           size="sm"
           variant="outline"

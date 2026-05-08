@@ -14,7 +14,7 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-// Stub the four tab bodies so the section tests stay focused on routing.
+// Stub each tab body so the section tests stay focused on routing.
 jest.mock("./tabs/defaults-tab", () => ({
   DefaultsTab: () => <div data-testid="defaults-tab" />,
 }))
@@ -26,6 +26,13 @@ jest.mock("./tabs/sidecar-tab", () => ({
 }))
 jest.mock("./tabs/a2ui-bridge-tab", () => ({
   A2UIBridgeTab: () => <div data-testid="a2ui-tab" />,
+}))
+jest.mock("./tabs/sessions-tab", () => ({
+  SessionsTab: () => <div data-testid="sessions-tab" />,
+}))
+jest.mock("@/components/settings/common/related-sections-strip", () => ({
+  RelatedSectionsStrip: () => <div data-testid="related-strip-stub" />,
+  CLAUDE_CODE_RELATED: [],
 }))
 
 describe("AgentRuntimeSection", () => {
@@ -39,11 +46,12 @@ describe("AgentRuntimeSection", () => {
     expect(screen.getByTestId("defaults-tab")).toBeInTheDocument()
   })
 
-  it("renders 4 trigger buttons with translated labels", () => {
+  it("renders 5 trigger buttons with translated labels", () => {
     render(<AgentRuntimeSection />)
-    expect(screen.getAllByRole("tab")).toHaveLength(4)
+    expect(screen.getAllByRole("tab")).toHaveLength(5)
     expect(screen.getByRole("tab", { name: "tabs.defaults" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "tabs.permissions" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "tabs.sessions" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "tabs.sidecar" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "tabs.a2ui" })).toBeInTheDocument()
   })

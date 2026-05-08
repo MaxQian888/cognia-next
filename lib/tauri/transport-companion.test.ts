@@ -16,7 +16,9 @@
 import {
   CompanionError,
   CompanionTransport,
+  __resetCompanionConfigCacheForTests,
   clearCompanionConfig,
+  hydrateCompanionConfig,
   loadCompanionConfig,
   saveCompanionConfig,
   type CompanionConfig,
@@ -52,8 +54,8 @@ const MOCK_CONFIG: CompanionConfig = {
   serverVersion: "0.1.0",
 }
 
-function setConfig(cfg: CompanionConfig = MOCK_CONFIG): void {
-  saveCompanionConfig(cfg)
+async function setConfig(cfg: CompanionConfig = MOCK_CONFIG): Promise<void> {
+  await saveCompanionConfig(cfg)
 }
 
 // Unused but left for documentation.
@@ -152,8 +154,9 @@ beforeEach(() => {
   g["fetch"] = jest.fn()
   fetchSpy = jest.spyOn(g as { fetch: jest.Mock }, "fetch")
 
-  // Ensure localStorage is clean.
+  // Ensure localStorage + module-level cache are clean.
   localStorage.clear()
+  __resetCompanionConfigCacheForTests()
 })
 
 afterEach(() => {
@@ -161,6 +164,7 @@ afterEach(() => {
   wsSpy.mockRestore()
   fetchSpy.mockRestore()
   localStorage.clear()
+  __resetCompanionConfigCacheForTests()
   jest.useRealTimers()
 })
 
@@ -169,24 +173,41 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("config helpers", () => {
-  it("loadCompanionConfig returns null when nothing stored", () => {
-    expect(loadCompanionConfig()).toBeNull()
+  it("loadCompanionConfig returns null when nothing stored", async () => {
+    expect(await loadCompanionConfig()).toBeNull()
   })
 
-  it("saveCompanionConfig + loadCompanionConfig round-trips correctly", () => {
-    saveCompanionConfig(MOCK_CONFIG)
-    expect(loadCompanionConfig()).toEqual(MOCK_CONFIG)
+  it("saveCompanionConfig + loadCompanionConfig round-trips correctly", async () => {
+    await saveCompanionConfig(MOCK_CONFIG)
+    expect(await loadCompanionConfig()).toEqual(MOCK_CONFIG)
   })
 
-  it("clearCompanionConfig removes the entry", () => {
-    saveCompanionConfig(MOCK_CONFIG)
-    clearCompanionConfig()
-    expect(loadCompanionConfig()).toBeNull()
+  it("clearCompanionConfig removes the entry", async () => {
+    await saveCompanionConfig(MOCK_CONFIG)
+    await clearCompanionConfig()
+    expect(await loadCompanionConfig()).toBeNull()
   })
 
-  it("loadCompanionConfig returns null on malformed JSON", () => {
+  it("hydrateCompanionConfig returns null on malformed JSON in storage", async () => {
+    // The cache must be primed via `hydrate*`, which delegates to the
+    // storage backend. The web/jsdom backend (`LocalStorageCompanionStorage`)
+    // catches `JSON.parse` failures and returns `null`; verify the fallback
+    // really runs and the cache is left empty so subsequent sync reads via
+    // `loadCompanionConfig` also yield `null`.
     localStorage.setItem("cognia.companion.config.v1", "not-json{{{")
+    expect(await hydrateCompanionConfig()).toBeNull()
     expect(loadCompanionConfig()).toBeNull()
+  })
+
+  it("hydrateCompanionConfig restores a previously-saved config", async () => {
+    // Round-trip via the real storage backend (not just the in-memory cache):
+    // save populates localStorage, reset wipes the cache, hydrate must
+    // re-read from storage and re-populate the cache.
+    await saveCompanionConfig(MOCK_CONFIG)
+    __resetCompanionConfigCacheForTests()
+    expect(loadCompanionConfig()).toBeNull()
+    expect(await hydrateCompanionConfig()).toEqual(MOCK_CONFIG)
+    expect(loadCompanionConfig()).toEqual(MOCK_CONFIG)
   })
 })
 
@@ -196,7 +217,7 @@ describe("config helpers", () => {
 
 describe("call() — success", () => {
   it("resolves with parsed JSON on 200", async () => {
-    setConfig()
+    await setConfig()
     fetchSpy.mockResolvedValueOnce(mockResponse({ ok: true }, 200))
 
     transport = new CompanionTransport()
@@ -205,7 +226,7 @@ describe("call() — success", () => {
   })
 
   it("posts to the correct URL with command name encoded", async () => {
-    setConfig()
+    await setConfig()
     fetchSpy.mockResolvedValueOnce(mockResponse({}, 200))
 
     transport = new CompanionTransport()
@@ -411,7 +432,7 @@ describe("call() — retries", () => {
 
 describe("call() — timeout", () => {
   it("throws timeout CompanionError when fetch rejects with AbortError", async () => {
-    setConfig()
+    await setConfig()
     const abortErr = new Error("The operation was aborted.")
     abortErr.name = "AbortError"
     fetchSpy.mockRejectedValueOnce(abortErr)
@@ -532,8 +553,8 @@ describe("subscribe() — WebSocket frame dispatch", () => {
 // ---------------------------------------------------------------------------
 
 describe("subscribe() — ping / pong", () => {
-  it("replies with pong when server sends ping", () => {
-    setConfig()
+  it("replies with pong when server sends ping", async () => {
+    await setConfig()
     transport = new CompanionTransport()
     transport.subscribe("ch:any", jest.fn())
 
@@ -550,8 +571,8 @@ describe("subscribe() — ping / pong", () => {
 // ---------------------------------------------------------------------------
 
 describe("subscribe() — resync_required", () => {
-  it("clears cursors and triggers reconnect on resync_required", () => {
-    setConfig()
+  it("clears cursors and triggers reconnect on resync_required", async () => {
+    await setConfig()
     transport = new CompanionTransport()
     const handler = jest.fn()
     transport.subscribe("claude://message", handler)
@@ -752,8 +773,8 @@ describe("ConnectionState", () => {
 // ---------------------------------------------------------------------------
 
 describe("network awareness — online event", () => {
-  it("reopens WS on online event when channels are registered", () => {
-    setConfig()
+  it("reopens WS on online event when channels are registered", async () => {
+    await setConfig()
     jest.useFakeTimers()
     transport = new CompanionTransport()
     transport.subscribe("ch:test", jest.fn())

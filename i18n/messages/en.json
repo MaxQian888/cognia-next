@@ -371,6 +371,18 @@
       "noLogsYet": "No log entries yet — sub-agent is initializing.",
       "durationMs": "{ms}ms"
     },
+    "sessionCost": {
+      "trigger": "Session cost",
+      "title": "Session cost",
+      "description": "Persisted per-turn totals from the SDK's result events. Per-model split is sourced from the sessionUsage Dexie table.",
+      "turns": "Turns",
+      "input": "Input",
+      "output": "Output",
+      "cache": "Cache",
+      "cost": "Cost",
+      "byModelTitle": "By model",
+      "noModelData": "No persisted usage rows yet — totals above come from in-memory turns."
+    },
     "agentTeamDispatch": {
       "title": "Dispatch",
       "supervisor": "Supervisor",
@@ -1743,12 +1755,26 @@
         "saveButton": "Save"
       }
     },
+    "relatedSections": {
+      "ariaLabel": "Related Claude Code settings",
+      "title": "Related",
+      "agentRuntime": "Agent runtime",
+      "sessions": "Sessions",
+      "subscription": "Subscription",
+      "ccswitch": "CCSwitch",
+      "mcp": "MCP servers",
+      "hooks": "Hooks",
+      "slashCommands": "Slash commands",
+      "subagents": "Sub-agents",
+      "tools": "Tools"
+    },
     "agentRuntimeSection": {
       "title": "Built-in agent runtime",
       "description": "Configure defaults for the in-process Claude SDK sidecar — these flow into every new chat unless a character or session overrides them.",
       "tabs": {
         "defaults": "Defaults",
         "permissions": "Permissions & tools",
+        "sessions": "Sessions",
         "sidecar": "Sidecar",
         "a2ui": "A2UI bridge"
       },
@@ -1773,6 +1799,12 @@
         "appendTitle": "Append to system prompt",
         "appendDesc": "Appended to every default character's system prompt. Use sparingly — large appendices inflate token cost.",
         "appendPlaceholder": "e.g., 'Always reply in concise bullet points.'",
+        "thinkingTitle": "Thinking budget",
+        "thinkingDesc": "Tokens reserved for the SDK's extended-thinking pass. 0 disables thinking. Heads-up: streaming partial events are not emitted while a thinking budget is active.",
+        "thinkingNumberLabel": "Thinking budget tokens",
+        "thinkingReset": "Reset",
+        "thinkingActiveHint": "Active: up to {budget} tokens reserved per turn for reasoning before the visible reply.",
+        "thinkingDisabledHint": "Off — Claude replies directly without an extended-thinking pass.",
         "routingTitle": "Routing fallback",
         "routingDesc": "When a turn fails, retry against the next entry in the alias's fallback chain. Disable to keep the original error visible."
       },
@@ -1815,6 +1847,44 @@
           }
         }
       },
+      "sessions": {
+        "title": "Sessions",
+        "description": "Every chat session, with token + USD totals captured from each turn's SDK result. Resume to switch the active chat; fork to branch off the SDK conversation; rename or delete in place.",
+        "filterPlaceholder": "Filter by title or id…",
+        "emptyAll": "No sessions yet. Start a chat to fill this list.",
+        "emptyFilter": "No sessions match this filter.",
+        "untitled": "(untitled)",
+        "colTitle": "Session",
+        "colKind": "Kind",
+        "colUpdated": "Updated",
+        "colTurns": "Turns",
+        "colTokens": "Tokens",
+        "colCost": "Cost",
+        "colActions": "Actions",
+        "resume": "Resume",
+        "resumedToast": "Resumed `{title}`.",
+        "fork": "Fork",
+        "forkDisabledTip": "Fork unavailable until the session has at least one completed turn.",
+        "forkedToast": "Forked into `{title}`.",
+        "rename": "Rename",
+        "renameTitle": "Rename session",
+        "renameDesc": "Pick a new display title. Changing the title doesn't affect the chat history or SDK conversation.",
+        "renamePlaceholder": "Session title",
+        "renameEmpty": "Title can't be empty.",
+        "renamedToast": "Renamed.",
+        "delete": "Delete",
+        "deleteTitle": "Delete session?",
+        "deleteDesc": "This permanently removes `{title}` and every message + usage row tied to it. The action can't be undone.",
+        "deletedToast": "Session deleted.",
+        "save": "Save",
+        "cancel": "Cancel",
+        "ago": {
+          "justNow": "just now",
+          "minutes": "{n}m ago",
+          "hours": "{n}h ago",
+          "days": "{n}d ago"
+        }
+      },
       "sidecar": {
         "title": "Sidecar diagnostics",
         "description": "Read-only view of the in-process Claude SDK sidecar.",
@@ -1824,9 +1894,18 @@
         "checking": "Checking…",
         "webOnly": "Desktop only",
         "sdkSessionLabel": "Most recent SDK session id",
+        "sdkVersionLabel": "SDK version",
+        "sidecarVersionLabel": "Sidecar version",
         "restartBtn": "Restart sidecar",
         "restartedToast": "Sidecar restart requested.",
-        "desktopOnlyHint": "Restart is only available in the desktop build."
+        "desktopOnlyHint": "Restart is only available in the desktop build.",
+        "countsTitle": "Linked surfaces",
+        "countsDescription": "Live counts across the related Claude Code settings sections — click a tile to jump.",
+        "countSessions": "Sessions",
+        "countSlashCommands": "Slash commands",
+        "countHooks": "Hooks",
+        "countHooksHint": "Open hooks",
+        "countMcpServers": "MCP servers"
       },
       "a2ui": {
         "title": "A2UI bridge",
@@ -2568,7 +2647,51 @@
       "try": "Copy to clipboard",
       "copiedToClipboard": "Copied `/{name} ` to clipboard.",
       "typeIntoComposer": "Type `/{name}` into the chat composer to run it.",
-      "openInEditor": "Open file"
+      "openInEditor": "Open file",
+      "newBtn": "New command",
+      "edit": "Edit",
+      "delete": "Delete",
+      "cancel": "Cancel",
+      "deletedToast": "Deleted `/{name}`.",
+      "deleteDialogTitle": "Delete this command?",
+      "deleteDialogDesc": "This permanently removes the markdown file backing `/{name}`. The action can't be undone.",
+      "webModeBanner": "Custom command create / edit / delete needs the desktop build — file system writes are not available in web mode.",
+      "editor": {
+        "titleCreate": "New custom command",
+        "titleEdit": "Edit custom command",
+        "description": "Custom commands are markdown files written to .claude/commands/. The body is the prompt template; YAML frontmatter carries hints, allowed-tools, and an optional model override.",
+        "webModeBanner": "Read-only preview — saving requires the desktop build.",
+        "nameLabel": "Name",
+        "namePlaceholder": "e.g. refactor",
+        "nameHint": "Used as the filename and the slash command — letters, digits, `_`, `-`, `.` or `/` (max 64 chars).",
+        "scopeLabel": "Scope",
+        "scopeUser": "User (~/.claude/commands)",
+        "scopeProject": "Project (./.claude/commands)",
+        "scopeUserHint": "Available across every chat on this machine.",
+        "scopeProjectHint": "Saved in the active session's working directory.",
+        "projectNeedsCwd": "Project scope needs the active session to have a working directory set.",
+        "descriptionLabel": "Description",
+        "descriptionPlaceholder": "Shown in the picker.",
+        "argHintLabel": "Argument hint",
+        "argHintPlaceholder": "e.g. <file> or <focus area?>",
+        "modelLabel": "Model override",
+        "modelPlaceholder": "e.g. claude-sonnet-4-5 (optional)",
+        "allowedToolsLabel": "Allowed tools",
+        "allowedToolsEmpty": "None — uses the default whitelist.",
+        "addToolPlaceholder": "Tool name (e.g. Read)",
+        "addToolBtn": "Add",
+        "removeTool": "Remove {tool}",
+        "bodyLabel": "Prompt body",
+        "bodyPlaceholder": "Wrote me a refactor for $ARGUMENTS…",
+        "bodyHint": "Use $1..$9 for positional args and $ARGUMENTS for the full string.",
+        "bodyRequired": "Prompt body can't be empty.",
+        "previewLabel": "Preview",
+        "save": "Save",
+        "saving": "Saving…",
+        "savedToast": "Saved.",
+        "webModeBlocked": "Saving custom commands requires the desktop build.",
+        "cancel": "Cancel"
+      }
     },
     "subagents": {
       "title": "Sub-agents",
@@ -4549,6 +4672,19 @@
         "status": "Status",
         "fiveHour": "5h",
         "sevenDay": "7d"
+      },
+      "topSessions": {
+        "title": "Top sessions by cost",
+        "description": "Aggregated from sessionUsage rows persisted on each SDK result event. Helps spot which conversations are running up the bill.",
+        "loading": "Loading…",
+        "empty": "No persisted usage rows yet. Run a chat to populate.",
+        "untitled": "(untitled)",
+        "colSession": "Session",
+        "colTurns": "Turns",
+        "colTokens": "Tokens",
+        "colCost": "Cost",
+        "colActions": "Actions",
+        "resume": "Resume"
       }
     },
     "settings": {

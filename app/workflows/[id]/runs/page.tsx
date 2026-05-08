@@ -1,21 +1,23 @@
-"use client"
-
 /**
  * /workflows/[id]/runs — list of past + in-flight runs for a single workflow.
+ *
+ * Server component entry for `output: "export"`. The UI lives in
+ * page-client.tsx so this file can export generateStaticParams without
+ * being a "use client" module.
  */
 
-import { use } from "react"
-import { RunList } from "@/components/workflow/runs/run-list"
+import { WorkflowRunsListPageClient } from "./page-client"
+
+export function generateStaticParams(): Array<{ id: string }> {
+  return [{ id: "_" }]
+}
+
+export const dynamicParams = false
 
 interface PageProps {
   params: Promise<{ id: string }>
 }
 
 export default function WorkflowRunsListPage({ params }: PageProps) {
-  const { id } = use(params)
-  return (
-    <div className="h-screen w-screen overflow-hidden">
-      <RunList workflowId={id} />
-    </div>
-  )
+  return <WorkflowRunsListPageClient params={params} />
 }

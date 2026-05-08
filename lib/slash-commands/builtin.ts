@@ -15,7 +15,7 @@
 import type { ChatStatus, PermissionMode } from "@/stores/chat"
 import { useChatStore } from "@/stores/chat"
 import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
-import { handleCost, handleStatus } from "./actions/diagnostics"
+import { handleContext, handleCost, handleDoctor, handleStatus } from "./actions/diagnostics"
 import { seedBuiltinSlashCommands } from "./registry"
 import { handleReset, handleResume, handleSessions } from "./actions/sessions"
 
@@ -262,9 +262,35 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "compact",
-    description: "Compact the conversation history (sidecar support pending).",
+    description: "Ask the SDK to summarise older turns and free up the context window.",
     scope: "builtin",
-    disabled: true,
+    // The Claude Agent SDK intercepts `/compact` as a user message and emits a
+    // `compact_boundary` event. We dispatch it as a regular template so the
+    // existing send pipeline carries it to the sidecar verbatim.
+    template: "/compact",
+  },
+  {
+    name: "context",
+    description: "Show this session's local message + token totals.",
+    scope: "builtin",
+    handler: handleContext,
+  },
+  {
+    name: "doctor",
+    description: "Run a runtime + auth + MCP health check.",
+    scope: "builtin",
+    handler: handleDoctor,
+  },
+  {
+    name: "export",
+    description: "Open the data settings panel to back up or export this session.",
+    scope: "builtin",
+    handler: (ctx) => {
+      ctx.pushSystemMessage(
+        "Opened Settings → Data. Use the **Download** icon in the chat header for a per-session export."
+      )
+      ctx.openSettings("data")
+    },
   },
 ]
 

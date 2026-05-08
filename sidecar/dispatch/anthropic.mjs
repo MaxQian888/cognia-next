@@ -91,6 +91,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     permissionMode: sendOptions.permissionMode,
     mcpServers: mergedMcpServers,
     maxTurns: sendOptions.maxTurns,
+    maxThinkingTokens: sendOptions.maxThinkingTokens,
     includePartialMessages: sendOptions.includePartialMessages,
     settingSources: sendOptions.settingSources,
     agents: sendOptions.agents,

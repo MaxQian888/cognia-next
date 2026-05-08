@@ -63,6 +63,10 @@ import { McpAgentChipGroup, refreshAgentAvailability } from "./mcp-agent-chip-gr
 import { McpImportDialog } from "./mcp-import-dialog"
 import { McpAgentStatusBar } from "./mcp-agent-status-bar"
 import { McpDriftBanner } from "./mcp-drift-banner"
+import {
+  CLAUDE_CODE_RELATED,
+  RelatedSectionsStrip,
+} from "@/components/settings/common/related-sections-strip"
 import { getDetectedWritableAgents } from "@/hooks/agent"
 import { cn } from "@/lib/utils"
 import { loggers } from "@/lib/logger"
@@ -167,6 +171,8 @@ export function McpServersSection() {
           </Button>
         </div>
       </div>
+
+      <RelatedSectionsStrip current="mcp" targets={CLAUDE_CODE_RELATED} />
 
       <McpPresetGalleryDialog
         open={galleryOpen}
@@ -347,9 +353,14 @@ function McpPresetGalleryDialog({
     }
     setSelected(preset)
     const initial: Record<string, string> = {}
+    const env = (preset.config.env as Record<string, string> | undefined) ?? {}
+    const headers = (preset.config.headers as Record<string, string> | undefined) ?? {}
+    const presetUrl = typeof preset.config.url === "string" ? preset.config.url : ""
     for (const f of preset.fields) {
-      const env = (preset.config.env as Record<string, string> | undefined) ?? {}
-      initial[f.key] = env[f.key] ?? ""
+      if (f.placement === "env") initial[f.key] = env[f.key] ?? ""
+      else if (f.placement === "header") initial[f.key] = headers[f.key] ?? ""
+      else if (f.placement === "url") initial[f.key] = presetUrl
+      else initial[f.key] = ""
     }
     setValues(initial)
   }

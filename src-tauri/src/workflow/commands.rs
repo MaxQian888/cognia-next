@@ -8,6 +8,7 @@ use tauri::State;
 
 use super::run_mirror::MirrorError;
 use super::state::WorkflowState;
+use super::triggers::webhook_router::WebhookEntry;
 use super::types::{InFlightRunRow, PersistRunStateInput, RegisterTriggerInput};
 
 fn map_mirror_err(e: MirrorError) -> String {
@@ -37,27 +38,57 @@ pub async fn workflow_register_trigger(
             )?;
             Ok(())
         }
-        // Webhook + connector + chat-message triggers don't need Rust-side
-        // registration in Phase 5a — they ride the existing connectors axum
-        // app and the TS hooks already in place. We accept the call as a
-        // no-op so the TS bridge can register all triggers uniformly.
-        "trigger.webhook"
-        | "trigger.connector.inbound"
-        | "trigger.chat.message"
-        | "trigger.manual" => Ok(()),
+        // Webhook triggers register a path in the local axum router. The
+        // path / method / response settings ride along on the same input.
+        "trigger.webhook" => {
+            let path = input
+                .webhook_path
+                .clone()
+                .ok_or_else(|| "trigger.webhook requires a 'webhookPath' field".to_string())?;
+            let entry = WebhookEntry {
+                trigger_id: input.trigger_id.clone(),
+                workflow_id: input.workflow_id.clone(),
+                path,
+                method: input.webhook_method.clone().unwrap_or_else(|| "POST".into()),
+                hmac_secret: input.webhook_hmac_secret.clone(),
+                enabled: input.enabled,
+                binding: input.binding.clone(),
+                response_status: input.webhook_response_status.unwrap_or(200),
+                response_body: input.webhook_response_body.clone(),
+            };
+            state.webhook.upsert(entry)?;
+            Ok(())
+        }
+        // Connector inbound + chat-message triggers ride existing TS hooks.
+        // We accept the call as a no-op so the TS bridge can register all
+        // trigger kinds uniformly.
+        "trigger.connector.inbound" | "trigger.chat.message" | "trigger.manual" => Ok(()),
         other => Err(format!("workflow_register_trigger: unsupported kind '{other}'")),
     }
 }
 
 /// `workflow_unregister_trigger` — remove a trigger by id. Idempotent;
-/// missing ids are a no-op.
+/// missing ids are a no-op. Sweeps both the cron daemon and the webhook
+/// router so callers don't have to remember which kind they registered.
 #[tauri::command]
 pub async fn workflow_unregister_trigger(
     state: State<'_, WorkflowState>,
     trigger_id: String,
 ) -> Result<(), String> {
     state.cron.remove(&trigger_id);
+    state.webhook.unregister(&trigger_id);
     Ok(())
+}
+
+/// `workflow_get_webhook_url` — returns the http URL the user can hit to
+/// fire a registered webhook trigger. Returns `None` when the trigger is
+/// not registered or the router has not yet bound a port.
+#[tauri::command]
+pub async fn workflow_get_webhook_url(
+    state: State<'_, WorkflowState>,
+    trigger_id: String,
+) -> Result<Option<String>, String> {
+    Ok(state.webhook.url_for_trigger(&trigger_id))
 }
 
 /// `workflow_persist_run_state` — upsert the SQLite mirror. Called from the

@@ -508,6 +508,17 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       : BRIEF_OUTPUT_SNIPPET
   }
 
+  // --- Extended thinking budget --------------------------------------------
+  // Precedence: session > character > app default. Only forwarded when > 0;
+  // a falsy budget keeps the SDK at its default (no thinking pass).
+  const thinkingBudget =
+    session?.maxThinkingTokens ??
+    character?.maxThinkingTokens ??
+    appSettings?.defaultMaxThinkingTokens
+  if (typeof thinkingBudget === "number" && thinkingBudget > 0) {
+    opts.maxThinkingTokens = thinkingBudget
+  }
+
   // --- Resume / fork continuity --------------------------------------------
   // The sidecar persists the SDK-issued `session_id` onto the ChatSession row
   // (see hooks/use-claude-chat.ts). Re-passing it as `resumeSessionId` on

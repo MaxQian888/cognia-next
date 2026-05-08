@@ -97,6 +97,18 @@ pub struct RegisterTriggerInput {
     pub cron: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub webhook_path: Option<String>,
+    /// HTTP method the receiver allows. Defaults to "POST" when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webhook_method: Option<String>,
+    /// Optional HMAC-SHA-256 secret for the X-Signature-256 header.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webhook_hmac_secret: Option<String>,
+    /// Status code returned to the caller. Defaults to 200 when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webhook_response_status: Option<u16>,
+    /// Optional response body template, returned verbatim in Phase 5a.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webhook_response_body: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binding: Option<TriggerBinding>,
 }
@@ -212,6 +224,10 @@ mod tests {
             enabled: true,
             cron: Some("0 9 * * 1-5".into()),
             webhook_path: None,
+            webhook_method: None,
+            webhook_hmac_secret: None,
+            webhook_response_status: None,
+            webhook_response_body: None,
             binding: Some(TriggerBinding {
                 adapter_id: Some("telegram_main".into()),
                 ..Default::default()

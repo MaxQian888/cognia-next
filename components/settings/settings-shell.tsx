@@ -216,7 +216,7 @@ function SettingsShellInner({ actions }: Props) {
     <SidebarProvider
       defaultOpen
       data-bg-target="chat"
-      className="flex h-dvh overflow-hidden"
+      className="flex h-dvh overflow-hidden safe-area-pt"
       style={{ "--sidebar-width": "15rem" } as React.CSSProperties}
     >
       <SettingsSidebar
@@ -227,11 +227,11 @@ function SettingsShellInner({ actions }: Props) {
       />
 
       <SidebarInset data-bg-target="chat" className="flex flex-col min-w-0 h-full overflow-hidden">
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 z-10">
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 z-10 sm:h-12">
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 shrink-0"
+            className="h-9 w-9 shrink-0 sm:h-8 sm:w-8"
             onClick={goHome}
             aria-label={t("backToChat")}
           >
@@ -254,7 +254,7 @@ function SettingsShellInner({ actions }: Props) {
 
         {FILL_HEIGHT_SECTIONS.has(activeSection) ? (
           <div
-            className="flex flex-1 min-h-0 flex-col p-3 sm:p-4 md:p-5 lg:p-6"
+            className="flex flex-1 min-h-0 flex-col p-3 sm:p-4 md:p-5 lg:p-6 safe-area-pb"
             data-settings-panel
           >
             <div className="mx-auto flex w-full min-h-0 flex-1 flex-col animate-in fade-in slide-in-from-bottom-2 duration-200">
@@ -263,7 +263,7 @@ function SettingsShellInner({ actions }: Props) {
           </div>
         ) : (
           <ScrollArea className="flex-1 min-h-0">
-            <div className="p-3 sm:p-4 md:p-5 lg:p-6" data-settings-panel>
+            <div className="p-3 sm:p-4 md:p-5 lg:p-6 safe-area-pb" data-settings-panel>
               <div className="mx-auto w-full max-w-5xl animate-in fade-in slide-in-from-bottom-2 duration-200">
                 <SectionContent section={activeSection} onClose={goHome} />
               </div>

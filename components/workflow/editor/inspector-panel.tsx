@@ -25,6 +25,7 @@ import { workflowNodeCategory, type WorkflowNodeKind } from "@/types/workflow/vi
 import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import { Field } from "./inspector/forms/shared"
+import { InspectorExpressionProvider } from "./inspector/forms/shared/inspector-context"
 import { getNodeConfigComponent, hasDedicatedConfig } from "./inspector/node-config-registry"
 
 // Module-scoped wrapper that resolves the per-kind config form via the
@@ -93,7 +94,7 @@ export function InspectorPanel({
     return (
       <aside
         className={cn(
-          "flex w-80 shrink-0 flex-col items-center justify-center border-l bg-card/50 p-6 text-center text-sm text-muted-foreground",
+          "flex h-full w-full flex-col items-center justify-center border-l bg-card/50 p-6 text-center text-sm text-muted-foreground",
           className
         )}
         data-testid="workflow-inspector-empty"
@@ -107,7 +108,7 @@ export function InspectorPanel({
 
   return (
     <aside
-      className={cn("flex w-80 shrink-0 flex-col border-l bg-card/50", className)}
+      className={cn("flex h-full w-full flex-col border-l bg-card/50", className)}
       aria-label="Node inspector"
       data-testid="workflow-inspector"
     >
@@ -165,11 +166,13 @@ export function InspectorPanel({
             />
           </div>
           <Separator />
-          <NodeConfigForm
-            kind={node.data.kind as WorkflowNodeKind}
-            params={(node.data.params as Record<string, unknown>) ?? {}}
-            onChange={handleParamsChange}
-          />
+          <InspectorExpressionProvider store={useStore} currentNodeId={node.id}>
+            <NodeConfigForm
+              kind={node.data.kind as WorkflowNodeKind}
+              params={(node.data.params as Record<string, unknown>) ?? {}}
+              onChange={handleParamsChange}
+            />
+          </InspectorExpressionProvider>
           {!hasDedicatedConfig(node.data.kind as WorkflowNodeKind) ? (
             <p className="text-[11px] text-muted-foreground">
               No dedicated config form yet — edit the raw JSON above. A tailored form ships with the

@@ -18,7 +18,7 @@ import { LinkIcon, MonitorIcon } from "lucide-react"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { isTauri } from "@/lib/tauri"
+import { usePlatform } from "@/hooks/use-platform"
 import { OverviewTab } from "./tabs/overview-tab"
 import { AdaptersTab } from "./tabs/adapters-tab"
 import { OutboundTab } from "./tabs/outbound-tab"
@@ -63,7 +63,7 @@ export function ConnectionsSection() {
     router.replace(`?${next.toString()}`, { scroll: false })
   }
 
-  const desktop = isTauri()
+  const desktop = usePlatform() === "tauri"
 
   return (
     <div className="space-y-6">

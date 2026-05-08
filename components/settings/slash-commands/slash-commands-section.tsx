@@ -4,18 +4,15 @@
  * SlashCommandsSection — settings panel for the unified slash-command
  * surface. Three groups visible at once:
  *   - Built-in: from BUILTIN_SLASH_COMMANDS (read-only descriptors)
- *   - Custom: scanned `.claude/commands/*.md` (read-only here; "Open file"
- *     opens the source in the system editor via Tauri shell).
+ *   - Custom: scanned `.claude/commands/*.md` — Edit / Delete / + New now
+ *     write through `lib/slash-commands/custom` (Phase 7c, Stage 3 of
+ *     the ClaudeCode 完整化 plan).
  *   - Plugin: registered through the unified registry by plugin manifests.
- *
- * Phase 7a of the ClaudeCode 完整化 plan. Editing custom command markdown
- * is intentionally out of scope for v1 — Phase 7c will add it once the
- * Tauri write surface is settled.
  */
 
 import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { TerminalSquareIcon, FileEditIcon, PlayIcon } from "lucide-react"
+import { TerminalSquareIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
@@ -26,29 +23,59 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { BUILTIN_SLASH_COMMANDS } from "@/lib/slash-commands/builtin"
 import type { SlashCommand } from "@/lib/slash-commands/builtin"
-import { loadCustomSlashCommands } from "@/lib/slash-commands/custom"
+import { deleteCustomSlashCommand, loadCustomSlashCommands } from "@/lib/slash-commands/custom"
 import { listSlashCommands } from "@/lib/slash-commands/registry"
 import type { SlashCommandDefinition } from "@/lib/slash-commands/registry"
 import { isTauri } from "@/lib/tauri"
 import { toast } from "@/components/ui/sonner"
 import { createLogger } from "@/lib/logger"
+import { CommandEditorDialog } from "./command-editor-dialog"
+import { useChatStore } from "@/stores/chat"
+import { getSession } from "@/lib/db/sessions"
+import {
+  CLAUDE_CODE_RELATED,
+  RelatedSectionsStrip,
+} from "@/components/settings/common/related-sections-strip"
 
 const log = createLogger("settings.slash-commands")
 
 export function SlashCommandsSection() {
   const t = useTranslations("settings.slashCommands")
+  const desktop = isTauri()
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
   const [custom, setCustom] = useState<SlashCommand[]>([])
   const [filter, setFilter] = useState("")
   const [loading, setLoading] = useState(false)
+  const [reloadCounter, setReloadCounter] = useState(0)
 
+  // Resolve the active session's working dir so project-scope commands write
+  // to the right `.claude/commands/`. Falls back to `null` (= disabled).
+  const [cwd, setCwd] = useState<string | null>(null)
+
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [editorInitial, setEditorInitial] = useState<SlashCommand | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<SlashCommand | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     let cancelled = false
     async function go() {
       setLoading(true)
       try {
-        const cmds = await loadCustomSlashCommands(null)
+        const cmds = await loadCustomSlashCommands(cwd)
         if (!cancelled) setCustom(cmds)
       } catch (e) {
         log.error("custom_scan_failed", { error: String(e) })
@@ -60,7 +87,60 @@ export function SlashCommandsSection() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [cwd, reloadCounter])
+
+  // Track the active session's working dir so the editor can target its
+  // `.claude/commands/`. This effect re-runs when the user switches sessions.
+  useEffect(() => {
+    let cancelled = false
+    if (!activeSessionId) {
+      setCwd(null)
+      return
+    }
+    void (async () => {
+      try {
+        const session = await getSession(activeSessionId)
+        if (!cancelled) setCwd(session?.workingDir ?? null)
+      } catch {
+        if (!cancelled) setCwd(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [activeSessionId])
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  const triggerReload = () => setReloadCounter((n) => n + 1)
+
+  const onEdit = (c: SlashCommand) => {
+    setEditorInitial(c)
+    setEditorOpen(true)
+  }
+
+  const onCreate = () => {
+    setEditorInitial(null)
+    setEditorOpen(true)
+  }
+
+  const onDelete = async () => {
+    if (!deleteTarget) return
+    setBusy(true)
+    try {
+      await deleteCustomSlashCommand({
+        scope: deleteTarget.scope === "project" ? "project" : "user",
+        name: deleteTarget.name,
+        cwd,
+      })
+      toast.success(t("deletedToast", { name: deleteTarget.name }))
+      setDeleteTarget(null)
+      triggerReload()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const pluginCmds = useMemo<SlashCommandDefinition[]>(
     () => listSlashCommands().filter((c) => c.source === "plugin"),
@@ -107,13 +187,36 @@ export function SlashCommandsSection() {
         <p className="text-xs text-muted-foreground">{t("description")}</p>
       </div>
 
-      <Input
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-        placeholder={t("filterPlaceholder")}
-        className="text-sm"
-        data-testid="slash-commands-filter"
-      />
+      <RelatedSectionsStrip current="slash-commands" targets={CLAUDE_CODE_RELATED} />
+
+      <div className="flex items-center gap-2">
+        <Input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder={t("filterPlaceholder")}
+          className="text-sm"
+          data-testid="slash-commands-filter"
+        />
+        <Button
+          size="sm"
+          onClick={onCreate}
+          disabled={!desktop}
+          aria-label={t("newBtn")}
+          data-testid="slash-commands-new"
+        >
+          <PlusIcon className="mr-1 size-3.5" />
+          {t("newBtn")}
+        </Button>
+      </div>
+      {!desktop && (
+        <p
+          className="rounded border bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+          role="status"
+          data-testid="slash-commands-web-banner"
+        >
+          {t("webModeBanner")}
+        </p>
+      )}
 
       <Accordion type="multiple" defaultValue={["builtin", "custom", "plugin"]}>
         <AccordionItem value="builtin">
@@ -151,7 +254,7 @@ export function SlashCommandsSection() {
                 <p className="px-2 text-xs text-muted-foreground">{t("scanning")}</p>
               ) : filteredCustom.length === 0 ? (
                 <p className="px-2 text-xs italic text-muted-foreground">
-                  {isTauri() ? t("emptyCustom") : t("emptyCustomWeb")}
+                  {desktop ? t("emptyCustom") : t("emptyCustomWeb")}
                 </p>
               ) : (
                 filteredCustom.map((c) => (
@@ -165,6 +268,10 @@ export function SlashCommandsSection() {
                     filePath={c.filePath}
                     onTry={() => tryInComposer(c.name)}
                     tryLabel={t("try")}
+                    onEdit={desktop ? () => onEdit(c) : undefined}
+                    editLabel={t("edit")}
+                    onDelete={desktop ? () => setDeleteTarget(c) : undefined}
+                    deleteLabel={t("delete")}
                   />
                 ))
               )}
@@ -202,6 +309,42 @@ export function SlashCommandsSection() {
           </AccordionContent>
         </AccordionItem>
       </Accordion>
+
+      <CommandEditorDialog
+        open={editorOpen}
+        onOpenChange={setEditorOpen}
+        initial={editorInitial}
+        cwd={cwd}
+        onSaved={() => {
+          setEditorOpen(false)
+          triggerReload()
+        }}
+      />
+
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("deleteDialogTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("deleteDialogDesc", { name: deleteTarget?.name ?? "" })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void onDelete()}
+              disabled={busy}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="slash-commands-delete-confirm"
+            >
+              {t("delete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -215,6 +358,10 @@ interface RowProps {
   filePath?: string
   onTry: () => void
   tryLabel: string
+  onEdit?: () => void
+  editLabel?: string
+  onDelete?: () => void
+  deleteLabel?: string
 }
 
 function CommandRow({
@@ -226,6 +373,10 @@ function CommandRow({
   filePath,
   onTry,
   tryLabel,
+  onEdit,
+  editLabel,
+  onDelete,
+  deleteLabel,
 }: RowProps) {
   return (
     <Card className="p-3" data-testid={`slash-command-row-${name}`}>
@@ -248,18 +399,6 @@ function CommandRow({
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {filePath ? (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-7"
-              data-testid={`open-file-${name}`}
-              title={filePath}
-              disabled
-            >
-              <FileEditIcon className="size-3.5" />
-            </Button>
-          ) : null}
           <Button
             variant="ghost"
             size="icon"
@@ -267,9 +406,36 @@ function CommandRow({
             onClick={onTry}
             data-testid={`try-${name}`}
             title={tryLabel}
+            aria-label={tryLabel}
           >
             <PlayIcon className="size-3.5" />
           </Button>
+          {onEdit && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              onClick={onEdit}
+              data-testid={`edit-${name}`}
+              title={editLabel}
+              aria-label={editLabel}
+            >
+              <PencilIcon className="size-3.5" />
+            </Button>
+          )}
+          {onDelete && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7 text-destructive hover:text-destructive"
+              onClick={onDelete}
+              data-testid={`delete-${name}`}
+              title={deleteLabel}
+              aria-label={deleteLabel}
+            >
+              <Trash2Icon className="size-3.5" />
+            </Button>
+          )}
         </div>
       </div>
     </Card>

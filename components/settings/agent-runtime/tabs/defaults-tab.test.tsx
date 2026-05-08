@@ -9,6 +9,7 @@ const stateRef = {
     defaultWorkingDir: "",
     defaultSystemPrompt: "",
     routingFallbackEnabled: true,
+    defaultMaxThinkingTokens: undefined as number | undefined,
   },
 }
 
@@ -36,6 +37,7 @@ describe("DefaultsTab", () => {
       defaultWorkingDir: "",
       defaultSystemPrompt: "",
       routingFallbackEnabled: true,
+      defaultMaxThinkingTokens: undefined,
     }
   })
 
@@ -107,10 +109,59 @@ describe("DefaultsTab", () => {
       defaultWorkingDir: undefined as never,
       defaultSystemPrompt: undefined as never,
       routingFallbackEnabled: undefined as never,
+      defaultMaxThinkingTokens: undefined,
     }
     render(<DefaultsTab />)
     // Should fall back to "default" — the trigger shows the matching label.
     const combobox = screen.getByRole("combobox")
     expect(combobox).toBeInTheDocument()
+  })
+
+  it("blur on thinking-budget input persists clamped, rounded value", () => {
+    render(<DefaultsTab />)
+    const input = screen.getByTestId("thinking-budget-input") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "5500" } })
+    fireEvent.blur(input)
+    expect(save).toHaveBeenCalledWith({ defaultMaxThinkingTokens: 5500 })
+  })
+
+  it("blur with zero thinking-budget persists undefined (use SDK default)", () => {
+    render(<DefaultsTab />)
+    const input = screen.getByTestId("thinking-budget-input") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "0" } })
+    fireEvent.blur(input)
+    expect(save).toHaveBeenCalledWith({ defaultMaxThinkingTokens: undefined })
+  })
+
+  it("blur with negative value clamps to 0 / undefined", () => {
+    render(<DefaultsTab />)
+    const input = screen.getByTestId("thinking-budget-input") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "-100" } })
+    fireEvent.blur(input)
+    expect(save).toHaveBeenCalledWith({ defaultMaxThinkingTokens: undefined })
+  })
+
+  it("blur with above-max value clamps down to the max budget", () => {
+    render(<DefaultsTab />)
+    const input = screen.getByTestId("thinking-budget-input") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "999999" } })
+    fireEvent.blur(input)
+    expect(save).toHaveBeenCalledWith({ defaultMaxThinkingTokens: 64000 })
+  })
+
+  it("reset button persists undefined when budget is non-zero", async () => {
+    stateRef.current = {
+      ...stateRef.current,
+      defaultMaxThinkingTokens: 4096,
+    }
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    await user.click(screen.getByTestId("thinking-budget-reset"))
+    expect(save).toHaveBeenCalledWith({ defaultMaxThinkingTokens: undefined })
+  })
+
+  it("reset button is disabled when budget is already zero", () => {
+    render(<DefaultsTab />)
+    expect(screen.getByTestId("thinking-budget-reset")).toBeDisabled()
   })
 })

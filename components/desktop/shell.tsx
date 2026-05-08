@@ -22,7 +22,7 @@ import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
-import { isTauri } from "@/lib/tauri"
+import { usePlatform } from "@/hooks/use-platform"
 import { whenSeeded } from "@/lib/db/schema"
 import { markSessionRead } from "@/lib/db/session-state"
 import { guildFromSession } from "@/lib/claude/guild"
@@ -44,6 +44,7 @@ const log = loggers.shell
  * that the inner panes stay narrow and focused.
  */
 export function DiscordShell() {
+  const platform = usePlatform()
   const router = useRouter()
   const { sessions, activeSessionId, select, create, remove, rename } = useSessions()
   const directChat = useClaudeChat()
@@ -253,7 +254,7 @@ export function DiscordShell() {
               className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
               data-bg-target="chat"
             >
-              {!mounted ? null : !isTauri() ? (
+              {!mounted ? null : platform !== "tauri" ? (
                 <DesktopOnlyBanner />
               ) : (
                 <ChatPane

@@ -282,6 +282,430 @@ function skillBundleTemplate(): VisualWorkflow {
   })
 }
 
+// ── Phase 5+ templates — use the executors registered in built-ins.ts ────
+
+function inboundTriageTemplate(): VisualWorkflow {
+  return template({
+    id: "wf_builtin_inbound_triage",
+    name: "Inbound triage",
+    description:
+      "Inbound platform message → AI classify → branch to high-priority handler / draft / drop. " +
+      "Wire your Telegram or Slack adapter and the workflow auto-routes incoming messages.",
+    icon: "Inbox",
+    tags: ["connector", "ai", "triage"],
+    nodes: [
+      {
+        id: "n_inbound",
+        type: "trigger.connector.inbound",
+        typeVersion: 1,
+        position: { x: 0, y: 80 },
+        data: { label: "Incoming message", params: {} },
+      },
+      {
+        id: "n_classify",
+        type: "ai.classify",
+        typeVersion: 1,
+        position: { x: 280, y: 80 },
+        data: {
+          label: "Classify",
+          params: {
+            input: "{{ $trigger.payload.text }}",
+            labels: ["urgent", "normal", "spam"],
+            labelsRaw: "urgent, normal, spam",
+          },
+        },
+      },
+      {
+        id: "n_switch",
+        type: "flow.switch",
+        typeVersion: 1,
+        position: { x: 560, y: 80 },
+        data: {
+          label: "Route by label",
+          params: {
+            subject: "{{ $node['n_classify'].out.label }}",
+            cases: [
+              { value: "urgent", label: "urgent" },
+              { value: "spam", label: "spam" },
+            ],
+            defaultLabel: "default",
+          },
+        },
+      },
+      {
+        id: "n_draft",
+        type: "action.connector.draft",
+        typeVersion: 1,
+        position: { x: 840, y: 0 },
+        data: {
+          label: "Draft urgent reply",
+          params: {
+            conversationKey: "{{ $trigger.payload.conversationKey }}",
+            sessionId: "{{ $trigger.payload.sessionId }}",
+            content: "Urgent: forwarded to oncall.",
+          },
+        },
+      },
+      {
+        id: "n_default",
+        type: "action.connector.send",
+        typeVersion: 1,
+        position: { x: 840, y: 160 },
+        data: {
+          label: "Auto-reply",
+          params: {
+            adapterId: "{{ $trigger.payload.adapterId }}",
+            conversationKey: "{{ $trigger.payload.conversationKey }}",
+            content: "Thanks — I'll get back to you shortly.",
+          },
+        },
+      },
+    ],
+    edges: [
+      { id: "e1", source: "n_inbound", target: "n_classify" },
+      { id: "e2", source: "n_classify", target: "n_switch" },
+      { id: "e3", source: "n_switch", target: "n_draft", label: "urgent" },
+      { id: "e4", source: "n_switch", target: "n_default", label: "default" },
+    ],
+  })
+}
+
+function dailyDigestTemplate(): VisualWorkflow {
+  return template({
+    id: "wf_builtin_daily_digest",
+    name: "Daily digest",
+    description:
+      "Cron trigger fires every weekday at 09:00 → fetch top items → AI summarise → send through a connector. Edit the cron to change cadence.",
+    icon: "Clock",
+    tags: ["cron", "ai", "connector"],
+    nodes: [
+      {
+        id: "n_cron",
+        type: "trigger.cron",
+        typeVersion: 1,
+        position: { x: 0, y: 80 },
+        data: { label: "Every weekday 09:00", params: { cron: "0 9 * * 1-5" } },
+      },
+      {
+        id: "n_http",
+        type: "io.http",
+        typeVersion: 1,
+        position: { x: 240, y: 80 },
+        data: {
+          label: "Fetch source",
+          params: {
+            method: "GET",
+            url: "https://hacker-news.firebaseio.com/v0/topstories.json",
+          },
+        },
+      },
+      {
+        id: "n_summary",
+        type: "ai.prompt",
+        typeVersion: 1,
+        position: { x: 480, y: 80 },
+        data: {
+          label: "Summarise",
+          params: {
+            systemPrompt: "Summarise this list as a 5-bullet morning digest.",
+            userPrompt: "{{ $node['n_http'].out.body }}",
+            temperature: 0.3,
+          },
+        },
+      },
+      {
+        id: "n_send",
+        type: "action.connector.send",
+        typeVersion: 1,
+        position: { x: 720, y: 80 },
+        data: {
+          label: "Send digest",
+          params: {
+            adapterId: "telegram_main",
+            conversationKey: "ops",
+            content: "{{ $node['n_summary'].out.completion }}",
+          },
+        },
+      },
+    ],
+    edges: [
+      { id: "e1", source: "n_cron", target: "n_http" },
+      { id: "e2", source: "n_http", target: "n_summary" },
+      { id: "e3", source: "n_summary", target: "n_send" },
+    ],
+  })
+}
+
+function ragFaqTemplate(): VisualWorkflow {
+  return template({
+    id: "wf_builtin_rag_faq",
+    name: "RAG-backed FAQ reply",
+    description:
+      "Chat message → vector-search the bound twin → grounded AI reply. Drop in any twin id + character to deploy a personal knowledge bot.",
+    icon: "Brain",
+    tags: ["chat", "twin", "rag", "ai"],
+    nodes: [
+      {
+        id: "n_chat",
+        type: "trigger.chat.message",
+        typeVersion: 1,
+        position: { x: 0, y: 80 },
+        data: { label: "On chat message", params: {} },
+      },
+      {
+        id: "n_rag",
+        type: "action.twin.rag",
+        typeVersion: 1,
+        position: { x: 240, y: 80 },
+        data: {
+          label: "Retrieve context",
+          params: {
+            twinId: "twin_demo",
+            query: "{{ $trigger.payload.text }}",
+            topK: 6,
+          },
+        },
+      },
+      {
+        id: "n_answer",
+        type: "ai.prompt",
+        typeVersion: 1,
+        position: { x: 480, y: 80 },
+        data: {
+          label: "Grounded answer",
+          params: {
+            systemPrompt:
+              "Answer using ONLY the context below. If you don't know, say so.\n\nCONTEXT:\n{{ $node['n_rag'].out.chunks }}",
+            userPrompt: "{{ $trigger.payload.text }}",
+            temperature: 0.2,
+          },
+        },
+      },
+      {
+        id: "n_send",
+        type: "action.character.send",
+        typeVersion: 1,
+        position: { x: 720, y: 80 },
+        data: {
+          label: "Reply",
+          params: {
+            characterId: "{{ $trigger.payload.characterId }}",
+            sessionId: "{{ $trigger.payload.sessionId }}",
+            content: "{{ $node['n_answer'].out.completion }}",
+            role: "assistant",
+          },
+        },
+      },
+    ],
+    edges: [
+      { id: "e1", source: "n_chat", target: "n_rag" },
+      { id: "e2", source: "n_rag", target: "n_answer" },
+      { id: "e3", source: "n_answer", target: "n_send" },
+    ],
+  })
+}
+
+function webhookEchoTemplate(): VisualWorkflow {
+  return template({
+    id: "wf_builtin_webhook_echo",
+    name: "Webhook → AI → respond",
+    description:
+      "Inbound webhook → AI rewrite of the body → echoed back as the HTTP response. Desktop only — relies on the Tauri webhook router.",
+    icon: "Webhook",
+    tags: ["webhook", "ai", "desktop-only"],
+    nodes: [
+      {
+        id: "n_in",
+        type: "trigger.webhook",
+        typeVersion: 1,
+        position: { x: 0, y: 80 },
+        data: {
+          label: "On webhook",
+          params: { path: "echo", method: "POST", responseStatus: 200 },
+        },
+      },
+      {
+        id: "n_rewrite",
+        type: "ai.prompt",
+        typeVersion: 1,
+        position: { x: 240, y: 80 },
+        data: {
+          label: "Rewrite",
+          params: {
+            systemPrompt: "Rewrite the user message in formal English.",
+            userPrompt: "{{ $trigger.payload.body }}",
+          },
+        },
+      },
+      {
+        id: "n_out",
+        type: "io.webhook.respond",
+        typeVersion: 1,
+        position: { x: 480, y: 80 },
+        data: {
+          label: "Respond",
+          params: {
+            status: 200,
+            body: "{{ $node['n_rewrite'].out.completion }}",
+            headersJson: '{ "Content-Type": "text/plain" }',
+          },
+        },
+      },
+    ],
+    edges: [
+      { id: "e1", source: "n_in", target: "n_rewrite" },
+      { id: "e2", source: "n_rewrite", target: "n_out" },
+    ],
+  })
+}
+
+function loopOverItemsTemplate(): VisualWorkflow {
+  return template({
+    id: "wf_builtin_loop_over_items",
+    name: "Loop over items",
+    description:
+      "Manual trigger → fetch list → loop with a per-item AI summary → join results into a single output. Demonstrates flow.loop and aggregation.",
+    icon: "Repeat",
+    tags: ["loop", "ai"],
+    nodes: [
+      {
+        id: "n_start",
+        type: "trigger.manual",
+        typeVersion: 1,
+        position: { x: 0, y: 80 },
+        data: { label: "Run", params: {} },
+      },
+      {
+        id: "n_fetch",
+        type: "io.http",
+        typeVersion: 1,
+        position: { x: 240, y: 80 },
+        data: {
+          label: "Fetch items",
+          params: {
+            method: "GET",
+            url: "https://jsonplaceholder.typicode.com/posts?_limit=5",
+          },
+        },
+      },
+      {
+        id: "n_loop",
+        type: "flow.loop",
+        typeVersion: 1,
+        position: { x: 480, y: 80 },
+        data: {
+          label: "For each post",
+          params: {
+            mode: "forEach",
+            inputExpression: "{{ $node['n_fetch'].out.body }}",
+            bodyExpression: "$item.title",
+            maxIterations: 100,
+          },
+        },
+      },
+      {
+        id: "n_print",
+        type: "data.template",
+        typeVersion: 1,
+        position: { x: 720, y: 80 },
+        data: {
+          label: "Render summary",
+          params: {
+            template:
+              "Processed {{ $node['n_loop'].out.iterations }} items:\n{{ $node['n_loop'].out.items }}",
+          },
+        },
+      },
+    ],
+    edges: [
+      { id: "e1", source: "n_start", target: "n_fetch" },
+      { id: "e2", source: "n_fetch", target: "n_loop" },
+      { id: "e3", source: "n_loop", target: "n_print" },
+    ],
+  })
+}
+
+function subworkflowOrchestratorTemplate(): VisualWorkflow {
+  return template({
+    id: "wf_builtin_subworkflow_orchestrator",
+    name: "Subworkflow orchestrator",
+    description:
+      "Manual trigger → run two subworkflows in parallel via flow.split → join results → AI merge. Demonstrates composition.",
+    icon: "Workflow",
+    tags: ["subworkflow", "split", "join", "ai"],
+    nodes: [
+      {
+        id: "n_start",
+        type: "trigger.manual",
+        typeVersion: 1,
+        position: { x: 0, y: 120 },
+        data: { label: "Run", params: {} },
+      },
+      {
+        id: "n_split",
+        type: "flow.split",
+        typeVersion: 1,
+        position: { x: 220, y: 120 },
+        data: {
+          label: "Fan out",
+          params: { branchLabels: ["A", "B"] },
+        },
+      },
+      {
+        id: "n_subA",
+        type: "flow.subworkflow",
+        typeVersion: 1,
+        position: { x: 440, y: 40 },
+        data: {
+          label: "Sub A",
+          params: { workflowId: "wf_builtin_hello_world" },
+        },
+      },
+      {
+        id: "n_subB",
+        type: "flow.subworkflow",
+        typeVersion: 1,
+        position: { x: 440, y: 200 },
+        data: {
+          label: "Sub B",
+          params: { workflowId: "wf_builtin_loop_over_items" },
+        },
+      },
+      {
+        id: "n_join",
+        type: "flow.join",
+        typeVersion: 1,
+        position: { x: 680, y: 120 },
+        data: {
+          label: "Join",
+          params: { joinPolicy: "all" },
+        },
+      },
+      {
+        id: "n_merge",
+        type: "ai.prompt",
+        typeVersion: 1,
+        position: { x: 900, y: 120 },
+        data: {
+          label: "Merge",
+          params: {
+            systemPrompt: "Combine the two upstream results into one short paragraph.",
+            userPrompt: "A: {{ $node['n_subA'].out }}\n\nB: {{ $node['n_subB'].out }}",
+          },
+        },
+      },
+    ],
+    edges: [
+      { id: "e1", source: "n_start", target: "n_split" },
+      { id: "e2", source: "n_split", target: "n_subA", label: "A" },
+      { id: "e3", source: "n_split", target: "n_subB", label: "B" },
+      { id: "e4", source: "n_subA", target: "n_join" },
+      { id: "e5", source: "n_subB", target: "n_join" },
+      { id: "e6", source: "n_join", target: "n_merge" },
+    ],
+  })
+}
+
 /**
  * Returns the in-memory list of built-in templates. Pure — no Dexie access —
  * so it can be safely consumed by tests and the templates tab without
@@ -293,6 +717,12 @@ export function buildBuiltInWorkflowTemplates(): VisualWorkflow[] {
     httpDataPipelineTemplate(),
     conditionalReplyTemplate(),
     skillBundleTemplate(),
+    inboundTriageTemplate(),
+    dailyDigestTemplate(),
+    ragFaqTemplate(),
+    webhookEchoTemplate(),
+    loopOverItemsTemplate(),
+    subworkflowOrchestratorTemplate(),
   ]
 }
 

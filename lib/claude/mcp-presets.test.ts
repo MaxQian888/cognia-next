@@ -52,3 +52,49 @@ describe("applyPresetFields", () => {
     expect(config.args as string[]).toContain("")
   })
 })
+
+describe("HTTP / SSE presets", () => {
+  it("ships DeepWiki + http-generic + sse-generic", () => {
+    const dw = getPreset("deepwiki")
+    expect(dw?.transport).toBe("http")
+    expect(dw?.config.url).toMatch(/^https:\/\/mcp\.deepwiki\.com/)
+
+    const httpGeneric = getPreset("http-generic")
+    expect(httpGeneric?.transport).toBe("http")
+    expect(httpGeneric?.fields.find((f) => f.placement === "url")).toBeDefined()
+    expect(httpGeneric?.fields.find((f) => f.placement === "header")).toBeDefined()
+
+    const sseGeneric = getPreset("sse-generic")
+    expect(sseGeneric?.transport).toBe("sse")
+  })
+
+  it("applyPresetFields writes url + header values", () => {
+    const httpGeneric = getPreset("http-generic")!
+    const config = applyPresetFields(httpGeneric, {
+      url: "https://example.com/mcp",
+      Authorization: "Bearer abc",
+    })
+    expect(config.url).toBe("https://example.com/mcp")
+    expect((config.headers as Record<string, string>).Authorization).toBe("Bearer abc")
+  })
+
+  it("applyPresetFields drops empty header values + empty headers map", () => {
+    const httpGeneric = getPreset("http-generic")!
+    const config = applyPresetFields(httpGeneric, {
+      url: "https://example.com/mcp",
+      Authorization: "",
+    })
+    expect(config.url).toBe("https://example.com/mcp")
+    expect(config.headers).toBeUndefined()
+  })
+
+  it("preserves non-empty user headers when other field is blank", () => {
+    const httpGeneric = getPreset("http-generic")!
+    const config = applyPresetFields(httpGeneric, {
+      url: "",
+      Authorization: "Bearer abc",
+    })
+    expect(config.url).toBe("")
+    expect((config.headers as Record<string, string>).Authorization).toBe("Bearer abc")
+  })
+})

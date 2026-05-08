@@ -279,10 +279,16 @@ export interface McpTestRequest {
 }
 
 /**
- * Spawn the MCP server, walk the JSON-RPC handshake, and report whether it
- * responded plus the discovered tool list. Times out at 10s. Network-transport
- * tests (sse/http) are not yet implemented and return ok: false with a clear
- * error string.
+ * Probe an MCP server and report whether it responded plus the discovered
+ * tool list. Times out at 10s.
+ *
+ *   - `stdio`: spawn the executable, walk the JSON-RPC handshake.
+ *   - `http`:  open a streamable-HTTP session, run `initialize` + `tools/list`.
+ *   - `sse`:   open the SSE endpoint, run the same handshake over the stream.
+ *
+ * Per-transport implementations live in `src-tauri/src/claude/mcp_test.rs`.
+ * Errors are normalised to a single `error` string so the UI can render any
+ * failure mode without branching on transport.
  */
 export async function testMcpServer(req: McpTestRequest): Promise<McpTestResult> {
   const raw = await transport.call<{
