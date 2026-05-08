@@ -36,6 +36,31 @@ jest.mock("@/lib/qr/barcode-scanner", () => ({
   scanQrCode: jest.fn(),
 }))
 
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
+    // Mirror the strings the test expectations match against. Keep keys
+    // here in sync with i18n/messages/* — these are NOT a runtime fallback,
+    // just a static stub for jsdom.
+    const map: Record<string, string> = {
+      title: "Pair with cognia desktop",
+      intro: "Enter the desktop's LAN address and the pairing code from Settings → Companion.",
+      scanCta: "Scan QR",
+      manualDivider: "or paste manually",
+      baseUrlLabel: "Server URL",
+      tokenLabel: "Pair token",
+      fingerprintPinned: "Desktop identity pinned",
+      submit: "Pair",
+      submitInProgress: "Pairing…",
+      transportLabel: "Transport",
+      signOutTitle: "Sign out",
+      signOutReason: "Confirm sign out",
+      signOutDescription: "Reconnect requires re-pairing.",
+      biometricFailed: `Biometric failed (${(vars?.reason as string) ?? ""})`,
+    }
+    return map[key] ?? key
+  },
+}))
+
 import { scan as scanBarcode } from "@/lib/capacitor/barcode"
 const mockedScanQr = scanBarcode as jest.Mock
 

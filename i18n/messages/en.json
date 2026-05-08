@@ -7965,5 +7965,205 @@
       "accept": "Accept",
       "reject": "Reject"
     }
+  },
+  "mobile": {
+    "tabs": {
+      "chat": "Chat",
+      "workflows": "Workflows",
+      "discover": "Discover",
+      "me": "Me"
+    },
+    "tabBar": {
+      "unread": "{count} unread"
+    },
+    "pair": {
+      "title": "Connect to desktop",
+      "intro": "Scan the QR shown in desktop Settings → Companion. You can also paste the 5-minute pair token manually.",
+      "scanCta": "Scan QR",
+      "manualDivider": "or paste manually",
+      "baseUrlLabel": "Server URL",
+      "tokenLabel": "Pair token",
+      "fingerprintPinned": "✓ Desktop identity pinned",
+      "submit": "Complete pairing",
+      "submitInProgress": "Pairing…",
+      "transportLabel": "Transport",
+      "signOutTitle": "Sign out",
+      "signOutReason": "Confirm sign out",
+      "signOutDescription": "You'll need to scan the QR again to reconnect.",
+      "biometricFailed": "Biometric check failed ({reason}); did not sign out."
+    },
+    "discover": {
+      "title": "Discover",
+      "tabs": {
+        "characters": "Characters",
+        "teams": "Teams",
+        "skills": "Skills",
+        "twinDrafts": "Twin drafts"
+      },
+      "builtInBadge": "Built-in",
+      "memberCount": "{count} agents",
+      "emptyCharacters": "No characters yet — create one on the desktop.",
+      "emptyTeams": "No teams yet.",
+      "emptySkills": "No skills yet.",
+      "emptyTwinDrafts": "No pending twin drafts."
+    },
+    "me": {
+      "title": "Me",
+      "pairing": "Pairing status",
+      "pairingPaired": "Paired with desktop ({deviceId})",
+      "pairingUnpaired": "Not paired with desktop yet",
+      "actionPair": "Pair now",
+      "sectionAccount": "Account",
+      "sectionData": "Data & backup",
+      "sectionAppearance": "Appearance & language",
+      "sectionAdvanced": "Advanced",
+      "settingsLink": "App settings",
+      "backupLink": "Backup & sync",
+      "appSecurity": "App security",
+      "biometricToggle": "Require biometric to unlock",
+      "biometricUnavailable": "This device has no biometric enrolled.",
+      "versionLabel": "Version"
+    },
+    "companion": {
+      "tunnel": {
+        "title": "Cloudflared tunnel",
+        "description": "Reach this desktop from anywhere. Requires the cloudflared CLI to be installed.",
+        "started": "Tunnel started.",
+        "stopped": "Tunnel stopped.",
+        "notInstalled": "cloudflared not found — install via brew/winget/apt first.",
+        "off": "Off. Turning the switch on launches cloudflared as a subprocess.",
+        "onlyDesktop": "Tunnel control is desktop-only.",
+        "enableLabel": "Enable cloudflared tunnel"
+      },
+      "mdns": {
+        "title": "LAN auto-discovery (mDNS)",
+        "description": "Broadcast _cognia._tcp on the LAN so phones find this desktop without QR scan.",
+        "started": "LAN broadcast started.",
+        "stopped": "LAN broadcast stopped.",
+        "onlyDesktop": "LAN broadcast is desktop-only.",
+        "enableLabel": "Enable mDNS broadcast"
+      },
+      "revoke": {
+        "reason": "Confirm revoking pairing for {label}",
+        "title": "Revoke pairing",
+        "description": "The device loses access immediately.",
+        "blocked": "Revoke not completed ({reason}).",
+        "successToast": "Device revoked."
+      }
+    },
+    "twinDraft": {
+      "kindCharacter": "Character",
+      "kindSkill": "Skill",
+      "statusPending": "Pending",
+      "statusAccepted": "Accepted",
+      "statusRejected": "Rejected",
+      "statusEdited": "Edited",
+      "untitled": "Untitled draft",
+      "noSummary": "No summary",
+      "qualityScore": "Score {percent}%"
+    },
+    "draftApproval": {
+      "empty": "No drafts pending approval.",
+      "approve": "Approve",
+      "reject": "Reject",
+      "queueLabelApprove": "Approve connector draft",
+      "queueLabelReject": "Reject connector draft"
+    },
+    "composerPlus": {
+      "toggleAria": "Attachments",
+      "camera": "Camera",
+      "album": "Album",
+      "file": "File",
+      "voice": "Voice",
+      "voiceStop": "Stop recording",
+      "voiceCannotStart": "Cannot start recording",
+      "unsupported": "Not supported on this platform.",
+      "permissionDeniedCamera": "Camera permission required.",
+      "permissionDeniedMic": "Microphone permission required."
+    },
+    "workflow": {
+      "title": "Workflows",
+      "empty": "No workflows yet. Create one on the desktop and it appears here.",
+      "runButton": "Run",
+      "runQueued": "Queued — fires when the desktop is online again.",
+      "runFailed": "Trigger failed: {message}",
+      "activeBadge": "Active",
+      "landscapeHint": "Rotate for full graph",
+      "runsHeader": "Recent runs",
+      "noRuns": "No runs yet.",
+      "statusRunning": "Running",
+      "statusSucceeded": "Succeeded",
+      "statusFailed": "Failed",
+      "statusCancelled": "Cancelled",
+      "statusSkipped": "Skipped",
+      "statusWaiting": "Waiting"
+    },
+    "twinSources": {
+      "title": "Twin sources",
+      "empty": "No twin sources yet. Tap + to add one.",
+      "addCta": "Add source",
+      "pickPaste": "Paste text",
+      "pickCamera": "Capture document",
+      "pickFile": "Pick file",
+      "queuedToast": "Queued — desktop will process when online.",
+      "pasteDialogTitle": "Paste text",
+      "pasteDialogPrompt": "Paste or type text to feed the twin",
+      "pasteCancelled": "Cancelled",
+      "statusQueued": "Queued",
+      "statusParsing": "Parsing",
+      "statusEmbedding": "Embedding",
+      "statusReady": "Ready",
+      "statusFailed": "Failed"
+    },
+    "twinDraftActions": {
+      "accept": "Accept",
+      "reject": "Reject",
+      "accepted": "Accepted as {kind}",
+      "rejected": "Rejected",
+      "queueAcceptLabel": "Accept twin draft",
+      "queueRejectLabel": "Reject twin draft"
+    },
+    "backup": {
+      "title": "Backup & sync",
+      "description": "Export all local data encrypted to this device.",
+      "exportNow": "Back up now",
+      "exporting": "Packaging…",
+      "exportSuccess": "Written to {path}",
+      "exportFailed": "Backup failed: {message}",
+      "importPick": "Import backup file",
+      "importStrategy": "Merge strategy",
+      "strategySkip": "Keep local (skip conflicts)",
+      "strategyOverwrite": "Overwrite (import wins)",
+      "strategyDuplicate": "Duplicate (keep both)",
+      "importing": "Restoring…",
+      "importSuccess": "Restore complete",
+      "importFailed": "Restore failed: {message}",
+      "autoBackup": "Auto backup",
+      "autoBackupHint": "Back up automatically while paired with desktop.",
+      "autoBackupInterval": "Interval (days)",
+      "historyHeader": "History",
+      "historyEmpty": "No history yet.",
+      "passphraseLabel": "Optional passphrase (blank uses auto key)"
+    },
+    "shareTarget": {
+      "title": "Share via cognia",
+      "intro": "Pick a conversation to send the shared content.",
+      "sendCta": "Send to this chat",
+      "cancel": "Cancel",
+      "targetSearchPlaceholder": "Search conversations…",
+      "queuedToast": "Queued for delivery.",
+      "noConversations": "No conversations available yet.",
+      "receivedText": "Received text",
+      "receivedUrl": "Link"
+    },
+    "offline": {
+      "bannerOffline": "Offline — sends will queue and retry automatically.",
+      "bannerReconnecting": "Reconnecting…",
+      "queuePending": "{count} queued",
+      "staleWarning": "{count} messages waiting > 30 min.",
+      "notifTitle": "cognia outbound queue",
+      "notifBody": "{count} messages waiting. Will retry when online.",
+      "notifChannel": "cognia"
+    }
   }
 }

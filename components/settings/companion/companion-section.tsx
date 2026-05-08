@@ -19,6 +19,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   CircleIcon,
@@ -157,20 +158,18 @@ export function CompanionSection() {
 // ---------------------------------------------------------------------------
 
 function TunnelCard() {
+  const t = useTranslations("mobile.companion.tunnel")
   const desktop = isTauri()
   const [info, setInfo] = useState<TunnelInfo | null>(null)
   const [busy, setBusy] = useState(false)
 
-  // Hydrate current tunnel state on mount.
   useEffect(() => {
     let cancelled = false
     void getTunnelInfo()
       .then((current) => {
         if (!cancelled) setInfo(current)
       })
-      .catch(() => {
-        // Best effort.
-      })
+      .catch(() => {})
     return () => {
       cancelled = true
     }
@@ -179,27 +178,24 @@ function TunnelCard() {
   const onToggle = useCallback(
     async (enabled: boolean) => {
       if (!desktop) {
-        toast.error("隧道仅在桌面运行时可用。")
+        toast.error(t("onlyDesktop"))
         return
       }
       setBusy(true)
       try {
         if (enabled) {
-          // For now we point the tunnel at the loopback HTTP companion server
-          // (Wave 1.4 TLS server is wired but cargo bind is HITL). When the
-          // HTTPS port lands the localUrl will switch to https://127.0.0.1:7891.
           const next = await startTunnel(`http://127.0.0.1:${DEFAULT_PORT}`)
           setInfo(next)
-          toast.success("隧道已启动。")
+          toast.success(t("started"))
         } else {
           await stopTunnel()
           setInfo(null)
-          toast.success("隧道已停止。")
+          toast.success(t("stopped"))
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         if (/cloudflared.*not.found|not.installed/i.test(msg)) {
-          toast.error("找不到 cloudflared，先 brew/winget/apt 安装。")
+          toast.error(t("notInstalled"))
         } else {
           toast.error(msg)
         }
@@ -207,24 +203,22 @@ function TunnelCard() {
         setBusy(false)
       }
     },
-    [desktop]
+    [desktop, t]
   )
 
   return (
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium">
-          <span className="flex items-center gap-2">Cloudflared 隧道</span>
+          <span className="flex items-center gap-2">{t("title")}</span>
           <Switch
             checked={!!info}
             onCheckedChange={onToggle}
             disabled={!desktop || busy}
-            aria-label="Enable cloudflared tunnel"
+            aria-label={t("enableLabel")}
           />
         </CardTitle>
-        <CardDescription className="text-xs">
-          出门在外时让手机能连上桌面。需先安装 cloudflared CLI。
-        </CardDescription>
+        <CardDescription className="text-xs">{t("description")}</CardDescription>
       </CardHeader>
       <CardContent className="text-xs text-muted-foreground">
         {info ? (
@@ -232,7 +226,7 @@ function TunnelCard() {
             {info.publicUrl}
           </p>
         ) : (
-          <p>关闭中。开关打开后会以子进程方式拉起 cloudflared。</p>
+          <p>{t("off")}</p>
         )}
       </CardContent>
     </Card>
@@ -244,6 +238,7 @@ function TunnelCard() {
 // ---------------------------------------------------------------------------
 
 function MdnsCard() {
+  const t = useTranslations("mobile.companion.mdns")
   const desktop = isTauri()
   const [running, setRunning] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -263,7 +258,7 @@ function MdnsCard() {
   const onToggle = useCallback(
     async (enabled: boolean) => {
       if (!desktop) {
-        toast.error("LAN 广播仅在桌面运行时可用。")
+        toast.error(t("onlyDesktop"))
         return
       }
       setBusy(true)
@@ -278,11 +273,11 @@ function MdnsCard() {
             tlsFingerprint: fingerprint,
           })
           setRunning(true)
-          toast.success("LAN 广播已启动。")
+          toast.success(t("started"))
         } else {
           await stopMdnsBroadcast()
           setRunning(false)
-          toast.success("LAN 广播已停止。")
+          toast.success(t("stopped"))
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : String(err))
@@ -290,24 +285,22 @@ function MdnsCard() {
         setBusy(false)
       }
     },
-    [desktop]
+    [desktop, t]
   )
 
   return (
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium">
-          <span>LAN 自动发现 (mDNS)</span>
+          <span>{t("title")}</span>
           <Switch
             checked={running}
             onCheckedChange={onToggle}
             disabled={!desktop || busy}
-            aria-label="Enable mDNS broadcast"
+            aria-label={t("enableLabel")}
           />
         </CardTitle>
-        <CardDescription className="text-xs">
-          在局域网广播 <code>_cognia._tcp</code>，手机不用扫码也能找到桌面。
-        </CardDescription>
+        <CardDescription className="text-xs">{t("description")}</CardDescription>
       </CardHeader>
     </Card>
   )
@@ -629,13 +622,14 @@ function PairedDevicesCard() {
   const rows = useLiveQuery(() => listPairedDevices(), [], [])
   const guard = useBiometricGuard()
 
+  const tRev = useTranslations("mobile.companion.revoke")
   const onRevoke = useCallback(
     async (deviceId: string, label: string) => {
       const result = await guard(
         {
-          reason: `确认解除 ${label} 的配对`,
-          title: "解除配对",
-          description: "解除后此设备将立即失去访问权限。",
+          reason: tRev("reason", { label }),
+          title: tRev("title"),
+          description: tRev("description"),
         },
         async () => {
           await revokePairedDevice(deviceId)
@@ -647,12 +641,12 @@ function PairedDevicesCard() {
           // Silent — user backed out.
           return
         }
-        toast.error(`解除配对未完成（${result.reason}）。`)
+        toast.error(tRev("blocked", { reason: result.reason }))
         return
       }
-      toast.success("Device revoked.")
+      toast.success(tRev("successToast"))
     },
-    [guard]
+    [guard, tRev]
   )
 
   return (

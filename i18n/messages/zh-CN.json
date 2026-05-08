@@ -8007,5 +8007,205 @@
       "accept": "接受",
       "reject": "拒绝"
     }
+  },
+  "mobile": {
+    "tabs": {
+      "chat": "聊天",
+      "workflows": "工作流",
+      "discover": "发现",
+      "me": "我"
+    },
+    "tabBar": {
+      "unread": "{count} 未读"
+    },
+    "pair": {
+      "title": "连接桌面",
+      "intro": "扫一下桌面端的二维码即可完成配对。也可以手动粘贴桌面 Settings → Companion 卡片里的 5 分钟令牌。",
+      "scanCta": "扫码配对",
+      "manualDivider": "或手动粘贴",
+      "baseUrlLabel": "服务器地址",
+      "tokenLabel": "配对令牌",
+      "fingerprintPinned": "✓ 桌面身份已锁定",
+      "submit": "完成配对",
+      "submitInProgress": "正在配对…",
+      "transportLabel": "传输层",
+      "signOutTitle": "退出登录",
+      "signOutReason": "确认退出当前配对",
+      "signOutDescription": "退出后需重新扫码配对才能再次连接。",
+      "biometricFailed": "生物识别失败（{reason}），未退出登录。"
+    },
+    "discover": {
+      "title": "发现",
+      "tabs": {
+        "characters": "角色",
+        "teams": "团队",
+        "skills": "技能",
+        "twinDrafts": "孪生草稿"
+      },
+      "builtInBadge": "内置",
+      "memberCount": "{count} 个智能体",
+      "emptyCharacters": "还没有角色 — 在桌面端创建一个吧。",
+      "emptyTeams": "还没有团队。",
+      "emptySkills": "还没有技能。",
+      "emptyTwinDrafts": "暂无待审孪生草稿。"
+    },
+    "me": {
+      "title": "我",
+      "pairing": "配对状态",
+      "pairingPaired": "已与桌面配对（{deviceId}）",
+      "pairingUnpaired": "尚未与桌面配对",
+      "actionPair": "去配对",
+      "sectionAccount": "账户",
+      "sectionData": "数据与备份",
+      "sectionAppearance": "外观与语言",
+      "sectionAdvanced": "高级",
+      "settingsLink": "应用设置",
+      "backupLink": "备份与同步",
+      "appSecurity": "应用安全",
+      "biometricToggle": "启用生物识别解锁",
+      "biometricUnavailable": "本设备未注册生物识别。",
+      "versionLabel": "版本"
+    },
+    "companion": {
+      "tunnel": {
+        "title": "Cloudflared 隧道",
+        "description": "出门在外时让手机能连上桌面。需先安装 cloudflared CLI。",
+        "started": "隧道已启动。",
+        "stopped": "隧道已停止。",
+        "notInstalled": "找不到 cloudflared，先 brew/winget/apt 安装。",
+        "off": "关闭中。开关打开后会以子进程方式拉起 cloudflared。",
+        "onlyDesktop": "隧道仅在桌面运行时可用。",
+        "enableLabel": "Enable cloudflared tunnel"
+      },
+      "mdns": {
+        "title": "LAN 自动发现 (mDNS)",
+        "description": "在局域网广播 _cognia._tcp，手机不用扫码也能找到桌面。",
+        "started": "LAN 广播已启动。",
+        "stopped": "LAN 广播已停止。",
+        "onlyDesktop": "LAN 广播仅在桌面运行时可用。",
+        "enableLabel": "Enable mDNS broadcast"
+      },
+      "revoke": {
+        "reason": "确认解除 {label} 的配对",
+        "title": "解除配对",
+        "description": "解除后此设备将立即失去访问权限。",
+        "blocked": "解除配对未完成（{reason}）。",
+        "successToast": "已解除该设备的配对。"
+      }
+    },
+    "twinDraft": {
+      "kindCharacter": "角色",
+      "kindSkill": "技能",
+      "statusPending": "待审",
+      "statusAccepted": "已接受",
+      "statusRejected": "已拒绝",
+      "statusEdited": "已编辑",
+      "untitled": "未命名草稿",
+      "noSummary": "无摘要",
+      "qualityScore": "评分 {percent}%"
+    },
+    "draftApproval": {
+      "empty": "没有待审批的草稿。",
+      "approve": "通过",
+      "reject": "拒绝",
+      "queueLabelApprove": "通过连接器草稿",
+      "queueLabelReject": "拒绝连接器草稿"
+    },
+    "composerPlus": {
+      "toggleAria": "附件菜单",
+      "camera": "相机",
+      "album": "相册",
+      "file": "文件",
+      "voice": "语音",
+      "voiceStop": "停止录音",
+      "voiceCannotStart": "无法开始录音",
+      "unsupported": "当前平台不支持此功能。",
+      "permissionDeniedCamera": "需要相机权限。",
+      "permissionDeniedMic": "需要麦克风权限。"
+    },
+    "workflow": {
+      "title": "工作流",
+      "empty": "还没有工作流。在桌面端创建后这里就会出现。",
+      "runButton": "运行",
+      "runQueued": "已加入队列，桌面联线后将触发。",
+      "runFailed": "触发失败：{message}",
+      "activeBadge": "活跃",
+      "landscapeHint": "横屏阅读大图",
+      "runsHeader": "最近运行",
+      "noRuns": "暂无运行记录。",
+      "statusRunning": "运行中",
+      "statusSucceeded": "成功",
+      "statusFailed": "失败",
+      "statusCancelled": "已取消",
+      "statusSkipped": "跳过",
+      "statusWaiting": "等待"
+    },
+    "twinSources": {
+      "title": "孪生数据源",
+      "empty": "暂无孪生数据源。点击 + 添加。",
+      "addCta": "添加数据源",
+      "pickPaste": "粘贴文本",
+      "pickCamera": "拍文档",
+      "pickFile": "选择文件",
+      "queuedToast": "已入队，桌面联线后将处理。",
+      "pasteDialogTitle": "粘贴文本",
+      "pasteDialogPrompt": "在此粘贴或输入要喂给孪生的文本",
+      "pasteCancelled": "已取消",
+      "statusQueued": "排队中",
+      "statusParsing": "解析中",
+      "statusEmbedding": "向量化",
+      "statusReady": "就绪",
+      "statusFailed": "失败"
+    },
+    "twinDraftActions": {
+      "accept": "接受",
+      "reject": "拒绝",
+      "accepted": "已接受为 {kind}",
+      "rejected": "已拒绝",
+      "queueAcceptLabel": "接受孪生草稿",
+      "queueRejectLabel": "拒绝孪生草稿"
+    },
+    "backup": {
+      "title": "备份与同步",
+      "description": "把全部本地数据加密导出到设备上。",
+      "exportNow": "立即备份",
+      "exporting": "正在打包…",
+      "exportSuccess": "已写入 {path}",
+      "exportFailed": "备份失败：{message}",
+      "importPick": "导入备份文件",
+      "importStrategy": "合并策略",
+      "strategySkip": "保留本地（跳过冲突）",
+      "strategyOverwrite": "覆盖（导入项优先）",
+      "strategyDuplicate": "全部新增（保留两份）",
+      "importing": "正在恢复…",
+      "importSuccess": "恢复完成",
+      "importFailed": "恢复失败：{message}",
+      "autoBackup": "自动备份",
+      "autoBackupHint": "在桌面联线时按设定的间隔加密自动备份。",
+      "autoBackupInterval": "间隔（天）",
+      "historyHeader": "历史",
+      "historyEmpty": "尚无历史记录。",
+      "passphraseLabel": "可选密码（留空则使用自动密钥）"
+    },
+    "shareTarget": {
+      "title": "通过 cognia 分享",
+      "intro": "选择要把这条内容发到的会话。",
+      "sendCta": "发送到此会话",
+      "cancel": "取消",
+      "targetSearchPlaceholder": "搜索会话…",
+      "queuedToast": "已加入发送队列。",
+      "noConversations": "尚无可发送的会话。",
+      "receivedText": "收到内容",
+      "receivedUrl": "链接"
+    },
+    "offline": {
+      "bannerOffline": "离线中 — 仍可浏览，发送将进入队列。",
+      "bannerReconnecting": "正在重连…",
+      "queuePending": "{count} 条待发送",
+      "staleWarning": "{count} 条消息超过 30 分钟未送达。",
+      "notifTitle": "cognia 离线发送中",
+      "notifBody": "{count} 条消息排队中。回到网络后会自动重发。",
+      "notifChannel": "cognia"
+    }
   }
 }

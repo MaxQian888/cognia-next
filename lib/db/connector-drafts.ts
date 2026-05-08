@@ -53,6 +53,16 @@ export async function listPendingForConversation(
     .toArray()
 }
 
+/**
+ * List every pending draft across all conversations, newest-first. Used by
+ * the mobile draft-approval panel so the user sees one global queue.
+ */
+export async function listAllPendingDrafts(): Promise<ConnectorDraftRow[]> {
+  const rows = await getDb().connectorDrafts.where("status").equals("pending").toArray()
+  rows.sort((a, b) => b.createdAt - a.createdAt)
+  return rows
+}
+
 /** Approve a draft — transitions status to "approved". */
 export async function approveDraft(id: string): Promise<void> {
   await getDb().connectorDrafts.update(id, { status: "approved" })

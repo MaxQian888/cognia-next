@@ -24,6 +24,7 @@ import type {
 import type { A2UIAppRow, A2UISurfaceRow, A2UITemplateRow, A2UIEventHistoryRow } from "./a2ui-types"
 import { buildA2UIBridgeMcpRow, A2UI_BRIDGE_SERVER_NAME } from "@/lib/a2ui/mcp-tool-schemas"
 import type { TwinSource, TwinChunk, TwinProfile, TwinDraft, TwinJob } from "@/types/twin"
+import type { MobileOutboundJobRow } from "./mobile-outbound-types"
 import type {
   PluginRow,
   PluginPermissionRow,
@@ -131,6 +132,12 @@ export class CogniaDB extends Dexie {
   // naturally idempotent. Aggregation helpers + UI consumers live in
   // `./session-usage.ts` and `components/settings/agent-runtime/tabs/sessions-tab.tsx`.
   sessionUsage!: Table<SessionUsageRow, string>
+  // v25 — Mobile outbound queue (Wave 2.1, ADR-0015 §Wave 2). One row per
+  // write op enqueued from the phone (chat send, draft approval, workflow
+  // trigger, twin ingest, backup export). The runner in
+  // `lib/queue/outbound-queue.ts` drains pending rows when the network is
+  // online; failed rows back off exponentially and deadletter at 5 attempts.
+  mobileOutboundQueue!: Table<MobileOutboundJobRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -839,6 +846,17 @@ export class CogniaDB extends Dexie {
     //   • `model`             — power the per-model breakdown popover.
     this.version(24).stores({
       sessionUsage: "&messageId, sessionId, [sessionId+at], at, model, characterId",
+    })
+
+    // v25 — Mobile outbound queue (Wave 2.1, ADR-0015 §Wave 2). Indexes:
+    //   • `&id`             — UUIDv4 primary key.
+    //   • `status`           — claimNext + listByStatus filter.
+    //   • `[status+nextAttemptAt]` — runner picks the next ready row by
+    //                          (status="pending", nextAttemptAt <= now).
+    //   • `createdAt`        — chronological listing in the queue UI.
+    //   • `command`          — "show only chat sends" filters in deadletter view.
+    this.version(25).stores({
+      mobileOutboundQueue: "&id, status, [status+nextAttemptAt], createdAt, command",
     })
   }
 

@@ -16,6 +16,7 @@ import { AgentTeamRuntimeInitializer } from "@/components/providers/initializers
 import { SchedulerInitializer } from "@/components/scheduler"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { CompanionBootProvider } from "@/components/providers/companion-boot-provider"
+import { MobileShellWrapper } from "@/components/mobile/shell/mobile-shell-wrapper"
 import { CompanionEventBridgeProvider } from "@/components/providers/companion-event-bridge-provider"
 import { DesktopSyncSourceProvider } from "@/components/providers/desktop-sync-source-provider"
 import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provider"
@@ -94,7 +95,7 @@ export default function RootLayout({
                                     <CompanionBootProvider>
                                       <DesktopSyncSourceProvider>
                                         <div data-bg-target="global" className="contents">
-                                          {children}
+                                          <MobileShellWrapper>{children}</MobileShellWrapper>
                                         </div>
                                       </DesktopSyncSourceProvider>
                                     </CompanionBootProvider>

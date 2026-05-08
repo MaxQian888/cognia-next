@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { useTranslations } from "next-intl"
 
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { scan as scanBarcode } from "@/lib/capacitor/barcode"
@@ -51,6 +52,7 @@ export function PairOnboardingClient() {
   const [serverFingerprint, setServerFingerprint] = useState("")
   const [phase, setPhase] = useState<Phase>({ kind: "loading" })
   const guard = useBiometricGuard()
+  const t = useTranslations("mobile.pair")
 
   // Hydrate cache from SecureStorage / localStorage on mount so a paired
   // device skips the form and lands on the smoke screen.
@@ -146,9 +148,9 @@ export function PairOnboardingClient() {
   const onSignOut = useCallback(async () => {
     const out = await guard(
       {
-        reason: "确认退出当前配对",
-        title: "退出登录",
-        description: "退出后需重新扫码配对才能再次连接。",
+        reason: t("signOutReason"),
+        title: t("signOutTitle"),
+        description: t("signOutDescription"),
       },
       async () => {
         await clearCompanionConfig()
@@ -158,7 +160,7 @@ export function PairOnboardingClient() {
       if (out.reason !== "cancelled") {
         setPhase({
           kind: "error",
-          message: `生物识别失败（${out.reason}），未退出登录。`,
+          message: t("biometricFailed", { reason: out.reason }),
           recoverable: true,
         })
       }
@@ -168,7 +170,7 @@ export function PairOnboardingClient() {
     setPairJwt("")
     setServerFingerprint("")
     setPhase({ kind: "idle" })
-  }, [guard])
+  }, [guard, t])
 
   const onScanQr = useCallback(async () => {
     setPhase({ kind: "idle" })
@@ -281,11 +283,8 @@ export function PairOnboardingClient() {
       data-testid="pair-onboarding"
     >
       <header className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold tracking-tight">连接桌面</h1>
-        <p className="text-sm text-muted-foreground">
-          扫一下桌面端的二维码即可完成配对。也可以手动粘贴桌面 Settings → Companion 卡片里的 5
-          分钟令牌。
-        </p>
+        <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
+        <p className="text-sm text-muted-foreground">{t("intro")}</p>
       </header>
 
       {phase.kind === "idle" || phase.kind === "pairing" || phase.kind === "error" ? (
@@ -304,17 +303,17 @@ export function PairOnboardingClient() {
             className="touch-target rounded-xl bg-primary px-6 py-4 text-base font-semibold text-primary-foreground shadow-sm disabled:opacity-60"
             data-testid="pair-scan-qr"
           >
-            扫码配对
+            {t("scanCta")}
           </button>
 
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <div className="h-px flex-1 bg-border" />
-            <span>或手动粘贴</span>
+            <span>{t("manualDivider")}</span>
             <div className="h-px flex-1 bg-border" />
           </div>
 
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium">服务器地址</span>
+            <span className="font-medium">{t("baseUrlLabel")}</span>
             <input
               className="touch-target rounded-md border border-input bg-background px-3 py-2.5 text-sm"
               type="url"
@@ -330,7 +329,7 @@ export function PairOnboardingClient() {
           </label>
 
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium">配对令牌</span>
+            <span className="font-medium">{t("tokenLabel")}</span>
             <textarea
               className="min-h-24 rounded-md border border-input bg-background px-3 py-2.5 font-mono text-xs"
               placeholder="eyJ..."
@@ -349,7 +348,9 @@ export function PairOnboardingClient() {
               role="status"
               data-testid="pair-fingerprint-pin"
             >
-              <p className="font-medium text-emerald-700 dark:text-emerald-300">✓ 桌面身份已锁定</p>
+              <p className="font-medium text-emerald-700 dark:text-emerald-300">
+                {t("fingerprintPinned")}
+              </p>
               <p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">
                 {serverFingerprint.slice(0, 16)}…{serverFingerprint.slice(-16)}
               </p>
@@ -362,7 +363,7 @@ export function PairOnboardingClient() {
             className="touch-target rounded-md border border-input px-4 py-2.5 text-sm font-medium disabled:opacity-60"
             data-testid="pair-submit"
           >
-            {phase.kind === "pairing" ? "正在配对…" : "完成配对"}
+            {phase.kind === "pairing" ? t("submitInProgress") : t("submit")}
           </button>
 
           {phase.kind === "error" ? (
@@ -376,7 +377,7 @@ export function PairOnboardingClient() {
           ) : null}
 
           <p className="text-[11px] text-muted-foreground">
-            传输层: <code>{transportName}</code>
+            {t("transportLabel")}: <code>{transportName}</code>
           </p>
         </form>
       ) : (
