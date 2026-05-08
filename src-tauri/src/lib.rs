@@ -1,4 +1,5 @@
 mod a2ui_bridge;
+mod companion_api;
 mod agents;
 mod anthropic_subscription;
 mod api_key;
@@ -198,6 +199,7 @@ pub fn run() {
         )))
         .manage(remote_control::RemoteControlState::new())
         .manage(mcp_server::McpServerState::new())
+        .manage(companion_api::CompanionServerState::new())
         .manage(external_agent::commands::ExternalAgentState::default())
         .manage(external_agent::commands::AcpTerminalState::default())
         .manage(scheduler::SchedulerState::new(
@@ -333,6 +335,13 @@ pub fn run() {
             mcp_server::commands::mcp_server_stop,
             mcp_server::commands::mcp_server_restart,
             mcp_server::commands::mcp_server_status,
+            companion_api::commands::companion_server_start,
+            companion_api::commands::companion_server_stop,
+            companion_api::commands::companion_server_status,
+            companion_api::commands::companion_issue_pair_jwt,
+            companion_api::commands::companion_seed_deny_list,
+            companion_api::commands::companion_revoke_device,
+            companion_api::commands::companion_unrevoke_device,
             proxy_config::commands::proxy_set,
             proxy_config::commands::proxy_get_active,
             proxy_config::commands::proxy_detect,

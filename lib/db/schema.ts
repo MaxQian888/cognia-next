@@ -49,6 +49,7 @@ import type {
   WorkflowRunEventRow,
   WorkflowTriggerRow,
 } from "@/types/workflow/visual"
+import type { PairedDeviceRow } from "@/types/mobile/paired-device"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -116,6 +117,13 @@ export class CogniaDB extends Dexie {
   workflowRuns!: Table<WorkflowRunRow, string>
   workflowRunEvents!: Table<WorkflowRunEventRow, string>
   workflowTriggers!: Table<WorkflowTriggerRow, string>
+  // v23 — Mobile companion paired devices (ADR 0012 → M2). One row per phone
+  // that completed the QR pairing flow (POST /api/v1/auth/pair, M2.3). The
+  // owner can soft-delete (revoke) any row from the desktop's "Mobile
+  // companion" settings tab; the JWT verifier middleware (M2.4) keeps an
+  // in-memory deny-list mirror of revoked rows. Per-row types live in
+  // `@/types/mobile/paired-device.ts`; CRUD helpers in `./paired-devices.ts`.
+  pairedDevices!: Table<PairedDeviceRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -801,6 +809,15 @@ export class CogniaDB extends Dexie {
         "&id, workflowId, status, startedAt, completedAt, [workflowId+startedAt], [workflowId+status]",
       workflowRunEvents: "&id, runId, [runId+ts], stepId, [runId+stepId], type",
       workflowTriggers: "&id, workflowId, kind, enabled, [workflowId+enabled], cron, nextFireAt",
+    })
+
+    // v23 — Mobile companion paired devices. Pure additive; no upgrade hook
+    // because no prior pairedDevices data exists. Indexes: `lastSeenAt` for
+    // the settings table's newest-first sort and `revokedAt` so the deny-list
+    // cache (M2.4) can hydrate from a `where("revokedAt").above(0)` query at
+    // server boot without scanning the full table.
+    this.version(23).stores({
+      pairedDevices: "&deviceId, lastSeenAt, revokedAt, platform",
     })
   }
 

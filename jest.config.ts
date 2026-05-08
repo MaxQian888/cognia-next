@@ -41,6 +41,7 @@ const config: Config = {
     // reports 0%. Same exemption pattern as the four entries above.
     "!lib/storage/persistence/types.ts",
     "!lib/wiki/types.ts",
+    "!lib/tauri/transport-types.ts",
     "!hooks/a2ui/app-builder/types.ts",
     "!lib/ccswitch/types.ts",
     "!lib/data-hooks/types.ts",

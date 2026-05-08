@@ -1,33 +1,23 @@
-// Thin wrapper around Tauri's invoke/listen API for the Claude sidecar.
-// Components should use this module rather than touching @tauri-apps/api directly.
+// Thin wrapper around the Claude sidecar IPC. Components should use this
+// module rather than touching @tauri-apps/api directly — every boundary
+// goes through `transport` from `@/lib/tauri`.
 
-import { invoke } from "@tauri-apps/api/core"
-import { listen, type UnlistenFn } from "@tauri-apps/api/event"
-import { isTauri } from "@/lib/tauri"
+import type { UnlistenFn } from "@tauri-apps/api/event"
+import { transport } from "@/lib/tauri"
 import type { AgentId, ApprovalDecision, ClaudeEvent, SendContent, SendOptions } from "./types"
 
 const SIDECAR_EVENT = "claude://message"
-
-function ensureTauri() {
-  if (!isTauri()) {
-    throw new Error(
-      "Claude IPC is only available inside Tauri. Run `pnpm tauri dev` instead of `pnpm dev`."
-    )
-  }
-}
 
 export async function sendPrompt(
   sessionId: string,
   prompt: SendContent,
   options?: SendOptions
 ): Promise<void> {
-  ensureTauri()
-  await invoke("claude_send", { sessionId, prompt, options })
+  await transport.call("claude_send", { sessionId, prompt, options })
 }
 
 export async function interruptSession(sessionId: string): Promise<void> {
-  ensureTauri()
-  await invoke("claude_interrupt", { sessionId })
+  await transport.call("claude_interrupt", { sessionId })
 }
 
 export async function approveTool(
@@ -37,8 +27,7 @@ export async function approveTool(
   message?: string,
   updatedInput?: unknown
 ): Promise<void> {
-  ensureTauri()
-  await invoke("claude_approve", {
+  await transport.call("claude_approve", {
     sessionId,
     requestId,
     decision,
@@ -48,18 +37,15 @@ export async function approveTool(
 }
 
 export async function closeSession(sessionId: string): Promise<void> {
-  ensureTauri()
-  await invoke("claude_close_session", { sessionId })
+  await transport.call("claude_close_session", { sessionId })
 }
 
 export async function getSidecarStatus(): Promise<{ ready: boolean }> {
-  ensureTauri()
-  return invoke<{ ready: boolean }>("claude_sidecar_status")
+  return transport.call<{ ready: boolean }>("claude_sidecar_status")
 }
 
 export async function setApiKey(key: string | null): Promise<void> {
-  ensureTauri()
-  await invoke("claude_set_api_key", { key })
+  await transport.call("claude_set_api_key", { key })
 }
 
 /**
@@ -71,13 +57,11 @@ export async function setApiKey(key: string | null): Promise<void> {
  * by the Rust side.
  */
 export async function setProviderEnv(apiKey: string | null, baseUrl: string | null): Promise<void> {
-  ensureTauri()
-  await invoke("claude_set_provider_env", { apiKey, baseUrl })
+  await transport.call("claude_set_provider_env", { apiKey, baseUrl })
 }
 
 export async function hasApiKey(): Promise<boolean> {
-  ensureTauri()
-  return invoke<boolean>("claude_has_api_key")
+  return transport.call<boolean>("claude_has_api_key")
 }
 
 /**
@@ -88,47 +72,37 @@ export async function hasApiKey(): Promise<boolean> {
  * change takes effect.
  */
 export async function setOauthBearer(token: string | null): Promise<void> {
-  ensureTauri()
-  await invoke("claude_set_oauth_bearer", { token })
+  await transport.call("claude_set_oauth_bearer", { token })
 }
 
 export async function hasOauthBearer(): Promise<boolean> {
-  ensureTauri()
-  return invoke<boolean>("claude_has_oauth_bearer")
+  return transport.call<boolean>("claude_has_oauth_bearer")
 }
 
 export async function restartSidecar(): Promise<void> {
-  ensureTauri()
-  await invoke("claude_restart_sidecar")
+  await transport.call("claude_restart_sidecar")
 }
 
-export function onClaudeMessage(handler: (evt: ClaudeEvent) => void): Promise<UnlistenFn> {
-  ensureTauri()
-  return listen<ClaudeEvent>(SIDECAR_EVENT, (event) => {
-    handler(event.payload)
-  })
+export async function onClaudeMessage(handler: (evt: ClaudeEvent) => void): Promise<UnlistenFn> {
+  return transport.subscribe<ClaudeEvent>(SIDECAR_EVENT, handler)
 }
 
 // ---- File-system commands (Skills + MCP import/export) -------------------
 
 export async function readTextFile(path: string): Promise<string> {
-  ensureTauri()
-  return invoke<string>("read_text_file", { path })
+  return transport.call<string>("read_text_file", { path })
 }
 
 export async function writeTextFile(path: string, content: string): Promise<void> {
-  ensureTauri()
-  await invoke("write_text_file", { path, content })
+  await transport.call("write_text_file", { path, content })
 }
 
 export async function ensureDir(path: string): Promise<void> {
-  ensureTauri()
-  await invoke("ensure_dir", { path })
+  await transport.call("ensure_dir", { path })
 }
 
 export async function defaultExportDir(): Promise<string> {
-  ensureTauri()
-  return invoke<string>("default_export_dir")
+  return transport.call<string>("default_export_dir")
 }
 
 export interface DiscoveredSkillFile {
@@ -138,9 +112,8 @@ export interface DiscoveredSkillFile {
 }
 
 export async function scanClaudeSkills(): Promise<DiscoveredSkillFile[]> {
-  ensureTauri()
   const raw =
-    await invoke<Array<{ dir_name: string; file_path: string; content: string }>>(
+    await transport.call<Array<{ dir_name: string; file_path: string; content: string }>>(
       "scan_claude_skills"
     )
   return raw.map((r) => ({
@@ -151,8 +124,7 @@ export async function scanClaudeSkills(): Promise<DiscoveredSkillFile[]> {
 }
 
 export async function readClaudeUserConfig(): Promise<unknown> {
-  ensureTauri()
-  return invoke<unknown>("read_claude_user_config")
+  return transport.call<unknown>("read_claude_user_config")
 }
 
 // ---- Multi-agent MCP IO (read / write external agents' config files) -----
@@ -172,8 +144,7 @@ export interface AgentReadResult {
 }
 
 export async function readAgentConfig(agent: AgentId): Promise<AgentReadResult> {
-  ensureTauri()
-  return invoke<AgentReadResult>("read_agent_config", { agent })
+  return transport.call<AgentReadResult>("read_agent_config", { agent })
 }
 
 export interface AgentWriteResult {
@@ -182,8 +153,7 @@ export interface AgentWriteResult {
 }
 
 export async function writeAgentConfig(agent: AgentId, value: unknown): Promise<AgentWriteResult> {
-  ensureTauri()
-  return invoke<AgentWriteResult>("write_agent_config", { agent, value })
+  return transport.call<AgentWriteResult>("write_agent_config", { agent, value })
 }
 
 // ---- Skills (native sync, marketplace registry, scanner) -----------------
@@ -240,49 +210,43 @@ export interface SkillScanIssue {
 }
 
 export async function skillsScanNative(): Promise<NativeSkill[]> {
-  ensureTauri()
-  return invoke<NativeSkill[]>("skills_scan_native")
+  return transport.call<NativeSkill[]>("skills_scan_native")
 }
 
 export async function skillsScanDir(path: string): Promise<NativeSkill[]> {
-  ensureTauri()
-  return invoke<NativeSkill[]>("skills_scan_dir", { path })
+  return transport.call<NativeSkill[]>("skills_scan_dir", { path })
 }
 
 export async function skillsInstallNative(
   request: InstallSkillRequest
 ): Promise<InstallSkillResponse> {
-  ensureTauri()
-  return invoke<InstallSkillResponse>("skills_install_native", { request })
+  return transport.call<InstallSkillResponse>("skills_install_native", { request })
 }
 
 export async function skillsUninstallNative(
   dirName: string
 ): Promise<{ removed: boolean; directory: string }> {
-  ensureTauri()
-  return invoke<{ removed: boolean; directory: string }>("skills_uninstall_native", { dirName })
+  return transport.call<{ removed: boolean; directory: string }>("skills_uninstall_native", {
+    dirName,
+  })
 }
 
 export async function skillsFetchRemoteMd(url: string): Promise<string> {
-  ensureTauri()
-  return invoke<string>("skills_fetch_remote_md", { url })
+  return transport.call<string>("skills_fetch_remote_md", { url })
 }
 
 export async function skillsLoadRegistry(): Promise<RegistrySkillEntry[]> {
-  ensureTauri()
-  return invoke<RegistrySkillEntry[]>("skills_load_registry")
+  return transport.call<RegistrySkillEntry[]>("skills_load_registry")
 }
 
 export async function skillsScanSecurity(content: string): Promise<SkillScanIssue[]> {
-  ensureTauri()
-  return invoke<SkillScanIssue[]>("skills_scan_security", { content })
+  return transport.call<SkillScanIssue[]>("skills_scan_security", { content })
 }
 
 export async function skillsScanResources(
   resources: Array<[string, string]>
 ): Promise<SkillScanIssue[]> {
-  ensureTauri()
-  return invoke<SkillScanIssue[]>("skills_scan_resources", { resources })
+  return transport.call<SkillScanIssue[]>("skills_scan_resources", { resources })
 }
 
 // ---- MCP server health-check / tool discovery ----------------------------
@@ -321,8 +285,7 @@ export interface McpTestRequest {
  * error string.
  */
 export async function testMcpServer(req: McpTestRequest): Promise<McpTestResult> {
-  ensureTauri()
-  const raw = await invoke<{
+  const raw = await transport.call<{
     ok: boolean
     tool_count: number
     tools: { name: string; description?: string | null }[]
