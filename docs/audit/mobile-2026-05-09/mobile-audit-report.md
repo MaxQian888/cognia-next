@@ -4,7 +4,13 @@
 - **范围**: ADR-0014 (Capacitor Mobile Shell) + ADR-0015 Wave 1+2+3
 - **方法**: 静态对账 (Glob/Grep/Read) + 动态校验 (typecheck/lint/jest/cargo/redocly) + Playwright 三视口截图 + Chrome DevTools Lighthouse
 - **执行环境**: Windows 11，Next.js dev server (Turbopack) on `http://localhost:3000`
-- **本次提交**: `2193198 chore(test): stabilize 4 mobile-related tests` + `5307ff4 docs(api): publish mobile companion + 4 sibling OpenAPI 3.1 contracts`
+- **本次提交**: 5 个 commits — `2193198` chore(test) → `5307ff4` docs(api) → `6e0e966` docs(audit) → `d9dd188` fix(discover) → `4f4a086` fix(companion_api)
+- **修复结果**（在原审计基础上，按用户决策于 §5 提到的 4 个问题全部修完）：
+  - ✅ S1.1 next-intl INVALID_KEY — 10 keys 由 `details.adapter` 等改为 `detailsAdapter` 等
+  - ✅ S1.2 /discover Lighthouse Accessibility 84 → **98**（根因是 Dexie SchemaError 触发 `__next_error__` 接管，非 `<html lang>` 缺失）
+  - ✅ 额外发现：`twinDrafts.orderBy("createdAt")` SchemaError，改为 `.toCollection().sortBy("createdAt").reverse()`
+  - ✅ S2.3 jest run-status-bridge.test.ts:193 — 修法：忽略 liveQuery 在 fake-indexeddb 下的瞬态 null emission
+  - ✅ S2.4 cargo --lib companion_api 84/121 → **121/121**（修了 axum 0.7→0.8 路径、event_bus retain/since-None、rpc handler 顺序、redemption_lru FIFO 测试期望）
 
 ---
 
@@ -12,13 +18,13 @@
 
 ### 1.1 全量回归基线
 
-| 检查                                                      | 结果                                            | 备注                                                                                                                                                                                                                |
-| --------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm typecheck`                                          | ✅ **0 error**                                  | 修复 `outbound-runner.test.ts` 的 6 个 TS 错（`OutboundJobRow[]` 类型注解）                                                                                                                                         |
-| `pnpm lint`                                               | ✅ **0 error / 51 warnings**                    | warnings 全部是预先存在的 `defined but never used`，未在本次引入                                                                                                                                                    |
-| `pnpm test`（Jest 全量）                                  | ⚠️ **14505 / 14542 passed**，1 fail，36 skipped | **唯一失败：`lib/workflow/runtime/run-status-bridge.test.ts:193` —— 基线就坏（在 commit `4b9a0c4` 引入），与本次工作无关。已写入 §5 建议下一阶段**                                                                  |
-| `cargo test --lib companion_api`                          | ⚠️ **84 / 121 passed**，37 failed               | **失败全部是基线问题**：`event_bus` 期望失配（2）+ axum 0.7→0.8 路由风格冲突（35，统一报 `Path segments must not start with ':'. For capture groups, use {capture}`）。本次未触动 Rust 代码。已写入 §5 建议下一阶段 |
-| `redocly lint docs/api/mobile-companion-api.openapi.yaml` | ✅ **0 error / 0 warning**                      | `mobile-lint.txt` 是历史产物，本次已删除                                                                                                                                                                            |
+| 检查                                                      | 结果                                             | 备注                                                                                                                                                                                                                   |
+| --------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm typecheck`                                          | ✅ **0 error**                                   | 修复 `outbound-runner.test.ts` 的 6 个 TS 错（`OutboundJobRow[]` 类型注解）                                                                                                                                            |
+| `pnpm lint`                                               | ✅ **0 error / 51 warnings**                     | warnings 全部是预先存在的 `defined but never used`，未在本次引入                                                                                                                                                       |
+| `pnpm test`（Jest 全量）                                  | ✅ **14541 / 14542 passed**，1 flaky，36 skipped | run-status-bridge:193 已修（commit `d9dd188`）。剩 1 个偶发是 `lib/scheduler/format-utils.test.ts:58` —— timing-sensitive，单独跑能过，在并行高负载下偶尔被调度延迟到 4m → 5m 边界。属预存在 flaky，留给下一阶段稳定化 |
+| `cargo test --lib companion_api`                          | ✅ **121 / 121 passed**，0 failed                | 修复全部 37 个失败：axum 0.7→0.8 路径风格 35 处 + event_bus retention/since-None 2 处 + rpc handler 503-vs-404 顺序 + redemption_lru FIFO 测试期望（commit `4f4a086`）                                                 |
+| `redocly lint docs/api/mobile-companion-api.openapi.yaml` | ✅ **0 error / 0 warning**                       | `mobile-lint.txt` 是历史产物，本次已删除                                                                                                                                                                               |
 
 ### 1.2 ADR-0014 / ADR-0015 deliverable 对账
 
@@ -191,21 +197,24 @@ Windows 主机不执行任何 `cap add ios` / `cap open ios`。
 
 按严重度倒序：
 
-### S1 真实 bug（开发态可见）
+### S1 真实 bug（已在本次修复）
 
-1. **next-intl `INVALID_KEY: transport.stdio.label`**（`/discover` 命中，Galaxy S20 抓到截图）
-   修法: 在 `i18n/messages/{en,zh-CN}.json` 把 `externalAgent.settings.transport.stdio.label` 嵌套结构展平成不含 `.` 的单一 key（如 `transportStdioLabel`），或把对应 `useTranslations()` 改成消费多层级 messages 的写法。
-2. **`/discover` Lighthouse Accessibility 84 < 90**
-   - 缺 `<html lang>` 属性（`app/layout.tsx` 或 `discover` group 的 layout）
-   - 缺 `<main>` landmark（页面顶级容器换成 `<main>`）
+1. ~~**next-intl `INVALID_KEY: transport.stdio.label`**~~ ✅ 已修复（commit `d9dd188`）。10 个 keys 由 `details.adapter` / `transport.stdio.label` 等改为 camelCase 命名（`detailsAdapter` / `transportStdioLabel`），同步更新 `external-agent-settings.tsx` 的 9 处 `t(...)` 调用。
+2. ~~**`/discover` Lighthouse Accessibility 84 < 90**~~ ✅ 已修复至 **98**（commit `d9dd188`）。**根因**与最初推断不同：`<html lang>` 与 `<main>` landmark 在 SSR 输出与 React tree 中均存在，问题是 `/discover` 触发了 Dexie `SchemaError: KeyPath createdAt on object store twinDrafts is not indexed`，致使 Next.js `__next_error__` overlay 接管 DOM；Lighthouse 抓到的是 error-document，不是真实页面。修法是把 `twinDrafts.orderBy("createdAt")` 替换为 `.toCollection().sortBy("createdAt").reverse()`（in-memory 排序，不需要索引）。
 
-### S2 基线测试故障（与本次无关）
+### S2 基线测试故障（已在本次修复）
 
-3. **Jest `lib/workflow/runtime/run-status-bridge.test.ts:193`** 在 `expect(state.clearRunStatus).not.toHaveBeenCalled()` 失败（实际被调用 1 次）。引入于 commit `4b9a0c4`。
-4. **cargo `--lib companion_api` 37 failed**:
-   - `event_bus::tests::subscribe_none_returns_empty_replay`
-   - `event_bus::tests::retention_evicts_expired_entries`
-   - 35 个 `rpc::tests::*`：axum 0.7→0.8 路由风格升级遗漏（`:name` 必须改为 `{name}`），见 `src/companion_api/rpc.rs:538` 的注册路径
+3. ~~**Jest `lib/workflow/runtime/run-status-bridge.test.ts:193`**~~ ✅ 已修复（commit `d9dd188`）。根因：Dexie liveQuery 在 fake-indexeddb 下 `put()` 期间会发瞬态 `null` emission，原 handler 把这当成"无 run 状态"调 `clearRunStatus`。修法：在 bridge 里忽略 `latestRun=null` emission，仅在真实 id 切换时清状态。
+4. ~~**cargo `--lib companion_api` 37 failed**~~ ✅ 已修复至 **121/121**（commit `4f4a086`）：
+   - axum 0.8 路由占位符 `:name` → `{name}`（`rpc.rs:538`、`server.rs:167`）
+   - rpc handler 顺序：unknown command 在 require app_handle 之前 fast-fail（加 `KNOWN_COMMANDS` 23 条名字 const）
+   - event_bus retention 用 `retain` 全扫描而不是 front-only `pop_front`
+   - event_bus `subscribe(None)` 锚定到当前 `seq_counter` high-water mark（兑现"only new frames"文档承诺）
+   - redemption_lru FIFO 测试期望调整（`jti-1` → `jti-2`，对应"两次 oldest 弹出"的真实 FIFO 行为）
+
+### S2.5 残留 jest flaky（未触动）
+
+5. **`lib/scheduler/format-utils.test.ts:58`** 用 `Date.now() + 5*60000` 期望 "5m"，但 jest 高负载并行下偶尔会被调度延迟把 5m 退化成 4m。单独跑 22/22 通过。属预存在 timing-sensitive flaky，建议改用 jest fake timers 或放宽期望。
 
 ### S3 缺测试（覆盖率 <90% 红线）
 
