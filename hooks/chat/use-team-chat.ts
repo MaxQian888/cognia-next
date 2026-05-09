@@ -7,10 +7,13 @@ import { applySdkEvent, contentPreview, makeUserMessage } from "@/lib/claude/ada
 import {
   approveTool,
   closeSession,
+  deleteMessage,
   interruptSession,
   onClaudeMessage,
   sendPrompt,
 } from "@/lib/claude/ipc"
+import { detectPlatform } from "@/hooks/use-platform"
+import { getDb } from "@/lib/db/schema"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { tryBuildTwinDeps, type TwinDepsForBuild } from "@/lib/twin/runtime/build-deps"
 import { generateEmbedding } from "@/lib/ai/embedding/embedding"
@@ -311,6 +314,9 @@ export function useTeamChat() {
     if (lastUserIdx < 0) return
 
     const anchor = messages[lastUserIdx]
+    if (detectPlatform() === "mobile") {
+      await mirrorTeamTruncateToDesktop(sessionId, anchor.id)
+    }
     // Drop the user message AND everything after it. We then re-call send()
     // with the original content; the user message will be re-persisted via the
     // normal optimistic-append path so attachments survive the round-trip.
@@ -345,6 +351,9 @@ export function useTeamChat() {
     async (messageId: string, newContent: SendContent) => {
       const sessionId = useChatStore.getState().activeSessionId
       if (!sessionId) return
+      if (detectPlatform() === "mobile") {
+        await mirrorTeamTruncateToDesktop(sessionId, messageId)
+      }
       await truncateAfter(sessionId, messageId, { inclusive: true })
       const remaining = await listMessages(sessionId)
       useChatStore.getState().replaceMessages(remaining)
@@ -374,6 +383,38 @@ export function useTeamChat() {
   )
 
   return { send, stop, regenerate, editAndResend, respondToApproval }
+}
+
+/**
+ * Mobile-only mirror for the team-chat truncate path (mobile completeness
+ * Phase 2). Identical contract to `useClaudeChat`'s `mirrorTruncateToDesktop`
+ * — fans out a per-message `deleteMessage` RPC to the desktop's Dexie so a
+ * mobile-driven edit/regenerate doesn't desync. Errors are best-effort
+ * (sync will reconcile later).
+ */
+async function mirrorTeamTruncateToDesktop(
+  sessionId: string,
+  anchorMessageId: string
+): Promise<void> {
+  try {
+    const db = getDb()
+    const anchor = await db.messages.get(anchorMessageId)
+    if (!anchor || anchor.sessionId !== sessionId) return
+    const ids = await db.messages
+      .where("[sessionId+createdAt]")
+      .between([sessionId, anchor.createdAt], [sessionId, Number.MAX_SAFE_INTEGER])
+      .primaryKeys()
+    for (const rawId of ids) {
+      const id = rawId as string
+      try {
+        await deleteMessage(sessionId, id)
+      } catch (err) {
+        console.warn("mirrorTeamTruncateToDesktop: deleteMessage failed", { id, err })
+      }
+    }
+  } catch (err) {
+    console.warn("mirrorTeamTruncateToDesktop failed", err)
+  }
 }
 
 // ---- Linear orchestration (round_robin / mention / manual-targeted) ------

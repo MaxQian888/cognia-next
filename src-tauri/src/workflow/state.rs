@@ -48,6 +48,17 @@ impl WorkflowState {
     }
 }
 
+impl Drop for WorkflowState {
+    /// Best-effort graceful shutdown of the webhook listener so the bound
+    /// port is released before the process exits or the state gets re-built
+    /// (the latter happens in test runs that swap states between cases).
+    /// `stop` is idempotent: calling it on a router that never started is
+    /// a no-op.
+    fn drop(&mut self) {
+        self.webhook.stop();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

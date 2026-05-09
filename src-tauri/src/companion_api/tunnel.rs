@@ -47,10 +47,6 @@ impl TunnelHandle {
         self.info.lock().clone()
     }
 
-    pub fn is_running(&self) -> bool {
-        self.child.lock().is_some()
-    }
-
     pub async fn wait_for_url(&self, timeout_secs: u64) -> Result<TunnelInfo, TunnelError> {
         let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
         let mut rx = self.info_rx.clone();
@@ -169,12 +165,14 @@ impl TunnelState {
         self.inner.lock().as_ref().and_then(|h| h.info())
     }
 
+    /// Whether a tunnel is currently being managed by this state. The tunnel
+    /// may not yet have a public URL — query [`Self::current`] for that.
+    /// Test-only: in production, the wait-for-url timeout in `start` means
+    /// there's no observable "running but no URL yet" window — `current()`
+    /// is the lifecycle signal.
+    #[cfg(test)]
     pub fn is_running(&self) -> bool {
-        self.inner
-            .lock()
-            .as_ref()
-            .map(|h| h.is_running())
-            .unwrap_or(false)
+        self.inner.lock().is_some()
     }
 }
 

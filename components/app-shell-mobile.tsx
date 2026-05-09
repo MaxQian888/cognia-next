@@ -55,6 +55,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import type { ComposerHandle } from "@/components/chat/composer"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
+import { useTeamMembers } from "@/hooks/use-team-members"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
@@ -165,6 +166,7 @@ export function AppShellMobile() {
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
   const isTeamSession = activeSession?.kind === "team" && Boolean(activeSession.teamId)
+  const teamMembers = useTeamMembers(isTeamSession ? activeSession?.teamId : null)
 
   const send = isTeamSession ? teamChat.send : directChat.send
   const stop = isTeamSession ? teamChat.stop : directChat.stop
@@ -236,7 +238,7 @@ export function AppShellMobile() {
 
           <SheetContent
             side="left"
-            className="flex w-[85vw] max-w-sm flex-col gap-0 p-0 sm:max-w-md"
+            className="flex w-[85vw] max-w-sm flex-col gap-0 p-0 sm:max-w-md md:max-w-lg"
             data-testid="mobile-nav-sheet"
           >
             <SheetHeader className="sr-only">
@@ -268,11 +270,11 @@ export function AppShellMobile() {
           </SheetContent>
         </Sheet>
 
-        <h1 className="truncate text-sm font-medium" data-testid="mobile-active-title">
+        <h1 className="truncate text-sm font-medium sm:text-base" data-testid="mobile-active-title">
           {headerTitle}
         </h1>
 
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-1 sm:gap-2">
           {isTeamSession ? (
             <Button
               type="button"
@@ -358,7 +360,7 @@ export function AppShellMobile() {
         <Sheet open={memberSheetOpen} onOpenChange={setMemberSheetOpen}>
           <SheetContent
             side="right"
-            className="flex w-[85vw] max-w-sm flex-col gap-0 p-0 sm:max-w-md"
+            className="flex w-[85vw] max-w-sm flex-col gap-0 p-0 sm:max-w-md md:max-w-lg"
             data-testid="mobile-members-sheet"
           >
             <SheetHeader>

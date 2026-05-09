@@ -125,7 +125,7 @@ export function TwinDraftsPanel({ twinId, className }: TwinDraftsPanelProps) {
                     id: "accept",
                     label: t("accept"),
                     icon: <CheckIcon className="size-4" />,
-                    className: "bg-emerald-600 text-white",
+                    className: "bg-primary text-primary-foreground",
                     onSelect: () => void onAccept(d),
                   },
                 ]}

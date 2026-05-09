@@ -36,6 +36,12 @@ jest.mock("@/lib/qr/barcode-scanner", () => ({
   scanQrCode: jest.fn(),
 }))
 
+// next/navigation — useRouter().push is now used for "Continue to chat".
+const pushMock = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock, replace: jest.fn(), back: jest.fn() }),
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     // Mirror the strings the test expectations match against. Keep keys
@@ -49,9 +55,42 @@ jest.mock("next-intl", () => ({
       baseUrlLabel: "Server URL",
       tokenLabel: "Pair token",
       fingerprintPinned: "Desktop identity pinned",
+      fingerprintHint: "Pinned to this signing key.",
+      formCardTitle: "Pair this phone",
+      formCardDescription: "One-tap scan or manual paste.",
       submit: "Pair",
       submitInProgress: "Pairing…",
       transportLabel: "Transport",
+      loadingTitle: "Checking for an existing pairing…",
+      errorTitle: "Pairing failed",
+      connectedTitle: "Connected to desktop",
+      connectedSubtitle: "Live link.",
+      offlineTitle: "Connection lost",
+      offlineSubtitle: "Couldn't reach the desktop.",
+      checkingTitle: "Re-checking link",
+      "health.device": "Device",
+      "health.server": "Server",
+      "health.lastHeartbeat": "Last heartbeat",
+      "health.latency": "Latency",
+      "health.live": "Live",
+      "health.checking": "Checking",
+      "health.offline": "Offline",
+      "health.refresh": "Refresh status",
+      "health.continueToChat": "Continue to chat",
+      "health.noHeartbeat": "—",
+      "diagnostics.title": "Diagnostics",
+      "diagnostics.subtitle": "Probe the link.",
+      "diagnostics.expand": "Show diagnostics",
+      "diagnostics.collapse": "Hide diagnostics",
+      "diagnostics.testRpc": "Test RPC connection",
+      "diagnostics.testWs": "Test event subscription",
+      "diagnostics.rpcResultLabel": "RPC response",
+      "diagnostics.wsResultLabel": "Event payload",
+      "diagnostics.rpcWaiting": "Tap Test RPC to send a status RPC.",
+      "diagnostics.wsWaiting": "Tap Test event to subscribe for 5 seconds.",
+      "signOut.cardTitle": "Disconnect",
+      "signOut.cardDescription": "Sign out and re-pair.",
+      "signOut.cta": "Sign out / re-pair",
       signOutTitle: "Sign out",
       signOutReason: "Confirm sign out",
       signOutDescription: "Reconnect requires re-pairing.",
@@ -68,6 +107,7 @@ const mockedScanQr = scanBarcode as jest.Mock
 beforeEach(() => {
   window.localStorage.clear()
   ;(globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn()
+  pushMock.mockReset()
 })
 
 afterEach(() => {
@@ -93,7 +133,7 @@ describe("<PairOnboardingClient />", () => {
     expect(await screen.findByTestId("pair-error")).toHaveTextContent(/required/i)
   })
 
-  it("transitions to paired status after a successful pair", async () => {
+  it("transitions to the health card after a successful pair", async () => {
     const fetchMock = (globalThis as unknown as { fetch: jest.Mock }).fetch
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -118,9 +158,10 @@ describe("<PairOnboardingClient />", () => {
     })
     await user.click(screen.getByTestId("pair-submit"))
 
-    await waitFor(() => expect(screen.getByTestId("pair-status")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId("pair-health-card")).toBeInTheDocument())
     expect(screen.getByTestId("pair-status")).toHaveTextContent("dev-001")
     expect(screen.getByTestId("pair-status")).toHaveTextContent("0.1.0")
+    expect(screen.getByTestId("pair-continue-cta")).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith(
       "http://192.168.1.42:7890/api/v1/auth/pair",
       expect.objectContaining({
@@ -203,7 +244,7 @@ describe("<PairOnboardingClient />", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it("hydrates and renders paired state when storage already has a config", async () => {
+  it("hydrates and renders the health card when storage already has a config", async () => {
     window.localStorage.setItem(
       "cognia.companion.config.v1",
       JSON.stringify({
@@ -216,11 +257,30 @@ describe("<PairOnboardingClient />", () => {
 
     render(<PairOnboardingClient />)
 
-    expect(await screen.findByTestId("pair-status")).toHaveTextContent("dev-existing")
+    expect(await screen.findByTestId("pair-health-card")).toBeInTheDocument()
+    expect(screen.getByTestId("pair-status")).toHaveTextContent("dev-existing")
     expect(screen.getByTestId("pair-status")).toHaveTextContent("9.9.9")
   })
 
-  it("invokes transport.call when smoke-call is pressed", async () => {
+  it("Continue to chat pushes the user to the mobile shell at /", async () => {
+    window.localStorage.setItem(
+      "cognia.companion.config.v1",
+      JSON.stringify({
+        baseUrl: "http://test:7890",
+        deviceJwt: "jwt",
+        deviceId: "dev-existing",
+        serverVersion: "9.9.9",
+      })
+    )
+
+    const user = userEvent.setup()
+    render(<PairOnboardingClient />)
+
+    await user.click(await screen.findByTestId("pair-continue-cta"))
+    expect(pushMock).toHaveBeenCalledWith("/")
+  })
+
+  it("Refresh status records latency on a successful RPC", async () => {
     window.localStorage.setItem(
       "cognia.companion.config.v1",
       JSON.stringify({
@@ -238,6 +298,82 @@ describe("<PairOnboardingClient />", () => {
     const user = userEvent.setup()
     render(<PairOnboardingClient />)
 
+    await user.click(await screen.findByTestId("pair-refresh"))
+
+    await waitFor(() => expect(transportMock.call).toHaveBeenCalledWith("claude_sidecar_status"))
+    await waitFor(() =>
+      expect(screen.getByTestId("pair-health-card").getAttribute("data-health")).toBe("live")
+    )
+  })
+
+  it("Refresh status flips to offline when the RPC throws", async () => {
+    window.localStorage.setItem(
+      "cognia.companion.config.v1",
+      JSON.stringify({
+        baseUrl: "http://test:7890",
+        deviceJwt: "jwt",
+        deviceId: "dev-existing",
+        serverVersion: "9.9.9",
+      })
+    )
+
+    const transportMock = (jest.requireMock("@/lib/tauri") as { transport: { call: jest.Mock } })
+      .transport
+    transportMock.call.mockRejectedValueOnce(new Error("backend down"))
+
+    const user = userEvent.setup()
+    render(<PairOnboardingClient />)
+
+    await user.click(await screen.findByTestId("pair-refresh"))
+
+    await waitFor(() =>
+      expect(screen.getByTestId("pair-health-card").getAttribute("data-health")).toBe("offline")
+    )
+  })
+
+  it("Diagnostics is collapsed by default and reveals smoke buttons when expanded", async () => {
+    window.localStorage.setItem(
+      "cognia.companion.config.v1",
+      JSON.stringify({
+        baseUrl: "http://test:7890",
+        deviceJwt: "jwt",
+        deviceId: "dev-existing",
+        serverVersion: "9.9.9",
+      })
+    )
+
+    const user = userEvent.setup()
+    render(<PairOnboardingClient />)
+
+    // Closed initially — smoke-call must not be in the DOM.
+    expect(await screen.findByTestId("pair-diagnostics-toggle")).toBeInTheDocument()
+    expect(screen.queryByTestId("smoke-call")).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId("pair-diagnostics-toggle"))
+    expect(await screen.findByTestId("smoke-call")).toBeInTheDocument()
+    expect(screen.getByTestId("smoke-ws")).toBeInTheDocument()
+  })
+
+  it("invokes transport.call when the diagnostic Test RPC button is pressed", async () => {
+    window.localStorage.setItem(
+      "cognia.companion.config.v1",
+      JSON.stringify({
+        baseUrl: "http://test:7890",
+        deviceJwt: "jwt",
+        deviceId: "dev-existing",
+        serverVersion: "9.9.9",
+      })
+    )
+
+    const transportMock = (jest.requireMock("@/lib/tauri") as { transport: { call: jest.Mock } })
+      .transport
+    transportMock.call.mockResolvedValueOnce({ status: "ok" })
+
+    const user = userEvent.setup()
+    render(<PairOnboardingClient />)
+
+    // Expand the Diagnostics card first.
+    await user.click(await screen.findByTestId("pair-diagnostics-toggle"))
     await user.click(await screen.findByTestId("smoke-call"))
 
     await waitFor(() => expect(screen.getByTestId("smoke-call-result")).toBeInTheDocument())
@@ -306,7 +442,6 @@ describe("<PairOnboardingClient />", () => {
     render(<PairOnboardingClient />)
     await user.click(await screen.findByTestId("pair-scan-qr"))
 
-    // No pair-error testid should appear — give the microtask a tick first.
     await new Promise((r) => setTimeout(r, 0))
     expect(screen.queryByTestId("pair-error")).not.toBeInTheDocument()
   })

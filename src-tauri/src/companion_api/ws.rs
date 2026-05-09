@@ -229,6 +229,8 @@ mod tests {
             idempotency: Arc::new(IdempotencyCache::new()),
             event_bus: Arc::clone(&bus),
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
+            desktop_messages_bridge:
+                crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
         });
         (state, bus)
     }

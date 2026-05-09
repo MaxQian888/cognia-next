@@ -132,6 +132,9 @@ jest.mock("@/components/ui/dialog", () => ({
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => {
     const translations: Record<string, string> = {
+      // Component switched from t("searchDocuments") to t("search") in commit 5
+      // (existing canvas.search key covers the same intent).
+      search: "Search documents",
       searchDocuments: "Search documents",
       new: "New",
       allLanguages: "All Languages",

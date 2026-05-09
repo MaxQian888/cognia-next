@@ -79,7 +79,13 @@ export function TwinSourcesPanel({ twinId = "default", className }: TwinSourcesP
     const r = await pickPhoto({ source: "camera", resultType: "base64" })
     if (r.kind !== "captured") {
       if (r.kind === "cancelled") return
-      toast.error(`Camera: ${r.kind}`)
+      const errorKeyMap: Record<string, string> = {
+        permission_denied: "permissionDenied",
+        unsupported: "unsupported",
+        error: "unknown",
+      }
+      const errorKey = errorKeyMap[r.kind] ?? "unknown"
+      toast.error(t(`cameraError.${errorKey}`))
       return
     }
     await enqueue({

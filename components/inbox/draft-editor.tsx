@@ -12,14 +12,12 @@
  *  - Cancel          → onClose()
  */
 
-import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
+import { useDraftApproval } from "@/hooks/use-draft-approval"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
-import { approveDraft, rejectDraft } from "@/lib/db/connector-drafts"
 import type { ConnectorDraftRow } from "@/lib/db/connector-types"
-import type { MessageSegment } from "@/types/connectors/segment"
 
 interface DraftEditorProps {
   draft: ConnectorDraftRow
@@ -27,52 +25,17 @@ interface DraftEditorProps {
 }
 
 export function DraftEditor({ draft, onClose }: DraftEditorProps) {
-  // Build editable state: only text/markdown segments are mutable.
-  const [segments, setSegments] = useState<MessageSegment[]>(draft.segments)
-  const [busy, setBusy] = useState(false)
-
-  const updateSegment = (index: number, text: string) => {
-    setSegments((prev) =>
-      prev.map((seg, i) => {
-        if (i !== index) return seg
-        if (seg.type === "text") return { ...seg, text }
-        if (seg.type === "markdown") return { ...seg, md: text }
-        return seg
+  const { segments, setSegment, busy, approve, reject } = useDraftApproval(draft, {
+    beforeApprove: async ({ segments: edited }) => {
+      if (!draft.outboundPreview) return
+      await enqueueOutbound({
+        adapterId: draft.outboundPreview.conversationRef.adapterId,
+        conversationKey: draft.conversationKey,
+        request: { ...draft.outboundPreview, segments: edited },
       })
-    )
-  }
-
-  const handleApprove = async () => {
-    setBusy(true)
-    try {
-      if (draft.outboundPreview) {
-        // Build updated request with edited segments.
-        const updatedRequest = {
-          ...draft.outboundPreview,
-          segments,
-        }
-        await enqueueOutbound({
-          adapterId: updatedRequest.conversationRef.adapterId,
-          conversationKey: draft.conversationKey,
-          request: updatedRequest,
-        })
-      }
-      await approveDraft(draft.id)
-      onClose()
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const handleReject = async () => {
-    setBusy(true)
-    try {
-      await rejectDraft(draft.id)
-      onClose()
-    } finally {
-      setBusy(false)
-    }
-  }
+    },
+    onComplete: onClose,
+  })
 
   return (
     <div className="space-y-3" data-testid="draft-editor">
@@ -83,7 +46,7 @@ export function DraftEditor({ draft, onClose }: DraftEditorProps) {
               <Textarea
                 key={i}
                 value={seg.text}
-                onChange={(e) => updateSegment(i, e.target.value)}
+                onChange={(e) => setSegment(i, e.target.value)}
                 className="min-h-[80px] text-sm"
                 placeholder="Draft text…"
                 data-testid={`draft-segment-text-${i}`}
@@ -95,14 +58,13 @@ export function DraftEditor({ draft, onClose }: DraftEditorProps) {
               <Textarea
                 key={i}
                 value={seg.md}
-                onChange={(e) => updateSegment(i, e.target.value)}
+                onChange={(e) => setSegment(i, e.target.value)}
                 className="min-h-[80px] font-mono text-sm"
                 placeholder="Draft markdown…"
                 data-testid={`draft-segment-markdown-${i}`}
               />
             )
           }
-          // Read-only segment
           return (
             <div
               key={i}
@@ -125,7 +87,7 @@ export function DraftEditor({ draft, onClose }: DraftEditorProps) {
       <div className="flex gap-2">
         <Button
           size="sm"
-          onClick={() => void handleApprove()}
+          onClick={() => void approve()}
           disabled={busy}
           data-testid="draft-approve-btn"
         >
@@ -134,7 +96,7 @@ export function DraftEditor({ draft, onClose }: DraftEditorProps) {
         <Button
           size="sm"
           variant="destructive"
-          onClick={() => void handleReject()}
+          onClick={() => void reject()}
           disabled={busy}
           data-testid="draft-reject-btn"
         >

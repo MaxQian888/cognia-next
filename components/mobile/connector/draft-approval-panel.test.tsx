@@ -92,6 +92,17 @@ describe("<DraftApprovalPanel />", () => {
     expect(screen.getByText("[image]")).toBeInTheDocument()
   })
 
+  it("summarizes markdown segments using the `md` field", async () => {
+    const draft = await createDraft({
+      conversationKey: "x",
+      sessionId: "s",
+      segments: [{ type: "markdown", md: "# Heading body" }],
+    })
+    render(<DraftApprovalPanel />)
+    expect(await screen.findByTestId(`draft-row-${draft.id}`)).toBeInTheDocument()
+    expect(screen.getByText("# Heading body")).toBeInTheDocument()
+  })
+
   it("survives pull-to-refresh sweeping expired drafts", async () => {
     await createDraft({
       conversationKey: "x",

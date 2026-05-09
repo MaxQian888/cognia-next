@@ -8,11 +8,14 @@ import { applyPlanModeBridge } from "@/lib/agent/plan-mode-bridge"
 import {
   approveTool,
   closeSession,
+  deleteMessage,
   interruptSession,
   onClaudeMessage,
   sendPrompt,
 } from "@/lib/claude/ipc"
+import { detectPlatform } from "@/hooks/use-platform"
 import { listMessages, persistMessages, truncateAfter } from "@/lib/db/messages"
+import { getDb } from "@/lib/db/schema"
 import { getSession, setSdkSessionId, touchSession, updateSession } from "@/lib/db/sessions"
 import { recordResultUsage } from "@/lib/db/session-usage"
 import { bumpUnread } from "@/lib/db/session-state"
@@ -356,11 +359,19 @@ export function useClaudeChat() {
   /**
    * Truncate the message log starting from `messageId` (inclusive) and resend
    * the supplied content. Used for "edit and resend" on a user message.
+   *
+   * On mobile (Capacitor), the truncate also fans out to the desktop's
+   * Dexie via the companion RPC bridge so the authoritative store stays
+   * in lockstep with the phone. On desktop / web the local `truncateAfter`
+   * is the only mutation.
    */
   const editAndResend = useCallback(
     async (messageId: string, newContent: SendContent) => {
       const sessionId = useChatStore.getState().activeSessionId
       if (!sessionId) return
+      if (detectPlatform() === "mobile") {
+        await mirrorTruncateToDesktop(sessionId, messageId)
+      }
       // Drop everything from this message onward, including the message itself.
       await truncateAfter(sessionId, messageId, { inclusive: true })
       // Re-hydrate the store from Dexie so the optimistic append in send() is
@@ -391,6 +402,9 @@ export function useClaudeChat() {
     if (lastUserIdx < 0) return
 
     const anchor = messages[lastUserIdx]
+    if (detectPlatform() === "mobile") {
+      await mirrorTruncateToDesktop(sessionId, anchor.id)
+    }
     // Remove the user message AND everything after it; we'll re-add it in send().
     await truncateAfter(sessionId, anchor.id, { inclusive: true })
     const remaining = await listMessages(sessionId)
@@ -418,6 +432,39 @@ export function useClaudeChat() {
     close,
     editAndResend,
     regenerate,
+  }
+}
+
+/**
+ * Mobile-only: mirror a `truncateAfter(sessionId, anchorId, { inclusive: true })`
+ * to the desktop's Dexie by calling `message_delete` for the anchor + every
+ * subsequent message. Reads from the local Dexie to compute the set, which
+ * is fine because mobile sync keeps the local store in lockstep before
+ * any edit operation.
+ *
+ * Errors from individual deletes are logged but never thrown — the local
+ * truncate (and subsequent send) is the load-bearing path; a desktop write
+ * failure surfaces later through sync rather than blocking the user.
+ */
+async function mirrorTruncateToDesktop(sessionId: string, anchorMessageId: string): Promise<void> {
+  try {
+    const db = getDb()
+    const anchor = await db.messages.get(anchorMessageId)
+    if (!anchor || anchor.sessionId !== sessionId) return
+    const ids = await db.messages
+      .where("[sessionId+createdAt]")
+      .between([sessionId, anchor.createdAt], [sessionId, Number.MAX_SAFE_INTEGER])
+      .primaryKeys()
+    for (const rawId of ids) {
+      const id = rawId as string
+      try {
+        await deleteMessage(sessionId, id)
+      } catch (err) {
+        console.warn("mirrorTruncateToDesktop: deleteMessage failed", { id, err })
+      }
+    }
+  } catch (err) {
+    console.warn("mirrorTruncateToDesktop failed", err)
   }
 }
 

@@ -146,6 +146,9 @@ const KNOWN_COMMANDS: &[&str] = &[
     "read_agent_config",
     "write_agent_config",
     "sync_pull",
+    "message_update",
+    "message_delete",
+    "session_list",
 ];
 
 /// Commands in this list skip the idempotency cache entirely.
@@ -163,6 +166,10 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // returns the same delta. Skip the cache to avoid stalling phone clients
     // behind a 60-second TTL when the desktop has fresh writes.
     "sync_pull",
+    // Read-only paginated session listing — same `(limit, offset, before)`
+    // returns the same page; skip the cache so a slow desktop write doesn't
+    // serve stale rows to a polling phone.
+    "session_list",
 ];
 
 // ---------------------------------------------------------------------------
@@ -508,6 +515,59 @@ async fn dispatch(
                 .map_err(RpcError::internal)
         }
 
+        // ── Desktop-message bridge (Mobile completeness P2) ──────────────────
+
+        "message_update" => {
+            let session_id: String = required(&args, "session_id")?;
+            let message_id: String = required(&args, "message_id")?;
+            let updates: Value = required(&args, "updates")?;
+            let bridge = std::sync::Arc::clone(&state.desktop_messages_bridge);
+            bridge
+                .update_message(
+                    app,
+                    session_id,
+                    message_id,
+                    updates,
+                    crate::companion_api::desktop_messages_bridge::DEFAULT_TIMEOUT,
+                )
+                .await
+                .map(|_| Value::Null)
+                .map_err(RpcError::internal)
+        }
+
+        "message_delete" => {
+            let session_id: String = required(&args, "session_id")?;
+            let message_id: String = required(&args, "message_id")?;
+            let bridge = std::sync::Arc::clone(&state.desktop_messages_bridge);
+            bridge
+                .delete_message(
+                    app,
+                    session_id,
+                    message_id,
+                    crate::companion_api::desktop_messages_bridge::DEFAULT_TIMEOUT,
+                )
+                .await
+                .map(|_| Value::Null)
+                .map_err(RpcError::internal)
+        }
+
+        "session_list" => {
+            let limit: u32 = required(&args, "limit")?;
+            let offset: u32 = required(&args, "offset")?;
+            let before: Option<i64> = optional(&args, "before")?;
+            let bridge = std::sync::Arc::clone(&state.desktop_messages_bridge);
+            bridge
+                .list_sessions(
+                    app,
+                    limit,
+                    offset,
+                    before,
+                    crate::companion_api::desktop_messages_bridge::DEFAULT_TIMEOUT,
+                )
+                .await
+                .map_err(RpcError::internal)
+        }
+
         // ── Test MCP ──────────────────────────────────────────────────────────
 
         "test_mcp_server" => {
@@ -567,6 +627,8 @@ mod tests {
             idempotency: Arc::new(IdempotencyCache::new()),
             event_bus: EventBus::new(),
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
+            desktop_messages_bridge:
+                crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
         })
     }
 
@@ -704,6 +766,8 @@ mod tests {
             idempotency: cache,
             event_bus: crate::companion_api::event_bus::EventBus::new(),
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
+            desktop_messages_bridge:
+                crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
         });
 
         let router = build_router(state);
@@ -742,6 +806,8 @@ mod tests {
             idempotency: cache,
             event_bus: crate::companion_api::event_bus::EventBus::new(),
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
+            desktop_messages_bridge:
+                crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
         });
         let jwt = device_jwt("dev2");
 
@@ -774,6 +840,8 @@ mod tests {
             idempotency: Arc::clone(&cache),
             event_bus: crate::companion_api::event_bus::EventBus::new(),
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
+            desktop_messages_bridge:
+                crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
         });
 
         let router = build_router(state);
@@ -814,6 +882,8 @@ mod tests {
             idempotency: cache,
             event_bus: crate::companion_api::event_bus::EventBus::new(),
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
+            desktop_messages_bridge:
+                crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
         });
 
         let router = build_router(state);
@@ -975,5 +1045,143 @@ mod tests {
             "test_mcp_server",
             json!({ "transport": "stdio", "command": "echo" })
         );
+    }
+
+    // ── Desktop-message bridge command coverage (Mobile completeness P2) ─────
+
+    #[tokio::test]
+    async fn dispatch_coverage_message_update() {
+        // Required fields are present so the handler reaches dispatch and
+        // returns 503 (test-mode, no AppHandle). The key assertion is that
+        // the dispatch arm is wired (not a 404).
+        assert_not_404!(
+            "message_update",
+            json!({
+                "session_id": "s1",
+                "message_id": "m1",
+                "updates": { "role": "user" }
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_coverage_message_delete() {
+        assert_not_404!(
+            "message_delete",
+            json!({ "session_id": "s1", "message_id": "m1" })
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_coverage_session_list() {
+        assert_not_404!(
+            "session_list",
+            json!({ "limit": 20, "offset": 0 })
+        );
+    }
+
+    // ── Missing-field 400s ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn message_update_missing_session_id_returns_non_success() {
+        // App handle is None in test-mode so the dispatch short-circuits to
+        // 503 *before* per-field validation. The assertion captures the
+        // contract that an empty-body request never reaches a 200 success
+        // and never returns a 404 (the dispatch arm exists).
+        let state = test_state();
+        let router = build_router(state);
+        let jwt = device_jwt("dev1");
+        let resp = rpc_post(router, "message_update", json!({}), &jwt, None).await;
+        let status = resp.status().as_u16();
+        assert_ne!(status, 200);
+        assert_ne!(status, 404);
+    }
+
+    #[tokio::test]
+    async fn message_delete_missing_message_id_returns_non_success() {
+        let state = test_state();
+        let router = build_router(state);
+        let jwt = device_jwt("dev1");
+        let resp = rpc_post(
+            router,
+            "message_delete",
+            json!({ "session_id": "s1" }),
+            &jwt,
+            None,
+        )
+        .await;
+        let status = resp.status().as_u16();
+        assert_ne!(status, 200);
+        assert_ne!(status, 404);
+    }
+
+    #[tokio::test]
+    async fn session_list_missing_limit_returns_non_success() {
+        let state = test_state();
+        let router = build_router(state);
+        let jwt = device_jwt("dev1");
+        let resp = rpc_post(router, "session_list", json!({ "offset": 0 }), &jwt, None).await;
+        let status = resp.status().as_u16();
+        assert_ne!(status, 200);
+        assert_ne!(status, 404);
+    }
+
+    // ── session_list lives in READ_ONLY_COMMANDS (skips idempotency cache) ──
+
+    #[tokio::test]
+    async fn session_list_skips_idempotency_cache() {
+        use std::time::Duration;
+        let cache = Arc::new(IdempotencyCache::with_capacity(100, Duration::from_secs(60)));
+        let state = Arc::new(CompanionState {
+            secret: RwLock::new(SECRET.to_vec()),
+            redemption_lru: RedemptionLru::new(),
+            deny_list: Arc::new(DenyList::new()),
+            app_handle: None,
+            idempotency: Arc::clone(&cache),
+            event_bus: crate::companion_api::event_bus::EventBus::new(),
+            sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
+            desktop_messages_bridge:
+                crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+        });
+
+        let router = build_router(state);
+        let jwt = device_jwt("dev-list");
+        let _ = rpc_post(
+            router,
+            "session_list",
+            json!({ "limit": 10, "offset": 0 }),
+            &jwt,
+            Some("idem-list"),
+        )
+        .await;
+
+        // session_list is in READ_ONLY_COMMANDS — cache must remain empty.
+        assert_eq!(cache.len(), 0);
+    }
+
+    // ── message_update / message_delete are NOT read-only ────────────────────
+    // (mutations must be cached on first success so an in-flight retry
+    // doesn't double-mutate the desktop's Dexie.)
+
+    #[test]
+    fn message_update_not_in_read_only_set() {
+        assert!(!READ_ONLY_COMMANDS.contains(&"message_update"));
+    }
+
+    #[test]
+    fn message_delete_not_in_read_only_set() {
+        assert!(!READ_ONLY_COMMANDS.contains(&"message_delete"));
+    }
+
+    #[test]
+    fn session_list_in_read_only_set() {
+        assert!(READ_ONLY_COMMANDS.contains(&"session_list"));
+    }
+
+    #[test]
+    fn all_three_commands_in_known_commands() {
+        assert!(KNOWN_COMMANDS.contains(&"message_update"));
+        assert!(KNOWN_COMMANDS.contains(&"message_delete"));
+        assert!(KNOWN_COMMANDS.contains(&"session_list"));
     }
 }

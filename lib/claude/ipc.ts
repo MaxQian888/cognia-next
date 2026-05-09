@@ -3,8 +3,16 @@
 // goes through `transport` from `@/lib/tauri`.
 
 import type { UnlistenFn } from "@tauri-apps/api/event"
+import type { UIMessage } from "@/types"
 import { transport } from "@/lib/tauri"
-import type { AgentId, ApprovalDecision, ClaudeEvent, SendContent, SendOptions } from "./types"
+import type {
+  AgentId,
+  ApprovalDecision,
+  ChatSession,
+  ClaudeEvent,
+  SendContent,
+  SendOptions,
+} from "./types"
 
 const SIDECAR_EVENT = "claude://message"
 
@@ -18,6 +26,55 @@ export async function sendPrompt(
 
 export async function interruptSession(sessionId: string): Promise<void> {
   await transport.call("claude_interrupt", { sessionId })
+}
+
+// ---- Mobile-only message + session RPCs (mobile completeness Phase 2) ----
+
+/**
+ * Page of sessions returned by `session_list`. Sorted desktop-side by
+ * `updatedAt` descending. `next_offset` is set when more rows remain
+ * after `offset + rows.length`.
+ */
+export interface SessionListPage {
+  rows: ChatSession[]
+  total: number
+  next_offset?: number
+}
+
+/**
+ * Patch a message on the desktop's Dexie. The mobile client uses this
+ * during edit-and-resend so the desktop's authoritative store stays in
+ * lockstep. Round-trips through `_rpc/message_update` → Tauri event →
+ * `messageRepository.update`.
+ */
+export async function updateMessage(
+  sessionId: string,
+  messageId: string,
+  updates: Partial<UIMessage>
+): Promise<void> {
+  await transport.call("message_update", { sessionId, messageId, updates })
+}
+
+/**
+ * Delete a message on the desktop's Dexie. Used by the mobile
+ * regenerate / edit flows when the local truncate must mirror to the
+ * desktop's store.
+ */
+export async function deleteMessage(sessionId: string, messageId: string): Promise<void> {
+  await transport.call("message_delete", { sessionId, messageId })
+}
+
+/**
+ * Paginated read of the desktop's `sessions` table. Read-only —
+ * structurally idempotent so the companion transport skips the
+ * idempotency-key header.
+ */
+export async function listSessions(opts: {
+  limit: number
+  offset: number
+  before?: number
+}): Promise<SessionListPage> {
+  return transport.call<SessionListPage>("session_list", opts)
 }
 
 export async function approveTool(

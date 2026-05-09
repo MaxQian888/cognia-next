@@ -211,26 +211,10 @@ mod tests {
 
     #[tokio::test]
     async fn ws_send_and_receive_via_mock_server() {
-        use futures_util::{SinkExt, StreamExt};
-        use tokio::net::TcpListener;
-        use tokio_tungstenite::{accept_async, connect_async, tungstenite::Message};
+        use futures_util::SinkExt;
+        use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-        // Spawn a simple echo WS server.
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        tokio::spawn(async move {
-            let (tcp, _) = listener.accept().await.unwrap();
-            let mut ws = accept_async(tcp).await.unwrap();
-            while let Some(Ok(msg)) = ws.next().await {
-                if msg.is_text() {
-                    ws.send(msg).await.ok();
-                    break;
-                }
-            }
-        });
-
-        // Connect and exchange a message.
+        let addr = spawn_echo_server().await;
         let url = format!("ws://{addr}");
         let (mut ws_stream, _) = connect_async(&url).await.unwrap();
         ws_stream

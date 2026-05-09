@@ -26,6 +26,7 @@ import { pickMultiplePhotos, pickPhoto } from "@/lib/capacitor/camera"
 import { selectionFeedback } from "@/lib/capacitor/haptics"
 import { showToast } from "@/lib/capacitor/toast"
 import { makeDefaultLoader, withPlugin } from "@/lib/capacitor/_shared"
+import type { SendContent, SendContentBlock } from "@/lib/claude/types"
 import { cn } from "@/lib/utils"
 
 export type ComposerAttachment =
@@ -41,6 +42,19 @@ export interface ComposerPlusMenuProps {
    * into a draft + outbound queue write.
    */
   onAttach: (attachment: ComposerAttachment) => void
+  /**
+   * Optional. When provided, the camera/album/file branches additionally
+   * pack their result as a {@link SendContent} block array and forward it
+   * to this callback so the chat composer can ship the attachment through
+   * the normal send pipeline (`claude_send` → SDK image block).
+   *
+   * Image picks become `{ type: "image", source: { type: "base64", data,
+   * media_type } }` blocks; non-image files fall back through `onAttach`
+   * since the SDK's send shape doesn't carry generic file blocks (yet).
+   * Voice is intentionally left to `onAttach` only — outbound queue is
+   * the right path for voice payloads.
+   */
+  onSend?: (content: SendContent) => Promise<void> | void
   /** Triggered with the raw error code on failure paths (permission, etc.). */
   onError?: (code: string, message: string) => void
   className?: string
@@ -60,7 +74,7 @@ const voiceLoader = makeDefaultLoader<VoiceRecorderShape>(
   "VoiceRecorder"
 )
 
-export function ComposerPlusMenu({ onAttach, onError, className }: ComposerPlusMenuProps) {
+export function ComposerPlusMenu({ onAttach, onSend, onError, className }: ComposerPlusMenuProps) {
   const t = useTranslations("mobile.composerPlus")
   const [open, setOpen] = useState(false)
   const [recording, setRecording] = useState(false)
@@ -70,12 +84,16 @@ export function ComposerPlusMenu({ onAttach, onError, className }: ComposerPlusM
     void selectionFeedback()
     const result = await pickPhoto({ source: "camera", resultType: "base64" })
     if (result.kind === "captured") {
+      const mime = `image/${result.format}`
       onAttach({
         kind: "photo",
         base64: result.base64,
         uri: result.uri,
-        mime: `image/${result.format}`,
+        mime,
       })
+      if (onSend && result.base64) {
+        await onSend(packPhotoAsSendContent(result.base64, mime))
+      }
       return
     }
     if (result.kind === "permission_denied") {
@@ -96,10 +114,16 @@ export function ComposerPlusMenu({ onAttach, onError, className }: ComposerPlusM
     void selectionFeedback()
     const result = await pickMultiplePhotos({ limit: 9 })
     if (result.kind === "picked") {
-      onAttach({
-        kind: "photos",
-        items: result.photos.map((p) => ({ uri: p.uri, mime: `image/${p.format}` })),
-      })
+      const items = result.photos.map((p) => ({ uri: p.uri, mime: `image/${p.format}` }))
+      onAttach({ kind: "photos", items })
+      if (onSend) {
+        try {
+          const blocks = await Promise.all(items.map(packUriAsImageBlock))
+          await onSend(blocks.filter((b): b is SendContentBlock => b !== null))
+        } catch (err) {
+          onError?.("error", err instanceof Error ? err.message : String(err))
+        }
+      }
       return
     }
     if (result.kind === "cancelled") return
@@ -110,10 +134,18 @@ export function ComposerPlusMenu({ onAttach, onError, className }: ComposerPlusM
     onError?.("error", result.message)
   }
 
-  const onFilePicked = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
     onAttach({ kind: "file", file })
+    if (onSend && file.type.startsWith("image/")) {
+      try {
+        const block = await packFileAsImageBlock(file)
+        if (block) await onSend([block])
+      } catch (err) {
+        onError?.("error", err instanceof Error ? err.message : String(err))
+      }
+    }
     setOpen(false)
     e.target.value = "" // reset so the same file can be chosen again
   }
@@ -152,7 +184,7 @@ export function ComposerPlusMenu({ onAttach, onError, className }: ComposerPlusM
     setRecording(false)
     setOpen(false)
     if (result && "kind" in result && (result.kind === "unsupported" || result.kind === "error")) {
-      onError?.("error", "Voice stop failed")
+      onError?.("error", t("voiceStopFailed"))
       return
     }
     const v = (
@@ -254,4 +286,60 @@ function PlusItem({ icon, label, onSelect, testId }: PlusItemProps) {
       <span>{label}</span>
     </button>
   )
+}
+
+// ---------------------------------------------------------------------------
+// SendContent packing helpers (Mobile completeness Phase 2.5)
+//
+// `SendContent` already accepts an `image` block with inline base64
+// (`{ type: "image", source: { type: "base64", data, media_type } }`), so
+// no new RPC is required. These helpers translate the camera / album /
+// file results into that shape so the chat composer can ship the image
+// through `onSend`'s normal path (`claude_send` → SDK image block).
+// ---------------------------------------------------------------------------
+
+export function packPhotoAsSendContent(base64: string, mime: string): SendContentBlock[] {
+  return [
+    {
+      type: "image",
+      source: { type: "base64", media_type: mime, data: base64 },
+    },
+  ]
+}
+
+async function packUriAsImageBlock(item: {
+  uri: string
+  mime: string
+}): Promise<SendContentBlock | null> {
+  if (typeof fetch !== "function") return null
+  const response = await fetch(item.uri)
+  const blob = await response.blob()
+  const data = await blobToBase64(blob)
+  if (!data) return null
+  return {
+    type: "image",
+    source: { type: "base64", media_type: item.mime, data },
+  }
+}
+
+async function packFileAsImageBlock(file: File): Promise<SendContentBlock | null> {
+  const data = await blobToBase64(file)
+  if (!data) return null
+  return {
+    type: "image",
+    source: { type: "base64", media_type: file.type || "image/jpeg", data },
+  }
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const url = typeof reader.result === "string" ? reader.result : ""
+      const base64 = url.includes(",") ? (url.split(",")[1] ?? "") : url
+      resolve(base64)
+    }
+    reader.onerror = () => reject(reader.error ?? new Error("blob read failed"))
+    reader.readAsDataURL(blob)
+  })
 }

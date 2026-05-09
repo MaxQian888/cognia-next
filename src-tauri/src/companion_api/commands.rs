@@ -13,9 +13,10 @@ use std::sync::Arc;
 use tauri::{Manager, State};
 
 use super::{
+    desktop_messages_bridge,
     event_bus::{register_tauri_event, EventBus},
     jwt::issue_pair_jwt,
-    mdns::{self, BroadcastConfig},
+    mdns::AutoStartConfig,
     secret,
     server::{CompanionServerError, DEFAULT_PORT},
     tls,
@@ -82,6 +83,11 @@ pub async fn companion_server_start(
         // `companion_sync_pull_response` Tauri command and the in-flight
         // HTTP handler talking to the same registry of pending requests.
         sync_bridge: Arc::clone(&state.sync_bridge),
+        // Same Arc-cloning trick — the `companion_message_response`
+        // Tauri command resolves pending oneshots on the long-lived
+        // CompanionServerState even after a server restart hands the
+        // axum handler a fresh SharedState.
+        desktop_messages_bridge: Arc::clone(&state.desktop_messages_bridge),
     });
 
     state.start(port, bind_loopback_only, shared).await
@@ -117,6 +123,42 @@ pub fn companion_sync_pull_response(
         .resolve(super::sync_bridge::SyncPullResponse {
             request_id,
             delta,
+            error,
+        });
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Desktop-message-mutation bridge response command (Mobile completeness P2)
+// ---------------------------------------------------------------------------
+
+/// Resolve a pending `companion://message-{update,delete}-request` or
+/// `companion://session-list-request` event with the result the WebView
+/// produced from Dexie.
+///
+/// The flow:
+///   1. Phone calls `_rpc/message_update` (or `_delete` / `session_list`)
+///      against the desktop's HTTP server.
+///   2. The Rust handler emits the matching event and awaits a oneshot.
+///   3. The desktop WebView's `lib/companion/desktop-message-source.ts`
+///      listener runs the Dexie call, then invokes this command.
+///   4. We resolve the matching oneshot — the HTTP handler returns to the
+///      phone with the result in its response body.
+///
+/// Exactly one of `result` / `error` should be populated. Both `None` is
+/// surfaced as a generic bridge error.
+#[tauri::command]
+pub fn companion_message_response(
+    request_id: String,
+    result: Option<serde_json::Value>,
+    error: Option<String>,
+    state: State<'_, CompanionServerState>,
+) -> Result<(), String> {
+    state
+        .desktop_messages_bridge
+        .resolve(desktop_messages_bridge::MessageBridgeResponse {
+            request_id,
+            result,
             error,
         });
     Ok(())
@@ -329,6 +371,28 @@ pub fn companion_get_tls_fingerprint(app_handle: tauri::AppHandle) -> Result<Str
     ensure_tls_fingerprint(&app_handle)
 }
 
+/// Diagnostics: where the companion TLS cert + key live on disk. Used by
+/// the Settings → Companion advanced view so a user can inspect / rotate
+/// the cert without grepping app-data paths by hand.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompanionTlsPaths {
+    pub cert_pem_path: String,
+    pub key_pem_path: String,
+    pub fingerprint_sha256: String,
+}
+
+#[tauri::command]
+pub fn companion_tls_paths(app_handle: tauri::AppHandle) -> Result<CompanionTlsPaths, String> {
+    let dir = data_dir(&app_handle)?;
+    let material = tls::ensure_certificate(&dir).map_err(|e| e.to_string())?;
+    Ok(CompanionTlsPaths {
+        cert_pem_path: material.cert_pem_path.to_string_lossy().into_owned(),
+        key_pem_path: material.key_pem_path.to_string_lossy().into_owned(),
+        fingerprint_sha256: material.fingerprint_sha256,
+    })
+}
+
 /// Begin advertising the running companion server over mDNS so phones on
 /// the same LAN can discover it without typing a URL. Idempotent — repeat
 /// calls replace the existing broadcast.
@@ -341,8 +405,6 @@ pub fn companion_mdns_start(
     tls_fingerprint: String,
     instance_name: Option<String>,
 ) -> Result<String, String> {
-    let local_ip = local_ip_address::local_ip()
-        .map_err(|e| format!("local ip lookup failed: {e}"))?;
     let instance_name = instance_name.unwrap_or_else(|| {
         let suffix: String = uuid::Uuid::new_v4().simple().to_string()[..6].to_string();
         format!("cognia-{suffix}")
@@ -350,10 +412,9 @@ pub fn companion_mdns_start(
     let _ = app_handle; // reserved for future logging-by-app-id
     state
         .mdns
-        .start(BroadcastConfig {
+        .start_auto(AutoStartConfig {
             instance_name,
             port,
-            local_ip,
             app_version,
             tls_fingerprint,
         })

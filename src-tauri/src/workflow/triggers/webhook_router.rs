@@ -165,6 +165,7 @@ impl WebhookRouter {
     }
 
     /// Number of registered entries (test helper).
+    #[cfg(test)]
     pub fn entry_count(&self) -> usize {
         self.inner.entries.read().len()
     }

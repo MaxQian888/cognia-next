@@ -8084,10 +8084,49 @@
       "manualDivider": "或手动粘贴",
       "baseUrlLabel": "服务器地址",
       "tokenLabel": "配对令牌",
-      "fingerprintPinned": "✓ 桌面身份已锁定",
+      "fingerprintPinned": "桌面身份已锁定",
+      "fingerprintHint": "今后重连时如果桌面签名密钥不一致，本机将自动拒绝。",
+      "formCardTitle": "配对手机",
+      "formCardDescription": "扫码或手动粘贴均可——两条路径共用同一份 5 分钟令牌。",
       "submit": "完成配对",
       "submitInProgress": "正在配对…",
       "transportLabel": "传输层",
+      "loadingTitle": "正在检查既有配对…",
+      "errorTitle": "配对失败",
+      "connectedTitle": "已连接到桌面",
+      "connectedSubtitle": "链路已就绪——桌面会接受本机发出的请求。",
+      "offlineTitle": "连接已断开",
+      "offlineSubtitle": "暂时无法联系到桌面，请确认桌面已唤醒且与手机处于同一网络。",
+      "checkingTitle": "正在重新检查链路",
+      "health": {
+        "device": "设备",
+        "server": "服务器",
+        "lastHeartbeat": "最近心跳",
+        "latency": "延迟",
+        "live": "在线",
+        "checking": "检查中",
+        "offline": "离线",
+        "refresh": "刷新状态",
+        "continueToChat": "进入聊天",
+        "noHeartbeat": "—"
+      },
+      "diagnostics": {
+        "title": "诊断",
+        "subtitle": "对 RPC 调用与事件订阅做一次端到端探测。",
+        "expand": "展开诊断",
+        "collapse": "收起诊断",
+        "testRpc": "测试 RPC 连接",
+        "testWs": "测试事件订阅",
+        "rpcResultLabel": "RPC 响应",
+        "wsResultLabel": "事件载荷",
+        "rpcWaiting": "点击「测试 RPC」即可发起一次状态 RPC。",
+        "wsWaiting": "点击「测试事件」会订阅 5 秒事件流。"
+      },
+      "signOut": {
+        "cardTitle": "断开连接",
+        "cardDescription": "退出登录并清除设备 JWT，需要重新扫码才能再次连接。",
+        "cta": "退出 / 重新配对"
+      },
       "signOutTitle": "退出登录",
       "signOutReason": "确认退出当前配对",
       "signOutDescription": "退出后需重新扫码配对才能再次连接。",
@@ -8178,6 +8217,7 @@
       "voice": "语音",
       "voiceStop": "停止录音",
       "voiceCannotStart": "无法开始录音",
+      "voiceStopFailed": "停止录音失败。",
       "unsupported": "当前平台不支持此功能。",
       "permissionDeniedCamera": "需要相机权限。",
       "permissionDeniedMic": "需要麦克风权限。"
@@ -8214,7 +8254,12 @@
       "statusParsing": "解析中",
       "statusEmbedding": "向量化",
       "statusReady": "就绪",
-      "statusFailed": "失败"
+      "statusFailed": "失败",
+      "cameraError": {
+        "permissionDenied": "需要相机权限。",
+        "unsupported": "当前平台不支持相机。",
+        "unknown": "相机调用失败，请重试。"
+      }
     },
     "twinDraftActions": {
       "accept": "接受",

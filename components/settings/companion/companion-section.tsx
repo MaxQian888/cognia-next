@@ -49,6 +49,7 @@ import { isTauri, transport } from "@/lib/tauri"
 import { listPairedDevices, revokePairedDevice } from "@/lib/db/paired-devices"
 import { encodePairPayload } from "@/lib/qr/pair-payload"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
+import { formatRelative } from "@/lib/time/relative"
 import { cn } from "@/lib/utils"
 
 // ---------------------------------------------------------------------------
@@ -721,17 +722,4 @@ function PairedDevicesCard() {
       </CardContent>
     </Card>
   )
-}
-
-/**
- * Tiny relative-time formatter — no `date-fns` here because the section
- * only needs five buckets and a project-wide bundling change is out of
- * scope.
- */
-function formatRelative(epochMs: number): string {
-  const delta = Date.now() - epochMs
-  if (delta < 60_000) return "just now"
-  if (delta < 60 * 60_000) return `${Math.floor(delta / 60_000)}m ago`
-  if (delta < 24 * 60 * 60_000) return `${Math.floor(delta / (60 * 60_000))}h ago`
-  return `${Math.floor(delta / (24 * 60 * 60_000))}d ago`
 }

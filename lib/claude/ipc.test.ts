@@ -10,10 +10,12 @@ import {
   approveTool,
   closeSession,
   defaultExportDir,
+  deleteMessage,
   ensureDir,
   getSidecarStatus,
   hasApiKey,
   interruptSession,
+  listSessions,
   onClaudeMessage,
   readAgentConfig,
   readClaudeUserConfig,
@@ -31,6 +33,7 @@ import {
   skillsScanSecurity,
   skillsUninstallNative,
   testMcpServer,
+  updateMessage,
   writeAgentConfig,
   writeTextFile,
 } from "./ipc"
@@ -366,5 +369,60 @@ describe("testMcpServer", () => {
     expect(out.error).toBe("spawn failed")
     expect(out.toolCount).toBe(0)
     expect(out.tools).toEqual([])
+  })
+})
+
+// ── Mobile message + session wrappers (Phase 2) ──────────────────────────
+
+describe("updateMessage", () => {
+  it("forwards sessionId / messageId / updates", async () => {
+    callSpy.mockResolvedValueOnce(undefined)
+    await updateMessage("s1", "m1", { content: "edited" })
+    expect(callSpy).toHaveBeenCalledWith("message_update", {
+      sessionId: "s1",
+      messageId: "m1",
+      updates: { content: "edited" },
+    })
+  })
+
+  it("supports parts-shape updates", async () => {
+    callSpy.mockResolvedValueOnce(undefined)
+    await updateMessage("s1", "m1", {
+      parts: [{ type: "text", text: "x" }] as never,
+    })
+    expect(callSpy).toHaveBeenCalledWith(
+      "message_update",
+      expect.objectContaining({ messageId: "m1" })
+    )
+  })
+})
+
+describe("deleteMessage", () => {
+  it("forwards sessionId + messageId", async () => {
+    callSpy.mockResolvedValueOnce(undefined)
+    await deleteMessage("s1", "m1")
+    expect(callSpy).toHaveBeenCalledWith("message_delete", {
+      sessionId: "s1",
+      messageId: "m1",
+    })
+  })
+})
+
+describe("listSessions", () => {
+  it("forwards limit/offset/before and returns the SessionListPage", async () => {
+    callSpy.mockResolvedValueOnce({ rows: [], total: 0 })
+    const page = await listSessions({ limit: 20, offset: 0, before: 1700000000000 })
+    expect(page).toEqual({ rows: [], total: 0 })
+    expect(callSpy).toHaveBeenCalledWith("session_list", {
+      limit: 20,
+      offset: 0,
+      before: 1700000000000,
+    })
+  })
+
+  it("works without an optional before cursor", async () => {
+    callSpy.mockResolvedValueOnce({ rows: [], total: 0, next_offset: undefined })
+    await listSessions({ limit: 10, offset: 0 })
+    expect(callSpy).toHaveBeenCalledWith("session_list", { limit: 10, offset: 0 })
   })
 })

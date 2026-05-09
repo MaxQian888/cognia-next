@@ -17,14 +17,6 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2.5.0", features = [] }
 
-# Embed a Common-Controls v6 manifest into every artifact (incl. test binaries)
-# so the Windows loader picks up comctl32 v6 from WinSxS — required by the
-# static `TaskDialogIndirect` import that `rfd` + `muda` emit under their
-# `common-controls-v6` feature. tauri-build only stamps the bin's manifest;
-# this covers `cargo test` too.
-[target.'cfg(windows)'.build-dependencies]
-embed-manifest = "1.4"
-
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }

@@ -134,7 +134,7 @@ impl SyncBridge {
 
     /// Test-only — number of in-flight requests.  Production code should
     /// not depend on this.
-    #[doc(hidden)]
+    #[cfg(test)]
     pub fn pending_count(&self) -> usize {
         self.pending.lock().len()
     }

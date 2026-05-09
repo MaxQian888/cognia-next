@@ -19,6 +19,7 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "skills_scan_native",
   "mcp_server_status",
   "read_agent_config",
+  "session_list",
 ])
 
 // ---------------------------------------------------------------------------

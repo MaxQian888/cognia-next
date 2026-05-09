@@ -20,12 +20,8 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { Badge } from "@/components/ui/badge"
 import { PullToRefresh } from "@/components/mobile/interactions/pull-to-refresh"
 import { SwipeRow } from "@/components/mobile/interactions/swipe-row"
-import {
-  approveDraft,
-  listAllPendingDrafts,
-  rejectDraft,
-  sweepExpired,
-} from "@/lib/db/connector-drafts"
+import { useDraftApproval } from "@/hooks/use-draft-approval"
+import { listAllPendingDrafts, sweepExpired } from "@/lib/db/connector-drafts"
 import type { ConnectorDraftRow } from "@/lib/db/connector-types"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { cn } from "@/lib/utils"
@@ -48,27 +44,98 @@ function summarize(row: ConnectorDraftRow): string {
   return `[${first.type}]`
 }
 
+interface RowProps {
+  row: ConnectorDraftRow
+  approveLabel: string
+  rejectLabel: string
+  queueLabelApprove: string
+  queueLabelReject: string
+}
+
+function DraftApprovalRow({
+  row,
+  approveLabel,
+  rejectLabel,
+  queueLabelApprove,
+  queueLabelReject,
+}: RowProps) {
+  const { approve, reject } = useDraftApproval(row, {
+    beforeApprove: async () => {
+      await enqueue({
+        command: "connector_approve_draft",
+        payload: { draftId: row.id },
+        label: queueLabelApprove,
+      })
+    },
+    beforeReject: async () => {
+      await enqueue({
+        command: "connector_reject_draft",
+        payload: { draftId: row.id },
+        label: queueLabelReject,
+      })
+    },
+  })
+
+  return (
+    <SwipeRow
+      leftActions={[
+        {
+          id: "reject",
+          label: rejectLabel,
+          icon: <XIcon className="size-4" />,
+          destructive: true,
+          onSelect: () => void reject(),
+        },
+      ]}
+      rightActions={[
+        {
+          id: "approve",
+          label: approveLabel,
+          icon: <CheckIcon className="size-4" />,
+          className: "bg-primary text-primary-foreground",
+          onSelect: () => void approve(),
+        },
+      ]}
+    >
+      <div
+        className="rounded-md border border-border bg-card p-3"
+        data-testid={`draft-row-${row.id}`}
+      >
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="text-[10px]">
+            {row.conversationKey}
+          </Badge>
+          <span className="ml-auto text-[10px] text-muted-foreground">
+            {new Date(row.createdAt).toLocaleTimeString()}
+          </span>
+        </div>
+        <p className="mt-1 line-clamp-3 text-sm">{summarize(row)}</p>
+        <div className="mt-2 flex gap-2">
+          <button
+            type="button"
+            onClick={() => void reject()}
+            className="touch-target flex-1 rounded-md border border-destructive/40 px-3 py-1.5 text-xs font-medium text-destructive"
+            data-testid={`draft-reject-${row.id}`}
+          >
+            {rejectLabel}
+          </button>
+          <button
+            type="button"
+            onClick={() => void approve()}
+            className="touch-target flex-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
+            data-testid={`draft-approve-${row.id}`}
+          >
+            {approveLabel}
+          </button>
+        </div>
+      </div>
+    </SwipeRow>
+  )
+}
+
 export function DraftApprovalPanel({ className }: DraftApprovalPanelProps) {
   const t = useTranslations("mobile.draftApproval")
   const drafts = useLiveQuery<ConnectorDraftRow[]>(() => listAllPendingDrafts(), []) ?? []
-
-  const onApprove = async (row: ConnectorDraftRow) => {
-    await approveDraft(row.id)
-    await enqueue({
-      command: "connector_approve_draft",
-      payload: { draftId: row.id },
-      label: t("queueLabelApprove"),
-    })
-  }
-
-  const onReject = async (row: ConnectorDraftRow) => {
-    await rejectDraft(row.id)
-    await enqueue({
-      command: "connector_reject_draft",
-      payload: { draftId: row.id },
-      label: t("queueLabelReject"),
-    })
-  }
 
   const onRefresh = async () => {
     await sweepExpired()
@@ -95,59 +162,13 @@ export function DraftApprovalPanel({ className }: DraftApprovalPanelProps) {
         <ul className="flex flex-col gap-2 p-4">
           {drafts.map((row) => (
             <li key={row.id}>
-              <SwipeRow
-                leftActions={[
-                  {
-                    id: "reject",
-                    label: t("reject"),
-                    icon: <XIcon className="size-4" />,
-                    destructive: true,
-                    onSelect: () => void onReject(row),
-                  },
-                ]}
-                rightActions={[
-                  {
-                    id: "approve",
-                    label: t("approve"),
-                    icon: <CheckIcon className="size-4" />,
-                    className: "bg-emerald-600 text-white",
-                    onSelect: () => void onApprove(row),
-                  },
-                ]}
-              >
-                <div
-                  className="rounded-md border border-border bg-card p-3"
-                  data-testid={`draft-row-${row.id}`}
-                >
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-[10px]">
-                      {row.conversationKey}
-                    </Badge>
-                    <span className="ml-auto text-[10px] text-muted-foreground">
-                      {new Date(row.createdAt).toLocaleTimeString()}
-                    </span>
-                  </div>
-                  <p className="mt-1 line-clamp-3 text-sm">{summarize(row)}</p>
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => void onReject(row)}
-                      className="touch-target flex-1 rounded-md border border-destructive/40 px-3 py-1.5 text-xs font-medium text-destructive"
-                      data-testid={`draft-reject-${row.id}`}
-                    >
-                      {t("reject")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void onApprove(row)}
-                      className="touch-target flex-1 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white"
-                      data-testid={`draft-approve-${row.id}`}
-                    >
-                      {t("approve")}
-                    </button>
-                  </div>
-                </div>
-              </SwipeRow>
+              <DraftApprovalRow
+                row={row}
+                approveLabel={t("approve")}
+                rejectLabel={t("reject")}
+                queueLabelApprove={t("queueLabelApprove")}
+                queueLabelReject={t("queueLabelReject")}
+              />
             </li>
           ))}
         </ul>

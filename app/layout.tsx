@@ -3,6 +3,7 @@
 // `connect-src` directive there, otherwise the request will be blocked.
 import type { Metadata, Viewport } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
+import { getLocale } from "next-intl/server"
 import { ThemeProvider } from "next-themes"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -19,6 +20,7 @@ import { CompanionBootProvider } from "@/components/providers/companion-boot-pro
 import { MobileShellWrapper } from "@/components/mobile/shell/mobile-shell-wrapper"
 import { CompanionEventBridgeProvider } from "@/components/providers/companion-event-bridge-provider"
 import { DesktopSyncSourceProvider } from "@/components/providers/desktop-sync-source-provider"
+import { DesktopMessageSourceProvider } from "@/components/providers/desktop-message-source-provider"
 import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provider"
 import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provider"
 import { ConnectorBusProvider } from "@/components/connectors/connector-bus-provider"
@@ -56,13 +58,14 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const locale = await getLocale()
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang={locale} suppressHydrationWarning>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <ThemeProvider
           attribute="class"
@@ -94,9 +97,11 @@ export default function RootLayout({
                                   <SubscriptionUsageProvider>
                                     <CompanionBootProvider>
                                       <DesktopSyncSourceProvider>
-                                        <div data-bg-target="global" className="contents">
-                                          <MobileShellWrapper>{children}</MobileShellWrapper>
-                                        </div>
+                                        <DesktopMessageSourceProvider>
+                                          <div data-bg-target="global" className="contents">
+                                            <MobileShellWrapper>{children}</MobileShellWrapper>
+                                          </div>
+                                        </DesktopMessageSourceProvider>
                                       </DesktopSyncSourceProvider>
                                     </CompanionBootProvider>
                                   </SubscriptionUsageProvider>

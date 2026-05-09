@@ -8042,10 +8042,49 @@
       "manualDivider": "or paste manually",
       "baseUrlLabel": "Server URL",
       "tokenLabel": "Pair token",
-      "fingerprintPinned": "✓ Desktop identity pinned",
+      "fingerprintPinned": "Desktop identity pinned",
+      "fingerprintHint": "This phone will refuse a different desktop signing key on every reconnect.",
+      "formCardTitle": "Pair this phone",
+      "formCardDescription": "One-tap scan or manual paste — both routes use the same 5-minute pair token.",
       "submit": "Complete pairing",
       "submitInProgress": "Pairing…",
       "transportLabel": "Transport",
+      "loadingTitle": "Checking for an existing pairing…",
+      "errorTitle": "Pairing failed",
+      "connectedTitle": "Connected to desktop",
+      "connectedSubtitle": "Live link — your desktop accepts requests from this phone.",
+      "offlineTitle": "Connection lost",
+      "offlineSubtitle": "Couldn't reach the desktop — verify the desktop is awake and on the same network.",
+      "checkingTitle": "Re-checking link",
+      "health": {
+        "device": "Device",
+        "server": "Server",
+        "lastHeartbeat": "Last heartbeat",
+        "latency": "Latency",
+        "live": "Live",
+        "checking": "Checking",
+        "offline": "Offline",
+        "refresh": "Refresh status",
+        "continueToChat": "Continue to chat",
+        "noHeartbeat": "—"
+      },
+      "diagnostics": {
+        "title": "Diagnostics",
+        "subtitle": "Run an RPC and a streaming-event probe end-to-end.",
+        "expand": "Show diagnostics",
+        "collapse": "Hide diagnostics",
+        "testRpc": "Test RPC connection",
+        "testWs": "Test event subscription",
+        "rpcResultLabel": "RPC response",
+        "wsResultLabel": "Event payload",
+        "rpcWaiting": "Tap “Test RPC” to send a status RPC.",
+        "wsWaiting": "Tap “Test event” to subscribe for 5 seconds."
+      },
+      "signOut": {
+        "cardTitle": "Disconnect",
+        "cardDescription": "Sign out and clear the device JWT. You'll need to scan a fresh QR to reconnect.",
+        "cta": "Sign out / re-pair"
+      },
       "signOutTitle": "Sign out",
       "signOutReason": "Confirm sign out",
       "signOutDescription": "You'll need to scan the QR again to reconnect.",
@@ -8136,6 +8175,7 @@
       "voice": "Voice",
       "voiceStop": "Stop recording",
       "voiceCannotStart": "Cannot start recording",
+      "voiceStopFailed": "Failed to stop recording.",
       "unsupported": "Not supported on this platform.",
       "permissionDeniedCamera": "Camera permission required.",
       "permissionDeniedMic": "Microphone permission required."
@@ -8172,7 +8212,12 @@
       "statusParsing": "Parsing",
       "statusEmbedding": "Embedding",
       "statusReady": "Ready",
-      "statusFailed": "Failed"
+      "statusFailed": "Failed",
+      "cameraError": {
+        "permissionDenied": "Camera permission required.",
+        "unsupported": "Camera not supported on this platform.",
+        "unknown": "Camera failed. Please try again."
+      }
     },
     "twinDraftActions": {
       "accept": "Accept",

@@ -31,6 +31,12 @@ const VALIDITY_YEARS: i64 = 10;
 
 /// Loaded TLS material — paths plus the SHA-256 SubjectPublicKeyInfo
 /// fingerprint that gets encoded into pair QR payloads.
+///
+/// The path fields are read by [`commands::companion_tls_paths`] (a
+/// diagnostics command — surfaces where the cert lives so a user can
+/// inspect / rotate it) and are also reserved for the eventual HTTPS
+/// server bring-up (M2.9), at which point `axum-server` will load the
+/// PEM + key from these paths.
 #[derive(Debug, Clone)]
 pub struct TlsMaterial {
     pub cert_pem_path: PathBuf,

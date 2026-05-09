@@ -30,6 +30,7 @@
 
 pub mod auth;
 pub mod deny_list;
+pub mod desktop_messages_bridge;
 pub mod event_bus;
 pub mod idempotency;
 pub mod jwt;
@@ -93,6 +94,11 @@ pub struct CompanionState {
     /// Sync-pull bridge between the Rust handler and the desktop WebView's
     /// Dexie store (M4.7).  See [`sync_bridge`] for the wire protocol.
     pub sync_bridge: Arc<sync_bridge::SyncBridge>,
+    /// Desktop-message-mutation bridge (mobile completeness, Phase 2).
+    /// Carries `message_update` / `message_delete` / `session_list` round-
+    /// trips between the Rust HTTP handler and the WebView's Dexie store.
+    /// See [`desktop_messages_bridge`] for the wire protocol.
+    pub desktop_messages_bridge: Arc<desktop_messages_bridge::DesktopMessagesBridge>,
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +125,12 @@ pub struct CompanionServerState {
     /// the request still holds a reference. Same Arc-cloning trick as
     /// `deny_list` above.
     pub sync_bridge: Arc<sync_bridge::SyncBridge>,
+    /// Desktop-message-mutation bridge — same Arc-cloning trick as
+    /// `sync_bridge`. Shared with `SharedState` so the
+    /// `companion_message_response` Tauri command can resolve pending
+    /// oneshots even when the HTTP handler that issued the request has
+    /// already returned.
+    pub desktop_messages_bridge: Arc<desktop_messages_bridge::DesktopMessagesBridge>,
     /// mDNS broadcaster (Wave 1.5) — exposes the running server on the LAN
     /// so paired phones can discover the desktop without manual baseUrl
     /// entry. Optional — broadcast must be opted into via Settings.
@@ -157,6 +169,7 @@ impl CompanionServerState {
             }),
             deny_list: Arc::new(DenyList::new()),
             sync_bridge: sync_bridge::SyncBridge::new(),
+            desktop_messages_bridge: desktop_messages_bridge::DesktopMessagesBridge::new(),
             mdns: mdns::BroadcasterState::new(),
             tunnel: tunnel::TunnelState::new(),
         }
@@ -261,6 +274,7 @@ mod tests {
             idempotency: Arc::new(IdempotencyCache::new()),
             event_bus: EventBus::new(),
             sync_bridge: sync_bridge::SyncBridge::new(),
+            desktop_messages_bridge: desktop_messages_bridge::DesktopMessagesBridge::new(),
         })
     }
 

@@ -43,6 +43,16 @@ pub struct BroadcastConfig {
     pub tls_fingerprint: String,
 }
 
+/// Config for the auto-detect-IP wrapper. Same as [`BroadcastConfig`] but
+/// without `local_ip` — `start_auto` picks one via `local-ip-address`.
+#[derive(Debug, Clone)]
+pub struct AutoStartConfig {
+    pub instance_name: String,
+    pub port: u16,
+    pub app_version: String,
+    pub tls_fingerprint: String,
+}
+
 pub struct Broadcaster {
     daemon: Arc<ServiceDaemon>,
     fullname: String,
@@ -104,6 +114,20 @@ impl BroadcasterState {
         let fullname = broadcaster.fullname().to_string();
         *self.inner.lock() = Some(broadcaster);
         Ok(fullname)
+    }
+
+    /// Same as [`Self::start`] but resolves `local_ip` via the
+    /// `local-ip-address` crate. Returns [`MdnsError::NoIp`] when the host
+    /// has no usable interface (e.g., a fresh container with no network).
+    pub fn start_auto(&self, config: AutoStartConfig) -> Result<String, MdnsError> {
+        let local_ip = local_ip_address::local_ip().map_err(|_| MdnsError::NoIp)?;
+        self.start(BroadcastConfig {
+            instance_name: config.instance_name,
+            port: config.port,
+            local_ip,
+            app_version: config.app_version,
+            tls_fingerprint: config.tls_fingerprint,
+        })
     }
 
     pub fn stop(&self) {
