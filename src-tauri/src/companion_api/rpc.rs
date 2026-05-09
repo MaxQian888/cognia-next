@@ -117,6 +117,37 @@ impl RpcError {
 // Read-only command list
 // ---------------------------------------------------------------------------
 
+/// Every command name recognized by `dispatch()`. The handler consults this
+/// list **before** requiring the AppHandle so unknown commands consistently
+/// surface as 404 rather than 503-in-test-mode. Keep in lockstep with the
+/// `match name` arms in `dispatch()` below — drift means unknown names
+/// silently bypass the 404 path.
+const KNOWN_COMMANDS: &[&str] = &[
+    "claude_send",
+    "claude_interrupt",
+    "claude_approve",
+    "claude_close_session",
+    "claude_sidecar_status",
+    "claude_sub_save_token",
+    "claude_sub_load_token",
+    "claude_sub_clear_token",
+    "claude_set_api_key",
+    "claude_has_api_key",
+    "claude_set_oauth_bearer",
+    "claude_has_oauth_bearer",
+    "claude_set_provider_env",
+    "claude_restart_sidecar",
+    "skills_load_registry",
+    "skills_scan_native",
+    "skills_install_native",
+    "skills_uninstall_native",
+    "mcp_server_status",
+    "test_mcp_server",
+    "read_agent_config",
+    "write_agent_config",
+    "sync_pull",
+];
+
 /// Commands in this list skip the idempotency cache entirely.
 /// They are cheap to re-run and structurally idempotent.
 const READ_ONLY_COMMANDS: &[&str] = &[
@@ -158,6 +189,15 @@ pub async fn rpc_handler(
         .get("idempotency-key")
         .and_then(|v| v.to_str().ok())
         .map(str::to_owned);
+
+    // Reject unknown command names before requiring the AppHandle so the
+    // public 404 contract holds in test mode (where `state.app_handle` is
+    // intentionally `None`). Keep `KNOWN_COMMANDS` in lockstep with the
+    // `match name` arms in `dispatch()` below — drift will silently bypass
+    // the 503 path for genuinely unknown commands.
+    if !KNOWN_COMMANDS.contains(&name.as_str()) {
+        return Err(RpcError::unknown_command(&name));
+    }
 
     let is_read_only = READ_ONLY_COMMANDS.contains(&name.as_str());
 
@@ -535,7 +575,7 @@ mod tests {
         use super::super::middleware;
 
         Router::new()
-            .route("/api/v1/_rpc/:name", post(rpc_handler))
+            .route("/api/v1/_rpc/{name}", post(rpc_handler))
             .layer(from_fn_with_state(
                 state.clone(),
                 middleware::require_device_jwt,

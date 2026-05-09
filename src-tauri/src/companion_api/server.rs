@@ -164,7 +164,7 @@ pub fn build_router(state: SharedState) -> Router {
     // because that layer can interfere with the WS upgrade handshake.
     let protected_routes = Router::new()
         .route("/api/v1/whoami", get(auth::whoami_handler))
-        .route("/api/v1/_rpc/:name", post(rpc::rpc_handler))
+        .route("/api/v1/_rpc/{name}", post(rpc::rpc_handler))
         .route("/ws/v1/events", any(ws::ws_handler))
         .layer(from_fn_with_state(
             state.clone(),

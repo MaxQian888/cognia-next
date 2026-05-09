@@ -117,13 +117,16 @@ mod tests {
         assert!(lru.mark_redeemed("jti-overflow"));
         assert_eq!(lru.len(), CAP); // still at cap
 
-        // "jti-0" was evicted so it can be re-inserted.
+        // "jti-0" was evicted so it can be re-inserted. Re-inserting at cap
+        // also evicts the new oldest ("jti-1"), per FIFO semantics.
         assert!(
             lru.mark_redeemed("jti-0"),
             "evicted entry must be re-insertable"
         );
-        // "jti-1" is still present (only the oldest was evicted).
-        assert!(!lru.mark_redeemed("jti-1"));
+        // "jti-2" is still present — only the two oldest entries (`jti-0`
+        // by the overflow insert, then `jti-1` by the re-insertion) have
+        // been evicted.
+        assert!(!lru.mark_redeemed("jti-2"));
     }
 
     #[test]

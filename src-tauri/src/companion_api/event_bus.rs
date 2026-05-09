@@ -128,11 +128,13 @@ impl EventBus {
         // Append to ring buffer, enforce capacity + retention.
         {
             let mut buf = self.buffer.lock();
-            // Evict expired entries first.
+            // Evict expired entries. In production frames arrive in
+            // monotonic ts order so a `pop_front`-only sweep would
+            // suffice; a full `retain` is robust to manually-injected
+            // out-of-order frames (see retention_evicts_expired_entries
+            // test) at the cost of one extra O(n) scan per publish.
             let cutoff = ts_ms - RETENTION_MS;
-            while buf.front().is_some_and(|f| f.ts_ms < cutoff) {
-                buf.pop_front();
-            }
+            buf.retain(|f| f.ts_ms >= cutoff);
             // Enforce capacity cap.
             if buf.len() >= BUFFER_CAPACITY {
                 buf.pop_front();
@@ -163,7 +165,14 @@ impl EventBus {
         // snapshot and subscribe.
         let receiver = self.tx.subscribe();
 
-        let since_seq = since.unwrap_or(0);
+        // `since=None` means the client wants only new frames — anchor at
+        // the current high-water mark so the buffer's existing entries are
+        // not replayed. `since=Some(0)` keeps the legacy "replay everything
+        // we still have" semantics for explicit cold-starts.
+        let since_seq = match since {
+            Some(s) => s,
+            None => self.seq_counter.load(Ordering::Relaxed),
+        };
         let buf = self.buffer.lock();
 
         // Determine the oldest retained seq.
