@@ -8206,6 +8206,13 @@
       "notifTitle": "cognia 离线发送中",
       "notifBody": "{count} 条消息排队中。回到网络后会自动重发。",
       "notifChannel": "cognia"
+    },
+    "mentionPopover": {
+      "title": "提及队友",
+      "count": "{count} 个匹配",
+      "empty": "该团队暂无成员。",
+      "noMatches": "未找到匹配「{query}」的成员",
+      "dismiss": "关闭"
     }
   }
 }

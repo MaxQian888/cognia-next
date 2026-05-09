@@ -50,6 +50,8 @@ const mockReplyToComment = jest.fn()
 const mockGetCommentsForDocument = jest.fn().mockReturnValue([])
 const mockGetUnresolvedComments = jest.fn().mockReturnValue([])
 
+const mockLoadCommentsForDocument = jest.fn().mockResolvedValue(undefined)
+
 jest.mock("@/stores/canvas/comment-store", () => ({
   useCommentStore: () => ({
     addComment: mockAddComment,
@@ -61,6 +63,7 @@ jest.mock("@/stores/canvas/comment-store", () => ({
     replyToComment: mockReplyToComment,
     getCommentsForDocument: mockGetCommentsForDocument,
     getUnresolvedComments: mockGetUnresolvedComments,
+    loadCommentsForDocument: mockLoadCommentsForDocument,
   }),
 }))
 

@@ -8164,6 +8164,13 @@
       "notifTitle": "cognia outbound queue",
       "notifBody": "{count} messages waiting. Will retry when online.",
       "notifChannel": "cognia"
+    },
+    "mentionPopover": {
+      "title": "Mention a teammate",
+      "count": "{count} {count, plural, one {match} other {matches}}",
+      "empty": "No members in this team yet.",
+      "noMatches": "No matches for \"{query}\"",
+      "dismiss": "Dismiss"
     }
   }
 }

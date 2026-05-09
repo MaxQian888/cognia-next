@@ -4,7 +4,7 @@
  * CommentPanel - Comments and annotations UI for Canvas documents
  */
 
-import { useState, useCallback, useMemo } from "react"
+import { useState, useCallback, useMemo, useEffect } from "react"
 import { useTranslations } from "next-intl"
 import {
   MessageSquare,
@@ -64,7 +64,12 @@ export function CommentPanel({
     replyToComment,
     getCommentsForDocument,
     getUnresolvedComments,
+    loadCommentsForDocument,
   } = useCommentStore()
+
+  useEffect(() => {
+    void loadCommentsForDocument(documentId)
+  }, [documentId, loadCommentsForDocument])
 
   const allComments = getCommentsForDocument(documentId)
   const unresolvedComments = getUnresolvedComments(documentId)

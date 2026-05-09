@@ -38,7 +38,7 @@ import { useTranslations } from "next-intl"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { search, formatSearchResultsForLLM } from "@/lib/search/search-service"
-import type { SendContent, SendContentBlock, ChatSession } from "@/lib/claude/types"
+import type { SendContent, SendContentBlock, ChatSession, Character } from "@/lib/claude/types"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { usePlatform } from "@/hooks/use-platform"
@@ -82,6 +82,12 @@ import { executeShell, formatShellResult } from "@/lib/shell/exec"
 import { appendMemory, type MemoryScope } from "@/lib/files/memory"
 import { useUpdateSession } from "@/lib/data-hooks/context"
 import { loggers } from "@/lib/logger"
+import { MentionPopover } from "@/components/mobile/chat/mention-popover"
+import {
+  clearDraft as clearChatDraft,
+  getDraft as getChatDraft,
+  setDraftDebounced as setChatDraftDebounced,
+} from "@/lib/db/chat-drafts"
 import { AttachmentPreview } from "./composer/attachment-preview"
 import { BottomToolbar } from "./composer/bottom-toolbar"
 import { CharCounter } from "./composer/char-counter"
@@ -112,6 +118,13 @@ interface Props {
    * needs a different hint text.
    */
   placeholder?: string
+  /**
+   * When provided, typing `@` opens a mobile-styled inline mention popover
+   * over the textarea instead of routing to the desktop `@file`/`@agent`
+   * picker. Designed for the mobile app shell where the team-member sheet
+   * was a two-tap affair. Desktop callers leave this undefined.
+   */
+  mobileMentionMembers?: readonly Character[]
 }
 
 /**
@@ -201,6 +214,7 @@ interface InnerProps {
   mentionMode?: MentionMode
   mentionables?: readonly MentionTarget[]
   placeholder?: string
+  mobileMentionMembers?: readonly Character[]
 }
 
 function ComposerInner(props: InnerProps) {
@@ -233,6 +247,7 @@ function ComposerInner(props: InnerProps) {
   const addReferencedPath = useChatStore((s) => s.addReferencedPath)
   const updateSession = useUpdateSession()
   const cwd = props.session?.workingDir ?? null
+  const sessionId = props.session?.id ?? null
 
   // --- Per-cwd custom slash commands ------------------------------------
   useEffect(() => {
@@ -446,8 +461,11 @@ function ComposerInner(props: InnerProps) {
     await props.onSubmit(text, filesToSend)
     controller.textInput.clear()
     attachments.clear()
+    if (sessionId) {
+      void clearChatDraft(sessionId)
+    }
     textareaRef.current?.focus()
-  }, [controller.textInput, attachments, props])
+  }, [controller.textInput, attachments, props, sessionId])
 
   // --- Textarea key handling --------------------------------------------
   const onKeyDown = useCallback(
@@ -585,6 +603,62 @@ function ComposerInner(props: InnerProps) {
   const openFileDialog = useCallback(() => {
     fileInputRef.current?.click()
   }, [])
+
+  // ── Mobile inline mention popover ──────────────────────────────────────
+  // When `mobileMentionMembers` is supplied, the chat shell wants the inline
+  // bottom-sheet popover instead of the desktop `<ComposerPopover>`'s
+  // @file/@agent picker. We branch by whether the active trigger is `@`-kind
+  // (`file` or `agent`); other kinds (slash/bash/memory) keep the desktop
+  // popover so all existing flows still work on mobile.
+  const mobileMentionEnabled = !!props.mobileMentionMembers
+  const isAtTrigger = trigger?.kind === "file" || trigger?.kind === "agent"
+  const mobileMentionOpen = !!(mobileMentionEnabled && isAtTrigger)
+  const mobileMentionQuery = mobileMentionOpen ? (trigger?.query ?? "") : ""
+
+  const desktopTrigger = mobileMentionOpen ? null : trigger
+
+  const onPickMobileMember = useCallback(
+    (member: Character) => {
+      insertReplacement(`@${member.name}`)
+    },
+    [insertReplacement]
+  )
+
+  // ── Per-session draft persistence (Phase 3.2) ─────────────────────────
+  const [draftHydratedFor, setDraftHydratedFor] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!sessionId) return
+    if (draftHydratedFor === sessionId) return
+    let cancelled = false
+    getChatDraft(sessionId)
+      .then((row) => {
+        if (cancelled) return
+        if (row?.text) {
+          controller.textInput.setInput(row.text)
+        }
+
+        setDraftHydratedFor(sessionId)
+      })
+      .catch(() => {
+        if (cancelled) return
+
+        setDraftHydratedFor(sessionId)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId, draftHydratedFor, controller.textInput])
+
+  useEffect(() => {
+    if (!sessionId) return
+    if (draftHydratedFor !== sessionId) return
+    try {
+      setChatDraftDebounced(sessionId, controller.textInput.value)
+    } catch {
+      // Dexie unavailable (e.g., SSR / tests without fake-indexeddb) — drafts are best-effort.
+    }
+  }, [controller.textInput.value, sessionId, draftHydratedFor])
 
   // Imperative handle: insert `@name ` at the caret. Used by the desktop
   // shell's member list to mention a teammate without going through any
@@ -748,7 +822,7 @@ function ComposerInner(props: InnerProps) {
 
       <ComposerPopover
         ref={popoverRef}
-        trigger={trigger}
+        trigger={desktopTrigger}
         cwd={cwd}
         slashCommands={slashCommands}
         anchor={containerEl}
@@ -756,6 +830,16 @@ function ComposerInner(props: InnerProps) {
         onPick={onPickPopoverItem}
         onDismiss={dismissPopover}
       />
+
+      {mobileMentionEnabled ? (
+        <MentionPopover
+          open={mobileMentionOpen}
+          query={mobileMentionQuery}
+          members={props.mobileMentionMembers ?? []}
+          onPick={onPickMobileMember}
+          onDismiss={dismissPopover}
+        />
+      ) : null}
     </div>
   )
 }
@@ -787,6 +871,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     mentionMode,
     mentionables,
     placeholder,
+    mobileMentionMembers,
   },
   ref
 ) {
@@ -1083,6 +1168,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           mentionMode={mentionMode}
           mentionables={mentionables}
           placeholder={placeholder}
+          mobileMentionMembers={mobileMentionMembers}
         />
         <BottomToolbar session={session ?? null} />
         <HelperHints />

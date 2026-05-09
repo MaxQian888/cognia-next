@@ -52,6 +52,7 @@ import type {
 } from "@/types/workflow/visual"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
 import type { SessionUsageRow } from "./session-usage"
+import type { ChatDraftRow } from "./chat-drafts"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -138,6 +139,10 @@ export class CogniaDB extends Dexie {
   // `lib/queue/outbound-queue.ts` drains pending rows when the network is
   // online; failed rows back off exponentially and deadletter at 5 attempts.
   mobileOutboundQueue!: Table<MobileOutboundJobRow, string>
+  // v26 — Per-session unsent composer text (chat drafts). Pure additive, no
+  // upgrade hook. Primary key `sessionId` makes upserts trivial; `updatedAt`
+  // is indexed so debug surfaces can sort newest-first.
+  chatDrafts!: Table<ChatDraftRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -857,6 +862,14 @@ export class CogniaDB extends Dexie {
     //   • `command`          — "show only chat sends" filters in deadletter view.
     this.version(25).stores({
       mobileOutboundQueue: "&id, status, [status+nextAttemptAt], createdAt, command",
+    })
+
+    // v26 — Per-session chat composer drafts (unsent text). Pure additive.
+    //   • `&sessionId`  — primary key; upsert by sessionId so each session has
+    //                     at most one draft row.
+    //   • `updatedAt`   — newest-first listing for debug / data settings.
+    this.version(26).stores({
+      chatDrafts: "&sessionId, updatedAt",
     })
   }
 
