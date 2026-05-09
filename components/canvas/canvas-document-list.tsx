@@ -175,7 +175,7 @@ export const CanvasDocumentList = memo(function CanvasDocumentList({
               <Input
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={t("searchDocuments")}
+                placeholder={t("search")}
                 className="pl-9 h-8"
               />
             </div>
