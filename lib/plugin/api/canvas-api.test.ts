@@ -2,6 +2,7 @@
  * Tests for Canvas Plugin API
  */
 
+import "fake-indexeddb/auto"
 import { createCanvasAPI } from "./canvas-api"
 
 type MockCanvasEditorSelection = {
@@ -754,3 +755,219 @@ describe("Canvas API", () => {
     })
   })
 })
+
+// ---------------------------------------------------------------------------
+// New surface added in commit 4: executePython, executeAction(Streaming),
+// comments CRUD, collaboration sessions. These talk to real Dexie via
+// fake-indexeddb (imported at file top) plus mocked Tauri / AI library calls.
+// ---------------------------------------------------------------------------
+
+jest.mock("@/lib/tauri/canvas", () => ({
+  runPython: jest.fn(),
+}))
+
+jest.mock("@/lib/ai/generation/canvas-actions", () => {
+  const actual = jest.requireActual("@/lib/ai/generation/canvas-actions")
+  return {
+    ...actual,
+    executeCanvasAction: jest.fn(),
+    executeCanvasActionStreaming: jest.fn(),
+  }
+})
+
+import { runPython } from "@/lib/tauri/canvas"
+import {
+  executeCanvasAction,
+  executeCanvasActionStreaming,
+} from "@/lib/ai/generation/canvas-actions"
+import * as canvasCommentsDb from "@/lib/db/canvas-comments"
+import * as canvasSessionsDb from "@/lib/db/canvas-sessions"
+import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+
+const mockedRunPython = runPython as jest.MockedFunction<typeof runPython>
+const mockedExecuteCanvasAction = executeCanvasAction as jest.MockedFunction<
+  typeof executeCanvasAction
+>
+const mockedExecuteCanvasActionStreaming = executeCanvasActionStreaming as jest.MockedFunction<
+  typeof executeCanvasActionStreaming
+>
+
+const RANGE = { startLine: 1, startColumn: 1, endLine: 1, endColumn: 5 }
+
+describe("PluginCanvasAPI — new surface (commit 4)", () => {
+  beforeEach(async () => {
+    jest.clearAllMocks()
+    await getDb().delete()
+    __resetDbForTesting()
+    getDb()
+    await whenSeeded()
+  })
+
+  describe("executePython", () => {
+    it("forwards to runPython and returns the sandbox result", async () => {
+      mockedRunPython.mockResolvedValue({
+        stdout: "hello\n",
+        stderr: "",
+        exit_code: 0,
+        duration_ms: 12,
+      })
+      const api = createCanvasAPI("plugin-x")
+      const r = await api.executePython("print('hello')", 5000)
+      expect(mockedRunPython).toHaveBeenCalledWith("print('hello')", 5000)
+      expect(r.stdout).toBe("hello\n")
+    })
+
+    it("propagates web-mode errors thrown by runPython", async () => {
+      mockedRunPython.mockRejectedValue(new Error("tauri-only"))
+      const api = createCanvasAPI("plugin-x")
+      await expect(api.executePython("x")).rejects.toThrow("tauri-only")
+    })
+  })
+
+  describe("executeAction / executeActionStreaming", () => {
+    it("executeAction forwards to executeCanvasAction with config + options", async () => {
+      mockedExecuteCanvasAction.mockResolvedValue({ success: true, result: "fixed" })
+      const api = createCanvasAPI("plugin-x")
+      const cfg = { provider: "openai" as const, model: "gpt-4", apiKey: "k" }
+      const r = await api.executeAction("fix", "code", cfg, { language: "ts" })
+      expect(mockedExecuteCanvasAction).toHaveBeenCalledWith("fix", "code", cfg, {
+        language: "ts",
+      })
+      expect(r.result).toBe("fixed")
+    })
+
+    it("executeActionStreaming forwards callbacks", async () => {
+      mockedExecuteCanvasActionStreaming.mockResolvedValue(undefined)
+      const callbacks = {
+        onToken: jest.fn(),
+        onComplete: jest.fn(),
+        onError: jest.fn(),
+      }
+      const api = createCanvasAPI("plugin-x")
+      const cfg = { provider: "openai" as const, model: "gpt-4", apiKey: "k" }
+      await api.executeActionStreaming("review", "code", cfg, callbacks)
+      expect(mockedExecuteCanvasActionStreaming).toHaveBeenCalledWith(
+        "review",
+        "code",
+        cfg,
+        callbacks,
+        undefined
+      )
+    })
+  })
+
+  describe("comments CRUD", () => {
+    it("addComment / getComments round-trip via Dexie", async () => {
+      const api = createCanvasAPI("plugin-x")
+      const created = await api.addComment({
+        documentId: "doc1",
+        authorId: "u",
+        authorName: "U",
+        content: "first",
+        range: RANGE,
+      })
+      expect(created.id).toBeDefined()
+      const list = await api.getComments("doc1")
+      expect(list.find((c) => c.id === created.id)?.content).toBe("first")
+    })
+
+    it("updateComment / resolveComment / deleteComment behave", async () => {
+      const api = createCanvasAPI("plugin-x")
+      const c = await api.addComment({
+        documentId: "doc1",
+        authorId: "u",
+        authorName: "U",
+        content: "x",
+        range: RANGE,
+      })
+      await api.updateComment(c.id, "edited")
+      await api.resolveComment(c.id, "owner")
+      let list = await api.getComments("doc1")
+      expect(list[0].content).toBe("edited")
+      expect(list[0].resolvedAt).toBeInstanceOf(Date)
+      await api.deleteComment(c.id)
+      list = await api.getComments("doc1")
+      expect(list).toEqual([])
+    })
+
+    it("replyToComment inherits parent range and parentId", async () => {
+      const api = createCanvasAPI("plugin-x")
+      const parent = await api.addComment({
+        documentId: "doc1",
+        authorId: "u",
+        authorName: "U",
+        content: "parent",
+        range: RANGE,
+      })
+      const reply = await api.replyToComment(parent.id, {
+        authorId: "u2",
+        authorName: "U2",
+        content: "reply",
+      })
+      expect(reply.parentId).toBe(parent.id)
+      expect(reply.range).toEqual(RANGE)
+    })
+  })
+
+  describe("collaboration sessions", () => {
+    it("createCollaborationSession persists metadata and exposes via lookup", async () => {
+      const api = createCanvasAPI("plugin-x")
+      const session = api.createCollaborationSession("doc1", "hello")
+      // Persistence is fire-and-forget; flush microtasks.
+      await new Promise((r) => setTimeout(r, 5))
+      expect(session.documentId).toBe("doc1")
+      const fromMem = await api.getCollaborationSession(session.id)
+      expect(fromMem?.id).toBe(session.id)
+      const persisted = await canvasSessionsDb.getSession(session.id)
+      expect(persisted?.id).toBe(session.id)
+    })
+
+    it("getActiveCollaborationSession reads from Dexie", async () => {
+      const api = createCanvasAPI("plugin-x")
+      api.createCollaborationSession("doc1", "x")
+      await new Promise((r) => setTimeout(r, 5))
+      const active = await api.getActiveCollaborationSession("doc1")
+      expect(active?.documentId).toBe("doc1")
+    })
+
+    it("listRecentCollaborationSessions returns persisted rows", async () => {
+      const api = createCanvasAPI("plugin-x")
+      api.createCollaborationSession("d1", "x")
+      api.createCollaborationSession("d2", "y")
+      await new Promise((r) => setTimeout(r, 10))
+      const rows = await api.listRecentCollaborationSessions(5)
+      expect(rows.length).toBeGreaterThanOrEqual(2)
+    })
+
+    it("closeCollaborationSession soft-closes the row", async () => {
+      const api = createCanvasAPI("plugin-x")
+      const session = api.createCollaborationSession("doc1", "x")
+      await new Promise((r) => setTimeout(r, 5))
+      api.closeCollaborationSession(session.id)
+      await new Promise((r) => setTimeout(r, 5))
+      const persisted = await canvasSessionsDb.getSession(session.id)
+      expect(persisted?.isActive).toBe(false)
+    })
+
+    it("getCollaborationSession falls back to Dexie when not in memory", async () => {
+      // Seed Dexie directly without going through the in-memory CRDT store.
+      await canvasSessionsDb.upsertSession({
+        id: "sess-disk",
+        documentId: "doc-disk",
+        ownerId: "u",
+        participants: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        isActive: true,
+        permissions: { canEdit: true, canComment: true, canShare: true, canExport: true },
+      })
+      const api = createCanvasAPI("plugin-x")
+      const found = await api.getCollaborationSession("sess-disk")
+      expect(found?.documentId).toBe("doc-disk")
+    })
+  })
+})
+
+// Suppress unused warning when canvasCommentsDb import becomes unused in
+// future refactors. It's kept here for parity with the canvas-api module.
+void canvasCommentsDb

@@ -17,6 +17,16 @@ import type {
   ChatMode,
 } from "./_compat"
 import type { Artifact, ArtifactLanguage } from "../artifact/artifact"
+import type {
+  CanvasActionConfig,
+  CanvasActionExecutionOptions,
+  CanvasActionResult,
+  CanvasActionType,
+  StreamingCallbacks,
+} from "@/lib/ai/generation/canvas-actions"
+import type { AddCommentInput, ReplyInput } from "@/lib/db/canvas-comments"
+import type { PythonExecResult } from "@/lib/tauri/canvas"
+import type { CanvasComment, CollaborativeSession } from "../canvas/collaboration"
 import type { CanvasDocumentVersion, CanvasSuggestion } from "../artifact/artifact"
 // PluginMediaAPI and CanonicalExtensionPoint live in `lib/plugin/api/media-api`
 // and `lib/plugin/contracts/plugin-points` respectively; those modules are
@@ -770,6 +780,61 @@ export interface PluginCanvasAPI {
 
   /** Subscribe to content changes */
   onContentChange: (handler: (content: string) => void) => () => void
+
+  // ---------------------------------------------------------------------------
+  // Python sandbox (Tauri-only)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Run Python code in the bundled sandbox. Throws in web mode.
+   * Requires the `canvas:run` permission.
+   */
+  executePython: (code: string, timeoutMs?: number) => Promise<PythonExecResult>
+
+  // ---------------------------------------------------------------------------
+  // AI actions (proxies to lib/ai/generation/canvas-actions)
+  // ---------------------------------------------------------------------------
+
+  executeAction: (
+    actionType: CanvasActionType,
+    content: string,
+    config: CanvasActionConfig,
+    options?: CanvasActionExecutionOptions
+  ) => Promise<CanvasActionResult>
+
+  executeActionStreaming: (
+    actionType: CanvasActionType,
+    content: string,
+    config: CanvasActionConfig,
+    callbacks: StreamingCallbacks,
+    options?: CanvasActionExecutionOptions
+  ) => Promise<void>
+
+  // ---------------------------------------------------------------------------
+  // Comments (Dexie-backed)
+  // ---------------------------------------------------------------------------
+
+  getComments: (docId: string) => Promise<CanvasComment[]>
+  addComment: (input: AddCommentInput) => Promise<CanvasComment>
+  updateComment: (commentId: string, content: string) => Promise<void>
+  resolveComment: (commentId: string, resolvedBy?: string) => Promise<void>
+  replyToComment: (parentId: string, reply: ReplyInput) => Promise<CanvasComment>
+  deleteComment: (commentId: string) => Promise<void>
+
+  // ---------------------------------------------------------------------------
+  // Collaboration sessions (CRDT + Dexie)
+  // ---------------------------------------------------------------------------
+
+  /** Create a new collab session for a document. Requires `canvas:collaborate`. */
+  createCollaborationSession: (documentId: string, content: string) => CollaborativeSession
+  /** Look up a session by id (in-memory or from Dexie). */
+  getCollaborationSession: (sessionId: string) => Promise<CollaborativeSession | undefined>
+  /** Active session for the given document, if one exists. */
+  getActiveCollaborationSession: (documentId: string) => Promise<CollaborativeSession | undefined>
+  /** N most-recent persisted sessions (newest-first). */
+  listRecentCollaborationSessions: (limit?: number) => Promise<CollaborativeSession[]>
+  /** Soft-close a session (sets isActive=false, drops in-memory state). */
+  closeCollaborationSession: (sessionId: string) => void
 }
 
 // =============================================================================
@@ -1112,6 +1177,8 @@ export type PluginAPIPermission =
   | "vector:write"
   | "canvas:read"
   | "canvas:write"
+  | "canvas:run"
+  | "canvas:collaborate"
   | "artifact:read"
   | "artifact:write"
   | "ai:chat"

@@ -7,6 +7,19 @@
 import { getActiveEditorContext } from "@/lib/editor-workbench/editor-context-registry"
 import { mapToArtifactLanguage } from "@/lib/artifacts/constants"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import {
+  executeCanvasAction,
+  executeCanvasActionStreaming,
+  type CanvasActionConfig,
+  type CanvasActionExecutionOptions,
+  type CanvasActionResult,
+  type CanvasActionType,
+  type StreamingCallbacks,
+} from "@/lib/ai/generation/canvas-actions"
+import * as canvasCommentsDb from "@/lib/db/canvas-comments"
+import * as canvasSessionsDb from "@/lib/db/canvas-sessions"
+import { crdtStore } from "@/lib/canvas/collaboration/crdt-store"
+import { runPython, type PythonExecResult } from "@/lib/tauri/canvas"
 import type {
   PluginCanvasAPI,
   PluginCanvasDocument,
@@ -19,6 +32,8 @@ import type {
   CanvasEditorSelection,
   CanvasSuggestion,
 } from "@/types/artifact"
+import type { CanvasComment, CollaborativeSession } from "@/types/canvas/collaboration"
+import type { AddCommentInput, ReplyInput } from "@/lib/db/canvas-comments"
 import { createPluginSystemLogger } from "../core/logger"
 
 type LineColumn = {
@@ -486,6 +501,100 @@ export function createCanvasAPI(pluginId: string): PluginCanvasAPI {
       })
 
       return unsubscribe
+    },
+
+    // Python sandbox -- forwards to lib/tauri/canvas.runPython, which throws
+    // on web mode. Plugin host should require the canvas:run permission.
+    executePython: async (code: string, timeoutMs?: number): Promise<PythonExecResult> => {
+      logger.info("executePython invoked")
+      return runPython(code, timeoutMs)
+    },
+
+    // AI actions -- thin forwarders to lib/ai/generation/canvas-actions so
+    // plugins reuse the existing prompt library / streaming machinery.
+    executeAction: async (
+      actionType: CanvasActionType,
+      content: string,
+      config: CanvasActionConfig,
+      options?: CanvasActionExecutionOptions
+    ): Promise<CanvasActionResult> => {
+      logger.info(`executeAction: ${actionType}`)
+      return executeCanvasAction(actionType, content, config, options)
+    },
+
+    executeActionStreaming: async (
+      actionType: CanvasActionType,
+      content: string,
+      config: CanvasActionConfig,
+      callbacks: StreamingCallbacks,
+      options?: CanvasActionExecutionOptions
+    ): Promise<void> => {
+      logger.info(`executeActionStreaming: ${actionType}`)
+      return executeCanvasActionStreaming(actionType, content, config, callbacks, options)
+    },
+
+    // Comments -- forwarders to lib/db/canvas-comments. The reactive store
+    // (useCommentStore) listens to its own writes; plugins go straight to
+    // Dexie because they live outside the React tree.
+    getComments: (docId: string): Promise<CanvasComment[]> => {
+      return canvasCommentsDb.listForDocument(docId)
+    },
+
+    addComment: async (input: AddCommentInput): Promise<CanvasComment> => {
+      logger.info(`addComment doc=${input.documentId}`)
+      return canvasCommentsDb.addComment(input)
+    },
+
+    updateComment: async (commentId: string, content: string): Promise<void> => {
+      logger.info(`updateComment ${commentId}`)
+      return canvasCommentsDb.updateComment(commentId, content)
+    },
+
+    resolveComment: async (commentId: string, resolvedBy?: string): Promise<void> => {
+      logger.info(`resolveComment ${commentId}`)
+      return canvasCommentsDb.resolveComment(commentId, resolvedBy)
+    },
+
+    replyToComment: async (parentId: string, reply: ReplyInput): Promise<CanvasComment> => {
+      logger.info(`replyToComment parent=${parentId}`)
+      return canvasCommentsDb.replyToComment(parentId, reply)
+    },
+
+    deleteComment: async (commentId: string): Promise<void> => {
+      logger.info(`deleteComment ${commentId}`)
+      return canvasCommentsDb.deleteComment(commentId)
+    },
+
+    // Collaboration sessions -- routed through the shared CRDT singleton +
+    // its Dexie persistence hooks (commit 3). createCollaborationSession
+    // returns synchronously because the CRDT path is in-memory; persistence
+    // is fire-and-forget by design.
+    createCollaborationSession: (documentId: string, content: string): CollaborativeSession => {
+      logger.info(`createCollaborationSession doc=${documentId}`)
+      return crdtStore.createSession(documentId, content)
+    },
+
+    getCollaborationSession: async (
+      sessionId: string
+    ): Promise<CollaborativeSession | undefined> => {
+      const live = crdtStore.getSession(sessionId)
+      if (live) return live
+      return canvasSessionsDb.getSession(sessionId)
+    },
+
+    getActiveCollaborationSession: (
+      documentId: string
+    ): Promise<CollaborativeSession | undefined> => {
+      return canvasSessionsDb.getActiveSessionForDocument(documentId)
+    },
+
+    listRecentCollaborationSessions: (limit?: number): Promise<CollaborativeSession[]> => {
+      return canvasSessionsDb.listRecent(limit)
+    },
+
+    closeCollaborationSession: (sessionId: string): void => {
+      logger.info(`closeCollaborationSession ${sessionId}`)
+      crdtStore.closeSession(sessionId)
     },
   }
 }
