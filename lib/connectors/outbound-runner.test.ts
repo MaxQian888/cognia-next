@@ -19,6 +19,7 @@ import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { listRecent } from "@/lib/db/connector-audit"
 import { startOutboundRunner, ConversationLane } from "./outbound-runner"
 import type { PlatformAdapter, OutboundResult } from "@/types/connectors"
+import type { OutboundJobRow } from "@/lib/db/connector-types"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -143,9 +144,19 @@ describe("outbound-runner — circuit breaker open", () => {
 
     await runOnce(adapters)
 
+    // The poll loop aborts after 80 ms, but the per-conversation lane keeps
+    // processing in-flight jobs asynchronously. Poll until all 3 jobs reach a
+    // terminal state instead of relying on a fixed wall-clock window — the
+    // 80 ms ceiling is tight enough to flake under jest worker contention.
+    let jobs: OutboundJobRow[] = []
+    for (let i = 0; i < 50; i++) {
+      jobs = await getDb().outboundQueue.toArray()
+      if (jobs.length === 3 && jobs.every((j) => j.status === "deadlettered")) break
+      await new Promise<void>((r) => setTimeout(r, 20))
+    }
+
     const audits = await listRecent(adapterId)
     expect(audits.some((a) => a.kind === "delivery.deadlettered")).toBe(true)
-    const jobs = await getDb().outboundQueue.toArray()
     expect(jobs.every((j) => j.status === "deadlettered")).toBe(true)
   })
 })

@@ -3,6 +3,18 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { useStorageCleanup } from "./use-storage-cleanup"
 import { appendBackupHistory } from "@/lib/db/backup-history"
 import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
+import * as storage from "@/lib/storage"
+
+// Wrap cleanupCategories so individual tests can override timing (the
+// "isRunning" lifecycle test needs a deterministic gate). Other tests fall
+// through to the real implementation via the default mock factory below.
+jest.mock("@/lib/storage", () => {
+  const actual = jest.requireActual("@/lib/storage")
+  return {
+    ...actual,
+    cleanupCategories: jest.fn((...args: unknown[]) => actual.cleanupCategories(...args)),
+  }
+})
 
 beforeEach(async () => {
   await getDb().delete()
@@ -13,31 +25,28 @@ beforeEach(async () => {
 
 describe("useStorageCleanup", () => {
   it("toggles isRunning around cleanup operations", async () => {
-    await appendBackupHistory({
-      completedAt: 1,
-      type: "manual",
-      success: true,
-      encryption: "none",
+    // Gate the underlying cleanup so isRunning is deterministically observable
+    // mid-flight. Without this, cleanupCategories resolves so quickly that
+    // setIsRunning(false) can fire before the test re-reads `result.current`.
+    let release: (() => void) | null = null
+    const gate = new Promise<void>((res) => {
+      release = res as () => void
+    })
+    const cleanupMock = storage.cleanupCategories as jest.Mock
+    cleanupMock.mockImplementationOnce(async () => {
+      await gate
+      return { freedSpace: 0, deletedItems: 0, details: [], errors: [] }
     })
 
     const { result } = renderHook(() => useStorageCleanup())
     expect(result.current.isRunning).toBe(false)
 
-    let resolve: (() => void) | null = null
-    const guard = new Promise<void>((res) => {
-      resolve = res as () => void
-    })
-
     let pending: Promise<unknown> | null = null
     await act(async () => {
-      pending = result.current.cleanup({ categories: ["backupHistory"] }).then(async (r) => {
-        await guard
-        return r
-      })
+      pending = result.current.cleanup({ categories: ["backupHistory"] })
     })
-    // Allow micro-tasks to run so isRunning flips before we resolve the guard.
     await waitFor(() => expect(result.current.isRunning).toBe(true))
-    ;(resolve as (() => void) | null)?.()
+    ;(release as (() => void) | null)?.()
     await act(async () => {
       await pending
     })

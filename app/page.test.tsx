@@ -1,9 +1,14 @@
-// app/page.tsx is a thin wrapper that renders <DiscordShell />. We mock the
-// shell so this test stays focused on page composition without pulling in the
-// shell's transitive dependencies (Tauri APIs, ESM-only token counters, etc).
+// app/page.tsx is a thin wrapper that picks between <DiscordShell /> and
+// <AppShellMobile />. We mock both shells so this test stays focused on page
+// composition without pulling in their transitive dependencies (Tauri APIs,
+// ESM-only chat libraries, etc).
 
 jest.mock("@/components/desktop/shell", () => ({
   DiscordShell: () => <div data-testid="discord-shell" />,
+}))
+
+jest.mock("@/components/app-shell-mobile", () => ({
+  AppShellMobile: () => <div data-testid="app-shell-mobile" />,
 }))
 
 import { render, screen } from "@testing-library/react"
