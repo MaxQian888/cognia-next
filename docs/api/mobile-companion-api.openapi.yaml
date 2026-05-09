@@ -1,0 +1,1860 @@
+openapi: 3.1.0
+info:
+  title: Cognia Mobile Companion API
+  version: "0.1.0"
+  license:
+    name: MIT
+    identifier: MIT
+  summary: Pairing, JWT-authenticated RPC, and event stream for the cognia-next mobile client.
+  description: |
+    Axum HTTP + WebSocket server hosted inside the cognia-next Tauri desktop
+    process. The mobile Capacitor client (and any other authenticated
+    consumer) drives the desktop through this surface.
+
+    ## Lifecycle
+
+    1. The desktop calls `POST /api/v1/auth/pair/issue` from its own UI to
+       obtain a fresh **pair JWT** (5-minute TTL, single-use, scope=`pair`).
+       The token is encoded into a QR code (or copied as a manual textbox).
+    2. The phone scans the QR / pastes the token, then `POST /api/v1/auth/pair`
+       redeems it for a long-lived **device JWT** (90-day TTL, scope=`device`).
+       The pair JWT is single-use; a second redemption returns 409.
+    3. The phone uses the device JWT in `Authorization: Bearer <jwt>` for
+       every authenticated request and `?token=<jwt>` on the `/ws/v1/events`
+       upgrade (browsers cannot reliably set headers on WS upgrades).
+
+    ## Bind strategy
+
+    The default bind is `127.0.0.1` (loopback only). The "LAN-accessible"
+    toggle in Settings switches the bind to `0.0.0.0`. With M2.8 the desktop
+    can additionally generate a self-signed TLS cert (`rcgen`, 10-year, key
+    persisted at `<app_data>/cognia/companion/tls.{pem,key}`) whose
+    SHA-256 SubjectPublicKeyInfo fingerprint is embedded into the QR
+    payload — the phone pins it across future calls. A Cloudflared tunnel
+    URL is also a valid `servers` entry when the user opts in.
+
+    ## Body limits
+
+    - JSON request body limit: **64 KiB** (`tower_http::limit::RequestBodyLimitLayer`).
+    - The WS upgrade route is intentionally **outside** that body-size layer,
+      because the layer interferes with the upgrade handshake.
+
+    ## Idempotency
+
+    Non-read-only RPC commands honour the `Idempotency-Key` header. A
+    successful response is cached for **60 seconds** under
+    `(device_id, idempotency_key)`. A second request with the same pair
+    returns the cached body without re-executing the command. Read-only
+    commands skip the cache (their idempotency is structural).
+
+    The current read-only set is: `claude_sidecar_status`,
+    `claude_sub_load_token`, `claude_has_api_key`, `claude_has_oauth_bearer`,
+    `skills_load_registry`, `skills_scan_native`, `mcp_server_status`,
+    `read_agent_config`, `sync_pull`.
+
+    ## Error envelopes
+
+    Two distinct error shapes — one per route family. The **pair / whoami /
+    middleware** family wraps the body in `{ error: { code, message } }`.
+    The **RPC dispatch** family is flat: `{ code, message }`. Both are
+    documented as schemas (`AuthError`, `RpcError`).
+
+    ## Sequencing & RPC dispatch
+
+    `POST /api/v1/_rpc/{name}` is the dispatch route on the wire — every
+    command is delivered to that single path with `name` as a path
+    parameter. To make every command's exact request and response shape
+    discoverable, this spec **also** documents each command as its own
+    explicit path entry (`/api/v1/_rpc/claude_send`, etc.). The two
+    representations describe the same wire contract; tooling that follows
+    the explicit-per-command paths will produce well-typed clients.
+
+    Unknown command names return HTTP 404 with `{ code: "unknown_command" }`.
+
+servers:
+  - url: http://127.0.0.1:7890
+    description: Loopback bind (default; only same-machine clients reach it).
+  - url: http://0.0.0.0:7890
+    description: LAN bind (M2.8 toggle in Settings → Connections).
+  - url: https://{tunnelHost}
+    description: Cloudflared tunnel URL (opt-in; user installs `cloudflared`).
+    variables:
+      tunnelHost:
+        default: example.trycloudflare.com
+        description: Resolved at runtime from `cloudflared`'s stderr.
+
+tags:
+  - name: auth
+    description: Pre-authentication pair exchange (no JWT required).
+  - name: identity
+    description: Authenticated device identity probe.
+  - name: rpc-dispatch
+    description: The wildcard RPC dispatch route + the read-only command list.
+  - name: rpc-claude-session
+    description: Claude Agent SDK chat-session control plane.
+  - name: rpc-subscription
+    description: Claude Pro/Max OAuth credential management.
+  - name: rpc-provider-env
+    description: Provider API key / base URL environment writes for the sidecar.
+  - name: rpc-agent-config
+    description: Multi-agent settings file IO (Claude Code, Cursor, Cline, Codex, …).
+  - name: rpc-skills
+    description: Native skills registry / install / uninstall.
+  - name: rpc-mcp
+    description: External-bridge MCP server status + remote MCP probing.
+  - name: rpc-sync
+    description: Server → client incremental sync (table delta pull).
+  - name: events
+    description: WebSocket bridge for live Tauri events (chat messages, run state, …).
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ─────────────────────────────────────────────────────────────────────────
+  # auth
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/auth/pair/issue:
+    post:
+      operationId: issuePairJwt
+      tags: [auth]
+      summary: Issue a single-use pair JWT (loopback-only in practice).
+      description: |
+        Issues a fresh pair JWT (`scope = "pair"`, 5-minute TTL, single-use
+        `jti`). The desktop QR generator calls this; the token is encoded
+        into the QR code / manual paste payload. The request body is empty.
+
+        **Loopback origin**: this route exists in the same router as the
+        protected routes, but in normal operation only the desktop UI calls
+        it (the phone never sees the issue endpoint). The router can be
+        bound to LAN, in which case any process on the LAN can request a
+        pair JWT — that is acceptable because the JWT is useless without
+        being scanned and redeemed within 5 minutes.
+      security: [] # no auth
+      responses:
+        "200":
+          description: A fresh single-use pair JWT.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IssueResponse" }
+              examples:
+                ok:
+                  value:
+                    pairJwt: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    expiresAtMs: 1714900200000
+        "413":
+          description: Request body exceeded 64 KiB (the request body for this endpoint must be empty).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthError" }
+        "500":
+          description: Internal error issuing the JWT.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthError" }
+              examples:
+                jwtIssueFailed:
+                  value:
+                    error:
+                      code: jwt_issue_failed
+                      message: "JWT signature or format invalid: …"
+
+  /api/v1/auth/pair:
+    post:
+      operationId: redeemPairJwt
+      tags: [auth]
+      summary: Redeem a pair JWT and receive a long-lived device JWT.
+      description: |
+        Validates the pair JWT (signature, scope=`pair`, expiry), marks its
+        `jti` as redeemed in the in-process LRU, mints a 90-day device JWT
+        bound to a fresh `device_id` (UUIDv4), and emits the
+        `companion://device-paired` Tauri event so the renderer can persist
+        the row to Dexie.
+
+        The pair JWT is **single-use**: a second redemption with the same
+        `jti` returns 409.
+      security: [] # no auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PairRequest" }
+            examples:
+              minimal:
+                value:
+                  pairJwt: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  deviceLabel: "Pixel 9 Pro"
+                  devicePlatform: "android"
+                  devicePubkey: "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA…"
+                  appVersion: "0.1.0"
+      responses:
+        "200":
+          description: Pair JWT redeemed; device JWT returned.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PairResponse" }
+              examples:
+                ok:
+                  value:
+                    deviceId: "9f6cb9c4-2c79-4f02-9b37-2b62ad03f0e1"
+                    deviceJwt: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    serverVersion: "0.1.0"
+        "400":
+          description: Malformed body or `device_label` longer than 64 chars.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthError" }
+              examples:
+                malformed:
+                  value:
+                    error:
+                      code: malformed_request
+                      message: "JSON syntax error: …"
+                labelTooLong:
+                  value:
+                    error:
+                      code: device_label_too_long
+                      message: "device_label must be at most 64 characters"
+        "401":
+          description: Pair JWT invalid, expired, or wrong scope.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthError" }
+              examples:
+                invalid:
+                  value:
+                    error:
+                      code: invalid_pair_jwt
+                      message: "pair JWT is invalid, expired, or has the wrong scope"
+        "409":
+          description: Pair JWT already redeemed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthError" }
+              examples:
+                redeemed:
+                  value:
+                    error:
+                      code: pair_jwt_redeemed
+                      message: "pair JWT has already been used"
+        "500":
+          description: Internal error issuing the device JWT.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthError" }
+              examples:
+                jwtIssueFailed:
+                  value:
+                    error:
+                      code: jwt_issue_failed
+                      message: "JWT signature or format invalid: …"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # identity
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/whoami:
+    get:
+      operationId: whoami
+      tags: [identity]
+      summary: Return the device id and server version for the bearer JWT.
+      description: |
+        Verifies the device JWT and returns the `device_id` plus the server
+        crate version. The mobile client uses this as a JWT-still-valid
+        probe after pair, before resuming a session.
+
+        Successful calls additionally emit the `companion://device-seen`
+        Tauri event so the renderer can update `pairedDevices.lastSeenAt`.
+      responses:
+        "200":
+          description: JWT valid; identity returned.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WhoamiResponse" }
+              examples:
+                ok:
+                  value:
+                    device_id: "9f6cb9c4-2c79-4f02-9b37-2b62ad03f0e1"
+                    server_version: "0.1.0"
+        "401":
+          $ref: "#/components/responses/JwtRejected"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — wildcard dispatch
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/{name}:
+    post:
+      operationId: rpcDispatch
+      tags: [rpc-dispatch]
+      summary: Dispatch any RPC command by name.
+      description: |
+        The wire-true representation of every RPC call. Every command in this
+        spec — `claude_send`, `sync_pull`, … — flows through this path with
+        `name` as the path segment.
+
+        Each command's exact request and response shapes are also documented
+        as their own explicit `/api/v1/_rpc/<command>` paths in this spec
+        (with full schemas and examples) so generated clients get per-command
+        typing. Both representations describe the same route on the server.
+
+        Unknown command names return HTTP 404 with `{ code: "unknown_command" }`.
+      parameters:
+        - $ref: "#/components/parameters/RpcName"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        description: |
+          Per-command JSON arguments. See each `/api/v1/_rpc/<command>`
+          path entry for the exact request schema.
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              description: Command-specific argument object. Empty object `{}` is valid for argument-less commands.
+      responses:
+        "200":
+          description: Command-specific success body. See the dedicated path entries for exact shapes.
+          content:
+            application/json:
+              schema:
+                description: Command-specific success body. May be `null` for fire-and-forget commands.
+                oneOf:
+                  - { type: object, additionalProperties: true }
+                  - { type: array, items: {} }
+                  - { type: string }
+                  - { type: number }
+                  - { type: boolean }
+                  - { type: "null" }
+        "400":
+          description: Malformed args.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RpcError" }
+              examples:
+                missingField:
+                  value:
+                    code: malformed_request
+                    message: "missing required field: session_id"
+        "401":
+          $ref: "#/components/responses/JwtRejected"
+        "404":
+          description: Command name not in the dispatch allowlist.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RpcError" }
+              examples:
+                unknown:
+                  value:
+                    code: unknown_command
+                    message: "RPC command 'wallpaper_save' is not exposed to mobile clients"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "500":
+          description: Internal error inside the dispatched handler.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RpcError" }
+        "503":
+          description: |
+            `app_handle` is not available. Surfaces in test harnesses where the
+            companion server is spawned without a real Tauri AppHandle, and at
+            very early boot before the Tauri event loop is up.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RpcError" }
+              examples:
+                serviceUnavailable:
+                  value:
+                    code: service_unavailable
+                    message: "app_handle not available (test mode)"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — chat session
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/claude_send:
+    post:
+      operationId: rpcClaudeSend
+      tags: [rpc-claude-session]
+      summary: Push a user message into a Claude SDK session (spawns sidecar if needed).
+      description: |
+        Forwards `prompt` to the Claude Agent SDK sidecar, attaching any
+        per-call `options` (system prompt, tools allowlist, MCP servers,
+        provider credentials, …). UserPromptSubmit hooks run before the
+        SDK call; a hook can short-circuit the turn or append additional
+        context. Returns `null` on accept; streaming output is delivered
+        out-of-band via the `/ws/v1/events` channel as `claude://message`
+        frames.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, prompt]
+              properties:
+                session_id:
+                  type: string
+                  description: Logical session id chosen by the caller (Dexie row key).
+                prompt:
+                  description: |
+                    Either a plain string or an array of content blocks (text + image) — forwarded
+                    verbatim to the Claude Agent SDK. Image blocks follow Anthropic's content-block format.
+                  oneOf:
+                    - type: string
+                    - type: array
+                      items:
+                        type: object
+                        additionalProperties: true
+                options:
+                  $ref: "#/components/schemas/SendOptions"
+            examples:
+              text:
+                value:
+                  session_id: "sess_01HK..."
+                  prompt: "Summarise the staged changes."
+                  options:
+                    cwd: "C:/Users/me/repo"
+                    model: "claude-opus-4-7"
+                    appendSystemPrompt: "Be terse."
+                    allowedTools: ["Read", "Grep", "Bash"]
+                    maxTurns: 6
+              imageBlock:
+                value:
+                  session_id: "sess_01HK..."
+                  prompt:
+                    - { type: "text", text: "What's in the screenshot?" }
+                    - {
+                        type: "image",
+                        source: { type: "base64", media_type: "image/png", data: "..." },
+                      }
+      responses:
+        "200":
+          description: Accepted — streaming output flows over the WS channel.
+          content:
+            application/json:
+              schema: { type: "null" }
+        "400":
+          description: |
+            Mutually exclusive options or invalid range — `systemPrompt` AND `appendSystemPrompt`,
+            `resumeSessionId` AND `forkFromSessionId`, `maxTurns` outside 1..=100,
+            invalid `settingSources` member, empty `provider`, or unsupported
+            `providerCredentials.protocol`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RpcError" }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          description: Sidecar spawn failure or hook block.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RpcError" }
+
+  /api/v1/_rpc/claude_interrupt:
+    post:
+      operationId: rpcClaudeInterrupt
+      tags: [rpc-claude-session]
+      summary: Interrupt the in-flight turn for a session.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id]
+              properties:
+                session_id: { type: string }
+      responses:
+        "200":
+          description: Interrupt signalled; running tools tear down asynchronously.
+          content: { application/json: { schema: { type: "null" } } }
+        "400":
+          {
+            description: missing session_id,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/claude_approve:
+    post:
+      operationId: rpcClaudeApprove
+      tags: [rpc-claude-session]
+      summary: Resolve a pending tool-use approval prompt.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, request_id, decision]
+              properties:
+                session_id: { type: string }
+                request_id:
+                  {
+                    type: string,
+                    description: "ID of the pending approval request emitted via WS.",
+                  }
+                decision:
+                  type: string
+                  enum: [allow, deny, edit]
+                  description: |
+                    `allow` proceeds, `deny` rejects with the optional `message` shown to the
+                    model, `edit` re-runs with `updated_input` substituted for the original arguments.
+                message:
+                  { type: string, description: "Optional rejection reason or note (denial only)." }
+                updated_input:
+                  description: "Replacement tool input — required when decision = edit."
+                  oneOf:
+                    - type: object
+                      additionalProperties: true
+                    - type: "null"
+      responses:
+        "200":
+          description: Approval forwarded.
+          content: { application/json: { schema: { type: "null" } } }
+        "400":
+          {
+            description: malformed args,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/claude_close_session:
+    post:
+      operationId: rpcClaudeCloseSession
+      tags: [rpc-claude-session]
+      summary: Tear down a Claude SDK session and free its sidecar slot.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id]
+              properties:
+                session_id: { type: string }
+      responses:
+        "200": { description: Closed., content: { application/json: { schema: { type: "null" } } } }
+        "400":
+          {
+            description: missing session_id,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/claude_sidecar_status:
+    post:
+      operationId: rpcClaudeSidecarStatus
+      tags: [rpc-claude-session]
+      summary: Probe whether the Claude SDK sidecar is running.
+      description: Read-only — skips the idempotency cache.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, description: "Empty body." }
+            examples:
+              empty: { value: {} }
+      responses:
+        "200":
+          description: Sidecar status snapshot.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SidecarStatus" }
+              examples: { ready: { value: { ready: true } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: internal error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — subscription / OAuth
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/claude_sub_save_token:
+    post:
+      operationId: rpcClaudeSubSaveToken
+      tags: [rpc-subscription]
+      summary: Persist a Claude OAuth credential to the OS keyring.
+      description: |
+        Writes the credential to keyring service `com.cognia.claude-subscription/v1`,
+        account `default`. Empty `accessToken` is rejected. Replaces any existing entry.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payload]
+              properties:
+                payload: { $ref: "#/components/schemas/SubscriptionCredential" }
+      responses:
+        "200": { description: Saved., content: { application/json: { schema: { type: "null" } } } }
+        "400":
+          {
+            description: empty access_token or malformed payload,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: keyring write failed,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/claude_sub_load_token:
+    post:
+      operationId: rpcClaudeSubLoadToken
+      tags: [rpc-subscription]
+      summary: Read the persisted OAuth credential.
+      description: Read-only — skips the idempotency cache.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+            examples: { empty: { value: {} } }
+      responses:
+        "200":
+          description: |
+            The persisted credential, or `null` when nothing is stored.
+            JSON-parse failures return 500 (corrupted credential).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/SubscriptionCredential" }
+                  - type: "null"
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: keyring or parse failure,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/claude_sub_clear_token:
+    post:
+      operationId: rpcClaudeSubClearToken
+      tags: [rpc-subscription]
+      summary: Delete the persisted OAuth credential. No-op when nothing stored.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          { application/json: { schema: { type: object }, examples: { empty: { value: {} } } } }
+      responses:
+        "200":
+          {
+            description: Cleared (or already absent).,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: keyring delete failed,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/claude_set_oauth_bearer:
+    post:
+      operationId: rpcClaudeSetOauthBearer
+      tags: [rpc-subscription, rpc-provider-env]
+      summary: Set or clear the OAuth bearer surfaced to the sidecar via CLAUDE_CODE_OAUTH_TOKEN.
+      description: |
+        When set, the sidecar process is spawned with `CLAUDE_CODE_OAUTH_TOKEN`
+        in its environment (and `ANTHROPIC_API_KEY` actively unset). Pass
+        `{ token: null }` to clear.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  oneOf: [{ type: string }, { type: "null" }]
+                  description: OAuth bearer string, or null to clear.
+            examples:
+              set: { value: { token: "oat01-..." } }
+              clear: { value: { token: null } }
+      responses:
+        "200":
+          {
+            description: Set / cleared.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "400":
+          {
+            description: malformed body,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — provider env
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/claude_set_api_key:
+    post:
+      operationId: rpcClaudeSetApiKey
+      tags: [rpc-provider-env]
+      summary: Set or clear the ANTHROPIC_API_KEY surfaced to the sidecar.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                key:
+                  oneOf: [{ type: string }, { type: "null" }]
+                  description: API key string, or null to clear.
+            examples:
+              set: { value: { key: "sk-ant-..." } }
+              clear: { value: { key: null } }
+      responses:
+        "200":
+          {
+            description: Set / cleared.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/claude_set_provider_env:
+    post:
+      operationId: rpcClaudeSetProviderEnv
+      tags: [rpc-provider-env]
+      summary: Set or clear both api_key and base_url for the active provider.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                api_key: { oneOf: [{ type: string }, { type: "null" }] }
+                base_url: { oneOf: [{ type: string }, { type: "null" }] }
+            examples:
+              azure:
+                value:
+                  api_key: "az-..."
+                  base_url: "https://my-azure.openai.azure.com"
+              clear:
+                value: { api_key: null, base_url: null }
+      responses:
+        "200":
+          {
+            description: Set / cleared.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/claude_has_api_key:
+    post:
+      operationId: rpcClaudeHasApiKey
+      tags: [rpc-provider-env]
+      summary: Probe whether ANTHROPIC_API_KEY is currently set.
+      description: Read-only — skips the idempotency cache.
+      requestBody:
+        required: true
+        content:
+          { application/json: { schema: { type: object }, examples: { empty: { value: {} } } } }
+      responses:
+        "200":
+          description: True when set, false otherwise.
+          content:
+            application/json:
+              schema: { type: boolean }
+              examples: { yes: { value: true }, no: { value: false } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/claude_has_oauth_bearer:
+    post:
+      operationId: rpcClaudeHasOauthBearer
+      tags: [rpc-provider-env]
+      summary: Probe whether CLAUDE_CODE_OAUTH_TOKEN is currently set.
+      description: Read-only — skips the idempotency cache.
+      requestBody:
+        required: true
+        content:
+          { application/json: { schema: { type: object }, examples: { empty: { value: {} } } } }
+      responses:
+        "200":
+          description: True when set, false otherwise.
+          content:
+            application/json:
+              schema: { type: boolean }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/claude_restart_sidecar:
+    post:
+      operationId: rpcClaudeRestartSidecar
+      tags: [rpc-claude-session]
+      summary: Kill the Claude sidecar so the next claude_send respawns it.
+      description: |
+        Useful after env / provider changes. The kill is best-effort — the
+        sidecar is detected dead by the next send, which spawns a fresh
+        process. Returns immediately.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          { application/json: { schema: { type: object }, examples: { empty: { value: {} } } } }
+      responses:
+        "200":
+          {
+            description: Kill signalled.,
+            content: { application/json: { schema: { type: "null" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — multi-agent config
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/read_agent_config:
+    post:
+      operationId: rpcReadAgentConfig
+      tags: [rpc-agent-config]
+      summary: Read the on-disk config file for a coding-agent CLI.
+      description: |
+        Read-only — skips the idempotency cache. `agent` is the canonical
+        slug (`claude-code`, `cursor`, `cline`, `codex`, …). Returns the raw
+        file plus a parsed JSON tree; on parse failure the parsed field is
+        null and `parseError` carries the message.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent]
+              properties:
+                agent: { type: string, description: "Canonical agent slug." }
+            examples:
+              cursor: { value: { agent: "cursor" } }
+      responses:
+        "200":
+          description: Config snapshot. `path` is null when the agent is unsupported on this OS.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentReadResult" }
+              examples:
+                exists:
+                  value:
+                    path: "C:\\Users\\me\\.cursor\\mcp.json"
+                    exists: true
+                    writable: true
+                    format: "json"
+                    raw: '{ "mcpServers": { } }'
+                    parsed: { mcpServers: {} }
+                missing:
+                  value:
+                    path: "C:\\Users\\me\\.cursor\\mcp.json"
+                    exists: false
+                    writable: true
+                    format: "json"
+                    raw: ""
+                    parsed: null
+        "400":
+          {
+            description: unknown agent,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: filesystem error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/write_agent_config:
+    post:
+      operationId: rpcWriteAgentConfig
+      tags: [rpc-agent-config]
+      summary: Atomically write a coding-agent CLI's config file.
+      description: |
+        Re-serialises `value` to the format the file expects (JSON / JSONC /
+        TOML), writes a `.bak` next to the original, then atomically replaces
+        the file. Read-only agents are rejected (400). Comment-preserving
+        TOML edits use `toml_edit`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent, value]
+              properties:
+                agent: { type: string }
+                value:
+                  type: object
+                  additionalProperties: true
+                  description: Canonical JSON tree to serialise into the agent's format.
+      responses:
+        "200":
+          description: Wrote. `backupPath` is null when the file did not exist before.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentWriteResult" }
+        "400":
+          description: unknown agent, agent is read-only, or no path on this OS.
+          content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: serialise / write error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — skills
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/skills_scan_native:
+    post:
+      operationId: rpcSkillsScanNative
+      tags: [rpc-skills]
+      summary: Walk the local skills directory and return every installed skill.
+      description: Read-only — skips the idempotency cache.
+      requestBody:
+        required: true
+        content:
+          { application/json: { schema: { type: object }, examples: { empty: { value: {} } } } }
+      responses:
+        "200":
+          description: Array of installed native skills with their resources.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NativeSkill" }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: filesystem error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/skills_load_registry:
+    post:
+      operationId: rpcSkillsLoadRegistry
+      tags: [rpc-skills]
+      summary: Load the merged remote+local skills registry.
+      description: Read-only — skips the idempotency cache.
+      requestBody:
+        required: true
+        content:
+          { application/json: { schema: { type: object }, examples: { empty: { value: {} } } } }
+      responses:
+        "200":
+          description: Array of registry entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RegistryEntry" }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: registry load failed,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/skills_install_native:
+    post:
+      operationId: rpcSkillsInstallNative
+      tags: [rpc-skills]
+      summary: Install or update a native skill on disk.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request]
+              properties:
+                request: { $ref: "#/components/schemas/InstallSkillRequest" }
+      responses:
+        "200":
+          description: Wrote files; returns absolute paths.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InstallSkillResponse" }
+        "400":
+          {
+            description: malformed request,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: filesystem error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  /api/v1/_rpc/skills_uninstall_native:
+    post:
+      operationId: rpcSkillsUninstallNative
+      tags: [rpc-skills]
+      summary: Remove a native skill directory by slug.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dir_name]
+              properties:
+                dir_name:
+                  {
+                    type: string,
+                    description: "Kebab-case skill slug (the directory name under ~/.claude/skills/).",
+                  }
+      responses:
+        "200":
+          description: Removed. The exact response shape mirrors `skills_uninstall_native`'s native return type.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          {
+            description: missing dir_name,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          {
+            description: filesystem error,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — MCP
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/mcp_server_status:
+    post:
+      operationId: rpcMcpServerStatus
+      tags: [rpc-mcp]
+      summary: Return the External Bridge MCP HTTP server's live status.
+      description: Read-only — skips the idempotency cache.
+      requestBody:
+        required: true
+        content:
+          { application/json: { schema: { type: object }, examples: { empty: { value: {} } } } }
+      responses:
+        "200":
+          description: Status snapshot.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/McpServerStatus" }
+              examples:
+                running:
+                  { value: { running: true, port: 47920, startedAt: "2026-05-09T08:31:12Z" } }
+                stopped: { value: { running: false } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  /api/v1/_rpc/test_mcp_server:
+    post:
+      operationId: rpcTestMcpServer
+      tags: [rpc-mcp]
+      summary: Probe a remote / local MCP server via JSON-RPC handshake.
+      description: |
+        Spawns a stdio process, or opens an SSE / streamable-HTTP connection,
+        runs the MCP `initialize` → `notifications/initialized` → `tools/list`
+        handshake, captures the tool list, and tears it down. The handshake
+        is bound by a 10-second timeout; the protocol version pinned at
+        request time is `2024-11-05`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transport]
+              properties:
+                transport: { type: string, enum: [stdio, http, sse] }
+                command:
+                  type: string
+                  description: stdio only — executable path or command name.
+                args:
+                  type: array
+                  items: { type: string }
+                env:
+                  type: object
+                  additionalProperties: { type: string }
+                url:
+                  type: string
+                  description: http / sse only — endpoint URL.
+                headers:
+                  type: object
+                  additionalProperties: { type: string }
+                  description: http / sse only — extra request headers.
+            examples:
+              stdio:
+                value:
+                  transport: "stdio"
+                  command: "node"
+                  args: ["./mcp-server.mjs"]
+              http:
+                value:
+                  transport: "http"
+                  url: "https://example.com/mcp"
+                  headers: { Authorization: "Bearer xxx" }
+      responses:
+        "200":
+          description: Probe finished. `ok=false` carries the reason in `error`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/McpTestResult" }
+              examples:
+                ok:
+                  value:
+                    ok: true
+                    tool_count: 3
+                    tools:
+                      - { name: "wiki_search", description: "Search the indexed wiki." }
+                    duration_ms: 412
+                fail:
+                  value:
+                    ok: false
+                    tool_count: 0
+                    tools: []
+                    error: "spawn node: ENOENT"
+                    duration_ms: 18
+        "400":
+          {
+            description: missing transport-required field,
+            content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } },
+          }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # rpc — sync
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /api/v1/_rpc/sync_pull:
+    post:
+      operationId: rpcSyncPull
+      tags: [rpc-sync]
+      summary: Pull a Dexie table delta since a cursor.
+      description: |
+        The phone hits this endpoint to incrementally sync a desktop-owned
+        Dexie table. The Rust handler emits `companion://sync-pull-request`
+        to the renderer, which queries Dexie and replies via the
+        `companion_sync_pull_response` Tauri command. Default timeout
+        **30 seconds** — slow desktops bubble up as a 500.
+
+        Read-only — skips the idempotency cache (the same `(table, since)`
+        pair returns the same delta, and stalling phone clients behind a
+        60-second TTL would mask fresh writes).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [table]
+              properties:
+                table:
+                  type: string
+                  enum: [characters, skills, sessions, messages]
+                  description: |
+                    Allowlist; mirror of `lib/sync/types.ts:SyncableTable`. Any other
+                    value returns 400 to prevent a malicious phone from asking for
+                    arbitrary tables.
+                since:
+                  type: integer
+                  format: int64
+                  default: 0
+                  description: Last cursor the phone received (ms epoch). Pass `0` for a full pull.
+            examples:
+              full: { value: { table: "characters", since: 0 } }
+              incremental: { value: { table: "messages", since: 1714900000000 } }
+      responses:
+        "200":
+          description: |
+            Delta payload as produced by the renderer. Shape is owned by the
+            TS sync layer and forwarded verbatim. The Rust side does not
+            inspect the body.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Table not in the allowlist.
+          content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } }
+        "401": { $ref: "#/components/responses/JwtRejected" }
+        "500":
+          description: Renderer reported an error or did not reply within the timeout.
+          content: { application/json: { schema: { $ref: "#/components/schemas/RpcError" } } }
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # WebSocket — events
+  # ─────────────────────────────────────────────────────────────────────────
+
+  /ws/v1/events:
+    get:
+      operationId: wsEvents
+      tags: [events]
+      summary: WebSocket upgrade — live Tauri event bridge.
+      description: |
+        WebSocket bridge from internal Tauri events to mobile clients.
+        OpenAPI 3.1 does not formally describe WebSocket protocols; the
+        upgrade endpoint is documented here as an HTTP `GET` whose 101
+        response transitions to a WS connection. Frame-level details live
+        in the `x-websocket` extension on this operation.
+
+        ## Auth
+
+        `Authorization: Bearer <jwt>` is preferred; browsers cannot
+        reliably set arbitrary headers on a `new WebSocket()` upgrade, so
+        the middleware also accepts `?token=<jwt>` as a fallback. If both
+        are present, the header wins.
+
+        ## Lifecycle
+
+        1. Client opens `wss://<host>/ws/v1/events?token=<jwt>&since=<seq>`.
+        2. If `since` is older than the oldest retained frame, the server
+           sends `{ "type": "resync_required" }` and closes immediately.
+        3. Otherwise the server replays every retained frame with `seq > since`.
+        4. New frames stream as JSON text frames as they arrive.
+        5. Server sends `{ "type": "ping" }` heartbeats every **25 s**.
+        6. Server closes if no client frame is received for **90 s** (idle timeout).
+        7. Slow subscribers that overflow the 256-slot broadcast channel
+           (`tokio::sync::broadcast`) are dropped with a `Lagged` close.
+
+        ## Replay window
+
+        The server keeps a ring buffer of the **last 200 frames** and
+        evicts anything older than **60 s**. A client whose `since` cursor
+        falls outside both bounds receives `resync_required` and must
+        re-bootstrap state via a `sync_pull` walk.
+      parameters:
+        - in: query
+          name: token
+          required: false
+          description: |
+            Device JWT. Optional only when `Authorization: Bearer` is present.
+            For browser-side WebSocket clients this query parameter is the
+            standard way to authenticate the upgrade.
+          schema: { type: string }
+        - in: query
+          name: since
+          required: false
+          description: Last sequence number the client received. Omit (or pass 0) for a fresh subscription with no replay.
+          schema: { type: integer, format: int64, minimum: 0 }
+        - in: header
+          name: Upgrade
+          required: true
+          schema: { type: string, enum: [websocket] }
+        - in: header
+          name: Connection
+          required: true
+          schema: { type: string, enum: [Upgrade] }
+        - in: header
+          name: Sec-WebSocket-Key
+          required: true
+          schema: { type: string }
+        - in: header
+          name: Sec-WebSocket-Version
+          required: true
+          schema: { type: string, enum: ["13"] }
+      responses:
+        "101":
+          description: |
+            Switching protocols — the connection is now a WebSocket. Subsequent
+            text frames carry one of the schemas under `content` (server → client)
+            or `WsClientFrame` (client → server).
+          headers:
+            Upgrade: { schema: { type: string, enum: [websocket] } }
+            Connection: { schema: { type: string, enum: [Upgrade] } }
+            Sec-WebSocket-Accept: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                description: |
+                  Discriminated union of every server-emitted text frame. After the
+                  upgrade, the WebSocket carries text frames whose JSON body matches
+                  one of these shapes.
+                oneOf:
+                  - { $ref: "#/components/schemas/EventFrame" }
+                  - { $ref: "#/components/schemas/PingFrame" }
+                  - { $ref: "#/components/schemas/ResyncRequiredFrame" }
+        "200":
+          description: |
+            Synthetic 2xx documenting the WebSocket message contract. The router never
+            actually returns a 200 for `/ws/v1/events` — clients receive 101 on success
+            or 401/426 on failure. This entry exists so OpenAPI tooling that requires a
+            2xx response per operation can find one.
+          content:
+            application/json:
+              schema:
+                description: |
+                  Frames the server may send during the lifetime of an open WebSocket.
+                oneOf:
+                  - { $ref: "#/components/schemas/EventFrame" }
+                  - { $ref: "#/components/schemas/PingFrame" }
+                  - { $ref: "#/components/schemas/ResyncRequiredFrame" }
+        "401":
+          $ref: "#/components/responses/JwtRejected"
+        "426":
+          description: Upgrade required — issued when the request is not a valid WS upgrade.
+      x-websocket:
+        subprotocol: null
+        heartbeat:
+          serverInterval: 25s
+          clientIdleTimeout: 90s
+        replay:
+          ringBufferSize: 200
+          retentionMs: 60000
+          broadcastSlots: 256
+          lagBehavior: close
+        outboundFrames:
+          - name: EventFrame
+            description: A live event forwarded from the Tauri event emitter.
+            schema: { $ref: "#/components/schemas/EventFrame" }
+          - name: PingFrame
+            description: Heartbeat sent every 25 s.
+            schema: { $ref: "#/components/schemas/PingFrame" }
+          - name: ResyncRequiredFrame
+            description: Sent when the client's `since` cursor is older than the retained ring buffer; followed by an immediate close.
+            schema: { $ref: "#/components/schemas/ResyncRequiredFrame" }
+        inboundFrames:
+          - name: AnyTextOrPong
+            description: |
+              Any text or pong frame the client sends resets the idle timer.
+              The server does not require the client to echo a particular
+              shape; sending an empty `{}` every 30 s is sufficient. Binary
+              frames are silently ignored.
+            schema:
+              oneOf:
+                - { type: object, additionalProperties: true }
+                - { type: string }
+
+# ───────────────────────────────────────────────────────────────────────────
+# components
+# ───────────────────────────────────────────────────────────────────────────
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        HS256 device JWT issued by `POST /api/v1/auth/pair`. Claims:
+        - `scope`: `"device"`
+        - `iat`, `exp` (90-day TTL)
+        - `device_id` (UUIDv4)
+        Secret material lives in the Tauri process; no remote signing.
+
+  parameters:
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: false
+      description: |
+        Optional caller-chosen idempotency key. When present and the command
+        is **not** read-only, the success body is cached for 60 s under
+        `(device_id, idempotency_key)`. A retry with the same key returns
+        the cached body without re-running the command. Read-only commands
+        (`claude_sidecar_status`, `claude_sub_load_token`, `claude_has_*`,
+        `skills_load_registry`, `skills_scan_native`, `mcp_server_status`,
+        `read_agent_config`, `sync_pull`) skip the cache entirely.
+      schema:
+        type: string
+        maxLength: 255
+        example: "0ec7f3ae-9b29-4b9a-bb69-0da70e8f1bf4"
+
+    RpcName:
+      in: path
+      name: name
+      required: true
+      description: RPC command name. The dispatch allowlist contains 24 commands; see the dedicated `/api/v1/_rpc/<command>` paths.
+      schema:
+        type: string
+        enum:
+          - claude_send
+          - claude_interrupt
+          - claude_approve
+          - claude_close_session
+          - claude_sidecar_status
+          - claude_sub_save_token
+          - claude_sub_load_token
+          - claude_sub_clear_token
+          - claude_set_oauth_bearer
+          - claude_set_api_key
+          - claude_set_provider_env
+          - claude_has_api_key
+          - claude_has_oauth_bearer
+          - claude_restart_sidecar
+          - read_agent_config
+          - write_agent_config
+          - skills_scan_native
+          - skills_load_registry
+          - skills_install_native
+          - skills_uninstall_native
+          - mcp_server_status
+          - test_mcp_server
+          - sync_pull
+
+  responses:
+    JwtRejected:
+      description: |
+        JWT missing, malformed, expired, wrong scope, or wrong signature.
+        Specific `error.code`: `missing_authorization`, `invalid_signature`,
+        `expired_token`, `wrong_scope`.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/AuthError" }
+          examples:
+            missing:
+              value:
+                {
+                  error:
+                    {
+                      code: missing_authorization,
+                      message: "Authorization header or ?token= query parameter is required",
+                    },
+                }
+            expired:
+              value: { error: { code: expired_token, message: "ExpiredSignature" } }
+            wrongScope:
+              value: { error: { code: wrong_scope, message: 'JWT scope must be "device"' } }
+    PayloadTooLarge:
+      description: Request body exceeded the 64 KiB limit.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/RpcError" }
+          examples:
+            tooLarge:
+              value: { code: payload_too_large, message: "request body exceeded 65536 bytes" }
+
+  schemas:
+    # ── Auth wire shapes ─────────────────────────────────────────────────────
+
+    IssueResponse:
+      type: object
+      required: [pairJwt, expiresAtMs]
+      additionalProperties: false
+      properties:
+        pairJwt: { type: string, description: 'HS256 JWT, scope="pair", 5-min TTL, single-use.' }
+        expiresAtMs: { type: integer, format: int64, description: "Millisecond epoch." }
+
+    PairRequest:
+      type: object
+      required: [pairJwt, deviceLabel, devicePlatform, devicePubkey, appVersion]
+      additionalProperties: false
+      properties:
+        pairJwt: { type: string }
+        deviceLabel:
+          type: string
+          maxLength: 64
+          description: "Human label shown in Settings → Connections. Validated server-side at ≤64 characters (chars, not bytes)."
+        devicePlatform:
+          type: string
+          description: "Free-form identifier (`ios`, `android`, `web`, `desktop`, …). Echoed back into the Tauri device-paired event."
+        devicePubkey:
+          type: string
+          description: "Base64-encoded device public key (currently informational; will be used by future encrypted channels)."
+        appVersion:
+          type: string
+          description: "Mobile client semver."
+
+    PairResponse:
+      type: object
+      required: [deviceId, deviceJwt, serverVersion]
+      additionalProperties: false
+      properties:
+        deviceId: { type: string, format: uuid }
+        deviceJwt: { type: string, description: 'HS256 JWT, scope="device", 90-day TTL.' }
+        serverVersion: { type: string, description: "Cargo crate version of the desktop process." }
+
+    WhoamiResponse:
+      type: object
+      required: [device_id, server_version]
+      additionalProperties: false
+      properties:
+        device_id: { type: string, format: uuid }
+        server_version: { type: string }
+
+    # ── Error envelopes ──────────────────────────────────────────────────────
+
+    AuthError:
+      description: Error envelope used by /auth/* and the JWT verifier middleware.
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          additionalProperties: false
+          properties:
+            code: { type: string }
+            message: { type: string }
+
+    RpcError:
+      description: Flat error envelope used by the /api/v1/_rpc/* dispatch.
+      type: object
+      required: [code, message]
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          description: |
+            Stable snake-case code. Known values: `unknown_command`,
+            `malformed_request`, `service_unavailable`, `internal_error`,
+            `payload_too_large`.
+        message: { type: string }
+
+    # ── Claude session ───────────────────────────────────────────────────────
+
+    SendOptions:
+      type: object
+      additionalProperties: true
+      description: |
+        Per-call options forwarded verbatim to the Claude Agent SDK (or the
+        AI SDK dispatch path for non-Anthropic providers). Unrecognised
+        fields ride along under `extra` (serde flatten). `null` is rejected
+        for optional fields — use `undefined`/missing instead, otherwise the
+        SDK's option parser crashes with "Cannot read properties of null".
+      properties:
+        cwd: { type: string }
+        model: { type: string }
+        fallbackModel: { type: string }
+        systemPrompt:
+          {
+            type: string,
+            description: "Replaces the SDK default system prompt. Mutually exclusive with appendSystemPrompt.",
+          }
+        appendSystemPrompt:
+          {
+            type: string,
+            description: "Appended to the SDK default. Mutually exclusive with systemPrompt.",
+          }
+        allowedTools: { type: array, items: { type: string } }
+        disallowedTools: { type: array, items: { type: string } }
+        additionalDirectories: { type: array, items: { type: string } }
+        permissionMode: { type: string }
+        env:
+          type: object
+          additionalProperties: { type: string }
+        mcpServers:
+          type: object
+          additionalProperties: true
+          description: Per-name MCP server config map; forwarded to the SDK verbatim.
+        maxTurns: { type: integer, minimum: 1, maximum: 100 }
+        includePartialMessages: { type: boolean }
+        settingSources:
+          type: array
+          items: { type: string, enum: [user, project, local] }
+        agents:
+          type: object
+          additionalProperties: true
+          description: Dynamic subagent definitions keyed by name.
+        strictMcpConfig:
+          type: boolean
+          description: When true, only `mcpServers` from this object are loaded — settings.json is ignored.
+        effort:
+          type: string
+          enum: [low, medium, high, xhigh, max]
+        resumeSessionId:
+          {
+            type: string,
+            description: "Resume an existing SDK session by id. Mutually exclusive with forkFromSessionId.",
+          }
+        forkFromSessionId:
+          { type: string, description: "Fork a new branch from an existing SDK session id." }
+        provider:
+          type: string
+          description: |
+            Provider id this turn dispatches against. `null`/missing or
+            `"anthropic"` keeps the Claude Agent SDK path; any other value
+            (`openai`, `google`, `mistral`, `cohere`, `openrouter`, custom)
+            flows through the AI SDK dispatcher.
+        providerCredentials: { $ref: "#/components/schemas/ProviderCredentials" }
+        aliasResolution:
+          type: object
+          additionalProperties: true
+          description: Renderer-side metadata; the sidecar ignores this.
+        routingDecision:
+          type: object
+          additionalProperties: true
+
+    ProviderCredentials:
+      type: object
+      additionalProperties: false
+      properties:
+        apiKey: { type: string }
+        baseUrl: { type: string }
+        protocol:
+          type: string
+          enum: [openai, anthropic, google, mistral, cohere]
+          description: AI SDK protocol family (required for custom provider ids).
+
+    SidecarStatus:
+      type: object
+      required: [ready]
+      additionalProperties: false
+      properties:
+        ready: { type: boolean }
+
+    # ── Subscription credential ──────────────────────────────────────────────
+
+    SubscriptionCredential:
+      type: object
+      required: [accessToken, refreshToken, expiresAtMs, mode]
+      additionalProperties: false
+      properties:
+        accessToken: { type: string, description: "OAuth bearer token. Treat as secret." }
+        refreshToken:
+          {
+            type: string,
+            description: "Long-lived refresh token. May rotate on every refresh — persist the latest.",
+          }
+        expiresAtMs: { type: integer, format: int64 }
+        mode:
+          type: string
+          enum: [subscription, console]
+          description: '"subscription" = Pro/Max, "console" = API billing.'
+        scope: { type: string }
+        email: { type: string, format: email }
+        plan: { type: string, description: "pro | max | team | console (provider may not return)." }
+        storedAtMs: { type: integer, format: int64, description: "Last-write timestamp." }
+
+    # ── Multi-agent config ───────────────────────────────────────────────────
+
+    AgentReadResult:
+      type: object
+      required: [exists, writable, format, raw, parsed]
+      additionalProperties: false
+      properties:
+        path: { oneOf: [{ type: string }, { type: "null" }] }
+        exists: { type: boolean }
+        writable: { type: boolean }
+        format: { type: string, enum: [json, jsonc, toml] }
+        raw: { type: string }
+        parsed:
+          description: Canonical JSON tree, or null when the file is missing or unparseable.
+          oneOf:
+            - { type: object, additionalProperties: true }
+            - { type: array, items: {} }
+            - { type: string }
+            - { type: number }
+            - { type: boolean }
+            - { type: "null" }
+        parseError: { type: string, description: "Filled when exists=true but parse failed." }
+
+    AgentWriteResult:
+      type: object
+      required: [path]
+      additionalProperties: false
+      properties:
+        path: { type: string }
+        backupPath:
+          {
+            type: string,
+            description: "`.bak` next to the original. Null when the file did not exist before.",
+          }
+
+    # ── Skills ───────────────────────────────────────────────────────────────
+
+    NativeSkillResource:
+      type: object
+      required: [kind, path, name, content, encoding, size]
+      additionalProperties: false
+      properties:
+        kind: { type: string, enum: [script, reference, asset] }
+        path: { type: string, description: "Relative to the skill directory." }
+        name: { type: string }
+        content:
+          { type: string, description: "UTF-8 or base64-encoded; encoding given in `encoding`." }
+        encoding: { type: string, enum: [utf-8, base64] }
+        mimeType: { type: string }
+        size: { type: integer, format: int64 }
+
+    NativeSkill:
+      type: object
+      required: [dirName, filePath, content, resources]
+      additionalProperties: false
+      properties:
+        dirName:
+          { type: string, description: "Directory name under ~/.claude/skills/ (kebab-case slug)." }
+        filePath: { type: string, description: "Absolute path to SKILL.md." }
+        content: { type: string, description: "Raw SKILL.md including YAML frontmatter." }
+        resources:
+          type: array
+          items: { $ref: "#/components/schemas/NativeSkillResource" }
+
+    InstallSkillRequest:
+      type: object
+      required: [dirName, content, resources, clean]
+      additionalProperties: false
+      properties:
+        dirName: { type: string }
+        content: { type: string, description: "Serialised SKILL.md including YAML frontmatter." }
+        resources:
+          type: array
+          items: { $ref: "#/components/schemas/NativeSkillResource" }
+        clean:
+          type: boolean
+          description: When true, blow away pre-existing files in the directory before writing.
+
+    InstallSkillResponse:
+      type: object
+      required: [directory, writtenFiles]
+      additionalProperties: false
+      properties:
+        directory: { type: string }
+        writtenFiles:
+          type: array
+          items: { type: string }
+
+    RegistryEntry:
+      type: object
+      required: [id, source, sourceType]
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        source: { type: string }
+        sourceType: { type: string }
+        skillPath: { type: string }
+        computedHash: { type: string }
+        displayName: { type: string }
+        description: { type: string }
+        category: { type: string }
+        tags: { type: array, items: { type: string } }
+        author: { type: string }
+        iconUrl: { type: string }
+        rawSkillUrl: { type: string }
+
+    # ── MCP ──────────────────────────────────────────────────────────────────
+
+    McpServerStatus:
+      type: object
+      required: [running]
+      additionalProperties: false
+      properties:
+        running: { type: boolean }
+        port: { type: integer, format: int32, minimum: 0, maximum: 65535 }
+        startedAt: { type: string, format: date-time, description: "ISO-8601." }
+
+    McpTestResult:
+      type: object
+      required: [ok, tool_count, tools, duration_ms]
+      additionalProperties: false
+      properties:
+        ok: { type: boolean }
+        tool_count: { type: integer, minimum: 0 }
+        tools:
+          type: array
+          items: { $ref: "#/components/schemas/McpToolInfo" }
+        error: { type: string }
+        duration_ms: { type: integer, minimum: 0 }
+
+    McpToolInfo:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        description: { type: string }
+
+    # ── WebSocket frames ─────────────────────────────────────────────────────
+
+    EventFrame:
+      type: object
+      required: [type, seq, payload, ts_ms]
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+          description: |
+            Tauri event channel name. Common values:
+            `claude://message`, `claude://tool-use`, `claude://approval-request`,
+            `claude://session-state`, `companion://device-seen`,
+            `connectors://webhook/<adapter_id>`, `workflow:trigger`,
+            `workflow:run-state`. The set is open-ended.
+        seq:
+          {
+            type: integer,
+            format: int64,
+            minimum: 1,
+            description: "Monotonically increasing sequence number.",
+          }
+        payload:
+          description: Arbitrary JSON payload from the Tauri event.
+          oneOf:
+            - { type: object, additionalProperties: true }
+            - { type: array, items: {} }
+            - { type: string }
+            - { type: number }
+            - { type: boolean }
+            - { type: "null" }
+        ts_ms: { type: integer, format: int64, description: "Publish timestamp (ms epoch)." }
+
+    PingFrame:
+      type: object
+      required: [type]
+      additionalProperties: false
+      properties:
+        type: { type: string, enum: [ping] }
+
+    ResyncRequiredFrame:
+      type: object
+      required: [type]
+      additionalProperties: false
+      properties:
+        type: { type: string, enum: [resync_required] }

@@ -1,0 +1,471 @@
+openapi: 3.1.0
+info:
+  title: Cognia Platform Connectors — webhook receiver
+  version: "0.1.0"
+  license:
+    name: MIT
+    identifier: MIT
+  summary: Inbound webhooks for Telegram / Slack / Discord / Lark + reverse-WS for OneBot v11.
+  description: |
+    Cognia AI characters can act as bots on Telegram, Slack, Discord,
+    Lark (Feishu), and OneBot-compatible (QQ / NapCat) platforms. Each
+    platform delivers messages via webhooks (or in OneBot's case, a
+    reverse-WebSocket); this axum router is the inbound side.
+
+    The router is shared across all five adapter types. Verification is
+    looked up by **registered adapter type**, never by the URL segment —
+    a wrong `:adapter_type` segment cannot bypass verification.
+
+    Adapter credentials live in the OS keyring under service
+    `com.cognia.platforms`, account `<adapter_id>:<name>`:
+
+    | Platform | Keyring entry name |
+    | --- | --- |
+    | Telegram | `secretToken` |
+    | Slack    | `signingSecret` |
+    | Discord  | `publicKey` (hex ed25519) |
+    | Lark     | `verificationToken` (+ optional `encryptKey` for encrypted events) |
+    | OneBot   | `onebotBearer` (optional — when missing, the WS upgrade is unauthenticated) |
+
+    On a verified delivery the router emits a Tauri event named
+    `connectors://webhook/<adapter_id>` whose payload is the parsed JSON
+    body (already decrypted for Lark encrypted events). The renderer's
+    ConnectorBus picks that up and routes it through trigger policy.
+
+servers:
+  - url: http://127.0.0.1:{port}
+    description: Loopback bind.
+    variables:
+      port:
+        default: "58440"
+        description: Bound port reported back to the renderer via Tauri command.
+  - url: http://0.0.0.0:{port}
+    description: LAN bind (when the user enables it in Settings).
+    variables:
+      port:
+        default: "58440"
+
+tags:
+  - name: health
+    description: Liveness probe (no auth required).
+  - name: webhook-telegram
+    description: Telegram Bot API webhook receiver — verified by `X-Telegram-Bot-Api-Secret-Token`.
+  - name: webhook-slack
+    description: Slack Events API webhook receiver — verified by `v0=<HMAC-SHA-256>` over timestamp + body.
+  - name: webhook-discord
+    description: Discord interaction / event webhook receiver — verified by ed25519 over timestamp + body.
+  - name: webhook-lark
+    description: Lark / Feishu event webhook receiver — verifies `header.token`; optionally AES-256-CBC decrypts encrypted events.
+  - name: ws-onebot
+    description: OneBot v11 reverse-WebSocket transport for QQ-compatible bots (NapCat / go-cqhttp / …).
+
+security: []
+
+paths:
+  /health:
+    get:
+      operationId: connectorsHealth
+      tags: [health]
+      summary: Liveness probe — no auth.
+      responses:
+        "200":
+          description: Always-ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean, enum: [true] }
+              examples:
+                ok: { value: { ok: true } }
+
+  /webhook/{adapterType}/{adapterId}:
+    parameters:
+      - in: path
+        name: adapterType
+        required: true
+        description: |
+          URL segment for the adapter type (`telegram`, `slack`, `discord`, `lark`).
+          **Informational only** — the router dispatches by the registered
+          adapter's type stored in `ConnectorsState`. A wrong / spoofed segment
+          cannot bypass verification (the registered type is what counts) but
+          the URL still has to be reachable, so the segment must be present.
+        schema: { type: string, enum: [telegram, slack, discord, lark] }
+      - in: path
+        name: adapterId
+        required: true
+        description: Per-adapter unique id (`tg_main`, `slack-prod-bot`, …) issued by the renderer at register time.
+        schema: { type: string, pattern: "^[a-zA-Z0-9_-]+$" }
+    get:
+      operationId: webhookGet
+      tags: [webhook-telegram, webhook-slack, webhook-discord, webhook-lark]
+      summary: Method-agnostic webhook receiver (any HTTP method).
+      description: |
+        Adapter-specific verification path. See per-method examples below for
+        the headers each platform sends. Most platforms POST; GET is here for
+        completeness because the handler accepts any method.
+      responses:
+        "200": { $ref: "#/components/responses/AdapterOk" }
+        "400": { $ref: "#/components/responses/AdapterBadRequest" }
+        "401": { $ref: "#/components/responses/AdapterUnauthorized" }
+        "404": { $ref: "#/components/responses/AdapterUnregistered" }
+        "500": { $ref: "#/components/responses/AdapterInternalError" }
+    post:
+      operationId: webhookPost
+      tags: [webhook-telegram, webhook-slack, webhook-discord, webhook-lark]
+      summary: Receive a verified webhook for the registered adapter.
+      description: |
+        Pulls the registered adapter's type from `ConnectorsState`, runs the
+        matching verifier, and on success emits the parsed body to the
+        renderer as `connectors://webhook/<adapter_id>`. On any verification
+        failure returns 401 / 404 / 400 with no leak of which check failed.
+
+        ## Per-platform request shape
+
+        ### Telegram
+        Header: `X-Telegram-Bot-Api-Secret-Token: <secret>`. Body is the
+        normal Bot API update JSON. The shared secret is whatever the
+        owner configured when calling `setWebhook`.
+
+        ### Slack
+        Headers: `X-Slack-Request-Timestamp`, `X-Slack-Signature` (`v0=<hex>`).
+        Body must be raw JSON; the verifier computes
+        `HMAC-SHA-256(signing_secret, "v0:" + timestamp + ":" + raw_body)`
+        and constant-time compares against the supplied MAC. Timestamp
+        skew tolerance follows Slack's 5-minute window.
+
+        ### Discord
+        Headers: `X-Signature-Ed25519`, `X-Signature-Timestamp`. Body is
+        verified by re-computing `ed25519_verify(public_key, timestamp || body, signature)`.
+
+        ### Lark / Feishu
+        Body is JSON. Plaintext: `header.token` (schema 2.0) or top-level
+        `token` (legacy schema 1.0) must equal the configured
+        `verificationToken`. Encrypted events arrive as
+        `{ "encrypt": "<base64>" }`; the router AES-256-CBC-decrypts with
+        `SHA-256(encryptKey)` then re-parses.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              description: Adapter-specific body. Forwarded verbatim into the connectors event after verification.
+              type: object
+              additionalProperties: true
+            examples:
+              telegram:
+                summary: Telegram bot update
+                value:
+                  update_id: 123456
+                  message: { message_id: 1, from: { id: 42 }, text: "hi" }
+              slackEvent:
+                summary: Slack Events API event_callback
+                value:
+                  type: "event_callback"
+                  event: { type: "message", user: "U123", text: "hello" }
+              discordPing:
+                summary: Discord interaction PING (type=1)
+                value: { type: 1 }
+              larkPlaintext:
+                summary: Lark schema-2.0 plaintext event
+                value:
+                  schema: "2.0"
+                  header: { token: "vtok-1", event_type: "im.message.receive_v1" }
+                  event: {}
+              larkEncrypted:
+                summary: Lark encrypted envelope (server decrypts before verifying)
+                value:
+                  encrypt: "BASE64_OF_AES_CBC_CIPHERTEXT"
+      parameters:
+        - in: header
+          name: X-Telegram-Bot-Api-Secret-Token
+          required: false
+          schema: { type: string }
+          description: Telegram only.
+        - in: header
+          name: X-Slack-Request-Timestamp
+          required: false
+          schema: { type: string }
+          description: Slack only — Unix seconds.
+        - in: header
+          name: X-Slack-Signature
+          required: false
+          schema: { type: string, pattern: "^v0=[0-9a-f]+$" }
+          description: Slack only — `v0=<hex>` (HMAC-SHA-256).
+        - in: header
+          name: X-Signature-Timestamp
+          required: false
+          schema: { type: string }
+          description: Discord only — Unix seconds.
+        - in: header
+          name: X-Signature-Ed25519
+          required: false
+          schema: { type: string, pattern: "^[0-9a-fA-F]{128}$" }
+          description: Discord only — hex-encoded ed25519 signature.
+      responses:
+        "200": { $ref: "#/components/responses/AdapterOk" }
+        "400": { $ref: "#/components/responses/AdapterBadRequest" }
+        "401": { $ref: "#/components/responses/AdapterUnauthorized" }
+        "404": { $ref: "#/components/responses/AdapterUnregistered" }
+        "500": { $ref: "#/components/responses/AdapterInternalError" }
+    put:
+      operationId: webhookPut
+      tags: [webhook-telegram, webhook-slack, webhook-discord, webhook-lark]
+      summary: Method-agnostic webhook receiver (any HTTP method).
+      responses:
+        "200": { $ref: "#/components/responses/AdapterOk" }
+        "400": { $ref: "#/components/responses/AdapterBadRequest" }
+        "401": { $ref: "#/components/responses/AdapterUnauthorized" }
+        "404": { $ref: "#/components/responses/AdapterUnregistered" }
+        "500": { $ref: "#/components/responses/AdapterInternalError" }
+    delete:
+      operationId: webhookDelete
+      tags: [webhook-telegram, webhook-slack, webhook-discord, webhook-lark]
+      summary: Method-agnostic webhook receiver (any HTTP method).
+      responses:
+        "200": { $ref: "#/components/responses/AdapterOk" }
+        "400": { $ref: "#/components/responses/AdapterBadRequest" }
+        "401": { $ref: "#/components/responses/AdapterUnauthorized" }
+        "404": { $ref: "#/components/responses/AdapterUnregistered" }
+        "500": { $ref: "#/components/responses/AdapterInternalError" }
+    patch:
+      operationId: webhookPatch
+      tags: [webhook-telegram, webhook-slack, webhook-discord, webhook-lark]
+      summary: Method-agnostic webhook receiver (any HTTP method).
+      responses:
+        "200": { $ref: "#/components/responses/AdapterOk" }
+        "400": { $ref: "#/components/responses/AdapterBadRequest" }
+        "401": { $ref: "#/components/responses/AdapterUnauthorized" }
+        "404": { $ref: "#/components/responses/AdapterUnregistered" }
+        "500": { $ref: "#/components/responses/AdapterInternalError" }
+    options:
+      operationId: webhookOptions
+      tags: [webhook-telegram, webhook-slack, webhook-discord, webhook-lark]
+      summary: Method-agnostic webhook receiver (any HTTP method).
+      responses:
+        "200": { $ref: "#/components/responses/AdapterOk" }
+        "400": { $ref: "#/components/responses/AdapterBadRequest" }
+        "401": { $ref: "#/components/responses/AdapterUnauthorized" }
+        "404": { $ref: "#/components/responses/AdapterUnregistered" }
+        "500": { $ref: "#/components/responses/AdapterInternalError" }
+
+  /ws/onebot/{adapterId}:
+    parameters:
+      - in: path
+        name: adapterId
+        required: true
+        description: Per-adapter unique id registered by the renderer.
+        schema: { type: string, pattern: "^[a-zA-Z0-9_-]+$" }
+    get:
+      operationId: wsOnebot
+      tags: [ws-onebot]
+      summary: OneBot v11 reverse-WebSocket upgrade.
+      description: |
+        Reverse-WebSocket transport: the OneBot client (NapCat / go-cqhttp /
+        compatible) connects **into** cognia; cognia is the WS server.
+
+        ## Auth
+
+        Optional. If keyring entry `<adapter_id>:onebotBearer` is present,
+        the upgrade requires `Authorization: Bearer <token>` (constant-time
+        compare). If the keyring entry is missing, the upgrade is accepted
+        without auth (development mode).
+
+        ## Phase 1 stub
+
+        The Phase 1 handler accepts the upgrade and drains incoming frames
+        without routing. Real OneBot v11 message routing (event ↔ action
+        echo, heartbeat, action requests / responses) lands later — the
+        wire frames are documented under `x-websocket.frames`.
+      parameters:
+        - in: header
+          name: Authorization
+          required: false
+          schema: { type: string, pattern: "^Bearer .+$" }
+          description: Required when `<adapter_id>:onebotBearer` keyring entry is set.
+        - in: header
+          name: Upgrade
+          required: true
+          schema: { type: string, enum: [websocket] }
+        - in: header
+          name: Connection
+          required: true
+          schema: { type: string, enum: [Upgrade] }
+        - in: header
+          name: Sec-WebSocket-Key
+          required: true
+          schema: { type: string }
+        - in: header
+          name: Sec-WebSocket-Version
+          required: true
+          schema: { type: string, enum: ["13"] }
+      responses:
+        "101":
+          description: |
+            Switching protocols — connection upgraded to WebSocket. After the
+            upgrade, text frames carry [`OneBotEvent`](#/components/schemas/OneBotEvent),
+            [`OneBotActionResponse`](#/components/schemas/OneBotActionResponse),
+            or [`OneBotActionRequest`](#/components/schemas/OneBotActionRequest).
+          headers:
+            Upgrade: { schema: { type: string, enum: [websocket] } }
+            Connection: { schema: { type: string, enum: [Upgrade] } }
+            Sec-WebSocket-Accept: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                description: Discriminated union of every text frame on the OneBot reverse-WS channel.
+                oneOf:
+                  - { $ref: "#/components/schemas/OneBotEvent" }
+                  - { $ref: "#/components/schemas/OneBotActionResponse" }
+                  - { $ref: "#/components/schemas/OneBotActionRequest" }
+        "200":
+          description: |
+            Synthetic 2xx documenting the WebSocket message contract. The router
+            never returns 200 for `/ws/onebot/{adapterId}`; clients receive 101 on
+            success or 401/500 on failure. This entry exists so OpenAPI tooling
+            that requires a 2xx response per operation can find one.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/OneBotEvent" }
+                  - { $ref: "#/components/schemas/OneBotActionResponse" }
+                  - { $ref: "#/components/schemas/OneBotActionRequest" }
+        "401":
+          description: Bearer token missing or wrong.
+          content:
+            text/plain:
+              schema: { type: string, example: "invalid bearer token" }
+        "500":
+          description: Keyring read failure.
+          content:
+            text/plain:
+              schema: { type: string, example: "keyring error" }
+      x-websocket:
+        subprotocol: null
+        auth:
+          mode: optional-bearer
+          source: header (Authorization)
+        frames:
+          inbound:
+            - name: OneBotEvent
+              ref: "#/components/schemas/OneBotEvent"
+              description: |
+                OneBot v11 event JSON (`post_type=message|notice|request|meta_event`).
+                Phase 1: drained without action. Phase 2: forwarded to the connectors bus
+                as `connectors://webhook/<adapter_id>`.
+            - name: OneBotActionResponse
+              ref: "#/components/schemas/OneBotActionResponse"
+              description: |
+                When cognia issues an action request, the bot responds with this shape.
+                Phase 1: not yet emitted.
+          outbound:
+            - name: OneBotActionRequest
+              ref: "#/components/schemas/OneBotActionRequest"
+              description: |
+                Action requests cognia sends to the bot (`send_msg`, `get_login_info`, …).
+                Phase 1: not yet emitted.
+
+components:
+  responses:
+    AdapterOk:
+      description: Verified successfully — body forwarded to renderer.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [ok]
+            additionalProperties: false
+            properties:
+              ok: { type: boolean, enum: [true] }
+          examples:
+            ok:
+              value: { ok: true }
+
+    AdapterBadRequest:
+      description: Body could not be parsed (after decryption for Lark) or registered adapter has an unsupported type.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/SimpleError" }
+          examples:
+            unknownType:
+              value: { error: "unsupported adapter type" }
+            badJson:
+              value: { error: "invalid JSON body" }
+
+    AdapterUnauthorized:
+      description: Verification failed — missing or wrong signature header / token.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/SimpleError" }
+          examples:
+            sigFail:
+              value: { error: "signature verification failed" }
+            secretMissing:
+              value: { error: "secret token not configured" }
+
+    AdapterUnregistered:
+      description: Adapter id is not registered in `ConnectorsState`.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/SimpleError" }
+          examples:
+            unregistered:
+              value: { error: "adapter not registered" }
+
+    AdapterInternalError:
+      description: Keyring or decryption failure.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/SimpleError" }
+          examples:
+            keyring:
+              value: { error: "keyring read failed" }
+
+  schemas:
+    SimpleError:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error: { type: string }
+
+    OneBotEvent:
+      description: |
+        OneBot v11 event JSON. The exact union of `post_type` fields is the
+        upstream OneBot v11 spec; only the discriminator is constrained here.
+      type: object
+      additionalProperties: true
+      properties:
+        time: { type: integer, format: int64 }
+        self_id: { type: integer, format: int64 }
+        post_type:
+          type: string
+          enum: [message, notice, request, meta_event]
+
+    OneBotActionResponse:
+      description: |
+        Action response from the bot to a cognia-issued action request.
+      type: object
+      additionalProperties: true
+      properties:
+        status: { type: string, enum: [ok, async, failed] }
+        retcode: { type: integer }
+        data: { description: "Action-specific result." }
+        echo:
+          description: "Caller-chosen correlation id; mirrors the request's `echo`."
+
+    OneBotActionRequest:
+      description: |
+        Action request cognia sends to the bot (`send_msg`, `get_login_info`, …).
+      type: object
+      required: [action]
+      additionalProperties: true
+      properties:
+        action: { type: string }
+        params:
+          type: object
+          additionalProperties: true
+        echo:
+          description: "Correlation id for the response."

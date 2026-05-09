@@ -1,0 +1,384 @@
+openapi: 3.1.0
+info:
+  title: Cognia Workflow Webhook receiver
+  version: "0.1.0"
+  license:
+    name: MIT
+    identifier: MIT
+  summary: Local axum HTTP server that turns inbound requests into `workflow.webhook` trigger events.
+  description: |
+    Visual workflows declare `trigger.webhook` nodes. When a workflow
+    containing such a trigger is saved, the renderer pushes the trigger's
+    metadata to this Rust router via `workflow_register_trigger` (Tauri
+    IPC). External services then `POST` (or `GET`/`PUT`/...) to the
+    bound URL; the router emits a `workflow:trigger` Tauri event that the
+    orchestrator picks up to execute the workflow.
+
+    The router runs only in desktop / Tauri builds. Web-only clients show
+    "desktop only" for `trigger.webhook` nodes in the inspector.
+
+    ## Bind strategy
+
+    The listener binds **127.0.0.1** only. SaaS senders that cannot reach
+    a loopback URL relay through a Cloudflared / ngrok tunnel; the tunnel
+    URL is what the user pastes into the third party's "webhook URL"
+    field. There is no LAN bind option.
+
+    ## Path discovery
+
+    The bound URL for a registered trigger is reported back to the
+    renderer via the `workflow_get_webhook_url` Tauri command, which the
+    inspector form copies to the clipboard. Each registered trigger owns
+    one path; collisions are rejected at registration time.
+
+    ## Routing
+
+    The handler dispatches by **lowercase, slash-trimmed path**. The
+    URL `:adapter_type` segment is informational and not used by the
+    dispatcher. Wrong / spoofed segments cannot bypass verification.
+
+    ## Auth
+
+    Optional per-trigger HMAC-SHA-256. When `hmacSecret` is set on the
+    trigger, every request must carry an `X-Signature-256: sha256=<hex>`
+    header whose MAC matches the SHA-256 HMAC of the **raw** body. Any
+    mismatch (missing, malformed prefix, hex decode failure, MAC
+    mismatch) returns 401 with the same generic message — never leak
+    which check failed.
+
+    Triggers without a secret are unauthenticated; a signed receiver is
+    available to triggers whose senders support it (GitHub, Stripe, …).
+
+    ## Body limit
+
+    1 MiB (`tower_http::limit::RequestBodyLimitLayer`). Larger bodies
+    return 413 before the handler reads them.
+
+    ## Trigger event payload
+
+    On a successful match the router emits a `workflow:trigger` Tauri
+    event whose `payload` follows the [`WebhookTriggerPayload`](#/components/schemas/WebhookTriggerPayload)
+    schema. That payload is what `trigger.webhook` workflow nodes see in
+    their downstream output port.
+
+servers:
+  - url: http://127.0.0.1:{port}
+    description: Loopback bind (port is random by default; settable via `AppSettings.workflowWebhookPort`).
+    variables:
+      port:
+        default: "57231"
+        description: Bound port reported back to the renderer.
+
+tags:
+  - name: webhook
+    description: Inbound webhook receivers for workflow `trigger.webhook` nodes.
+
+security: []
+
+paths:
+  "/webhook/{path}":
+    parameters:
+      - in: path
+        name: path
+        required: true
+        description: |
+          Lowercase, slash-trimmed path segment(s) the trigger registered. Multi-segment
+          paths are supported (`a/b/c`); the router stores them as a single key after
+          calling `normalize_path` (strip leading + trailing `/`, lowercase).
+        schema: { type: string, pattern: "^[a-z0-9/_-]+$" }
+        example: incoming-events
+    get:
+      operationId: webhookGet
+      tags: [webhook]
+      summary: Handle a webhook request (any HTTP method).
+      description: |
+        OpenAPI requires one operation per HTTP method. Every method is
+        accepted by the same handler — the trigger's configured `method`
+        ("*", "GET", "POST", "PUT", "DELETE", "PATCH", …) decides whether
+        the request is admitted (otherwise 405).
+      parameters:
+        - $ref: "#/components/parameters/Sig256"
+      responses:
+        "200": { $ref: "#/components/responses/WebhookSuccess" }
+        "401": { $ref: "#/components/responses/WebhookSigFail" }
+        "404": { $ref: "#/components/responses/WebhookUnknownPath" }
+        "405": { $ref: "#/components/responses/WebhookMethodNotAllowed" }
+        "413": { $ref: "#/components/responses/WebhookPayloadTooLarge" }
+        "500": { $ref: "#/components/responses/WebhookInternalError" }
+        "503": { $ref: "#/components/responses/WebhookDisabled" }
+
+    post:
+      operationId: webhookPost
+      tags: [webhook]
+      summary: Receive an inbound webhook (most senders use POST).
+      description: |
+        Builds a [`WebhookTriggerPayload`](#/components/schemas/WebhookTriggerPayload)
+        (method, normalised path, headers, query map, body, body_was_json),
+        emits a `workflow:trigger` Tauri event to the orchestrator, then
+        returns the trigger's configured response status (default 200) and
+        body (default empty).
+
+        JSON parsing is best-effort — non-JSON bodies are passed through as
+        a UTF-8 string and `body_was_json` is set to false.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              description: Free-form JSON. Sent SaaS payloads are forwarded verbatim into the trigger event.
+              type: object
+              additionalProperties: true
+            examples:
+              github:
+                summary: GitHub push event
+                value:
+                  ref: "refs/heads/main"
+                  pusher: { name: "octocat" }
+              stripe:
+                summary: Stripe charge.succeeded
+                value:
+                  id: "evt_123"
+                  type: "charge.succeeded"
+                  data: { object: { id: "ch_456", amount: 1000 } }
+          "*/*":
+            schema:
+              type: string
+              description: Non-JSON bodies are forwarded as a UTF-8 string with `body_was_json=false`.
+            example: "raw=text&payload=here"
+      parameters:
+        - $ref: "#/components/parameters/Sig256"
+      responses:
+        "200": { $ref: "#/components/responses/WebhookSuccess" }
+        "401": { $ref: "#/components/responses/WebhookSigFail" }
+        "404": { $ref: "#/components/responses/WebhookUnknownPath" }
+        "405": { $ref: "#/components/responses/WebhookMethodNotAllowed" }
+        "413": { $ref: "#/components/responses/WebhookPayloadTooLarge" }
+        "500": { $ref: "#/components/responses/WebhookInternalError" }
+        "503": { $ref: "#/components/responses/WebhookDisabled" }
+
+    put:
+      operationId: webhookPut
+      tags: [webhook]
+      summary: Handle a webhook request (any HTTP method).
+      parameters:
+        - $ref: "#/components/parameters/Sig256"
+      responses:
+        "200": { $ref: "#/components/responses/WebhookSuccess" }
+        "401": { $ref: "#/components/responses/WebhookSigFail" }
+        "404": { $ref: "#/components/responses/WebhookUnknownPath" }
+        "405": { $ref: "#/components/responses/WebhookMethodNotAllowed" }
+        "413": { $ref: "#/components/responses/WebhookPayloadTooLarge" }
+        "500": { $ref: "#/components/responses/WebhookInternalError" }
+        "503": { $ref: "#/components/responses/WebhookDisabled" }
+
+    patch:
+      operationId: webhookPatch
+      tags: [webhook]
+      summary: Handle a webhook request (any HTTP method).
+      parameters:
+        - $ref: "#/components/parameters/Sig256"
+      responses:
+        "200": { $ref: "#/components/responses/WebhookSuccess" }
+        "401": { $ref: "#/components/responses/WebhookSigFail" }
+        "404": { $ref: "#/components/responses/WebhookUnknownPath" }
+        "405": { $ref: "#/components/responses/WebhookMethodNotAllowed" }
+        "413": { $ref: "#/components/responses/WebhookPayloadTooLarge" }
+        "500": { $ref: "#/components/responses/WebhookInternalError" }
+        "503": { $ref: "#/components/responses/WebhookDisabled" }
+
+    delete:
+      operationId: webhookDelete
+      tags: [webhook]
+      summary: Handle a webhook request (any HTTP method).
+      parameters:
+        - $ref: "#/components/parameters/Sig256"
+      responses:
+        "200": { $ref: "#/components/responses/WebhookSuccess" }
+        "401": { $ref: "#/components/responses/WebhookSigFail" }
+        "404": { $ref: "#/components/responses/WebhookUnknownPath" }
+        "405": { $ref: "#/components/responses/WebhookMethodNotAllowed" }
+        "413": { $ref: "#/components/responses/WebhookPayloadTooLarge" }
+        "500": { $ref: "#/components/responses/WebhookInternalError" }
+        "503": { $ref: "#/components/responses/WebhookDisabled" }
+
+    head:
+      operationId: webhookHead
+      tags: [webhook]
+      summary: Handle a webhook request (any HTTP method).
+      parameters:
+        - $ref: "#/components/parameters/Sig256"
+      responses:
+        "200": { $ref: "#/components/responses/WebhookSuccess" }
+        "401": { $ref: "#/components/responses/WebhookSigFail" }
+        "404": { $ref: "#/components/responses/WebhookUnknownPath" }
+        "405": { $ref: "#/components/responses/WebhookMethodNotAllowed" }
+        "413": { $ref: "#/components/responses/WebhookPayloadTooLarge" }
+        "500": { $ref: "#/components/responses/WebhookInternalError" }
+        "503": { $ref: "#/components/responses/WebhookDisabled" }
+
+    options:
+      operationId: webhookOptions
+      tags: [webhook]
+      summary: Handle a webhook request (any HTTP method).
+      parameters:
+        - $ref: "#/components/parameters/Sig256"
+      responses:
+        "200": { $ref: "#/components/responses/WebhookSuccess" }
+        "401": { $ref: "#/components/responses/WebhookSigFail" }
+        "404": { $ref: "#/components/responses/WebhookUnknownPath" }
+        "405": { $ref: "#/components/responses/WebhookMethodNotAllowed" }
+        "413": { $ref: "#/components/responses/WebhookPayloadTooLarge" }
+        "500": { $ref: "#/components/responses/WebhookInternalError" }
+        "503": { $ref: "#/components/responses/WebhookDisabled" }
+
+components:
+  parameters:
+    Sig256:
+      in: header
+      name: X-Signature-256
+      required: false
+      description: |
+        Mandatory when the trigger has an `hmacSecret`. Format
+        `sha256=<lowercase hex of HMAC-SHA-256(secret, raw_body)>`. The
+        verifier rejects missing header, wrong prefix, hex decode failure,
+        or MAC mismatch with the same 401 — never leaks which failed.
+      schema:
+        type: string
+        pattern: "^sha256=[0-9a-fA-F]{64}$"
+        example: "sha256=a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e"
+
+  responses:
+    WebhookSuccess:
+      description: |
+        Trigger matched and a `workflow:trigger` event was emitted. The
+        status code is the trigger's configured `responseStatus` (default
+        200). The body is the configured `responseBody` (verbatim, default
+        empty). On a successful match the orchestrator receives a
+        [`WebhookTriggerPayload`](#/components/schemas/WebhookTriggerPayload).
+      content:
+        text/plain:
+          schema:
+            type: string
+            description: Trigger's configured response body, verbatim. Empty by default.
+        application/json:
+          schema:
+            description: When the trigger configured a JSON response body.
+            type: object
+            additionalProperties: true
+
+    WebhookSigFail:
+      description: |
+        Signature verification failed when the trigger required signing.
+        The same response is used for missing header, wrong prefix, hex
+        decode failure, and MAC mismatch — never leaks which check failed.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/SimpleError" }
+          examples:
+            sigFail:
+              value: { error: "signature verification failed" }
+
+    WebhookUnknownPath:
+      description: No trigger is registered for the requested path.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/SimpleError" }
+          examples:
+            unknown:
+              value: { error: "no workflow registered for this path" }
+
+    WebhookMethodNotAllowed:
+      description: HTTP method not allowed for this trigger (the trigger's configured `method` did not match).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/SimpleError" }
+          examples:
+            method:
+              value: { error: "method not allowed" }
+
+    WebhookPayloadTooLarge:
+      description: Request body exceeded 1 MiB.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/SimpleError" }
+
+    WebhookInternalError:
+      description: Internal serialization failure when building the trigger event payload.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/SimpleError" }
+          examples:
+            serial:
+              value: { error: "payload serialization failed" }
+
+    WebhookDisabled:
+      description: Trigger is registered but disabled.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/SimpleError" }
+          examples:
+            disabled:
+              value: { error: "trigger is disabled" }
+
+  schemas:
+    SimpleError:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error: { type: string }
+
+    # ── Trigger event envelope (emitted to the orchestrator over Tauri IPC) ──
+
+    WebhookTriggerPayload:
+      description: |
+        Constructed by the router and emitted as the `payload` field of a
+        `workflow:trigger` Tauri event. Documented here so workflow authors
+        know exactly what their `trigger.webhook` node will see in its
+        downstream output port. This shape is **not** an HTTP response of
+        this API — it is the IPC shape forwarded to the orchestrator.
+      type: object
+      required: [method, path, headers, query, body, bodyWasJson]
+      additionalProperties: false
+      properties:
+        method: { type: string, description: "Upper-case HTTP method." }
+        path:
+          { type: string, description: "Normalised (slash-trimmed, lowercase) path segment(s)." }
+        headers:
+          type: object
+          additionalProperties: { type: string }
+          description: |
+            Lowercase header name → first value. Multi-valued headers are
+            collapsed to the first occurrence (axum default).
+        query:
+          type: object
+          additionalProperties: { type: string }
+          description: Query parameters parsed by `serde_urlencoded`. Repeated keys retain the last value.
+        body:
+          description: |
+            Parsed JSON when the body was valid JSON; otherwise the body
+            as a UTF-8 string. `bodyWasJson` distinguishes the two.
+          oneOf:
+            - { type: object, additionalProperties: true }
+            - { type: array, items: {} }
+            - { type: string }
+            - { type: number }
+            - { type: boolean }
+            - { type: "null" }
+        bodyWasJson: { type: boolean }
+        binding:
+          $ref: "#/components/schemas/TriggerBinding"
+
+    TriggerBinding:
+      description: |
+        Optional per-trigger filter bag that the orchestrator can use to
+        scope the run (adapter / session / conversation / character).
+        Stored on the trigger by the renderer at registration time;
+        forwarded into the trigger event payload.
+      type: object
+      additionalProperties: false
+      properties:
+        adapterId: { type: string }
+        sessionId: { type: string }
+        conversationKey: { type: string }
+        characterId: { type: string }

@@ -1,0 +1,380 @@
+openapi: 3.1.0
+info:
+  title: Cognia Remote Control — local task / event bridge
+  version: "0.1.0"
+  license:
+    name: MIT
+    identifier: MIT
+  summary: Loopback HTTP listener that lets local automation scripts trigger scheduler tasks and emit Tauri events.
+  description: |
+    Local axum HTTP server that accepts task triggers and event emissions
+    from same-machine automation (cron jobs, IDE tasks, custom scripts)
+    and forwards them into the Tauri event bus where the renderer's
+    scheduler / event listeners pick them up.
+
+    ## Bind strategy
+
+    The listener **always** binds `127.0.0.1`. The IPv4 allowlist is a
+    defence-in-depth check; IPv6 callers must arrive through an
+    IPv4-mapped address (`::ffff:127.0.0.1`) and are mapped through
+    `to_canonical` before allowlist comparison. Pure IPv6 callers are
+    rejected with 403.
+
+    ## Auth
+
+    `Authorization: Bearer <token>` — constant-time compared via
+    `subtle::ConstantTimeEq`. The token is rotated through a Tauri
+    command; the server is restarted on rotation.
+
+    ## Allowlist
+
+    The renderer-side `RemoteControlInboundConfig.allowlist` is a list of
+    CIDR strings (`127.0.0.1/32`, `192.168.0.0/16`, …). Defaults to
+    `["127.0.0.1/32"]`. Requests from outside the allowlist return 403
+    *before* the bearer check runs.
+
+    ## Rate limit
+
+    Per-token fixed-window rate limiter (default 60 requests / minute).
+    Exceeding the budget returns 429.
+
+    ## Body limit
+
+    8 KiB (`tower_http::limit::RequestBodyLimitLayer`) — these endpoints
+    accept tiny payloads only.
+
+servers:
+  - url: http://127.0.0.1:{port}
+    description: Loopback bind (the only bind option).
+    variables:
+      port:
+        default: "47821"
+        description: Default port; configurable via `RemoteControlInboundConfig.port`.
+
+tags:
+  - name: health
+    description: Liveness probe.
+  - name: tasks
+    description: Trigger a configured scheduler task to run now.
+  - name: events
+    description: Emit a Tauri event into the renderer.
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/health:
+    get:
+      operationId: remoteControlHealth
+      tags: [health]
+      summary: Liveness probe.
+      description: |
+        Exempted from auth, allowlist, and rate limit. (Implementation
+        note: in the current build the middleware is applied to all
+        routes; loopback origins are always allowed by the default
+        allowlist, so the practical effect is the same — `/api/v1/health`
+        is reachable by anyone the listener is reachable by.)
+
+        ## IPC payloads documented for reference
+
+        Successful calls to `POST /api/v1/tasks/{id}/run` and
+        `POST /api/v1/events` cause the server to emit Tauri events
+        (`remote-control://run-task` and `remote-control://emit-event`)
+        whose payloads follow [`RunTaskEvent`](#/components/schemas/RunTaskEvent)
+        and [`EmitEvent`](#/components/schemas/EmitEvent). Renderer-side
+        configuration follows
+        [`RemoteControlInboundConfig`](#/components/schemas/RemoteControlInboundConfig);
+        live status is [`RemoteControlStatus`](#/components/schemas/RemoteControlStatus).
+      security: []
+      responses:
+        "200":
+          description: Server is alive.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthResponse" }
+              examples:
+                ok: { value: { ok: true, version: "0.1.0" } }
+
+  /api/v1/tasks/{id}/run:
+    post:
+      operationId: runTask
+      tags: [tasks]
+      summary: Trigger a scheduler task by id.
+      description: |
+        Emits the `remote-control://run-task` Tauri event. The renderer's
+        scheduler subscriber matches the `task_id` against its own task
+        registry and calls `runTaskNow` (or surfaces "unknown task" in
+        the audit log). The HTTP response is 202 the moment the event is
+        emitted — completion of the task itself is not awaited.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+          description: Logical task id matching a renderer-side scheduler task.
+      requestBody:
+        required: false
+        description: Optional payload forwarded into the task as `RunTaskEvent.payload`. Default `{}`.
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TriggerTaskRequestBody" }
+            examples:
+              empty: { value: {} }
+              withPayload:
+                value:
+                  payload: { reason: "scheduled re-index", source: "cron" }
+      responses:
+        "202":
+          description: Event emitted; renderer will run the task asynchronously.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AcceptedResponse" }
+              examples:
+                accepted: { value: { accepted: true } }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          description: Tauri event emit failed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+              examples: { fail: { value: { error: "emit failed" } } }
+
+  /api/v1/events:
+    post:
+      operationId: emitEvent
+      tags: [events]
+      summary: Emit a Tauri event with arbitrary type and data.
+      description: |
+        Emits the `remote-control://emit-event` Tauri event. The renderer
+        subscriber forwards it into its own event bus. `eventType` is
+        required and trimmed; empty values return 400.
+
+        Returns 202 the moment the Tauri emit succeeds.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EmitEventRequestBody" }
+            examples:
+              minimal:
+                value: { eventType: "system.alarm" }
+              full:
+                value:
+                  eventType: "tray.click"
+                  eventSource: "external-cli"
+                  data: { which: "tray-icon-2", at: 1714900000000 }
+      responses:
+        "202":
+          description: Event emitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AcceptedResponse" }
+        "400":
+          description: Missing body or empty `eventType`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+              examples:
+                missing: { value: { error: "request body required" } }
+                empty: { value: { error: "eventType required" } }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          description: Tauri event emit failed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: |
+        Static bearer token managed by the renderer's Remote Control
+        Settings. Constant-time compared via `subtle`. Rotation is a
+        full server restart.
+
+  responses:
+    Unauthorized:
+      description: Missing or wrong bearer token.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/SimpleError" }
+          examples:
+            missing: { value: { error: "missing bearer token" } }
+            wrong: { value: { error: "invalid token" } }
+    Forbidden:
+      description: |
+        IP rejected. Either the canonical IPv4 (`to_canonical`) is not in
+        the allowlist, or the caller arrived via pure IPv6 (the listener
+        is IPv4-only).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/SimpleError" }
+          examples:
+            notAllowed: { value: { error: "origin not allowed" } }
+            ipv6: { value: { error: "ipv6 not supported" } }
+    PayloadTooLarge:
+      description: Request body exceeded the 8 KiB cap.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/SimpleError" }
+    RateLimited:
+      description: |
+        Per-token rate limit exceeded. Default budget is
+        `RemoteControlInboundConfig.rateLimitPerMin` (60) requests per
+        minute, fixed window.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/SimpleError" }
+          examples:
+            limit: { value: { error: "rate limit exceeded" } }
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [ok, version]
+      additionalProperties: false
+      properties:
+        ok: { type: boolean, enum: [true] }
+        version: { type: string, description: "Cargo crate version of the desktop process." }
+
+    AcceptedResponse:
+      type: object
+      required: [accepted]
+      additionalProperties: false
+      properties:
+        accepted: { type: boolean, enum: [true] }
+
+    SimpleError:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error: { type: string }
+
+    # ── Request bodies ───────────────────────────────────────────────────────
+
+    TriggerTaskRequestBody:
+      type: object
+      additionalProperties: false
+      properties:
+        payload:
+          description: Optional task payload forwarded into the renderer's task runner.
+          oneOf:
+            - { type: object, additionalProperties: true }
+            - { type: array, items: {} }
+            - { type: string }
+            - { type: number }
+            - { type: boolean }
+            - { type: "null" }
+
+    EmitEventRequestBody:
+      type: object
+      required: [eventType]
+      additionalProperties: false
+      properties:
+        eventType:
+          type: string
+          minLength: 1
+          description: Tauri event channel name. Whitespace-only values are rejected (400).
+        eventSource:
+          type: string
+          description: Optional free-form source label.
+        data:
+          description: Optional payload object.
+          oneOf:
+            - { type: object, additionalProperties: true }
+            - { type: array, items: {} }
+            - { type: string }
+            - { type: number }
+            - { type: boolean }
+            - { type: "null" }
+
+    # ── Renderer-side IPC payloads (documented for reference) ────────────────
+
+    RunTaskEvent:
+      description: |
+        Payload of the `remote-control://run-task` Tauri event the server emits
+        to the renderer. Documented here so renderer-side subscribers know the
+        exact shape; it is not the HTTP response of this surface.
+      type: object
+      required: [taskId]
+      additionalProperties: false
+      properties:
+        taskId: { type: string }
+        payload:
+          description: Mirror of `TriggerTaskRequestBody.payload`.
+          oneOf:
+            - { type: object, additionalProperties: true }
+            - { type: array, items: {} }
+            - { type: string }
+            - { type: number }
+            - { type: boolean }
+            - { type: "null" }
+
+    EmitEvent:
+      description: |
+        Payload of the `remote-control://emit-event` Tauri event the server
+        emits to the renderer.
+      type: object
+      required: [eventType]
+      additionalProperties: false
+      properties:
+        eventType: { type: string }
+        eventSource: { type: string }
+        data:
+          oneOf:
+            - { type: object, additionalProperties: true }
+            - { type: array, items: {} }
+            - { type: string }
+            - { type: number }
+            - { type: boolean }
+            - { type: "null" }
+
+    # ── Configuration shapes (documented for reference) ──────────────────────
+
+    RemoteControlInboundConfig:
+      description: Renderer-side configuration that drives this server's bind.
+      type: object
+      required: [enabled, port, allowlist, rateLimitPerMin]
+      additionalProperties: false
+      properties:
+        enabled: { type: boolean, default: false }
+        port: { type: integer, format: int32, minimum: 0, maximum: 65535, default: 47821 }
+        allowlist:
+          type: array
+          items: { type: string, description: "CIDR string (`127.0.0.1/32`, `192.168.0.0/16`)." }
+          default: ["127.0.0.1/32"]
+        rateLimitPerMin: { type: integer, minimum: 0, default: 60 }
+
+    RemoteControlStatus:
+      description: Live status reported by the renderer's Settings page.
+      type: object
+      required: [inboundRunning, inboundCallsTotal, hasInboundToken]
+      additionalProperties: false
+      properties:
+        inboundRunning: { type: boolean }
+        boundPort:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 65535
+        lastCallAt: { type: string, format: date-time }
+        inboundCallsTotal: { type: integer, format: int64, minimum: 0 }
+        hasInboundToken: { type: boolean }

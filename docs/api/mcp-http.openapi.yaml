@@ -1,0 +1,288 @@
+openapi: 3.1.0
+info:
+  title: Cognia External Bridge — MCP HTTP transport
+  version: "0.1.0"
+  license:
+    name: MIT
+    identifier: MIT
+  summary: Local axum HTTP server forwarding MCP JSON-RPC envelopes to the bundled node sidecar.
+  description: |
+    cognia-next exposes its generated wikis, vector RAG, and runtime
+    entities (skills / characters / twins / plugins / agent teams) to
+    external coding agents (Claude Code, Cursor, Cline, Codex) via the
+    Model Context Protocol. The transport is a node sidecar speaking MCP
+    over stdio; this HTTP server is a thin pass-through that forwards
+    JSON-RPC envelopes to the sidecar and returns the response verbatim.
+
+    ## Bind strategy
+
+    The listener always binds **127.0.0.1** only. There is no LAN toggle,
+    no IP allowlist (unnecessary because of loopback-only). Multi-tenant
+    isolation is by bearer token alone — every concrete external agent
+    pastes its own bearer when configuring an MCP server entry.
+
+    ## Bearer token
+
+    A static string compared in constant time
+    (`subtle::ConstantTimeEq`). Length mismatch is revealed (early-out);
+    content compare is always constant-time so a token oracle attack via
+    response timing is not possible.
+
+    Tokens rotate via the renderer's
+    `ExternalBridgeSettings.bearerToken` setting; the server is restarted
+    when the token changes.
+
+    ## Body limit
+
+    1 MiB (`tower_http::limit::RequestBodyLimitLayer`). MCP envelopes can
+    legitimately be large (file contents, embedding payloads), so the cap
+    is generous compared to the 64 KiB cap on the mobile companion API.
+
+    ## SSE
+
+    `POST /mcp/sse` is wired but returns 501 in this build. SSE streaming
+    lands in Phase 2 of the External Bridge plan. Until then, every
+    streamed MCP response is delivered as the result of a single
+    `POST /mcp` round-trip.
+
+servers:
+  - url: http://127.0.0.1:{port}
+    description: Loopback bind (port chosen by the renderer; random ephemeral by default).
+    variables:
+      port:
+        default: "47920"
+        description: Bound port; reported back via the `mcp_server_status` Tauri command.
+
+tags:
+  - name: health
+    description: Liveness probe (no auth required).
+  - name: mcp
+    description: JSON-RPC pass-through to the bundled sidecar.
+
+security:
+  - bearerAuth: []
+
+paths:
+  /healthz:
+    get:
+      operationId: mcpHealth
+      tags: [health]
+      summary: Liveness probe — no auth required.
+      description: |
+        Always returns 200 with `{ ok: true, version }`. Used by external
+        agents to verify the server is reachable before sending an
+        `initialize` envelope. Explicitly exempted from bearer-auth.
+      security: []
+      responses:
+        "200":
+          description: Server is alive.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthResponse" }
+              examples:
+                ok: { value: { ok: true, version: "0.1.0" } }
+
+  /mcp:
+    post:
+      operationId: mcpPost
+      tags: [mcp]
+      summary: Forward a JSON-RPC envelope to the MCP sidecar and return its response.
+      description: |
+        The body must be valid UTF-8 JSON. The exact shape is the
+        Model Context Protocol's JSON-RPC 2.0 envelope (see
+        https://modelcontextprotocol.io/specification). Common methods:
+        `initialize`, `notifications/initialized`, `tools/list`,
+        `tools/call`, `resources/list`, `resources/read`,
+        `prompts/list`, `prompts/get`.
+
+        The Rust handler does not parse or rewrite the envelope — it is a
+        line-protocol pass-through to the sidecar's stdin/stdout. The
+        sidecar's response is forwarded verbatim as the JSON body of this
+        response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JsonRpcRequest" }
+            examples:
+              initialize:
+                value:
+                  jsonrpc: "2.0"
+                  id: 1
+                  method: "initialize"
+                  params:
+                    protocolVersion: "2024-11-05"
+                    capabilities: {}
+                    clientInfo: { name: "claude-code", version: "1.0.0" }
+              toolsList:
+                value: { jsonrpc: "2.0", id: 2, method: "tools/list" }
+              toolsCallWikiSearch:
+                value:
+                  jsonrpc: "2.0"
+                  id: 3
+                  method: "tools/call"
+                  params:
+                    name: "wiki_search"
+                    arguments: { query: "vector store schema" }
+      responses:
+        "200":
+          description: |
+            JSON-RPC response from the sidecar. The handler does not validate
+            the response shape; whatever the sidecar wrote is forwarded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JsonRpcResponse" }
+              examples:
+                resultOk:
+                  value:
+                    jsonrpc: "2.0"
+                    id: 2
+                    result:
+                      tools:
+                        - { name: "wiki_search", description: "Search the indexed wiki." }
+                        - { name: "wiki_read", description: "Read a specific wiki page." }
+                        - { name: "rag_search", description: "Vector-search the wiki + chunks." }
+                        - { name: "runtime_query", description: "Inspect a runtime entity." }
+                error:
+                  value:
+                    jsonrpc: "2.0"
+                    id: 99
+                    error: { code: -32601, message: "Method not found" }
+        "400":
+          description: Body was non-UTF-8 or empty.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+              examples:
+                empty: { value: { error: "request body required" } }
+                notUtf8: { value: { error: "request body must be UTF-8" } }
+        "401":
+          description: Missing or wrong bearer token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+              examples:
+                missing: { value: { error: "missing bearer token" } }
+                wrong: { value: { error: "invalid token" } }
+        "413":
+          description: Request body exceeded 1 MiB.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+        "502":
+          description: |
+            Sidecar process error — failed to spawn, IO error, or terminated mid-roundtrip.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+              examples:
+                spawn:
+                  value: { error: "sidecar error: spawn node: ENOENT" }
+
+  /mcp/sse:
+    post:
+      operationId: mcpSse
+      tags: [mcp]
+      summary: SSE streaming (Phase 2 — currently returns 501).
+      description: |
+        Stub for the streaming MCP transport. Phase 1 returns 501 with a
+        message pointing the caller at `POST /mcp`.
+      responses:
+        "501":
+          description: Not implemented.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimpleError" }
+              examples:
+                notImplemented:
+                  value: { error: "SSE streaming is not implemented in Phase 1; use POST /mcp" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: |
+        Static bearer string compared in constant time. Configured via
+        the renderer's `ExternalBridgeSettings.bearerToken`. Rotation is
+        a tear-down + restart of the server; in-flight requests are not
+        invalidated mid-call.
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [ok, version]
+      additionalProperties: false
+      properties:
+        ok: { type: boolean, enum: [true] }
+        version: { type: string, description: "Cargo crate version of the desktop process." }
+
+    SimpleError:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error: { type: string }
+
+    # ── JSON-RPC 2.0 envelopes (intentionally permissive) ────────────────────
+
+    JsonRpcRequest:
+      description: |
+        JSON-RPC 2.0 request envelope. Per the MCP spec, `id` may be a
+        string or a number; notification envelopes omit `id`. `params` is
+        optional and may be either an array or an object.
+      type: object
+      required: [jsonrpc, method]
+      properties:
+        jsonrpc: { type: string, enum: ["2.0"] }
+        id:
+          oneOf:
+            - { type: string }
+            - { type: number }
+            - { type: "null" }
+          description: Omit for notifications.
+        method: { type: string, description: "MCP method name." }
+        params:
+          oneOf:
+            - { type: object, additionalProperties: true }
+            - { type: array, items: {} }
+
+    JsonRpcResponse:
+      description: |
+        JSON-RPC 2.0 response envelope. Either `result` or `error` is
+        present, not both. Pass-through; the server does not validate.
+      type: object
+      required: [jsonrpc]
+      properties:
+        jsonrpc: { type: string, enum: ["2.0"] }
+        id:
+          oneOf:
+            - { type: string }
+            - { type: number }
+            - { type: "null" }
+        result:
+          description: Method-specific success payload.
+          oneOf:
+            - { type: object, additionalProperties: true }
+            - { type: array, items: {} }
+            - { type: string }
+            - { type: number }
+            - { type: boolean }
+            - { type: "null" }
+        error: { $ref: "#/components/schemas/JsonRpcError" }
+
+    JsonRpcError:
+      type: object
+      required: [code, message]
+      additionalProperties: false
+      properties:
+        code:
+          type: integer
+          description: |
+            Standard JSON-RPC code (`-32700` parse error, `-32600` invalid
+            request, `-32601` method not found, `-32602` invalid params,
+            `-32603` internal error) or an MCP-specific code.
+        message: { type: string }
+        data:
+          description: Optional error payload — shape determined by the sidecar.
