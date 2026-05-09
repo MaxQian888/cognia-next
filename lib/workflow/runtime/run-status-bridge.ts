@@ -93,12 +93,13 @@ export function startRunStatusBridge(opts: BridgeOptions): () => void {
   const runsSubscription = runsObservable.subscribe({
     next(latestRun) {
       if (!latestRun) {
-        // No runs yet — clear any leftover state.
-        unsubscribeEvents()
-        if (lastRunId !== null) {
-          lastRunId = null
-          store.getState().clearRunStatus()
-        }
+        // Transient `null` emissions can happen mid-`put()` (Dexie liveQuery
+        // re-runs the query before the write fully commits — most reliably
+        // seen under fake-indexeddb). Treat empty emissions as "nothing
+        // changed" so a same-id update doesn't double-clear the canvas
+        // rings. If the user genuinely deletes the only run mid-edit, the
+        // stale rings stay until they navigate away — acceptable, since
+        // this is a best-effort visual hint.
         return
       }
       if (latestRun.id === lastRunId) return

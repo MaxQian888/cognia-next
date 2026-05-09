@@ -5533,16 +5533,16 @@
       "quickStartPreset": "快速预设",
       "selectPresetOrCustom": "选择预设或手动配置",
       "customConfiguration": "自定义配置",
-      "transport.stdio.label": "Stdio (本地进程)",
-      "transport.http.label": "HTTP (远程)",
-      "details.adapter": "适配器",
-      "details.surface": "接入面",
-      "details.supportTier": "支持级别",
-      "details.prerequisiteStatus": "前置条件",
-      "details.officialDocs": "官方文档",
-      "details.docsLink": "查看文档",
-      "details.limitation": "已知限制",
-      "details.recommendedActions": "建议操作"
+      "transportStdioLabel": "Stdio (本地进程)",
+      "transportHttpLabel": "HTTP (远程)",
+      "detailsAdapter": "适配器",
+      "detailsSurface": "接入面",
+      "detailsSupportTier": "支持级别",
+      "detailsPrerequisiteStatus": "前置条件",
+      "detailsOfficialDocs": "官方文档",
+      "detailsDocsLink": "查看文档",
+      "detailsLimitation": "已知限制",
+      "detailsRecommendedActions": "建议操作"
     }
   },
   "tools": {

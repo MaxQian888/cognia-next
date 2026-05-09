@@ -5533,16 +5533,16 @@
       "quickStartPreset": "Quick start preset",
       "selectPresetOrCustom": "Select a preset or configure manually",
       "customConfiguration": "Custom configuration",
-      "transport.stdio.label": "Stdio (local process)",
-      "transport.http.label": "HTTP (remote)",
-      "details.adapter": "Adapter",
-      "details.surface": "Surface",
-      "details.supportTier": "Support tier",
-      "details.prerequisiteStatus": "Prerequisite status",
-      "details.officialDocs": "Official docs",
-      "details.docsLink": "View documentation",
-      "details.limitation": "Limitation",
-      "details.recommendedActions": "Recommended actions"
+      "transportStdioLabel": "Stdio (local process)",
+      "transportHttpLabel": "HTTP (remote)",
+      "detailsAdapter": "Adapter",
+      "detailsSurface": "Surface",
+      "detailsSupportTier": "Support tier",
+      "detailsPrerequisiteStatus": "Prerequisite status",
+      "detailsOfficialDocs": "Official docs",
+      "detailsDocsLink": "View documentation",
+      "detailsLimitation": "Limitation",
+      "detailsRecommendedActions": "Recommended actions"
     }
   },
   "tools": {

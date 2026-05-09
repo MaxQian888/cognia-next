@@ -39,7 +39,14 @@ export default function DiscoverPage() {
   const skills = useLiveQuery<Skill[]>(() => listSkills(), []) ?? []
   const twinDrafts =
     useLiveQuery<TwinDraft[]>(
-      () => getDb().twinDrafts.orderBy("createdAt").reverse().toArray() as Promise<TwinDraft[]>,
+      // `createdAt` is not a Dexie index on twinDrafts (see lib/db/schema.ts),
+      // so use sortBy() — in-memory sort that does not require an index — and
+      // reverse the resulting array for newest-first.
+      () =>
+        getDb()
+          .twinDrafts.toCollection()
+          .sortBy("createdAt")
+          .then((arr) => arr.reverse() as TwinDraft[]),
       []
     ) ?? []
 
