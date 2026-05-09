@@ -211,7 +211,7 @@ export function KeybindingSettings({ trigger }: KeybindingSettingsProps) {
 
             {/* Conflicts Warning */}
             {hasConflicts && (
-              <div className="flex items-center gap-2 p-2 rounded-lg bg-yellow-500/10 text-yellow-600 dark:text-yellow-400">
+              <div className="flex items-center gap-2 p-2 rounded-lg bg-warning/10 text-warning">
                 <AlertTriangle className="h-4 w-4" />
                 <span className="text-sm">{t("keybindingConflicts")}</span>
               </div>
@@ -322,7 +322,7 @@ function KeybindingRow({
       className={cn(
         "flex items-center justify-between py-2 px-3 rounded-lg",
         isEditing && "bg-primary/10",
-        hasConflict && !isEditing && "bg-yellow-500/10"
+        hasConflict && !isEditing && "bg-warning/10"
       )}
     >
       <div className="flex items-center gap-2">
@@ -335,7 +335,7 @@ function KeybindingRow({
         {hasConflict && (
           <Tooltip>
             <TooltipTrigger>
-              <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" />
+              <AlertTriangle className="h-3.5 w-3.5 text-warning" />
             </TooltipTrigger>
             <TooltipContent>{t("conflictWarning")}</TooltipContent>
           </Tooltip>

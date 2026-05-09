@@ -64,15 +64,15 @@ export const CodeExecutionPanel = memo(function CodeExecutionPanel({
 
   const getStatusIcon = () => {
     if (isExecuting) {
-      return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+      return <Loader2 className="h-4 w-4 animate-spin text-primary" />
     }
     if (!result) {
       return <TerminalIcon className="h-4 w-4 text-muted-foreground" />
     }
     if (result.success) {
-      return <CheckCircle2 className="h-4 w-4 text-green-500" />
+      return <CheckCircle2 className="h-4 w-4 text-success" />
     }
-    return <XCircle className="h-4 w-4 text-red-500" />
+    return <XCircle className="h-4 w-4 text-destructive" />
   }
 
   const getStatusText = () => {
@@ -120,14 +120,14 @@ export const CodeExecutionPanel = memo(function CodeExecutionPanel({
           isStreaming={isExecuting}
           className="flex-1 rounded-none border-0"
         >
-          <TerminalHeader className="bg-zinc-950/95">
+          <TerminalHeader className="bg-popover">
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-2 text-sm text-zinc-400">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <TerminalIcon className="h-4 w-4" />
                 <span>{t("output")}</span>
               </div>
               {result && (
-                <div className="flex items-center gap-3 text-xs text-zinc-400">
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
                   <span className="flex items-center gap-1">
                     <Clock className="h-3 w-3" />
                     {result.executionTime}ms
@@ -136,7 +136,7 @@ export const CodeExecutionPanel = memo(function CodeExecutionPanel({
                     <span
                       className={cn(
                         "flex items-center gap-1",
-                        result.exitCode === 0 ? "text-green-400" : "text-red-400"
+                        result.exitCode === 0 ? "text-success" : "text-destructive"
                       )}
                     >
                       {t("exitCode")}: {result.exitCode}
@@ -155,7 +155,7 @@ export const CodeExecutionPanel = memo(function CodeExecutionPanel({
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-7 w-7 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+                          className="h-7 w-7 text-muted-foreground hover:bg-accent hover:text-foreground"
                           onClick={handleCopyOutput}
                           disabled={isCopying || !terminalOutput}
                           aria-label={t("copyOutput")}
@@ -168,7 +168,7 @@ export const CodeExecutionPanel = memo(function CodeExecutionPanel({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-7 w-7 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+                      className="h-7 w-7 text-muted-foreground hover:bg-accent hover:text-foreground"
                       onClick={onClear}
                       aria-label={t("clearOutput")}
                     >
@@ -183,7 +183,7 @@ export const CodeExecutionPanel = memo(function CodeExecutionPanel({
             <div className="space-y-2">
               {isExecuting && !result && (
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sm text-zinc-400">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     <span>{t("executingCode")}</span>
                   </div>
@@ -194,14 +194,16 @@ export const CodeExecutionPanel = memo(function CodeExecutionPanel({
               {result && (
                 <>
                   {/* Execution stats */}
-                  <div className="flex items-center gap-3 text-xs text-zinc-400">
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
                     <span>{getStatusText()}</span>
                   </div>
 
                   {/* stdout */}
                   {result.stdout && (
                     <div className="space-y-1">
-                      <div className="text-xs font-medium text-zinc-400">{t("output")}:</div>
+                      <div className="text-xs font-medium text-muted-foreground">
+                        {t("output")}:
+                      </div>
                       <pre className="p-2 rounded bg-muted text-xs sm:text-sm font-mono whitespace-pre-wrap overflow-x-auto">
                         {result.stdout}
                       </pre>
@@ -211,11 +213,11 @@ export const CodeExecutionPanel = memo(function CodeExecutionPanel({
                   {/* stderr */}
                   {result.stderr && (
                     <div className="space-y-1">
-                      <div className="text-xs font-medium text-red-600 flex items-center gap-1">
+                      <div className="text-xs font-medium text-destructive flex items-center gap-1">
                         <AlertTriangle className="h-3 w-3" />
                         {t("errors")}:
                       </div>
-                      <pre className="p-2 rounded bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 text-xs sm:text-sm font-mono whitespace-pre-wrap overflow-x-auto">
+                      <pre className="p-2 rounded bg-destructive/10 text-destructive text-xs sm:text-sm font-mono whitespace-pre-wrap overflow-x-auto">
                         {result.stderr}
                       </pre>
                     </div>
@@ -223,7 +225,7 @@ export const CodeExecutionPanel = memo(function CodeExecutionPanel({
 
                   {/* No output message */}
                   {!result.stdout && !result.stderr && result.success && (
-                    <div className="text-sm italic text-zinc-400">{t("noOutput")}</div>
+                    <div className="text-sm italic text-muted-foreground">{t("noOutput")}</div>
                   )}
                 </>
               )}

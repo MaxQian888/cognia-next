@@ -184,7 +184,7 @@ export function CollaborationPanel({
             {t("collaboration")}
             <Badge
               variant="outline"
-              className="ml-1 text-[10px] px-1.5 py-0 text-yellow-600 border-yellow-400"
+              className="ml-1 text-[10px] px-1.5 py-0 text-warning border-warning"
             >
               {t("experimental")}
             </Badge>
@@ -273,7 +273,7 @@ export function CollaborationPanel({
                     <TooltipTrigger asChild>
                       <Button variant="outline" className="flex-1" onClick={handleCopyShareLink}>
                         {copied ? (
-                          <Check className="h-4 w-4 mr-2 text-green-500" />
+                          <Check className="h-4 w-4 mr-2 text-success" />
                         ) : (
                           <Link2 className="h-4 w-4 mr-2" />
                         )}
@@ -387,7 +387,7 @@ function ParticipantItem({ participant }: ParticipantItemProps) {
         <p className="text-xs text-muted-foreground">
           {participant.isOnline ? (
             <span className="flex items-center gap-1">
-              <Circle className="h-2 w-2 fill-green-500 text-green-500" />
+              <Circle className="h-2 w-2 fill-success text-success" />
               {t("online")}
             </span>
           ) : (

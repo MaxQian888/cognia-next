@@ -91,12 +91,8 @@ export function VersionDiffView({
         </div>
       )}
       <div className="ml-auto flex items-center gap-1">
-        <Badge className="bg-emerald-500/10 text-[10px] text-emerald-600 dark:text-emerald-400">
-          +{additions}
-        </Badge>
-        <Badge className="bg-red-500/10 text-[10px] text-red-600 dark:text-red-400">
-          -{removals}
-        </Badge>
+        <Badge className="bg-success/10 text-[10px] text-success">+{additions}</Badge>
+        <Badge className="bg-destructive/10 text-[10px] text-destructive">-{removals}</Badge>
       </div>
     </div>
   )
@@ -130,9 +126,8 @@ export function VersionDiffView({
                 key={`${line.type}-${i}`}
                 className={cn(
                   "flex items-baseline gap-2 rounded px-1 py-0.5",
-                  line.type === "added" &&
-                    "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-                  line.type === "removed" && "bg-red-500/10 text-red-700 dark:text-red-300"
+                  line.type === "added" && "bg-success/10 text-success",
+                  line.type === "removed" && "bg-destructive/10 text-destructive"
                 )}
               >
                 <span className="w-10 shrink-0 select-none text-right text-[10px] tabular-nums text-muted-foreground">

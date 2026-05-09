@@ -86,13 +86,13 @@ export const SuggestionItem = memo(function SuggestionItem({
           <CollapsibleContent className="rounded-md border bg-muted/30 p-2 space-y-2 text-xs sm:text-sm font-mono">
             <div className="space-y-1">
               <div className="text-[10px] text-muted-foreground font-sans">{t("original")}:</div>
-              <pre className="p-2 rounded bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 whitespace-pre-wrap overflow-x-auto">
+              <pre className="p-2 rounded bg-destructive/10 text-destructive whitespace-pre-wrap overflow-x-auto">
                 {suggestion.originalText}
               </pre>
             </div>
             <div className="space-y-1">
               <div className="text-[10px] text-muted-foreground font-sans">{t("suggested")}:</div>
-              <pre className="p-2 rounded bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-300 whitespace-pre-wrap overflow-x-auto">
+              <pre className="p-2 rounded bg-success/10 text-success whitespace-pre-wrap overflow-x-auto">
                 {suggestion.suggestedText}
               </pre>
             </div>
