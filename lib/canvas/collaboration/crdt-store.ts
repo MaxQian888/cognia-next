@@ -10,7 +10,26 @@ import type {
   ContentUpdate,
   CollaborationUpdate,
 } from "@/types/canvas/collaboration"
+import * as canvasSessionsDb from "@/lib/db/canvas-sessions"
 import { loggers } from "@/lib/logger"
+
+function persistSessionMetadata(label: string, session: CollaborativeSession): void {
+  canvasSessionsDb.upsertSession(session).catch((err) => {
+    loggers.canvas.warn(`crdt-store ${label} persist failed`, {
+      sessionId: session.id,
+      error: String(err),
+    })
+  })
+}
+
+function persistSessionClose(sessionId: string): void {
+  canvasSessionsDb.closeSession(sessionId).catch((err) => {
+    loggers.canvas.warn("crdt-store close persist failed", {
+      sessionId,
+      error: String(err),
+    })
+  })
+}
 
 export interface CRDTDocument {
   id: string
@@ -76,6 +95,8 @@ export class CanvasCRDTStore {
     }
     this.sessions.set(sessionId, session)
 
+    persistSessionMetadata("createSession", session)
+
     return session
   }
 
@@ -91,6 +112,7 @@ export class CanvasCRDTStore {
     }
 
     session.updatedAt = new Date()
+    persistSessionMetadata("joinSession", session)
     this.notifyListeners(sessionId, {
       type: "participant",
       participantId: participant.id,
@@ -110,6 +132,7 @@ export class CanvasCRDTStore {
     }
 
     session.updatedAt = new Date()
+    persistSessionMetadata("leaveSession", session)
     this.notifyListeners(sessionId, {
       type: "participant",
       participantId,
@@ -258,6 +281,29 @@ export class CanvasCRDTStore {
       this.sessions.delete(sessionId)
       this.documents.delete(session.documentId)
       this.listeners.delete(sessionId)
+      persistSessionClose(sessionId)
+    }
+  }
+
+  /**
+   * Pull the most-recent persisted sessions back into memory. Used on app
+   * startup so the UI can list previous collab sessions; does NOT
+   * re-establish the WebSocket transport — that's the hook layer's job.
+   */
+  async restoreRecentSessions(limit = 20): Promise<CollaborativeSession[]> {
+    try {
+      const sessions = await canvasSessionsDb.listRecent(limit)
+      for (const s of sessions) {
+        if (!this.sessions.has(s.id)) {
+          this.sessions.set(s.id, s)
+        }
+      }
+      return sessions
+    } catch (err) {
+      loggers.canvas.warn("crdt-store restoreRecentSessions failed", {
+        error: String(err),
+      })
+      return []
     }
   }
 

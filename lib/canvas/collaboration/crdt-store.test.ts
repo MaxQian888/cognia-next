@@ -2,8 +2,23 @@
  * Comprehensive Tests for CRDT Store
  */
 
+import "fake-indexeddb/auto"
 import { CanvasCRDTStore, crdtStore, type CRDTOperation } from "./crdt-store"
 import type { Participant, ContentUpdate } from "@/types/canvas/collaboration"
+import * as canvasSessionsDb from "@/lib/db/canvas-sessions"
+import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+
+async function freshDb() {
+  await getDb().delete()
+  __resetDbForTesting()
+  getDb()
+  await whenSeeded()
+}
+
+async function flushMicrotasks() {
+  // Give the fire-and-forget Dexie writes a chance to land.
+  await new Promise((r) => setTimeout(r, 5))
+}
 
 const createParticipant = (id: string, name: string, isOnline = true): Participant => ({
   id,
@@ -388,6 +403,134 @@ describe("CanvasCRDTStore", () => {
       expect(typeof crdtStore.closeSession).toBe("function")
       expect(typeof crdtStore.serializeState).toBe("function")
       expect(typeof crdtStore.deserializeState).toBe("function")
+      expect(typeof crdtStore.restoreRecentSessions).toBe("function")
     })
+  })
+})
+
+describe("CanvasCRDTStore Dexie persistence", () => {
+  let store: CanvasCRDTStore
+
+  beforeEach(async () => {
+    await freshDb()
+    store = new CanvasCRDTStore()
+    store.setLocalParticipantId("user-1")
+  })
+
+  it("createSession persists session metadata to Dexie", async () => {
+    const session = store.createSession("doc1", "hello")
+    await flushMicrotasks()
+    const persisted = await canvasSessionsDb.getSession(session.id)
+    expect(persisted).toBeDefined()
+    expect(persisted?.documentId).toBe("doc1")
+    expect(persisted?.isActive).toBe(true)
+  })
+
+  it("joinSession persists the updated participant list", async () => {
+    const session = store.createSession("doc1", "hello")
+    await flushMicrotasks()
+    store.joinSession(session.id, createParticipant("user-2", "Bob"))
+    await flushMicrotasks()
+    const persisted = await canvasSessionsDb.getSession(session.id)
+    expect(persisted?.participants).toHaveLength(1)
+    expect(persisted?.participants[0].id).toBe("user-2")
+  })
+
+  it("leaveSession persists the participant offline state", async () => {
+    const session = store.createSession("doc1", "hello")
+    store.joinSession(session.id, createParticipant("user-2", "Bob"))
+    await flushMicrotasks()
+    store.leaveSession(session.id, "user-2")
+    await flushMicrotasks()
+    const persisted = await canvasSessionsDb.getSession(session.id)
+    expect(persisted?.participants[0].isOnline).toBe(false)
+  })
+
+  it("closeSession marks the row inactive in Dexie", async () => {
+    const session = store.createSession("doc1", "hello")
+    await flushMicrotasks()
+    store.closeSession(session.id)
+    await flushMicrotasks()
+    const persisted = await canvasSessionsDb.getSession(session.id)
+    expect(persisted?.isActive).toBe(false)
+  })
+
+  it("restoreRecentSessions rehydrates sessions into the in-memory map", async () => {
+    // Seed Dexie out-of-band, then create a fresh store and restore.
+    const fresh = new CanvasCRDTStore()
+    fresh.setLocalParticipantId("user-1")
+    await canvasSessionsDb.upsertSession({
+      id: "sess_seed",
+      documentId: "doc_seed",
+      ownerId: "user-1",
+      participants: [],
+      createdAt: new Date(1000),
+      updatedAt: new Date(1000),
+      isActive: true,
+      permissions: { canEdit: true, canComment: true, canShare: true, canExport: true },
+    })
+    const restored = await fresh.restoreRecentSessions()
+    expect(restored).toHaveLength(1)
+    expect(fresh.getSession("sess_seed")).toBeDefined()
+  })
+
+  it("restoreRecentSessions does not overwrite already-loaded sessions", async () => {
+    const session = store.createSession("doc1", "live")
+    await flushMicrotasks()
+    // Mutate the row in Dexie behind the store's back.
+    const stored = await canvasSessionsDb.getSession(session.id)
+    if (stored) {
+      stored.ownerId = "different-owner"
+      await canvasSessionsDb.upsertSession(stored)
+    }
+    await store.restoreRecentSessions()
+    // Live in-memory copy wins; we don't trample on the active session.
+    expect(store.getSession(session.id)?.ownerId).toBe("user-1")
+  })
+
+  it("restoreRecentSessions returns [] when Dexie throws", async () => {
+    await getDb().close()
+    const fresh = new CanvasCRDTStore()
+    expect(await fresh.restoreRecentSessions()).toEqual([])
+  })
+
+  it("persistSessionMetadata catch handler logs without throwing", async () => {
+    await getDb().close()
+    expect(() => {
+      store.createSession("doc1", "x")
+    }).not.toThrow()
+    await flushMicrotasks()
+  })
+
+  it("applyRemoteUpdate exercises the vector-clock conflict branches", () => {
+    // Touches canApplyOperation: skip-self branch + value > localValue + 1 reject.
+    const session = store.createSession("doc1", "abc")
+    const ahead: CRDTOperation = {
+      id: "op-ahead",
+      type: "insert",
+      position: 0,
+      text: "X",
+      origin: "remote-1",
+      timestamp: Date.now(),
+      // Vector clock claims remote-1 is way ahead (jumps past our local clock).
+      vectorClock: new Map([
+        ["remote-1", 1],
+        ["other", 5], // localValue is 0; 5 > 0+1 should reject
+      ]),
+    }
+    const before = store.getDocumentContent(session.id)
+    store.applyRemoteUpdate(session.id, ahead)
+    // Operation rejected — content unchanged.
+    expect(store.getDocumentContent(session.id)).toBe(before)
+  })
+
+  it("persistSessionClose catch handler logs without throwing", async () => {
+    const session = store.createSession("doc1", "x")
+    await flushMicrotasks()
+    await getDb().close()
+    expect(() => {
+      store.closeSession(session.id)
+    }).not.toThrow()
+    await flushMicrotasks()
   })
 })
