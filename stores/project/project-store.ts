@@ -18,6 +18,7 @@
 import { create } from "zustand"
 import { nanoid } from "nanoid"
 import type { Project, KnowledgeFile } from "@/types"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 
 export interface CreateProjectOptions {
   name?: string
@@ -87,28 +88,43 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       metadata: options.metadata,
     }
     set((state) => ({ projects: [...state.projects, project] }))
+    void getPluginEventHooks().dispatchProjectCreate(project)
     return project
   },
 
   updateProject: (id, updates) => {
+    let updated: Project | undefined
     set((state) => ({
-      projects: state.projects.map((p) =>
-        p.id === id ? { ...p, ...updates, updatedAt: nowDate() } : p
-      ),
+      projects: state.projects.map((p) => {
+        if (p.id !== id) return p
+        const next = { ...p, ...updates, updatedAt: nowDate() }
+        updated = next
+        return next
+      }),
     }))
+    if (updated) {
+      void getPluginEventHooks().dispatchProjectUpdate(updated, updates as Partial<Project>)
+    }
   },
 
   deleteProject: (id) => {
+    let removed = false
     set((state) => {
       const projects = state.projects.filter((p) => p.id !== id)
+      removed = projects.length !== state.projects.length
       const activeProjectId = state.activeProjectId === id ? null : state.activeProjectId
       return { projects, activeProjectId }
     })
+    if (removed) {
+      void getPluginEventHooks().dispatchProjectDelete(id)
+    }
   },
 
   setActiveProject: (id) => {
+    const previousProjectId = get().activeProjectId
     if (id === null) {
       set({ activeProjectId: null })
+      getPluginEventHooks().dispatchProjectSwitch(null, previousProjectId)
       return
     }
     const exists = get().projects.some((p) => p.id === id)
@@ -117,12 +133,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // (Dexie load is async). The next render reconciles. Don't throw —
       // plugins shouldn't have to await load order.
       set({ activeProjectId: id })
+      getPluginEventHooks().dispatchProjectSwitch(id, previousProjectId)
       return
     }
     set((state) => ({
       activeProjectId: id,
       projects: state.projects.map((p) => (p.id === id ? { ...p, lastAccessedAt: nowDate() } : p)),
     }))
+    getPluginEventHooks().dispatchProjectSwitch(id, previousProjectId)
   },
 
   archiveProject: (id) => {
@@ -149,27 +167,38 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       createdAt: now,
       updatedAt: now,
     }
+    let added = false
     set((state) => ({
-      projects: state.projects.map((p) =>
-        p.id === projectId
-          ? { ...p, knowledgeBase: [...p.knowledgeBase, newFile], updatedAt: now }
-          : p
-      ),
+      projects: state.projects.map((p) => {
+        if (p.id !== projectId) return p
+        added = true
+        return { ...p, knowledgeBase: [...p.knowledgeBase, newFile], updatedAt: now }
+      }),
     }))
+    if (added) {
+      void getPluginEventHooks().dispatchKnowledgeFileAdd(projectId, newFile)
+    }
   },
 
   removeKnowledgeFile: (projectId, fileId) => {
+    let removed = false
     set((state) => ({
-      projects: state.projects.map((p) =>
-        p.id === projectId
-          ? {
-              ...p,
-              knowledgeBase: p.knowledgeBase.filter((f) => f.id !== fileId),
-              updatedAt: nowDate(),
-            }
-          : p
-      ),
+      projects: state.projects.map((p) => {
+        if (p.id !== projectId) return p
+        const nextKb = p.knowledgeBase.filter((f) => f.id !== fileId)
+        if (nextKb.length !== p.knowledgeBase.length) {
+          removed = true
+        }
+        return {
+          ...p,
+          knowledgeBase: nextKb,
+          updatedAt: nowDate(),
+        }
+      }),
     }))
+    if (removed) {
+      getPluginEventHooks().dispatchKnowledgeFileRemove(projectId, fileId)
+    }
   },
 
   updateKnowledgeFile: (projectId, fileId, content) => {
@@ -189,10 +218,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   addSessionToProject: (projectId, sessionId) => {
+    let linked = false
     set((state) => ({
       projects: state.projects.map((p) => {
         if (p.id !== projectId) return p
         if (p.sessionIds.includes(sessionId)) return p
+        linked = true
         const sessionIds = [...p.sessionIds, sessionId]
         return {
           ...p,
@@ -202,13 +233,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }
       }),
     }))
+    if (linked) {
+      getPluginEventHooks().dispatchSessionLinked(projectId, sessionId)
+    }
   },
 
   removeSessionFromProject: (projectId, sessionId) => {
+    let unlinked = false
     set((state) => ({
       projects: state.projects.map((p) => {
         if (p.id !== projectId) return p
         const sessionIds = p.sessionIds.filter((id) => id !== sessionId)
+        if (sessionIds.length !== p.sessionIds.length) {
+          unlinked = true
+        }
         return {
           ...p,
           sessionIds,
@@ -217,6 +255,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }
       }),
     }))
+    if (unlinked) {
+      getPluginEventHooks().dispatchSessionUnlinked(projectId, sessionId)
+    }
   },
 
   addTag: (projectId, tag) => {

@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react"
 import { useMemberStatus, useUIStore, type SelectedGuild } from "./ui-store"
+import { getPluginEventHooks } from "@/lib/plugin"
 
 const RESET = {
   selectedGuild: { kind: "dm" } as SelectedGuild,
@@ -202,6 +203,45 @@ describe("useUIStore", () => {
       expect(parsed.state.stopRequestedFor).toBeUndefined()
       expect(parsed.state.pendingSettingsRequest).toBeUndefined()
     })
+  })
+})
+
+describe("plugin event dispatch — onSidebarToggle", () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    useUIStore.setState(RESET)
+  })
+
+  it("toggleSidebar dispatches the negated visibility through getPluginEventHooks", () => {
+    const spy = jest
+      .spyOn(getPluginEventHooks(), "dispatchSidebarToggle")
+      .mockImplementation(() => {})
+    try {
+      const { result } = renderHook(() => useUIStore())
+      // Default sidebarCollapsed === false → toggle makes it collapsed === true → visible === false
+      act(() => result.current.toggleSidebar())
+      expect(spy).toHaveBeenLastCalledWith(false)
+      // Toggle back: collapsed === false → visible === true
+      act(() => result.current.toggleSidebar())
+      expect(spy).toHaveBeenLastCalledWith(true)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("setSidebarCollapsed dispatches once with the inverted boolean", () => {
+    const spy = jest
+      .spyOn(getPluginEventHooks(), "dispatchSidebarToggle")
+      .mockImplementation(() => {})
+    try {
+      const { result } = renderHook(() => useUIStore())
+      act(() => result.current.setSidebarCollapsed(true))
+      expect(spy).toHaveBeenLastCalledWith(false)
+      act(() => result.current.setSidebarCollapsed(false))
+      expect(spy).toHaveBeenLastCalledWith(true)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
 

@@ -1,8 +1,9 @@
 // AES-GCM + PBKDF2-SHA256 + SHA-256 helpers for the v3 backup format.
 //
-// Adapted directly from Cognia's `lib/storage/persistence/crypto.ts`. Works in
-// both the browser (`globalThis.crypto.subtle`) and Node's test runtime
-// (`node:crypto`'s `webcrypto.subtle`).
+// Web Crypto API only. `globalThis.crypto.subtle` is available in every
+// modern browser, in Capacitor's WebView, and in Node 20+ test runtimes —
+// so there is no Node-specific fallback. Importing `node:crypto` would
+// only force bundlers to add a polyfill the mobile bundle never needs.
 
 import type { EncryptedEnvelopeV1, BackupManifestV3 } from "./types"
 import { IntegrityCheckFailedError } from "./types"
@@ -36,16 +37,16 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 }
 
-async function getSubtleCrypto(): Promise<SubtleCrypto> {
-  if (globalThis.crypto?.subtle) {
-    return globalThis.crypto.subtle
+function getSubtleCrypto(): SubtleCrypto {
+  const subtle = globalThis.crypto?.subtle
+  if (!subtle) {
+    throw new Error("Web Crypto API (crypto.subtle) is required but not available in this runtime")
   }
-  const { webcrypto } = await import("node:crypto")
-  return webcrypto.subtle as unknown as SubtleCrypto
+  return subtle
 }
 
 async function sha256Bytes(input: Uint8Array): Promise<Uint8Array> {
-  const subtle = await getSubtleCrypto()
+  const subtle = getSubtleCrypto()
   const digest = await subtle.digest("SHA-256", toArrayBuffer(input))
   return new Uint8Array(digest)
 }
@@ -63,7 +64,7 @@ async function deriveAesKey(
   salt: Uint8Array,
   iterations = PBKDF2_ITERATIONS
 ): Promise<CryptoKey> {
-  const subtle = await getSubtleCrypto()
+  const subtle = getSubtleCrypto()
   const keyMaterial = await subtle.importKey(
     "raw",
     toArrayBuffer(new TextEncoder().encode(passphrase)),
@@ -103,7 +104,7 @@ export async function encryptBackupPackage(
   passphrase: string,
   manifest: Omit<BackupManifestV3, "integrity">
 ): Promise<EncryptedEnvelopeV1> {
-  const subtle = await getSubtleCrypto()
+  const subtle = getSubtleCrypto()
   const salt = randomBytes(16)
   const iv = randomBytes(12)
   const key = await deriveAesKey(passphrase, salt)
@@ -140,7 +141,7 @@ export async function decryptBackupPackage(
   envelope: EncryptedEnvelopeV1,
   passphrase: string
 ): Promise<string> {
-  const subtle = await getSubtleCrypto()
+  const subtle = getSubtleCrypto()
   const salt = decodeBase64(envelope.kdf.salt)
   const iv = decodeBase64(envelope.iv)
   const ciphertext = decodeBase64(envelope.ciphertext)

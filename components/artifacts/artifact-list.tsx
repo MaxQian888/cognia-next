@@ -41,6 +41,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useChatStore } from "@/stores/chat"
+import { getPluginEventHooks } from "@/lib/plugin"
 import type { Artifact } from "@/types"
 import { ARTIFACT_TYPES, ARTIFACT_TYPE_KEYS, PREVIEWABLE_TYPES } from "@/lib/artifacts"
 import { useArtifactList } from "@/hooks/artifacts/use-artifact-list"
@@ -207,7 +208,19 @@ export function ArtifactList({
               artifact.createdAt instanceof Date ? artifact.createdAt : new Date(artifact.createdAt)
 
             return (
-              <ContextMenu key={artifact.id}>
+              <ContextMenu
+                key={artifact.id}
+                onOpenChange={(open) => {
+                  if (open) {
+                    // Plugin host: announce the artifact-list context-menu open
+                    // so plugins can observe / react (Phase 1 dispatch only).
+                    void getPluginEventHooks().dispatchContextMenuShow({
+                      type: "artifact-list",
+                      target: { artifactId: artifact.id, artifactType: artifact.type },
+                    })
+                  }
+                }}
+              >
                 <ContextMenuTrigger>
                   <Button
                     data-testid={`artifact-list-item-${artifact.id}`}

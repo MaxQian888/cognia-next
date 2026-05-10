@@ -2,6 +2,36 @@
  * @jest-environment jsdom
  */
 
+// Capture plugin-event dispatch calls so we can verify the canvas hook
+// wiring (Tier 2 of ADR 0016). The mock keeps the dispatch surface intact
+// for every other dispatcher the store calls but lets us spy on canvas
+// invocations.
+const mockHooksManager = {
+  dispatchArtifactCreate: jest.fn(),
+  dispatchArtifactUpdate: jest.fn(),
+  dispatchArtifactDelete: jest.fn(),
+  dispatchArtifactOpen: jest.fn(),
+  dispatchArtifactClose: jest.fn(),
+  dispatchCanvasCreate: jest.fn(),
+  dispatchCanvasUpdate: jest.fn(),
+  dispatchCanvasDelete: jest.fn(),
+  dispatchCanvasSwitch: jest.fn(),
+  dispatchCanvasContentChange: jest.fn(),
+  dispatchCanvasVersionSave: jest.fn(),
+  dispatchCanvasVersionRestore: jest.fn(),
+  dispatchCanvasSelection: jest.fn(),
+  dispatchPanelOpen: jest.fn(),
+  dispatchPanelClose: jest.fn(),
+}
+
+jest.mock("@/lib/plugin", () => ({
+  getPluginEventHooks: jest.fn(() => mockHooksManager),
+}))
+
+// Reset the rate-limiter singleton so the high-frequency dispatch tests
+// start with a full token bucket.
+import { resetPluginRateLimiter } from "@/lib/plugin/security/rate-limiter"
+
 import { useArtifactStore } from "./artifact-store"
 
 const initial = {
@@ -28,6 +58,8 @@ const initial = {
 beforeEach(() => {
   localStorage.clear()
   useArtifactStore.setState(initial)
+  jest.clearAllMocks()
+  resetPluginRateLimiter()
 })
 
 describe("createArtifact", () => {
@@ -116,6 +148,22 @@ describe("duplicateArtifact", () => {
 
   it("returns null for unknown id", () => {
     expect(useArtifactStore.getState().duplicateArtifact("missing")).toBeNull()
+  })
+})
+
+describe("plugin event dispatch — onPanelOpen / onPanelClose", () => {
+  it("openPanel dispatches onPanelOpen with the artifact:<view> id", () => {
+    useArtifactStore.getState().openPanel("canvas")
+    expect(mockHooksManager.dispatchPanelOpen).toHaveBeenCalledWith("artifact:canvas")
+    useArtifactStore.getState().openPanel("artifact")
+    expect(mockHooksManager.dispatchPanelOpen).toHaveBeenLastCalledWith("artifact:artifact")
+  })
+
+  it("closePanel dispatches onPanelClose with the previously-active view", () => {
+    useArtifactStore.getState().openPanel("analysis")
+    mockHooksManager.dispatchPanelClose.mockClear()
+    useArtifactStore.getState().closePanel()
+    expect(mockHooksManager.dispatchPanelClose).toHaveBeenCalledWith("artifact:analysis")
   })
 })
 
@@ -1285,5 +1333,173 @@ describe("auto-save retention", () => {
     const versions = useArtifactStore.getState().canvasDocuments[id].versions || []
     // Cap is 30; we just added one more on top of 35, then retention prunes.
     expect(versions.length).toBeLessThanOrEqual(30)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Plugin canvas hook wiring (ADR 0016 Tier 2)
+// ---------------------------------------------------------------------------
+
+describe("canvas plugin hook dispatches", () => {
+  it("createCanvasDocument fires onCanvasCreate + onCanvasSwitch", () => {
+    const id = useArtifactStore.getState().createCanvasDocument({
+      title: "Doc",
+      content: "v1",
+      language: "javascript",
+      type: "code",
+    })
+    expect(mockHooksManager.dispatchCanvasCreate).toHaveBeenCalledTimes(1)
+    const created = mockHooksManager.dispatchCanvasCreate.mock.calls[0][0] as { id: string }
+    expect(created.id).toBe(id)
+    expect(mockHooksManager.dispatchCanvasSwitch).toHaveBeenCalledWith(id)
+  })
+
+  it("updateCanvasDocument fires onCanvasUpdate (always) and onCanvasContentChange (only on content change)", () => {
+    const id = useArtifactStore.getState().createCanvasDocument({
+      title: "Doc",
+      content: "v1",
+      language: "javascript",
+      type: "code",
+    })
+    mockHooksManager.dispatchCanvasUpdate.mockClear()
+    mockHooksManager.dispatchCanvasContentChange.mockClear()
+
+    // Title-only update — should fire onCanvasUpdate, NOT onCanvasContentChange.
+    useArtifactStore.getState().updateCanvasDocument(id, { title: "Renamed" })
+    expect(mockHooksManager.dispatchCanvasUpdate).toHaveBeenCalledTimes(1)
+    expect(mockHooksManager.dispatchCanvasContentChange).not.toHaveBeenCalled()
+
+    // Content update — should fire BOTH onCanvasUpdate and onCanvasContentChange.
+    useArtifactStore.getState().updateCanvasDocument(id, { content: "v2" })
+    expect(mockHooksManager.dispatchCanvasUpdate).toHaveBeenCalledTimes(2)
+    expect(mockHooksManager.dispatchCanvasContentChange).toHaveBeenCalledTimes(1)
+    expect(mockHooksManager.dispatchCanvasContentChange).toHaveBeenCalledWith(id, "v2", "v1")
+  })
+
+  it("updateCanvasDocument is a no-op for unknown ids and does NOT dispatch", () => {
+    useArtifactStore.getState().updateCanvasDocument("missing", { content: "x" })
+    expect(mockHooksManager.dispatchCanvasUpdate).not.toHaveBeenCalled()
+    expect(mockHooksManager.dispatchCanvasContentChange).not.toHaveBeenCalled()
+  })
+
+  it("updateCanvasDocument with editorContext.selection fires onCanvasSelection (with offsets)", () => {
+    const id = useArtifactStore.getState().createCanvasDocument({
+      title: "Doc",
+      content: "abc\ndef",
+      language: "javascript",
+      type: "code",
+    })
+    mockHooksManager.dispatchCanvasSelection.mockClear()
+    useArtifactStore.getState().updateCanvasDocument(id, {
+      editorContext: {
+        selection: {
+          startLineNumber: 1,
+          startColumn: 1,
+          endLineNumber: 2,
+          endColumn: 2,
+        } as never,
+      },
+    })
+    expect(mockHooksManager.dispatchCanvasSelection).toHaveBeenCalledTimes(1)
+    const [docId, payload] = mockHooksManager.dispatchCanvasSelection.mock.calls[0]
+    expect(docId).toBe(id)
+    expect(payload).toMatchObject({ start: 0, end: 5 })
+    // text spans the selection
+    expect((payload as { text: string }).text).toBe("abc\nd")
+  })
+
+  it("deleteCanvasDocument fires onCanvasDelete; onCanvasSwitch(null) fires when active", () => {
+    const id = useArtifactStore.getState().createCanvasDocument({
+      title: "Doc",
+      content: "v1",
+      language: "javascript",
+      type: "code",
+    })
+    mockHooksManager.dispatchCanvasDelete.mockClear()
+    mockHooksManager.dispatchCanvasSwitch.mockClear()
+    useArtifactStore.getState().deleteCanvasDocument(id)
+    expect(mockHooksManager.dispatchCanvasDelete).toHaveBeenCalledWith(id)
+    expect(mockHooksManager.dispatchCanvasSwitch).toHaveBeenCalledWith(null)
+  })
+
+  it("deleteCanvasDocument is silent for unknown ids", () => {
+    useArtifactStore.getState().deleteCanvasDocument("missing")
+    expect(mockHooksManager.dispatchCanvasDelete).not.toHaveBeenCalled()
+  })
+
+  it("setActiveCanvas fires onCanvasSwitch only when the active id changes", () => {
+    const id = useArtifactStore.getState().createCanvasDocument({
+      title: "Doc",
+      content: "v1",
+      language: "javascript",
+      type: "code",
+    })
+    mockHooksManager.dispatchCanvasSwitch.mockClear()
+    // No-op: same active id.
+    useArtifactStore.getState().setActiveCanvas(id)
+    expect(mockHooksManager.dispatchCanvasSwitch).not.toHaveBeenCalled()
+    // Switch to null
+    useArtifactStore.getState().setActiveCanvas(null)
+    expect(mockHooksManager.dispatchCanvasSwitch).toHaveBeenCalledWith(null)
+  })
+
+  it("saveCanvasVersion fires onCanvasVersionSave with the new version id", () => {
+    const id = useArtifactStore.getState().createCanvasDocument({
+      title: "Doc",
+      content: "v1",
+      language: "javascript",
+      type: "code",
+    })
+    mockHooksManager.dispatchCanvasVersionSave.mockClear()
+    const v = useArtifactStore.getState().saveCanvasVersion(id, "first")
+    expect(mockHooksManager.dispatchCanvasVersionSave).toHaveBeenCalledWith(id, v!.id)
+  })
+
+  it("restoreCanvasVersion fires onCanvasVersionRestore on success and stays silent on failure", () => {
+    const id = useArtifactStore.getState().createCanvasDocument({
+      title: "Doc",
+      content: "v1",
+      language: "javascript",
+      type: "code",
+    })
+    const v1 = useArtifactStore.getState().saveCanvasVersion(id, "first")
+    mockHooksManager.dispatchCanvasVersionRestore.mockClear()
+    useArtifactStore.getState().restoreCanvasVersion(id, v1!.id)
+    expect(mockHooksManager.dispatchCanvasVersionRestore).toHaveBeenCalledWith(id, v1!.id)
+
+    // Unknown version id should NOT dispatch.
+    mockHooksManager.dispatchCanvasVersionRestore.mockClear()
+    useArtifactStore.getState().restoreCanvasVersion(id, "missing-version")
+    expect(mockHooksManager.dispatchCanvasVersionRestore).not.toHaveBeenCalled()
+  })
+
+  it("rate-limiter caps onCanvasContentChange dispatches under burst load", () => {
+    // Freeze the wall clock so the token bucket cannot refill mid-burst.
+    // The limiter uses Date.now() for refill accounting; without freezing,
+    // the 100 rapid iterations span enough real time (~70ms) for the
+    // 30/sec refill to leak 1-2 extra dispatches through.
+    const realDateNow = Date.now
+    const frozen = realDateNow()
+    Date.now = () => frozen
+    try {
+      const id = useArtifactStore.getState().createCanvasDocument({
+        title: "Doc",
+        content: "v0",
+        language: "javascript",
+        type: "code",
+      })
+      mockHooksManager.dispatchCanvasContentChange.mockClear()
+
+      // Fire 100 rapid content updates. Bucket capacity is 30, so the
+      // limiter should drop everything past 30 within the same tick.
+      for (let i = 1; i <= 100; i += 1) {
+        useArtifactStore.getState().updateCanvasDocument(id, { content: `v${i}` })
+      }
+      expect(mockHooksManager.dispatchCanvasContentChange.mock.calls.length).toBeLessThanOrEqual(30)
+      // But onCanvasUpdate is NOT rate-limited — every mutation fires one.
+      expect(mockHooksManager.dispatchCanvasUpdate.mock.calls.length).toBe(100)
+    } finally {
+      Date.now = realDateNow
+    }
   })
 })

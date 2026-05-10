@@ -580,6 +580,19 @@ export interface AppSettings {
    * available regardless. Trailing slash is stripped at read time.
    */
   skillsMpBaseUrl?: string
+  /**
+   * Workflow ids the user has pinned in the mobile Workflows tab. Surfaced
+   * as a "Pinned" section above the main list. Lives in settings JSON to
+   * avoid a Dexie migration on the workflow row.
+   */
+  pinnedWorkflowIds?: string[]
+  /**
+   * Last time the user opened the Inbox tab (ms since epoch). Used by the
+   * mobile bottom Tab Bar to compute an unread badge over the Chat tab —
+   * count of `inboundLedger` rows newer than this timestamp. `0` / unset
+   * means "show every inbound row as unread".
+   */
+  lastInboxViewedAt?: number
 
   // ---- Text-to-Speech ----
   // The active TTS provider. See `lib/tts/types.ts` for the union.
@@ -850,6 +863,29 @@ export interface AppSettings {
    * round-trip on the hot path.
    */
   networkProxy?: import("@/types/network/proxy").NetworkProxySettings
+
+  /**
+   * Per-action biometric guard policy (Wave 1.5). Each flag, when true,
+   * requires a successful biometric verification before the named action
+   * runs. Devices with no biometric enrollment fall through unless the
+   * action's caller passes `fallthroughWhenUnavailable: false`.
+   */
+  biometricRequiredFor?: BiometricGuardPolicy
+}
+
+export interface BiometricGuardPolicy {
+  /** Sign-out / pair-revocation already wires this up; here for parity. */
+  deletePairing: boolean
+  /** Encrypted backup export from the mobile shell. */
+  exportBackup: boolean
+  /** Revealing secrets (API keys, OAuth tokens) in the UI. */
+  revealSecrets: boolean
+}
+
+export const DEFAULT_BIOMETRIC_GUARD: BiometricGuardPolicy = {
+  deletePairing: true,
+  exportBackup: false,
+  revealSecrets: false,
 }
 
 export interface BackupAutoSchedule {

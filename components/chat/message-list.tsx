@@ -93,8 +93,13 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
   const rowVirtualizer = useVirtualizer({
     count: totalCount,
     getScrollElement: () => scrollParentRef.current,
-    estimateSize: () => 120,
+    estimateSize: () => 200,
     overscan: 5,
+    // Without dynamic measurement every row sits at offset + estimateSize,
+    // so any row taller than the estimate (expanded tools, code blocks,
+    // images, long markdown) overlaps the next row. measureElement attaches
+    // a ResizeObserver to each row, so collapsible toggles also re-measure.
+    measureElement: (el) => el?.getBoundingClientRect().height ?? 0,
   })
 
   const virtualItems = rowVirtualizer.getVirtualItems()
@@ -168,6 +173,8 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
               return (
                 <div
                   key="thinking"
+                  data-index={virtualItem.index}
+                  ref={rowVirtualizer.measureElement}
                   style={{
                     position: "absolute",
                     top: 0,
@@ -193,6 +200,8 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
             return (
               <div
                 key={m.id}
+                data-index={virtualItem.index}
+                ref={rowVirtualizer.measureElement}
                 style={{
                   position: "absolute",
                   top: 0,

@@ -2,6 +2,7 @@
 
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
+import { getPluginEventHooks } from "@/lib/plugin"
 
 /**
  * Which "guild" the user is currently looking at — either the synthetic
@@ -103,8 +104,17 @@ export const useUIStore = create<UIState>()(
       setShowMemberList: (visible) => set({ showMemberList: visible }),
 
       sidebarCollapsed: false,
-      toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
-      setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
+      toggleSidebar: () =>
+        set((s) => {
+          const next = !s.sidebarCollapsed
+          // Plugin host: dispatch sidebar visibility change. Visible === !collapsed.
+          getPluginEventHooks().dispatchSidebarToggle(!next)
+          return { sidebarCollapsed: next }
+        }),
+      setSidebarCollapsed: (collapsed) => {
+        set({ sidebarCollapsed: collapsed })
+        getPluginEventHooks().dispatchSidebarToggle(!collapsed)
+      },
 
       scratchpadCollapsed: {},
       setScratchpadCollapsed: (sessionId, collapsed) =>

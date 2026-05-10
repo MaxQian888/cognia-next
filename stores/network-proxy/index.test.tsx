@@ -18,8 +18,8 @@ const tauriCore = require("@tauri-apps/api/core") as { invoke: jest.Mock }
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const tauri = require("@/lib/tauri") as { isTauri: jest.Mock }
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { useSettingsStore } =
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   require("@/stores/settings/settings-store") as typeof import("@/stores/settings/settings-store")
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const proxyStore = require("./index") as typeof import("./index")

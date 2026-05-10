@@ -406,9 +406,19 @@ describe("outbound-runner — Task 39 cross-conversation parallelism", () => {
 
     await runOnce(adapters)
 
-    // All 4 jobs should be sent
-    const jobs = await getDb().outboundQueue.toArray()
-    const sentJobs = jobs.filter((j) => j.status === "sent")
+    // The poll loop aborts after 80 ms, but the per-conversation lanes keep
+    // processing in-flight jobs asynchronously. Poll until all 4 jobs reach a
+    // terminal state instead of relying on the fixed wall-clock window — the
+    // 80 ms ceiling flakes under jest worker contention.
+    let jobs: OutboundJobRow[] = []
+    let sentJobs: OutboundJobRow[] = []
+    for (let i = 0; i < 50; i++) {
+      jobs = await getDb().outboundQueue.toArray()
+      sentJobs = jobs.filter((j) => j.status === "sent")
+      if (sentJobs.length === 4) break
+      await new Promise<void>((r) => setTimeout(r, 20))
+    }
+
     expect(sentJobs.length).toBe(4)
 
     // Within conversation A: A1 must be sent before A2 (by createdAt order)

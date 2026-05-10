@@ -24,6 +24,22 @@ jest.mock("@/lib/logger", () => ({
       error: (...args: unknown[]) => logError(...args),
     },
   },
+  // Pulled in transitively by @/lib/plugin → hooks-system → core/logger.
+  createLogger: () => ({
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: () => ({ debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() }),
+  }),
+}))
+
+// Stub the plugin event surface so the new dispatchShortcut wiring doesn't
+// drag the real plugin store (and its Tauri bindings) into this test.
+jest.mock("@/lib/plugin", () => ({
+  getPluginEventHooks: () => ({
+    dispatchShortcut: jest.fn().mockResolvedValue(false),
+  }),
 }))
 
 jest.mock("sonner", () => ({

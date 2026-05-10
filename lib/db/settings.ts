@@ -1,5 +1,5 @@
 import type { AppSettings, BuiltinToolsConfig } from "@/lib/claude/types"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BIOMETRIC_GUARD, DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 import { DEFAULT_TTS_SETTINGS } from "@/lib/tts/types"
 import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
@@ -37,6 +37,8 @@ const DEFAULTS: AppSettings = {
   telemetryEnabled: false,
   sttLanguage: "en-US",
   selectedMicId: undefined,
+  pinnedWorkflowIds: [],
+  lastInboxViewedAt: 0,
   // TTS defaults (mirror lib/tts/types.ts → DEFAULT_TTS_SETTINGS).
   ttsProvider: DEFAULT_TTS_SETTINGS.ttsProvider,
   systemVoice: DEFAULT_TTS_SETTINGS.systemVoice,
@@ -104,6 +106,11 @@ const DEFAULTS: AppSettings = {
 
   // Network proxy defaults — disabled until the user configures one.
   networkProxy: { ...DEFAULT_NETWORK_PROXY_SETTINGS },
+
+  // Biometric guard policy — Wave 1.5. Sign-out is on by default
+  // (matches the existing pair-onboarding behavior); export and reveal
+  // are off until the user opts in via Settings → 应用安全.
+  biometricRequiredFor: { ...DEFAULT_BIOMETRIC_GUARD },
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -124,6 +131,10 @@ export async function getSettings(): Promise<AppSettings> {
     customCssEnabled: row.customCssEnabled ?? false,
     importedVscodeThemes: row.importedVscodeThemes ?? [],
     networkProxy: { ...DEFAULT_NETWORK_PROXY_SETTINGS, ...(row.networkProxy ?? {}) },
+    biometricRequiredFor: {
+      ...DEFAULT_BIOMETRIC_GUARD,
+      ...(row.biometricRequiredFor ?? {}),
+    },
     id: SINGLETON_ID,
   }
 }

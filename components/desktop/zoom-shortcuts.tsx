@@ -2,6 +2,7 @@
 
 import { applyZoom, clampZoom, DEFAULT_ZOOM, ZOOM_STEP } from "@/lib/tauri/webview-zoom"
 import { loggers } from "@/lib/logger"
+import { getPluginEventHooks } from "@/lib/plugin"
 import { useSettingsStore } from "@/stores/settings"
 import { useEffect, useRef } from "react"
 
@@ -64,16 +65,19 @@ export function ZoomShortcuts() {
       // physical key on US/JP layouts).
       if (event.key === "=" || event.key === "+") {
         event.preventDefault()
+        void getPluginEventHooks().dispatchShortcut("zoom.in")
         void step(ZOOM_STEP)
         return
       }
       if (event.key === "-" || event.key === "_") {
         event.preventDefault()
+        void getPluginEventHooks().dispatchShortcut("zoom.out")
         void step(-ZOOM_STEP)
         return
       }
       if (event.key === "0") {
         event.preventDefault()
+        void getPluginEventHooks().dispatchShortcut("zoom.reset")
         void reset()
       }
     }

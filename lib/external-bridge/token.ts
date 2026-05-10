@@ -14,18 +14,16 @@
 const TOKEN_BYTES = 32
 
 /**
- * Cross-runtime random byte source. Browser ships `crypto.getRandomValues`;
- * Node provides it via `node:crypto.webcrypto.getRandomValues`. Lazy import
- * keeps the cost off the cold path of every other call site.
+ * Web Crypto random byte source. `crypto.getRandomValues` is in every
+ * modern browser, in Capacitor's WebView, and in Node 20+ — so the
+ * import path stays browser-only and bundlers don't drag in `node:`.
  */
-async function randomBytes(length: number): Promise<Uint8Array> {
+function randomBytes(length: number): Uint8Array {
   const out = new Uint8Array(length)
-  if (typeof globalThis.crypto?.getRandomValues === "function") {
-    globalThis.crypto.getRandomValues(out)
-    return out
+  if (typeof globalThis.crypto?.getRandomValues !== "function") {
+    throw new Error("crypto.getRandomValues is required but not available in this runtime")
   }
-  const { webcrypto } = await import("node:crypto")
-  webcrypto.getRandomValues(out)
+  globalThis.crypto.getRandomValues(out)
   return out
 }
 
@@ -35,8 +33,7 @@ function toHex(bytes: Uint8Array): string {
 
 /** Generate a fresh 64-char hex bearer token. */
 export async function generateToken(): Promise<string> {
-  const bytes = await randomBytes(TOKEN_BYTES)
-  return toHex(bytes)
+  return toHex(randomBytes(TOKEN_BYTES))
 }
 
 /**

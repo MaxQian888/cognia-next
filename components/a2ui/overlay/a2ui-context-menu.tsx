@@ -10,6 +10,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { resolveIcon } from "@/lib/a2ui/resolve-icon"
+import { getPluginEventHooks } from "@/lib/plugin"
 import type { A2UIComponentProps, A2UIBaseComponent } from "@/types/a2ui/schema"
 import type { A2UIDropdownMenuItem } from "./a2ui-dropdown-menu"
 
@@ -33,7 +34,18 @@ export const A2UIContextMenu = memo(function A2UIContextMenu({
   )
 
   return (
-    <ContextMenu>
+    <ContextMenu
+      onOpenChange={(open) => {
+        if (open) {
+          // Plugin host: announce the context-menu open so plugins can react
+          // (e.g. inject extra items via host registries — Phase 1 dispatch only).
+          void getPluginEventHooks().dispatchContextMenuShow({
+            type: "a2ui",
+            target: { trigger: component.trigger, label: component.label },
+          })
+        }
+      }}
+    >
       <ContextMenuTrigger asChild>
         <div className={component.className} style={component.style as React.CSSProperties}>
           {renderChild(component.trigger)}

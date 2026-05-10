@@ -15,7 +15,9 @@ import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import { nanoid } from "nanoid"
 import { getPluginEventHooks } from "@/lib/plugin"
+import { getPluginRateLimiter, RateLimitError } from "@/lib/plugin/security/rate-limiter"
 import { loggers } from "@/lib/logger"
+import type { PluginCanvasDocument } from "@/types/plugin/plugin-extended"
 import {
   buildArtifactSourceMetadata,
   buildDerivedArtifactMetadata,
@@ -47,6 +49,102 @@ const MAX_PERSISTED_CONTENT_SIZE = 100 * 1024
 const MAX_PERSISTED_ARTIFACTS = 200
 /** Maximum number of auto-save canvas versions retained per document */
 const MAX_CANVAS_AUTOSAVE_VERSIONS = 30
+
+/**
+ * Synthetic plugin id used by host-side rate limiting for high-frequency
+ * canvas dispatches. The token bucket per (pluginId, operation) lets us
+ * debounce dispatches without dropping legitimate traffic.
+ */
+const HOST_RATE_LIMIT_OWNER = "__host:canvas__"
+const CANVAS_CONTENT_CHANGE_OP = "canvas:contentChange"
+const CANVAS_SELECTION_OP = "canvas:selection"
+
+function ensureCanvasRateLimits(limiter: ReturnType<typeof getPluginRateLimiter>): void {
+  // Register lazily on every call: the flag-on-module pattern desyncs if the
+  // limiter singleton is reset (tests do this) while the flag stays true.
+  // High-frequency editor events: cap at 30/sec each (≈one frame at 30fps).
+  if (!limiter.getLimit(CANVAS_CONTENT_CHANGE_OP)) {
+    limiter.setLimit(CANVAS_CONTENT_CHANGE_OP, { capacity: 30, refillPerSecond: 30 })
+  }
+  if (!limiter.getLimit(CANVAS_SELECTION_OP)) {
+    limiter.setLimit(CANVAS_SELECTION_OP, { capacity: 30, refillPerSecond: 30 })
+  }
+}
+
+function shouldDispatchHighFrequency(operation: string): boolean {
+  const limiter = getPluginRateLimiter()
+  ensureCanvasRateLimits(limiter)
+  try {
+    limiter.check(HOST_RATE_LIMIT_OWNER, operation)
+    return true
+  } catch (error) {
+    if (error instanceof RateLimitError) return false
+    // Unexpected limiter error — surface in debug logs but don't break the host.
+    loggers.store.debug("canvas.rate-limit.unexpected-error", { operation })
+    return false
+  }
+}
+
+function lineColumnToOffset(
+  content: string,
+  position: { lineNumber: number; column: number }
+): number {
+  const lines = content.split("\n")
+  let offset = 0
+  for (let index = 0; index < lines.length; index += 1) {
+    const lineNumber = index + 1
+    if (lineNumber === position.lineNumber) {
+      return offset + Math.max(0, position.column - 1)
+    }
+    offset += lines[index].length + 1
+  }
+  return content.length
+}
+
+function selectionToOffsets(
+  content: string,
+  selection: CanvasEditorContext["selection"]
+): { start: number; end: number; text: string } | null {
+  if (!selection) return null
+  const startLineNumber = (selection as { startLineNumber?: number }).startLineNumber
+  const startColumn = (selection as { startColumn?: number }).startColumn
+  const endLineNumber = (selection as { endLineNumber?: number }).endLineNumber
+  const endColumn = (selection as { endColumn?: number }).endColumn
+  if (
+    typeof startLineNumber !== "number" ||
+    typeof startColumn !== "number" ||
+    typeof endLineNumber !== "number" ||
+    typeof endColumn !== "number"
+  ) {
+    return null
+  }
+  const start = lineColumnToOffset(content, {
+    lineNumber: startLineNumber,
+    column: startColumn,
+  })
+  const end = lineColumnToOffset(content, {
+    lineNumber: endLineNumber,
+    column: endColumn,
+  })
+  const lo = Math.min(start, end)
+  const hi = Math.max(start, end)
+  return { start: lo, end: hi, text: content.slice(lo, hi) }
+}
+
+function toPluginCanvasDocument(doc: CanvasDocument): PluginCanvasDocument {
+  return {
+    id: doc.id,
+    sessionId: doc.sessionId,
+    title: doc.title,
+    content: doc.content,
+    language: (doc.language ?? "markdown") as PluginCanvasDocument["language"],
+    type: doc.type,
+    createdAt: ensureDate(doc.createdAt),
+    updatedAt: ensureDate(doc.updatedAt),
+    suggestions: doc.aiSuggestions,
+    versions: doc.versions,
+  }
+}
 
 /**
  * Helper to ensure Date objects are properly parsed from storage
@@ -815,10 +913,19 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           panelView: "canvas",
         }))
 
+        getPluginEventHooks().dispatchCanvasCreate(toPluginCanvasDocument(doc))
+        getPluginEventHooks().dispatchCanvasSwitch(doc.id)
+
         return doc.id
       },
 
       updateCanvasDocument: (id, updates) => {
+        let dispatchPayload: {
+          updated: CanvasDocument
+          previousContent: string
+          contentChanged: boolean
+        } | null = null
+
         set((state) => {
           const doc = state.canvasDocuments[id]
           if (!doc) return state
@@ -840,6 +947,12 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             updatedAt: nonContextUpdateKeys.length === 0 ? doc.updatedAt : new Date(),
           }
 
+          dispatchPayload = {
+            updated,
+            previousContent: doc.content,
+            contentChanged,
+          }
+
           return {
             canvasDocuments: {
               ...state.canvasDocuments,
@@ -847,22 +960,74 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             },
           }
         })
+
+        if (dispatchPayload) {
+          const { updated, previousContent, contentChanged } = dispatchPayload as {
+            updated: CanvasDocument
+            previousContent: string
+            contentChanged: boolean
+          }
+          const pluginDoc = toPluginCanvasDocument(updated)
+          // Convert host-shaped updates into the plugin-facing document partial.
+          const pluginChanges: Partial<PluginCanvasDocument> = {}
+          if ("title" in updates) pluginChanges.title = updates.title as string
+          if ("content" in updates) pluginChanges.content = updates.content as string
+          if ("language" in updates && updates.language !== undefined) {
+            pluginChanges.language = updates.language as PluginCanvasDocument["language"]
+          }
+          if ("type" in updates && updates.type !== undefined) {
+            pluginChanges.type = updates.type as PluginCanvasDocument["type"]
+          }
+          getPluginEventHooks().dispatchCanvasUpdate(pluginDoc, pluginChanges)
+
+          if (contentChanged && shouldDispatchHighFrequency(CANVAS_CONTENT_CHANGE_OP)) {
+            getPluginEventHooks().dispatchCanvasContentChange(id, updated.content, previousContent)
+          }
+
+          // Selection updates ride on editorContext.selection; translate
+          // line/column coordinates to absolute offsets for plugin consumers.
+          const selectionUpdate =
+            updates.editorContext && "selection" in updates.editorContext
+              ? updates.editorContext.selection
+              : undefined
+          if (selectionUpdate && shouldDispatchHighFrequency(CANVAS_SELECTION_OP)) {
+            const offsets = selectionToOffsets(updated.content, selectionUpdate)
+            if (offsets) {
+              getPluginEventHooks().dispatchCanvasSelection(id, offsets)
+            }
+          }
+        }
       },
 
       deleteCanvasDocument: (id) => {
+        let didDelete = false
+        let activeCleared = false
         set((state) => {
+          if (!state.canvasDocuments[id]) return state
+          didDelete = true
+          activeCleared = state.activeCanvasId === id
           const { [id]: _removed, ...rest } = state.canvasDocuments
           return {
             canvasDocuments: rest,
-            activeCanvasId: state.activeCanvasId === id ? null : state.activeCanvasId,
+            activeCanvasId: activeCleared ? null : state.activeCanvasId,
           }
         })
+        if (didDelete) {
+          getPluginEventHooks().dispatchCanvasDelete(id)
+          if (activeCleared) {
+            getPluginEventHooks().dispatchCanvasSwitch(null)
+          }
+        }
       },
 
       setActiveCanvas: (id) => {
+        const previousId = get().activeCanvasId
         set({ activeCanvasId: id })
         if (id) {
           set({ canvasOpen: true, panelView: "canvas" })
+        }
+        if (previousId !== id) {
+          getPluginEventHooks().dispatchCanvasSwitch(id)
         }
       },
 
@@ -986,10 +1151,13 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           },
         }))
 
+        getPluginEventHooks().dispatchCanvasVersionSave(documentId, version.id)
+
         return version
       },
 
       restoreCanvasVersion: (documentId, versionId, autoSaveDescription) => {
+        let didRestore = false
         set((state) => {
           const doc = state.canvasDocuments[documentId]
           if (!doc || !doc.versions) return state
@@ -1012,6 +1180,8 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             versionId,
           })
 
+          didRestore = true
+
           return {
             canvasDocuments: {
               ...state.canvasDocuments,
@@ -1030,6 +1200,10 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             },
           }
         })
+
+        if (didRestore) {
+          getPluginEventHooks().dispatchCanvasVersionRestore(documentId, versionId)
+        }
       },
 
       deleteCanvasVersion: (documentId, versionId) => {
@@ -1108,10 +1282,16 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
               : state.activeArtifactId,
         }))
         getPluginEventHooks().dispatchArtifactOpen(view)
+        // Generic UI panel hook — fires for every right-rail panel open so
+        // plugins that don't need the artifact-vs-canvas distinction get a
+        // single event keyed by the active view.
+        getPluginEventHooks().dispatchPanelOpen(`artifact:${view}`)
       },
       closePanel: () => {
+        const previousView = get().panelView
         set({ panelOpen: false })
         getPluginEventHooks().dispatchArtifactClose()
+        getPluginEventHooks().dispatchPanelClose(`artifact:${previousView}`)
       },
       setPanelView: (view) => set({ panelView: view }),
 

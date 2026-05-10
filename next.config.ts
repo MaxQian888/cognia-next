@@ -1,4 +1,5 @@
 import createNextIntlPlugin from "next-intl/plugin"
+import path from "node:path"
 import type { NextConfig } from "next"
 
 const withNextIntl = createNextIntlPlugin("./i18n/request.ts")
@@ -25,12 +26,28 @@ const SERVER_ONLY_PACKAGES = [
   "@dsnp/parquetjs",
   "thrift",
   "node-int64",
+  // simple-git shells out — only the Tauri code-repo importer uses it,
+  // alias to the empty stub so the mobile / web bundle stays clean.
+  "simple-git",
 ]
 
 // Truly un-polyfillable Node.js built-ins (safety net for any dep that slips
 // past the package-level alias above). Do NOT include modules that Turbopack/
-// webpack polyfill automatically (path, stream, events, os, zlib).
-const NODE_ONLY_MODULES = ["dns", "net", "tls", "fs", "child_process", "http2", "stream/promises"]
+// webpack polyfill automatically (path, stream, os, zlib).
+const NODE_ONLY_MODULES = [
+  "dns",
+  "net",
+  "tls",
+  "fs",
+  "child_process",
+  "http2",
+  "stream/promises",
+  // Webpack 5 with Next.js 16 doesn't auto-polyfill `node:events` for
+  // ESM deps that import it explicitly. Aliasing to the stub keeps the
+  // mobile bundle from blowing up the moment any transitive dep
+  // (simple-git → @kwsites/file-exists, etc.) reaches for it.
+  "events",
+]
 
 // Enable static export for Tauri production builds.
 // This makes `pnpm build` generate the `out/` directory that Tauri loads from `src-tauri/tauri.conf.json` (frontendDist: "../out").
@@ -62,9 +79,14 @@ const nextConfig: NextConfig = {
   // Webpack (pnpm build): package-level aliases + built-in fallbacks for client bundles.
   webpack: (config, { isServer }) => {
     if (!isServer) {
+      // Webpack aliases must be absolute paths (relative ones get treated
+      // as module IDs and never resolve). Turbopack accepts the relative
+      // form, so we keep `browserStub` as a relative literal and resolve
+      // here.
+      const stubAbsolute = path.resolve(process.cwd(), browserStub)
       config.resolve.alias = {
         ...config.resolve.alias,
-        ...Object.fromEntries(SERVER_ONLY_PACKAGES.map((pkg) => [pkg, browserStub])),
+        ...Object.fromEntries(SERVER_ONLY_PACKAGES.map((pkg) => [pkg, stubAbsolute])),
       }
       config.resolve.fallback = {
         ...config.resolve.fallback,

@@ -8132,6 +8132,17 @@
       "signOutDescription": "退出后需重新扫码配对才能再次连接。",
       "biometricFailed": "生物识别失败（{reason}），未退出登录。"
     },
+    "messageActions": {
+      "title": "消息",
+      "description": "选择一项操作。",
+      "copy": "复制文本",
+      "copySuccess": "已复制到剪贴板。",
+      "copyFailed": "复制失败：{message}",
+      "share": "分享…",
+      "shareDialogTitle": "分享至",
+      "shareUnsupported": "此设备不支持分享。",
+      "shareFailed": "分享失败：{message}"
+    },
     "discover": {
       "title": "发现",
       "tabs": {
@@ -8317,6 +8328,123 @@
       "empty": "该团队暂无成员。",
       "noMatches": "未找到匹配「{query}」的成员",
       "dismiss": "关闭"
+    }
+  },
+  "workflows": {
+    "canvasToast": {
+      "savedOk": "工作流已保存",
+      "saveFailed": "保存工作流失败",
+      "running": "运行中…",
+      "completed": "工作流执行完成",
+      "runFailed": "运行失败",
+      "startFailed": "启动运行失败",
+      "layoutUnavailable": "当前环境不支持自动布局",
+      "exported": "已下载工作流 JSON",
+      "imported": "已导入工作流",
+      "importFailed": "导入工作流 JSON 失败"
+    },
+    "toolbar": {
+      "namePlaceholder": "工作流名称",
+      "saved": "已保存",
+      "unsavedChanges": "有未保存更改",
+      "saving": "保存中…",
+      "save": "保存",
+      "run": "运行",
+      "tooltip": {
+        "back": "返回工作流库",
+        "undo": "撤销（Ctrl+Z）",
+        "redo": "重做（Ctrl+Shift+Z）",
+        "autoLayout": "自动布局",
+        "commands": "命令面板（Ctrl+K）",
+        "shortcuts": "键盘快捷键（Ctrl+/）",
+        "exportJson": "导出为 JSON",
+        "importJson": "导入 JSON"
+      }
+    },
+    "empty": {
+      "title": "空工作流",
+      "description": "从左侧拖入一个触发节点开始，然后连接到操作节点。",
+      "addManualTrigger": "添加手动触发",
+      "browseTemplates": "浏览模板"
+    },
+    "sidebar": {
+      "searchPlaceholder": "搜索节点…",
+      "noMatches": "无匹配节点。"
+    },
+    "inspector": {
+      "empty": "在画布上选择一个节点以配置。",
+      "label": "标签",
+      "notes": "备注",
+      "notesHint": "在节点下方显示的便签文本。",
+      "disabled": "已禁用",
+      "disabledHint": "运行时跳过。便于暂存而不删除。",
+      "deleteNode": "删除节点",
+      "noConfigYet": "暂无专属配置表单 — 在上方编辑原始 JSON。",
+      "closeAria": "关闭检查器",
+      "errorBadge": "{count} 个问题",
+      "categoryBadge": {
+        "trigger": "触发",
+        "action": "动作",
+        "ai": "AI",
+        "flow": "流程",
+        "data": "数据",
+        "io": "I/O",
+        "annotation": "注解"
+      }
+    },
+    "node": {
+      "lastRun": {
+        "succeeded": "{ago} 运行 · 用时 {duration}",
+        "succeededNoDuration": "{ago} 运行",
+        "failed": "{ago} 失败",
+        "skipped": "{ago} 跳过"
+      }
+    },
+    "shortcuts": {
+      "title": "键盘快捷键",
+      "group": {
+        "editor": "编辑器",
+        "canvas": "画布",
+        "run": "运行",
+        "inspector": "检查器"
+      },
+      "items": {
+        "save": "保存",
+        "undo": "撤销",
+        "redo": "重做",
+        "commands": "打开命令面板",
+        "shortcuts": "显示键盘快捷键",
+        "deleteNode": "删除选中节点",
+        "panCanvas": "拖动画布",
+        "selectAll": "全选节点",
+        "copy": "复制选区",
+        "cut": "剪切选区",
+        "paste": "粘贴",
+        "duplicate": "复制副本",
+        "group": "分组选区",
+        "run": "运行工作流",
+        "closeInspector": "关闭检查器"
+      }
+    },
+    "validation": {
+      "required": "此项为必填",
+      "minLength": "长度至少为 {min} 个字符",
+      "minItems": "至少添加 {min} 项",
+      "minValue": "数值至少为 {min}",
+      "maxValue": "数值至多为 {max}",
+      "invalid": "无效值",
+      "invalidType": "应为 {expected}",
+      "invalidFormat": "格式无效",
+      "cronExpr": "请使用五字段 cron 表达式（分 时 日 月 周）",
+      "webhookPath": "仅支持字母、数字、短划线、下划线和斜杠",
+      "variableName": "请使用合法标识符（字母 / 数字 / 下划线，且不能以数字开头）",
+      "switchCasesRequired": "至少添加一个 case",
+      "splitBranchesRequired": "至少添加两条分支标签",
+      "loopBodyRequired": "请按所选循环模式提供输入表达式或迭代次数",
+      "twinIngestSourceRequired": "请提供内容（粘贴模式）或 URL（拉取模式）",
+      "summary": "{count} 个校验问题",
+      "blockedRunTitle": "请先修复校验问题再运行",
+      "blockedSaveTitle": "工作流已保存，但仍有 {count} 个未解决的问题"
     }
   }
 }

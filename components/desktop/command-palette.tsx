@@ -39,6 +39,7 @@ import { loggers } from "@/lib/logger"
 import type { Character, Team } from "@/lib/claude/types"
 import { messagesToMarkdown } from "@/components/ai-elements/conversation"
 import { isTauri } from "@/lib/tauri"
+import { getPluginEventHooks } from "@/lib/plugin"
 import { toast } from "sonner"
 import { AvatarBadge } from "./avatar-badge"
 
@@ -67,6 +68,9 @@ export function CommandPalette({ onOpenSettings }: Props) {
       const meta = isMac ? e.metaKey : e.ctrlKey
       if (meta && e.key.toLowerCase() === "k" && !e.shiftKey && !e.altKey) {
         e.preventDefault()
+        // Plugin host: announce the global Ctrl/Cmd+K shortcut so plugins can
+        // observe / extend the command palette opening flow.
+        void getPluginEventHooks().dispatchShortcut("command-palette.toggle")
         setOpen((v) => {
           log.info("command-palette toggle", { next: !v, source: "shortcut" })
           return !v

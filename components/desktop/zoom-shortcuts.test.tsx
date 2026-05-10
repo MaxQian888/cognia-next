@@ -32,6 +32,23 @@ jest.mock("@/lib/logger", () => ({
   loggers: {
     ui: { warn: (...args: unknown[]) => logWarn(...args), info: jest.fn(), error: jest.fn() },
   },
+  // Pulled in transitively by @/lib/plugin → hooks-system → core/logger.
+  createLogger: () => ({
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: () => ({ debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() }),
+  }),
+}))
+
+// The plugin runtime is reachable via getPluginEventHooks. Stub it with a
+// no-op surface so the shortcut wiring doesn't drag the real plugin store
+// (and its Tauri bindings) into the zoom-shortcuts test environment.
+jest.mock("@/lib/plugin", () => ({
+  getPluginEventHooks: () => ({
+    dispatchShortcut: jest.fn().mockResolvedValue(false),
+  }),
 }))
 
 import { ZoomShortcuts } from "./zoom-shortcuts"

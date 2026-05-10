@@ -112,6 +112,17 @@ jest.mock("@/components/ui/button", () => ({
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("ProviderCostTab", () => {
+  // Pin "now" so the 30-day window in the component always covers the
+  // hard-coded 2026-04-10/11/12 entries below — without this, the test
+  // gradually breaks as wall-clock time advances past 2026-05-10.
+  beforeAll(() => {
+    jest.useFakeTimers()
+    jest.setSystemTime(new Date("2026-04-15T00:00:00.000Z"))
+  })
+  afterAll(() => {
+    jest.useRealTimers()
+  })
+
   beforeEach(() => {
     jest.clearAllMocks()
   })

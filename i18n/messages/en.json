@@ -8090,6 +8090,17 @@
       "signOutDescription": "You'll need to scan the QR again to reconnect.",
       "biometricFailed": "Biometric check failed ({reason}); did not sign out."
     },
+    "messageActions": {
+      "title": "Message",
+      "description": "Pick an action.",
+      "copy": "Copy text",
+      "copySuccess": "Copied to clipboard.",
+      "copyFailed": "Copy failed: {message}",
+      "share": "Share…",
+      "shareDialogTitle": "Share via",
+      "shareUnsupported": "Sharing isn't supported on this device.",
+      "shareFailed": "Share failed: {message}"
+    },
     "discover": {
       "title": "Discover",
       "tabs": {
@@ -8275,6 +8286,123 @@
       "empty": "No members in this team yet.",
       "noMatches": "No matches for \"{query}\"",
       "dismiss": "Dismiss"
+    }
+  },
+  "workflows": {
+    "canvasToast": {
+      "savedOk": "Workflow saved",
+      "saveFailed": "Failed to save workflow",
+      "running": "Running…",
+      "completed": "Workflow completed",
+      "runFailed": "Run failed",
+      "startFailed": "Failed to start run",
+      "layoutUnavailable": "Auto-layout unavailable",
+      "exported": "Workflow JSON downloaded",
+      "imported": "Workflow imported",
+      "importFailed": "Failed to import workflow JSON"
+    },
+    "toolbar": {
+      "namePlaceholder": "Workflow name",
+      "saved": "Saved",
+      "unsavedChanges": "Unsaved changes",
+      "saving": "Saving…",
+      "save": "Save",
+      "run": "Run",
+      "tooltip": {
+        "back": "Back to library",
+        "undo": "Undo (Ctrl+Z)",
+        "redo": "Redo (Ctrl+Shift+Z)",
+        "autoLayout": "Auto-layout",
+        "commands": "Commands (Ctrl+K)",
+        "shortcuts": "Keyboard shortcuts (Ctrl+/)",
+        "exportJson": "Export workflow as JSON",
+        "importJson": "Import workflow JSON"
+      }
+    },
+    "empty": {
+      "title": "Empty workflow",
+      "description": "Drop a trigger node from the left sidebar to start, then connect it to actions.",
+      "addManualTrigger": "Add manual trigger",
+      "browseTemplates": "Browse templates"
+    },
+    "sidebar": {
+      "searchPlaceholder": "Search nodes…",
+      "noMatches": "No nodes match."
+    },
+    "inspector": {
+      "empty": "Select a node on the canvas to configure it.",
+      "label": "Label",
+      "notes": "Notes",
+      "notesHint": "Sticky-note text shown under the node body.",
+      "disabled": "Disabled",
+      "disabledHint": "Skipped during runs. Useful for staging without deleting.",
+      "deleteNode": "Delete node",
+      "noConfigYet": "No dedicated config form yet — edit the raw JSON above.",
+      "closeAria": "Close inspector",
+      "errorBadge": "{count, plural, one {# issue} other {# issues}}",
+      "categoryBadge": {
+        "trigger": "Trigger",
+        "action": "Action",
+        "ai": "AI",
+        "flow": "Flow",
+        "data": "Data",
+        "io": "I/O",
+        "annotation": "Annotation"
+      }
+    },
+    "node": {
+      "lastRun": {
+        "succeeded": "Ran {ago} · {duration}",
+        "succeededNoDuration": "Ran {ago}",
+        "failed": "Failed {ago}",
+        "skipped": "Skipped {ago}"
+      }
+    },
+    "shortcuts": {
+      "title": "Keyboard shortcuts",
+      "group": {
+        "editor": "Editor",
+        "canvas": "Canvas",
+        "run": "Run",
+        "inspector": "Inspector"
+      },
+      "items": {
+        "save": "Save",
+        "undo": "Undo",
+        "redo": "Redo",
+        "commands": "Open command palette",
+        "shortcuts": "Show keyboard shortcuts",
+        "deleteNode": "Delete selected nodes",
+        "panCanvas": "Pan canvas",
+        "selectAll": "Select all nodes",
+        "copy": "Copy selection",
+        "cut": "Cut selection",
+        "paste": "Paste",
+        "duplicate": "Duplicate",
+        "group": "Group selection",
+        "run": "Run workflow",
+        "closeInspector": "Close inspector"
+      }
+    },
+    "validation": {
+      "required": "This field is required",
+      "minLength": "Must be at least {min} characters",
+      "minItems": "Add at least {min} item(s)",
+      "minValue": "Must be at least {min}",
+      "maxValue": "Must be at most {max}",
+      "invalid": "Invalid value",
+      "invalidType": "Expected {expected}",
+      "invalidFormat": "Invalid format",
+      "cronExpr": "Use a 5-field cron expression (minute hour day month weekday)",
+      "webhookPath": "Use letters, digits, dashes, underscores, and slashes only",
+      "variableName": "Use a valid identifier (letters, digits, underscores; not starting with a digit)",
+      "switchCasesRequired": "Add at least one case",
+      "splitBranchesRequired": "Add at least two branch labels",
+      "loopBodyRequired": "Provide the input expression / iteration count required by this loop mode",
+      "twinIngestSourceRequired": "Provide content (paste mode) or a URL (fetch mode)",
+      "summary": "{count, plural, one {# validation issue} other {# validation issues}}",
+      "blockedRunTitle": "Fix validation issues before running",
+      "blockedSaveTitle": "Workflow saved with {count, plural, one {# unresolved issue} other {# unresolved issues}}"
     }
   }
 }

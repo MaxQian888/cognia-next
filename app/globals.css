@@ -30,6 +30,22 @@
   --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
+  /* Workflow category & status semantic tokens. Each is referenced by the
+     `--wf-*` variables in `:root` / `.dark` so dark-mode tracking is automatic
+     once a component switches from `bg-emerald-500/15` to `bg-wf-trigger/15`. */
+  --color-wf-trigger: var(--wf-trigger);
+  --color-wf-action: var(--wf-action);
+  --color-wf-ai: var(--wf-ai);
+  --color-wf-flow: var(--wf-flow);
+  --color-wf-data: var(--wf-data);
+  --color-wf-io: var(--wf-io);
+  --color-wf-annotation: var(--wf-annotation);
+  --color-wf-status-running: var(--wf-status-running);
+  --color-wf-status-succeeded: var(--wf-status-succeeded);
+  --color-wf-status-failed: var(--wf-status-failed);
+  --color-wf-status-skipped: var(--wf-status-skipped);
+  --color-wf-status-waiting: var(--wf-status-waiting);
+  --color-wf-status-idle: var(--wf-status-idle);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -72,6 +88,23 @@
   --success-foreground: oklch(0.985 0 0);
   --warning: oklch(0.75 0.17 80);
   --warning-foreground: oklch(0.205 0 0);
+  /* Workflow editor: per-category accent colors and runtime status hues.
+     Light-mode values stay within the 0.55–0.7 lightness band so they
+     read against the white card background. The .dark block below shifts
+     each up to 0.7–0.78 with slightly higher chroma to compensate. */
+  --wf-trigger: oklch(0.62 0.17 145);
+  --wf-action: oklch(0.6 0.13 220);
+  --wf-ai: oklch(0.55 0.22 295);
+  --wf-flow: oklch(0.7 0.17 65);
+  --wf-data: oklch(0.6 0.22 12);
+  --wf-io: oklch(0.6 0.13 195);
+  --wf-annotation: oklch(0.55 0.02 270);
+  --wf-status-idle: oklch(0.55 0.02 270);
+  --wf-status-running: var(--warning);
+  --wf-status-succeeded: var(--success);
+  --wf-status-failed: var(--destructive);
+  --wf-status-skipped: oklch(0.6 0.02 270);
+  --wf-status-waiting: var(--wf-action);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -110,6 +143,21 @@
   --success-foreground: oklch(0.145 0 0);
   --warning: oklch(0.82 0.18 85);
   --warning-foreground: oklch(0.145 0 0);
+  /* Workflow tokens — dark-mode equivalents (kept in the same hue family as
+     :root, only lightness/chroma re-tuned so they pop on the dark surface). */
+  --wf-trigger: oklch(0.72 0.18 150);
+  --wf-action: oklch(0.7 0.15 220);
+  --wf-ai: oklch(0.7 0.22 295);
+  --wf-flow: oklch(0.78 0.17 70);
+  --wf-data: oklch(0.7 0.22 12);
+  --wf-io: oklch(0.72 0.13 195);
+  --wf-annotation: oklch(0.7 0.02 270);
+  --wf-status-idle: oklch(0.7 0.02 270);
+  --wf-status-running: var(--warning);
+  --wf-status-succeeded: var(--success);
+  --wf-status-failed: var(--destructive);
+  --wf-status-skipped: oklch(0.55 0.02 270);
+  --wf-status-waiting: var(--wf-action);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
@@ -405,6 +453,31 @@ html[data-bg-preview="all"] [data-bg-target] {
     min-height: 44px;
     min-width: 44px;
   }
+}
+
+/* Mobile pair-page radar — `<ScanRadar>` renders two concentric rings that
+ * pulse outward while the LAN scan runs. The animation is paused when the
+ * radar is idle and respects the global `data-reduce-motion` switch above. */
+@keyframes pair-radar-pulse {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.65;
+  }
+  70% {
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+
+.pair-radar-ring--active {
+  animation: pair-radar-pulse 2s ease-out infinite;
+}
+
+.pair-radar-ring--active.pair-radar-ring--inner {
+  animation-delay: 0.6s;
 }
 
 /* iOS auto-zoom prevention: any text input that's <16px on focus triggers
