@@ -47,6 +47,7 @@ jest.mock(
 )
 
 import { useSingleExport } from "./use-single-export"
+import { getPluginEventHooks } from "@/lib/plugin"
 
 beforeEach(() => {
   isTauriMock.mockReset().mockReturnValue(false)
@@ -163,6 +164,65 @@ describe("useSingleExport", () => {
       res = await result.current.run({ ...baseArgs(), messages: [] } as never)
     })
     expect(res).toEqual({ ok: false, error: "string-failure" })
+  })
+
+  it("dispatches onExportStart, onExportTransform, and onExportComplete(true) on success", async () => {
+    renderSingleExportMock.mockReturnValueOnce({
+      filename: "out.md",
+      content: "# hello",
+      mimeType: "text/markdown",
+    })
+    jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined)
+    const hooks = getPluginEventHooks()
+    const startSpy = jest.spyOn(hooks, "dispatchExportStart").mockResolvedValue([] as never)
+    const transformSpy = jest
+      .spyOn(hooks, "dispatchExportTransform")
+      .mockImplementation(async (content) => content)
+    const completeSpy = jest.spyOn(hooks, "dispatchExportComplete").mockImplementation(() => {})
+
+    const { result } = renderHook(() => useSingleExport())
+    await act(async () => {
+      await result.current.run({ ...baseArgs(), messages: [] } as never)
+    })
+    expect(startSpy).toHaveBeenCalledWith("s1", "markdown")
+    expect(transformSpy).toHaveBeenCalledWith("# hello", "markdown")
+    expect(completeSpy).toHaveBeenCalledWith("s1", "markdown", true)
+  })
+
+  it("dispatches onExportComplete(false) when the user cancels the Tauri save dialog", async () => {
+    isTauriMock.mockReturnValue(true)
+    renderSingleExportMock.mockReturnValueOnce({
+      filename: "out.txt",
+      content: "x",
+      mimeType: "text/plain",
+    })
+    saveDialogMock.mockResolvedValueOnce(null)
+    const hooks = getPluginEventHooks()
+    jest.spyOn(hooks, "dispatchExportStart").mockResolvedValue([] as never)
+    jest.spyOn(hooks, "dispatchExportTransform").mockImplementation(async (content) => content)
+    const completeSpy = jest.spyOn(hooks, "dispatchExportComplete").mockImplementation(() => {})
+
+    const { result } = renderHook(() => useSingleExport())
+    await act(async () => {
+      await result.current.run({ ...baseArgs(), messages: [] } as never)
+    })
+    expect(completeSpy).toHaveBeenCalledWith("s1", "markdown", false)
+  })
+
+  it("dispatches onExportComplete(false) when render throws", async () => {
+    renderSingleExportMock.mockImplementationOnce(() => {
+      throw new Error("render boom")
+    })
+    const hooks = getPluginEventHooks()
+    jest.spyOn(hooks, "dispatchExportStart").mockResolvedValue([] as never)
+    jest.spyOn(hooks, "dispatchExportTransform").mockImplementation(async (content) => content)
+    const completeSpy = jest.spyOn(hooks, "dispatchExportComplete").mockImplementation(() => {})
+
+    const { result } = renderHook(() => useSingleExport())
+    await act(async () => {
+      await result.current.run({ ...baseArgs(), messages: [] } as never)
+    })
+    expect(completeSpy).toHaveBeenCalledWith("s1", "markdown", false)
   })
 
   it("filename without extension defaults the dialog filter to TXT", async () => {

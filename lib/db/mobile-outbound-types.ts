@@ -17,6 +17,14 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   "session_delete",
   "session_pin",
   "session_mute",
+  // Wave 2 mutating RPCs that the phone may queue while offline.
+  "character_upsert",
+  "character_delete",
+  "character_bind_twin",
+  "skill_set_enabled",
+  "plugin_set_enabled",
+  "adapter_update_policy",
+  "app_settings_update",
   "rpc_generic",
 ] as const
 

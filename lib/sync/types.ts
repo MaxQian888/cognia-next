@@ -10,8 +10,22 @@
  * Tables the phone is allowed to mirror. Each value matches the production
  * Dexie table name in `lib/db/schema.ts` so the handler implementations
  * can do `db[name]` without an extra adapter layer.
+ *
+ * Wave 2 additions: workflows / twinProfile / plugins / adapterInstances
+ * / settings (the singleton AppSettings row). These power the mobile
+ * read paths for workflow viewer, twin switcher, plugin toggles,
+ * connector policy, and per-device preferences.
  */
-export type SyncableTable = "characters" | "skills" | "sessions" | "messages"
+export type SyncableTable =
+  | "characters"
+  | "skills"
+  | "sessions"
+  | "messages"
+  | "workflows"
+  | "twinProfile"
+  | "plugins"
+  | "adapterInstances"
+  | "settings"
 
 export interface SyncCursor {
   /** Server-defined opaque cursor; defaults to 0 for the first sync. */

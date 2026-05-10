@@ -31,6 +31,20 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
     },
+    // Wave 3.7 — mobile-viewport e2e suite. Specs live under
+    // tests/e2e/mobile/. Pixel 7 covers the Android Chromium path; the
+    // iPhone 13 project is opt-in because webkit must be installed
+    // separately (`pnpx playwright install webkit`).
+    {
+      name: "mobile-pixel-7",
+      testDir: "./tests/e2e/mobile",
+      use: { ...devices["Pixel 7"] },
+    },
+    {
+      name: "mobile-iphone-13",
+      testDir: "./tests/e2e/mobile",
+      use: { ...devices["iPhone 13"] },
+    },
   ],
 
   // No `webServer` block because `pnpm dev` is expected to already be running.

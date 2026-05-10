@@ -7,6 +7,7 @@ import { toast } from "sonner"
 
 import { usePlatform } from "@/hooks/use-platform"
 import { subscribe as subscribeDeeplink } from "@/lib/capacitor/deeplink"
+import { dispatchRoute, makeRouterNavigators } from "@/lib/capacitor/deeplink-router"
 import { hide as hideSplash } from "@/lib/capacitor/splash-screen"
 import { syncWithTheme as syncStatusBar } from "@/lib/capacitor/status-bar"
 import { ensureChannel as ensureNotifChannel } from "@/lib/capacitor/local-notifications"
@@ -82,22 +83,12 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       })
 
       // Subscribe to deeplink routes. OAuth callbacks resolve through their
-      // own awaitCallback subscription; here we handle session-open and
-      // share-target routes that arrive while the app is foregrounded.
+      // own awaitCallback subscription; the router below handles session,
+      // share-target, and pair-qr routes that arrive while the app is
+      // foregrounded.
+      const navigators = makeRouterNavigators(router)
       const deeplinkUnsub = await subscribeDeeplink((route) => {
-        if (route.kind === "open_session") {
-          if (route.sessionId) {
-            router.push(`/inbox/c/${encodeURIComponent(route.sessionId)}`)
-          }
-          return
-        }
-        if (route.kind === "share_target") {
-          // Wave 3 lands the share-target page; for Wave 1 just log it.
-          log.info("companion: share-target deeplink", route)
-        }
-        if (route.kind === "pair_qr") {
-          router.push(`/pair?payload=${encodeURIComponent(route.payload)}`)
-        }
+        dispatchRoute(route, navigators)
       })
       cleanup.push(deeplinkUnsub)
 
@@ -148,8 +139,9 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
         const sessionId =
           typeof payload?.sessionId === "string" ? (payload.sessionId as string) : null
         if (sessionId && !delivery.foreground) {
-          // Tap-from-background → deep-link to the session.
-          router.push(`/inbox/c/${encodeURIComponent(sessionId)}`)
+          // Tap-from-background → deep-link to the session via the same
+          // router the deeplink subscriber uses.
+          navigators.pushSession(sessionId)
         }
       })
       cleanup.push(unsubPush)

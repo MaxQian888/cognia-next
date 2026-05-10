@@ -14,6 +14,7 @@ use tauri::{Manager, State};
 
 use super::{
     desktop_messages_bridge,
+    desktop_writes_bridge,
     event_bus::{register_tauri_event, EventBus},
     jwt::issue_pair_jwt,
     mdns::AutoStartConfig,
@@ -88,6 +89,21 @@ pub async fn companion_server_start(
         // CompanionServerState even after a server restart hands the
         // axum handler a fresh SharedState.
         desktop_messages_bridge: Arc::clone(&state.desktop_messages_bridge),
+        // Wave 2 desktop-write bridge — same Arc-cloning trick as the
+        // messages bridge above. Carries the 7 mutating Wave 2 RPCs +
+        // twin_profile_get through one event channel.
+        desktop_writes_bridge: Arc::clone(&state.desktop_writes_bridge),
+        // Wave 3.5 — share the long-lived sync table registry so plugin
+        // registrations made before `start()` propagate to the server.
+        sync_registry: Arc::clone(&state.sync_registry),
+        // Wave 3.3 — same Arc-cloning trick: keep buckets alive across
+        // server restarts so a misbehaving device can't reset its quota
+        // by stop-starting the companion server.
+        rate_limiter: Arc::clone(&state.rate_limiter),
+        // Wave 3.4 — preserve registered push tokens across server
+        // restarts so the desktop never has to re-prompt the phone for
+        // re-registration just because the user toggled the server off.
+        push_tokens: Arc::clone(&state.push_tokens),
     });
 
     state.start(port, bind_loopback_only, shared).await
@@ -157,6 +173,37 @@ pub fn companion_message_response(
     state
         .desktop_messages_bridge
         .resolve(desktop_messages_bridge::MessageBridgeResponse {
+            request_id,
+            result,
+            error,
+        });
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Desktop-write bridge response command (Wave 2)
+// ---------------------------------------------------------------------------
+
+/// Resolve a pending `companion://desktop-write-request` event with the
+/// result the WebView produced. Mirrors `companion_message_response`
+/// but generic across the 7 Wave 2 mutating commands and `twin_profile_get`.
+///
+/// The TS-side dispatcher (`lib/companion/desktop-write-source.ts`) routes
+/// each event to the appropriate Dexie helper before invoking this command
+/// with the result.
+///
+/// Exactly one of `result` / `error` should be populated; both None is
+/// surfaced as a generic bridge error.
+#[tauri::command]
+pub fn companion_desktop_write_response(
+    request_id: String,
+    result: Option<serde_json::Value>,
+    error: Option<String>,
+    state: State<'_, CompanionServerState>,
+) -> Result<(), String> {
+    state
+        .desktop_writes_bridge
+        .resolve(desktop_writes_bridge::DesktopWriteResponse {
             request_id,
             result,
             error,

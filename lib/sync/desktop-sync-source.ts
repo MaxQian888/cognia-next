@@ -107,6 +107,16 @@ export async function readDexieDelta(
       return readSessionsDelta(since)
     case "messages":
       return readMessagesDelta(since)
+    case "workflows":
+      return readWorkflowsDelta(since)
+    case "twinProfile":
+      return readTwinProfileDelta(since)
+    case "plugins":
+      return readPluginsDelta(since)
+    case "adapterInstances":
+      return readAdapterInstancesDelta(since)
+    case "settings":
+      return readSettingsDelta(since)
     default:
       throw new Error(`unknown sync table: ${table}`)
   }
@@ -143,6 +153,51 @@ async function readMessagesDelta(since: number): Promise<SyncDelta<StoredMessage
   // phone applies them in chronological sequence.
   const head = filtered.length > 200 ? filtered.slice(filtered.length - 200) : filtered
   return finalizeDelta(head, since)
+}
+
+async function readWorkflowsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().workflows.where("updatedAt").above(since).toArray()
+  return finalizeDelta(rows as UpdatedAtRow[], since)
+}
+
+async function readTwinProfileDelta(since: number): Promise<SyncDelta<unknown>> {
+  // twinProfile rows track changes via updatedAt; older rows without an
+  // updatedAt always sync once and then settle.
+  const all = await getDb().twinProfile.toArray()
+  const rows = all.filter((row) => Number((row as { updatedAt?: number }).updatedAt ?? 0) > since)
+  return finalizeDelta(rows as UpdatedAtRow[], since)
+}
+
+async function readPluginsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const all = await getDb().plugins.toArray()
+  const rows = all.filter((row) => Number((row as { updatedAt?: number }).updatedAt ?? 0) > since)
+  return finalizeDelta(rows as UpdatedAtRow[], since)
+}
+
+async function readAdapterInstancesDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().adapterInstances.where("updatedAt").above(since).toArray()
+  return finalizeDelta(rows as UpdatedAtRow[], since)
+}
+
+/**
+ * Settings is a singleton row keyed `"singleton"`. We don't have a
+ * per-row `updatedAt` field on it, so the rule is: emit the row whenever
+ * the caller has never pulled it (`since === 0`) OR if it was changed
+ * since the cursor. The mobile cache then warms once and any subsequent
+ * pulls return an empty delta until the cursor is reset.
+ */
+async function readSettingsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const row = await getDb().settings.get("singleton")
+  if (!row) return { rows: [], deleted_ids: [], next_since: since }
+  const updatedAt = Number((row as { updatedAt?: number }).updatedAt ?? 0)
+  if (since === 0 || updatedAt > since) {
+    return {
+      rows: [row],
+      deleted_ids: [],
+      next_since: updatedAt > 0 ? updatedAt : Date.now(),
+    }
+  }
+  return { rows: [], deleted_ids: [], next_since: since }
 }
 
 interface UpdatedAtRow {

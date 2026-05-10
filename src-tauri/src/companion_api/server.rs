@@ -207,6 +207,14 @@ mod tests {
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
             desktop_messages_bridge:
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            desktop_writes_bridge:
+                crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
+            sync_registry:
+                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter:
+                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens:
+                crate::companion_api::push::PushTokenRegistry::new(),
         })
     }
 

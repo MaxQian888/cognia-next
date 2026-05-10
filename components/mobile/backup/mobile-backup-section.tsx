@@ -37,6 +37,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { writeFile } from "@/lib/capacitor/filesystem"
 import { ensureChannel, schedule as scheduleLocalNotif } from "@/lib/capacitor/local-notifications"
 import { detectNativePlatform } from "@/lib/capacitor/_shared"
@@ -47,10 +48,12 @@ import { migrateEnvelope } from "@/lib/data/migrate"
 import type { ImportMergeStrategy } from "@/lib/data/types"
 import { listBackupHistory } from "@/lib/db/backup-history"
 import type { BackupHistoryRow } from "@/lib/db/backup-history"
+import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
 
-const DEFAULT_PASSPHRASE = "mobile-auto-key" // Replaced by user input or settings.
 const NOTIF_ID_DAILY = 91_001
+const MIN_PASSPHRASE_LENGTH = 8
+const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 function tsFilename(now = new Date()): string {
   const pad = (n: number) => n.toString().padStart(2, "0")
@@ -72,6 +75,9 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
   const t = useTranslations("mobile.backup")
   const tNotif = useTranslations("mobile.offline")
   const isMobile = detectNativePlatform() === "mobile"
+  const guard = useBiometricGuard()
+  const biometricRequired =
+    useSettingsStore((s) => s.settings?.biometricRequiredFor?.exportBackup) ?? false
 
   const [exporting, setExporting] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -81,6 +87,72 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
   const [intervalDays, setIntervalDays] = useState(7)
 
   const history = useLiveQuery<BackupHistoryRow[]>(() => listBackupHistory(), []) ?? []
+  const passphraseValid = passphrase.length >= MIN_PASSPHRASE_LENGTH
+
+  const runExport = async () => {
+    const pkg = await buildBackupPackage({
+      mergeStrategy: "skip",
+      includeSessions: true,
+      includeApiKey: false,
+      includeBuiltIns: false,
+    } as never)
+    const plaintext = JSON.stringify(pkg)
+    const envelope = await encryptBackupPackage(plaintext, passphrase, pkg.manifest)
+    const json = JSON.stringify(envelope)
+    const path = `cognia/backups/${tsFilename()}`
+
+    const out = await writeFile({
+      path,
+      data: utf8ToBase64(json),
+      encoding: "base64",
+      directory: "documents",
+      recursive: true,
+    })
+    if (out.kind === "ok") {
+      toast.success(t("exportSuccess", { path: out.value.uri }))
+    } else if (out.kind === "unsupported") {
+      // Web fallback — trigger a download via Blob URL.
+      const blob = new Blob([json], { type: "application/octet-stream" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = tsFilename()
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      toast.success(t("exportSuccess", { path: a.download }))
+    } else {
+      toast.error(t("exportFailed", { message: out.message }))
+    }
+  }
+
+  const onExport = async () => {
+    if (exporting) return
+    if (!passphraseValid) return
+    setExporting(true)
+    try {
+      if (biometricRequired) {
+        const outcome = await guard(
+          {
+            reason: t("exportBiometricReason"),
+            title: t("exportBiometricTitle"),
+            fallthroughWhenUnavailable: true,
+          },
+          runExport
+        )
+        if (outcome.kind === "blocked" && outcome.reason !== "cancelled") {
+          toast.error(t("biometricBlocked", { reason: outcome.reason }))
+        }
+      } else {
+        await runExport()
+      }
+    } catch (err) {
+      toast.error(t("exportFailed", { message: err instanceof Error ? err.message : String(err) }))
+    } finally {
+      setExporting(false)
+    }
+  }
 
   // Schedule a daily LocalNotifications reminder when auto-backup flips on.
   useEffect(() => {
@@ -98,55 +170,45 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
     })()
   }, [autoBackup, t, tNotif])
 
-  const onExport = async () => {
-    if (exporting) return
-    setExporting(true)
-    try {
-      const pkg = await buildBackupPackage({
-        mergeStrategy: "skip",
-        includeSessions: true,
-        includeApiKey: false,
-        includeBuiltIns: false,
-      } as never)
-      const plaintext = JSON.stringify(pkg)
-      const envelope = await encryptBackupPackage(
-        plaintext,
-        passphrase || DEFAULT_PASSPHRASE,
-        pkg.manifest
-      )
-      const json = JSON.stringify(envelope)
-      const path = `cognia/backups/${tsFilename()}`
+  // Fire a real backup at every `intervalDays`-day boundary while the app
+  // is alive. The notif above is the fallback for when the app is closed.
+  // We probe the existing backup history on mount so a freshly-mounted
+  // session that's overdue triggers immediately rather than waiting the
+  // full interval again.
+  useEffect(() => {
+    if (!autoBackup) return
+    if (!passphraseValid) return
+    if (intervalDays <= 0) return
 
-      const out = await writeFile({
-        path,
-        data: utf8ToBase64(json),
-        encoding: "base64",
-        directory: "documents",
-        recursive: true,
-      })
-      if (out.kind === "ok") {
-        toast.success(t("exportSuccess", { path: out.value.uri }))
-      } else if (out.kind === "unsupported") {
-        // Web fallback — trigger a download via Blob URL.
-        const blob = new Blob([json], { type: "application/octet-stream" })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement("a")
-        a.href = url
-        a.download = tsFilename()
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        URL.revokeObjectURL(url)
-        toast.success(t("exportSuccess", { path: a.download }))
-      } else {
-        toast.error(t("exportFailed", { message: out.message }))
+    let cancelled = false
+    let interval: ReturnType<typeof setInterval> | null = null
+
+    const lastSuccessAt = (() => {
+      for (const row of history) {
+        if (row.success) return row.completedAt
       }
-    } catch (err) {
-      toast.error(t("exportFailed", { message: err instanceof Error ? err.message : String(err) }))
-    } finally {
-      setExporting(false)
+      return 0
+    })()
+
+    const fireIfOverdue = () => {
+      if (cancelled) return
+      const now = Date.now()
+      const due = lastSuccessAt === 0 ? now : lastSuccessAt + intervalDays * MS_PER_DAY
+      if (now >= due) {
+        void onExport()
+      }
     }
-  }
+
+    fireIfOverdue()
+    interval = setInterval(fireIfOverdue, MS_PER_DAY)
+    return () => {
+      cancelled = true
+      if (interval !== null) clearInterval(interval)
+    }
+    // `history` and `onExport` change every render but the interval only
+    // needs to re-arm on the toggle / interval / passphrase boundary.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoBackup, intervalDays, passphraseValid])
 
   const onImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -192,10 +254,28 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
+              minLength={MIN_PASSPHRASE_LENGTH}
               data-testid="backup-passphrase"
+              aria-invalid={passphrase.length > 0 && !passphraseValid}
+              aria-describedby="backup-passphrase-help"
             />
+            <span
+              id="backup-passphrase-help"
+              className={cn(
+                "text-[11px]",
+                passphraseValid ? "text-muted-foreground" : "text-destructive"
+              )}
+              data-testid="backup-passphrase-help"
+            >
+              {t("passphraseRequiredHint", { min: MIN_PASSPHRASE_LENGTH })}
+            </span>
           </Label>
-          <Button type="button" onClick={onExport} disabled={exporting} data-testid="backup-export">
+          <Button
+            type="button"
+            onClick={onExport}
+            disabled={exporting || !passphraseValid}
+            data-testid="backup-export"
+          >
             {exporting ? <span>{t("exporting")}</span> : <span>{t("exportNow")}</span>}
           </Button>
           {!isMobile ? (

@@ -217,14 +217,17 @@ pub async fn whoami_handler(Extension(ctx): Extension<DeviceContext>) -> Respons
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Wave 3.1: unified flat envelope `{ code, message, details? }`.
+///
+/// Both auth and RPC now share this shape so the mobile transport
+/// (`lib/tauri/transport-companion.ts`) can read `body.code` directly,
+/// no more synthetic `http_<status>` fallbacks for auth-side errors.
 fn error_response(status: StatusCode, code: &str, message: &str) -> Response {
     (
         status,
         Json(json!({
-            "error": {
-                "code": code,
-                "message": message
-            }
+            "code": code,
+            "message": message,
         })),
     )
         .into_response()
@@ -263,6 +266,14 @@ mod tests {
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
             desktop_messages_bridge:
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            desktop_writes_bridge:
+                crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
+            sync_registry:
+                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter:
+                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens:
+                crate::companion_api::push::PushTokenRegistry::new(),
         })
     }
 
@@ -349,7 +360,7 @@ mod tests {
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 401);
         let body = body_json(resp).await;
-        assert_eq!(body["error"]["code"], "invalid_pair_jwt");
+        assert_eq!(body["code"], "invalid_pair_jwt");
     }
 
     #[tokio::test]
@@ -373,7 +384,7 @@ mod tests {
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 401);
         let body = body_json(resp).await;
-        assert_eq!(body["error"]["code"], "invalid_pair_jwt");
+        assert_eq!(body["code"], "invalid_pair_jwt");
     }
 
     // ── 409 pair_jwt_redeemed ────────────────────────────────────────────
@@ -412,7 +423,7 @@ mod tests {
         let resp2 = router2.oneshot(req2).await.unwrap();
         assert_eq!(resp2.status().as_u16(), 409);
         let body = body_json(resp2).await;
-        assert_eq!(body["error"]["code"], "pair_jwt_redeemed");
+        assert_eq!(body["code"], "pair_jwt_redeemed");
     }
 
     // ── 400 device_label_too_long ────────────────────────────────────────
@@ -439,7 +450,7 @@ mod tests {
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 400);
         let body = body_json(resp).await;
-        assert_eq!(body["error"]["code"], "device_label_too_long");
+        assert_eq!(body["code"], "device_label_too_long");
     }
 
     #[tokio::test]
@@ -479,7 +490,7 @@ mod tests {
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 400);
         let body = body_json(resp).await;
-        assert_eq!(body["error"]["code"], "malformed_request");
+        assert_eq!(body["code"], "malformed_request");
     }
 
     #[tokio::test]
@@ -494,6 +505,6 @@ mod tests {
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 400);
         let body = body_json(resp).await;
-        assert_eq!(body["error"]["code"], "malformed_request");
+        assert_eq!(body["code"], "malformed_request");
     }
 }

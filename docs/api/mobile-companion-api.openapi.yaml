@@ -1531,22 +1531,16 @@ components:
 
     # ── Error envelopes ──────────────────────────────────────────────────────
 
+    # Wave 3.1: AuthError is now an alias for RpcError. Both /auth/* and
+    # /_rpc/* return the same flat `{ code, message, details? }` shape.
     AuthError:
-      description: Error envelope used by /auth/* and the JWT verifier middleware.
-      type: object
-      required: [error]
-      additionalProperties: false
-      properties:
-        error:
-          type: object
-          required: [code, message]
-          additionalProperties: false
-          properties:
-            code: { type: string }
-            message: { type: string }
+      $ref: "#/components/schemas/RpcError"
 
     RpcError:
-      description: Flat error envelope used by the /api/v1/_rpc/* dispatch.
+      description: |
+        Unified flat error envelope for every endpoint under /api/v1/.
+        Wave 3.1 collapsed the prior `{ error: { code, message } }`
+        nested shape used by /auth/* into this flat form.
       type: object
       required: [code, message]
       additionalProperties: false
@@ -1556,8 +1550,18 @@ components:
           description: |
             Stable snake-case code. Known values: `unknown_command`,
             `malformed_request`, `service_unavailable`, `internal_error`,
-            `payload_too_large`.
+            `payload_too_large`, `validation_failed`, `rate_limited`,
+            `invalid_pair_jwt`, `pair_jwt_redeemed`, `device_label_too_long`,
+            `missing_authorization`, `expired_token`, `wrong_scope`,
+            `device_revoked`.
         message: { type: string }
+        details:
+          description: |
+            Optional structured payload — populated by `validation_failed`
+            with the field-level errors from JSON-schema validation
+            (Wave 3.2), and by `rate_limited` with `retry_after_ms`.
+          type: object
+          additionalProperties: true
 
     # ── Claude session ───────────────────────────────────────────────────────
 

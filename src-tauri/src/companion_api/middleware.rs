@@ -168,14 +168,13 @@ pub async fn require_device_jwt(
 // Helper
 // ---------------------------------------------------------------------------
 
+/// Wave 3.1: unified flat envelope `{ code, message, details? }`.
 fn error_response(code: &str, message: &str) -> Response {
     (
         StatusCode::UNAUTHORIZED,
         Json(json!({
-            "error": {
-                "code": code,
-                "message": message
-            }
+            "code": code,
+            "message": message,
         })),
     )
         .into_response()
@@ -220,6 +219,14 @@ mod tests {
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
             desktop_messages_bridge:
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            desktop_writes_bridge:
+                crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
+            sync_registry:
+                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter:
+                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens:
+                crate::companion_api::push::PushTokenRegistry::new(),
         })
     }
 
@@ -281,7 +288,7 @@ mod tests {
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 401);
         let body = body_json(resp).await;
-        assert_eq!(body["error"]["code"], "missing_authorization");
+        assert_eq!(body["code"], "missing_authorization");
     }
 
     // ── Malformed JWT ────────────────────────────────────────────────────────
@@ -299,7 +306,7 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 401);
         let body = body_json(resp).await;
         // "not.a.valid.jwt" fails JSON decode → invalid_signature
-        let code = body["error"]["code"].as_str().unwrap();
+        let code = body["code"].as_str().unwrap();
         assert!(
             code == "invalid_signature" || code == "malformed_token",
             "unexpected code: {code}"
@@ -339,7 +346,7 @@ mod tests {
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 401);
         let body = body_json(resp).await;
-        assert_eq!(body["error"]["code"], "expired_token");
+        assert_eq!(body["code"], "expired_token");
     }
 
     // ── Wrong scope ──────────────────────────────────────────────────────────
@@ -357,7 +364,7 @@ mod tests {
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 401);
         let body = body_json(resp).await;
-        assert_eq!(body["error"]["code"], "wrong_scope");
+        assert_eq!(body["code"], "wrong_scope");
     }
 
     // ── Revoked device ───────────────────────────────────────────────────────
@@ -376,7 +383,7 @@ mod tests {
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 401);
         let body = body_json(resp).await;
-        assert_eq!(body["error"]["code"], "device_revoked");
+        assert_eq!(body["code"], "device_revoked");
     }
 
     // ── Query-string auth (WS upgrade path) ─────────────────────────────────

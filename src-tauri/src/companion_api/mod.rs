@@ -31,15 +31,21 @@
 pub mod auth;
 pub mod deny_list;
 pub mod desktop_messages_bridge;
+pub mod desktop_writes_bridge;
 pub mod event_bus;
 pub mod idempotency;
 pub mod jwt;
 pub mod middleware;
+pub mod push;
+pub mod rate_limit;
 pub mod redemption_lru;
 pub mod rpc;
 pub mod secret;
 pub mod server;
+pub mod pair_flow_test;
+pub mod spec_parity;
 pub mod sync_bridge;
+pub mod sync_registry;
 pub mod mdns;
 pub mod tls;
 pub mod tunnel;
@@ -99,6 +105,24 @@ pub struct CompanionState {
     /// trips between the Rust HTTP handler and the WebView's Dexie store.
     /// See [`desktop_messages_bridge`] for the wire protocol.
     pub desktop_messages_bridge: Arc<desktop_messages_bridge::DesktopMessagesBridge>,
+    /// Generic desktop-write bridge (Wave 2). Carries the 7 mutating Wave 2
+    /// RPCs (character_*, skill_set_enabled, plugin_set_enabled,
+    /// adapter_update_policy, app_settings_update) plus the read-only
+    /// `twin_profile_get` projection through one event channel.
+    pub desktop_writes_bridge: Arc<desktop_writes_bridge::DesktopWritesBridge>,
+    /// Declarative sync-table allowlist (Wave 3.5). Replaces the
+    /// hardcoded `const ALLOWED` array in `rpc.rs`'s `sync_pull` arm so
+    /// plugins can register their own Dexie tables for mobile mirror.
+    pub sync_registry: Arc<sync_registry::SyncTableRegistry>,
+    /// Per-device rate limiter (Wave 3.3). Token bucket: 60 rpm, 10
+    /// burst, evaluated *after* the JWT verifier middleware so each
+    /// paired phone gets its own quota.
+    pub rate_limiter: Arc<rate_limit::RateLimiter>,
+    /// Push notification token registry (Wave 3.4). Per-device APNs /
+    /// FCM tokens registered via `register_push_token`; consumed by the
+    /// dispatcher when the desktop emits an event for a phone that has
+    /// no live WebSocket subscription.
+    pub push_tokens: Arc<push::PushTokenRegistry>,
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +155,23 @@ pub struct CompanionServerState {
     /// oneshots even when the HTTP handler that issued the request has
     /// already returned.
     pub desktop_messages_bridge: Arc<desktop_messages_bridge::DesktopMessagesBridge>,
+    /// Desktop-write bridge (Wave 2). Same Arc-cloning trick as
+    /// `desktop_messages_bridge`; the `companion_desktop_write_response`
+    /// Tauri command resolves the pending oneshots regardless of whether
+    /// the HTTP handler that issued the request still has its task alive.
+    pub desktop_writes_bridge: Arc<desktop_writes_bridge::DesktopWritesBridge>,
+    /// Declarative sync-table registry (Wave 3.5). Shared with the axum
+    /// `SharedState` so plugin registration done at boot — before the
+    /// server starts — propagates to the running HTTP handler.
+    pub sync_registry: Arc<sync_registry::SyncTableRegistry>,
+    /// Long-lived rate limiter shared between the orchestrator and the
+    /// running axum SharedState — buckets persist across server restarts
+    /// so a device that's burning quota can't reset it by re-pairing.
+    pub rate_limiter: Arc<rate_limit::RateLimiter>,
+    /// Long-lived push token registry — survives server restarts so a
+    /// re-paired phone keeps its existing FCM/APNs token until the
+    /// phone itself re-registers.
+    pub push_tokens: Arc<push::PushTokenRegistry>,
     /// mDNS broadcaster (Wave 1.5) — exposes the running server on the LAN
     /// so paired phones can discover the desktop without manual baseUrl
     /// entry. Optional — broadcast must be opted into via Settings.
@@ -170,6 +211,10 @@ impl CompanionServerState {
             deny_list: Arc::new(DenyList::new()),
             sync_bridge: sync_bridge::SyncBridge::new(),
             desktop_messages_bridge: desktop_messages_bridge::DesktopMessagesBridge::new(),
+            desktop_writes_bridge: desktop_writes_bridge::DesktopWritesBridge::new(),
+            sync_registry: sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: rate_limit::RateLimiter::with_defaults(),
+            push_tokens: push::PushTokenRegistry::new(),
             mdns: mdns::BroadcasterState::new(),
             tunnel: tunnel::TunnelState::new(),
         }
@@ -275,6 +320,10 @@ mod tests {
             event_bus: EventBus::new(),
             sync_bridge: sync_bridge::SyncBridge::new(),
             desktop_messages_bridge: desktop_messages_bridge::DesktopMessagesBridge::new(),
+            desktop_writes_bridge: desktop_writes_bridge::DesktopWritesBridge::new(),
+            sync_registry: sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: rate_limit::RateLimiter::with_defaults(),
+            push_tokens: push::PushTokenRegistry::new(),
         })
     }
 

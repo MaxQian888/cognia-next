@@ -39,6 +39,25 @@ jest.mock("@/components/mobile/offline-banner", () => ({
   OfflineBanner: () => null,
 }))
 
+const inboundUnreadRef = { value: 0 }
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: () => inboundUnreadRef.value,
+}))
+
+jest.mock("@/lib/db/schema", () => ({
+  getDb: () => ({
+    inboundLedger: {
+      where: () => ({ above: () => ({ count: () => Promise.resolve(0) }) }),
+    },
+  }),
+}))
+
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (
+    selector: (s: { settings: { lastInboxViewedAt: number } | null }) => unknown
+  ) => selector({ settings: { lastInboxViewedAt: 0 } }),
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: (ns?: string) => (key: string, vars?: Record<string, unknown>) => {
     if (ns === "mobile.tabs") {
@@ -55,6 +74,7 @@ describe("<MobileShellWrapper />", () => {
   beforeEach(() => {
     platformMock.mockReset().mockReturnValue("mobile")
     pathnameMock.mockReset().mockReturnValue("/")
+    inboundUnreadRef.value = 0
   })
 
   it("renders the tab bar on mobile", () => {
@@ -114,6 +134,16 @@ describe("<MobileShellWrapper />", () => {
       </MobileShellWrapper>
     )
     expect(screen.getByTestId("mobile-tab-badge-chat")).toHaveTextContent("3")
+  })
+
+  it("merges inbound unread into the chat badge", () => {
+    inboundUnreadRef.value = 7
+    render(
+      <MobileShellWrapper>
+        <div>x</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.getByTestId("mobile-tab-badge-chat")).toHaveTextContent("7")
   })
 
   it("sets data-tab-bar-visible attribute correctly", () => {

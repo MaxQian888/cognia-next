@@ -1,4 +1,5 @@
 import { transport } from "@/lib/tauri"
+import { getPluginEventHooks } from "@/lib/plugin"
 import { runPython, type PythonExecResult } from "./canvas"
 
 describe("lib/tauri/canvas", () => {
@@ -47,5 +48,42 @@ describe("lib/tauri/canvas", () => {
   it("propagates rejection from transport.call", async () => {
     jest.spyOn(transport, "call").mockRejectedValueOnce(new Error("python boom"))
     await expect(runPython("oops")).rejects.toThrow("python boom")
+  })
+
+  it("dispatches onCodeExecutionStart + onCodeExecutionComplete on success", async () => {
+    const fakeResult: PythonExecResult = {
+      stdout: "hi",
+      stderr: "",
+      exit_code: 0,
+      duration_ms: 1,
+    }
+    jest.spyOn(transport, "call").mockResolvedValueOnce(fakeResult)
+    const hooks = getPluginEventHooks()
+    const startSpy = jest.spyOn(hooks, "dispatchCodeExecutionStart").mockImplementation(() => {})
+    const completeSpy = jest
+      .spyOn(hooks, "dispatchCodeExecutionComplete")
+      .mockImplementation(() => {})
+    const errorSpy = jest.spyOn(hooks, "dispatchCodeExecutionError").mockImplementation(() => {})
+
+    await runPython("print('hi')", 1234)
+    expect(startSpy).toHaveBeenCalledWith("python", "print('hi')")
+    expect(completeSpy).toHaveBeenCalledWith("python", fakeResult)
+    expect(errorSpy).not.toHaveBeenCalled()
+  })
+
+  it("dispatches onCodeExecutionError when the underlying call rejects", async () => {
+    const error = new Error("python boom")
+    jest.spyOn(transport, "call").mockRejectedValueOnce(error)
+    const hooks = getPluginEventHooks()
+    const startSpy = jest.spyOn(hooks, "dispatchCodeExecutionStart").mockImplementation(() => {})
+    const completeSpy = jest
+      .spyOn(hooks, "dispatchCodeExecutionComplete")
+      .mockImplementation(() => {})
+    const errorSpy = jest.spyOn(hooks, "dispatchCodeExecutionError").mockImplementation(() => {})
+
+    await expect(runPython("oops")).rejects.toThrow("python boom")
+    expect(startSpy).toHaveBeenCalledWith("python", "oops")
+    expect(errorSpy).toHaveBeenCalledWith("python", error)
+    expect(completeSpy).not.toHaveBeenCalled()
   })
 })

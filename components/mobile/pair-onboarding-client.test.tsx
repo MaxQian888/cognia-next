@@ -12,11 +12,11 @@ import {
   validateBaseUrl,
   validatePairJwt,
 } from "./pair-onboarding-client"
+import type { DiscoveredServer } from "@/lib/connectivity/lan-scanner"
 
-// A valid-shape JWT for tests that exercise the network layer (not validation).
 const VALID_JWT = "aaa.bbb.ccc"
 
-// Stub the transport singleton — we don't want the real selector to run.
+// Stub the transport singleton — no real RPC layer in jsdom.
 jest.mock("@/lib/tauri", () => ({
   transport: {
     call: jest.fn(),
@@ -25,18 +25,18 @@ jest.mock("@/lib/tauri", () => ({
   },
 }))
 
-// Mock the QR scanner so the dynamic-import never tries to resolve the
-// native plugin during jsdom tests. The pair page now reads from
-// `lib/capacitor/barcode` (Wave 1.7); the legacy mock path stays so any
-// transitive callers keep working.
-jest.mock("@/lib/capacitor/barcode", () => ({
-  scan: jest.fn(),
-}))
-jest.mock("@/lib/qr/barcode-scanner", () => ({
-  scanQrCode: jest.fn(),
+// Stub the QR scanner; keep the legacy mock path so any transitive callers keep working.
+jest.mock("@/lib/capacitor/barcode", () => ({ scan: jest.fn() }))
+jest.mock("@/lib/qr/barcode-scanner", () => ({ scanQrCode: jest.fn() }))
+
+// Stub the LAN scanner — the coordinator imports DiscoverStep, which imports
+// scanLan. Per-step tests cover the scan internals directly.
+const mockScanLan = jest.fn()
+jest.mock("@/lib/connectivity/lan-scanner", () => ({
+  scanLan: (opts: unknown) => mockScanLan(opts),
 }))
 
-// next/navigation — useRouter().push is now used for "Continue to chat".
+// next/navigation — useRouter().push is used after Continue-to-chat.
 const pushMock = jest.fn()
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock, replace: jest.fn(), back: jest.fn() }),
@@ -44,12 +44,36 @@ jest.mock("next/navigation", () => ({
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
-    // Mirror the strings the test expectations match against. Keep keys
-    // here in sync with i18n/messages/* — these are NOT a runtime fallback,
-    // just a static stub for jsdom.
     const map: Record<string, string> = {
-      title: "Pair with cognia desktop",
-      intro: "Enter the desktop's LAN address and the pairing code from Settings → Companion.",
+      title: "Connect to desktop",
+      intro: "Pick a server or paste the pairing code.",
+      loadingTitle: "Checking for an existing pairing…",
+      // Stepper labels.
+      discover: "Discover",
+      pair: "Pair",
+      paired: "Done",
+      ariaLabel: "Pairing progress",
+      // Discover step copy used through children.
+      "discover.title": "Find your desktop",
+      "discover.subtitle": "Pick a server or use a QR/manual code.",
+      "discover.scanning": "Scanning your network…",
+      "discover.rescanCta": "Scan again",
+      "discover.foundCount": `Found ${(vars?.count as number) ?? 0}`,
+      "discover.emptyTitle": "No servers found",
+      "discover.emptyDescription": "Make sure both devices share Wi-Fi.",
+      "discover.skipToManual": "Use QR or manual entry",
+      "discover.viaMdns": "mDNS",
+      "discover.viaProbe": "Probe",
+      "discover.viaHistory": "Last used",
+      "discover.tlsPinned": "TLS pinned",
+      "discover.tlsUnverified": "TLS unverified",
+      "discover.latencyMs": `${(vars?.ms as number) ?? 0} ms`,
+      "discover.baseUrlLocked": "Server locked",
+      "discover.backToDiscover": "Back to discover",
+      "permissions.localNetwork.title": "Local network blocked",
+      "permissions.localNetwork.description": "Open Settings to grant access.",
+      "permissions.localNetwork.openSettings": "Open Settings",
+      // Pair step copy.
       scanCta: "Scan QR",
       manualDivider: "or paste manually",
       baseUrlLabel: "Server URL",
@@ -60,9 +84,13 @@ jest.mock("next-intl", () => ({
       formCardDescription: "One-tap scan or manual paste.",
       submit: "Pair",
       submitInProgress: "Pairing…",
-      transportLabel: "Transport",
-      loadingTitle: "Checking for an existing pairing…",
       errorTitle: "Pairing failed",
+      "scanError.notPairCode": "QR code scanned but its payload is not a cognia pairing code.",
+      "scanError.permissionDenied": "Camera permission denied.",
+      "scanError.unsupported": "QR scan only available on mobile app.",
+      "scanError.failed": `QR scan failed: ${(vars?.message as string) ?? ""}`,
+      // Paired step copy.
+      transportLabel: "Transport",
       connectedTitle: "Connected to desktop",
       connectedSubtitle: "Live link.",
       offlineTitle: "Connection lost",
@@ -82,58 +110,107 @@ jest.mock("next-intl", () => ({
       "diagnostics.subtitle": "Probe the link.",
       "diagnostics.expand": "Show diagnostics",
       "diagnostics.collapse": "Hide diagnostics",
-      "diagnostics.testRpc": "Test RPC connection",
-      "diagnostics.testWs": "Test event subscription",
+      "diagnostics.testRpc": "Test RPC",
+      "diagnostics.testWs": "Test event",
       "diagnostics.rpcResultLabel": "RPC response",
       "diagnostics.wsResultLabel": "Event payload",
-      "diagnostics.rpcWaiting": "Tap Test RPC to send a status RPC.",
-      "diagnostics.wsWaiting": "Tap Test event to subscribe for 5 seconds.",
+      "diagnostics.rpcWaiting": "Tap Test RPC.",
+      "diagnostics.wsWaiting": "Tap Test event.",
       "signOut.cardTitle": "Disconnect",
       "signOut.cardDescription": "Sign out and re-pair.",
       "signOut.cta": "Sign out / re-pair",
       signOutTitle: "Sign out",
       signOutReason: "Confirm sign out",
-      signOutDescription: "Reconnect requires re-pairing.",
+      signOutDescription: "You'll need to scan a QR again to reconnect.",
       biometricFailed: `Biometric failed (${(vars?.reason as string) ?? ""})`,
     }
     return map[key] ?? key
   },
 }))
 
-import { scan as scanBarcode } from "@/lib/capacitor/barcode"
-const mockedScanQr = scanBarcode as jest.Mock
-
-// Force a clean cache + storage between tests.
 beforeEach(() => {
   window.localStorage.clear()
   ;(globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn()
   pushMock.mockReset()
+  mockScanLan.mockReset()
+  // Default scan stub: settles fast with no hits.
+  mockScanLan.mockImplementation(async () => [])
 })
 
 afterEach(() => {
   jest.clearAllMocks()
-  mockedScanQr.mockReset()
 })
 
-describe("<PairOnboardingClient />", () => {
-  it("renders the pair form when not yet paired", async () => {
+describe("<PairOnboardingClient /> — coordinator", () => {
+  it("starts on the discover step when no companion config exists", async () => {
     render(<PairOnboardingClient />)
-
-    expect(await screen.findByTestId("pair-baseurl")).toBeInTheDocument()
-    expect(screen.getByTestId("pair-jwt")).toBeInTheDocument()
-    expect(screen.getByTestId("pair-submit")).toBeInTheDocument()
+    expect(await screen.findByTestId("pair-discover-step")).toBeInTheDocument()
+    expect(screen.getByTestId("pair-stepper")).toBeInTheDocument()
+    expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "discover")
   })
 
-  it("shows an error when baseUrl or pair JWT is empty on submit", async () => {
+  it("hydrates and lands on the paired step when storage already has a config", async () => {
+    window.localStorage.setItem(
+      "cognia.companion.config.v1",
+      JSON.stringify({
+        baseUrl: "http://test:7890",
+        deviceJwt: "jwt",
+        deviceId: "dev-existing",
+        serverVersion: "9.9.9",
+      })
+    )
+    render(<PairOnboardingClient />)
+    expect(await screen.findByTestId("pair-paired-step")).toBeInTheDocument()
+    expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "paired")
+    expect(screen.getByTestId("pair-status")).toHaveTextContent("dev-existing")
+  })
+
+  it("Skip from discover advances to the pair step with an empty form", async () => {
     const user = userEvent.setup()
     render(<PairOnboardingClient />)
-
-    await user.click(await screen.findByTestId("pair-submit"))
-
-    expect(await screen.findByTestId("pair-error")).toHaveTextContent(/required/i)
+    await user.click(await screen.findByTestId("pair-discover-skip"))
+    expect(await screen.findByTestId("pair-pair-step")).toBeInTheDocument()
+    expect((screen.getByTestId("pair-baseurl") as HTMLInputElement).value).toBe("")
+    expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "pair")
   })
 
-  it("transitions to the health card after a successful pair", async () => {
+  it("picking a discovered server prefills + locks the URL field on the pair step", async () => {
+    const hit: DiscoveredServer = {
+      id: "192.168.1.42:7890",
+      hostname: "cognia-AB12.local",
+      ip: "192.168.1.42",
+      port: 7890,
+      baseUrl: "https://cognia-AB12.local:7890",
+      source: "mdns",
+      fingerprint: "ABCD1234EFGH5678",
+      serverVersion: "0.4.2",
+      discoveredAt: 0,
+    }
+    mockScanLan.mockImplementation(
+      async ({ onFound }: { onFound: (s: DiscoveredServer) => void }) => {
+        onFound(hit)
+        return [hit]
+      }
+    )
+    const user = userEvent.setup()
+    render(<PairOnboardingClient />)
+    await user.click(await screen.findByTestId("pair-server-card"))
+    expect(await screen.findByTestId("pair-pair-step")).toBeInTheDocument()
+    const baseUrl = screen.getByTestId("pair-baseurl") as HTMLInputElement
+    expect(baseUrl.value).toBe("https://cognia-AB12.local:7890")
+    expect(baseUrl).toHaveAttribute("readonly")
+    expect(screen.getByTestId("pair-fingerprint-pin")).toBeInTheDocument()
+  })
+
+  it("Back from pair step returns to discover", async () => {
+    const user = userEvent.setup()
+    render(<PairOnboardingClient />)
+    await user.click(await screen.findByTestId("pair-discover-skip"))
+    await user.click(await screen.findByTestId("pair-back-to-discover"))
+    expect(await screen.findByTestId("pair-discover-step")).toBeInTheDocument()
+  })
+
+  it("transitions discover → pair → paired on a successful pair", async () => {
     const fetchMock = (globalThis as unknown as { fetch: jest.Mock }).fetch
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -146,120 +223,16 @@ describe("<PairOnboardingClient />", () => {
         }),
       text: () => Promise.resolve(""),
     })
-
     const user = userEvent.setup()
     render(<PairOnboardingClient />)
-
-    fireEvent.change(await screen.findByTestId("pair-baseurl"), {
+    await user.click(await screen.findByTestId("pair-discover-skip"))
+    fireEvent.change(screen.getByTestId("pair-baseurl"), {
       target: { value: "http://192.168.1.42:7890" },
     })
-    fireEvent.change(screen.getByTestId("pair-jwt"), {
-      target: { value: VALID_JWT },
-    })
+    fireEvent.change(screen.getByTestId("pair-jwt"), { target: { value: VALID_JWT } })
     await user.click(screen.getByTestId("pair-submit"))
-
-    await waitFor(() => expect(screen.getByTestId("pair-health-card")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId("pair-paired-step")).toBeInTheDocument())
     expect(screen.getByTestId("pair-status")).toHaveTextContent("dev-001")
-    expect(screen.getByTestId("pair-status")).toHaveTextContent("0.1.0")
-    expect(screen.getByTestId("pair-continue-cta")).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://192.168.1.42:7890/api/v1/auth/pair",
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({ "Content-Type": "application/json" }),
-      })
-    )
-  })
-
-  it("renders an actionable error when the pair endpoint returns 401", async () => {
-    const fetchMock = (globalThis as unknown as { fetch: jest.Mock }).fetch
-    fetchMock.mockResolvedValueOnce({
-      ok: false,
-      status: 401,
-      json: () => Promise.resolve({}),
-      text: () => Promise.resolve("invalid pair JWT"),
-    })
-
-    const user = userEvent.setup()
-    render(<PairOnboardingClient />)
-    fireEvent.change(await screen.findByTestId("pair-baseurl"), {
-      target: { value: "http://test:7890" },
-    })
-    fireEvent.change(screen.getByTestId("pair-jwt"), {
-      target: { value: VALID_JWT },
-    })
-    await user.click(screen.getByTestId("pair-submit"))
-
-    expect(await screen.findByTestId("pair-error")).toHaveTextContent(/expired|already been used/i)
-  })
-
-  it("renders the network-down hint when fetch rejects with a network error", async () => {
-    const fetchMock = (globalThis as unknown as { fetch: jest.Mock }).fetch
-    fetchMock.mockRejectedValueOnce(new Error("Failed to fetch"))
-
-    const user = userEvent.setup()
-    render(<PairOnboardingClient />)
-    fireEvent.change(await screen.findByTestId("pair-baseurl"), {
-      target: { value: "http://nope:7890" },
-    })
-    fireEvent.change(screen.getByTestId("pair-jwt"), {
-      target: { value: VALID_JWT },
-    })
-    await user.click(screen.getByTestId("pair-submit"))
-
-    expect(await screen.findByTestId("pair-error")).toHaveTextContent(/same network/i)
-  })
-
-  it("rejects malformed pair JWT before any fetch", async () => {
-    const fetchMock = (globalThis as unknown as { fetch: jest.Mock }).fetch
-
-    const user = userEvent.setup()
-    render(<PairOnboardingClient />)
-    fireEvent.change(await screen.findByTestId("pair-baseurl"), {
-      target: { value: "http://test:7890" },
-    })
-    fireEvent.change(screen.getByTestId("pair-jwt"), {
-      target: { value: "not-a-jwt" },
-    })
-    await user.click(screen.getByTestId("pair-submit"))
-
-    expect(await screen.findByTestId("pair-error")).toHaveTextContent(/three dot-separated parts/i)
-    expect(fetchMock).not.toHaveBeenCalled()
-  })
-
-  it("rejects a malformed base URL before any fetch", async () => {
-    const fetchMock = (globalThis as unknown as { fetch: jest.Mock }).fetch
-
-    const user = userEvent.setup()
-    render(<PairOnboardingClient />)
-    fireEvent.change(await screen.findByTestId("pair-baseurl"), {
-      target: { value: "ftp://nope" },
-    })
-    fireEvent.change(screen.getByTestId("pair-jwt"), {
-      target: { value: VALID_JWT },
-    })
-    await user.click(screen.getByTestId("pair-submit"))
-
-    expect(await screen.findByTestId("pair-error")).toHaveTextContent(/http:\/\/ or https:\/\//i)
-    expect(fetchMock).not.toHaveBeenCalled()
-  })
-
-  it("hydrates and renders the health card when storage already has a config", async () => {
-    window.localStorage.setItem(
-      "cognia.companion.config.v1",
-      JSON.stringify({
-        baseUrl: "http://test:7890",
-        deviceJwt: "jwt",
-        deviceId: "dev-existing",
-        serverVersion: "9.9.9",
-      })
-    )
-
-    render(<PairOnboardingClient />)
-
-    expect(await screen.findByTestId("pair-health-card")).toBeInTheDocument()
-    expect(screen.getByTestId("pair-status")).toHaveTextContent("dev-existing")
-    expect(screen.getByTestId("pair-status")).toHaveTextContent("9.9.9")
   })
 
   it("Continue to chat pushes the user to the mobile shell at /", async () => {
@@ -272,15 +245,13 @@ describe("<PairOnboardingClient />", () => {
         serverVersion: "9.9.9",
       })
     )
-
     const user = userEvent.setup()
     render(<PairOnboardingClient />)
-
     await user.click(await screen.findByTestId("pair-continue-cta"))
     expect(pushMock).toHaveBeenCalledWith("/")
   })
 
-  it("Refresh status records latency on a successful RPC", async () => {
+  it("sign-out wipes the config and routes back to discover", async () => {
     window.localStorage.setItem(
       "cognia.companion.config.v1",
       JSON.stringify({
@@ -290,185 +261,16 @@ describe("<PairOnboardingClient />", () => {
         serverVersion: "9.9.9",
       })
     )
-
-    const transportMock = (jest.requireMock("@/lib/tauri") as { transport: { call: jest.Mock } })
-      .transport
-    transportMock.call.mockResolvedValueOnce({ status: "ok" })
-
     const user = userEvent.setup()
     render(<PairOnboardingClient />)
-
-    await user.click(await screen.findByTestId("pair-refresh"))
-
-    await waitFor(() => expect(transportMock.call).toHaveBeenCalledWith("claude_sidecar_status"))
-    await waitFor(() =>
-      expect(screen.getByTestId("pair-health-card").getAttribute("data-health")).toBe("live")
-    )
-  })
-
-  it("Refresh status flips to offline when the RPC throws", async () => {
-    window.localStorage.setItem(
-      "cognia.companion.config.v1",
-      JSON.stringify({
-        baseUrl: "http://test:7890",
-        deviceJwt: "jwt",
-        deviceId: "dev-existing",
-        serverVersion: "9.9.9",
-      })
-    )
-
-    const transportMock = (jest.requireMock("@/lib/tauri") as { transport: { call: jest.Mock } })
-      .transport
-    transportMock.call.mockRejectedValueOnce(new Error("backend down"))
-
-    const user = userEvent.setup()
-    render(<PairOnboardingClient />)
-
-    await user.click(await screen.findByTestId("pair-refresh"))
-
-    await waitFor(() =>
-      expect(screen.getByTestId("pair-health-card").getAttribute("data-health")).toBe("offline")
-    )
-  })
-
-  it("Diagnostics is collapsed by default and reveals smoke buttons when expanded", async () => {
-    window.localStorage.setItem(
-      "cognia.companion.config.v1",
-      JSON.stringify({
-        baseUrl: "http://test:7890",
-        deviceJwt: "jwt",
-        deviceId: "dev-existing",
-        serverVersion: "9.9.9",
-      })
-    )
-
-    const user = userEvent.setup()
-    render(<PairOnboardingClient />)
-
-    // Closed initially — smoke-call must not be in the DOM.
-    expect(await screen.findByTestId("pair-diagnostics-toggle")).toBeInTheDocument()
-    expect(screen.queryByTestId("smoke-call")).not.toBeInTheDocument()
-
-    await user.click(screen.getByTestId("pair-diagnostics-toggle"))
-    expect(await screen.findByTestId("smoke-call")).toBeInTheDocument()
-    expect(screen.getByTestId("smoke-ws")).toBeInTheDocument()
-  })
-
-  it("invokes transport.call when the diagnostic Test RPC button is pressed", async () => {
-    window.localStorage.setItem(
-      "cognia.companion.config.v1",
-      JSON.stringify({
-        baseUrl: "http://test:7890",
-        deviceJwt: "jwt",
-        deviceId: "dev-existing",
-        serverVersion: "9.9.9",
-      })
-    )
-
-    const transportMock = (jest.requireMock("@/lib/tauri") as { transport: { call: jest.Mock } })
-      .transport
-    transportMock.call.mockResolvedValueOnce({ status: "ok" })
-
-    const user = userEvent.setup()
-    render(<PairOnboardingClient />)
-
-    // Expand the Diagnostics card first.
-    await user.click(await screen.findByTestId("pair-diagnostics-toggle"))
-    await user.click(await screen.findByTestId("smoke-call"))
-
-    await waitFor(() => expect(screen.getByTestId("smoke-call-result")).toBeInTheDocument())
-    expect(screen.getByTestId("smoke-call-result")).toHaveTextContent('"status": "ok"')
-    expect(transportMock.call).toHaveBeenCalledWith("claude_sidecar_status")
-  })
-
-  it("Scan QR prefills the form on a successful scan", async () => {
-    mockedScanQr.mockResolvedValueOnce({
-      kind: "scanned",
-      raw: JSON.stringify({
-        baseUrl: "http://192.168.1.99:7890",
-        pairJwt: "qq.qq.qq",
-        v: 1,
-      }),
-    })
-
-    const user = userEvent.setup()
-    render(<PairOnboardingClient />)
-    await user.click(await screen.findByTestId("pair-scan-qr"))
-
-    await waitFor(() =>
-      expect((screen.getByTestId("pair-baseurl") as HTMLInputElement).value).toBe(
-        "http://192.168.1.99:7890"
-      )
-    )
-    expect((screen.getByTestId("pair-jwt") as HTMLTextAreaElement).value).toBe("qq.qq.qq")
-  })
-
-  it("Scan QR shows an error when the QR payload isn't a cognia pairing code", async () => {
-    mockedScanQr.mockResolvedValueOnce({ kind: "scanned", raw: "https://example.com" })
-
-    const user = userEvent.setup()
-    render(<PairOnboardingClient />)
-    await user.click(await screen.findByTestId("pair-scan-qr"))
-
-    expect(await screen.findByTestId("pair-error")).toHaveTextContent(/cognia pairing code/i)
-  })
-
-  it("Scan QR explains permission denial without throwing", async () => {
-    mockedScanQr.mockResolvedValueOnce({ kind: "permission_denied" })
-
-    const user = userEvent.setup()
-    render(<PairOnboardingClient />)
-    await user.click(await screen.findByTestId("pair-scan-qr"))
-
-    expect(await screen.findByTestId("pair-error")).toHaveTextContent(/Camera permission denied/i)
-  })
-
-  it("Scan QR explains web-mode unsupported", async () => {
-    mockedScanQr.mockResolvedValueOnce({ kind: "unsupported" })
-
-    const user = userEvent.setup()
-    render(<PairOnboardingClient />)
-    await user.click(await screen.findByTestId("pair-scan-qr"))
-
-    expect(await screen.findByTestId("pair-error")).toHaveTextContent(
-      /only available on the mobile app/i
-    )
-  })
-
-  it("Scan QR cancellation leaves the form untouched and shows no error", async () => {
-    mockedScanQr.mockResolvedValueOnce({ kind: "cancelled" })
-
-    const user = userEvent.setup()
-    render(<PairOnboardingClient />)
-    await user.click(await screen.findByTestId("pair-scan-qr"))
-
-    await new Promise((r) => setTimeout(r, 0))
-    expect(screen.queryByTestId("pair-error")).not.toBeInTheDocument()
-  })
-
-  it("clears the saved config and returns to the form when sign-out is pressed", async () => {
-    window.localStorage.setItem(
-      "cognia.companion.config.v1",
-      JSON.stringify({
-        baseUrl: "http://test:7890",
-        deviceJwt: "jwt",
-        deviceId: "dev-existing",
-        serverVersion: "9.9.9",
-      })
-    )
-
-    const user = userEvent.setup()
-    render(<PairOnboardingClient />)
-
     await user.click(await screen.findByTestId("pair-signout"))
-
-    await waitFor(() => expect(screen.getByTestId("pair-baseurl")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId("pair-discover-step")).toBeInTheDocument())
     expect(window.localStorage.getItem("cognia.companion.config.v1")).toBeNull()
   })
 })
 
 // ---------------------------------------------------------------------------
-// Pure helpers
+// Pure helpers (re-exported from ./pair/pair-helpers)
 // ---------------------------------------------------------------------------
 
 describe("validateBaseUrl", () => {

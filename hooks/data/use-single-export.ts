@@ -10,6 +10,7 @@ import type { SingleExportFormat } from "@/lib/export/single"
 import type { ChatSession, StoredMessage } from "@/lib/claude/types"
 import type { ThemeId, ThemeTokens } from "@/lib/export/html/syntax-themes"
 import { getDb } from "@/lib/db/schema"
+import { getPluginEventHooks } from "@/lib/plugin"
 
 interface RunArgs {
   format: SingleExportFormat
@@ -33,12 +34,15 @@ export function useSingleExport() {
 
   const run = useCallback(async (args: RunArgs): Promise<SingleExportResult> => {
     setBusy(true)
+    const hooks = getPluginEventHooks()
+    // Plugin host: announce export start so plugins can observe / log.
+    await hooks.dispatchExportStart(args.session.id, args.format)
     try {
       const messages =
         args.messages ??
         (await getDb().messages.where("sessionId").equals(args.session.id).sortBy("createdAt"))
 
-      const out = renderSingleExport({
+      const rendered = renderSingleExport({
         format: args.format,
         session: args.session,
         messages,
@@ -49,6 +53,12 @@ export function useSingleExport() {
         includeTokens: args.includeTokens,
       })
 
+      // Plugin host: let plugins rewrite the export payload before it's
+      // written to disk / downloaded. The pipeline returns the original
+      // content unchanged when no plugin transforms it.
+      const transformed = await hooks.dispatchExportTransform(rendered.content, args.format)
+      const out = { ...rendered, content: transformed }
+
       if (isTauri()) {
         const { save } = await import("@tauri-apps/plugin-dialog")
         const { writeTextFile } = await import("@tauri-apps/plugin-fs")
@@ -57,7 +67,10 @@ export function useSingleExport() {
           defaultPath: out.filename,
           filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
         })
-        if (!path) return { ok: true, canceled: true }
+        if (!path) {
+          hooks.dispatchExportComplete(args.session.id, args.format, false)
+          return { ok: true, canceled: true }
+        }
         await writeTextFile(path, out.content)
       } else {
         const blob = new Blob([out.content], { type: out.mimeType })
@@ -68,8 +81,10 @@ export function useSingleExport() {
         a.click()
         URL.revokeObjectURL(url)
       }
+      hooks.dispatchExportComplete(args.session.id, args.format, true)
       return { ok: true, canceled: false, filename: out.filename, sizeBytes: out.content.length }
     } catch (err) {
+      hooks.dispatchExportComplete(args.session.id, args.format, false)
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     } finally {
       setBusy(false)

@@ -30,6 +30,15 @@ jest.mock("@/lib/logger", () => ({
     },
     ui: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
   },
+  createLogger: () => ({
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    trace: jest.fn(),
+    fatal: jest.fn(),
+    child: jest.fn(),
+  }),
 }))
 
 const toastError = jest.fn()
@@ -71,8 +80,13 @@ jest.mock("@/hooks/chat", () => ({
 const errorMessageRef: { current: string | null } = { current: null }
 jest.mock("@/stores/chat", () => ({
   useChatStore: <T,>(
-    selector: (s: { errorMessage: string | null; pendingApprovals: unknown[] }) => T
-  ): T => selector({ errorMessage: errorMessageRef.current, pendingApprovals: [] }),
+    selector: (s: { errorMessage: string | null; status: string; pendingApprovals: unknown[] }) => T
+  ): T =>
+    selector({
+      errorMessage: errorMessageRef.current,
+      status: "idle",
+      pendingApprovals: [],
+    }),
 }))
 
 const loadSettings = jest.fn().mockResolvedValue(undefined)
@@ -116,6 +130,18 @@ jest.mock("@/lib/db/session-state", () => ({
   markSessionRead: jest.fn().mockResolvedValue(undefined),
 }))
 
+jest.mock("@/lib/db/characters", () => ({
+  listCharacters: () => Promise.resolve([]),
+}))
+
+jest.mock("@/lib/db/teams", () => ({
+  getTeam: () => Promise.resolve(undefined),
+}))
+
+jest.mock("@/hooks/data", () => ({
+  useClientLiveQuery: <T,>(_query: () => Promise<T>, _deps: unknown, fallback: T): T => fallback,
+}))
+
 // Stub heavy children — the shell test verifies structural wiring, not
 // child internals.
 jest.mock("@/components/chat/chat-view", () => ({
@@ -146,8 +172,8 @@ jest.mock("@/components/desktop/guild-rail", () => ({
     </div>
   ),
 }))
-jest.mock("@/components/desktop/channel-list", () => ({
-  ChannelList: ({
+jest.mock("@/components/mobile/shell/mobile-channel-list", () => ({
+  MobileChannelList: ({
     onSelect,
     onNewDirect,
   }: {
@@ -159,6 +185,16 @@ jest.mock("@/components/desktop/channel-list", () => ({
       <button data-testid="channel-new-direct-stub" onClick={onNewDirect} />
     </div>
   ),
+}))
+
+jest.mock("@/components/mobile/shell/character-header", () => ({
+  CharacterHeader: ({
+    subject,
+    fallbackTitle,
+  }: {
+    subject: { name: string } | null
+    fallbackTitle: string
+  }) => <div data-testid="mobile-active-title">{subject?.name ?? fallbackTitle}</div>,
 }))
 jest.mock("@/components/desktop/member-list", () => ({
   MemberList: () => <div data-testid="member-list" />,

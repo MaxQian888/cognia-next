@@ -13,6 +13,7 @@ mod files;
 mod hooks;
 mod logging;
 mod mcp_server;
+mod plugin_api;
 mod proxy_config;
 mod remote_control;
 mod scheduler;
@@ -208,6 +209,11 @@ pub fn run() {
         .manage(vector::VectorState::new(
             dirs::data_dir().map(|d| d.join("cognia").join("vectors.sqlite")),
         ))
+        .manage(plugin_api::PluginRuntimeState::new(
+            dirs::data_dir()
+                .map(|d| d.join("cognia").join("plugins"))
+                .unwrap_or_else(|| std::path::PathBuf::from(".")),
+        ))
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             claude::commands::claude_send,
@@ -344,6 +350,7 @@ pub fn run() {
             companion_api::commands::companion_unrevoke_device,
             companion_api::commands::companion_sync_pull_response,
             companion_api::commands::companion_message_response,
+            companion_api::commands::companion_desktop_write_response,
             companion_api::commands::companion_get_tls_fingerprint,
             companion_api::commands::companion_tls_paths,
             companion_api::commands::companion_mdns_start,
@@ -385,6 +392,51 @@ pub fn run() {
             workflow::commands::workflow_reload_in_flight_runs,
             workflow::commands::workflow_ack_completed,
             workflow::commands::workflow_get_webhook_url,
+            plugin_api::lifecycle::plugin_load,
+            plugin_api::lifecycle::plugin_enable,
+            plugin_api::lifecycle::plugin_disable,
+            plugin_api::lifecycle::plugin_unload,
+            plugin_api::lifecycle::plugin_install,
+            plugin_api::lifecycle::plugin_uninstall,
+            plugin_api::lifecycle::plugin_get_all,
+            plugin_api::lifecycle::plugin_runtime_snapshot,
+            plugin_api::lifecycle::plugin_set_state,
+            plugin_api::lifecycle::plugin_get_state,
+            plugin_api::permissions::plugin_permission_grant,
+            plugin_api::permissions::plugin_permission_list,
+            plugin_api::permissions::plugin_permission_revoke,
+            plugin_api::api_bridge::plugin_api_invoke,
+            plugin_api::api_bridge::plugin_api_batch_invoke,
+            plugin_api::fs_watcher::plugin_fs_watch,
+            plugin_api::fs_watcher::plugin_fs_unwatch,
+            plugin_api::window_ops::plugin_window_minimize,
+            plugin_api::window_ops::plugin_window_maximize,
+            plugin_api::window_ops::plugin_window_unmaximize,
+            plugin_api::window_ops::plugin_window_set_always_on_top,
+            plugin_api::shortcut_ops::plugin_shortcut_register,
+            plugin_api::shortcut_ops::plugin_shortcut_unregister,
+            plugin_api::context_menu::plugin_context_menu_register,
+            plugin_api::context_menu::plugin_context_menu_unregister,
+            plugin_api::notification::plugin_show_notification,
+            plugin_api::process_ops::plugin_process_kill,
+            plugin_api::signature::plugin_generate_keypair,
+            plugin_api::signature::plugin_create_signature,
+            plugin_api::signature::plugin_verify_signature,
+            plugin_api::backup::plugin_backup_create,
+            plugin_api::backup::plugin_backup_restore,
+            plugin_api::backup::plugin_backup_delete,
+            plugin_api::marketplace::plugin_marketplace_versions,
+            plugin_api::marketplace::plugin_get_directory,
+            plugin_api::marketplace::plugin_download_version,
+            plugin_api::marketplace::plugin_invalidate_cache,
+            plugin_api::devtools::plugin_dev_server_start,
+            plugin_api::devtools::plugin_dev_server_stop,
+            plugin_api::devtools::plugin_dev_server_watch,
+            plugin_api::devtools::plugin_dev_server_unwatch,
+            plugin_api::devtools::plugin_watch_start,
+            plugin_api::devtools::plugin_watch_stop,
+            plugin_api::devtools::plugin_reload,
+            plugin_api::devtools::plugin_list_dev_plugins,
         ])
         .setup(|app| {
             // Bootstrap native logging in *all* builds. Installs tauri-plugin-log

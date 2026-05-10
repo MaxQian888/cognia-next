@@ -13,7 +13,6 @@ import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   ChevronRightIcon,
-  CloudUploadIcon,
   DatabaseIcon,
   KeyRoundIcon,
   PaletteIcon,
@@ -24,6 +23,10 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { MobileBackupSection } from "@/components/mobile/backup/mobile-backup-section"
+import { MobileSettingsPanel } from "@/components/mobile/settings/mobile-settings-panel"
+import { ProfileHeader } from "@/components/mobile/me/profile-header"
+import { TodayStatsCard } from "@/components/mobile/me/today-stats-card"
+import { QuickToggles } from "@/components/mobile/me/quick-toggles"
 import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
 import type { CompanionConfig } from "@/lib/tauri/transport-companion"
 
@@ -72,8 +75,14 @@ export default function MePage() {
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
       </header>
 
+      <section className="flex flex-col gap-3 px-4">
+        <ProfileHeader />
+        <TodayStatsCard />
+        <QuickToggles />
+      </section>
+
       {/* Pairing status card */}
-      <section className="px-4">
+      <section className="px-4 pt-4">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-sm font-medium">
@@ -111,6 +120,7 @@ export default function MePage() {
         <h2 className="mt-2 text-xs font-medium uppercase text-muted-foreground">
           {t("sectionData")}
         </h2>
+        <MobileSettingsPanel />
         <MobileBackupSection />
         <SectionLink
           href="/settings?section=data&dataTab=maintenance"

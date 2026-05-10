@@ -111,6 +111,33 @@ impl RpcError {
             Json(Self::new("internal_error", detail)),
         )
     }
+
+    /// Wave 3.3 — 429 Too Many Requests with the wait time embedded in
+    /// the message (`retry_after_seconds=N`). The flat envelope keeps
+    /// the contract simple; phones can parse the integer.
+    fn rate_limited(retry_after_secs: u64) -> (StatusCode, Json<Self>) {
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(Self::new(
+                "rate_limited",
+                format!(
+                    "device exceeded the per-minute quota; retry_after_seconds={retry_after_secs}"
+                ),
+            )),
+        )
+    }
+
+    /// Wave 3.2 — request shape rejected. Distinct from
+    /// `malformed_request` so clients can route validation failures
+    /// (recoverable, fix the payload and retry) separately from
+    /// transport-level malformed JSON (terminal at this layer).
+    #[allow(dead_code)] // re-exposed when full schema validation lands.
+    fn validation_failed(detail: String) -> (StatusCode, Json<Self>) {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(Self::new("validation_failed", detail)),
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -146,10 +173,31 @@ const KNOWN_COMMANDS: &[&str] = &[
     "read_agent_config",
     "write_agent_config",
     "sync_pull",
+    "sync_list_tables",
+    "register_push_token",
+    "revoke_push_token",
     "message_update",
     "message_delete",
     "session_list",
+    // Wave 2 mutating RPCs — round-trip through desktop_writes_bridge.
+    "character_upsert",
+    "character_delete",
+    "character_bind_twin",
+    "skill_set_enabled",
+    "plugin_set_enabled",
+    "adapter_update_policy",
+    "app_settings_update",
+    // Wave 2 read-only projection routed through desktop_writes_bridge.
+    "twin_profile_get",
 ];
+
+/// Public read-only accessor for the dispatch allowlist. Used by the
+/// `spec_parity` test (Wave 3.6) to assert that every command in this
+/// list has a matching `/api/v1/_rpc/<name>` path in the OpenAPI spec.
+#[allow(dead_code)] // referenced from `spec_parity::tests` only.
+pub fn known_commands() -> &'static [&'static str] {
+    KNOWN_COMMANDS
+}
 
 /// Commands in this list skip the idempotency cache entirely.
 /// They are cheap to re-run and structurally idempotent.
@@ -166,10 +214,27 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // returns the same delta. Skip the cache to avoid stalling phone clients
     // behind a 60-second TTL when the desktop has fresh writes.
     "sync_pull",
+    // Wave 3.5 — registry introspection is pure read.
+    "sync_list_tables",
     // Read-only paginated session listing — same `(limit, offset, before)`
     // returns the same page; skip the cache so a slow desktop write doesn't
     // serve stale rows to a polling phone.
     "session_list",
+    // Wave 2 read-only twin profile projection.
+    "twin_profile_get",
+];
+
+/// Allowlisted patch keys for `app_settings_update`. The mobile client may
+/// only mutate user-facing preferences; transport, sidecar, and provider
+/// configuration stay desktop-only. Mirror this with the OpenAPI spec.
+const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
+    "theme",
+    "fontScale",
+    "language",
+    "reduceMotion",
+    "defaultModel",
+    "defaultCharacterId",
+    "biometricRequiredFor",
 ];
 
 // ---------------------------------------------------------------------------
@@ -206,6 +271,15 @@ pub async fn rpc_handler(
         return Err(RpcError::unknown_command(&name));
     }
 
+    // Wave 3.3 — per-device rate limiter sits after the JWT verifier
+    // middleware (so we can key on device_id) and before idempotency
+    // lookup (cache hits don't burn a token).
+    if let crate::companion_api::rate_limit::RateLimitDecision::Reject { retry_after } =
+        state.rate_limiter.check(&ctx.device_id)
+    {
+        return Err(RpcError::rate_limited(retry_after.as_secs()));
+    }
+
     let is_read_only = READ_ONLY_COMMANDS.contains(&name.as_str());
 
     // Cache look-up (non-read-only commands only).
@@ -224,7 +298,7 @@ pub async fn rpc_handler(
         .ok_or_else(|| RpcError::service_unavailable("app_handle not available (test mode)".to_string()))?;
 
     // Dispatch.
-    let result = dispatch(&name, args, &state, &app).await?;
+    let result = dispatch(&name, args, &state, &app, &ctx.device_id).await?;
 
     // Cache the result (non-read-only + idempotency key present).
     if !is_read_only {
@@ -285,6 +359,7 @@ async fn dispatch(
     args: Value,
     state: &SharedState,
     app: &tauri::AppHandle,
+    device_id: &str,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     use tauri::Manager as _;
 
@@ -492,13 +567,69 @@ async fn dispatch(
 
         // ── Sync down (M4.7) ──────────────────────────────────────────────────
 
+        "register_push_token" => {
+            // Wave 3.4 — phone hands its FCM/APNs token to the desktop
+            // so the dispatcher can route inbound events to the device
+            // when no WS subscription is live. Idempotent: re-registering
+            // overwrites the previous record.
+            let provider_str: String = required(&args, "provider")?;
+            let token: String = required(&args, "token")?;
+            let provider = match provider_str.as_str() {
+                "fcm" => crate::companion_api::push::PushProvider::Fcm,
+                "apns" => crate::companion_api::push::PushProvider::Apns,
+                other => {
+                    return Err(RpcError::malformed(format!(
+                        "register_push_token.provider must be 'fcm' or 'apns', got '{other}'"
+                    )));
+                }
+            };
+            let app_version: Option<String> = optional(&args, "app_version")?;
+            let device_locale: Option<String> = optional(&args, "device_locale")?;
+            state
+                .push_tokens
+                .register(crate::companion_api::push::PushTokenRecord {
+                    device_id: device_id.to_string(),
+                    provider,
+                    token,
+                    app_version,
+                    device_locale,
+                    registered_at: chrono::Utc::now().timestamp_millis(),
+                });
+            Ok(Value::Null)
+        }
+
+        "revoke_push_token" => {
+            // Phone explicitly clears its token (sign-out / token rotation).
+            state.push_tokens.revoke(device_id);
+            Ok(Value::Null)
+        }
+
+        "sync_list_tables" => {
+            // Wave 3.5 introspection — surface every registered Dexie
+            // table the phone is allowed to mirror. Used by the mobile
+            // shell to discover plugin-added tables without a release.
+            let descriptors = state.sync_registry.list();
+            let payload: Vec<serde_json::Value> = descriptors
+                .into_iter()
+                .map(|d| {
+                    serde_json::json!({
+                        "name": d.name,
+                        "description": d.description,
+                        "hasTombstones": d.has_tombstones,
+                    })
+                })
+                .collect();
+            Ok(serde_json::json!({ "tables": payload }))
+        }
+
         "sync_pull" => {
             let table: String = required(&args, "table")?;
             let since: i64 = optional::<i64>(&args, "since")?.unwrap_or(0);
-            // Allowlist the table names so a malicious phone can't ask for
-            // arbitrary Dexie tables. Mirror lib/sync/types.ts SyncableTable.
-            const ALLOWED: &[&str] = &["characters", "skills", "sessions", "messages"];
-            if !ALLOWED.contains(&table.as_str()) {
+            // Wave 3.5 — table allowlist now lives on the declarative
+            // `SyncTableRegistry` (`sync_registry.rs`) so plugins can
+            // register new tables at boot without a code edit here.
+            // The `with_defaults()` factory seeds the 9 Wave 1+2 tables.
+            if !state.sync_registry.contains(&table) {
                 return Err(RpcError::malformed(format!(
                     "table '{table}' is not exposed to mobile sync"
                 )));
@@ -568,6 +699,62 @@ async fn dispatch(
                 .map_err(RpcError::internal)
         }
 
+        // ── Desktop-write bridge (Wave 2 mutating RPCs) ──────────────────────
+        // All commands route through one generic bridge that emits
+        // `companion://desktop-write-request` with `{ command, payload }`.
+        // The desktop WebView dispatches by command name and resolves via
+        // the `companion_desktop_write_response` Tauri command.
+        "character_upsert"
+        | "character_delete"
+        | "character_bind_twin"
+        | "skill_set_enabled"
+        | "plugin_set_enabled"
+        | "adapter_update_policy"
+        | "twin_profile_get" => {
+            let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
+            bridge
+                .dispatch(
+                    app,
+                    name,
+                    args,
+                    crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
+                )
+                .await
+                .map_err(RpcError::internal)
+        }
+
+        "app_settings_update" => {
+            // Allowlist enforcement — phone may only mutate user-facing
+            // preferences, never transport / sidecar / provider keys.
+            // Wave 3.2: distinguish validation failures (recoverable —
+            // user can fix the payload) from transport-level malformed
+            // requests by emitting `validation_failed` here.
+            let patch: Value = required(&args, "patch")?;
+            if let Some(map) = patch.as_object() {
+                for key in map.keys() {
+                    if !APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key.as_str()) {
+                        return Err(RpcError::validation_failed(format!(
+                            "settings key '{key}' is not editable from the mobile client"
+                        )));
+                    }
+                }
+            } else {
+                return Err(RpcError::validation_failed(
+                    "app_settings_update.patch must be an object".to_string(),
+                ));
+            }
+            let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
+            bridge
+                .dispatch(
+                    app,
+                    name,
+                    args,
+                    crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
+                )
+                .await
+                .map_err(RpcError::internal)
+        }
+
         // ── Test MCP ──────────────────────────────────────────────────────────
 
         "test_mcp_server" => {
@@ -629,6 +816,14 @@ mod tests {
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
             desktop_messages_bridge:
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            desktop_writes_bridge:
+                crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
+            sync_registry:
+                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter:
+                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens:
+                crate::companion_api::push::PushTokenRegistry::new(),
         })
     }
 
@@ -768,6 +963,14 @@ mod tests {
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
             desktop_messages_bridge:
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            desktop_writes_bridge:
+                crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
+            sync_registry:
+                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter:
+                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens:
+                crate::companion_api::push::PushTokenRegistry::new(),
         });
 
         let router = build_router(state);
@@ -808,6 +1011,14 @@ mod tests {
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
             desktop_messages_bridge:
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            desktop_writes_bridge:
+                crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
+            sync_registry:
+                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter:
+                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens:
+                crate::companion_api::push::PushTokenRegistry::new(),
         });
         let jwt = device_jwt("dev2");
 
@@ -842,6 +1053,14 @@ mod tests {
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
             desktop_messages_bridge:
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            desktop_writes_bridge:
+                crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
+            sync_registry:
+                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter:
+                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens:
+                crate::companion_api::push::PushTokenRegistry::new(),
         });
 
         let router = build_router(state);
@@ -884,6 +1103,14 @@ mod tests {
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
             desktop_messages_bridge:
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            desktop_writes_bridge:
+                crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
+            sync_registry:
+                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter:
+                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens:
+                crate::companion_api::push::PushTokenRegistry::new(),
         });
 
         let router = build_router(state);
@@ -1142,6 +1369,14 @@ mod tests {
             sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
             desktop_messages_bridge:
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            desktop_writes_bridge:
+                crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
+            sync_registry:
+                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter:
+                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens:
+                crate::companion_api::push::PushTokenRegistry::new(),
         });
 
         let router = build_router(state);

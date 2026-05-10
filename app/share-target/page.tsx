@@ -18,7 +18,7 @@
  * received text / url. No special inbox state.
  */
 
-import { useEffect, useMemo, useState } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -28,12 +28,21 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
+import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { listSessions } from "@/lib/db/sessions"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import type { ChatSession } from "@/lib/claude/types"
 import { cn } from "@/lib/utils"
 
 export default function ShareTargetPage() {
+  return (
+    <Suspense fallback={null}>
+      <ShareTargetPageInner />
+    </Suspense>
+  )
+}
+
+function ShareTargetPageInner() {
   const t = useTranslations("mobile.shareTarget")
   const router = useRouter()
   const params = useSearchParams()
@@ -42,6 +51,7 @@ export default function ShareTargetPage() {
 
   const [search, setSearch] = useState("")
   const [busyId, setBusyId] = useState<string | null>(null)
+  const keyboard = useKeyboardInsets()
 
   const sessions = useLiveQuery<ChatSession[]>(() => listSessions(), []) ?? []
 
@@ -86,6 +96,7 @@ export default function ShareTargetPage() {
   return (
     <main
       className="flex min-h-[100dvh] flex-col bg-background safe-area-pt"
+      style={{ paddingBottom: keyboard.keyboardHeight ? keyboard.keyboardHeight + 16 : undefined }}
       data-testid="share-target-page"
     >
       <header className="flex items-center gap-2 border-b border-border px-4 py-3">

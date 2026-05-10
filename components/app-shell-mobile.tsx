@@ -24,7 +24,7 @@
  * Tauri / web the existing `DiscordShell` continues to render unchanged.
  */
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import {
@@ -39,11 +39,12 @@ import { toast } from "sonner"
 
 import { ChatPane } from "@/components/chat/chat-view"
 import { CharacterPicker } from "@/components/chat/character-picker"
-import { ChannelList } from "@/components/desktop/channel-list"
 import { GuildRail } from "@/components/desktop/guild-rail"
 import { MemberList } from "@/components/desktop/member-list"
 import { OnboardingDialog } from "@/components/desktop/onboarding-dialog"
 import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
+import { CharacterHeader } from "@/components/mobile/shell/character-header"
+import { MobileChannelList } from "@/components/mobile/shell/mobile-channel-list"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import {
@@ -56,24 +57,29 @@ import {
 import type { ComposerHandle } from "@/components/chat/composer"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { useTeamMembers } from "@/hooks/use-team-members"
+import { useClientLiveQuery } from "@/hooks/data"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 import { whenSeeded } from "@/lib/db/schema"
 import { markSessionRead } from "@/lib/db/session-state"
+import { listCharacters } from "@/lib/db/characters"
+import { getTeam } from "@/lib/db/teams"
 import { guildFromSession } from "@/lib/claude/guild"
 import { loggers } from "@/lib/logger"
+import type { Character, Team } from "@/lib/claude/types"
 
 const log = loggers.shell
 
 export function AppShellMobile() {
   const t = useTranslations("desktop.shell")
   const router = useRouter()
-  const { sessions, activeSessionId, select, create, remove, rename } = useSessions()
+  const { sessions, activeSessionId, select, create, remove } = useSessions()
   const directChat = useClaudeChat()
   const teamChat = useTeamChat()
 
   const errorMessage = useChatStore((s) => s.errorMessage)
+  const chatStatus = useChatStore((s) => s.status)
   const pendingApproval = useChatStore((s) => s.pendingApprovals[0] ?? null)
 
   const loadSettings = useSettingsStore((s) => s.load)
@@ -168,6 +174,21 @@ export function AppShellMobile() {
   const isTeamSession = activeSession?.kind === "team" && Boolean(activeSession.teamId)
   const teamMembers = useTeamMembers(isTeamSession ? activeSession?.teamId : null)
 
+  const characters = useClientLiveQuery<Character[]>(() => listCharacters(), [], [])
+  const activeCharacter = useMemo(() => {
+    if (!activeSession || activeSession.kind === "team" || !activeSession.characterId) return null
+    return (characters ?? []).find((c) => c.id === activeSession.characterId) ?? null
+  }, [characters, activeSession])
+  const activeTeam = useClientLiveQuery<Team | undefined>(
+    () =>
+      isTeamSession && activeSession?.teamId
+        ? getTeam(activeSession.teamId)
+        : Promise.resolve(undefined),
+    [isTeamSession, activeSession?.teamId],
+    undefined
+  )
+  const headerSubject = isTeamSession ? (activeTeam ?? null) : activeCharacter
+
   const send = isTeamSession ? teamChat.send : directChat.send
   const stop = isTeamSession ? teamChat.stop : directChat.stop
   const respondToApproval = (
@@ -193,12 +214,6 @@ export function AppShellMobile() {
   }, [pendingSettingsRequest])
 
   const handleNewDirect = () => setCharacterPickerOpen(true)
-
-  const handleNewTeamConversation = async (teamId: string) => {
-    const s = await create({ title: "New conversation", kind: "team", teamId })
-    select(s.id)
-    setNavOpen(false)
-  }
 
   const handleCreateTeam = () => openSettings("teams")
 
@@ -253,7 +268,7 @@ export function AppShellMobile() {
                 }}
               />
               <div className="flex flex-1 overflow-hidden">
-                <ChannelList
+                <MobileChannelList
                   sessions={sessions}
                   activeSessionId={activeSessionId}
                   onSelect={handleSwitchToSession}
@@ -261,18 +276,18 @@ export function AppShellMobile() {
                     setNavOpen(false)
                     handleNewDirect()
                   }}
-                  onNewTeamConversation={(id) => void handleNewTeamConversation(id)}
                   onDelete={(id) => void remove(id)}
-                  onRename={(id, title) => void rename(id, title)}
                 />
               </div>
             </div>
           </SheetContent>
         </Sheet>
 
-        <h1 className="truncate text-sm font-medium sm:text-base" data-testid="mobile-active-title">
-          {headerTitle}
-        </h1>
+        <CharacterHeader
+          subject={headerSubject}
+          fallbackTitle={headerTitle}
+          streaming={chatStatus === "streaming"}
+        />
 
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
           {isTeamSession ? (
@@ -351,6 +366,7 @@ export function AppShellMobile() {
             onUseSample={(text) => void send(text)}
             onOpenSettings={openSettings}
             composerRef={composerRef}
+            mobileMentionMembers={isTeamSession ? teamMembers : undefined}
           />
         )}
       </main>
