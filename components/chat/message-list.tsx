@@ -23,10 +23,13 @@ import {
 import type { UIMessage } from "ai"
 import { DownloadIcon, Trash2Icon } from "lucide-react"
 import { MessageRenderer } from "./message-renderer"
+import { LongPress } from "@/components/mobile/interactions/long-press"
+import { MessageActionSheet } from "@/components/mobile/chat/message-action-sheet"
 import { useChatStore } from "@/stores/chat"
+import { usePlatform } from "@/hooks/use-platform"
 import { useCharacters, useClearMessages } from "@/lib/data-hooks/context"
 import type { Character } from "@/lib/claude/types"
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { downloadBlob } from "@/lib/files/download"
 import { loggers } from "@/lib/logger"
@@ -44,6 +47,9 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
   const lastIndex = messages.length - 1
   const sessionId = useChatStore((s) => s.activeSessionId)
   const clearMessages = useClearMessages()
+  const platform = usePlatform()
+  const isMobile = platform === "mobile"
+  const [actionMessage, setActionMessage] = useState<UIMessage | null>(null)
 
   // Single subscription so renderer can resolve senderId → Character without
   // N independent queries. Cheap: characters are 5–20 rows in practice.
@@ -78,12 +84,12 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
     }
   }, [sessionId, t, clearMessages])
 
-  const lastAssistantId = (() => {
+  const lastAssistantId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === "assistant") return messages[i].id
     }
     return null
-  })()
+  }, [messages])
 
   return (
     <div className="relative flex flex-1 flex-col overflow-hidden">
@@ -122,22 +128,28 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
 
       <Conversation>
         <ConversationContent>
-          {messages.map((m, i) => (
-            <MessageRenderer
-              key={m.id}
-              message={m}
-              characterById={characterById}
-              isStreaming={
+          {messages.map((m, i) => {
+            const rendererProps = {
+              message: m,
+              characterById,
+              isStreaming:
                 i === lastIndex &&
                 m.role === "assistant" &&
-                (status === "streaming" || status === "awaiting_approval")
-              }
-              isLastAssistant={m.id === lastAssistantId}
-              onCopy={onCopy}
-              onRegenerate={onRegenerate}
-              onEditResend={onEditResend}
-            />
-          ))}
+                (status === "streaming" || status === "awaiting_approval"),
+              isLastAssistant: m.id === lastAssistantId,
+              onCopy,
+              onRegenerate,
+              onEditResend,
+            }
+            if (isMobile) {
+              return (
+                <LongPress key={m.id} onLongPress={() => setActionMessage(m)}>
+                  <MessageRenderer {...rendererProps} />
+                </LongPress>
+              )
+            }
+            return <MessageRenderer key={m.id} {...rendererProps} />
+          })}
           {shouldShowThinking(messages, status) && (
             <Shimmer as="p" className="px-1 py-2 text-sm">
               {t("thinking")}
@@ -146,6 +158,14 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
+      {isMobile ? (
+        <MessageActionSheet
+          message={actionMessage}
+          onOpenChange={(next) => {
+            if (!next) setActionMessage(null)
+          }}
+        />
+      ) : null}
     </div>
   )
 }
