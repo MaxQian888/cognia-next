@@ -36,7 +36,7 @@ import {
 import type { ToolUIPart, UIMessage } from "ai"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import type { Character } from "@/lib/claude/types"
-import { useCallback, useMemo, useState, type KeyboardEvent } from "react"
+import { memo, useCallback, useMemo, useState, type KeyboardEvent } from "react"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
@@ -57,7 +57,7 @@ interface Props {
   onEditResend?: (messageId: string, newText: string) => void | Promise<void>
 }
 
-export function MessageRenderer({
+function MessageRendererInner({
   message,
   isStreaming = false,
   isLastAssistant = false,
@@ -72,9 +72,10 @@ export function MessageRenderer({
   const [shared, setShared] = useState(false)
   const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
 
-  const bookmarkedIds = useChatStore((s) => s.bookmarkedIds)
+  const isBookmarked = useChatStore(
+    useCallback((s) => s.bookmarkedIds.includes(message.id), [message.id])
+  )
   const toggleBookmark = useChatStore((s) => s.toggleBookmark)
-  const isBookmarked = bookmarkedIds.includes(message.id)
 
   // For team-session assistant messages, resolve which character spoke.
   const senderId = (message as { metadata?: { senderId?: string } }).metadata?.senderId
@@ -282,6 +283,20 @@ export function MessageRenderer({
   )
 }
 
+export const MessageRenderer = memo(
+  MessageRendererInner,
+  (prev, next) =>
+    prev.message === next.message &&
+    prev.isStreaming === next.isStreaming &&
+    prev.isLastAssistant === next.isLastAssistant &&
+    prev.characterById === next.characterById &&
+    prev.onCopy === next.onCopy &&
+    prev.onRegenerate === next.onRegenerate &&
+    prev.onEditResend === next.onEditResend
+)
+
+MessageRenderer.displayName = "MessageRenderer"
+
 function UsageBreakdown({ usage }: { usage: UsageInfo }) {
   const t = useTranslations("chat.message")
   return (
@@ -445,18 +460,37 @@ function renderPart(
   if (type === "file") {
     const url = (part as { url?: string }).url
     const mediaType = (part as { mediaType?: string }).mediaType
+    const filename = (part as { filename?: string }).filename
+
     if (url && mediaType?.startsWith("image/")) {
       return (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           key={key}
           src={url}
-          alt={(part as { filename?: string }).filename ?? t("attachmentAlt")}
+          alt={filename ?? t("attachmentAlt")}
           className="max-h-64 max-w-xs rounded-md border"
         />
       )
     }
-    return null
+
+    if (!url) return null
+
+    // Non-image file: render as a downloadable link
+    const displayName = filename ?? url
+    return (
+      <a
+        key={key}
+        href={url}
+        download={displayName}
+        className="inline-flex items-center gap-1.5 rounded border px-2 py-1 text-sm hover:bg-muted"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <span aria-hidden>📎</span>
+        {displayName}
+      </a>
+    )
   }
 
   // Special-case Claude's TodoWrite tool: render as a structured task list.
