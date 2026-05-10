@@ -25,6 +25,23 @@ jest.mock("@/components/ai-elements/shimmer", () => {
   }
 })
 
+// jsdom has no layout engine so useVirtualizer always returns empty items.
+// Mock it to render every item so message-level assertions work in tests.
+jest.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({ count }: { count: number }) => ({
+    getVirtualItems: () =>
+      Array.from({ length: count }, (_, i) => ({
+        index: i,
+        key: String(i),
+        start: i * 120,
+        size: 120,
+        lane: 0,
+      })),
+    getTotalSize: () => count * 120,
+    measureElement: () => {},
+  }),
+}))
+
 jest.mock("./message-renderer", () => {
   return {
     MessageRenderer: ({ message }: { message: { id: string; parts: { text?: string }[] } }) =>
@@ -164,5 +181,75 @@ describe("MessageList", () => {
     )
     expect(screen.getByText("hello")).toBeInTheDocument()
     expect(screen.getByText("world")).toBeInTheDocument()
+  })
+
+  it("renders items based on virtualizer output", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const msgs = Array.from({ length: 10 }, (_, i) => userMsg(`vm-${i}`, `Msg ${i}`))
+    render(
+      <Wrapper>
+        <MessageList messages={msgs} status="idle" />
+      </Wrapper>
+    )
+    for (let i = 0; i < 10; i++) {
+      expect(document.querySelector(`[data-test="msg-vm-${i}"]`)).toBeTruthy()
+    }
+  })
+})
+
+describe("shouldShowThinking", () => {
+  it("shows thinking shimmer when streaming and last message is from user", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList messages={[userMsg("u1", "hi")]} status="streaming" />
+      </Wrapper>
+    )
+    expect(screen.getByText("Claude is thinking…")).toBeInTheDocument()
+  })
+
+  it("does not show thinking shimmer when streaming but assistant already has text", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const assistantMsg: UIMessage = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "text", text: "hello" }],
+    }
+    render(
+      <Wrapper>
+        <MessageList messages={[assistantMsg]} status="streaming" />
+      </Wrapper>
+    )
+    expect(screen.queryByText("Claude is thinking…")).toBeNull()
+  })
+
+  it("does not show thinking shimmer when status is idle", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList messages={[]} status="idle" />
+      </Wrapper>
+    )
+    expect(screen.queryByText("Claude is thinking…")).toBeNull()
+  })
+
+  it("shows thinking shimmer when streaming with no messages yet", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList messages={[]} status="streaming" />
+      </Wrapper>
+    )
+    expect(screen.getByText("Claude is thinking…")).toBeInTheDocument()
+  })
+
+  it("does not show thinking shimmer during awaiting_approval", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList messages={[userMsg("u1", "hi")]} status="awaiting_approval" />
+      </Wrapper>
+    )
+    expect(screen.queryByText("Claude is thinking…")).toBeNull()
   })
 })

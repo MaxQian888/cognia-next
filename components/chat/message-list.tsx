@@ -1,12 +1,7 @@
 "use client"
 
 import { useTranslations } from "next-intl"
-import {
-  Conversation,
-  ConversationContent,
-  ConversationScrollButton,
-  messagesToMarkdown,
-} from "@/components/ai-elements/conversation"
+import { messagesToMarkdown } from "@/components/ai-elements/conversation"
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import { Button } from "@/components/ui/button"
 import {
@@ -21,7 +16,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import type { UIMessage } from "ai"
-import { DownloadIcon, Trash2Icon } from "lucide-react"
+import { ArrowDownIcon, DownloadIcon, Trash2Icon } from "lucide-react"
 import { MessageRenderer } from "./message-renderer"
 import { LongPress } from "@/components/mobile/interactions/long-press"
 import { MessageActionSheet } from "@/components/mobile/chat/message-action-sheet"
@@ -29,7 +24,8 @@ import { useChatStore } from "@/stores/chat"
 import { usePlatform } from "@/hooks/use-platform"
 import { useCharacters, useClearMessages } from "@/lib/data-hooks/context"
 import type { Character } from "@/lib/claude/types"
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { toast } from "sonner"
 import { downloadBlob } from "@/lib/files/download"
 import { loggers } from "@/lib/logger"
@@ -50,9 +46,9 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
   const platform = usePlatform()
   const isMobile = platform === "mobile"
   const [actionMessage, setActionMessage] = useState<UIMessage | null>(null)
+  const [isAtBottom, setIsAtBottom] = useState(true)
+  const scrollParentRef = useRef<HTMLDivElement>(null)
 
-  // Single subscription so renderer can resolve senderId → Character without
-  // N independent queries. Cheap: characters are 5–20 rows in practice.
   const charactersList = useCharacters()
   const characterById = useMemo(() => {
     const map = new Map<string, Character>()
@@ -91,6 +87,39 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
     return null
   }, [messages])
 
+  const showThinking = shouldShowThinking(messages, status)
+  const totalCount = messages.length + (showThinking ? 1 : 0)
+
+  const rowVirtualizer = useVirtualizer({
+    count: totalCount,
+    getScrollElement: () => scrollParentRef.current,
+    estimateSize: () => 120,
+    overscan: 5,
+  })
+
+  const virtualItems = rowVirtualizer.getVirtualItems()
+  const totalSize = rowVirtualizer.getTotalSize()
+
+  // Stick-to-bottom: auto-scroll when streaming and user is at the bottom.
+  useEffect(() => {
+    if ((status === "streaming" || status === "awaiting_approval") && isAtBottom) {
+      const el = scrollParentRef.current
+      if (el) el.scrollTop = el.scrollHeight
+    }
+  }, [messages, status, isAtBottom])
+
+  const handleScroll = useCallback(() => {
+    const el = scrollParentRef.current
+    if (!el) return
+    setIsAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 32)
+  }, [])
+
+  const scrollToBottom = useCallback(() => {
+    const el = scrollParentRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
+  }, [])
+
   return (
     <div className="relative flex flex-1 flex-col overflow-hidden">
       {messages.length > 0 && (
@@ -126,38 +155,94 @@ export function MessageList({ messages, status, onCopy, onRegenerate, onEditRese
         </div>
       )}
 
-      <Conversation>
-        <ConversationContent>
-          {messages.map((m, i) => {
-            const rendererProps = {
-              message: m,
-              characterById,
-              isStreaming:
-                i === lastIndex &&
-                m.role === "assistant" &&
-                (status === "streaming" || status === "awaiting_approval"),
-              isLastAssistant: m.id === lastAssistantId,
-              onCopy,
-              onRegenerate,
-              onEditResend,
-            }
-            if (isMobile) {
+      <div
+        ref={scrollParentRef}
+        className="relative flex-1 overflow-y-auto"
+        role="log"
+        onScroll={handleScroll}
+      >
+        <div style={{ height: totalSize, position: "relative" }}>
+          {virtualItems.map((virtualItem) => {
+            const isThinkingRow = virtualItem.index === messages.length
+            if (isThinkingRow) {
               return (
-                <LongPress key={m.id} onLongPress={() => setActionMessage(m)}>
-                  <MessageRenderer {...rendererProps} />
-                </LongPress>
+                <div
+                  key="thinking"
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${virtualItem.start}px)`,
+                    padding: "0 1rem",
+                  }}
+                >
+                  <Shimmer as="p" className="px-1 py-2 text-sm">
+                    {t("thinking")}
+                  </Shimmer>
+                </div>
               )
             }
-            return <MessageRenderer key={m.id} {...rendererProps} />
+
+            const m = messages[virtualItem.index]!
+            const isStreaming =
+              virtualItem.index === lastIndex &&
+              m.role === "assistant" &&
+              (status === "streaming" || status === "awaiting_approval")
+
+            return (
+              <div
+                key={m.id}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  transform: `translateY(${virtualItem.start}px)`,
+                  padding: "0 1rem",
+                }}
+              >
+                {isMobile ? (
+                  <LongPress onLongPress={() => setActionMessage(m)}>
+                    <MessageRenderer
+                      message={m}
+                      characterById={characterById}
+                      isStreaming={isStreaming}
+                      isLastAssistant={m.id === lastAssistantId}
+                      onCopy={onCopy}
+                      onRegenerate={onRegenerate}
+                      onEditResend={onEditResend}
+                    />
+                  </LongPress>
+                ) : (
+                  <MessageRenderer
+                    message={m}
+                    characterById={characterById}
+                    isStreaming={isStreaming}
+                    isLastAssistant={m.id === lastAssistantId}
+                    onCopy={onCopy}
+                    onRegenerate={onRegenerate}
+                    onEditResend={onEditResend}
+                  />
+                )}
+              </div>
+            )
           })}
-          {shouldShowThinking(messages, status) && (
-            <Shimmer as="p" className="px-1 py-2 text-sm">
-              {t("thinking")}
-            </Shimmer>
-          )}
-        </ConversationContent>
-        <ConversationScrollButton />
-      </Conversation>
+        </div>
+
+        {!isAtBottom && (
+          <Button
+            className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full dark:bg-background dark:hover:bg-muted"
+            onClick={scrollToBottom}
+            size="icon"
+            type="button"
+            variant="outline"
+          >
+            <ArrowDownIcon className="size-4" />
+          </Button>
+        )}
+      </div>
+
       {isMobile ? (
         <MessageActionSheet
           message={actionMessage}
