@@ -43,7 +43,7 @@ function makeProps() {
     onSend: jest.fn(async (_c: SendContent) => {}),
     onStop: jest.fn(async () => {}),
     onRegenerate: jest.fn(async () => {}),
-    onEditResend: jest.fn(async (_id: string, _text: string) => {}),
+    onEditResend: jest.fn(async (_id: string, _content: SendContent) => {}),
     onCreate: jest.fn(),
     onUseSample: jest.fn(),
     onOpenSettings: jest.fn(),

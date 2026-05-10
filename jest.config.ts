@@ -212,6 +212,16 @@ const config: Config = {
     // is short enough to leave it untransformed. Tests don't render real
     // syntax highlighting, so a thin mock is sufficient.
     "^shiki$": "<rootDir>/__mocks__/shiki.js",
+
+    // react-markdown and its remark/rehype plugin ecosystem are ESM-only.
+    // Instead of fighting pnpm's two-layer path layout with transformIgnorePatterns,
+    // we redirect them to CJS-compatible manual mocks. The react-markdown mock
+    // provides a functional line-based markdown parser sufficient for unit tests.
+    "^react-markdown$": "<rootDir>/__mocks__/react-markdown.js",
+    "^rehype-sanitize$": "<rootDir>/__mocks__/rehype-sanitize.js",
+    "^remark-gfm$": "<rootDir>/__mocks__/esm-plugin-stub.js",
+    "^remark-math$": "<rootDir>/__mocks__/esm-plugin-stub.js",
+    "^rehype-raw$": "<rootDir>/__mocks__/esm-plugin-stub.js",
   },
 
   // An array of regexp pattern strings, matched against all module paths before considered 'visible' to the module loader
@@ -331,7 +341,7 @@ const config: Config = {
   // `.pnpm/<scope>+<pkg>@<ver>/node_modules/<scope>/<pkg>` layout. Add new
   // ESM packages to the negative-lookahead alternation as they surface.
   transformIgnorePatterns: [
-    "/node_modules/(?!.*(?:@qdrant\\+|@qdrant/|@huggingface\\+|@huggingface/|chromadb|@chroma-core|@pinecone-database\\+|@pinecone-database/|weaviate-client|simple-git|onnxruntime-common|@tokenlens\\+|@tokenlens/|use-stick-to-bottom|tokenlens|shiki|@shikijs|@streamdown|streamdown|hast-util-|mdast-util-|micromark|unist-util-|vfile))",
+    "/node_modules/(?!.*(?:@qdrant\\+|@qdrant/|@huggingface\\+|@huggingface/|chromadb|@chroma-core|@pinecone-database\\+|@pinecone-database/|weaviate-client|simple-git|onnxruntime-common|@tokenlens\\+|@tokenlens/|use-stick-to-bottom|tokenlens|shiki|@shikijs|@streamdown|streamdown|hast-util-|mdast-util-|micromark|unist-util-|vfile|react-markdown|remark-gfm|remark-math|rehype-raw|rehype-sanitize|remark-parse|remark-rehype|rehype-stringify|unified|bail|is-plain-obj|trough|zwitch|ccount|character-entities|comma-separated-tokens|decode-named-character-reference|devlop|extend|html-void-elements|longest-streak|property-information|space-separated-tokens|stringify-entities|web-namespaces))",
     "\\.pnp\\.[^\\\\]+$",
   ],
 

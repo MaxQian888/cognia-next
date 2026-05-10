@@ -193,7 +193,7 @@ describe("custom extension parts", () => {
     const msg: UIMessage = {
       id: "a1",
       role: "assistant",
-      parts: [{ type: "a2ui" } as UIMessage["parts"][number]],
+      parts: [{ type: "a2ui" } as unknown as UIMessage["parts"][number]],
     }
     render(<MessageRenderer message={msg} />)
     expect(document.querySelector("[data-test='a2ui-part']")).toBeTruthy()
@@ -203,7 +203,7 @@ describe("custom extension parts", () => {
     const msg: UIMessage = {
       id: "s1",
       role: "assistant",
-      parts: [{ type: "subagent" } as UIMessage["parts"][number]],
+      parts: [{ type: "subagent" } as unknown as UIMessage["parts"][number]],
     }
     render(<MessageRenderer message={msg} />)
     expect(document.querySelector("[data-test='subagent-part']")).toBeTruthy()
@@ -222,10 +222,10 @@ describe("tool parts", () => {
           type: "tool-SomeTool",
           toolCallId: "call_1",
           toolName: "SomeTool",
-          state: "result",
+          state: "output-available",
           input: {},
           output: "done",
-        } as UIMessage["parts"][number],
+        } as unknown as UIMessage["parts"][number],
       ],
     }
     render(<MessageRenderer message={msg} />)
@@ -241,7 +241,7 @@ describe("tool parts", () => {
           type: "tool-TodoWrite",
           toolCallId: "call_2",
           toolName: "TodoWrite",
-          state: "result",
+          state: "output-available",
           input: {
             todos: [
               { content: "Do A", status: "completed" },
@@ -250,7 +250,7 @@ describe("tool parts", () => {
             ],
           },
           output: "",
-        } as UIMessage["parts"][number],
+        } as unknown as UIMessage["parts"][number],
       ],
     }
     render(<MessageRenderer message={msg} />)
@@ -337,7 +337,9 @@ describe("edit flow", () => {
 
 describe("team speaker display", () => {
   it("shows speaker name when characterById resolves senderId", () => {
-    const characterById = new Map([["char_1", { id: "char_1", name: "Alice", systemPrompt: "" }]])
+    const characterById = new Map([
+      ["char_1", { id: "char_1", name: "Alice", systemPrompt: "" }],
+    ]) as unknown as Map<string, import("@/lib/claude/types").Character>
     const msg: UIMessage = {
       id: "sp1",
       role: "assistant",

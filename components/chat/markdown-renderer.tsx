@@ -175,209 +175,44 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     return content
   }, [content, enableMath])
 
+  const components = useMemo(
+    () =>
+      buildComponents({
+        enableMermaid,
+        enableMath,
+        enableDiff,
+        enableAlerts,
+        enableEnhancedImages,
+        enableVideoEmbed,
+        enableAudioEmbed,
+        showLineNumbers,
+        mathFontScale,
+        mathDisplayAlignment,
+        mathShowCopyButton,
+        messageId,
+      }),
+    [
+      enableMermaid,
+      enableMath,
+      enableDiff,
+      enableAlerts,
+      enableEnhancedImages,
+      enableVideoEmbed,
+      enableAudioEmbed,
+      showLineNumbers,
+      mathFontScale,
+      mathDisplayAlignment,
+      mathShowCopyButton,
+      messageId,
+    ]
+  )
+
   return (
     <div className={cn("markdown-renderer prose prose-sm dark:prose-invert max-w-none", className)}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         rehypePlugins={rehypePlugins}
-        components={{
-          code({ className: codeClassName, children, ...props }) {
-            const match = /language-(\w+)/.exec(codeClassName || "")
-            const language = match ? match[1] : undefined
-            const codeContent = String(children).replace(/\n$/, "")
-            const isInline = !match && !codeContent.includes("\n")
-
-            // remark-math emits code elements with `language-math` and an
-            // additional `math-display` / `math-inline` class. We catch these
-            // before generic code-block handling.
-            if (enableMath && language === "math") {
-              const isDisplayMath = codeClassName?.includes("math-display")
-              if (isDisplayMath) {
-                return (
-                  <MathBlock
-                    content={codeContent}
-                    scale={mathFontScale}
-                    alignment={mathDisplayAlignment}
-                  />
-                )
-              }
-              return (
-                <MathInline
-                  content={codeContent}
-                  scale={mathFontScale}
-                  showCopyOnHover={mathShowCopyButton}
-                />
-              )
-            }
-
-            if (isInline) {
-              return (
-                <code className="rounded bg-muted px-1.5 py-0.5 text-sm font-mono" {...props}>
-                  {children}
-                </code>
-              )
-            }
-
-            if (enableMermaid && language === "mermaid") {
-              return <MermaidBlock content={codeContent} />
-            }
-
-            if (enableDiff && language === "diff") {
-              return <DiffBlock content={codeContent} />
-            }
-
-            // Explicit ```a2ui``` fence — route through the A2UI inline
-            // pipeline. Generic ```json``` blocks that happen to contain
-            // a2ui payloads are handled earlier in `adapter.ts`.
-            if (language === "a2ui") {
-              return <A2UIBlock content={codeContent} messageId={messageId} />
-            }
-
-            // Multi-line code block: render the syntax-highlighted block plus
-            // a corner overlay button to promote the snippet into a tracked
-            // artifact. Inline code, math/diff/mermaid are handled above.
-            const showArtifactButton = codeContent.split("\n").length > 1
-            return (
-              <div className="relative group/code">
-                <CodeBlock
-                  code={codeContent}
-                  language={language}
-                  showLineNumbers={showLineNumbers}
-                />
-                {showArtifactButton && (
-                  <div className="absolute right-1 top-1 opacity-0 group-hover/code:opacity-100 transition-opacity">
-                    <ArtifactCreateButton
-                      content={codeContent}
-                      language={language}
-                      messageId={messageId}
-                      variant="icon"
-                    />
-                  </div>
-                )}
-              </div>
-            )
-          },
-          pre({ children }) {
-            return <>{children}</>
-          },
-          table({ children }) {
-            return (
-              <div className="overflow-x-auto my-4">
-                <table className="min-w-full border-collapse border border-border">
-                  {children}
-                </table>
-              </div>
-            )
-          },
-          th({ children }) {
-            return (
-              <th className="border border-border bg-muted px-4 py-2 text-left font-semibold">
-                {children}
-              </th>
-            )
-          },
-          td({ children }) {
-            return <td className="border border-border px-4 py-2">{children}</td>
-          },
-          a({ href, children }) {
-            return (
-              <a
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary hover:underline"
-              >
-                {children}
-              </a>
-            )
-          },
-          blockquote({ children }) {
-            if (enableAlerts && children) {
-              const textContent = extractTextContent(children)
-              const alertInfo = parseAlertFromBlockquote(textContent)
-              if (alertInfo) {
-                return <AlertBlock type={alertInfo.type}>{alertInfo.content}</AlertBlock>
-              }
-            }
-            return (
-              <blockquote className="border-l-4 border-primary/30 pl-4 italic text-muted-foreground my-4">
-                {children}
-              </blockquote>
-            )
-          },
-          ul({ children }) {
-            return <ul className="list-disc pl-6 my-2 space-y-1">{children}</ul>
-          },
-          ol({ children }) {
-            return <ol className="list-decimal pl-6 my-2 space-y-1">{children}</ol>
-          },
-          li({ children }) {
-            return <li className="leading-relaxed">{children}</li>
-          },
-          h1({ children }) {
-            return <h1 className="text-2xl font-bold mt-6 mb-4">{children}</h1>
-          },
-          h2({ children }) {
-            return <h2 className="text-xl font-bold mt-5 mb-3">{children}</h2>
-          },
-          h3({ children }) {
-            return <h3 className="text-lg font-semibold mt-4 mb-2">{children}</h3>
-          },
-          h4({ children }) {
-            return <h4 className="text-base font-semibold mt-3 mb-2">{children}</h4>
-          },
-          p({ children }) {
-            return <p className="my-2 leading-relaxed">{children}</p>
-          },
-          hr() {
-            return <hr className="my-6 border-border" />
-          },
-          img({ src, alt, title }) {
-            if (!src || typeof src !== "string") return null
-
-            if (enableVideoEmbed && isVideoUrl(src)) {
-              return <VideoBlock src={src} title={title || alt} />
-            }
-
-            if (enableAudioEmbed && isAudioUrl(src)) {
-              return <AudioBlock src={src} title={title || alt} />
-            }
-
-            if (enableEnhancedImages) {
-              return <ImageBlock src={src} alt={alt || ""} title={title} />
-            }
-
-            return (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={src}
-                alt={alt || ""}
-                title={title}
-                className="max-w-full h-auto rounded-lg my-4"
-                loading="lazy"
-              />
-            )
-          },
-          details({ children }) {
-            const childArray = Children.toArray(children)
-            let summaryContent: React.ReactNode = "Details"
-            const restContent: React.ReactNode[] = []
-
-            childArray.forEach((child) => {
-              if (isValidElement(child) && child.type === "summary") {
-                const props = child.props as { children?: React.ReactNode }
-                summaryContent = props.children
-              } else {
-                restContent.push(child)
-              }
-            })
-
-            return <DetailsBlock summary={summaryContent}>{restContent}</DetailsBlock>
-          },
-          kbd({ children }) {
-            return <KbdInline>{children}</KbdInline>
-          },
-        }}
+        components={components}
       >
         {processedContent}
       </ReactMarkdown>
@@ -386,6 +221,220 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 })
 
 MarkdownRenderer.displayName = "MarkdownRenderer"
+
+interface BuildComponentsOptions {
+  enableMermaid: boolean
+  enableMath: boolean
+  enableDiff: boolean
+  enableAlerts: boolean
+  enableEnhancedImages: boolean
+  enableVideoEmbed: boolean
+  enableAudioEmbed: boolean
+  showLineNumbers: boolean
+  mathFontScale: number
+  mathDisplayAlignment: "center" | "left"
+  mathShowCopyButton: boolean
+  messageId?: string
+}
+
+function buildComponents(
+  opts: BuildComponentsOptions
+): NonNullable<Parameters<typeof ReactMarkdown>[0]["components"]> {
+  const {
+    enableMermaid,
+    enableMath,
+    enableDiff,
+    enableAlerts,
+    enableEnhancedImages,
+    enableVideoEmbed,
+    enableAudioEmbed,
+    showLineNumbers,
+    mathFontScale,
+    mathDisplayAlignment,
+    mathShowCopyButton,
+    messageId,
+  } = opts
+
+  return {
+    code({ className: codeClassName, children, ...props }) {
+      const match = /language-(\w+)/.exec(codeClassName || "")
+      const language = match ? match[1] : undefined
+      const codeContent = String(children).replace(/\n$/, "")
+      const isInline = !match && !codeContent.includes("\n")
+
+      // remark-math emits code elements with `language-math` and an
+      // additional `math-display` / `math-inline` class.
+      if (enableMath && language === "math") {
+        const isDisplayMath = codeClassName?.includes("math-display")
+        if (isDisplayMath) {
+          return (
+            <MathBlock
+              content={codeContent}
+              scale={mathFontScale}
+              alignment={mathDisplayAlignment}
+            />
+          )
+        }
+        return (
+          <MathInline
+            content={codeContent}
+            scale={mathFontScale}
+            showCopyOnHover={mathShowCopyButton}
+          />
+        )
+      }
+
+      if (isInline) {
+        return (
+          <code className="rounded bg-muted px-1.5 py-0.5 text-sm font-mono" {...props}>
+            {children}
+          </code>
+        )
+      }
+
+      if (enableMermaid && language === "mermaid") {
+        return <MermaidBlock content={codeContent} />
+      }
+
+      if (enableDiff && language === "diff") {
+        return <DiffBlock content={codeContent} />
+      }
+
+      if (language === "a2ui") {
+        return <A2UIBlock content={codeContent} messageId={messageId} />
+      }
+
+      const showArtifactButton = codeContent.split("\n").length > 1
+      return (
+        <div className="relative group/code">
+          <CodeBlock code={codeContent} language={language} showLineNumbers={showLineNumbers} />
+          {showArtifactButton && (
+            <div className="absolute right-1 top-1 opacity-0 group-hover/code:opacity-100 transition-opacity">
+              <ArtifactCreateButton
+                content={codeContent}
+                language={language}
+                messageId={messageId}
+                variant="icon"
+              />
+            </div>
+          )}
+        </div>
+      )
+    },
+    pre({ children }) {
+      return <>{children}</>
+    },
+    table({ children }) {
+      return (
+        <div className="overflow-x-auto my-4">
+          <table className="min-w-full border-collapse border border-border">{children}</table>
+        </div>
+      )
+    },
+    th({ children }) {
+      return (
+        <th className="border border-border bg-muted px-4 py-2 text-left font-semibold">
+          {children}
+        </th>
+      )
+    },
+    td({ children }) {
+      return <td className="border border-border px-4 py-2">{children}</td>
+    },
+    a({ href, children }) {
+      return (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-primary hover:underline"
+        >
+          {children}
+        </a>
+      )
+    },
+    blockquote({ children }) {
+      if (enableAlerts && children) {
+        const textContent = extractTextContent(children)
+        const alertInfo = parseAlertFromBlockquote(textContent)
+        if (alertInfo) {
+          return <AlertBlock type={alertInfo.type}>{alertInfo.content}</AlertBlock>
+        }
+      }
+      return (
+        <blockquote className="border-l-4 border-primary/30 pl-4 italic text-muted-foreground my-4">
+          {children}
+        </blockquote>
+      )
+    },
+    ul({ children }) {
+      return <ul className="list-disc pl-6 my-2 space-y-1">{children}</ul>
+    },
+    ol({ children }) {
+      return <ol className="list-decimal pl-6 my-2 space-y-1">{children}</ol>
+    },
+    li({ children }) {
+      return <li className="leading-relaxed">{children}</li>
+    },
+    h1({ children }) {
+      return <h1 className="text-2xl font-bold mt-6 mb-4">{children}</h1>
+    },
+    h2({ children }) {
+      return <h2 className="text-xl font-bold mt-5 mb-3">{children}</h2>
+    },
+    h3({ children }) {
+      return <h3 className="text-lg font-semibold mt-4 mb-2">{children}</h3>
+    },
+    h4({ children }) {
+      return <h4 className="text-base font-semibold mt-3 mb-2">{children}</h4>
+    },
+    p({ children }) {
+      return <p className="my-2 leading-relaxed">{children}</p>
+    },
+    hr() {
+      return <hr className="my-6 border-border" />
+    },
+    img({ src, alt, title }) {
+      if (!src || typeof src !== "string") return null
+      if (enableVideoEmbed && isVideoUrl(src)) {
+        return <VideoBlock src={src} title={title || alt} />
+      }
+      if (enableAudioEmbed && isAudioUrl(src)) {
+        return <AudioBlock src={src} title={title || alt} />
+      }
+      if (enableEnhancedImages) {
+        return <ImageBlock src={src} alt={alt || ""} title={title} />
+      }
+
+      return (
+        <img
+          src={src}
+          alt={alt || ""}
+          title={title}
+          className="max-w-full h-auto rounded-lg my-4"
+          loading="lazy"
+        />
+      )
+    },
+    details({ children }) {
+      const childArray = Children.toArray(children)
+      let summaryContent: React.ReactNode = "Details"
+      const restContent: React.ReactNode[] = []
+      childArray.forEach((child) => {
+        if (isValidElement(child) && child.type === "summary") {
+          const props = child.props as { children?: React.ReactNode }
+          summaryContent = props.children
+        } else {
+          restContent.push(child)
+        }
+      })
+      return <DetailsBlock summary={summaryContent}>{restContent}</DetailsBlock>
+    },
+    kbd({ children }) {
+      return <KbdInline>{children}</KbdInline>
+    },
+  }
+}
 
 function extractTextContent(children: React.ReactNode): string {
   if (typeof children === "string") return children
