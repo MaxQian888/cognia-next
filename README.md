@@ -51,7 +51,7 @@ Before you begin, ensure you have the following installed:
 
    ```bash
    git clone <your-repo-url>
-   cd react-quick-starter
+   cd cognia-next
    ```
 
 2. **Install dependencies**
@@ -195,7 +195,7 @@ pnpm dlx shadcn@latest add button card dialog
 ## Project Structure
 
 ```
-react-quick-starter/
+cognia-next/
 ├── app/                      # Next.js App Router (main app)
 │   ├── layout.tsx           # Root layout with fonts and metadata
 │   ├── page.tsx             # Main landing page
@@ -259,7 +259,7 @@ Edit `src-tauri/tauri.conf.json` to customize your desktop app:
 
 ```json
 {
-  "productName": "react-quick-starter", // App name
+  "productName": "cognia-next", // App name
   "version": "0.1.0", // App version
   "identifier": "com.reactquickstarter.desktop", // Unique app identifier
   "build": {
@@ -269,7 +269,7 @@ Edit `src-tauri/tauri.conf.json` to customize your desktop app:
   "app": {
     "windows": [
       {
-        "title": "react-quick-starter", // Window title
+        "title": "cognia-next", // Window title
         "width": 800, // Default width
         "height": 600, // Default height
         "resizable": true, // Allow resizing

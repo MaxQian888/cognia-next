@@ -1,4 +1,4 @@
-# Copilot Instructions for react-quick-starter
+# Copilot Instructions for cognia-next
 
 ## Project Architecture
 

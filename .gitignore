@@ -53,6 +53,7 @@ next-env.d.ts
 # docs workspace
 /docs/.next/
 /docs/.source/
+/docs/superpowers/
 
 # Claude Code user-local state (per-user, not committed)
 .claude/settings.local.json

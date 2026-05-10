@@ -16,7 +16,7 @@ The latest `master` branch and the most recent tagged release receive security u
 Please use one of:
 
 1. **GitHub Security Advisories** (preferred): open a private advisory at
-   https://github.com/AstroAir/react-quick-starter/security/advisories/new
+   https://github.com/AstroAir/cognia-next/security/advisories/new
 2. **Email**: send details to `astro_air@126.com` with subject prefix `[security]`.
 
 Include:

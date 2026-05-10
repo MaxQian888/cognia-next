@@ -51,7 +51,7 @@
 
    ```bash
    git clone <your-repo-url>
-   cd react-quick-starter
+   cd cognia-next
    ```
 
 2. **安装依赖**
@@ -195,7 +195,7 @@ pnpm dlx shadcn@latest add button card dialog
 ## 项目结构
 
 ```
-react-quick-starter/
+cognia-next/
 ├── app/                      # Next.js App Router（主应用）
 │   ├── layout.tsx           # 根布局，包含字体和元数据
 │   ├── page.tsx             # 主着陆页
@@ -259,7 +259,7 @@ cp .env.example .env.local
 
 ```json
 {
-  "productName": "react-quick-starter", // 应用名称
+  "productName": "cognia-next", // 应用名称
   "version": "0.1.0", // 应用版本
   "identifier": "com.reactquickstarter.desktop", // 唯一应用标识符
   "build": {
@@ -269,7 +269,7 @@ cp .env.example .env.local
   "app": {
     "windows": [
       {
-        "title": "react-quick-starter", // 窗口标题
+        "title": "cognia-next", // 窗口标题
         "width": 800, // 默认宽度
         "height": 600, // 默认高度
         "resizable": true, // 允许调整大小
