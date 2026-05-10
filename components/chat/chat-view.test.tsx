@@ -105,4 +105,53 @@ describe("ChatPane", () => {
     render(<ChatPane {...makeProps()} activeSession={null} />)
     expect(document.querySelector("[data-test='empty']")).toBeTruthy()
   })
+
+  it("renders EmptyChatState inline when session exists but messages list is empty", () => {
+    const savedMessages = storeState.messages
+    storeState.messages = []
+    const { EmptyChatState } = jest.requireMock("./empty-state") as {
+      EmptyChatState: jest.Mock
+    }
+    EmptyChatState.mockReturnValue(
+      ReactForMocks.createElement("div", { "data-test": "empty-inline" })
+    )
+    render(<ChatPane {...makeProps()} />)
+    expect(document.querySelector("[data-test='empty-inline']")).toBeTruthy()
+    storeState.messages = savedMessages
+  })
+
+  it("onCopy callback invokes handleCopySuccess without throwing", () => {
+    const MockList = MessageList as jest.Mock
+    MockList.mockClear()
+    render(<ChatPane {...makeProps()} />)
+    const onCopy = MockList.mock.calls[0]?.[0]?.onCopy as (() => void) | undefined
+    expect(onCopy).toBeDefined()
+    expect(() => onCopy?.()).not.toThrow()
+  })
+
+  it("onRegenerate callback delegates to the prop", async () => {
+    const MockList = MessageList as jest.Mock
+    MockList.mockClear()
+    const props = makeProps()
+    render(<ChatPane {...props} />)
+    const onRegenerate = MockList.mock.calls[0]?.[0]?.onRegenerate as
+      | (() => void | Promise<void>)
+      | undefined
+    expect(onRegenerate).toBeDefined()
+    await onRegenerate?.()
+    expect(props.onRegenerate).toHaveBeenCalled()
+  })
+
+  it("onEditResend callback delegates to the prop with id and content", async () => {
+    const MockList = MessageList as jest.Mock
+    MockList.mockClear()
+    const props = makeProps()
+    render(<ChatPane {...props} />)
+    const onEditResend = MockList.mock.calls[0]?.[0]?.onEditResend as
+      | ((id: string, content: unknown) => void | Promise<void>)
+      | undefined
+    expect(onEditResend).toBeDefined()
+    await onEditResend?.("msg-1", { text: "edited" })
+    expect(props.onEditResend).toHaveBeenCalledWith("msg-1", { text: "edited" })
+  })
 })

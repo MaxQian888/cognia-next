@@ -53,6 +53,38 @@ jest.mock("./message-renderer", () => {
   }
 })
 
+jest.mock("@/lib/files/download", () => ({
+  downloadBlob: jest.fn(),
+}))
+
+jest.mock("@/hooks/use-platform", () => ({
+  usePlatform: jest.fn(() => "desktop"),
+}))
+
+jest.mock("@/components/mobile/interactions/long-press", () => ({
+  LongPress: ({
+    children,
+    onLongPress,
+  }: {
+    children: ReactForMocks.ReactNode
+    onLongPress: () => void
+  }) =>
+    ReactForMocks.createElement(
+      "div",
+      { "data-test": "long-press", onClick: onLongPress },
+      children
+    ),
+}))
+
+jest.mock("@/components/mobile/chat/message-action-sheet", () => ({
+  MessageActionSheet: ({ message }: { message: unknown }) =>
+    ReactForMocks.createElement(
+      "div",
+      { "data-test": "action-sheet", "data-message": message ? "open" : "closed" },
+      null
+    ),
+}))
+
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import type { ReactNode } from "react"
 import type { UIMessage } from "ai"
@@ -60,6 +92,8 @@ import { MessageList } from "./message-list"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
+import { downloadBlob } from "@/lib/files/download"
+import { usePlatform } from "@/hooks/use-platform"
 
 function makeAdapter(overrides: Partial<DataAdapter> = {}): DataAdapter {
   return {
@@ -183,6 +217,20 @@ describe("MessageList", () => {
     expect(screen.getByText("world")).toBeInTheDocument()
   })
 
+  it("export button triggers downloadBlob with markdown content", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList messages={[userMsg("m1", "hello")]} status="idle" />
+      </Wrapper>
+    )
+    fireEvent.click(screen.getByText(/Export/i))
+    expect(downloadBlob).toHaveBeenCalledWith(
+      expect.any(Blob),
+      expect.stringMatching(/^cognia-chat-.*\.md$/)
+    )
+  })
+
   it("renders items based on virtualizer output", () => {
     const Wrapper = withAdapter(makeAdapter())
     const msgs = Array.from({ length: 10 }, (_, i) => userMsg(`vm-${i}`, `Msg ${i}`))
@@ -194,6 +242,43 @@ describe("MessageList", () => {
     for (let i = 0; i < 10; i++) {
       expect(document.querySelector(`[data-test="msg-vm-${i}"]`)).toBeTruthy()
     }
+  })
+
+  it("wraps messages in LongPress on mobile and renders MessageActionSheet", () => {
+    ;(usePlatform as jest.Mock).mockReturnValue("mobile")
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList messages={[userMsg("m1", "hello")]} status="idle" />
+      </Wrapper>
+    )
+    expect(document.querySelector("[data-test='long-press']")).toBeTruthy()
+    expect(document.querySelector("[data-test='action-sheet']")).toBeTruthy()
+    ;(usePlatform as jest.Mock).mockReturnValue("desktop")
+  })
+
+  it("shows and clicks scroll-to-bottom button when scrolled up", async () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const { container } = render(
+      <Wrapper>
+        <MessageList messages={[userMsg("m1", "hello")]} status="idle" />
+      </Wrapper>
+    )
+    const scrollEl = container.querySelector('[role="log"]')!
+    Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true })
+    Object.defineProperty(scrollEl, "scrollTop", { value: 0, configurable: true })
+    Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true })
+    // Assign scrollTo so it doesn't throw in jsdom
+    const scrollTo = jest.fn()
+    scrollEl.scrollTo = scrollTo as unknown as typeof scrollEl.scrollTo
+    await act(async () => {
+      fireEvent.scroll(scrollEl)
+    })
+    // scrollHeight(1000) - scrollTop(0) - clientHeight(200) = 800 >= 32 → not at bottom
+    const btn = scrollEl.querySelector('button[type="button"]')
+    expect(btn).toBeTruthy()
+    fireEvent.click(btn!)
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1000, behavior: "smooth" })
   })
 })
 
@@ -251,5 +336,67 @@ describe("shouldShowThinking", () => {
       </Wrapper>
     )
     expect(screen.queryByText("Claude is thinking…")).toBeNull()
+  })
+
+  it("does not show thinking shimmer when assistant has non-empty reasoning text", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const msg: UIMessage = {
+      id: "a1",
+      role: "assistant",
+      parts: [
+        { type: "reasoning", text: "I am reasoning…" } as unknown as UIMessage["parts"][number],
+      ],
+    }
+    render(
+      <Wrapper>
+        <MessageList messages={[msg]} status="streaming" />
+      </Wrapper>
+    )
+    expect(screen.queryByText("Claude is thinking…")).toBeNull()
+  })
+
+  it("does not show thinking shimmer when assistant has a tool-call part", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const msg: UIMessage = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "tool-invocation" } as unknown as UIMessage["parts"][number]],
+    }
+    render(
+      <Wrapper>
+        <MessageList messages={[msg]} status="streaming" />
+      </Wrapper>
+    )
+    expect(screen.queryByText("Claude is thinking…")).toBeNull()
+  })
+
+  it("does not show thinking shimmer when assistant has a file part", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const msg: UIMessage = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "file" } as unknown as UIMessage["parts"][number]],
+    }
+    render(
+      <Wrapper>
+        <MessageList messages={[msg]} status="streaming" />
+      </Wrapper>
+    )
+    expect(screen.queryByText("Claude is thinking…")).toBeNull()
+  })
+
+  it("shows thinking shimmer when assistant part has empty text", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const msg: UIMessage = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "text", text: "   " }],
+    }
+    render(
+      <Wrapper>
+        <MessageList messages={[msg]} status="streaming" />
+      </Wrapper>
+    )
+    expect(screen.getByText("Claude is thinking…")).toBeInTheDocument()
   })
 })
