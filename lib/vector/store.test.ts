@@ -77,6 +77,48 @@ describe("createVectorStore factory", () => {
   })
 })
 
+describe("createVectorStore plugin-event proxy", () => {
+  it("dispatches onDocumentsIndexed after addDocuments resolves", async () => {
+    mockInvoke.mockResolvedValue(true)
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getPluginEventHooks } = require("@/lib/plugin/messaging/hooks-system") as {
+      getPluginEventHooks: () => {
+        dispatchDocumentsIndexed: (collection: string, count: number) => void
+        dispatchVectorSearch: (collection: string, query: string, count: number) => void
+      }
+    }
+    const indexedSpy = jest
+      .spyOn(getPluginEventHooks(), "dispatchDocumentsIndexed")
+      .mockImplementation(() => {})
+
+    const store = createVectorStore(mockConfig)
+    const docs: VectorDocument[] = [
+      { id: "a", content: "hello", embedding: [0.1, 0.2, 0.3] },
+      { id: "b", content: "world", embedding: [0.4, 0.5, 0.6] },
+    ]
+    await store.addDocuments("plugins-test", docs)
+    expect(indexedSpy).toHaveBeenCalledWith("plugins-test", 2)
+  })
+
+  it("dispatches onVectorSearch after searchDocuments resolves", async () => {
+    mockInvoke.mockResolvedValue({ results: [], total: 0 })
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getPluginEventHooks } = require("@/lib/plugin/messaging/hooks-system") as {
+      getPluginEventHooks: () => {
+        dispatchDocumentsIndexed: (collection: string, count: number) => void
+        dispatchVectorSearch: (collection: string, query: string, count: number) => void
+      }
+    }
+    const searchSpy = jest
+      .spyOn(getPluginEventHooks(), "dispatchVectorSearch")
+      .mockImplementation(() => {})
+
+    const store = createVectorStore(mockConfig)
+    const results = await store.searchDocuments("plugins-test", "hello")
+    expect(searchSpy).toHaveBeenCalledWith("plugins-test", "hello", results.length)
+  })
+})
+
 describe("NativeVectorStore", () => {
   let store: NativeVectorStore
 

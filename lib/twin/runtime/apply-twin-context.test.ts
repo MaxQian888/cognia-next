@@ -22,6 +22,7 @@ jest.mock("@/lib/ai/embedding/embedding", () => ({
 
 import { applyTwinContext } from "./apply-twin-context"
 import type { ApplyTwinContextDeps } from "./apply-twin-context"
+import { getPluginEventHooks } from "@/lib/plugin"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createTwinSource } from "@/lib/db/twin-sources"
 import { bulkCreateTwinChunks } from "@/lib/db/twin-chunks"
@@ -318,5 +319,94 @@ describe("applyTwinContext", () => {
     })
     expect(generateEmbeddingMock).not.toHaveBeenCalled()
     expect(result.degraded).toBe(false)
+  })
+
+  it("dispatches onRAGContextRetrieved with the retrieved chunks", async () => {
+    mockEmbedding()
+    const source = await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/notes.md",
+      title: "Onboarding notes",
+      bytes: 100,
+      fingerprint: "f-rag",
+      redacted: false,
+    })
+    const [chunk] = await bulkCreateTwinChunks([
+      {
+        twinId: "twin_alice",
+        sourceId: source.id,
+        content: "the rag-dispatch payload",
+        contentRedacted: "the rag-dispatch payload",
+        charStart: 0,
+        charEnd: 24,
+        vectorBackend: "qdrant",
+        vectorCollection: "cognia_twin_twin_alice",
+        vectorDocId: "vec_rag",
+        strategy: "paragraph",
+        tokenCount: 4,
+        metadata: {},
+      },
+    ])
+    const store = makeFakeStore({
+      onSearch: () => [{ id: chunk.vectorDocId, content: "the rag-dispatch payload", score: 0.7 }],
+    })
+    const dispatchSpy = jest
+      .spyOn(getPluginEventHooks(), "dispatchRAGContextRetrieved")
+      .mockImplementation(() => {})
+
+    await applyTwinContext({
+      character: makeCharacter(),
+      userMessage: "rag plz",
+      sessionId: "session-rag",
+      deps: { ...baseDeps, store },
+    })
+    expect(dispatchSpy).toHaveBeenCalledWith("session-rag", [
+      { id: "vec_rag", content: "the rag-dispatch payload", score: 0.7 },
+    ])
+  })
+
+  it("falls back to twin:<twinId> when sessionId is omitted on the RAG dispatch", async () => {
+    mockEmbedding()
+    const source = await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/notes.md",
+      title: "Onboarding notes",
+      bytes: 100,
+      fingerprint: "f-rag-2",
+      redacted: false,
+    })
+    const [chunk] = await bulkCreateTwinChunks([
+      {
+        twinId: "twin_alice",
+        sourceId: source.id,
+        content: "another payload",
+        contentRedacted: "another payload",
+        charStart: 0,
+        charEnd: 14,
+        vectorBackend: "qdrant",
+        vectorCollection: "cognia_twin_twin_alice",
+        vectorDocId: "vec_rag2",
+        strategy: "paragraph",
+        tokenCount: 2,
+        metadata: {},
+      },
+    ])
+    const store = makeFakeStore({
+      onSearch: () => [{ id: chunk.vectorDocId, content: "another payload", score: 0.42 }],
+    })
+    const dispatchSpy = jest
+      .spyOn(getPluginEventHooks(), "dispatchRAGContextRetrieved")
+      .mockImplementation(() => {})
+
+    await applyTwinContext({
+      character: makeCharacter(),
+      userMessage: "no session",
+      deps: { ...baseDeps, store },
+    })
+    expect(dispatchSpy).toHaveBeenCalledWith("twin:twin_alice", expect.any(Array))
   })
 })

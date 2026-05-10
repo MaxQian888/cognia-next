@@ -15,14 +15,16 @@
  */
 
 /**
- * Cross-runtime SubtleCrypto. Browser ships `crypto.subtle`; Node provides
- * it via `node:crypto.webcrypto.subtle`. The lazy import keeps the cost
- * off code paths that never hash.
+ * Web Crypto SubtleCrypto. `globalThis.crypto.subtle` is available in
+ * every modern browser, Capacitor WebView, and Node 20+. No `node:`
+ * fallback so the mobile bundle stays free of Node polyfills.
  */
-async function getSubtle(): Promise<SubtleCrypto> {
-  if (globalThis.crypto?.subtle) return globalThis.crypto.subtle
-  const { webcrypto } = await import("node:crypto")
-  return webcrypto.subtle as unknown as SubtleCrypto
+function getSubtle(): SubtleCrypto {
+  const subtle = globalThis.crypto?.subtle
+  if (!subtle) {
+    throw new Error("Web Crypto API (crypto.subtle) is required but not available in this runtime")
+  }
+  return subtle
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -31,7 +33,7 @@ function bytesToHex(bytes: Uint8Array): string {
 
 /** Hex-encoded SHA-256 of a UTF-8 string. */
 export async function hashContent(content: string): Promise<string> {
-  const subtle = await getSubtle()
+  const subtle = getSubtle()
   const encoded = new TextEncoder().encode(content)
   const digest = await subtle.digest(
     "SHA-256",

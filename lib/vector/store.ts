@@ -2314,9 +2314,11 @@ export class MilvusVectorStore implements IVectorStore {
  * Create a vector store instance based on provider
  */
 export function createVectorStore(config: VectorStoreConfig): IVectorStore {
+  let store: IVectorStore
   switch (config.provider) {
     case "chroma":
-      return new ChromaVectorStore(config)
+      store = new ChromaVectorStore(config)
+      break
     case "pinecone":
       if (!config.pineconeApiKey) {
         throw new Error("Pinecone API key is required")
@@ -2324,27 +2326,92 @@ export function createVectorStore(config: VectorStoreConfig): IVectorStore {
       if (!config.pineconeIndexName) {
         throw new Error("Pinecone index name is required")
       }
-      return new PineconeVectorStore(config)
+      store = new PineconeVectorStore(config)
+      break
     case "weaviate":
       if (!config.weaviateUrl) {
         throw new Error("Weaviate URL is required")
       }
-      return new WeaviateVectorStore(config)
+      store = new WeaviateVectorStore(config)
+      break
     case "qdrant":
       if (!config.qdrantUrl) {
         throw new Error("Qdrant URL is required")
       }
-      return new QdrantVectorStore(config)
+      store = new QdrantVectorStore(config)
+      break
     case "milvus":
       if (!config.milvusAddress) {
         throw new Error("Milvus address is required")
       }
-      return new MilvusVectorStore(config)
+      store = new MilvusVectorStore(config)
+      break
     case "native":
-      return new NativeVectorStore(config)
+      store = new NativeVectorStore(config)
+      break
     default:
       throw new Error(`Unsupported vector store provider: ${config.provider}`)
   }
+  return wrapVectorStoreWithPluginHooks(store)
+}
+
+/**
+ * Wrap a concrete vector store with plugin-event dispatching for
+ * `onDocumentsIndexed` and `onVectorSearch`. The wrapper is a thin proxy:
+ * every other method delegates straight to the inner store. Hook dispatch
+ * happens after the underlying call resolves so plugins observe completed
+ * work, not in-flight intent.
+ */
+function wrapVectorStoreWithPluginHooks(inner: IVectorStore): IVectorStore {
+  return new Proxy(inner, {
+    get(target, prop, receiver) {
+      const original = Reflect.get(target, prop, receiver) as unknown
+      if (typeof original !== "function") return original
+      // Bind early so `this` inside provider classes points back at the
+      // underlying instance, not the proxy (avoids infinite recursion when a
+      // method calls another method on the same store).
+      const bound = (original as (...args: unknown[]) => unknown).bind(target)
+
+      if (prop === "addDocuments") {
+        return async (collectionName: string, documents: VectorDocument[]) => {
+          const result = await (bound as IVectorStore["addDocuments"])(collectionName, documents)
+          // Lazy-load the hooks module so importing the vector store doesn't
+          // pull in the plugin runtime (which transitively touches `@tauri-
+          // apps/api/core` and breaks tests that mock it via jest.mock).
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { getPluginEventHooks } = require("@/lib/plugin/messaging/hooks-system") as {
+            getPluginEventHooks: () => {
+              dispatchDocumentsIndexed: (c: string, n: number) => void
+            }
+          }
+          getPluginEventHooks().dispatchDocumentsIndexed(collectionName, documents.length)
+          return result
+        }
+      }
+      if (prop === "searchDocuments") {
+        return async (
+          collectionName: string,
+          query: string,
+          options?: SearchOptions
+        ): Promise<VectorSearchResult[]> => {
+          const results = await (bound as IVectorStore["searchDocuments"])(
+            collectionName,
+            query,
+            options
+          )
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { getPluginEventHooks } = require("@/lib/plugin/messaging/hooks-system") as {
+            getPluginEventHooks: () => {
+              dispatchVectorSearch: (c: string, q: string, n: number) => void
+            }
+          }
+          getPluginEventHooks().dispatchVectorSearch(collectionName, query, results.length)
+          return results
+        }
+      }
+      return bound
+    },
+  })
 }
 
 /**

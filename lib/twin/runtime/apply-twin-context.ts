@@ -19,6 +19,7 @@ import type { Character } from "@/lib/claude/types"
 import type { IVectorStore } from "@/lib/vector/store"
 import type { TwinChunk, TwinSource, TwinSettings, VectorBackend } from "@/types/twin"
 import { DEFAULT_TWIN_SETTINGS } from "@/types/twin"
+import { getPluginEventHooks } from "@/lib/plugin"
 import { vectorCollectionName } from "../ingest/persist"
 import { applySystemPromptTemplate, type AppliedTemplate } from "./system-prompt-template"
 import { selectFewShotSamples } from "./few-shot-selector"
@@ -51,6 +52,12 @@ export interface ApplyTwinContextInput {
    * the runtime skips `generateEmbedding(userMessage)`.
    */
   precomputedQueryEmbedding?: number[]
+  /**
+   * Optional session id for the chat that triggered the lookup. Used only
+   * by the plugin-event hook (`onRAGContextRetrieved`) to scope dispatched
+   * sources. When omitted, the runtime falls back to `twin:<twinId>`.
+   */
+  sessionId?: string
   deps: ApplyTwinContextDeps
 }
 
@@ -168,6 +175,21 @@ export async function applyTwinContext(
     retrievedChunks,
     styleSamples,
   })
+
+  // Plugin host: announce the retrieved chunks so plugins observing
+  // `onRAGContextRetrieved` can react (e.g. surface citations). Skip when
+  // RAG was disabled for this character — empty payloads add noise.
+  if (settings.enableRag && retrievedChunks.length > 0) {
+    const sessionId = input.sessionId ?? `twin:${character.twinId}`
+    getPluginEventHooks().dispatchRAGContextRetrieved(
+      sessionId,
+      retrievedChunks.map((rc) => ({
+        id: rc.chunk.vectorDocId,
+        content: rc.chunk.content,
+        score: rc.score,
+      }))
+    )
+  }
 
   return {
     applied,
