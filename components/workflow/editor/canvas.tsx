@@ -32,12 +32,25 @@ import {
 import "@xyflow/react/dist/style.css"
 import { useShallow } from "zustand/react/shallow"
 import { toast } from "sonner"
+import { useTranslations } from "next-intl"
 import type { VisualWorkflow, WorkflowNodeKind } from "@/types/workflow/visual"
 import { replaceWorkflow } from "@/lib/db/workflows"
 import { autoLayout, applyAutoLayoutPositions } from "@/lib/workflow/editor/auto-layout"
 import { createEditorStore, type EditorStore, type EditorState } from "@/lib/workflow/editor/store"
 import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
 import { useRunStatusBridge } from "@/lib/workflow/runtime/run-status-bridge"
+import { useLastRunSummaryByStep } from "@/lib/workflow/runtime/last-run-summary"
+import {
+  buildClipboardEnvelope,
+  parseClipboard,
+  serializeClipboard,
+} from "@/lib/workflow/editor/clipboard"
+import {
+  computeAlignmentGuides,
+  type GuidesResult,
+  type RectLike,
+} from "@/lib/workflow/editor/alignment-guides"
+import { AlignmentOverlay } from "./alignment-overlay"
 import { syncWorkflowTriggers } from "@/lib/workflow/runtime/webhook-bridge"
 import { validateConnection } from "@/lib/workflow/editor/connection-validator"
 import type { TriggerEvent } from "@/types/workflow/visual"
@@ -47,6 +60,7 @@ import { EditorEmptyState } from "./empty-state"
 import { NodeSearchSidebar, NODE_DRAG_MIME } from "./node-search-sidebar"
 import { InspectorPanel } from "./inspector-panel"
 import { CommandPalette } from "./command-palette"
+import { ShortcutsCheatsheet } from "./shortcuts-cheatsheet"
 import * as ResizablePrimitive from "react-resizable-panels"
 import { GripVerticalIcon } from "lucide-react"
 import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
@@ -62,6 +76,8 @@ interface CanvasInnerProps {
 
 function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const useStore = store
+  const t = useTranslations("workflows.canvasToast")
+  const tValidation = useTranslations("workflows.validation")
 
   const {
     nodes,
@@ -80,6 +96,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     setName,
     markSaved,
     toWorkflow,
+    revalidateAll,
   } = useStore(
     useShallow((s: EditorState) => ({
       nodes: s.nodes,
@@ -98,34 +115,49 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       setName: s.setName,
       markSaved: s.markSaved,
       toWorkflow: s.toWorkflow,
+      revalidateAll: s.revalidateAll,
     }))
   )
 
   // Wire the live run-status bridge so the canvas reflects what the
   // orchestrator is doing in real time.
   useRunStatusBridge(workflowId, useStore)
+  // Aggregate per-step "last run" summaries across every run of this workflow
+  // (Dexie liveQuery). Renders as the "Ran 12s ago · 1.4s" footer on each
+  // node; runs in parallel with the live bridge above.
+  const lastRunByStepId = useLastRunSummaryByStep(workflowId)
 
-  // Merge the live runStatus + validation errors into each node's `data` so
-  // `WorkflowNodeComponent` can render the status ring without the runtime
-  // events plumbing leaking down to each node.
+  // Merge the live runStatus + validation errors + last-run summary into each
+  // node's `data` so `WorkflowNodeComponent` can render the status ring
+  // without the runtime events plumbing leaking down to each node.
   const decoratedNodes = useMemo(() => {
     return nodes.map((n) => {
       const status = runStatusByStepId[n.id]
-      const errors = validationByStepId[n.id]
-      if (!status && !errors) return n
+      const validation = validationByStepId[n.id]
+      const lastRun = lastRunByStepId[n.id]
+      if (!status && !validation && !lastRun) return n
       return {
         ...n,
         data: {
           ...n.data,
           ...(status ? { runStatus: status } : {}),
-          ...(errors ? { validationErrors: errors } : {}),
+          ...(lastRun ? { lastRun } : {}),
+          ...(validation
+            ? {
+                validationErrorCount: Object.keys(validation.fields).length,
+                validationErrors: validation.summary,
+              }
+            : {}),
         },
       }
     })
-  }, [nodes, runStatusByStepId, validationByStepId])
+  }, [nodes, runStatusByStepId, validationByStepId, lastRunByStepId])
 
   const [saving, setSaving] = useState(false)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
+  // Alignment guides — populated by `onNodeDrag` while a node is moving,
+  // cleared on drag stop so the overlay doesn't linger.
+  const [alignmentGuides, setAlignmentGuides] = useState<GuidesResult | null>(null)
 
   // Track undo/redo availability so the toolbar can disable its buttons.
   const [canUndo, setCanUndo] = useState(false)
@@ -194,6 +226,33 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
 
   const onMoveEnd = useCallback((_e: unknown, v: Viewport) => setViewport(v), [setViewport])
 
+  // Compute alignment guides while dragging. We rebuild the peer rect array
+  // from the latest `nodes` snapshot each frame; keep the cost minimal
+  // since it runs at pointer-move rate.
+  const handleNodeDrag = useCallback(
+    (_e: unknown, draggedNode: { id: string; position: { x: number; y: number } }) => {
+      const peers: RectLike[] = nodes.map((n) => ({
+        id: n.id,
+        x: n.position.x,
+        y: n.position.y,
+        // React Flow doesn't track measured size on every snapshot — fall
+        // back to defaults that match `WorkflowNodeComponent`.
+        width: n.width ?? 240,
+        height: n.height ?? 80,
+      }))
+      const dragged: RectLike = {
+        id: draggedNode.id,
+        x: draggedNode.position.x,
+        y: draggedNode.position.y,
+        width: nodes.find((n) => n.id === draggedNode.id)?.width ?? 240,
+        height: nodes.find((n) => n.id === draggedNode.id)?.height ?? 80,
+      }
+      setAlignmentGuides(computeAlignmentGuides(dragged, peers))
+    },
+    [nodes]
+  )
+  const handleNodeDragStop = useCallback(() => setAlignmentGuides(null), [])
+
   const handleSave = useCallback(async () => {
     if (saving) return
     setSaving(true)
@@ -206,17 +265,36 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         console.warn("syncWorkflowTriggers failed:", err)
       })
       markSaved()
-      toast.success("Workflow saved")
+      // Re-validate on save so the status badges + inspector header reflect
+      // the freshly-persisted state. Saves are NOT blocked on validation —
+      // the user is allowed to keep a dirty draft on disk.
+      const issues = revalidateAll()
+      const issueCount = Object.keys(issues).length
+      if (issueCount > 0) {
+        toast.warning(tValidation("blockedSaveTitle", { count: issueCount }))
+      } else {
+        toast.success(t("savedOk"))
+      }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save workflow")
+      toast.error(err instanceof Error ? err.message : t("saveFailed"))
     } finally {
       setSaving(false)
     }
-  }, [saving, toWorkflow, markSaved])
+  }, [saving, toWorkflow, markSaved, t, tValidation, revalidateAll])
 
   const [running, setRunning] = useState(false)
   const handleRun = useCallback(async () => {
     if (running) return
+    // Block runs when validation issues exist. The toast surfaces the count;
+    // the inspector + node corner badges show the actual fields.
+    const issues = revalidateAll()
+    const issueCount = Object.keys(issues).length
+    if (issueCount > 0) {
+      toast.error(tValidation("blockedRunTitle"), {
+        description: tValidation("summary", { count: issueCount }),
+      })
+      return
+    }
     setRunning(true)
     let toastId: string | number | undefined
     try {
@@ -226,7 +304,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         markSaved()
       }
       const wf = toWorkflow()
-      toastId = toast.loading(`Running ${wf.name}…`)
+      toastId = toast.loading(`${t("running")} ${wf.name}`)
       const trigger: TriggerEvent = {
         workflowId: wf.id,
         kind: "trigger.manual",
@@ -235,22 +313,22 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       }
       const result = await runWorkflow({ workflow: wf, trigger })
       if (result.status === "succeeded") {
-        toast.success("Workflow completed", { id: toastId })
+        toast.success(t("completed"), { id: toastId })
       } else {
-        toast.error(`Run failed: ${result.error?.message ?? "unknown error"}`, {
+        toast.error(`${t("runFailed")}: ${result.error?.message ?? "unknown error"}`, {
           id: toastId,
         })
       }
       // The parent (e.g., the editor page) can hook in to navigate to /runs.
       onRequestRun()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to start run", {
+      toast.error(err instanceof Error ? err.message : t("startFailed"), {
         id: toastId,
       })
     } finally {
       setRunning(false)
     }
-  }, [running, dirty, toWorkflow, markSaved, onRequestRun])
+  }, [running, dirty, toWorkflow, markSaved, onRequestRun, t, tValidation, revalidateAll])
 
   const handleUndo = useCallback(() => useStore.temporal.getState().undo(), [useStore])
   const handleRedo = useCallback(() => useStore.temporal.getState().redo(), [useStore])
@@ -258,12 +336,12 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const handleAutoLayout = useCallback(async () => {
     const positions = await autoLayout(nodes, edges)
     if (Object.keys(positions).length === 0) {
-      toast.error("Auto-layout unavailable in this environment")
+      toast.error(t("layoutUnavailable"))
       return
     }
     setNodes(applyAutoLayoutPositions(nodes, positions))
     requestAnimationFrame(() => reactFlowInstance?.fitView({ duration: 250, padding: 0.2 }))
-  }, [nodes, edges, setNodes, reactFlowInstance])
+  }, [nodes, edges, setNodes, reactFlowInstance, t])
 
   // ── JSON export / import ──────────────────────────────────────────────────
   const handleExportJson = useCallback(() => {
@@ -279,8 +357,8 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
-    toast.success("Workflow JSON downloaded")
-  }, [toWorkflow])
+    toast.success(t("exported"))
+  }, [toWorkflow, t])
 
   const handleImportJson = useCallback(
     (jsonText: string) => {
@@ -298,17 +376,18 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
           // duplicate from the library afterwards.
           id: useStore.getState().baseWorkflow.id,
         } as VisualWorkflow)
-        toast.success("Workflow imported")
+        toast.success(t("imported"))
       } catch (err) {
         toast.error(
-          err instanceof Error ? `Import failed: ${err.message}` : "Import failed: invalid JSON"
+          err instanceof Error ? `${t("importFailed")}: ${err.message}` : t("importFailed")
         )
       }
     },
-    [useStore]
+    [useStore, t]
   )
 
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const handleAddFromPalette = useCallback(
     (kind: WorkflowNodeKind) => {
       const center = reactFlowInstance?.screenToFlowPosition({
@@ -321,28 +400,108 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     [reactFlowInstance, useStore, setSelectedNodes]
   )
 
-  // Keyboard shortcuts: Ctrl/Cmd+S, Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+K
+  // Keyboard shortcuts: Ctrl/Cmd+S, Z/Shift-Z/Y, K — plus clipboard/group
+  // family (A/C/X/V/D/G). Skip when focus is in an input / textarea / CM
+  // editor so typing in the inspector doesn't fight the canvas shortcuts.
   useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false
+      const tag = target.tagName
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true
+      if (target.isContentEditable) return true
+      // CodeMirror's host wraps a contenteditable inside `.cm-editor`.
+      if (target.closest(".cm-editor")) return true
+      return false
+    }
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey
+      // Ctrl+/ (or just `?` when not typing) opens the shortcuts cheatsheet.
+      if (mod && e.key === "/") {
+        e.preventDefault()
+        setShortcutsOpen((v) => !v)
+        return
+      }
       if (!mod) return
-      if (e.key.toLowerCase() === "s") {
+      const key = e.key.toLowerCase()
+      // Save / undo / redo / palette — never blocked even when the inspector
+      // has focus, because they're idempotent saves / history nav.
+      if (key === "s") {
         e.preventDefault()
         void handleSave()
-      } else if (e.key.toLowerCase() === "z" && !e.shiftKey) {
+        return
+      }
+      if (key === "z" && !e.shiftKey) {
         e.preventDefault()
         handleUndo()
-      } else if ((e.key.toLowerCase() === "z" && e.shiftKey) || e.key.toLowerCase() === "y") {
+        return
+      }
+      if ((key === "z" && e.shiftKey) || key === "y") {
         e.preventDefault()
         handleRedo()
-      } else if (e.key.toLowerCase() === "k") {
+        return
+      }
+      if (key === "k") {
         e.preventDefault()
         setPaletteOpen((v) => !v)
+        return
+      }
+      // Clipboard + selection family — do nothing while the user is typing
+      // inside an inspector field; the browser's native handling owns it.
+      if (isEditableTarget(e.target)) return
+      const state = useStore.getState()
+      if (key === "a") {
+        e.preventDefault()
+        state.selectAll()
+        return
+      }
+      if (key === "c") {
+        const selected = state.selectedNodeIds
+        if (selected.length === 0) return
+        e.preventDefault()
+        const env = buildClipboardEnvelope(state.nodes, state.edges, selected)
+        navigator.clipboard?.writeText(serializeClipboard(env)).catch(() => {})
+        return
+      }
+      if (key === "x") {
+        const selected = state.selectedNodeIds
+        if (selected.length === 0) return
+        e.preventDefault()
+        const env = buildClipboardEnvelope(state.nodes, state.edges, selected)
+        navigator.clipboard
+          ?.writeText(serializeClipboard(env))
+          .then(() => state.removeNodes(selected))
+          .catch(() => state.removeNodes(selected))
+        return
+      }
+      if (key === "v") {
+        e.preventDefault()
+        navigator.clipboard
+          ?.readText()
+          .then((text) => {
+            const env = parseClipboard(text)
+            if (env) state.pasteFromEnvelope(env)
+          })
+          .catch(() => {})
+        return
+      }
+      if (key === "d") {
+        const selected = state.selectedNodeIds
+        if (selected.length === 0) return
+        e.preventDefault()
+        state.duplicateNodes(selected)
+        return
+      }
+      if (key === "g") {
+        const selected = state.selectedNodeIds
+        if (selected.length < 2) return
+        e.preventDefault()
+        state.groupSelected(selected)
+        return
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [handleSave, handleUndo, handleRedo])
+  }, [handleSave, handleUndo, handleRedo, useStore])
 
   const addManualTrigger = useCallback(() => {
     const id = useStore.getState().addNode("trigger.manual", { x: 80, y: 80 })
@@ -473,6 +632,8 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
               onConnect={onConnect}
               isValidConnection={isValidConnection}
               onMoveEnd={onMoveEnd}
+              onNodeDrag={handleNodeDrag}
+              onNodeDragStop={handleNodeDragStop}
               onInit={setReactFlowInstance}
               nodeTypes={nodeTypes}
               fitView={false}
@@ -495,6 +656,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
                 nodeColor={minimapNodeColor as unknown as () => string}
                 className="!rounded-md !border !bg-background"
               />
+              <AlignmentOverlay guides={alignmentGuides} />
             </ReactFlow>
             {showEmpty ? <EditorEmptyState onAddNode={addManualTrigger} /> : null}
           </div>
@@ -521,6 +683,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         onExportJson={handleExportJson}
         onImportJsonRequest={handleImportRequest}
       />
+      <ShortcutsCheatsheet open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </div>
   )
 }

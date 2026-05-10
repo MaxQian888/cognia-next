@@ -63,6 +63,8 @@ export function CronConfig({ params, onChange }: ConfigProps) {
         label="Cron expression"
         htmlFor="cron-expr"
         hint="Five fields: minute hour day month weekday. Use *  for any value."
+        name="cron"
+        required
       >
         <Input
           id="cron-expr"
@@ -76,6 +78,7 @@ export function CronConfig({ params, onChange }: ConfigProps) {
         label="Timezone"
         htmlFor="cron-tz"
         hint="Optional. Defaults to the workflow's timezone setting."
+        name="timezone"
       >
         <Input
           id="cron-tz"
@@ -95,7 +98,13 @@ export function ConnectorInboundConfig({ params, onChange }: ConfigProps) {
   const characterId = readString(params, "characterId")
   return (
     <FieldGroup>
-      <Field label="Adapter" htmlFor="ci-adapter" hint="Adapter instance id, e.g., a Telegram bot.">
+      <Field
+        label="Adapter"
+        htmlFor="ci-adapter"
+        hint="Adapter instance id, e.g., a Telegram bot."
+        name="adapterId"
+        required
+      >
         <Input
           id="ci-adapter"
           value={adapterId}
@@ -107,6 +116,7 @@ export function ConnectorInboundConfig({ params, onChange }: ConfigProps) {
         label="Conversation key"
         htmlFor="ci-conv"
         hint="Optional. Limit to a specific conversation; empty fires on any."
+        name="conversationKey"
       >
         <Input
           id="ci-conv"
@@ -114,7 +124,7 @@ export function ConnectorInboundConfig({ params, onChange }: ConfigProps) {
           onChange={(e) => onChange(patchParam(params, "conversationKey", e.target.value))}
         />
       </Field>
-      <Field label="Character (optional)" htmlFor="ci-char">
+      <Field label="Character (optional)" htmlFor="ci-char" name="characterId">
         <CharacterPicker
           id="ci-char"
           value={characterId}
@@ -131,7 +141,7 @@ export function ChatMessageTriggerConfig({ params, onChange }: ConfigProps) {
   const sessionId = readString(params, "sessionId")
   return (
     <FieldGroup>
-      <Field label="Character" htmlFor="cm-char">
+      <Field label="Character" htmlFor="cm-char" name="characterId" required>
         <CharacterPicker
           id="cm-char"
           value={characterId}
@@ -142,6 +152,7 @@ export function ChatMessageTriggerConfig({ params, onChange }: ConfigProps) {
         label="Session id (optional)"
         htmlFor="cm-session"
         hint="Limit to a single chat session. Empty fires on any session for the character."
+        name="sessionId"
       >
         <Input
           id="cm-session"
@@ -160,7 +171,7 @@ export function CharacterSendConfig({ params, onChange }: ConfigProps) {
   const sessionId = readString(params, "sessionId")
   return (
     <FieldGroup>
-      <Field label="Character" htmlFor="cs-char">
+      <Field label="Character" htmlFor="cs-char" name="characterId" required>
         <CharacterPicker
           id="cs-char"
           value={characterId}
@@ -171,6 +182,8 @@ export function CharacterSendConfig({ params, onChange }: ConfigProps) {
         label="Message content"
         htmlFor="cs-content"
         hint="Supports {{ $node['id'].out.field }} expressions."
+        name="content"
+        required
       >
         <ExpressionField
           id="cs-content"
@@ -181,7 +194,7 @@ export function CharacterSendConfig({ params, onChange }: ConfigProps) {
           placeholder="Hello, {{ $trigger.payload.userName }}"
         />
       </Field>
-      <Field label="Target session id (optional)" htmlFor="cs-session">
+      <Field label="Target session id (optional)" htmlFor="cs-session" name="sessionId">
         <Input
           id="cs-session"
           value={sessionId}
@@ -198,7 +211,7 @@ export function TeamRunConfig({ params, onChange }: ConfigProps) {
   const goal = readString(params, "goal")
   return (
     <FieldGroup>
-      <Field label="Team id" htmlFor="tr-team">
+      <Field label="Team id" htmlFor="tr-team" name="teamId" required>
         <Input
           id="tr-team"
           value={teamId}
@@ -210,6 +223,8 @@ export function TeamRunConfig({ params, onChange }: ConfigProps) {
         label="Goal / brief"
         htmlFor="tr-goal"
         hint="What you want the team to accomplish. Forwarded to the lead's planning phase."
+        name="goal"
+        required
       >
         <Textarea
           id="tr-goal"
@@ -231,6 +246,8 @@ export function SkillInvokeConfig({ params, onChange }: ConfigProps) {
         label="Skill ids (comma-separated)"
         htmlFor="si-ids"
         hint="The selected skills are appended to the next downstream AI prompt."
+        name="skillIds"
+        required
       >
         <Input
           id="si-ids"
@@ -250,7 +267,7 @@ export function TwinRagConfig({ params, onChange }: ConfigProps) {
   const topK = readNumber(params, "topK", 6)
   return (
     <FieldGroup>
-      <Field label="Twin id" htmlFor="tr-twin">
+      <Field label="Twin id" htmlFor="tr-twin" name="twinId" required>
         <Input
           id="tr-twin"
           value={twinId}
@@ -262,6 +279,8 @@ export function TwinRagConfig({ params, onChange }: ConfigProps) {
         label="Query"
         htmlFor="tr-query"
         hint="The text used for vector search. Supports expressions."
+        name="query"
+        required
       >
         <Textarea
           id="tr-query"
@@ -271,7 +290,12 @@ export function TwinRagConfig({ params, onChange }: ConfigProps) {
           placeholder="{{ $trigger.payload.text }}"
         />
       </Field>
-      <Field label="Top K" htmlFor="tr-topk" hint="Number of chunks to return. Default 6.">
+      <Field
+        label="Top K"
+        htmlFor="tr-topk"
+        hint="Number of chunks to return. Default 6."
+        name="topK"
+      >
         <Input
           id="tr-topk"
           type="number"
@@ -292,7 +316,7 @@ export function ConnectorSendConfig({ params, onChange }: ConfigProps) {
   const content = readString(params, "content")
   return (
     <FieldGroup>
-      <Field label="Adapter" htmlFor="cs-adapter">
+      <Field label="Adapter" htmlFor="cs-adapter" name="adapterId" required>
         <Input
           id="cs-adapter"
           value={adapterId}
@@ -300,14 +324,14 @@ export function ConnectorSendConfig({ params, onChange }: ConfigProps) {
           placeholder="telegram_main"
         />
       </Field>
-      <Field label="Conversation key" htmlFor="cs-conv">
+      <Field label="Conversation key" htmlFor="cs-conv" name="conversationKey" required>
         <Input
           id="cs-conv"
           value={conversationKey}
           onChange={(e) => onChange(patchParam(params, "conversationKey", e.target.value))}
         />
       </Field>
-      <Field label="Message content" htmlFor="cs-content">
+      <Field label="Message content" htmlFor="cs-content" name="content" required>
         <Textarea
           id="cs-content"
           value={content}
@@ -331,7 +355,7 @@ export function AiPromptConfig({ params, onChange }: ConfigProps) {
   return (
     <FieldGroup>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Provider" htmlFor="ai-provider">
+        <Field label="Provider" htmlFor="ai-provider" name="provider">
           <Select
             value={provider || undefined}
             onValueChange={(v) => onChange(patchParam(params, "provider", v))}
@@ -348,7 +372,7 @@ export function AiPromptConfig({ params, onChange }: ConfigProps) {
             </SelectContent>
           </Select>
         </Field>
-        <Field label="Model" htmlFor="ai-model" hint="Provider-specific model id.">
+        <Field label="Model" htmlFor="ai-model" hint="Provider-specific model id." name="model">
           <Input
             id="ai-model"
             value={model}
@@ -361,6 +385,7 @@ export function AiPromptConfig({ params, onChange }: ConfigProps) {
         label="API key"
         htmlFor="ai-key"
         hint="Embedded inline. For shared workflows, use a credential ref instead."
+        name="apiKey"
       >
         <Input
           id="ai-key"
@@ -373,6 +398,7 @@ export function AiPromptConfig({ params, onChange }: ConfigProps) {
         label="Base URL (optional)"
         htmlFor="ai-base"
         hint="Override for proxies / custom OpenAI-compatible endpoints."
+        name="baseURL"
       >
         <Input
           id="ai-base"
@@ -381,7 +407,7 @@ export function AiPromptConfig({ params, onChange }: ConfigProps) {
           placeholder="https://api.openai.com/v1"
         />
       </Field>
-      <Field label="System prompt" htmlFor="ai-system">
+      <Field label="System prompt" htmlFor="ai-system" name="systemPrompt">
         <ExpressionField
           id="ai-system"
           value={systemPrompt}
@@ -390,7 +416,7 @@ export function AiPromptConfig({ params, onChange }: ConfigProps) {
           rows={3}
         />
       </Field>
-      <Field label="User prompt" htmlFor="ai-user">
+      <Field label="User prompt" htmlFor="ai-user" name="userPrompt" required>
         <ExpressionField
           id="ai-user"
           value={userPrompt}
@@ -403,6 +429,7 @@ export function AiPromptConfig({ params, onChange }: ConfigProps) {
         label="Temperature"
         htmlFor="ai-temp"
         hint="0 = deterministic. Higher values = more variety."
+        name="temperature"
       >
         <Input
           id="ai-temp"
@@ -429,6 +456,8 @@ export function BranchConfig({ params, onChange }: ConfigProps) {
         label="Condition"
         htmlFor="br-cond"
         hint="Expression that resolves to a truthy value. Supports {{ }} expressions."
+        name="condition"
+        required
       >
         <ExpressionField
           id="br-cond"
@@ -440,14 +469,14 @@ export function BranchConfig({ params, onChange }: ConfigProps) {
         />
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Truthy label" htmlFor="br-tlabel">
+        <Field label="Truthy label" htmlFor="br-tlabel" name="truthyLabel">
           <Input
             id="br-tlabel"
             value={truthy}
             onChange={(e) => onChange(patchParam(params, "truthyLabel", e.target.value))}
           />
         </Field>
-        <Field label="Falsy label" htmlFor="br-flabel">
+        <Field label="Falsy label" htmlFor="br-flabel" name="falsyLabel">
           <Input
             id="br-flabel"
             value={falsy}
@@ -465,7 +494,7 @@ export function SetVariableConfig({ params, onChange }: ConfigProps) {
   const value = readString(params, "value")
   return (
     <FieldGroup>
-      <Field label="Variable name" htmlFor="sv-name">
+      <Field label="Variable name" htmlFor="sv-name" name="variable" required>
         <Input
           id="sv-name"
           value={variable}
@@ -473,7 +502,13 @@ export function SetVariableConfig({ params, onChange }: ConfigProps) {
           placeholder="counter"
         />
       </Field>
-      <Field label="Value" htmlFor="sv-value" hint="Expression. Stored on the run's static data.">
+      <Field
+        label="Value"
+        htmlFor="sv-value"
+        hint="Expression. Stored on the run's static data."
+        name="value"
+        required
+      >
         <ExpressionField
           id="sv-value"
           value={value}
@@ -492,7 +527,7 @@ export function WaitConfig({ params, onChange }: ConfigProps) {
   const durationMs = readNumber(params, "durationMs", 1000)
   return (
     <FieldGroup>
-      <Field label="Wait mode" htmlFor="w-mode">
+      <Field label="Wait mode" htmlFor="w-mode" name="mode">
         <Select value={mode} onValueChange={(v) => onChange(patchParam(params, "mode", v))}>
           <SelectTrigger id="w-mode">
             <SelectValue />
@@ -508,6 +543,7 @@ export function WaitConfig({ params, onChange }: ConfigProps) {
           label="Duration (ms)"
           htmlFor="w-dur"
           hint="The orchestrator pauses the run for this long before continuing."
+          name="durationMs"
         >
           <Input
             id="w-dur"
@@ -532,7 +568,7 @@ export function HttpRequestConfig({ params, onChange }: ConfigProps) {
   const followRedirects = readBoolean(params, "followRedirects", true)
   return (
     <FieldGroup>
-      <Field label="Method" htmlFor="http-method">
+      <Field label="Method" htmlFor="http-method" name="method">
         <Select value={method} onValueChange={(v) => onChange(patchParam(params, "method", v))}>
           <SelectTrigger id="http-method">
             <SelectValue />
@@ -546,7 +582,7 @@ export function HttpRequestConfig({ params, onChange }: ConfigProps) {
           </SelectContent>
         </Select>
       </Field>
-      <Field label="URL" htmlFor="http-url" hint="Supports {{ }} expressions.">
+      <Field label="URL" htmlFor="http-url" hint="Supports {{ }} expressions." name="url" required>
         <Input
           id="http-url"
           value={url}
@@ -555,7 +591,7 @@ export function HttpRequestConfig({ params, onChange }: ConfigProps) {
         />
       </Field>
       {method !== "GET" ? (
-        <Field label="Body" htmlFor="http-body" hint="Sent as application/json.">
+        <Field label="Body" htmlFor="http-body" hint="Sent as application/json." name="body">
           <ExpressionField
             id="http-body"
             value={body}
@@ -570,6 +606,7 @@ export function HttpRequestConfig({ params, onChange }: ConfigProps) {
           label="Follow redirects"
           htmlFor="http-follow"
           hint="If off, returns the redirect status without following."
+          name="followRedirects"
         >
           <Switch
             id="http-follow"
@@ -595,6 +632,8 @@ export function CodeConfig({ params, onChange }: ConfigProps) {
         label="JS body"
         htmlFor="code-body"
         hint="Runs in a sandboxed Function() with a 5 s timeout. Available: upstream, params, trigger."
+        name="code"
+        required
       >
         <Textarea
           id="code-body"
@@ -617,6 +656,8 @@ export function TemplateConfig({ params, onChange }: ConfigProps) {
         label="Template"
         htmlFor="tmpl"
         hint="Mustache-like {{ }} expressions are evaluated against upstream / trigger / static data."
+        name="template"
+        required
       >
         <ExpressionField
           id="tmpl"
@@ -636,7 +677,7 @@ export function TransformConfig({ params, onChange }: ConfigProps) {
   const expression = readString(params, "expression")
   return (
     <FieldGroup>
-      <Field label="Operation" htmlFor="tr-op">
+      <Field label="Operation" htmlFor="tr-op" name="operation">
         <Select value={op} onValueChange={(v) => onChange(patchParam(params, "operation", v))}>
           <SelectTrigger id="tr-op">
             <SelectValue />
@@ -654,6 +695,8 @@ export function TransformConfig({ params, onChange }: ConfigProps) {
         label="Expression"
         htmlFor="tr-expr"
         hint="Per-operation expression. For map: 'x.field'. For filter: 'x.value > 0'."
+        name="expression"
+        required
       >
         <ExpressionField
           id="tr-expr"
@@ -668,17 +711,50 @@ export function TransformConfig({ params, onChange }: ConfigProps) {
 }
 
 // ── annotation.note ───────────────────────────────────────────────────────
+const NOTE_COLOR_OPTIONS: Array<{
+  value: "yellow" | "green" | "blue" | "pink" | "violet"
+  swatch: string
+  label: string
+}> = [
+  { value: "yellow", swatch: "bg-amber-200", label: "Yellow" },
+  { value: "green", swatch: "bg-emerald-200", label: "Green" },
+  { value: "blue", swatch: "bg-sky-200", label: "Blue" },
+  { value: "pink", swatch: "bg-pink-200", label: "Pink" },
+  { value: "violet", swatch: "bg-violet-200", label: "Violet" },
+]
+
 export function NoteConfig({ params, onChange }: ConfigProps) {
   const text = readString(params, "text")
+  const color = readString(params, "color", "yellow")
   return (
     <FieldGroup>
-      <Field label="Note text" htmlFor="note-text">
+      <Field label="Note text" htmlFor="note-text" name="text">
         <Textarea
           id="note-text"
           value={text}
           onChange={(e) => onChange(patchParam(params, "text", e.target.value))}
           rows={6}
         />
+      </Field>
+      <Field label="Color" htmlFor="note-color" name="color">
+        <div id="note-color" role="radiogroup" aria-label="Note color" className="flex gap-1.5">
+          {NOTE_COLOR_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              role="radio"
+              aria-checked={color === opt.value}
+              aria-label={opt.label}
+              data-testid={`note-color-${opt.value}`}
+              onClick={() => onChange(patchParam(params, "color", opt.value))}
+              className={`size-6 rounded-full border-2 transition ${opt.swatch} ${
+                color === opt.value
+                  ? "border-foreground scale-110"
+                  : "border-transparent hover:scale-105"
+              }`}
+            />
+          ))}
+        </div>
       </Field>
     </FieldGroup>
   )
@@ -757,8 +833,8 @@ function WebhookUrlBanner() {
     }
   }, [triggerId])
   return (
-    <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-2.5 py-2 text-[11px] space-y-1">
-      <p className="text-amber-700 dark:text-amber-300">
+    <div className="rounded-md border border-wf-status-running/40 bg-wf-status-running/5 px-2.5 py-2 text-[11px] space-y-1">
+      <p className="text-wf-status-running">
         Desktop only. The webhook receiver runs inside the Tauri sidecar.
       </p>
       {url ? (
@@ -788,7 +864,7 @@ export function WebhookTriggerConfig({ params, onChange }: ConfigProps) {
     <FieldGroup>
       <WebhookUrlBanner />
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Method" htmlFor="wh-method">
+        <Field label="Method" htmlFor="wh-method" name="method">
           <Select value={method} onValueChange={(v) => onChange(patchParam(params, "method", v))}>
             <SelectTrigger id="wh-method">
               <SelectValue />
@@ -803,7 +879,13 @@ export function WebhookTriggerConfig({ params, onChange }: ConfigProps) {
             </SelectContent>
           </Select>
         </Field>
-        <Field label="Path" htmlFor="wh-path" hint="Mounted at /webhook/<path>">
+        <Field
+          label="Path"
+          htmlFor="wh-path"
+          hint="Mounted at /webhook/<path>"
+          name="path"
+          required
+        >
           <Input
             id="wh-path"
             value={path}
@@ -817,6 +899,7 @@ export function WebhookTriggerConfig({ params, onChange }: ConfigProps) {
         label="HMAC secret (optional)"
         htmlFor="wh-hmac"
         hint="Verifies the X-Signature-256 header. Leave blank to skip verification."
+        name="hmacSecret"
       >
         <Input
           id="wh-hmac"
@@ -826,7 +909,12 @@ export function WebhookTriggerConfig({ params, onChange }: ConfigProps) {
         />
       </Field>
       <div className="grid grid-cols-3 gap-3">
-        <Field label="Response status" htmlFor="wh-status" className="col-span-1">
+        <Field
+          label="Response status"
+          htmlFor="wh-status"
+          className="col-span-1"
+          name="responseStatus"
+        >
           <Input
             id="wh-status"
             type="number"
@@ -843,6 +931,7 @@ export function WebhookTriggerConfig({ params, onChange }: ConfigProps) {
           htmlFor="wh-resp"
           hint="Optional. Defaults to the workflow run id."
           className="col-span-2"
+          name="responseTemplate"
         >
           <Input
             id="wh-resp"
@@ -867,7 +956,7 @@ export function CharacterCreateConfig({ params, onChange }: ConfigProps) {
   const model = readString(params, "model")
   return (
     <FieldGroup>
-      <Field label="Name" htmlFor="cc-name">
+      <Field label="Name" htmlFor="cc-name" name="name" required>
         <Input
           id="cc-name"
           value={name}
@@ -878,7 +967,9 @@ export function CharacterCreateConfig({ params, onChange }: ConfigProps) {
       <Field
         label="System prompt"
         htmlFor="cc-sys"
-        hint="Required. Supports {{ }} expressions for dynamic content."
+        hint="Supports {{ }} expressions for dynamic content."
+        name="systemPrompt"
+        required
       >
         <Textarea
           id="cc-sys"
@@ -887,7 +978,7 @@ export function CharacterCreateConfig({ params, onChange }: ConfigProps) {
           rows={5}
         />
       </Field>
-      <Field label="Description (optional)" htmlFor="cc-desc">
+      <Field label="Description (optional)" htmlFor="cc-desc" name="description">
         <Textarea
           id="cc-desc"
           value={description}
@@ -896,7 +987,7 @@ export function CharacterCreateConfig({ params, onChange }: ConfigProps) {
         />
       </Field>
       <div className="grid grid-cols-3 gap-3">
-        <Field label="Avatar color" htmlFor="cc-color">
+        <Field label="Avatar color" htmlFor="cc-color" name="avatarColor">
           <Input
             id="cc-color"
             value={avatarColor}
@@ -904,7 +995,7 @@ export function CharacterCreateConfig({ params, onChange }: ConfigProps) {
             placeholder="#6d28d9"
           />
         </Field>
-        <Field label="Avatar emoji" htmlFor="cc-emoji">
+        <Field label="Avatar emoji" htmlFor="cc-emoji" name="avatarEmoji">
           <Input
             id="cc-emoji"
             value={avatarEmoji}
@@ -912,7 +1003,7 @@ export function CharacterCreateConfig({ params, onChange }: ConfigProps) {
             placeholder="🤖"
           />
         </Field>
-        <Field label="Default model (optional)" htmlFor="cc-model">
+        <Field label="Default model (optional)" htmlFor="cc-model" name="model">
           <Input
             id="cc-model"
             value={model}
@@ -931,7 +1022,7 @@ export function CharacterUpdateConfig({ params, onChange }: ConfigProps) {
   const patchJson = readString(params, "patchJson")
   return (
     <FieldGroup>
-      <Field label="Character" htmlFor="cu-char">
+      <Field label="Character" htmlFor="cu-char" name="characterId" required>
         <CharacterPicker
           id="cu-char"
           value={characterId}
@@ -945,6 +1036,7 @@ export function CharacterUpdateConfig({ params, onChange }: ConfigProps) {
         label="Patch (JSON)"
         htmlFor="cu-patch"
         hint='Fields to update. Example: { "systemPrompt": "{{ $node.n_extract.out.text }}" }'
+        name="patchJson"
       >
         <Textarea
           id="cu-patch"
@@ -978,14 +1070,14 @@ export function TeamCreateConfig({ params, onChange }: ConfigProps) {
   const membersJson = readString(params, "membersJson", "[]")
   return (
     <FieldGroup>
-      <Field label="Team name" htmlFor="tc-name">
+      <Field label="Team name" htmlFor="tc-name" name="name" required>
         <Input
           id="tc-name"
           value={name}
           onChange={(e) => onChange(patchParam(params, "name", e.target.value))}
         />
       </Field>
-      <Field label="Description" htmlFor="tc-desc">
+      <Field label="Description" htmlFor="tc-desc" name="description">
         <Textarea
           id="tc-desc"
           value={description}
@@ -993,7 +1085,7 @@ export function TeamCreateConfig({ params, onChange }: ConfigProps) {
           rows={2}
         />
       </Field>
-      <Field label="Orchestration" htmlFor="tc-orc">
+      <Field label="Orchestration" htmlFor="tc-orc" name="orchestration">
         <Select
           value={orchestration}
           onValueChange={(v) => onChange(patchParam(params, "orchestration", v))}
@@ -1009,7 +1101,7 @@ export function TeamCreateConfig({ params, onChange }: ConfigProps) {
         </Select>
       </Field>
       {orchestration === "supervisor" ? (
-        <Field label="Supervisor character" htmlFor="tc-sup">
+        <Field label="Supervisor character" htmlFor="tc-sup" name="supervisorCharacterId">
           <CharacterPicker
             id="tc-sup"
             value={supervisorCharacterId}
@@ -1021,6 +1113,7 @@ export function TeamCreateConfig({ params, onChange }: ConfigProps) {
         label="Members (JSON array)"
         htmlFor="tc-members"
         hint='[{ "characterId": "...", "role": "researcher" }]'
+        name="membersJson"
       >
         <Textarea
           id="tc-members"
@@ -1052,7 +1145,7 @@ export function TeamUpdateConfig({ params, onChange }: ConfigProps) {
   const patchJson = readString(params, "patchJson")
   return (
     <FieldGroup>
-      <Field label="Team" htmlFor="tu-team">
+      <Field label="Team" htmlFor="tu-team" name="teamId" required>
         <TeamPicker
           id="tu-team"
           value={teamId}
@@ -1063,6 +1156,7 @@ export function TeamUpdateConfig({ params, onChange }: ConfigProps) {
         label="Patch (JSON)"
         htmlFor="tu-patch"
         hint='Example: { "orchestration": "supervisor" }'
+        name="patchJson"
       >
         <Textarea
           id="tu-patch"
@@ -1100,6 +1194,7 @@ export function SkillUpsertConfig({ params, onChange }: ConfigProps) {
         label="Skill id (optional)"
         htmlFor="su-id"
         hint="If set, updates that skill. Otherwise creates a new one."
+        name="skillId"
       >
         <SkillPicker
           id="su-id"
@@ -1108,7 +1203,7 @@ export function SkillUpsertConfig({ params, onChange }: ConfigProps) {
           allowEmpty
         />
       </Field>
-      <Field label="Name" htmlFor="su-name">
+      <Field label="Name" htmlFor="su-name" name="name" required>
         <Input
           id="su-name"
           value={name}
@@ -1116,7 +1211,7 @@ export function SkillUpsertConfig({ params, onChange }: ConfigProps) {
           placeholder="Research framework"
         />
       </Field>
-      <Field label="Description" htmlFor="su-desc">
+      <Field label="Description" htmlFor="su-desc" name="description">
         <Input
           id="su-desc"
           value={description}
@@ -1127,6 +1222,8 @@ export function SkillUpsertConfig({ params, onChange }: ConfigProps) {
         label="Markdown body"
         htmlFor="su-content"
         hint="The skill body. Supports expressions; rendered into AI prompts when invoked."
+        name="content"
+        required
       >
         <Textarea
           id="su-content"
@@ -1136,7 +1233,7 @@ export function SkillUpsertConfig({ params, onChange }: ConfigProps) {
           className="font-mono text-xs"
         />
       </Field>
-      <Field label="Tags" htmlFor="su-tags" hint="Comma separated">
+      <Field label="Tags" htmlFor="su-tags" hint="Comma separated" name="tagsRaw">
         <Input
           id="su-tags"
           value={tagsRaw}
@@ -1165,7 +1262,7 @@ export function TwinIngestConfig({ params, onChange }: ConfigProps) {
   const title = readString(params, "title")
   return (
     <FieldGroup>
-      <Field label="Twin id" htmlFor="ti-twin">
+      <Field label="Twin id" htmlFor="ti-twin" name="twinId" required>
         <Input
           id="ti-twin"
           value={twinId}
@@ -1174,7 +1271,7 @@ export function TwinIngestConfig({ params, onChange }: ConfigProps) {
         />
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Source mode" htmlFor="ti-mode">
+        <Field label="Source mode" htmlFor="ti-mode" name="sourceMode">
           <Select
             value={sourceMode}
             onValueChange={(v) => onChange(patchParam(params, "sourceMode", v))}
@@ -1188,7 +1285,7 @@ export function TwinIngestConfig({ params, onChange }: ConfigProps) {
             </SelectContent>
           </Select>
         </Field>
-        <Field label="Format" htmlFor="ti-fmt">
+        <Field label="Format" htmlFor="ti-fmt" name="format">
           <Select value={format} onValueChange={(v) => onChange(patchParam(params, "format", v))}>
             <SelectTrigger id="ti-fmt">
               <SelectValue />
@@ -1202,7 +1299,7 @@ export function TwinIngestConfig({ params, onChange }: ConfigProps) {
           </Select>
         </Field>
       </div>
-      <Field label="Title (optional)" htmlFor="ti-title">
+      <Field label="Title (optional)" htmlFor="ti-title" name="title">
         <Input
           id="ti-title"
           value={title}
@@ -1210,7 +1307,7 @@ export function TwinIngestConfig({ params, onChange }: ConfigProps) {
         />
       </Field>
       {sourceMode === "fetch" ? (
-        <Field label="URL" htmlFor="ti-url" hint="Supports {{ }} expressions.">
+        <Field label="URL" htmlFor="ti-url" hint="Supports {{ }} expressions." name="url" required>
           <Input
             id="ti-url"
             value={url}
@@ -1219,7 +1316,13 @@ export function TwinIngestConfig({ params, onChange }: ConfigProps) {
           />
         </Field>
       ) : (
-        <Field label="Content" htmlFor="ti-content" hint="Supports {{ }} expressions.">
+        <Field
+          label="Content"
+          htmlFor="ti-content"
+          hint="Supports {{ }} expressions."
+          name="content"
+          required
+        >
           <Textarea
             id="ti-content"
             value={content}
@@ -1240,14 +1343,14 @@ export function McpInvokeToolConfig({ params, onChange }: ConfigProps) {
   const argsJson = readString(params, "argsJson", "{}")
   return (
     <FieldGroup>
-      <Field label="MCP server" htmlFor="mi-server">
+      <Field label="MCP server" htmlFor="mi-server" name="serverId" required>
         <McpServerPicker
           id="mi-server"
           value={serverId}
           onChange={(v) => onChange(patchParam(params, "serverId", v))}
         />
       </Field>
-      <Field label="Tool name" htmlFor="mi-tool">
+      <Field label="Tool name" htmlFor="mi-tool" name="toolName" required>
         <Input
           id="mi-tool"
           value={toolName}
@@ -1259,6 +1362,7 @@ export function McpInvokeToolConfig({ params, onChange }: ConfigProps) {
         label="Arguments (JSON)"
         htmlFor="mi-args"
         hint="Forwarded as the tool call's arguments. Supports expressions."
+        name="argsJson"
       >
         <Textarea
           id="mi-args"
@@ -1290,14 +1394,14 @@ export function PluginInvokeConfig({ params, onChange }: ConfigProps) {
   const argsJson = readString(params, "argsJson", "{}")
   return (
     <FieldGroup>
-      <Field label="Plugin" htmlFor="pi-plug">
+      <Field label="Plugin" htmlFor="pi-plug" name="pluginId" required>
         <PluginPicker
           id="pi-plug"
           value={pluginId}
           onChange={(v) => onChange(patchParam(params, "pluginId", v))}
         />
       </Field>
-      <Field label="Task id" htmlFor="pi-task">
+      <Field label="Task id" htmlFor="pi-task" name="taskId" required>
         <Input
           id="pi-task"
           value={taskId}
@@ -1309,6 +1413,7 @@ export function PluginInvokeConfig({ params, onChange }: ConfigProps) {
         label="Arguments (JSON)"
         htmlFor="pi-args"
         hint="Forwarded to the plugin task handler."
+        name="argsJson"
       >
         <Textarea
           id="pi-args"
@@ -1342,21 +1447,21 @@ export function ConnectorDraftConfig({ params, onChange }: ConfigProps) {
   const ttlMs = readNumber(params, "ttlMs", 0)
   return (
     <FieldGroup>
-      <Field label="Conversation key" htmlFor="cd-conv">
+      <Field label="Conversation key" htmlFor="cd-conv" name="conversationKey" required>
         <Input
           id="cd-conv"
           value={conversationKey}
           onChange={(e) => onChange(patchParam(params, "conversationKey", e.target.value))}
         />
       </Field>
-      <Field label="Session id" htmlFor="cd-session">
+      <Field label="Session id" htmlFor="cd-session" name="sessionId" required>
         <Input
           id="cd-session"
           value={sessionId}
           onChange={(e) => onChange(patchParam(params, "sessionId", e.target.value))}
         />
       </Field>
-      <Field label="Draft content" htmlFor="cd-content">
+      <Field label="Draft content" htmlFor="cd-content" name="content" required>
         <Textarea
           id="cd-content"
           value={content}
@@ -1365,14 +1470,14 @@ export function ConnectorDraftConfig({ params, onChange }: ConfigProps) {
         />
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Source message id (optional)" htmlFor="cd-src">
+        <Field label="Source message id (optional)" htmlFor="cd-src" name="sourceMessageId">
           <Input
             id="cd-src"
             value={sourceMessageId}
             onChange={(e) => onChange(patchParam(params, "sourceMessageId", e.target.value))}
           />
         </Field>
-        <Field label="TTL (ms, optional)" htmlFor="cd-ttl" hint="0 = no expiry">
+        <Field label="TTL (ms, optional)" htmlFor="cd-ttl" hint="0 = no expiry" name="ttlMs">
           <Input
             id="cd-ttl"
             type="number"
@@ -1398,7 +1503,7 @@ export function AiClassifyConfig({ params, onChange }: ConfigProps) {
   return (
     <FieldGroup>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Provider" htmlFor="ac-provider">
+        <Field label="Provider" htmlFor="ac-provider" name="provider">
           <Select
             value={provider || undefined}
             onValueChange={(v) => onChange(patchParam(params, "provider", v))}
@@ -1415,7 +1520,7 @@ export function AiClassifyConfig({ params, onChange }: ConfigProps) {
             </SelectContent>
           </Select>
         </Field>
-        <Field label="Model" htmlFor="ac-model">
+        <Field label="Model" htmlFor="ac-model" name="model">
           <Input
             id="ac-model"
             value={model}
@@ -1424,7 +1529,7 @@ export function AiClassifyConfig({ params, onChange }: ConfigProps) {
           />
         </Field>
       </div>
-      <Field label="API key" htmlFor="ac-key">
+      <Field label="API key" htmlFor="ac-key" name="apiKey">
         <Input
           id="ac-key"
           type="password"
@@ -1432,7 +1537,7 @@ export function AiClassifyConfig({ params, onChange }: ConfigProps) {
           onChange={(e) => onChange(patchParam(params, "apiKey", e.target.value))}
         />
       </Field>
-      <Field label="Base URL (optional)" htmlFor="ac-base">
+      <Field label="Base URL (optional)" htmlFor="ac-base" name="baseURL">
         <Input
           id="ac-base"
           value={baseURL}
@@ -1443,6 +1548,8 @@ export function AiClassifyConfig({ params, onChange }: ConfigProps) {
         label="Labels (comma-separated)"
         htmlFor="ac-labels"
         hint="The classifier picks one of these. Order is the deterministic fallback."
+        name="labelsRaw"
+        required
       >
         <Input
           id="ac-labels"
@@ -1458,7 +1565,13 @@ export function AiClassifyConfig({ params, onChange }: ConfigProps) {
           placeholder="urgent, normal, spam"
         />
       </Field>
-      <Field label="Input" htmlFor="ac-input" hint="Supports {{ }} expressions.">
+      <Field
+        label="Input"
+        htmlFor="ac-input"
+        hint="Supports {{ }} expressions."
+        name="input"
+        required
+      >
         <Textarea
           id="ac-input"
           value={input}
@@ -1466,7 +1579,7 @@ export function AiClassifyConfig({ params, onChange }: ConfigProps) {
           rows={4}
         />
       </Field>
-      <Field label="Guidance (optional)" htmlFor="ac-hint">
+      <Field label="Guidance (optional)" htmlFor="ac-hint" name="hint">
         <Input
           id="ac-hint"
           value={hint}
@@ -1489,7 +1602,7 @@ export function AiExtractConfig({ params, onChange }: ConfigProps) {
   return (
     <FieldGroup>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Provider" htmlFor="ae-provider">
+        <Field label="Provider" htmlFor="ae-provider" name="provider">
           <Select
             value={provider || undefined}
             onValueChange={(v) => onChange(patchParam(params, "provider", v))}
@@ -1506,7 +1619,7 @@ export function AiExtractConfig({ params, onChange }: ConfigProps) {
             </SelectContent>
           </Select>
         </Field>
-        <Field label="Model" htmlFor="ae-model">
+        <Field label="Model" htmlFor="ae-model" name="model">
           <Input
             id="ae-model"
             value={model}
@@ -1514,7 +1627,7 @@ export function AiExtractConfig({ params, onChange }: ConfigProps) {
           />
         </Field>
       </div>
-      <Field label="API key" htmlFor="ae-key">
+      <Field label="API key" htmlFor="ae-key" name="apiKey">
         <Input
           id="ae-key"
           type="password"
@@ -1522,7 +1635,7 @@ export function AiExtractConfig({ params, onChange }: ConfigProps) {
           onChange={(e) => onChange(patchParam(params, "apiKey", e.target.value))}
         />
       </Field>
-      <Field label="Base URL (optional)" htmlFor="ae-base">
+      <Field label="Base URL (optional)" htmlFor="ae-base" name="baseURL">
         <Input
           id="ae-base"
           value={baseURL}
@@ -1533,6 +1646,7 @@ export function AiExtractConfig({ params, onChange }: ConfigProps) {
         label="Schema (JSON)"
         htmlFor="ae-schema"
         hint='Field → expected type. Example: { "name": "string", "amount": "number" }'
+        name="schemaJson"
       >
         <Textarea
           id="ae-schema"
@@ -1553,7 +1667,7 @@ export function AiExtractConfig({ params, onChange }: ConfigProps) {
           className="font-mono text-xs"
         />
       </Field>
-      <Field label="Input" htmlFor="ae-input">
+      <Field label="Input" htmlFor="ae-input" name="input" required>
         <Textarea
           id="ae-input"
           value={input}
@@ -1561,7 +1675,7 @@ export function AiExtractConfig({ params, onChange }: ConfigProps) {
           rows={4}
         />
       </Field>
-      <Field label="Guidance (optional)" htmlFor="ae-hint">
+      <Field label="Guidance (optional)" htmlFor="ae-hint" name="hint">
         <Input
           id="ae-hint"
           value={hint}
@@ -1578,7 +1692,13 @@ export function AiEmbedConfig({ params, onChange }: ConfigProps) {
   const dimension = readNumber(params, "dimension", 384)
   return (
     <FieldGroup>
-      <Field label="Input" htmlFor="aem-input" hint="Supports {{ }} expressions.">
+      <Field
+        label="Input"
+        htmlFor="aem-input"
+        hint="Supports {{ }} expressions."
+        name="input"
+        required
+      >
         <Textarea
           id="aem-input"
           value={input}
@@ -1590,6 +1710,7 @@ export function AiEmbedConfig({ params, onChange }: ConfigProps) {
         label="Dimension"
         htmlFor="aem-dim"
         hint="Phase 4 ships a deterministic hash-based embedder; real semantic embeddings land later."
+        name="dimension"
       >
         <Input
           id="aem-dim"
@@ -1622,6 +1743,8 @@ export function SwitchConfig({ params, onChange }: ConfigProps) {
         label="Subject"
         htmlFor="sw-subject"
         hint="Expression evaluated and matched against cases."
+        name="subject"
+        required
       >
         <Textarea
           id="sw-subject"
@@ -1632,7 +1755,13 @@ export function SwitchConfig({ params, onChange }: ConfigProps) {
           placeholder="{{ $node['n_classify'].out.label }}"
         />
       </Field>
-      <Field label="Cases" htmlFor="sw-cases" hint="First match wins. Strict equality.">
+      <Field
+        label="Cases"
+        htmlFor="sw-cases"
+        hint="First match wins. Strict equality."
+        name="cases"
+        required
+      >
         <div className="space-y-2">
           {cases.map((c, i) => (
             <div key={i} className="flex gap-2 items-start">
@@ -1675,7 +1804,7 @@ export function SwitchConfig({ params, onChange }: ConfigProps) {
           </Button>
         </div>
       </Field>
-      <Field label="Default label" htmlFor="sw-default">
+      <Field label="Default label" htmlFor="sw-default" name="defaultLabel">
         <Input
           id="sw-default"
           value={defaultLabel}
@@ -1700,6 +1829,8 @@ export function SplitConfig({ params, onChange }: ConfigProps) {
         label="Branch labels"
         htmlFor="sp-labels"
         hint="Each label corresponds to one outgoing edge from this split."
+        name="branchLabels"
+        required
       >
         <div className="space-y-2">
           {labels.map((label, i) => (
@@ -1744,7 +1875,7 @@ export function JoinConfig({ params, onChange }: ConfigProps) {
   const timeoutMs = readNumber(params, "timeoutMs", 0)
   return (
     <FieldGroup>
-      <Field label="Join policy" htmlFor="jn-policy">
+      <Field label="Join policy" htmlFor="jn-policy" name="joinPolicy">
         <Select
           value={joinPolicy}
           onValueChange={(v) => onChange(patchParam(params, "joinPolicy", v))}
@@ -1763,6 +1894,7 @@ export function JoinConfig({ params, onChange }: ConfigProps) {
         label="Timeout (ms, optional)"
         htmlFor="jn-timeout"
         hint="0 = wait forever. Otherwise abort the join after this long."
+        name="timeoutMs"
       >
         <Input
           id="jn-timeout"
@@ -1786,7 +1918,7 @@ export function LoopConfig({ params, onChange }: ConfigProps) {
   const maxIterations = readNumber(params, "maxIterations", 10000)
   return (
     <FieldGroup>
-      <Field label="Mode" htmlFor="lp-mode">
+      <Field label="Mode" htmlFor="lp-mode" name="mode">
         <Select value={mode} onValueChange={(v) => onChange(patchParam(params, "mode", v))}>
           <SelectTrigger id="lp-mode">
             <SelectValue />
@@ -1799,7 +1931,7 @@ export function LoopConfig({ params, onChange }: ConfigProps) {
         </Select>
       </Field>
       {mode === "times" ? (
-        <Field label="Times" htmlFor="lp-times">
+        <Field label="Times" htmlFor="lp-times" name="times" required>
           <Input
             id="lp-times"
             type="number"
@@ -1814,6 +1946,8 @@ export function LoopConfig({ params, onChange }: ConfigProps) {
           label="Input expression"
           htmlFor="lp-input"
           hint="Resolves to the array to iterate. If empty, the first upstream output is used."
+          name="inputExpression"
+          required
         >
           <Textarea
             id="lp-input"
@@ -1830,6 +1964,8 @@ export function LoopConfig({ params, onChange }: ConfigProps) {
           label="While condition"
           htmlFor="lp-while"
           hint="Re-evaluated each iteration. Loop ends when this is falsy or maxIterations is reached."
+          name="whileCondition"
+          required
         >
           <Textarea
             id="lp-while"
@@ -1844,6 +1980,8 @@ export function LoopConfig({ params, onChange }: ConfigProps) {
         label="Body expression"
         htmlFor="lp-body"
         hint="Per-iteration value. $item is the current array element (forEach mode)."
+        name="bodyExpression"
+        required
       >
         <Textarea
           id="lp-body"
@@ -1858,6 +1996,7 @@ export function LoopConfig({ params, onChange }: ConfigProps) {
         label="Max iterations"
         htmlFor="lp-max"
         hint="Hard cap. Loop breaks early at this count."
+        name="maxIterations"
       >
         <Input
           id="lp-max"
@@ -1880,7 +2019,7 @@ export function SubworkflowConfig({ params, onChange }: ConfigProps) {
   const inputJson = readString(params, "inputJson", "{}")
   return (
     <FieldGroup>
-      <Field label="Sub workflow" htmlFor="sw-wf">
+      <Field label="Sub workflow" htmlFor="sw-wf" name="workflowId" required>
         <SubworkflowPicker
           id="sw-wf"
           value={workflowId}
@@ -1891,6 +2030,7 @@ export function SubworkflowConfig({ params, onChange }: ConfigProps) {
         label="Input (JSON)"
         htmlFor="sw-input"
         hint="Forwarded as the subworkflow's trigger payload."
+        name="inputJson"
       >
         <Textarea
           id="sw-input"
@@ -1920,11 +2060,11 @@ export function WebhookRespondConfig({ params, onChange }: ConfigProps) {
   const body = readString(params, "body")
   return (
     <FieldGroup>
-      <p className="text-[11px] text-amber-600 dark:text-amber-400">
+      <p className="text-[11px] text-wf-status-running">
         Desktop only. Respond is delivered via the Tauri webhook router.
       </p>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Status code" htmlFor="wr-status">
+        <Field label="Status code" htmlFor="wr-status" name="status">
           <Input
             id="wr-status"
             type="number"
@@ -1938,6 +2078,7 @@ export function WebhookRespondConfig({ params, onChange }: ConfigProps) {
           label="Headers (JSON)"
           htmlFor="wr-headers"
           hint='Example: { "Content-Type": "application/json" }'
+          name="headersJson"
         >
           <Input
             id="wr-headers"
@@ -1962,7 +2103,7 @@ export function WebhookRespondConfig({ params, onChange }: ConfigProps) {
           />
         </Field>
       </div>
-      <Field label="Body" htmlFor="wr-body" hint="Supports {{ }} expressions.">
+      <Field label="Body" htmlFor="wr-body" hint="Supports {{ }} expressions." name="body">
         <Textarea
           id="wr-body"
           value={body}
@@ -1983,7 +2124,7 @@ export function GroupAnnotationConfig({ params, onChange }: ConfigProps) {
   const height = readNumber(params, "height", 320)
   return (
     <FieldGroup>
-      <Field label="Title" htmlFor="grp-title">
+      <Field label="Title" htmlFor="grp-title" name="title">
         <Input
           id="grp-title"
           value={title}
@@ -1991,7 +2132,7 @@ export function GroupAnnotationConfig({ params, onChange }: ConfigProps) {
           placeholder="Validation pipeline"
         />
       </Field>
-      <Field label="Color token" htmlFor="grp-color">
+      <Field label="Color token" htmlFor="grp-color" name="color">
         <Select value={color} onValueChange={(v) => onChange(patchParam(params, "color", v))}>
           <SelectTrigger id="grp-color">
             <SelectValue />
@@ -2008,7 +2149,7 @@ export function GroupAnnotationConfig({ params, onChange }: ConfigProps) {
         </Select>
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Width (px)" htmlFor="grp-w">
+        <Field label="Width (px)" htmlFor="grp-w" name="width">
           <Input
             id="grp-w"
             type="number"
@@ -2017,7 +2158,7 @@ export function GroupAnnotationConfig({ params, onChange }: ConfigProps) {
             onChange={(e) => onChange(patchParam(params, "width", Number(e.target.value) || 480))}
           />
         </Field>
-        <Field label="Height (px)" htmlFor="grp-h">
+        <Field label="Height (px)" htmlFor="grp-h" name="height">
           <Input
             id="grp-h"
             type="number"

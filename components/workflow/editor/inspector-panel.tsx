@@ -12,7 +12,8 @@
 
 import { useCallback, useMemo } from "react"
 import { useShallow } from "zustand/react/shallow"
-import { Trash2Icon, XIcon } from "lucide-react"
+import { Trash2Icon, XIcon, AlertCircleIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -24,23 +25,27 @@ import { cn } from "@/lib/utils"
 import { workflowNodeCategory, type WorkflowNodeKind } from "@/types/workflow/visual"
 import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
-import { Field } from "./inspector/forms/shared"
+import { Field, FieldErrorProvider } from "./inspector/forms/shared"
 import { InspectorExpressionProvider } from "./inspector/forms/shared/inspector-context"
-import { getNodeConfigComponent, hasDedicatedConfig } from "./inspector/node-config-registry"
+import {
+  getNodeConfigComponentForEntry,
+  hasDedicatedConfigForEntry,
+} from "./inspector/node-config-registry"
 
-// Module-scoped wrapper that resolves the per-kind config form via the
-// registry. The registry returns stable references, so React preserves
-// form state across renders despite the dynamic dispatch.
+// Module-scoped wrapper that resolves the per-entry config form via the
+// registry. Built-in nodes hit a dedicated component; plugin nodes with a
+// `paramsSchema` go through SchemaForm; everything else falls back to
+// the raw-JSON editor.
 function NodeConfigForm({
-  kind,
+  entry,
   params,
   onChange,
 }: {
-  kind: WorkflowNodeKind
+  entry: { kind: WorkflowNodeKind; paramsSchema?: Record<string, unknown> }
   params: Record<string, unknown>
   onChange: (next: Record<string, unknown>) => void
 }) {
-  const Component = getNodeConfigComponent(kind)
+  const Component = getNodeConfigComponentForEntry(entry)
   return (
     // eslint-disable-next-line react-hooks/static-components
     <Component params={params} onChange={onChange} />
@@ -64,18 +69,22 @@ export function InspectorPanel({
   useStore: EditorStore
   className?: string
 }) {
-  const { node, updateNodeData, removeNodes, clearSelection } = useStore(
-    useShallow((s: EditorState) => {
-      const id = s.selectedNodeIds[0]
-      const node = id ? s.nodes.find((n) => n.id === id) : null
-      return {
-        node,
-        updateNodeData: s.updateNodeData,
-        removeNodes: s.removeNodes,
-        clearSelection: s.clearSelection,
-      }
-    })
-  )
+  const t = useTranslations("workflows.inspector")
+  const { node, validation, updateNodeData, removeNodes, clearSelection, revalidateNode } =
+    useStore(
+      useShallow((s: EditorState) => {
+        const id = s.selectedNodeIds[0]
+        const node = id ? s.nodes.find((n) => n.id === id) : null
+        return {
+          node,
+          validation: id ? (s.validationByStepId[id] ?? null) : null,
+          updateNodeData: s.updateNodeData,
+          removeNodes: s.removeNodes,
+          clearSelection: s.clearSelection,
+          revalidateNode: s.revalidateNode,
+        }
+      })
+    )
 
   const entry = useMemo(
     () => (node ? nodeCatalogEntry(node.data.kind as WorkflowNodeKind) : null),
@@ -86,8 +95,12 @@ export function InspectorPanel({
     (next: Record<string, unknown>) => {
       if (!node) return
       updateNodeData(node.id, { params: next })
+      // Re-validate immediately so the per-field error context updates in
+      // the same render. revalidateNode skips the store write when nothing
+      // changed (see store.ts), so this is safe to call on every keystroke.
+      revalidateNode(node.id)
     },
-    [node, updateNodeData]
+    [node, updateNodeData, revalidateNode]
   )
 
   if (!node || !entry) {
@@ -99,24 +112,37 @@ export function InspectorPanel({
         )}
         data-testid="workflow-inspector-empty"
       >
-        <p>Select a node on the canvas to configure it.</p>
+        <p>{t("empty")}</p>
       </aside>
     )
   }
 
   const category = workflowNodeCategory(node.data.kind as WorkflowNodeKind)
+  const errorCount = validation?.hasErrors ? Object.keys(validation.fields).length : 0
 
   return (
     <aside
       className={cn("flex h-full w-full flex-col border-l bg-card/50", className)}
-      aria-label="Node inspector"
+      aria-label={t("closeAria")}
       data-testid="workflow-inspector"
     >
       <header className="flex items-start gap-2 border-b px-4 py-3">
         <div className="flex-1 min-w-0">
-          <Badge variant="outline" className={cn("font-normal", CATEGORY_BADGE[category])}>
-            {entry.kind}
-          </Badge>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <Badge variant="outline" className={cn("font-normal", CATEGORY_BADGE[category])}>
+              {t(`categoryBadge.${category}`)}
+            </Badge>
+            {errorCount > 0 ? (
+              <Badge
+                variant="destructive"
+                className="gap-1 font-normal"
+                data-testid="inspector-error-badge"
+              >
+                <AlertCircleIcon className="size-3" aria-hidden="true" />
+                {t("errorBadge", { count: errorCount })}
+              </Badge>
+            ) : null}
+          </div>
           <h3 className="mt-1.5 text-sm font-semibold leading-tight">{entry.label}</h3>
           <p className="mt-0.5 text-xs text-muted-foreground">{entry.description}</p>
         </div>
@@ -125,14 +151,14 @@ export function InspectorPanel({
           size="icon"
           className="size-7"
           onClick={clearSelection}
-          aria-label="Close inspector"
+          aria-label={t("closeAria")}
         >
           <XIcon className="size-4" />
         </Button>
       </header>
       <ScrollArea className="flex-1">
         <div className="space-y-4 px-4 py-4">
-          <Field label="Label" htmlFor="ins-label">
+          <Field label={t("label")} htmlFor="ins-label" required>
             <Input
               id="ins-label"
               value={node.data.label}
@@ -140,11 +166,7 @@ export function InspectorPanel({
               maxLength={120}
             />
           </Field>
-          <Field
-            label="Notes"
-            htmlFor="ins-notes"
-            hint="Sticky-note text shown under the node body."
-          >
+          <Field label={t("notes")} htmlFor="ins-notes" hint={t("notesHint")}>
             <Textarea
               id="ins-notes"
               value={node.data.notes ?? ""}
@@ -154,30 +176,33 @@ export function InspectorPanel({
           </Field>
           <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2">
             <div>
-              <p className="text-sm font-medium">Disabled</p>
-              <p className="text-[11px] text-muted-foreground">
-                Skipped during runs. Useful for staging without deleting.
-              </p>
+              <p className="text-sm font-medium">{t("disabled")}</p>
+              <p className="text-[11px] text-muted-foreground">{t("disabledHint")}</p>
             </div>
             <Switch
               checked={node.data.disabled ?? false}
               onCheckedChange={(v) => updateNodeData(node.id, { disabled: v })}
-              aria-label="Disable node"
+              aria-label={t("disabled")}
             />
           </div>
           <Separator />
-          <InspectorExpressionProvider store={useStore} currentNodeId={node.id}>
-            <NodeConfigForm
-              kind={node.data.kind as WorkflowNodeKind}
-              params={(node.data.params as Record<string, unknown>) ?? {}}
-              onChange={handleParamsChange}
-            />
-          </InspectorExpressionProvider>
-          {!hasDedicatedConfig(node.data.kind as WorkflowNodeKind) ? (
-            <p className="text-[11px] text-muted-foreground">
-              No dedicated config form yet — edit the raw JSON above. A tailored form ships with the
-              node executor in Phase 6.
-            </p>
+          <FieldErrorProvider errors={validation?.fields ?? null}>
+            <InspectorExpressionProvider store={useStore} currentNodeId={node.id}>
+              <NodeConfigForm
+                entry={{
+                  kind: node.data.kind as WorkflowNodeKind,
+                  paramsSchema: entry.paramsSchema,
+                }}
+                params={(node.data.params as Record<string, unknown>) ?? {}}
+                onChange={handleParamsChange}
+              />
+            </InspectorExpressionProvider>
+          </FieldErrorProvider>
+          {!hasDedicatedConfigForEntry({
+            kind: node.data.kind as WorkflowNodeKind,
+            paramsSchema: entry.paramsSchema,
+          }) ? (
+            <p className="text-[11px] text-muted-foreground">{t("noConfigYet")}</p>
           ) : null}
         </div>
       </ScrollArea>
@@ -190,7 +215,7 @@ export function InspectorPanel({
           }}
         >
           <Trash2Icon className="size-4 mr-1.5" />
-          Delete node
+          {t("deleteNode")}
         </Button>
       </footer>
     </aside>

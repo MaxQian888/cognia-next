@@ -1420,9 +1420,15 @@ registerNodeExecutor({
           })
         : new StreamableHTTPClientTransport(new URL(String(server.config.url ?? "")))
 
+    const { getPluginEventHooks } = await import("@/lib/plugin")
+    const hooks = getPluginEventHooks()
+
     try {
       await client.connect(transport)
+      hooks.dispatchMCPServerConnect(serverId, server.name)
+      hooks.dispatchMCPToolCall(serverId, toolName, args)
       const result = await client.callTool({ name: toolName, arguments: args })
+      hooks.dispatchMCPToolResult(serverId, toolName, result)
       return {
         output: {
           serverId,
@@ -1435,6 +1441,7 @@ registerNodeExecutor({
       }
     } finally {
       await client.close().catch(() => undefined)
+      hooks.dispatchMCPServerDisconnect(serverId)
     }
   },
 })

@@ -7,11 +7,19 @@
  * actually produced.
  */
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
+import { useTranslations } from "next-intl"
+import { SearchIcon } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { Input } from "@/components/ui/input"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
+
+type LogLevel = "debug" | "info" | "warn" | "error"
+const LOG_LEVELS: LogLevel[] = ["debug", "info", "warn", "error"]
 import {
   workflowNodeCategory,
   type VisualWorkflow,
@@ -21,13 +29,13 @@ import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 import { formatDurationMs } from "./format"
 
 const CATEGORY_BADGE = {
-  trigger: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  action: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
-  ai: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
-  flow: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
-  data: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
-  io: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300",
-  annotation: "bg-zinc-500/15 text-zinc-700 dark:text-zinc-300",
+  trigger: "bg-wf-trigger/15 text-wf-trigger border-wf-trigger/30",
+  action: "bg-wf-action/15 text-wf-action border-wf-action/30",
+  ai: "bg-wf-ai/15 text-wf-ai border-wf-ai/30",
+  flow: "bg-wf-flow/15 text-wf-flow border-wf-flow/30",
+  data: "bg-wf-data/15 text-wf-data border-wf-data/30",
+  io: "bg-wf-io/15 text-wf-io border-wf-io/30",
+  annotation: "bg-wf-annotation/15 text-wf-annotation border-wf-annotation/30",
 } as const
 
 export function RunStepDetail({
@@ -39,6 +47,11 @@ export function RunStepDetail({
   events: WorkflowRunEventRow[]
   stepId: string | null
 }) {
+  const t = useTranslations("workflows.runs.step")
+  const tLogs = useTranslations("workflows.runs.logs")
+  const [logQuery, setLogQuery] = useState("")
+  const [logLevels, setLogLevels] = useState<string[]>(LOG_LEVELS)
+  const [stackOpen, setStackOpen] = useState(false)
   const { node, stepEvents, summary } = useMemo(() => {
     if (!stepId) return { node: null, stepEvents: [], summary: null }
     const node = workflow.nodes.find((n) => n.id === stepId) ?? null
@@ -67,20 +80,33 @@ export function RunStepDetail({
     return { node, stepEvents, summary }
   }, [stepId, workflow.nodes, events])
 
+  const filteredLogs = useMemo(() => {
+    const logEvents = stepEvents.filter((e) => e.type === "run_log")
+    const q = logQuery.trim().toLowerCase()
+    return logEvents.filter((e) => {
+      const level = (e.level ?? "info") as LogLevel
+      if (!logLevels.includes(level)) return false
+      if (!q) return true
+      const payload = e.payload as { message?: string; data?: unknown } | undefined
+      return (
+        payload?.message?.toLowerCase().includes(q) ||
+        JSON.stringify(payload?.data ?? "")
+          .toLowerCase()
+          .includes(q)
+      )
+    })
+  }, [stepEvents, logQuery, logLevels])
+
   if (!stepId) {
     return (
       <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
-        Select a step to inspect its input, output, and logs.
+        {t("selectPrompt")}
       </div>
     )
   }
 
   if (!node) {
-    return (
-      <div className="p-6 text-sm text-muted-foreground">
-        Step {stepId} is not in the run snapshot.
-      </div>
-    )
+    return <div className="p-6 text-sm text-muted-foreground">{t("notInSnapshot", { stepId })}</div>
   }
 
   const entry = nodeCatalogEntry(node.type)
@@ -89,12 +115,12 @@ export function RunStepDetail({
   const completedEv = stepEvents.find((e) => e.type === "step_completed")
   const failedEv = stepEvents.find((e) => e.type === "step_failed")
   const skippedEv = stepEvents.find((e) => e.type === "step_skipped")
-  const logEvents = stepEvents.filter((e) => e.type === "run_log")
 
   const startParams = (startedEv?.payload as { params?: unknown } | undefined)?.params
   const completedOutput = (completedEv?.payload as { output?: unknown } | undefined)?.output
   const failedError =
-    (failedEv?.payload as { message?: string; retryable?: boolean } | undefined) ?? null
+    (failedEv?.payload as { message?: string; retryable?: boolean; stack?: string } | undefined) ??
+    null
   const skippedReason = (skippedEv?.payload as { reason?: string } | undefined)?.reason
 
   return (
@@ -110,14 +136,14 @@ export function RunStepDetail({
 
         {summary ? (
           <div className="grid grid-cols-2 gap-2 rounded-md border bg-muted/30 p-3 text-xs">
-            <Stat label="Duration" value={formatDurationMs(summary.durationMs)} />
-            <Stat label="Status" value={summary.terminalType.replace("step_", "")} />
+            <Stat label={t("duration")} value={formatDurationMs(summary.durationMs)} />
+            <Stat label={t("statusLabel")} value={summary.terminalType.replace("step_", "")} />
             {startedEv ? (
-              <Stat label="Started" value={new Date(startedEv.ts).toLocaleTimeString()} />
+              <Stat label={t("started")} value={new Date(startedEv.ts).toLocaleTimeString()} />
             ) : null}
             {(completedEv ?? failedEv ?? skippedEv) ? (
               <Stat
-                label="Ended"
+                label={t("ended")}
                 value={new Date((completedEv ?? failedEv ?? skippedEv)!.ts).toLocaleTimeString()}
               />
             ) : null}
@@ -125,69 +151,114 @@ export function RunStepDetail({
         ) : null}
 
         {failedError ? (
-          <Section title="Error">
-            <pre className="whitespace-pre-wrap rounded-md border border-rose-500/40 bg-rose-500/5 p-3 text-xs">
-              {failedError.message ?? "Unknown error"}
+          <Section title={t("error")}>
+            <pre className="whitespace-pre-wrap rounded-md border border-wf-status-failed/40 bg-wf-status-failed/5 p-3 text-xs">
+              {failedError.message ?? t("error")}
             </pre>
+            {failedError.stack ? (
+              <Collapsible open={stackOpen} onOpenChange={setStackOpen} className="mt-1.5">
+                <CollapsibleTrigger className="text-[11px] text-muted-foreground underline-offset-2 hover:underline">
+                  {stackOpen ? tLogs("stackToggleHide") : tLogs("stackToggleShow")}
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <pre className="mt-1 whitespace-pre overflow-x-auto rounded-md border bg-muted/30 p-2 text-[11px] font-mono leading-relaxed">
+                    {failedError.stack}
+                  </pre>
+                </CollapsibleContent>
+              </Collapsible>
+            ) : null}
             {failedError.retryable === false ? (
-              <p className="text-[11px] text-muted-foreground mt-1">
-                The executor flagged this error as non-retryable.
-              </p>
+              <p className="text-[11px] text-muted-foreground mt-1">{t("nonRetryable")}</p>
             ) : null}
           </Section>
         ) : null}
 
         {skippedReason ? (
-          <Section title="Skip reason">
+          <Section title={t("skipReason")}>
             <p className="text-sm text-muted-foreground">{skippedReason}</p>
           </Section>
         ) : null}
 
-        <Section title="Resolved params">
-          <JsonView value={startParams ?? node.data.params} />
+        <Section title={t("resolvedParams")}>
+          <JsonView value={startParams ?? node.data.params} emptyText={t("noValue")} />
         </Section>
 
         {completedOutput !== undefined ? (
-          <Section title="Output">
-            <JsonView value={completedOutput} />
+          <Section title={t("output")}>
+            <JsonView value={completedOutput} emptyText={t("noValue")} />
           </Section>
         ) : null}
 
         {logEvents.length > 0 ? (
-          <Section title="Logs">
-            <div className="space-y-1.5 rounded-md border bg-muted/30 p-2">
-              {logEvents.map((e) => {
-                const payload = e.payload as { message?: string; data?: unknown } | undefined
-                return (
-                  <div key={e.id} className="flex items-start gap-2 text-xs">
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "shrink-0 font-mono uppercase",
-                        e.level === "error" && "text-rose-600 dark:text-rose-400",
-                        e.level === "warn" && "text-amber-600 dark:text-amber-400"
-                      )}
-                    >
-                      {e.level ?? "info"}
-                    </Badge>
-                    <div className="flex-1 min-w-0 break-words">
-                      {payload?.message ?? "—"}
-                      {payload?.data !== undefined ? (
-                        <pre className="mt-1 whitespace-pre-wrap text-[11px] text-muted-foreground">
-                          {safeStringify(payload.data)}
-                        </pre>
-                      ) : null}
-                    </div>
-                  </div>
-                )
-              })}
+          <Section title={t("logs")}>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="relative flex-1">
+                <SearchIcon className="size-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={logQuery}
+                  onChange={(e) => setLogQuery(e.target.value)}
+                  placeholder={tLogs("searchPlaceholder")}
+                  className="h-7 pl-7 text-xs"
+                  aria-label={tLogs("searchPlaceholder")}
+                />
+              </div>
+              <ToggleGroup
+                type="multiple"
+                size="sm"
+                value={logLevels}
+                onValueChange={(v) => setLogLevels(v.length > 0 ? v : LOG_LEVELS)}
+                aria-label={tLogs("levelFilter")}
+              >
+                {LOG_LEVELS.map((level) => (
+                  <ToggleGroupItem
+                    key={level}
+                    value={level}
+                    className="h-7 px-2 text-[10px] uppercase"
+                  >
+                    {tLogs(`levels.${level}`)}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
             </div>
+            {filteredLogs.length === 0 ? (
+              <p className="px-2 py-3 text-center text-[11px] text-muted-foreground">
+                {tLogs("noResults")}
+              </p>
+            ) : (
+              <div className="space-y-1.5 rounded-md border bg-muted/30 p-2">
+                {filteredLogs.map((e) => {
+                  const payload = e.payload as { message?: string; data?: unknown } | undefined
+                  return (
+                    <div key={e.id} className="flex items-start gap-2 text-xs">
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "shrink-0 font-mono uppercase",
+                          e.level === "error" && "text-wf-status-failed",
+                          e.level === "warn" && "text-wf-status-running"
+                        )}
+                      >
+                        {e.level ?? "info"}
+                      </Badge>
+                      <div className="flex-1 min-w-0 break-words">
+                        {payload?.message ?? "—"}
+                        {payload?.data !== undefined ? (
+                          <pre className="mt-1 whitespace-pre-wrap text-[11px] text-muted-foreground">
+                            {safeStringify(payload.data)}
+                          </pre>
+                        ) : null}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </Section>
         ) : null}
 
         <Separator />
         <p className="text-[11px] text-muted-foreground">
-          Step id <code className="font-mono">{stepId}</code>
+          {t("stepIdLabel")} <code className="font-mono">{stepId}</code>
         </p>
       </div>
     </ScrollArea>
@@ -212,9 +283,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-function JsonView({ value }: { value: unknown }) {
+function JsonView({ value, emptyText }: { value: unknown; emptyText: string }) {
   if (value === undefined) {
-    return <p className="text-xs text-muted-foreground italic">No value.</p>
+    return <p className="text-xs text-muted-foreground italic">{emptyText}</p>
   }
   return (
     <pre className="whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-xs font-mono leading-relaxed">

@@ -35,6 +35,17 @@ import {
   type RFWorkflowEdge,
   type RFWorkflowNode,
 } from "./react-flow-converter"
+import {
+  validateAllNodes,
+  validateNodeParams,
+  type NodeValidationResult,
+} from "@/lib/workflow/nodes/validate-params"
+import {
+  cloneNodesAndEdges,
+  rehydrateFromEnvelope,
+  selectionBounds,
+  type ClipboardEnvelope,
+} from "./clipboard"
 
 export interface EditorStateSnapshot {
   nodes: RFWorkflowNode[]
@@ -59,8 +70,13 @@ export interface EditorState extends EditorStateSnapshot {
   savedAt: number | null
   /** Per-stepId live execution status, keyed by node id. */
   runStatusByStepId: Record<string, NodeRunStatus>
-  /** Per-node validation errors surfaced from the inspector / save path. */
-  validationByStepId: Record<string, string[]>
+  /**
+   * Per-node validation result, keyed by node id. Only nodes with at least
+   * one error are present — passing nodes are pruned so the canvas /
+   * inspector can render based on key existence alone. Populated on params
+   * change by `revalidateNode` and on save by `revalidateAll`.
+   */
+  validationByStepId: Record<string, NodeValidationResult>
 
   // ── mutators (graph) ──────────────────────────────────────────────────────
   setNodes: (nodes: RFWorkflowNode[]) => void
@@ -98,12 +114,38 @@ export interface EditorState extends EditorStateSnapshot {
   markSaved: () => void
   resetDirty: () => void
 
+  // ── productivity actions (undoable) ──────────────────────────────────────
+  /**
+   * Duplicate the given nodes (and the edges fully inside the subset),
+   * offset by `{x:24,y:24}`, select the clones, return their new ids.
+   */
+  duplicateNodes: (ids: string[]) => string[]
+  /**
+   * Insert nodes/edges from a system-clipboard envelope. Used by Ctrl+V to
+   * paste content potentially copied from another workflow.
+   */
+  pasteFromEnvelope: (envelope: ClipboardEnvelope) => string[]
+  /**
+   * Wrap the given nodes in an `annotation.group` frame sized to the
+   * selection bounding box (with padding). Returns the new group's id.
+   */
+  groupSelected: (ids: string[]) => string | null
+  /** Select every node + edge in the workflow. */
+  selectAll: () => void
+
   // ── runtime status (not undoable) ────────────────────────────────────────
   setRunStatus: (stepId: string, status: NodeRunStatus) => void
   setRunStatusBatch: (entries: Record<string, NodeRunStatus>) => void
   clearRunStatus: () => void
-  setValidation: (stepId: string, errors: string[]) => void
+  /** Replace one node's validation result. Pass `null` to clear. */
+  setValidation: (stepId: string, result: NodeValidationResult | null) => void
+  /** Replace the whole validation map (used by `revalidateAll`). */
+  setValidationBatch: (entries: Record<string, NodeValidationResult>) => void
   clearValidation: () => void
+  /** Run zod validation for one node and write the result to the store. */
+  revalidateNode: (id: string) => NodeValidationResult
+  /** Run zod validation for every node and replace `validationByStepId`. */
+  revalidateAll: () => Record<string, NodeValidationResult>
 }
 
 export type EditorStore = UseBoundStore<StoreApi<EditorState>> & {
@@ -128,6 +170,24 @@ const labelByKind: Partial<Record<WorkflowNodeKind, string>> = {
 
 function defaultLabelFor(kind: WorkflowNodeKind): string {
   return labelByKind[kind] ?? kind
+}
+
+/**
+ * Cheap equality test for `NodeValidationResult` so `revalidateNode` can
+ * skip a no-op `set()` and avoid re-triggering subscribers (which would
+ * loop with effects that depend on the selected node).
+ */
+function shallowEqualValidation(a: NodeValidationResult, b: NodeValidationResult): boolean {
+  if (a === b) return true
+  if (a.hasErrors !== b.hasErrors) return false
+  const aKeys = Object.keys(a.fields)
+  const bKeys = Object.keys(b.fields)
+  if (aKeys.length !== bKeys.length) return false
+  for (const k of aKeys) {
+    if (!(k in b.fields)) return false
+    if (a.fields[k].key !== b.fields[k].key) return false
+  }
+  return true
 }
 
 export function createEditorStore(initial: VisualWorkflow): EditorStore {
@@ -243,6 +303,73 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         markSaved: () => set({ dirty: false, savedAt: Date.now() }),
         resetDirty: () => set({ dirty: false }),
 
+        duplicateNodes: (ids) => {
+          if (ids.length === 0) return []
+          const { nodes, edges } = get()
+          const cloned = cloneNodesAndEdges(nodes, edges, ids)
+          if (cloned.nodes.length === 0) return []
+          set({
+            nodes: [...nodes, ...cloned.nodes],
+            edges: [...edges, ...cloned.edges],
+            selectedNodeIds: cloned.nodes.map((n) => n.id),
+            dirty: true,
+          })
+          return cloned.nodes.map((n) => n.id)
+        },
+
+        pasteFromEnvelope: (envelope) => {
+          if (!envelope || envelope.nodes.length === 0) return []
+          const { nodes, edges } = get()
+          const cloned = rehydrateFromEnvelope(envelope)
+          set({
+            nodes: [...nodes, ...cloned.nodes],
+            edges: [...edges, ...cloned.edges],
+            selectedNodeIds: cloned.nodes.map((n) => n.id),
+            dirty: true,
+          })
+          return cloned.nodes.map((n) => n.id)
+        },
+
+        groupSelected: (ids) => {
+          if (ids.length === 0) return null
+          const { nodes } = get()
+          const bounds = selectionBounds(nodes, ids)
+          if (!bounds) return null
+          const padding = 32
+          const id = "n_" + nanoid(8)
+          const group: RFWorkflowNode = {
+            id,
+            type: "workflowNode",
+            position: { x: bounds.x - padding, y: bounds.y - padding * 1.5 },
+            data: {
+              label: "Group",
+              kind: "annotation.group",
+              typeVersion: 1,
+              params: {
+                title: "Group",
+                width: bounds.width + padding * 2,
+                height: bounds.height + padding * 2.25,
+              },
+            },
+          }
+          set({
+            // Group goes FIRST in the array so React Flow paints it under
+            // its members (group should not occlude its contents).
+            nodes: [group, ...get().nodes],
+            selectedNodeIds: [id],
+            dirty: true,
+          })
+          return id
+        },
+
+        selectAll: () => {
+          const { nodes, edges } = get()
+          set({
+            selectedNodeIds: nodes.map((n) => n.id),
+            selectedEdgeIds: edges.map((e) => e.id),
+          })
+        },
+
         setRunStatus: (stepId, status) =>
           set({
             runStatusByStepId: { ...get().runStatusByStepId, [stepId]: status },
@@ -251,11 +378,50 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           set({ runStatusByStepId: { ...get().runStatusByStepId, ...entries } }),
         clearRunStatus: () => set({ runStatusByStepId: {} }),
 
-        setValidation: (stepId, errors) =>
-          set({
-            validationByStepId: { ...get().validationByStepId, [stepId]: errors },
-          }),
+        setValidation: (stepId, result) => {
+          const next = { ...get().validationByStepId }
+          if (result === null || !result.hasErrors) {
+            delete next[stepId]
+          } else {
+            next[stepId] = result
+          }
+          set({ validationByStepId: next })
+        },
+        setValidationBatch: (entries) => set({ validationByStepId: { ...entries } }),
         clearValidation: () => set({ validationByStepId: {} }),
+        revalidateNode: (id) => {
+          const node = get().nodes.find((n) => n.id === id)
+          if (!node) return { fields: {}, summary: [], hasErrors: false }
+          const result = validateNodeParams(
+            node.data.kind as WorkflowNodeKind,
+            (node.data.params as Record<string, unknown> | undefined) ?? {}
+          )
+          const current = get().validationByStepId
+          if (!result.hasErrors) {
+            if (!(id in current)) return result
+            const next = { ...current }
+            delete next[id]
+            set({ validationByStepId: next })
+            return result
+          }
+          const prev = current[id]
+          if (prev && shallowEqualValidation(prev, result)) return result
+          set({ validationByStepId: { ...current, [id]: result } })
+          return result
+        },
+        revalidateAll: () => {
+          const errs = validateAllNodes(
+            get().nodes.map((n) => ({
+              id: n.id,
+              data: {
+                kind: n.data.kind as string,
+                params: (n.data.params as Record<string, unknown> | undefined) ?? {},
+              },
+            }))
+          )
+          set({ validationByStepId: errs })
+          return errs
+        },
       }),
       {
         // Track only nodes + edges in the temporal slice. Viewport and

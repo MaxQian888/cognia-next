@@ -11,6 +11,8 @@
 
 import type { ComponentType } from "react"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
+import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
+import { SchemaForm } from "./forms/schema-form"
 import {
   AiClassifyConfig,
   AiEmbedConfig,
@@ -120,7 +122,41 @@ export function getNodeConfigComponent(kind: WorkflowNodeKind): NodeConfigCompon
   return REGISTRY[kind] ?? GenericJsonConfig
 }
 
+/**
+ * Entry-aware variant: prefers the built-in REGISTRY hit, then a JSON Schema
+ * driven `SchemaForm` (for plugin entries that ship a `paramsSchema`), then
+ * the raw-JSON fallback. This is what the inspector should call once it has
+ * a `NodeCatalogEntry` in hand.
+ */
+export function getNodeConfigComponentForEntry(
+  entry: Pick<NodeCatalogEntry, "kind" | "paramsSchema">
+): NodeConfigComponent {
+  const builtIn = REGISTRY[entry.kind]
+  if (builtIn) return builtIn
+  if (entry.paramsSchema) {
+    const schema = entry.paramsSchema
+    const SchemaFormForKind: NodeConfigComponent = ({ params, onChange }) => (
+      <SchemaForm schema={schema} params={params} onChange={onChange} />
+    )
+    SchemaFormForKind.displayName = `SchemaFormFor(${entry.kind})`
+    return SchemaFormForKind
+  }
+  return GenericJsonConfig
+}
+
 /** Whether a registered (non-fallback) component exists. */
 export function hasDedicatedConfig(kind: WorkflowNodeKind): boolean {
   return REGISTRY[kind] !== undefined
+}
+
+/**
+ * Whether the inspector has a structured form (built-in OR schema-driven)
+ * for this entry. Used to suppress the "no dedicated config yet" hint when
+ * a plugin author provides a `paramsSchema`.
+ */
+export function hasDedicatedConfigForEntry(
+  entry: Pick<NodeCatalogEntry, "kind" | "paramsSchema">
+): boolean {
+  if (REGISTRY[entry.kind] !== undefined) return true
+  return Boolean(entry.paramsSchema)
 }

@@ -9,48 +9,39 @@ import {
   PauseCircleIcon,
   PlayCircleIcon,
 } from "lucide-react"
+import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import type { RunStatus } from "@/types/workflow/visual"
 
-const STATUS_META: Record<
-  RunStatus,
-  { className: string; icon: typeof CheckCircle2Icon; label: string }
-> = {
+const STATUS_META: Record<RunStatus, { className: string; icon: typeof CheckCircle2Icon }> = {
   pending: {
-    className: "bg-zinc-500/15 text-zinc-700 dark:text-zinc-300 border-zinc-500/40",
+    className: "bg-wf-status-idle/15 text-wf-status-idle border-wf-status-idle/40",
     icon: CircleDashedIcon,
-    label: "Pending",
   },
   running: {
-    className: "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/40",
+    className: "bg-wf-status-waiting/15 text-wf-status-waiting border-wf-status-waiting/40",
     icon: LoaderIcon,
-    label: "Running",
   },
   waiting: {
-    className: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/40",
+    className: "bg-wf-status-running/15 text-wf-status-running border-wf-status-running/40",
     icon: PlayCircleIcon,
-    label: "Waiting",
   },
   paused: {
-    className: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/40",
+    className: "bg-wf-status-running/15 text-wf-status-running border-wf-status-running/40",
     icon: PauseCircleIcon,
-    label: "Paused",
   },
   succeeded: {
-    className: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/40",
+    className: "bg-wf-status-succeeded/15 text-wf-status-succeeded border-wf-status-succeeded/40",
     icon: CheckCircle2Icon,
-    label: "Succeeded",
   },
   failed: {
-    className: "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/40",
+    className: "bg-wf-status-failed/15 text-wf-status-failed border-wf-status-failed/40",
     icon: CircleAlertIcon,
-    label: "Failed",
   },
   cancelled: {
-    className: "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400 border-zinc-500/40",
+    className: "bg-wf-status-skipped/15 text-wf-status-skipped border-wf-status-skipped/40",
     icon: CircleSlashIcon,
-    label: "Cancelled",
   },
 }
 
@@ -63,6 +54,7 @@ export function RunStatusPill({
   className?: string
   showIcon?: boolean
 }) {
+  const t = useTranslations("workflows.runs.status")
   const meta = STATUS_META[status]
   const Icon = meta.icon
   const animate = status === "running" ? "animate-spin" : ""
@@ -73,7 +65,7 @@ export function RunStatusPill({
       data-testid={`run-status-${status}`}
     >
       {showIcon ? <Icon className={cn("size-3", animate)} aria-hidden="true" /> : null}
-      {meta.label}
+      {t(status)}
     </Badge>
   )
 }

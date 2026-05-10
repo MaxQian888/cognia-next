@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { PlusIcon, SearchIcon, WorkflowIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -10,8 +11,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { listWorkflowsByUpdated } from "@/lib/db/workflows"
 import { WorkflowCard } from "./workflow-card"
 import { WorkflowCreateDialog } from "./workflow-create-dialog"
+import { LibraryStatBar } from "./library-stat-bar"
 
 export function WorkflowLibrary() {
+  const t = useTranslations("workflows.library")
   const workflows = useLiveQuery(() => listWorkflowsByUpdated(), [])
   const [query, setQuery] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
@@ -24,7 +27,7 @@ export function WorkflowLibrary() {
       (w) =>
         w.name.toLowerCase().includes(q) ||
         w.description?.toLowerCase().includes(q) ||
-        w.tags?.some((t) => t.toLowerCase().includes(q))
+        w.tags?.some((tag) => tag.toLowerCase().includes(q))
     )
   }, [workflows, query])
 
@@ -35,25 +38,24 @@ export function WorkflowLibrary() {
           <WorkflowIcon className="size-5" aria-hidden="true" />
         </span>
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-semibold leading-tight">Workflows</h1>
-          <p className="text-sm text-muted-foreground">
-            Visual orchestration for characters, teams, and connectors.
-          </p>
+          <h1 className="text-xl font-semibold leading-tight">{t("title")}</h1>
+          <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
         </div>
         <Button onClick={() => setCreateOpen(true)} data-testid="workflow-create">
           <PlusIcon className="size-4 mr-1.5" />
-          New workflow
+          {t("new")}
         </Button>
       </header>
+      <LibraryStatBar />
       <div className="px-6 py-3 border-b">
         <div className="relative max-w-md">
           <SearchIcon className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search workflows…"
+            placeholder={t("searchPlaceholder")}
             className="pl-9"
-            aria-label="Search workflows"
+            aria-label={t("searchPlaceholder")}
           />
         </div>
       </div>
@@ -67,16 +69,14 @@ export function WorkflowLibrary() {
                 <WorkflowIcon className="size-8" aria-hidden="true" />
               </EmptyMedia>
             </EmptyHeader>
-            <EmptyTitle>{query ? "No matching workflows" : "No workflows yet"}</EmptyTitle>
+            <EmptyTitle>{query ? t("empty.titleQuery") : t("empty.title")}</EmptyTitle>
             <EmptyDescription>
-              {query
-                ? "Try a different search term, or clear the search to see all workflows."
-                : "Create your first workflow to wire up triggers, agents, and connectors."}
+              {query ? t("empty.descriptionQuery") : t("empty.description")}
             </EmptyDescription>
             {!query ? (
               <Button onClick={() => setCreateOpen(true)} className="mt-2">
                 <PlusIcon className="size-4 mr-1.5" />
-                Create workflow
+                {t("empty.cta")}
               </Button>
             ) : null}
           </Empty>

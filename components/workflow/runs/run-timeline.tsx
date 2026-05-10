@@ -11,29 +11,30 @@
 
 import { useMemo } from "react"
 import { CheckCircle2Icon, CircleAlertIcon, CircleSlashIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import type { VisualWorkflow, WorkflowRunEventRow } from "@/types/workflow/visual"
 import { workflowNodeCategory } from "@/types/workflow/visual"
 import { formatDurationMs } from "./format"
 
 const CATEGORY_COLORS = {
-  trigger: "bg-emerald-500/70",
-  action: "bg-sky-500/70",
-  ai: "bg-violet-500/70",
-  flow: "bg-amber-500/70",
-  data: "bg-rose-500/70",
-  io: "bg-cyan-500/70",
-  annotation: "bg-zinc-500/70",
+  trigger: "bg-wf-trigger/70",
+  action: "bg-wf-action/70",
+  ai: "bg-wf-ai/70",
+  flow: "bg-wf-flow/70",
+  data: "bg-wf-data/70",
+  io: "bg-wf-io/70",
+  annotation: "bg-wf-annotation/70",
 } as const
 
 const CATEGORY_RAILS = {
-  trigger: "bg-emerald-500/15",
-  action: "bg-sky-500/15",
-  ai: "bg-violet-500/15",
-  flow: "bg-amber-500/15",
-  data: "bg-rose-500/15",
-  io: "bg-cyan-500/15",
-  annotation: "bg-zinc-500/15",
+  trigger: "bg-wf-trigger/15",
+  action: "bg-wf-action/15",
+  ai: "bg-wf-ai/15",
+  flow: "bg-wf-flow/15",
+  data: "bg-wf-data/15",
+  io: "bg-wf-io/15",
+  annotation: "bg-wf-annotation/15",
 } as const
 
 interface StepSpan {
@@ -59,6 +60,7 @@ export function RunTimeline({
   selectedStepId: string | null
   onSelectStep: (stepId: string) => void
 }) {
+  const t = useTranslations("workflows.runs.timeline")
   // For running steps we need an end-of-window. Use the latest event ts so the
   // computation is pure (deterministic from props) and the timeline still
   // grows as fresh events arrive.
@@ -75,7 +77,7 @@ export function RunTimeline({
   if (spans.length === 0) {
     return (
       <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
-        Waiting for the first step to start…
+        {t("waiting")}
       </div>
     )
   }
@@ -125,8 +127,8 @@ export function RunTimeline({
                   "absolute top-0 bottom-0 rounded-sm",
                   CATEGORY_COLORS[category],
                   span.status === "running" && "animate-pulse",
-                  span.status === "failed" && "bg-rose-500/80",
-                  span.status === "skipped" && "bg-zinc-500/40"
+                  span.status === "failed" && "bg-wf-status-failed/80",
+                  span.status === "skipped" && "bg-wf-status-skipped/40"
                 )}
                 style={{
                   left: `${left}%`,
@@ -141,16 +143,18 @@ export function RunTimeline({
                 <StatusIcon
                   className={cn(
                     "size-3.5",
-                    span.status === "succeeded" && "text-emerald-600 dark:text-emerald-400",
-                    span.status === "failed" && "text-rose-600 dark:text-rose-400",
-                    span.status === "skipped" && "text-zinc-500"
+                    span.status === "succeeded" && "text-wf-status-succeeded",
+                    span.status === "failed" && "text-wf-status-failed",
+                    span.status === "skipped" && "text-wf-status-skipped"
                   )}
                   aria-hidden="true"
                 />
               ) : null}
               {formatDurationMs(span.endTs - span.startTs)}
               {span.attemptCount > 1 ? (
-                <span title={`Retried ${span.attemptCount - 1} time(s)`}>×{span.attemptCount}</span>
+                <span title={t("retried", { count: span.attemptCount - 1 })}>
+                  ×{span.attemptCount}
+                </span>
               ) : null}
             </div>
           </button>

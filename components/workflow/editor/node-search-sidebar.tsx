@@ -10,36 +10,32 @@
  * is the same pattern the official React Flow Drag-and-Drop example uses.
  */
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, useSyncExternalStore } from "react"
 import * as LucideIcons from "lucide-react"
 import { ChevronRightIcon, SearchIcon, type LucideIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
 import { Input } from "@/components/ui/input"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { groupedCatalog, searchCatalog, type NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
-import type { WorkflowNodeCategory } from "@/types/workflow/visual"
+import {
+  groupedCatalog,
+  searchCatalog,
+  subscribePluginCatalog,
+  getPluginCatalogSnapshot,
+  type NodeCatalogEntry,
+} from "@/lib/workflow/nodes/catalog"
 
 export const NODE_DRAG_MIME = "application/x-workflow-kind"
 
-const CATEGORY_LABELS: Record<WorkflowNodeCategory, string> = {
-  trigger: "Triggers",
-  action: "Actions",
-  ai: "AI",
-  flow: "Flow control",
-  data: "Data",
-  io: "I/O",
-  annotation: "Annotations",
-}
-
-const CATEGORY_HINTS: Record<WorkflowNodeCategory, string> = {
-  trigger: "Start a workflow",
-  action: "Operate on cognia entities",
-  ai: "LLM primitives",
-  flow: "Control execution flow",
-  data: "Reshape data between steps",
-  io: "Network in/out",
-  annotation: "Visual notes only",
+// useSyncExternalStore identity-stable getter for the plugin catalog. The
+// snapshot returned by `getPluginCatalogSnapshot` is a fresh array on every
+// call, but identity matters less than reactivity here: any change to the
+// plugin catalog notifies subscribers, and the sidebar re-renders. We pin a
+// `getServerSnapshot` to an empty array so SSR/static builds don't crash.
+const SERVER_SNAPSHOT: readonly NodeCatalogEntry[] = []
+function getServerSnapshot(): readonly NodeCatalogEntry[] {
+  return SERVER_SNAPSHOT
 }
 
 export function NodeSearchSidebar({
@@ -50,15 +46,33 @@ export function NodeSearchSidebar({
   /** Called when the user clicks an entry instead of dragging it. */
   onAddNodeAtCenter?: (entry: NodeCatalogEntry) => void
 }) {
+  const t = useTranslations("workflows.sidebar")
   const [query, setQuery] = useState("")
-  const groups = useMemo(() => (query.trim() ? null : groupedCatalog()), [query])
-  const flatResults = useMemo(() => (query.trim() ? searchCatalog(query) : null), [query])
+  // Subscribe to the plugin catalog so newly-registered plugin nodes appear
+  // in the sidebar without a page reload. The snapshot identity changes on
+  // every plugin add/remove, which forces the memoized groups/flatResults
+  // below to recompute.
+  const pluginEntries = useSyncExternalStore(
+    subscribePluginCatalog,
+    getPluginCatalogSnapshot,
+    getServerSnapshot
+  )
+  const groups = useMemo(
+    () => (query.trim() ? null : groupedCatalog()),
+    // pluginEntries is read indirectly through groupedCatalog; tracking its
+    // identity here forces the recompute when the plugin catalog mutates.
+    [query, pluginEntries]
+  )
+  const flatResults = useMemo(
+    () => (query.trim() ? searchCatalog(query) : null),
+    [query, pluginEntries]
+  )
 
   return (
     <aside
       className={cn("flex h-full w-full flex-col border-r bg-card/50 backdrop-blur", className)}
       data-testid="workflow-node-sidebar"
-      aria-label="Node palette"
+      aria-label={t("searchPlaceholder")}
     >
       <div className="border-b px-3 py-3">
         <div className="relative">
@@ -66,9 +80,9 @@ export function NodeSearchSidebar({
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search nodes…"
+            placeholder={t("searchPlaceholder")}
             className="pl-9 h-9"
-            aria-label="Search nodes"
+            aria-label={t("searchPlaceholder")}
           />
         </div>
       </div>
@@ -77,7 +91,7 @@ export function NodeSearchSidebar({
           <div className="p-2 space-y-1">
             {flatResults.length === 0 ? (
               <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-                No nodes match &ldquo;{query}&rdquo;
+                {t("noMatches")}
               </p>
             ) : (
               flatResults.map((entry) => (
@@ -89,8 +103,8 @@ export function NodeSearchSidebar({
           groups?.map((group) => (
             <NodeCategoryGroup
               key={group.category}
-              title={CATEGORY_LABELS[group.category]}
-              hint={CATEGORY_HINTS[group.category]}
+              title={t(`category.${group.category}`)}
+              hint={t(`hint.${group.category}`)}
               entries={group.entries}
               onAddNodeAtCenter={onAddNodeAtCenter}
             />
@@ -98,7 +112,7 @@ export function NodeSearchSidebar({
         )}
       </div>
       <div className="border-t px-3 py-2 text-[10px] text-muted-foreground leading-relaxed">
-        Drag a node to the canvas, or click to drop it at the center.
+        {t("dragHint")}
       </div>
     </aside>
   )
@@ -146,6 +160,7 @@ function NodeChip({
   entry: NodeCatalogEntry
   onAddNodeAtCenter?: (entry: NodeCatalogEntry) => void
 }) {
+  const t = useTranslations("workflows.sidebar")
   const Icon =
     (LucideIcons as unknown as Record<string, LucideIcon>)[entry.iconName] ?? LucideIcons.Box
   const handleDragStart = (e: React.DragEvent<HTMLButtonElement>) => {
@@ -168,8 +183,8 @@ function NodeChip({
           <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span className="flex-1 min-w-0 truncate">{entry.label}</span>
           {entry.desktopOnly ? (
-            <span className="text-[9px] uppercase tracking-wide text-amber-600 dark:text-amber-400">
-              Desktop
+            <span className="text-[9px] uppercase tracking-wide text-wf-status-running">
+              {t("desktopOnly")}
             </span>
           ) : null}
         </button>

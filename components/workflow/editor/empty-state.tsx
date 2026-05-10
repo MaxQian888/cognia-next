@@ -2,8 +2,11 @@
 
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { WorkflowIcon } from "lucide-react"
+import Link from "next/link"
+import { useTranslations } from "next-intl"
 
 export function EditorEmptyState({ onAddNode }: { onAddNode?: () => void }) {
+  const t = useTranslations("workflows.empty")
   return (
     <Empty className="absolute inset-0 m-auto h-fit max-w-md pointer-events-none">
       <EmptyHeader>
@@ -11,19 +14,25 @@ export function EditorEmptyState({ onAddNode }: { onAddNode?: () => void }) {
           <WorkflowIcon className="size-8" aria-hidden="true" />
         </EmptyMedia>
       </EmptyHeader>
-      <EmptyTitle>Empty workflow</EmptyTitle>
-      <EmptyDescription>
-        Drop a trigger node from the left sidebar to start, then connect it to actions.
-      </EmptyDescription>
-      {onAddNode ? (
-        <button
-          type="button"
-          onClick={onAddNode}
-          className="pointer-events-auto rounded-md border bg-card px-3 py-1.5 text-sm hover:bg-accent"
+      <EmptyTitle>{t("title")}</EmptyTitle>
+      <EmptyDescription>{t("description")}</EmptyDescription>
+      <div className="flex items-center gap-2">
+        {onAddNode ? (
+          <button
+            type="button"
+            onClick={onAddNode}
+            className="pointer-events-auto rounded-md border bg-card px-3 py-1.5 text-sm hover:bg-accent"
+          >
+            {t("addManualTrigger")}
+          </button>
+        ) : null}
+        <Link
+          href="/settings?section=workflows&wfTab=templates"
+          className="pointer-events-auto rounded-md border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
         >
-          Add manual trigger
-        </button>
-      ) : null}
+          {t("browseTemplates")}
+        </Link>
+      </div>
     </Empty>
   )
 }

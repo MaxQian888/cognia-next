@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { ArrowLeftIcon, RotateCcwIcon, SquareIcon } from "lucide-react"
 import { toast } from "sonner"
+import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -24,9 +25,11 @@ import type { TriggerEvent, WorkflowRunEventRow, WorkflowRunRow } from "@/types/
 import { RunStatusPill } from "./run-status-pill"
 import { RunTimeline } from "./run-timeline"
 import { RunStepDetail } from "./run-step-detail"
+import { RunDurationSparkline } from "./run-duration-sparkline"
 import { formatDurationMs, formatRunStartedAt } from "./format"
 
 export function RunDetail({ workflowId, runId }: { workflowId: string; runId: string }) {
+  const t = useTranslations("workflows.runs.detail")
   const router = useRouter()
   const run = useLiveQuery(() => getDb().workflowRuns.get(runId), [runId])
   const events = useLiveQuery(
@@ -70,12 +73,10 @@ export function RunDetail({ workflowId, runId }: { workflowId: string; runId: st
             <SquareIcon className="size-8" aria-hidden="true" />
           </EmptyMedia>
         </EmptyHeader>
-        <EmptyTitle>Run not found</EmptyTitle>
-        <EmptyDescription>
-          The run you tried to open doesn&apos;t exist or has been cleared.
-        </EmptyDescription>
+        <EmptyTitle>{t("notFound.title")}</EmptyTitle>
+        <EmptyDescription>{t("notFound.description")}</EmptyDescription>
         <Button onClick={() => router.push(`/workflows/${workflowId}/runs`)} className="mt-2">
-          Back to runs
+          {t("backToRuns")}
         </Button>
       </Empty>
     )
@@ -111,9 +112,11 @@ function RunDetailInner({
   busy: boolean
   setBusy: (v: boolean) => void
 }) {
+  const t = useTranslations("workflows.runs.detail")
+  const tToast = useTranslations("workflows.canvasToast")
   const totalDuration = useMemo(
-    () => (run.completedAt ? formatDurationMs(run.completedAt - run.startedAt) : "running"),
-    [run.startedAt, run.completedAt]
+    () => (run.completedAt ? formatDurationMs(run.completedAt - run.startedAt) : t("running")),
+    [run.startedAt, run.completedAt, t]
   )
 
   const handleReRun = async () => {
@@ -121,7 +124,7 @@ function RunDetailInner({
     setBusy(true)
     let toastId: string | number | undefined
     try {
-      toastId = toast.loading("Re-running workflow…")
+      toastId = toast.loading(t("rerunning"))
       const trigger: TriggerEvent = {
         workflowId: run.workflowId,
         kind: "trigger.manual",
@@ -133,14 +136,14 @@ function RunDetailInner({
         trigger,
       })
       if (result.status === "succeeded") {
-        toast.success("Workflow completed", { id: toastId })
+        toast.success(tToast("completed"), { id: toastId })
       } else {
-        toast.error(`Re-run failed: ${result.error?.message ?? "unknown error"}`, {
+        toast.error(`${tToast("runFailed")}: ${result.error?.message ?? "unknown error"}`, {
           id: toastId,
         })
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Re-run failed", {
+      toast.error(err instanceof Error ? err.message : tToast("runFailed"), {
         id: toastId,
       })
     } finally {
@@ -151,7 +154,7 @@ function RunDetailInner({
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center gap-3 border-b px-6 py-4">
-        <Button asChild size="icon" variant="ghost" aria-label="Back to runs">
+        <Button asChild size="icon" variant="ghost" aria-label={t("backToRuns")}>
           <Link href={`/workflows/${workflowId}/runs`}>
             <ArrowLeftIcon className="size-4" />
           </Link>
@@ -167,6 +170,7 @@ function RunDetailInner({
             {formatRunStartedAt(run.startedAt)} · {totalDuration} · {run.triggerKind}
           </p>
         </div>
+        <RunDurationSparkline workflowId={run.workflowId} />
         <Button
           variant="outline"
           size="sm"
@@ -175,7 +179,7 @@ function RunDetailInner({
           data-testid="run-detail-rerun"
         >
           <RotateCcwIcon className="size-4 mr-1.5" />
-          Re-run
+          {busy ? t("rerunning") : t("rerun")}
         </Button>
       </header>
       <div className="flex flex-1 overflow-hidden">

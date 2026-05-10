@@ -33,12 +33,10 @@ import {
   AlertTriangle as WarnIcon,
   type LucideIcon,
 } from "lucide-react"
-import { useFormatter, useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { workflowNodeCategory, type WorkflowNodeKind } from "@/types/workflow/visual"
 import type { WorkflowNodeData } from "@/types/workflow/visual"
 import type { NodeRunStatus } from "@/lib/workflow/editor/store"
-import type { LastRunSummary } from "@/lib/workflow/runtime/last-run-summary"
 
 const ICONS: Partial<Record<WorkflowNodeKind, LucideIcon>> = {
   "trigger.manual": PlayIcon,
@@ -91,18 +89,6 @@ const CATEGORY_COLORS = {
   annotation: "border-zinc-500/30 bg-zinc-500/5 text-zinc-700 dark:text-zinc-300",
 } as const
 
-/** Sticky-note color overrides for `annotation.note` (NoteConfig writes here). */
-const STICKY_NOTE_COLORS: Record<string, string> = {
-  yellow:
-    "border-amber-400/60 bg-amber-100/60 text-amber-900 dark:bg-amber-200/20 dark:text-amber-100",
-  green:
-    "border-emerald-400/60 bg-emerald-100/60 text-emerald-900 dark:bg-emerald-200/20 dark:text-emerald-100",
-  blue: "border-sky-400/60 bg-sky-100/60 text-sky-900 dark:bg-sky-200/20 dark:text-sky-100",
-  pink: "border-pink-400/60 bg-pink-100/60 text-pink-900 dark:bg-pink-200/20 dark:text-pink-100",
-  violet:
-    "border-violet-400/60 bg-violet-100/60 text-violet-900 dark:bg-violet-200/20 dark:text-violet-100",
-}
-
 export type WorkflowNodeRenderData = WorkflowNodeData & {
   kind: WorkflowNodeKind
   typeVersion: number
@@ -112,99 +98,29 @@ export type WorkflowNodeRenderData = WorkflowNodeData & {
   validationErrors?: string[]
   /** Number of fields with validation errors. Drives the corner badge count. */
   validationErrorCount?: number
-  /** Aggregated outcome of the most recent terminal event for this step. */
-  lastRun?: LastRunSummary
 }
 
-/**
- * Status indicator rendered as a corner badge (-top-1.5 -right-1.5) so it
- * coexists with the selection ring instead of being suppressed by it. The
- * badge sits ABOVE the card border using a solid background colored by status.
- */
-const STATUS_BADGE_BG: Record<NodeRunStatus, string> = {
+const STATUS_RING: Record<NodeRunStatus, string> = {
   idle: "",
-  running: "bg-amber-500 text-white animate-pulse",
-  succeeded: "bg-emerald-500 text-white",
-  failed: "bg-rose-500 text-white",
-  skipped: "bg-zinc-400 text-white",
-  waiting: "bg-sky-500 text-white",
+  running: "ring-2 ring-amber-500/70 animate-pulse",
+  succeeded: "ring-2 ring-emerald-500/70",
+  failed: "ring-2 ring-rose-500/70",
+  skipped: "ring-2 ring-zinc-500/40 ring-dashed",
+  waiting: "ring-2 ring-sky-500/60",
 }
 
-function StatusCornerBadge({ status }: { status: NodeRunStatus }) {
-  if (status === "idle") return null
-  const Icon = (() => {
-    switch (status) {
-      case "running":
-        return LoadingIcon
-      case "succeeded":
-        return SuccessIcon
-      case "failed":
-        return FailedIcon
-      case "skipped":
-        return SkippedIcon
-      case "waiting":
-        return TimerIcon
-    }
-  })()
-  return (
-    <span
-      className={cn(
-        "absolute -top-1.5 -right-1.5 z-10 inline-flex size-5 items-center justify-center rounded-full shadow ring-2 ring-background",
-        STATUS_BADGE_BG[status]
-      )}
-      aria-label={`Run status: ${status}`}
-      data-testid={`wf-node-status-${status}`}
-    >
-      <Icon className={cn("size-3", status === "running" && "animate-spin")} aria-hidden="true" />
-    </span>
-  )
-}
-
-/**
- * Footer rendered below the node body when there's a previous-run summary
- * AND no live run is in progress. Shows "Ran 12s ago · 1.4s" or
- * "Failed 5m ago" with a hover tooltip carrying the error message.
- */
-function LastRunFooter({ lastRun }: { lastRun: LastRunSummary }) {
-  const t = useTranslations("workflows.node.lastRun")
-  const fmt = useFormatter()
-  const ago = (() => {
-    try {
-      return fmt.relativeTime(new Date(lastRun.finishedAt))
-    } catch {
-      return new Date(lastRun.finishedAt).toLocaleTimeString()
-    }
-  })()
-  const duration = (() => {
-    if (!lastRun.durationMs || lastRun.durationMs <= 0) return ""
-    if (lastRun.durationMs < 1000) return `${lastRun.durationMs}ms`
-    return `${(lastRun.durationMs / 1000).toFixed(1)}s`
-  })()
-  const colors =
-    lastRun.status === "succeeded"
-      ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300"
-      : lastRun.status === "failed"
-        ? "border-rose-500/30 bg-rose-500/5 text-rose-700 dark:text-rose-300"
-        : "border-zinc-500/30 bg-zinc-500/5 text-zinc-700 dark:text-zinc-300"
-  const message =
-    lastRun.status === "succeeded"
-      ? duration
-        ? t("succeeded", { ago, duration })
-        : t("succeededNoDuration", { ago })
-      : lastRun.status === "failed"
-        ? t("failed", { ago })
-        : t("skipped", { ago })
-  return (
-    <div
-      title={lastRun.errorMessage ?? undefined}
-      className={cn("border-t px-3 py-1 text-[10px] font-medium", colors)}
-      data-testid="wf-node-last-run-footer"
-      data-status={lastRun.status}
-    >
-      {message}
-      {lastRun.attempt > 1 ? <span className="ml-1 opacity-70">×{lastRun.attempt}</span> : null}
-    </div>
-  )
+function StatusBadge({ status }: { status: NodeRunStatus }) {
+  if (status === "running")
+    return <LoadingIcon className="size-3.5 text-amber-500 animate-spin" aria-label="Running" />
+  if (status === "succeeded")
+    return <SuccessIcon className="size-3.5 text-emerald-500" aria-label="Succeeded" />
+  if (status === "failed")
+    return <FailedIcon className="size-3.5 text-rose-500" aria-label="Failed" />
+  if (status === "skipped")
+    return <SkippedIcon className="size-3.5 text-zinc-400" aria-label="Skipped" />
+  if (status === "waiting")
+    return <TimerIcon className="size-3.5 text-sky-500" aria-label="Waiting" />
+  return null
 }
 
 export const WorkflowNodeComponent = memo(function WorkflowNodeComponent({
@@ -220,33 +136,20 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent({
   const errorCount = data.validationErrorCount ?? data.validationErrors?.length ?? 0
   const hasErrors = errorCount > 0
 
-  // The lastRun footer is suppressed while a run is actively in progress so
-  // the user sees current-run state, not stale history.
-  const showLastRun = !!data.lastRun && status === "idle"
-  // Sticky note nodes use the user-picked color instead of the default
-  // annotation palette — see `NoteConfig` in inspector/forms/index.tsx.
-  const stickyColor =
-    data.kind === "annotation.note"
-      ? (STICKY_NOTE_COLORS[(data.params as { color?: string } | undefined)?.color ?? "yellow"] ??
-        STICKY_NOTE_COLORS.yellow)
-      : null
-
   return (
     <div
       className={cn(
         "group relative min-w-[200px] max-w-[280px] rounded-md border-2 bg-card text-card-foreground shadow-sm transition-shadow",
-        // Sticky color (when set) overrides the category palette.
-        stickyColor ?? CATEGORY_COLORS[category],
-        // Selection ring is the OUTERMOST layer — always visible, even
-        // mid-run. Run status now lives in the corner badge below.
+        CATEGORY_COLORS[category],
         selected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
+        // Status ring takes precedence over selection when present.
+        !selected && STATUS_RING[status],
         data.disabled && "opacity-50",
         isAnnotation && "italic"
       )}
       data-testid={`wf-node-${data.kind}`}
       data-run-status={status}
     >
-      <StatusCornerBadge status={status} />
       {showInput ? (
         <Handle
           type="target"
@@ -259,6 +162,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
             <div className="text-sm font-medium truncate text-foreground flex-1">{data.label}</div>
+            {status !== "idle" ? <StatusBadge status={status} /> : null}
             {hasErrors ? (
               <span
                 title={data.validationErrors?.join("\n") ?? `${errorCount} validation issue(s)`}
@@ -276,7 +180,6 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent({
           ) : null}
         </div>
       </div>
-      {showLastRun && data.lastRun ? <LastRunFooter lastRun={data.lastRun} /> : null}
       {showOutput ? (
         <Handle
           type="source"

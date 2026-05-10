@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
+import { useTranslations } from "next-intl"
 import {
   CopyIcon,
   MoreHorizontalIcon,
@@ -40,6 +41,7 @@ export interface WorkflowCardProps {
 }
 
 export function WorkflowCard({ workflow }: WorkflowCardProps) {
+  const t = useTranslations("workflows.card")
   const router = useRouter()
   const [confirmDelete, setConfirmDelete] = useState(false)
   const triggerCount = workflow.nodes.filter((n) => n.type.startsWith("trigger.")).length
@@ -48,21 +50,21 @@ export function WorkflowCard({ workflow }: WorkflowCardProps) {
   const handleDelete = async () => {
     try {
       await deleteWorkflow(workflow.id)
-      toast.success("Workflow deleted")
+      toast.success(t("deleted"))
       setConfirmDelete(false)
       router.refresh()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to delete")
+      toast.error(err instanceof Error ? err.message : t("deleteFailed"))
     }
   }
 
   const handleDuplicate = async () => {
     try {
       const copy = await duplicateWorkflow(workflow.id)
-      toast.success("Workflow duplicated")
+      toast.success(t("duplicated"))
       router.push(`/workflows/${copy.id}`)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to duplicate")
+      toast.error(err instanceof Error ? err.message : t("duplicateFailed"))
     }
   }
 
@@ -92,7 +94,7 @@ export function WorkflowCard({ workflow }: WorkflowCardProps) {
                 variant="ghost"
                 size="icon"
                 className="size-8 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                aria-label="Workflow actions"
+                aria-label={t("edit")}
               >
                 <MoreHorizontalIcon className="size-4" />
               </Button>
@@ -100,16 +102,16 @@ export function WorkflowCard({ workflow }: WorkflowCardProps) {
             <DropdownMenuContent align="end">
               <DropdownMenuItem asChild>
                 <Link href={`/workflows/${workflow.id}`}>
-                  <PencilIcon className="size-4 mr-2" /> Edit
+                  <PencilIcon className="size-4 mr-2" /> {t("edit")}
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
                 <Link href={`/workflows/${workflow.id}/runs`}>
-                  <PlayIcon className="size-4 mr-2" /> View runs
+                  <PlayIcon className="size-4 mr-2" /> {t("viewRuns")}
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem onClick={handleDuplicate}>
-                <CopyIcon className="size-4 mr-2" /> Duplicate
+                <CopyIcon className="size-4 mr-2" /> {t("duplicate")}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -117,56 +119,55 @@ export function WorkflowCard({ workflow }: WorkflowCardProps) {
                 onClick={() => setConfirmDelete(true)}
                 disabled={workflow.isBuiltIn}
               >
-                <Trash2Icon className="size-4 mr-2" /> Delete
+                <Trash2Icon className="size-4 mr-2" /> {t("delete")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </CardHeader>
         <CardContent className="pt-0 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <Badge variant="outline" className="font-normal">
-            {workflow.nodes.length} {workflow.nodes.length === 1 ? "node" : "nodes"}
+            {t("node", { count: workflow.nodes.length })}
           </Badge>
           {triggerCount > 0 ? (
             <Badge variant="outline" className="font-normal">
-              {triggerCount} trigger{triggerCount === 1 ? "" : "s"}
+              {t("trigger", { count: triggerCount })}
             </Badge>
           ) : null}
           {actionCount > 0 ? (
             <Badge variant="outline" className="font-normal">
-              {actionCount} action{actionCount === 1 ? "" : "s"}
+              {t("action", { count: actionCount })}
             </Badge>
           ) : null}
           {workflow.isBuiltIn ? (
             <Badge variant="secondary" className="font-normal">
-              Built-in
+              {t("builtin")}
             </Badge>
           ) : null}
           {workflow.isTemplate ? (
             <Badge variant="secondary" className="font-normal">
-              Template
+              {t("template")}
             </Badge>
           ) : null}
           <span className="ml-auto">
-            Updated {new Date(workflow.updatedAt).toLocaleDateString()}
+            {t("updated", { ago: new Date(workflow.updatedAt).toLocaleDateString() })}
           </span>
         </CardContent>
       </Card>
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this workflow?</AlertDialogTitle>
+            <AlertDialogTitle>{t("deleteConfirm.title")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {workflow.name} will be permanently removed. Run history is preserved but cannot be
-              re-run.
+              {t("deleteConfirm.description", { name: workflow.name })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("deleteConfirm.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDelete}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Delete
+              {t("deleteConfirm.confirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

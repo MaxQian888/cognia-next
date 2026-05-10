@@ -1,0 +1,387 @@
+/**
+ * Per-kind zod schemas for `node.data.params`. Powers the inspector's
+ * field-level validation hints + the "block run on errors" gate in the
+ * canvas. Independent from the orchestrator's runtime checks — those still
+ * apply at execution time.
+ *
+ * Errors are surfaced via stable i18n keys (NOT english strings) so the
+ * inspector can translate them at render time. The `params` object that
+ * comes back from `safeParse` is discarded — only the issue list matters,
+ * so unknown keys don't need to be preserved in the parsed output.
+ */
+
+import { z } from "zod"
+import { WORKFLOW_NODE_KINDS, type WorkflowNodeKind } from "@/types/workflow/visual"
+
+/**
+ * Cron field accepts the standard 5-field expression (minute hour dom mon dow).
+ * We do NOT use a full cron parser here — that would balloon the bundle and
+ * the orchestrator's cron-parser is the authoritative source. This is just
+ * a sanity check so users don't ship "every monday" as a value.
+ */
+const cronExprRegex = /^\s*(\S+\s+){4}\S+\s*$/
+
+function requiredString(messageKey = "required") {
+  return z.string().min(1, messageKey)
+}
+
+const optionalString = z.string().optional()
+
+function numberRange(min?: number, max?: number) {
+  let s = z.number()
+  if (min !== undefined) s = s.min(min, "minValue")
+  if (max !== undefined) s = s.max(max, "maxValue")
+  return s
+}
+
+// ── Triggers ────────────────────────────────────────────────────────────────
+
+const ManualTriggerParams = z.object({})
+
+const CronParams = z.object({
+  cron: requiredString("required").regex(cronExprRegex, "cronExpr"),
+  timezone: optionalString,
+})
+
+const ConnectorInboundParams = z.object({
+  adapterId: requiredString("required"),
+  conversationKey: optionalString,
+  characterId: optionalString,
+})
+
+const ChatMessageTriggerParams = z.object({
+  characterId: requiredString("required"),
+  sessionId: optionalString,
+})
+
+const WebhookTriggerParams = z.object({
+  path: requiredString("required").regex(/^[a-z0-9][a-z0-9-_/]*$/i, "webhookPath"),
+  method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "*"]).optional(),
+  hmacSecret: optionalString,
+  responseStatus: numberRange(100, 599).optional(),
+  responseTemplate: optionalString,
+})
+
+// ── Actions: characters / teams / skills ────────────────────────────────────
+
+const CharacterSendParams = z.object({
+  characterId: requiredString("required"),
+  content: requiredString("required"),
+  sessionId: optionalString,
+})
+
+const CharacterCreateParams = z.object({
+  name: requiredString("required"),
+  systemPrompt: requiredString("required"),
+  description: optionalString,
+  avatarColor: optionalString,
+  avatarEmoji: optionalString,
+  model: optionalString,
+})
+
+const CharacterUpdateParams = z.object({
+  characterId: requiredString("required"),
+  patchJson: optionalString,
+  patch: z.record(z.string(), z.unknown()).optional(),
+})
+
+const TeamRunParams = z.object({
+  teamId: requiredString("required"),
+  goal: requiredString("required"),
+})
+
+const TeamCreateParams = z.object({
+  name: requiredString("required"),
+  description: optionalString,
+  orchestration: z.enum(["round_robin", "supervisor", "mention_round_robin"]).optional(),
+  supervisorCharacterId: optionalString,
+  membersJson: optionalString,
+  members: z.array(z.unknown()).optional(),
+})
+
+const TeamUpdateParams = z.object({
+  teamId: requiredString("required"),
+  patchJson: optionalString,
+  patch: z.record(z.string(), z.unknown()).optional(),
+})
+
+const SkillInvokeParams = z.object({
+  skillIds: requiredString("required"),
+})
+
+const SkillUpsertParams = z.object({
+  skillId: optionalString,
+  name: requiredString("required"),
+  description: optionalString,
+  content: requiredString("required"),
+  tagsRaw: optionalString,
+  tags: z.array(z.string()).optional(),
+})
+
+// ── Actions: twins / connectors / extensibility ─────────────────────────────
+
+const TwinRagParams = z.object({
+  twinId: requiredString("required"),
+  query: requiredString("required"),
+  topK: numberRange(1, 50).optional(),
+})
+
+const TwinIngestParams = z
+  .object({
+    twinId: requiredString("required"),
+    sourceMode: z.enum(["paste", "fetch"]).optional(),
+    format: z.enum(["markdown", "text", "code", "chat"]).optional(),
+    content: optionalString,
+    url: optionalString,
+    title: optionalString,
+  })
+  .refine(
+    (v) => {
+      const mode = v.sourceMode ?? "paste"
+      if (mode === "fetch") return typeof v.url === "string" && v.url.length > 0
+      return typeof v.content === "string" && v.content.length > 0
+    },
+    { message: "twinIngestSourceRequired", path: ["content"] }
+  )
+
+const ConnectorSendParams = z.object({
+  adapterId: requiredString("required"),
+  conversationKey: requiredString("required"),
+  content: requiredString("required"),
+})
+
+const ConnectorDraftParams = z.object({
+  conversationKey: requiredString("required"),
+  sessionId: requiredString("required"),
+  content: requiredString("required"),
+  sourceMessageId: optionalString,
+  ttlMs: numberRange(0).optional(),
+})
+
+const McpInvokeToolParams = z.object({
+  serverId: requiredString("required"),
+  toolName: requiredString("required"),
+  argsJson: optionalString,
+  args: z.unknown().optional(),
+})
+
+const PluginInvokeParams = z.object({
+  pluginId: requiredString("required"),
+  taskId: requiredString("required"),
+  argsJson: optionalString,
+  args: z.unknown().optional(),
+})
+
+// ── AI primitives ──────────────────────────────────────────────────────────
+
+const AiPromptParams = z.object({
+  provider: optionalString,
+  model: optionalString,
+  apiKey: optionalString,
+  baseURL: optionalString,
+  systemPrompt: optionalString,
+  userPrompt: requiredString("required"),
+  temperature: numberRange(0, 2).optional(),
+})
+
+const AiClassifyParams = z.object({
+  provider: optionalString,
+  model: optionalString,
+  apiKey: optionalString,
+  baseURL: optionalString,
+  input: requiredString("required"),
+  labelsRaw: requiredString("required"),
+  labels: z.array(z.string()).optional(),
+  hint: optionalString,
+})
+
+const AiExtractParams = z.object({
+  provider: optionalString,
+  model: optionalString,
+  apiKey: optionalString,
+  baseURL: optionalString,
+  input: requiredString("required"),
+  schemaJson: optionalString,
+  schema: z.record(z.string(), z.unknown()).optional(),
+  hint: optionalString,
+})
+
+const AiEmbedParams = z.object({
+  input: requiredString("required"),
+  dimension: numberRange(32, 4096).optional(),
+})
+
+// ── Flow ────────────────────────────────────────────────────────────────────
+
+const BranchParams = z.object({
+  condition: requiredString("required"),
+  truthyLabel: optionalString,
+  falsyLabel: optionalString,
+})
+
+const SwitchParams = z.object({
+  subject: requiredString("required"),
+  cases: z.array(z.object({ value: z.unknown(), label: z.string() })).min(1, "switchCasesRequired"),
+  defaultLabel: optionalString,
+})
+
+const SplitParams = z.object({
+  branchLabels: z.array(z.string()).min(2, "splitBranchesRequired"),
+})
+
+const JoinParams = z.object({
+  joinPolicy: z.enum(["all", "any", "race"]).optional(),
+  timeoutMs: numberRange(0).optional(),
+})
+
+const LoopParams = z
+  .object({
+    mode: z.enum(["forEach", "times", "while"]).optional(),
+    times: numberRange(0).optional(),
+    inputExpression: optionalString,
+    bodyExpression: requiredString("required"),
+    whileCondition: optionalString,
+    maxIterations: numberRange(1, 1_000_000).optional(),
+  })
+  .refine(
+    (v) => {
+      const mode = v.mode ?? "forEach"
+      if (mode === "while")
+        return typeof v.whileCondition === "string" && v.whileCondition.length > 0
+      if (mode === "forEach")
+        return typeof v.inputExpression === "string" && v.inputExpression.length > 0
+      return typeof v.times === "number" && v.times > 0
+    },
+    {
+      message: "loopBodyRequired",
+      path: ["mode"],
+    }
+  )
+
+const WaitParams = z.object({
+  mode: z.enum(["duration", "event"]).optional(),
+  durationMs: numberRange(0).optional(),
+})
+
+const SetVariableParams = z.object({
+  variable: requiredString("required").regex(/^[a-z_][a-z0-9_]*$/i, "variableName"),
+  value: requiredString("required"),
+})
+
+const SubworkflowParams = z.object({
+  workflowId: requiredString("required"),
+  inputJson: optionalString,
+  input: z.unknown().optional(),
+})
+
+// ── Data ────────────────────────────────────────────────────────────────────
+
+const TransformParams = z.object({
+  operation: z.enum(["map", "filter", "reduce", "sort", "flatten"]).optional(),
+  expression: requiredString("required"),
+})
+
+const CodeParams = z.object({
+  code: requiredString("required"),
+})
+
+const TemplateParams = z.object({
+  template: requiredString("required"),
+})
+
+// ── IO ──────────────────────────────────────────────────────────────────────
+
+const HttpRequestParams = z.object({
+  method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]).optional(),
+  url: requiredString("required"),
+  body: optionalString,
+  followRedirects: z.boolean().optional(),
+})
+
+const WebhookRespondParams = z.object({
+  status: numberRange(100, 599).optional(),
+  headersJson: optionalString,
+  headers: z.record(z.string(), z.unknown()).optional(),
+  body: optionalString,
+})
+
+// ── Annotations ────────────────────────────────────────────────────────────
+
+const NoteParams = z.object({
+  text: optionalString,
+  color: z.enum(["yellow", "green", "blue", "pink", "violet"]).optional(),
+})
+
+const GroupAnnotationParams = z.object({
+  title: optionalString,
+  color: optionalString,
+  width: numberRange(200).optional(),
+  height: numberRange(100).optional(),
+})
+
+// ── Registry ───────────────────────────────────────────────────────────────
+
+export const PARAMS_SCHEMAS: Record<WorkflowNodeKind, z.ZodTypeAny> = {
+  // Triggers
+  "trigger.manual": ManualTriggerParams,
+  "trigger.cron": CronParams,
+  "trigger.connector.inbound": ConnectorInboundParams,
+  "trigger.chat.message": ChatMessageTriggerParams,
+  "trigger.webhook": WebhookTriggerParams,
+  // Actions: characters
+  "action.character.send": CharacterSendParams,
+  "action.character.create": CharacterCreateParams,
+  "action.character.update": CharacterUpdateParams,
+  // Actions: teams
+  "action.team.run": TeamRunParams,
+  "action.team.create": TeamCreateParams,
+  "action.team.update": TeamUpdateParams,
+  // Actions: skills
+  "action.skill.invoke": SkillInvokeParams,
+  "action.skill.upsert": SkillUpsertParams,
+  // Actions: twins
+  "action.twin.rag": TwinRagParams,
+  "action.twin.ingest": TwinIngestParams,
+  // Actions: connectors
+  "action.connector.send": ConnectorSendParams,
+  "action.connector.draft": ConnectorDraftParams,
+  // Actions: extensibility
+  "action.mcp.invokeTool": McpInvokeToolParams,
+  "action.plugin.invoke": PluginInvokeParams,
+  // AI
+  "ai.prompt": AiPromptParams,
+  "ai.classify": AiClassifyParams,
+  "ai.extract": AiExtractParams,
+  "ai.embed": AiEmbedParams,
+  // Flow
+  "flow.branch": BranchParams,
+  "flow.switch": SwitchParams,
+  "flow.split": SplitParams,
+  "flow.join": JoinParams,
+  "flow.loop": LoopParams,
+  "flow.wait": WaitParams,
+  "flow.set": SetVariableParams,
+  "flow.subworkflow": SubworkflowParams,
+  // Data
+  "data.transform": TransformParams,
+  "data.code": CodeParams,
+  "data.template": TemplateParams,
+  // IO
+  "io.http": HttpRequestParams,
+  "io.webhook.respond": WebhookRespondParams,
+  // Annotation
+  "annotation.note": NoteParams,
+  "annotation.group": GroupAnnotationParams,
+}
+
+/** Test-only export so the matrix test can iterate every kind. */
+export const KNOWN_KINDS: readonly WorkflowNodeKind[] = WORKFLOW_NODE_KINDS
+
+/**
+ * Fetch the schema for a kind. Plugin / unknown kinds get a permissive
+ * record so the validator returns no errors but the Schema Form (M4)
+ * can drive its own JSON Schema validation.
+ */
+export function paramsSchemaFor(kind: WorkflowNodeKind): z.ZodTypeAny {
+  return PARAMS_SCHEMAS[kind] ?? z.record(z.string(), z.unknown())
+}

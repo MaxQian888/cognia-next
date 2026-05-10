@@ -11,8 +11,10 @@ import {
   Download as ExportIcon,
   Upload as ImportIcon,
   Command as CommandIcon,
+  Keyboard as KeyboardIcon,
 } from "lucide-react"
 import Link from "next/link"
+import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -33,6 +35,7 @@ export interface EditorToolbarProps {
   onExportJson?: () => void
   onImportJson?: (json: string) => void
   onOpenCommandPalette?: () => void
+  onOpenShortcuts?: () => void
 }
 
 export function EditorToolbar({
@@ -50,8 +53,10 @@ export function EditorToolbar({
   onExportJson,
   onImportJson,
   onOpenCommandPalette,
+  onOpenShortcuts,
 }: EditorToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const t = useTranslations("workflows.toolbar")
 
   function handleImportClick() {
     fileInputRef.current?.click()
@@ -77,29 +82,29 @@ export function EditorToolbar({
       <Tooltip>
         <TooltipTrigger asChild>
           <Button asChild size="icon" variant="ghost">
-            <Link href="/workflows" aria-label="Back to library">
+            <Link href="/workflows" aria-label={t("tooltip.back")}>
               <BackIcon className="size-4" />
             </Link>
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="bottom">Back to library</TooltipContent>
+        <TooltipContent side="bottom">{t("tooltip.back")}</TooltipContent>
       </Tooltip>
       <Input
         value={workflowName}
         onChange={(e) => onRename(e.target.value)}
         className="max-w-xs h-8"
-        aria-label="Workflow name"
+        aria-label={t("namePlaceholder")}
       />
       <span
         className={cn(
           "text-xs px-2 py-0.5 rounded-full",
           dirty
-            ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-            : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+            ? "bg-wf-status-running/15 text-wf-status-running"
+            : "bg-wf-status-succeeded/15 text-wf-status-succeeded"
         )}
         aria-live="polite"
       >
-        {dirty ? "Unsaved changes" : "Saved"}
+        {dirty ? t("unsavedChanges") : t("saved")}
       </span>
       <div className="ml-auto flex items-center gap-1">
         <Tooltip>
@@ -109,13 +114,13 @@ export function EditorToolbar({
               variant="ghost"
               onClick={onUndo}
               disabled={!canUndo}
-              aria-label="Undo"
+              aria-label={t("tooltip.undo")}
               data-testid="workflow-undo"
             >
               <UndoIcon className="size-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">Undo (Ctrl+Z)</TooltipContent>
+          <TooltipContent side="bottom">{t("tooltip.undo")}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -124,13 +129,13 @@ export function EditorToolbar({
               variant="ghost"
               onClick={onRedo}
               disabled={!canRedo}
-              aria-label="Redo"
+              aria-label={t("tooltip.redo")}
               data-testid="workflow-redo"
             >
               <RedoIcon className="size-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">Redo (Ctrl+Shift+Z)</TooltipContent>
+          <TooltipContent side="bottom">{t("tooltip.redo")}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -138,13 +143,13 @@ export function EditorToolbar({
               size="icon"
               variant="ghost"
               onClick={onAutoLayout}
-              aria-label="Auto-layout"
+              aria-label={t("tooltip.autoLayout")}
               data-testid="workflow-auto-layout"
             >
               <LayoutIcon className="size-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">Auto-layout</TooltipContent>
+          <TooltipContent side="bottom">{t("tooltip.autoLayout")}</TooltipContent>
         </Tooltip>
         {onOpenCommandPalette ? (
           <Tooltip>
@@ -153,13 +158,29 @@ export function EditorToolbar({
                 size="icon"
                 variant="ghost"
                 onClick={onOpenCommandPalette}
-                aria-label="Command palette"
+                aria-label={t("tooltip.commands")}
                 data-testid="workflow-command-palette"
               >
                 <CommandIcon className="size-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">Commands (Ctrl+K)</TooltipContent>
+            <TooltipContent side="bottom">{t("tooltip.commands")}</TooltipContent>
+          </Tooltip>
+        ) : null}
+        {onOpenShortcuts ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={onOpenShortcuts}
+                aria-label={t("tooltip.shortcuts")}
+                data-testid="workflow-shortcuts"
+              >
+                <KeyboardIcon className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("tooltip.shortcuts")}</TooltipContent>
           </Tooltip>
         ) : null}
         {onExportJson ? (
@@ -169,13 +190,13 @@ export function EditorToolbar({
                 size="icon"
                 variant="ghost"
                 onClick={onExportJson}
-                aria-label="Export JSON"
+                aria-label={t("tooltip.exportJson")}
                 data-testid="workflow-export-json"
               >
                 <ExportIcon className="size-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">Export workflow as JSON</TooltipContent>
+            <TooltipContent side="bottom">{t("tooltip.exportJson")}</TooltipContent>
           </Tooltip>
         ) : null}
         {onImportJson ? (
@@ -194,13 +215,13 @@ export function EditorToolbar({
                   size="icon"
                   variant="ghost"
                   onClick={handleImportClick}
-                  aria-label="Import JSON"
+                  aria-label={t("tooltip.importJson")}
                   data-testid="workflow-import-json"
                 >
                   <ImportIcon className="size-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="bottom">Import workflow JSON</TooltipContent>
+              <TooltipContent side="bottom">{t("tooltip.importJson")}</TooltipContent>
             </Tooltip>
           </>
         ) : null}
@@ -212,11 +233,11 @@ export function EditorToolbar({
           data-testid="workflow-save"
         >
           <SaveIcon className="size-4 mr-1.5" />
-          {saving ? "Saving…" : "Save"}
+          {saving ? t("saving") : t("save")}
         </Button>
         <Button size="sm" onClick={onRun} disabled={!onRun} data-testid="workflow-run">
           <PlayIcon className="size-4 mr-1.5" />
-          Run
+          {t("run")}
         </Button>
       </div>
     </div>

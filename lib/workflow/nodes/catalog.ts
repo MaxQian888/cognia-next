@@ -17,7 +17,7 @@ import {
 
 export interface NodeCatalogEntry {
   kind: WorkflowNodeKind
-  category: WorkflowNodeCategory
+  category: WorkflowNodeCategory | "plugin"
   /** Short label shown in the sidebar / palette. */
   label: string
   /** One-line description shown in the search sidebar tooltip + palette. */
@@ -30,6 +30,18 @@ export interface NodeCatalogEntry {
   hidden?: boolean
   /** True if the node only fires on Tauri (web-mode hides them). */
   desktopOnly?: boolean
+  /**
+   * Set on plugin-contributed entries; absent for built-ins. Used by the
+   * sidebar to render a per-plugin sub-group inside the "Plugin nodes"
+   * section.
+   */
+  pluginId?: string
+  /**
+   * Optional JSON Schema describing the node's params. Set for plugin
+   * entries that ship a `paramsSchema`; used by the inspector to render an
+   * auto-generated `SchemaForm` instead of the raw-JSON fallback.
+   */
+  paramsSchema?: Record<string, unknown>
 }
 
 const ENTRIES: Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | "category">> = {
@@ -279,6 +291,73 @@ export const NODE_CATALOG: readonly NodeCatalogEntry[] = WORKFLOW_NODE_KINDS.map
   ...ENTRIES[kind],
 }))
 
+// ── Plugin-contributed entries (hot-merged) ──────────────────────────────────
+
+const pluginCatalog = new Map<string, NodeCatalogEntry>()
+const catalogListeners = new Set<() => void>()
+// Cached snapshot. Held by reference identity so `useSyncExternalStore` sees
+// the same array between renders unless the catalog actually changed —
+// returning a fresh array each time would loop renders indefinitely.
+let pluginCatalogSnapshot: readonly NodeCatalogEntry[] = []
+
+function invalidateCatalogSnapshot(): void {
+  pluginCatalogSnapshot = [...pluginCatalog.values()]
+}
+
+function notifyCatalogChanged(): void {
+  // Catalog notifications run synchronously — consumers (Sidebar's
+  // `useSyncExternalStore`) need to read the freshly-mutated map on the
+  // same tick the snapshot identity changes.
+  invalidateCatalogSnapshot()
+  for (const fn of catalogListeners) {
+    try {
+      fn()
+    } catch (err) {
+      console.warn("Catalog listener threw:", err)
+    }
+  }
+}
+
+/**
+ * Register a plugin-contributed catalog entry. The runtime is expected to
+ * have already prefixed `entry.kind` with `<pluginId>.` so naming stays
+ * collision-free across plugins.
+ */
+export function addPluginCatalogEntry(entry: NodeCatalogEntry): void {
+  pluginCatalog.set(entry.kind, entry)
+  notifyCatalogChanged()
+}
+
+export function removePluginCatalogEntry(kind: string): void {
+  if (!pluginCatalog.has(kind)) return
+  pluginCatalog.delete(kind)
+  notifyCatalogChanged()
+}
+
+/**
+ * `useSyncExternalStore`-friendly subscribe hook. Returns an unsubscribe
+ * function. Listeners fire whenever a plugin entry is added or removed.
+ */
+export function subscribePluginCatalog(fn: () => void): () => void {
+  catalogListeners.add(fn)
+  return () => {
+    catalogListeners.delete(fn)
+  }
+}
+
+/** Snapshot read for `useSyncExternalStore`. Identity is stable until the
+ * catalog mutates — required by React's external-store contract. */
+export function getPluginCatalogSnapshot(): readonly NodeCatalogEntry[] {
+  return pluginCatalogSnapshot
+}
+
+/** Test-only — clears plugin catalog without touching built-ins. */
+export function __resetPluginCatalogForTesting(): void {
+  pluginCatalog.clear()
+  catalogListeners.clear()
+  invalidateCatalogSnapshot()
+}
+
 /** Lookup an entry by kind. Falls back to a synthesized entry for unknown kinds. */
 export function nodeCatalogEntry(kind: WorkflowNodeKind): NodeCatalogEntry {
   const meta = ENTRIES[kind]
@@ -296,11 +375,15 @@ export function nodeCatalogEntry(kind: WorkflowNodeKind): NodeCatalogEntry {
 /**
  * Group the catalog by category. The outer order matches the user-facing
  * sidebar grouping; within a group entries follow the canonical order.
+ *
+ * Plugin-contributed entries always appear in a single virtual `"plugin"`
+ * group at the bottom; per-pluginId sub-grouping is the sidebar component's
+ * responsibility (so it can pick its own sub-group label / icon).
  */
 export function groupedCatalog(opts?: {
   includeDesktopOnly?: boolean
   includeHidden?: boolean
-}): Array<{ category: WorkflowNodeCategory; entries: NodeCatalogEntry[] }> {
+}): Array<{ category: WorkflowNodeCategory | "plugin"; entries: NodeCatalogEntry[] }> {
   const desktopOnly = opts?.includeDesktopOnly ?? true
   const includeHidden = opts?.includeHidden ?? false
   const order: WorkflowNodeCategory[] = [
@@ -312,13 +395,18 @@ export function groupedCatalog(opts?: {
     "io",
     "annotation",
   ]
-  return order.map((category) => ({
-    category,
+  const builtinGroups = order.map((category) => ({
+    category: category as WorkflowNodeCategory | "plugin",
     entries: NODE_CATALOG.filter(
       (e) =>
         e.category === category && (includeHidden || !e.hidden) && (desktopOnly || !e.desktopOnly)
     ),
   }))
+  const pluginEntries = [...pluginCatalog.values()].filter(
+    (e) => (includeHidden || !e.hidden) && (desktopOnly || !e.desktopOnly)
+  )
+  if (pluginEntries.length === 0) return builtinGroups
+  return [...builtinGroups, { category: "plugin" as const, entries: pluginEntries }]
 }
 
 /**
@@ -337,21 +425,24 @@ export function searchCatalog(
   opts?: { includeDesktopOnly?: boolean }
 ): NodeCatalogEntry[] {
   const q = query.trim().toLowerCase()
-  if (!q) return [...NODE_CATALOG]
   const desktopOnly = opts?.includeDesktopOnly ?? true
-  const scored = NODE_CATALOG.filter((e) => desktopOnly || !e.desktopOnly).map((e) => {
-    const label = e.label.toLowerCase()
-    const desc = e.description.toLowerCase()
-    const kind = e.kind.toLowerCase()
-    let score = 0
-    if (label === q) score = Math.max(score, 100)
-    else if (label.startsWith(q)) score = Math.max(score, 80)
-    else if (label.includes(q)) score = Math.max(score, 60)
-    if (e.keywords.some((k) => k.toLowerCase().includes(q))) score = Math.max(score, 40)
-    if (desc.includes(q)) score = Math.max(score, 20)
-    if (kind.includes(q)) score = Math.max(score, 10)
-    return { entry: e, score }
-  })
+  const all: NodeCatalogEntry[] = [...NODE_CATALOG, ...pluginCatalog.values()]
+  if (!q) return all
+  const scored = all
+    .filter((e) => desktopOnly || !e.desktopOnly)
+    .map((e) => {
+      const label = e.label.toLowerCase()
+      const desc = e.description.toLowerCase()
+      const kind = e.kind.toLowerCase()
+      let score = 0
+      if (label === q) score = Math.max(score, 100)
+      else if (label.startsWith(q)) score = Math.max(score, 80)
+      else if (label.includes(q)) score = Math.max(score, 60)
+      if (e.keywords.some((k) => k.toLowerCase().includes(q))) score = Math.max(score, 40)
+      if (desc.includes(q)) score = Math.max(score, 20)
+      if (kind.includes(q)) score = Math.max(score, 10)
+      return { entry: e, score }
+    })
   return scored
     .filter((s) => s.score > 0)
     .sort((a, b) => b.score - a.score)

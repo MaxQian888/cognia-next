@@ -2,6 +2,20 @@
  * @jest-environment jsdom
  */
 import "fake-indexeddb/auto"
+
+// Mock plugin hook dispatcher (Tier 2 of ADR 0016) so we can verify the
+// orchestrator emits onWorkflowStart / onWorkflowStepComplete /
+// onWorkflowComplete / onWorkflowError without booting the plugin store.
+const mockHooksManager = {
+  dispatchWorkflowStart: jest.fn(),
+  dispatchWorkflowStepComplete: jest.fn(),
+  dispatchWorkflowComplete: jest.fn(),
+  dispatchWorkflowError: jest.fn(),
+}
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
+  getPluginEventHooks: jest.fn(() => mockHooksManager),
+}))
+
 import { runWorkflow } from "./orchestrator"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { listRunEvents } from "./event-log"
@@ -14,6 +28,7 @@ beforeEach(async () => {
   await whenSeeded()
   await getDb().workflowRuns.clear()
   await getDb().workflowRunEvents.clear()
+  jest.clearAllMocks()
 })
 
 const trigger: TriggerEvent = {
@@ -339,5 +354,108 @@ describe("runWorkflow — resume from event log (idempotency)", () => {
     const counts = new Map<string, number>()
     for (const e of completed) counts.set(e.stepId!, (counts.get(e.stepId!) ?? 0) + 1)
     expect([...counts.values()].every((c) => c === 1)).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Plugin workflow hook wiring (ADR 0016 Tier 2)
+// ---------------------------------------------------------------------------
+
+describe("runWorkflow — plugin hook dispatches", () => {
+  it("happy path emits onWorkflowStart, one onWorkflowStepComplete per executed step, then onWorkflowComplete(true)", async () => {
+    const wf = buildWorkflow(
+      [
+        {
+          id: "n_start",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "start", params: {} },
+        },
+        {
+          id: "n_set",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 200, y: 0 },
+          data: { label: "set", params: { variable: "x", value: "1" } },
+        },
+      ],
+      [{ id: "e1", source: "n_start", target: "n_set" }]
+    )
+    const r = await runWorkflow({ workflow: wf, trigger })
+    expect(r.status).toBe("succeeded")
+
+    expect(mockHooksManager.dispatchWorkflowStart).toHaveBeenCalledTimes(1)
+    expect(mockHooksManager.dispatchWorkflowStart).toHaveBeenCalledWith("wf_x", "Test workflow")
+
+    // Every executed step gets a 0-based index.
+    expect(mockHooksManager.dispatchWorkflowStepComplete).toHaveBeenCalledTimes(2)
+    const indices = mockHooksManager.dispatchWorkflowStepComplete.mock.calls.map((call) => call[1])
+    expect(indices).toEqual([0, 1])
+
+    expect(mockHooksManager.dispatchWorkflowComplete).toHaveBeenCalledTimes(1)
+    expect(mockHooksManager.dispatchWorkflowComplete.mock.calls[0][0]).toBe("wf_x")
+    expect(mockHooksManager.dispatchWorkflowComplete.mock.calls[0][1]).toBe(true)
+    expect(mockHooksManager.dispatchWorkflowError).not.toHaveBeenCalled()
+  })
+
+  it("invalid workflow fires onWorkflowStart + onWorkflowError (validation failure path)", async () => {
+    const wf = buildWorkflow(
+      [
+        {
+          id: "n",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "start", params: {} },
+        },
+      ],
+      []
+    )
+    const broken = { ...wf, name: "" }
+    const r = await runWorkflow({ workflow: broken, trigger })
+    expect(r.status).toBe("failed")
+
+    // Even on validation failure, plugins should see the lifecycle.
+    expect(mockHooksManager.dispatchWorkflowStart).toHaveBeenCalledTimes(1)
+    expect(mockHooksManager.dispatchWorkflowError).toHaveBeenCalledTimes(1)
+    expect(mockHooksManager.dispatchWorkflowError.mock.calls[0][0]).toBe("wf_x")
+    const errArg = mockHooksManager.dispatchWorkflowError.mock.calls[0][1] as Error
+    expect(errArg).toBeInstanceOf(Error)
+    expect(errArg.message).toMatch(/invalid workflow/i)
+    expect(mockHooksManager.dispatchWorkflowComplete).not.toHaveBeenCalled()
+    expect(mockHooksManager.dispatchWorkflowStepComplete).not.toHaveBeenCalled()
+  })
+
+  it("step failure fires onWorkflowError + onWorkflowComplete(false)", async () => {
+    // annotation.note has no executor — drives the step-failure path.
+    const wf = buildWorkflow(
+      [
+        {
+          id: "n_start",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "start", params: {} },
+        },
+        {
+          id: "n_note",
+          type: "annotation.note",
+          typeVersion: 1,
+          position: { x: 200, y: 0 },
+          data: { label: "note", params: { text: "blocking annotation" } },
+        },
+      ],
+      [{ id: "e1", source: "n_start", target: "n_note" }]
+    )
+    const r = await runWorkflow({ workflow: wf, trigger })
+    expect(r.status).toBe("failed")
+
+    expect(mockHooksManager.dispatchWorkflowStart).toHaveBeenCalledTimes(1)
+    // n_start completed once before the note failed.
+    expect(mockHooksManager.dispatchWorkflowStepComplete).toHaveBeenCalledTimes(1)
+    expect(mockHooksManager.dispatchWorkflowError).toHaveBeenCalledTimes(1)
+    expect(mockHooksManager.dispatchWorkflowComplete).toHaveBeenCalledTimes(1)
+    expect(mockHooksManager.dispatchWorkflowComplete.mock.calls[0][1]).toBe(false)
   })
 })

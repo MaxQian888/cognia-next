@@ -26,6 +26,7 @@
 import { nanoid } from "nanoid"
 import { getDb } from "@/lib/db/schema"
 import { validateWorkflow, type ValidatedVisualWorkflow } from "@/lib/workflow/definition/validate"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import type {
   RunStatus,
   TriggerEvent,
@@ -70,9 +71,16 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     const message = `Invalid workflow: ${validation.errors.join("; ")}`
     await logger.runStarted({ trigger })
     await logger.runFailed({ message })
+    // Notify plugins that this workflow tried to start but failed validation.
+    getPluginEventHooks().dispatchWorkflowStart(workflow.id, workflow.name)
+    getPluginEventHooks().dispatchWorkflowError(workflow.id, new Error(message))
     return { runId, status: "failed", error: { message } }
   }
   const validated = validation.workflow as ValidatedVisualWorkflow
+
+  // Plugin host hook: workflow run is starting (after validation, before
+  // any step executes). Fires once per run() invocation.
+  getPluginEventHooks().dispatchWorkflowStart(workflow.id, workflow.name)
 
   // 2. Persist the WorkflowRunRow up front so the UI can render it as
   // "running" immediately. We freeze the workflow snapshot here.
@@ -132,6 +140,10 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     runRow = { ...runRow, status: "failed", completedAt: Date.now(), error: { message } }
     await getDb().workflowRuns.put(runRow)
     await persistRunState({ runId, workflowId: workflow.id, status: "failed" })
+    // Plugin host hook: cycle / sort failure during run preparation.
+    const sortError = err instanceof Error ? err : new Error(message)
+    getPluginEventHooks().dispatchWorkflowError(workflow.id, sortError)
+    getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
     return { runId, status: "failed", error: { message } }
   }
 
@@ -139,6 +151,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   const skipped = new Set<string>()
   const stepOutputs = new Map<string, unknown>()
   const retryPolicy = validated.settings.retryDefaults
+  let executedStepIndex = -1
 
   for (const stepId of order) {
     if (skipped.has(stepId)) {
@@ -185,6 +198,15 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
         status: "running",
         lastStepId: stepId,
       })
+      // Plugin host hook: a step has completed. `executedStepIndex` counts
+      // executed (non-skipped) steps so plugins see a monotonically
+      // increasing 0-based counter even when branches skip nodes.
+      executedStepIndex += 1
+      getPluginEventHooks().dispatchWorkflowStepComplete(
+        workflow.id,
+        executedStepIndex,
+        result.output
+      )
 
       // Branch routing — if a node returned `decision`, mark non-chosen
       // outgoing edges' targets as skipped.
@@ -222,6 +244,12 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
         status: "failed",
         lastStepId: stepId,
       })
+      // Plugin host hook: workflow failed. Fire both onWorkflowError
+      // (error variant) and onWorkflowComplete with success=false so
+      // plugins that listen to either get the same signal.
+      const failureError = err instanceof Error ? err : new Error(message)
+      getPluginEventHooks().dispatchWorkflowError(workflow.id, failureError)
+      getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
       return { runId, status: "failed", error: { message, nodeId: stepId, code: errorCode } }
     }
   }
@@ -247,6 +275,8 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   await logger.runCompleted(finalOutput)
   await persistRunState({ runId, workflowId: workflow.id, status: "succeeded" })
   await ackRunCompleted(runId)
+  // Plugin host hook: workflow finished successfully.
+  getPluginEventHooks().dispatchWorkflowComplete(workflow.id, true, finalOutput)
 
   return { runId, status: "succeeded", output: finalOutput }
 }
