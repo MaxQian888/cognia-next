@@ -1,5 +1,6 @@
 "use client"
 
+import { useCallback, type Ref } from "react"
 import { useTranslations } from "next-intl"
 import { Composer, type ComposerHandle } from "./composer"
 import { ChatHeader } from "./chat-header"
@@ -8,8 +9,7 @@ import { InlineError } from "./inline-error"
 import { MessageList } from "./message-list"
 import { ExternalAgentSessionPanel } from "@/components/agent/external-agent-session-panel"
 import { useChatStore } from "@/stores/chat"
-import type { ChatSession, SendContent } from "@/lib/claude/types"
-import type { Ref } from "react"
+import type { Character, ChatSession, SendContent } from "@/lib/claude/types"
 import { toast } from "sonner"
 
 interface ChatPaneProps {
@@ -27,6 +27,8 @@ interface ChatPaneProps {
    * member-list rail.
    */
   composerRef?: Ref<ComposerHandle>
+  /** When provided, opens the mobile inline @-mention popover on `@`. */
+  mobileMentionMembers?: readonly Character[]
 }
 
 /**
@@ -47,23 +49,42 @@ export function ChatPane({
   onUseSample,
   onOpenSettings,
   composerRef,
+  mobileMentionMembers,
 }: ChatPaneProps) {
   const tCopy = useTranslations("chat.copy")
   const messages = useChatStore((s) => s.messages)
   const status = useChatStore((s) => s.status)
   const errorMessage = useChatStore((s) => s.errorMessage)
 
-  if (!activeSession) {
-    return <EmptyChatState onCreate={onCreate} onUseSample={(text) => onUseSample(text)} />
-  }
+  const handleCopySuccess = useCallback(() => {
+    toast.success(tCopy("success"))
+  }, [tCopy])
 
-  const handleSend = async (content: SendContent) => {
-    await onSend(content)
-  }
+  const handleRegenerate = useCallback(() => {
+    void onRegenerate()
+  }, [onRegenerate])
 
-  const handleRetry = async () => {
+  const handleEditResend = useCallback(
+    (id: string, newText: string) => {
+      void onEditResend(id, newText)
+    },
+    [onEditResend]
+  )
+
+  const handleSend = useCallback(
+    async (content: SendContent) => {
+      await onSend(content)
+    },
+    [onSend]
+  )
+
+  const handleRetry = useCallback(async () => {
     useChatStore.getState().setError(null)
     await onRegenerate()
+  }, [onRegenerate])
+
+  if (!activeSession) {
+    return <EmptyChatState onCreate={onCreate} onUseSample={(text) => onUseSample(text)} />
   }
 
   return (
@@ -84,9 +105,9 @@ export function ChatPane({
         <MessageList
           messages={messages}
           status={status}
-          onCopy={() => toast.success(tCopy("success"))}
-          onRegenerate={() => void onRegenerate()}
-          onEditResend={(id, newText) => void onEditResend(id, newText)}
+          onCopy={handleCopySuccess}
+          onRegenerate={handleRegenerate}
+          onEditResend={handleEditResend}
         />
       )}
       {errorMessage && (
@@ -105,6 +126,7 @@ export function ChatPane({
         onSend={handleSend}
         onStop={() => void onStop()}
         disabled={status === "awaiting_approval"}
+        mobileMentionMembers={mobileMentionMembers}
       />
     </>
   )
