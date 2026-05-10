@@ -17,6 +17,14 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+const routerPush = jest.fn()
+let pathname = "/"
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: routerPush, replace: jest.fn(), back: jest.fn() }),
+  usePathname: () => pathname,
+  useSearchParams: () => new URLSearchParams(),
+}))
+
 jest.mock("@/lib/logger", () => ({
   loggers: {
     ui: {
@@ -51,11 +59,13 @@ import { GuildRail } from "./guild-rail"
 
 beforeEach(() => {
   logInfo.mockReset()
+  routerPush.mockReset()
   setSelectedGuild.mockReset().mockImplementation((g: SelectedGuild) => {
     selectedGuild = g
   })
   selectedGuild = { kind: "dm" }
   teamsRef.current = []
+  pathname = "/"
 })
 
 test("renders the DM, Canvas, and Settings rail buttons", () => {
@@ -63,6 +73,24 @@ test("renders the DM, Canvas, and Settings rail buttons", () => {
   expect(screen.getByLabelText("directMessages")).toBeInTheDocument()
   expect(screen.getByLabelText("canvas")).toBeInTheDocument()
   expect(screen.getByLabelText("openSettings")).toBeInTheDocument()
+})
+
+test("renders feature buttons for every top-level route", () => {
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  for (const key of [
+    "workflows",
+    "inbox",
+    "twin",
+    "discover",
+    "skills",
+    "plugins",
+    "agentTeams",
+    "scheduler",
+    "logs",
+    "me",
+  ]) {
+    expect(screen.getByLabelText(key)).toBeInTheDocument()
+  }
 })
 
 test("clicking DM/Canvas updates the guild selection and logs", async () => {
@@ -73,6 +101,35 @@ test("clicking DM/Canvas updates the guild selection and logs", async () => {
   expect(logInfo).toHaveBeenCalledWith("guild switch canvas")
   await user.click(screen.getByLabelText("directMessages"))
   expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+})
+
+test("clicking a chat guild while on a feature route also pushes back to /", async () => {
+  pathname = "/workflows"
+  const user = userEvent.setup()
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  await user.click(screen.getByLabelText("canvas"))
+  expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "canvas" })
+  expect(routerPush).toHaveBeenCalledWith("/")
+})
+
+test("clicking a feature button routes to its top-level path", async () => {
+  const user = userEvent.setup()
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  await user.click(screen.getByLabelText("workflows"))
+  expect(routerPush).toHaveBeenCalledWith("/workflows")
+  expect(logInfo).toHaveBeenCalledWith(
+    "guild navigate feature",
+    expect.objectContaining({ route: "/workflows" })
+  )
+  await user.click(screen.getByLabelText("inbox"))
+  expect(routerPush).toHaveBeenCalledWith("/inbox")
+})
+
+test("active state highlights the current route", () => {
+  pathname = "/workflows/abc/edit"
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  expect(screen.getByLabelText("workflows")).toHaveAttribute("aria-current", "page")
+  expect(screen.getByLabelText("inbox")).not.toHaveAttribute("aria-current")
 })
 
 test("renders one button per team and selecting one switches guild", async () => {

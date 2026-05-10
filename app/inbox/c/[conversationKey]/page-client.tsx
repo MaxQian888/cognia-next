@@ -77,7 +77,7 @@ function ConversationPageInner({ conversationKey }: { conversationKey: string })
         />
         <DraftBanner conversationKey={conversationKey} />
         <div className="flex-1 overflow-auto p-4 text-sm text-muted-foreground">
-          {/* The full ChatPane integration requires the DiscordShell's hook wiring. */}
+          {/* The full ChatPane integration requires DesktopChatWorkspace's hook wiring. */}
           {/* Phase 1: render the session id as a placeholder; Phase 2 wires ChatPane. */}
           <p>Session: {session.id}</p>
           <p>Conversation: {conversationKey}</p>

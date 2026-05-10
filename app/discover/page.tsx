@@ -104,7 +104,7 @@ export default function DiscoverPage() {
 
   return (
     <main
-      className="flex min-h-[100dvh] flex-col bg-background safe-area-pt"
+      className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background safe-area-pt"
       data-testid="discover-page"
     >
       <header className="flex flex-col gap-3 px-4 py-3">

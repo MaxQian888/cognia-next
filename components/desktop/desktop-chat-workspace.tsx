@@ -1,49 +1,47 @@
 "use client"
 
+/**
+ * Desktop Chat Workspace — the home-route content. Renders the Discord-style
+ * channel/chat/member panes for DM and team guilds, swaps to the Canvas
+ * editor for the canvas guild, and owns chat-domain modals (character
+ * picker, onboarding, tool approval).
+ *
+ *   ┌ ChannelList │ ChatPane │ MemberList ┐    (DM / team guilds)
+ *   └────────────────────────────────────┘
+ *   ┌────────────── CanvasShell ─────────┐    (canvas guild)
+ *   └────────────────────────────────────┘
+ *
+ * The global chrome (TitleBar, GuildRail, StatusBar, CommandPalette) is
+ * provided by `DesktopAppShell` in the root layout — this component just
+ * fills the shell's content slot.
+ */
+
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
+import { useTranslations } from "next-intl"
+import { toast } from "sonner"
+
 import { ChatPane } from "@/components/chat/chat-view"
 import { CharacterPicker } from "@/components/chat/character-picker"
-import { CommandPalette } from "@/components/desktop/command-palette"
-import { GuildRail } from "@/components/desktop/guild-rail"
 import { ChannelList } from "@/components/desktop/channel-list"
 import { MemberList } from "@/components/desktop/member-list"
 import { ArtifactPanel } from "@/components/artifacts/artifact-panel"
 import { CanvasShell } from "@/components/canvas"
 import { OnboardingDialog } from "@/components/desktop/onboarding-dialog"
-import { StatusBar } from "@/components/desktop/status-bar"
-import { TitleBar } from "@/components/desktop/title-bar"
-import { WindowFocusTracker } from "@/components/desktop/window-focus-tracker"
-import { WindowResizeEdges } from "@/components/desktop/window-resize-edges"
-import { ZoomShortcuts } from "@/components/desktop/zoom-shortcuts"
 import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
 import type { ComposerHandle } from "@/components/chat/composer"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
+import { usePlatform } from "@/hooks/use-platform"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
-import { usePlatform } from "@/hooks/use-platform"
-import { whenSeeded } from "@/lib/db/schema"
 import { markSessionRead } from "@/lib/db/session-state"
 import { guildFromSession } from "@/lib/claude/guild"
 import { loggers } from "@/lib/logger"
-import { useTranslations } from "next-intl"
-import { toast } from "sonner"
 
 const log = loggers.shell
 
-/**
- * The top-level Discord-style frame:
- *
- *   ┌───────────── TitleBar ─────────────┐
- *   │ Guild │ Channel │ ChatPane │ Mems  │
- *   │ rail  │ list    │          │       │
- *   └────────────────────────────────────┘
- *
- * Owns the cross-cutting pieces (dialogs, command palette, hook wiring) so
- * that the inner panes stay narrow and focused.
- */
-export function DiscordShell() {
+export function DesktopChatWorkspace() {
   const platform = usePlatform()
   const router = useRouter()
   const { sessions, activeSessionId, select, create, remove, rename } = useSessions()
@@ -65,32 +63,18 @@ export function DiscordShell() {
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [onboardingDismissed, setOnboardingDismissed] = useState(false)
 
-  // Imperative handle on the chat composer — the member-list rail uses this
-  // to insert `@CharacterName` mentions at the caret without going through
-  // any draft store.
   const composerRef = useRef<ComposerHandle | null>(null)
 
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true)
-    void whenSeeded()
-  }, [])
-
-  // No-scroll guarantee. Setting `data-app-shell` on <body> turns on the
-  // `overflow:hidden` rule defined in globals.css. Removed on unmount so
-  // standalone routes (docs, /settings sub-pages) keep their own behavior.
-  useEffect(() => {
-    if (typeof document === "undefined") return
-    document.body.setAttribute("data-app-shell", "true")
-    return () => document.body.removeAttribute("data-app-shell")
   }, [])
 
   useEffect(() => {
     void loadSettings()
   }, [loadSettings])
 
-  // Whenever the active session changes, mark it as read.
   useEffect(() => {
     if (!activeSessionId) return
     void markSessionRead(activeSessionId).catch((err) => {
@@ -101,8 +85,6 @@ export function DiscordShell() {
     })
   }, [activeSessionId])
 
-  // First-run onboarding: nudge the user when there's no API key and they
-  // haven't already dismissed the wizard this session.
   useEffect(() => {
     if (!mounted) return
     const settings = useSettingsStore.getState().settings
@@ -114,18 +96,12 @@ export function DiscordShell() {
     }
   }, [mounted, onboardingDismissed, sessions.length])
 
-  // Auto-select the most-recent session on first render — but only one that
-  // matches the current guild. (If the user switched guilds and there's no
-  // matching session yet, we leave the pane in its empty state.)
   useEffect(() => {
     if (!mounted) return
     if (activeSessionId) {
       const current = sessions.find((s) => s.id === activeSessionId)
-      // If the active session belongs to a different guild, surface that mismatch
-      // by switching the guild rather than dropping the active session.
       if (current && selectedGuild.kind === "team") {
         if (current.kind !== "team" || current.teamId !== selectedGuild.teamId) {
-          // Honor the active session and adjust the guild filter.
           const target = guildFromSession(current)
           log.info("auto guild-switch from active session", {
             sessionId: current.id,
@@ -148,7 +124,6 @@ export function DiscordShell() {
     }
   }, [mounted, sessions, activeSessionId, selectedGuild, select, setSelectedGuild])
 
-  // Surface non-fatal errors as toasts (debounced).
   useEffect(() => {
     if (errorMessage && errorMessage !== lastErrorShown) {
       log.warn("chat error surfaced", { message: errorMessage })
@@ -167,9 +142,6 @@ export function DiscordShell() {
     router.push(tab ? `/settings?section=${tab}` : "/settings")
   }
 
-  // Honor open-settings requests coming from the tray, app menu, or
-  // deep-link handler. The store carries a nonce so repeated requests
-  // re-trigger this effect even when the tab string didn't change.
   useEffect(() => {
     if (!pendingSettingsRequest) return
     log.info("open settings via deep-link", { tab: pendingSettingsRequest.tab })
@@ -181,7 +153,6 @@ export function DiscordShell() {
 
   const handleNewDirect = () => {
     log.info("new-direct (open character picker)")
-    // Open the character picker; the actual session is created in onPick.
     setCharacterPickerOpen(true)
   }
 
@@ -189,13 +160,6 @@ export function DiscordShell() {
     log.info("new-team-conversation", { teamId })
     const s = await create({ title: "New conversation", kind: "team", teamId })
     select(s.id)
-  }
-
-  // Team creation is fully implemented in Settings → Teams. The guild rail's
-  // "+" button silently routes there; no toast needed.
-  const handleCreateTeam = () => {
-    log.info("create-team click → settings")
-    openSettings("teams")
   }
 
   const handleSwitchToSession = (id: string) => {
@@ -206,12 +170,9 @@ export function DiscordShell() {
     setSelectedGuild(guildFromSession(target))
   }
 
-  // Member-list is only shown for team sessions, and only on wide enough screens.
   const isTeamSession = activeSession?.kind === "team" && Boolean(activeSession.teamId)
   const isCanvasGuild = selectedGuild.kind === "canvas"
 
-  // Pick the right send/stop pair based on session kind. Team sessions go
-  // through `useTeamChat`, direct chats stay on `useClaudeChat`.
   const send = isTeamSession ? teamChat.send : directChat.send
   const stop = isTeamSession ? teamChat.stop : directChat.stop
   const respondToApproval = (
@@ -225,65 +186,58 @@ export function DiscordShell() {
   }
 
   return (
-    <div className="relative flex h-screen w-full flex-col bg-background text-foreground">
-      <WindowFocusTracker />
-      <WindowResizeEdges />
-      <ZoomShortcuts />
-      <TitleBar />
-      <div className="flex flex-1 overflow-hidden">
-        <GuildRail onCreateTeam={handleCreateTeam} onOpenSettings={() => openSettings()} />
-        {isCanvasGuild ? (
-          mounted ? (
-            <CanvasShell />
-          ) : null
-        ) : (
-          <>
-            {!sidebarCollapsed && (
-              <ChannelList
-                sessions={sessions}
-                activeSessionId={activeSessionId}
-                onSelect={handleSwitchToSession}
-                onNewDirect={() => void handleNewDirect()}
-                onNewTeamConversation={(id) => void handleNewTeamConversation(id)}
-                onDelete={(id) => void remove(id)}
-                onRename={(id, title) => void rename(id, title)}
+    <>
+      {isCanvasGuild ? (
+        mounted ? (
+          <CanvasShell />
+        ) : null
+      ) : (
+        <>
+          {!sidebarCollapsed && (
+            <ChannelList
+              sessions={sessions}
+              activeSessionId={activeSessionId}
+              onSelect={handleSwitchToSession}
+              onNewDirect={() => void handleNewDirect()}
+              onNewTeamConversation={(id) => void handleNewTeamConversation(id)}
+              onDelete={(id) => void remove(id)}
+              onRename={(id, title) => void rename(id, title)}
+            />
+          )}
+
+          <main
+            className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
+            data-bg-target="chat"
+          >
+            {!mounted ? null : platform !== "tauri" ? (
+              <DesktopOnlyBanner />
+            ) : (
+              <ChatPane
+                activeSession={activeSession}
+                onSend={send}
+                onStop={stop}
+                onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
+                onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
+                onCreate={handleNewDirect}
+                onUseSample={(text) => void send(text)}
+                onOpenSettings={openSettings}
+                composerRef={composerRef}
               />
             )}
+          </main>
 
-            <main
-              className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
-              data-bg-target="chat"
-            >
-              {!mounted ? null : platform !== "tauri" ? (
-                <DesktopOnlyBanner />
-              ) : (
-                <ChatPane
-                  activeSession={activeSession}
-                  onSend={send}
-                  onStop={stop}
-                  onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
-                  onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
-                  onCreate={handleNewDirect}
-                  onUseSample={(text) => void send(text)}
-                  onOpenSettings={openSettings}
-                  composerRef={composerRef}
-                />
-              )}
-            </main>
-
-            {isTeamSession && (
-              <MemberList
-                teamSessionId={activeSession?.id ?? null}
-                teamId={activeSession?.teamId ?? null}
-                onMention={(c) => {
-                  composerRef.current?.insertMention(c.name)
-                }}
-              />
-            )}
-            <ArtifactPanel />
-          </>
-        )}
-      </div>
+          {isTeamSession && (
+            <MemberList
+              teamSessionId={activeSession?.id ?? null}
+              teamId={activeSession?.teamId ?? null}
+              onMention={(c) => {
+                composerRef.current?.insertMention(c.name)
+              }}
+            />
+          )}
+          <ArtifactPanel />
+        </>
+      )}
 
       <CharacterPicker
         open={characterPickerOpen}
@@ -327,9 +281,7 @@ export function DiscordShell() {
           pendingApproval ? respondToApproval(pendingApproval, decision) : Promise.resolve()
         }
       />
-      {mounted && <CommandPalette onOpenSettings={openSettings} />}
-      <StatusBar />
-    </div>
+    </>
   )
 }
 

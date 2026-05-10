@@ -184,9 +184,10 @@
     @apply bg-background text-foreground;
   }
 
-  /* No global scrollbar inside the desktop shell. The DiscordShell sets
-     `data-app-shell` on <body> while it's mounted; the docs site and any
-     standalone routes opt out by simply not setting the attribute. */
+  /* No global scrollbar inside the desktop shell. DesktopAppShell sets
+     `data-app-shell` on <body> while it's mounted (and clears it on bypass
+     routes); the docs site and any standalone routes opt out by simply not
+     setting the attribute. */
   html,
   body {
     height: 100%;

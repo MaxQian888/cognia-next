@@ -21,9 +21,9 @@ interface Props {
 
 /**
  * Searchable command-palette-style picker for the user to choose a character
- * to start a new chat with. Mounted by `<DiscordShell>`; opens whenever the
- * user clicks "+ New chat" under Direct Messages or hits the empty-state
- * button.
+ * to start a new chat with. Mounted by `<DesktopChatWorkspace>`; opens
+ * whenever the user clicks "+ New chat" under Direct Messages or hits the
+ * empty-state button.
  */
 export function CharacterPicker({ open, onOpenChange, onPick }: Props) {
   const t = useTranslations("chat.characterPicker")

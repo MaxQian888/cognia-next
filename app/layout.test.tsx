@@ -7,6 +7,14 @@ jest.mock("next-intl/server", () => ({
   getLocale: jest.fn(async () => "en"),
 }))
 
+// DesktopAppShell pulls in the desktop chrome + command palette, which
+// transitively imports `use-stick-to-bottom` (an ESM-only module Jest can't
+// transform without extra config). For this layout test we only care that
+// children render inside the providers, so a passthrough stub is enough.
+jest.mock("@/components/desktop/desktop-app-shell", () => ({
+  DesktopAppShell: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
+
 // matchMedia isn't implemented by jsdom — next-themes reads it during SSR.
 if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
   Object.defineProperty(window, "matchMedia", {

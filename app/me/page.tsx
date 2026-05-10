@@ -70,7 +70,10 @@ export default function MePage() {
   const paired = !!config
 
   return (
-    <main className="flex min-h-[100dvh] flex-col bg-background safe-area-pt" data-testid="me-page">
+    <main
+      className="flex h-full min-h-0 flex-1 flex-col overflow-y-auto bg-background safe-area-pt"
+      data-testid="me-page"
+    >
       <header className="px-4 py-3">
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
       </header>

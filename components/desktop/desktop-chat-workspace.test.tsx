@@ -96,6 +96,7 @@ jest.mock("@/stores/ui", () => ({
       setSelectedGuild: typeof setSelectedGuild
       pendingSettingsRequest: typeof pendingSettingsRequestRef.current
       clearPendingSettings: typeof clearPendingSettings
+      sidebarCollapsed: boolean
     }) => T
   ): T =>
     selector({
@@ -103,6 +104,7 @@ jest.mock("@/stores/ui", () => ({
       setSelectedGuild,
       pendingSettingsRequest: pendingSettingsRequestRef.current,
       clearPendingSettings,
+      sidebarCollapsed: false,
     }),
 }))
 
@@ -110,38 +112,17 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: () => false,
 }))
 
-jest.mock("@/lib/db/schema", () => ({
-  whenSeeded: jest.fn().mockResolvedValue(undefined),
-}))
-
 jest.mock("@/lib/db/session-state", () => ({
   markSessionRead: jest.fn().mockResolvedValue(undefined),
 }))
 
-// Stub heavy children — we only verify shell wiring, not their internals.
+// Stub heavy children — we only verify workspace wiring, not their internals.
 jest.mock("@/components/chat/chat-view", () => ({
   ChatPane: () => <div data-testid="chat-pane" />,
 }))
 jest.mock("@/components/chat/character-picker", () => ({
   CharacterPicker: ({ open }: { open: boolean }) =>
     open ? <div data-testid="char-picker" /> : null,
-}))
-jest.mock("@/components/desktop/command-palette", () => ({
-  CommandPalette: () => <div data-testid="command-palette" />,
-}))
-jest.mock("@/components/desktop/guild-rail", () => ({
-  GuildRail: ({
-    onCreateTeam,
-    onOpenSettings,
-  }: {
-    onCreateTeam: () => void
-    onOpenSettings: () => void
-  }) => (
-    <div>
-      <button data-testid="guild-create-team" onClick={onCreateTeam} />
-      <button data-testid="guild-open-settings" onClick={onOpenSettings} />
-    </div>
-  ),
 }))
 jest.mock("@/components/desktop/channel-list", () => ({
   ChannelList: ({ onSelect }: { onSelect: (id: string) => void }) => (
@@ -161,26 +142,11 @@ jest.mock("@/components/desktop/onboarding-dialog", () => ({
   OnboardingDialog: ({ open }: { open: boolean }) =>
     open ? <div data-testid="onboarding" /> : null,
 }))
-jest.mock("@/components/desktop/title-bar", () => ({
-  TitleBar: () => <div data-testid="title-bar" />,
-}))
-jest.mock("@/components/desktop/status-bar", () => ({
-  StatusBar: () => <div data-testid="status-bar" />,
-}))
-jest.mock("@/components/desktop/window-focus-tracker", () => ({
-  WindowFocusTracker: () => null,
-}))
-jest.mock("@/components/desktop/window-resize-edges", () => ({
-  WindowResizeEdges: () => <div data-testid="resize-edges" />,
-}))
-jest.mock("@/components/desktop/zoom-shortcuts", () => ({
-  ZoomShortcuts: () => null,
-}))
 jest.mock("@/components/chat/tool-approval-dialog", () => ({
   ToolApprovalDialog: () => null,
 }))
 
-import { DiscordShell } from "./shell"
+import { DesktopChatWorkspace } from "./desktop-chat-workspace"
 
 beforeEach(() => {
   logInfo.mockReset()
@@ -203,35 +169,11 @@ beforeEach(() => {
   pendingSettingsRequestRef.current = null
 })
 
-test("renders title bar, status bar, guild rail, channel list, and command palette", () => {
-  render(<DiscordShell />)
-  expect(screen.getByTestId("title-bar")).toBeInTheDocument()
-  expect(screen.getByTestId("status-bar")).toBeInTheDocument()
-  expect(screen.getByTestId("guild-create-team")).toBeInTheDocument()
-})
-
-test("clicking the rail's Create-team button routes to Settings → Teams", async () => {
-  render(<DiscordShell />)
-  await act(async () => {
-    screen.getByTestId("guild-create-team").click()
-  })
-  await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/settings?section=teams"))
-  expect(logInfo).toHaveBeenCalledWith("create-team click → settings")
-})
-
-test("clicking guild settings button routes to /settings", async () => {
-  render(<DiscordShell />)
-  await act(async () => {
-    screen.getByTestId("guild-open-settings").click()
-  })
-  await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/settings"))
-})
-
 test("auto-selects a matching session on first render and logs", async () => {
   sessionsRef.current = [
     { id: "s-1", title: "x", kind: "direct", createdAt: 0, updatedAt: 0 } as unknown as ChatSession,
   ]
-  render(<DiscordShell />)
+  render(<DesktopChatWorkspace />)
   await waitFor(() =>
     expect(logInfo).toHaveBeenCalledWith(
       "auto-select session",
@@ -252,8 +194,7 @@ test("switching to a team session adjusts the guild filter via guildFromSession"
       updatedAt: 0,
     } as unknown as ChatSession,
   ]
-  // The ChannelList stub fires onSelect with "s-2" when clicked.
-  render(<DiscordShell />)
+  render(<DesktopChatWorkspace />)
   await act(async () => {
     screen.getByTestId("channel-select-stub").click()
   })
@@ -268,7 +209,7 @@ test("switching to a team session adjusts the guild filter via guildFromSession"
 
 test("opens settings via deep-link when pendingSettingsRequest is set", async () => {
   pendingSettingsRequestRef.current = { tab: "skills", nonce: 1 }
-  render(<DiscordShell />)
+  render(<DesktopChatWorkspace />)
   await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/settings?section=skills"))
   expect(clearPendingSettings).toHaveBeenCalled()
   expect(logInfo).toHaveBeenCalledWith(
@@ -277,21 +218,8 @@ test("opens settings via deep-link when pendingSettingsRequest is set", async ()
   )
 })
 
-test("sets data-app-shell on body while mounted", () => {
-  const { unmount } = render(<DiscordShell />)
-  expect(document.body.getAttribute("data-app-shell")).toBe("true")
-  unmount()
-  expect(document.body.getAttribute("data-app-shell")).toBeNull()
-})
-
-test("mounts the resize edges and removes them on unmount", () => {
-  const { unmount, container } = render(<DiscordShell />)
-  expect(container.querySelector("[data-testid='resize-edges']")).not.toBeNull()
-  unmount()
-})
-
 test("marks the chat <main> region as a scope-target for chat backgrounds", () => {
-  const { container } = render(<DiscordShell />)
+  const { container } = render(<DesktopChatWorkspace />)
   const main = container.querySelector("main[data-bg-target='chat']")
   expect(main).not.toBeNull()
 })

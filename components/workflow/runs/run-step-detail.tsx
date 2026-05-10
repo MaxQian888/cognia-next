@@ -80,8 +80,9 @@ export function RunStepDetail({
     return { node, stepEvents, summary }
   }, [stepId, workflow.nodes, events])
 
+  const logEvents = useMemo(() => stepEvents.filter((e) => e.type === "run_log"), [stepEvents])
+
   const filteredLogs = useMemo(() => {
-    const logEvents = stepEvents.filter((e) => e.type === "run_log")
     const q = logQuery.trim().toLowerCase()
     return logEvents.filter((e) => {
       const level = (e.level ?? "info") as LogLevel
@@ -95,7 +96,7 @@ export function RunStepDetail({
           .includes(q)
       )
     })
-  }, [stepEvents, logQuery, logLevels])
+  }, [logEvents, logQuery, logLevels])
 
   if (!stepId) {
     return (

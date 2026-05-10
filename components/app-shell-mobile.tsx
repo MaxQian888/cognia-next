@@ -21,7 +21,8 @@
  * character picker, member list when applicable, sign-out).
  *
  * Mounted via `app/page.tsx` only when `usePlatform() === "mobile"`. On
- * Tauri / web the existing `DiscordShell` continues to render unchanged.
+ * Tauri / web the desktop chrome (`DesktopAppShell` + `DesktopChatWorkspace`)
+ * continues to render unchanged.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -396,7 +397,7 @@ export function AppShellMobile() {
         </Sheet>
       ) : null}
 
-      {/* ── Cross-cutting dialogs (mirrored from DiscordShell) ────────── */}
+      {/* ── Cross-cutting dialogs (mirrored from DesktopChatWorkspace) ── */}
       <CharacterPicker
         open={characterPickerOpen}
         onOpenChange={setCharacterPickerOpen}

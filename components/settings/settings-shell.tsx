@@ -216,7 +216,7 @@ function SettingsShellInner({ actions }: Props) {
     <SidebarProvider
       defaultOpen
       data-bg-target="chat"
-      className="flex h-dvh overflow-hidden safe-area-pt"
+      className="flex h-full min-h-0 flex-1 overflow-hidden safe-area-pt"
       style={{ "--sidebar-width": "15rem" } as React.CSSProperties}
     >
       <SettingsSidebar

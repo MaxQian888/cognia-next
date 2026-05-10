@@ -18,6 +18,7 @@ import { SchedulerInitializer } from "@/components/scheduler"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { CompanionBootProvider } from "@/components/providers/companion-boot-provider"
 import { MobileShellWrapper } from "@/components/mobile/shell/mobile-shell-wrapper"
+import { DesktopAppShell } from "@/components/desktop/desktop-app-shell"
 import { CompanionEventBridgeProvider } from "@/components/providers/companion-event-bridge-provider"
 import { DesktopSyncSourceProvider } from "@/components/providers/desktop-sync-source-provider"
 import { DesktopMessageSourceProvider } from "@/components/providers/desktop-message-source-provider"
@@ -99,7 +100,9 @@ export default async function RootLayout({
                                       <DesktopSyncSourceProvider>
                                         <DesktopMessageSourceProvider>
                                           <div data-bg-target="global" className="contents">
-                                            <MobileShellWrapper>{children}</MobileShellWrapper>
+                                            <MobileShellWrapper>
+                                              <DesktopAppShell>{children}</DesktopAppShell>
+                                            </MobileShellWrapper>
                                           </div>
                                         </DesktopMessageSourceProvider>
                                       </DesktopSyncSourceProvider>

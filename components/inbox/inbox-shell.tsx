@@ -38,7 +38,7 @@ export function InboxShell({
     <SidebarProvider
       defaultOpen
       data-bg-target="chat"
-      className="flex h-dvh overflow-hidden safe-area-pt safe-area-pb"
+      className="flex h-full min-h-0 flex-1 overflow-hidden safe-area-pt safe-area-pb"
       style={{ "--sidebar-width": "14rem" } as React.CSSProperties}
     >
       {/* Left pane — adapter sections + view-mode chips */}

@@ -32,9 +32,9 @@ interface ChatPaneProps {
 }
 
 /**
- * The "main pane" content of the Discord shell — header, message list,
- * composer, error/empty states. Owned by `<DiscordShell>`, which provides
- * the cross-cutting hooks and dialogs.
+ * The "main pane" content of the desktop shell — header, message list,
+ * composer, error/empty states. Owned by `<DesktopChatWorkspace>`, which
+ * provides the cross-cutting hooks and dialogs.
  *
  * Kept lean on purpose: every cross-cutting concern (settings, approvals,
  * command palette, title bar) belongs in the shell.

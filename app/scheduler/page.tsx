@@ -407,7 +407,10 @@ export default function SchedulerPage() {
   }
 
   return (
-    <SidebarProvider data-bg-target="chat">
+    <SidebarProvider
+      data-bg-target="chat"
+      className="flex h-full min-h-0 w-full flex-1 overflow-hidden"
+    >
       {/* Mobile detail view — full-screen push */}
       {isMobile && mobileView === "detail" && selectedTask && (
         <SchedulerMobileDetailView

@@ -1,4 +1,8 @@
 {
+  "featureShell": {
+    "openLeft": "打开{name}",
+    "openRight": "打开{name}"
+  },
   "agentTeamsWorkspace": {
     "listTitle": "智能体团队",
     "listDescription": "多智能体团队：规划、分工并并行执行。",
@@ -6594,7 +6598,19 @@
       "canvas": "画布",
       "createTeam": "创建团队",
       "openSettings": "打开设置",
-      "settings": "设置"
+      "settings": "设置",
+      "workflows": "工作流",
+      "inbox": "收件箱",
+      "twin": "数字分身",
+      "discover": "发现",
+      "skills": "技能",
+      "plugins": "插件",
+      "agentTeams": "智能体团队",
+      "scheduler": "调度器",
+      "logs": "日志",
+      "me": "我的",
+      "featuresGroup": "功能",
+      "auxiliaryGroup": "个人与日志"
     },
     "memberList": {
       "show": "显示成员列表",

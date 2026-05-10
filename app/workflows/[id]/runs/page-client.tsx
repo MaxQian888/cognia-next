@@ -10,7 +10,7 @@ interface PageProps {
 export function WorkflowRunsListPageClient({ params }: PageProps) {
   const { id } = use(params)
   return (
-    <div className="h-screen w-screen overflow-hidden">
+    <div className="h-full w-full overflow-hidden">
       <RunList workflowId={id} />
     </div>
   )

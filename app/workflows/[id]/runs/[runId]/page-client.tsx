@@ -10,7 +10,7 @@ interface PageProps {
 export function WorkflowRunDetailPageClient({ params }: PageProps) {
   const { id, runId } = use(params)
   return (
-    <div className="h-screen w-screen overflow-hidden">
+    <div className="h-full w-full overflow-hidden">
       <RunDetail workflowId={id} runId={runId} />
     </div>
   )

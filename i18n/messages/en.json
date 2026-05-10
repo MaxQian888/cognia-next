@@ -1,4 +1,8 @@
 {
+  "featureShell": {
+    "openLeft": "Open {name}",
+    "openRight": "Open {name}"
+  },
   "agentTeamsWorkspace": {
     "listTitle": "Agent Teams",
     "listDescription": "Multi-agent teams that plan, divide work, and execute in parallel.",
@@ -6594,7 +6598,19 @@
       "canvas": "Canvas",
       "createTeam": "Create team",
       "openSettings": "Open settings",
-      "settings": "Settings"
+      "settings": "Settings",
+      "workflows": "Workflows",
+      "inbox": "Inbox",
+      "twin": "Digital twin",
+      "discover": "Discover",
+      "skills": "Skills",
+      "plugins": "Plugins",
+      "agentTeams": "Agent teams",
+      "scheduler": "Scheduler",
+      "logs": "Logs",
+      "me": "Me",
+      "featuresGroup": "Features",
+      "auxiliaryGroup": "Profile and logs"
     },
     "memberList": {
       "show": "Show member list",
