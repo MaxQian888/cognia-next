@@ -38,6 +38,17 @@ jest.mock("@/lib/native/utils", () => ({
   isTauri: jest.fn(() => false),
 }))
 
+jest.mock("../contracts/diagnostics-store", () => ({
+  recordSilentFailure: jest.fn(),
+  recordPluginPointDiagnostic: jest.fn(),
+  getPluginPointDiagnostics: jest.fn(() => []),
+  getAllPluginPointDiagnostics: jest.fn(() => ({})),
+  clearPluginPointDiagnostics: jest.fn(),
+  clearAllPluginPointDiagnostics: jest.fn(),
+  subscribePluginPointDiagnostics: jest.fn(() => () => {}),
+  getPluginPointDiagnosticsRevision: jest.fn(() => 0),
+}))
+
 // Mock IPC, message-bus, i18n-loader, debugger
 jest.mock("../messaging/ipc", () => ({
   createIPCAPI: jest.fn(() => ({})),
@@ -295,6 +306,29 @@ describe("createPluginContext", () => {
         body: "Workspace SDK linked",
         icon: undefined,
       })
+    })
+
+    it("should route showNotification failures through recordSilentFailure", async () => {
+      const { recordSilentFailure } = jest.requireMock("../contracts/diagnostics-store") as {
+        recordSilentFailure: jest.Mock
+      }
+      recordSilentFailure.mockClear()
+
+      const plugin = createMockPlugin()
+      const context = createPluginContext(plugin, mockManager)
+      const invokeMock = invoke as jest.Mock
+      invokeMock.mockRejectedValueOnce(new Error("backend missing"))
+
+      await context.ui.showNotification({ title: "x" })
+
+      expect(recordSilentFailure).toHaveBeenCalledWith(
+        plugin.manifest.id,
+        expect.objectContaining({
+          site: "ui.showNotification",
+          message: "Failed to show notification",
+        }),
+        expect.any(Error)
+      )
     })
   })
 

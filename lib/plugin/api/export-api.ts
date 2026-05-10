@@ -15,6 +15,7 @@ import {
   exportToAnimatedHTML,
   generateFilename as generateExportFilename,
 } from "@/lib/export"
+import { getPluginEventHooks } from "../messaging/hooks-system"
 import { createPluginSystemLogger, loggers } from "../core/logger"
 import type {
   PluginExportAPI,
@@ -83,11 +84,16 @@ export function createExportAPI(pluginId: string): PluginExportAPI {
   const logger = createPluginSystemLogger(pluginId)
   return {
     exportSession: async (sessionId: string, options: ExportOptions): Promise<ExportResult> => {
+      const hooks = getPluginEventHooks()
+      // Plugin host: announce session export start. The pipeline always emits
+      // a matching complete (success/failure) below.
+      await hooks.dispatchExportStart(sessionId, options.format)
       try {
         const sessionStore = useSessionStore.getState()
         const session = sessionStore.sessions.find((s) => s.id === sessionId)
 
         if (!session) {
+          hooks.dispatchExportComplete(sessionId, options.format, false)
           return { success: false, error: "Session not found" }
         }
 
@@ -100,8 +106,11 @@ export function createExportAPI(pluginId: string): PluginExportAPI {
           exportedAt,
         }
 
-        return await performExport(exportData, options, pluginId)
+        const result = await performExport(exportData, options, pluginId)
+        hooks.dispatchExportComplete(sessionId, options.format, result.success)
+        return result
       } catch (error) {
+        hooks.dispatchExportComplete(sessionId, options.format, false)
         logger.error("Export session failed:", error)
         return {
           success: false,
@@ -111,11 +120,16 @@ export function createExportAPI(pluginId: string): PluginExportAPI {
     },
 
     exportProject: async (projectId: string, options: ExportOptions): Promise<ExportResult> => {
+      const hooks = getPluginEventHooks()
+      // Plugin host: announce project export start, mirror complete on every
+      // exit branch (not-found / success / thrown).
+      await hooks.dispatchProjectExportStart(projectId, options.format)
       try {
         const projectStore = useProjectStore.getState()
         const project = projectStore.projects.find((p) => p.id === projectId)
 
         if (!project) {
+          hooks.dispatchProjectExportComplete(projectId, options.format, false)
           return { success: false, error: "Project not found" }
         }
 
@@ -125,8 +139,11 @@ export function createExportAPI(pluginId: string): PluginExportAPI {
           exportedAt,
         }
 
-        return await performExport(exportData, options, pluginId)
+        const result = await performExport(exportData, options, pluginId)
+        hooks.dispatchProjectExportComplete(projectId, options.format, result.success)
+        return result
       } catch (error) {
+        hooks.dispatchProjectExportComplete(projectId, options.format, false)
         logger.error("Export project failed:", error)
         return {
           success: false,
@@ -309,7 +326,11 @@ async function performExport(
       return { success: false, error: `Unsupported format: ${format}` }
   }
 
-  const blob = new Blob([content], { type: mimeType })
+  // Plugin host: let plugins rewrite the rendered payload before it lands
+  // in the result blob. The pipeline returns the original content unchanged
+  // when no plugin transforms it.
+  const transformed = await getPluginEventHooks().dispatchExportTransform(content, format)
+  const blob = new Blob([transformed], { type: mimeType })
   const filename = generateExportFilename(
     data.session?.title || data.project?.name || "export",
     extension

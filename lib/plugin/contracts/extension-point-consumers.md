@@ -127,15 +127,15 @@ For payload schemas, see `types/plugin/plugin.ts:PluginHooks`.
 
 ### Sessions (5)
 
-| Hook                | Dispatched by        |
-| ------------------- | -------------------- |
-| `onSessionCreate`   | `lib/sessions/*`     |
-| `onSessionSwitch`   | `lib/sessions/*`     |
-| `onSessionDelete`   | `lib/sessions/*`     |
-| `onSessionRename`   | `lib/sessions/*`     |
-| `onSessionClear`    | `lib/sessions/*`     |
-| `onSessionLinked`   | session-link feature |
-| `onSessionUnlinked` | session-link feature |
+| Hook                | Dispatched by                                              |
+| ------------------- | ---------------------------------------------------------- |
+| `onSessionCreate`   | `lib/sessions/*`                                           |
+| `onSessionSwitch`   | `lib/sessions/*`                                           |
+| `onSessionDelete`   | `lib/sessions/*`                                           |
+| `onSessionRename`   | `lib/sessions/*`                                           |
+| `onSessionClear`    | `lib/sessions/*`                                           |
+| `onSessionLinked`   | `stores/project/project-store.ts:addSessionToProject`      |
+| `onSessionUnlinked` | `stores/project/project-store.ts:removeSessionFromProject` |
 
 ### Commands & chat flow (4)
 
@@ -163,29 +163,35 @@ For payload schemas, see `types/plugin/plugin.ts:PluginHooks`.
 
 ### Project & knowledge (6)
 
-| Hook                      | Dispatched by    |
-| ------------------------- | ---------------- |
-| `onProjectCreate`         | `lib/projects/*` |
-| `onProjectUpdate`         | `lib/projects/*` |
-| `onProjectDelete`         | `lib/projects/*` |
-| `onProjectSwitch`         | `lib/projects/*` |
-| `onKnowledgeFileAdd`      | knowledge ingest |
-| `onKnowledgeFileRemove`   | knowledge ingest |
-| `onProjectExportStart`    | export pipeline  |
-| `onProjectExportComplete` | export pipeline  |
+| Hook                      | Dispatched by                                         |
+| ------------------------- | ----------------------------------------------------- |
+| `onProjectCreate`         | `stores/project/project-store.ts:createProject`       |
+| `onProjectUpdate`         | `stores/project/project-store.ts:updateProject`       |
+| `onProjectDelete`         | `stores/project/project-store.ts:deleteProject`       |
+| `onProjectSwitch`         | `stores/project/project-store.ts:setActiveProject`    |
+| `onKnowledgeFileAdd`      | `stores/project/project-store.ts:addKnowledgeFile`    |
+| `onKnowledgeFileRemove`   | `stores/project/project-store.ts:removeKnowledgeFile` |
+| `onProjectExportStart`    | `lib/plugin/api/export-api.ts:exportProject`          |
+| `onProjectExportComplete` | `lib/plugin/api/export-api.ts:exportProject`          |
 
 ### Canvas (8)
 
-| Hook                     | Dispatched by     |
-| ------------------------ | ----------------- |
-| `onCanvasCreate`         | `lib/canvas/*`    |
-| `onCanvasUpdate`         | `lib/canvas/*`    |
-| `onCanvasDelete`         | `lib/canvas/*`    |
-| `onCanvasSwitch`         | `lib/canvas/*`    |
-| `onCanvasContentChange`  | canvas editor     |
-| `onCanvasVersionSave`    | canvas versioning |
-| `onCanvasVersionRestore` | canvas versioning |
-| `onCanvasSelection`      | canvas editor     |
+The canvas event source is `stores/artifact/artifact-store.ts` — the
+artifact store owns canvas documents in cognia-next. `onCanvasContentChange`
+and `onCanvasSelection` are high-frequency; both go through
+`lib/plugin/security/rate-limiter.ts:getPluginRateLimiter().check(...)`
+under the synthetic owner `__host:canvas__` (cap 30/sec, refill 30/sec).
+
+| Hook                     | Dispatched by                                                                                         |
+| ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `onCanvasCreate`         | `stores/artifact/artifact-store.ts:createCanvasDocument`                                              |
+| `onCanvasUpdate`         | `stores/artifact/artifact-store.ts:updateCanvasDocument`                                              |
+| `onCanvasDelete`         | `stores/artifact/artifact-store.ts:deleteCanvasDocument`                                              |
+| `onCanvasSwitch`         | `stores/artifact/artifact-store.ts:setActiveCanvas` + `createCanvasDocument` + `deleteCanvasDocument` |
+| `onCanvasContentChange`  | `stores/artifact/artifact-store.ts:updateCanvasDocument` (rate-limited)                               |
+| `onCanvasVersionSave`    | `stores/artifact/artifact-store.ts:saveCanvasVersion`                                                 |
+| `onCanvasVersionRestore` | `stores/artifact/artifact-store.ts:restoreCanvasVersion`                                              |
+| `onCanvasSelection`      | `stores/artifact/artifact-store.ts:updateCanvasDocument` (editorContext.selection, rate-limited)      |
 
 ### Artifact (7)
 
@@ -201,19 +207,19 @@ For payload schemas, see `types/plugin/plugin.ts:PluginHooks`.
 
 ### Export (3)
 
-| Hook                | Dispatched by   |
-| ------------------- | --------------- |
-| `onExportStart`     | export pipeline |
-| `onExportComplete`  | export pipeline |
-| `onExportTransform` | export pipeline |
+| Hook                | Dispatched by                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------ |
+| `onExportStart`     | `hooks/data/use-single-export.ts:run` + `lib/plugin/api/export-api.ts:exportSession` |
+| `onExportComplete`  | `hooks/data/use-single-export.ts:run` + `lib/plugin/api/export-api.ts:exportSession` |
+| `onExportTransform` | `hooks/data/use-single-export.ts:run` + `lib/plugin/api/export-api.ts:performExport` |
 
-### Theme (3)
+### Theme (3 — all demoted)
 
-| Hook                    | Dispatched by  |
-| ----------------------- | -------------- |
-| `onThemeModeChange`     | theme switcher |
-| `onColorPresetChange`   | theme switcher |
-| `onCustomThemeActivate` | theme switcher |
+| Hook                    | Status      | Notes                                                                                                |
+| ----------------------- | ----------- | ---------------------------------------------------------------------------------------------------- |
+| `onThemeModeChange`     | **demoted** | Host event source `setTheme` lives in `stores/settings/settings-store.ts`. See ADR 0016.             |
+| `onColorPresetChange`   | **demoted** | Host event source `setColorTheme` lives in `stores/settings/settings-store.ts`. See ADR 0016.        |
+| `onCustomThemeActivate` | **demoted** | Host event source `setActiveCustomTheme` lives in `stores/settings/settings-store.ts`. See ADR 0016. |
 
 ### Stream / chat request (5)
 
@@ -238,30 +244,30 @@ For payload schemas, see `types/plugin/plugin.ts:PluginHooks`.
 
 ### RAG (3)
 
-| Hook                    | Dispatched by  |
-| ----------------------- | -------------- |
-| `onDocumentsIndexed`    | indexer        |
-| `onVectorSearch`        | search service |
-| `onRAGContextRetrieved` | RAG runtime    |
+| Hook                    | Dispatched by                                                                     |
+| ----------------------- | --------------------------------------------------------------------------------- |
+| `onDocumentsIndexed`    | `lib/vector/store.ts:wrapVectorStoreWithPluginHooks` (proxy on `addDocuments`)    |
+| `onVectorSearch`        | `lib/vector/store.ts:wrapVectorStoreWithPluginHooks` (proxy on `searchDocuments`) |
+| `onRAGContextRetrieved` | `lib/twin/runtime/apply-twin-context.ts:applyTwinContext` (after retrieval)       |
 
 ### Workflow (4)
 
-| Hook                     | Dispatched by    |
-| ------------------------ | ---------------- |
-| `onWorkflowStart`        | workflow runtime |
-| `onWorkflowStepComplete` | workflow runtime |
-| `onWorkflowComplete`     | workflow runtime |
-| `onWorkflowError`        | workflow runtime |
+| Hook                     | Dispatched by                                                                                |
+| ------------------------ | -------------------------------------------------------------------------------------------- |
+| `onWorkflowStart`        | `lib/workflow/runtime/orchestrator.ts:runWorkflow` (after validation, before first step)     |
+| `onWorkflowStepComplete` | `lib/workflow/runtime/orchestrator.ts:runWorkflow` (after each step's `stepOutputs.set`)     |
+| `onWorkflowComplete`     | `lib/workflow/runtime/orchestrator.ts:runWorkflow` (success path + failure paths, both fire) |
+| `onWorkflowError`        | `lib/workflow/runtime/orchestrator.ts:runWorkflow` (validation, topo-sort, step failures)    |
 
 ### UI interaction (5)
 
-| Hook                | Dispatched by       |
-| ------------------- | ------------------- |
-| `onSidebarToggle`   | sidebar shell       |
-| `onPanelOpen`       | panel host          |
-| `onPanelClose`      | panel host          |
-| `onShortcut`        | keybindings runtime |
-| `onContextMenuShow` | context menu host   |
+| Hook                | Dispatched by                                                                                                                       |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `onSidebarToggle`   | `stores/ui/ui-store.ts:toggleSidebar` + `setSidebarCollapsed`                                                                       |
+| `onPanelOpen`       | `stores/artifact/artifact-store.ts:openPanel` (panel id = `artifact:<view>`)                                                        |
+| `onPanelClose`      | `stores/artifact/artifact-store.ts:closePanel` (panel id = `artifact:<view>`)                                                       |
+| `onShortcut`        | `components/desktop/zoom-shortcuts.tsx` (`zoom.in/out/reset`) + `components/desktop/command-palette.tsx` (`command-palette.toggle`) |
+| `onContextMenuShow` | `components/a2ui/overlay/a2ui-context-menu.tsx` + `components/artifacts/artifact-list.tsx` (via `<ContextMenu onOpenChange>`)       |
 
 ### External agent (7)
 
@@ -277,24 +283,24 @@ For payload schemas, see `types/plugin/plugin.ts:PluginHooks`.
 
 ### Code execution (3)
 
-| Hook                      | Dispatched by |
-| ------------------------- | ------------- |
-| `onCodeExecutionStart`    | code runner   |
-| `onCodeExecutionComplete` | code runner   |
-| `onCodeExecutionError`    | code runner   |
+| Hook                      | Dispatched by                                                                |
+| ------------------------- | ---------------------------------------------------------------------------- |
+| `onCodeExecutionStart`    | `lib/tauri/canvas.ts:runPython` (Tauri sandbox bridge — `language="python"`) |
+| `onCodeExecutionComplete` | `lib/tauri/canvas.ts:runPython` (after Tauri command resolves)               |
+| `onCodeExecutionError`    | `lib/tauri/canvas.ts:runPython` (catch branch)                               |
 
 ### MCP (4)
 
-| Hook                    | Dispatched by |
-| ----------------------- | ------------- |
-| `onMCPServerConnect`    | MCP service   |
-| `onMCPServerDisconnect` | MCP service   |
-| `onMCPToolCall`         | MCP service   |
-| `onMCPToolResult`       | MCP service   |
+| Hook                    | Dispatched by                                                                       |
+| ----------------------- | ----------------------------------------------------------------------------------- |
+| `onMCPServerConnect`    | `lib/workflow/nodes/built-ins.ts` (`action.mcp.invokeTool`, after `client.connect`) |
+| `onMCPServerDisconnect` | `lib/workflow/nodes/built-ins.ts` (`action.mcp.invokeTool`, finally block)          |
+| `onMCPToolCall`         | `lib/workflow/nodes/built-ins.ts` (`action.mcp.invokeTool`, before `callTool`)      |
+| `onMCPToolResult`       | `lib/workflow/nodes/built-ins.ts` (`action.mcp.invokeTool`, after `callTool`)       |
 
 ---
 
-## Activation Patterns (11)
+## Activation Patterns (10)
 
 | Pattern          | Status         | Notes                                                           |
 | ---------------- | -------------- | --------------------------------------------------------------- |

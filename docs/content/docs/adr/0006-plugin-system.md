@@ -219,6 +219,16 @@ desktop users will see silent-failure diagnostics for every
 backend-bound operation — the noisy panel is the work-item registry
 for the next cycle.
 
+## Follow-up #6 (2026-05-09) — Plugin system completion (ADR 0016)
+
+ADR 0007 was claimed by theme rendering, so the desktop-runtime gap stayed
+open. A fresh audit found the gap was 2.6× larger than estimated: **82**
+distinct `plugin_*` invoke commands, not 31. ADR 0016 addresses this in
+five tiers (T0 truth-up, T1 silent-catch migration + layout fixes, T2 hook
+host-wiring with explicit demote, T3 Rust handlers in batches 3a/3g/3b/3c/3d,
+T4 documentation closure). See
+[ADR 0016 — Plugin System Completion](./0016-plugin-system-completion).
+
 ## References
 
 - [`lib/plugin/contracts/plugin-points.ts`](https://github.com/.../plugin-points.ts)

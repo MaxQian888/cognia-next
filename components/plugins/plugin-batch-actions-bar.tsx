@@ -44,7 +44,7 @@ export function PluginBatchActionsBar() {
 
   return (
     <Card
-      className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-30 flex flex-wrap items-center justify-center gap-2 px-4 py-2 shadow-lg max-w-[calc(100vw-1rem)]"
+      className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-30 flex flex-wrap items-center justify-center gap-2 px-4 py-2 shadow-lg overflow-hidden max-w-[min(calc(100vw-1rem),32rem)]"
       role="region"
       aria-label={t("ariaLabel")}
     >

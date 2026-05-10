@@ -3,6 +3,7 @@
  */
 
 import { createExportAPI, clearCustomExporters } from "./export-api"
+import { getPluginEventHooks } from "../messaging/hooks-system"
 import type { CustomExporter, ExportData } from "@/types/plugin/plugin-extended"
 
 // Mock stores and dependencies
@@ -139,6 +140,65 @@ describe("Export API", () => {
 
       expect(result.success).toBe(false)
       expect(result.error).toContain("Unsupported format")
+    })
+  })
+
+  describe("plugin event dispatch", () => {
+    it("exportSession dispatches onExportStart + onExportComplete(true) and runs onExportTransform", async () => {
+      const hooks = getPluginEventHooks()
+      const startSpy = jest.spyOn(hooks, "dispatchExportStart").mockResolvedValue([] as never)
+      const transformSpy = jest
+        .spyOn(hooks, "dispatchExportTransform")
+        .mockImplementation(async (content) => content)
+      const completeSpy = jest.spyOn(hooks, "dispatchExportComplete").mockImplementation(() => {})
+
+      const api = createExportAPI(testPluginId)
+      const result = await api.exportSession("session-1", { format: "markdown" })
+      expect(result.success).toBe(true)
+      expect(startSpy).toHaveBeenCalledWith("session-1", "markdown")
+      expect(transformSpy).toHaveBeenCalledWith("# Exported Markdown", "markdown")
+      expect(completeSpy).toHaveBeenCalledWith("session-1", "markdown", true)
+    })
+
+    it("exportSession dispatches onExportComplete(false) when the session is missing", async () => {
+      const hooks = getPluginEventHooks()
+      jest.spyOn(hooks, "dispatchExportStart").mockResolvedValue([] as never)
+      const completeSpy = jest.spyOn(hooks, "dispatchExportComplete").mockImplementation(() => {})
+
+      const api = createExportAPI(testPluginId)
+      const result = await api.exportSession("does-not-exist", { format: "markdown" })
+      expect(result.success).toBe(false)
+      expect(completeSpy).toHaveBeenCalledWith("does-not-exist", "markdown", false)
+    })
+
+    it("exportProject dispatches onProjectExportStart + onProjectExportComplete", async () => {
+      const hooks = getPluginEventHooks()
+      const startSpy = jest
+        .spyOn(hooks, "dispatchProjectExportStart")
+        .mockResolvedValue([] as never)
+      const completeSpy = jest
+        .spyOn(hooks, "dispatchProjectExportComplete")
+        .mockImplementation(() => {})
+
+      const api = createExportAPI(testPluginId)
+      await api.exportProject("project-1", { format: "json" })
+      expect(startSpy).toHaveBeenCalledWith("project-1", "json")
+      // The JSON branch in performExport requires a session, so it returns
+      // success: false; we still expect a paired complete dispatch.
+      expect(completeSpy).toHaveBeenCalledWith("project-1", "json", false)
+    })
+
+    it("exportProject dispatches onProjectExportComplete(false) when the project is missing", async () => {
+      const hooks = getPluginEventHooks()
+      jest.spyOn(hooks, "dispatchProjectExportStart").mockResolvedValue([] as never)
+      const completeSpy = jest
+        .spyOn(hooks, "dispatchProjectExportComplete")
+        .mockImplementation(() => {})
+
+      const api = createExportAPI(testPluginId)
+      const result = await api.exportProject("missing", { format: "json" })
+      expect(result.success).toBe(false)
+      expect(completeSpy).toHaveBeenCalledWith("missing", "json", false)
     })
   })
 

@@ -58,6 +58,8 @@ export type PluginCapability =
   | "scheduler" // Provides scheduled tasks
   | "external-agent-preset" // cognia-next: contributes external-agent presets (Claude Code / Codex / etc.)
   | "connectors" // Provides Platform Connector adapters (Task 110)
+  | "workflow" // Contributes custom workflow node executors (ADR 0017)
+  | "workflow-trigger" // Contributes custom workflow trigger sources (ADR 0017)
 
 /**
  * Plugin status in the lifecycle
@@ -383,6 +385,18 @@ export interface PluginManifest {
    * instantiate a `PlatformAdapter`.
    */
   connectors?: PluginConnectorDef[]
+
+  // Visual Workflows (ADR 0017)
+  /**
+   * Custom workflow node executors and trigger sources contributed by this
+   * plugin. The host's `lib/plugin/workflow-bridge.ts` reads this block on
+   * plugin enable, calls each `execute` / `start` factory the plugin's main
+   * entry exposes, and registers them with the workflow runtime — they then
+   * appear in the editor's Sidebar palette and are schedulable like
+   * built-ins. The `workflow` and `workflow-trigger` capability flags must
+   * be declared in `capabilities[]` for the bridge to pick them up.
+   */
+  workflows?: import("./plugin-workflow").PluginManifestWorkflowsBlock
 
   // Themes (capability "themes")
   /**
@@ -961,6 +975,42 @@ export interface PluginContext {
 
   /** Scheduler API for scheduled tasks */
   scheduler: PluginSchedulerAPI
+
+  /**
+   * Visual workflow extension API. Plugins use this to contribute custom
+   * node executors and trigger sources to the workflow runtime. See ADR
+   * 0017. Only available when the host has wired
+   * `lib/plugin/workflow-bridge.ts` (default in cognia-next 0.3.0+).
+   */
+  workflow: PluginWorkflowAPI
+}
+
+/**
+ * Plugin-facing API for contributing workflow nodes and triggers to the
+ * editor catalog + runtime. Each `register*` returns an unsubscribe
+ * function the host calls during `deactivate`. Internally the host
+ * prefixes `kind` with `<pluginId>.` automatically; plugin authors should
+ * not include the prefix themselves.
+ */
+export interface PluginWorkflowAPI {
+  /**
+   * Contribute a custom node executor. The kind is auto-prefixed with the
+   * plugin id, so a plugin with id `acme.fetch` registering kind
+   * `"action.fetchPage"` ends up as `"action.acme.fetch.fetchPage"` in
+   * the editor.
+   */
+  registerNode(def: import("./plugin-workflow").PluginNodeDef): () => void
+
+  /** Contribute a trigger source (long-running event emitter). */
+  registerTrigger(def: import("./plugin-workflow").PluginTriggerDef): () => void
+
+  /**
+   * Convenience for plugins whose triggers want to forward an event
+   * synthesized from outside the trigger context (e.g. a webhook the
+   * plugin registered with the host's HTTP router). Routes to the
+   * orchestrator's standard trigger queue.
+   */
+  emitTriggerEvent(workflowId: string, kind: string, payload: unknown): void
 }
 
 export interface PluginLogger {

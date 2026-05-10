@@ -55,7 +55,20 @@ import type {
   ContextMenuClickContext,
   WindowOptions,
   PluginWindow,
+  PluginWorkflowAPI,
 } from "@/types/plugin"
+import type { PluginNodeDef, PluginTriggerDef } from "@/types/plugin/plugin-workflow"
+import { registerNodeExecutor, unregisterNodeExecutor } from "@/lib/workflow/nodes/registry"
+import {
+  addPluginCatalogEntry,
+  removePluginCatalogEntry,
+  type NodeCatalogEntry,
+} from "@/lib/workflow/nodes/catalog"
+import {
+  registerPluginTrigger,
+  unregisterPluginTrigger,
+  type TriggerRegistration,
+} from "@/lib/workflow/triggers/registry"
 import type { A2UIComponent, A2UISurfaceType } from "@/types/artifact/a2ui"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import { usePluginStore } from "@/stores/plugin"
@@ -85,6 +98,7 @@ import { getPluginI18nLoader } from "../utils/i18n-loader"
 import { getPluginDebugger } from "../devtools/debugger"
 import { invokePluginApi, PluginGatewayError } from "./transport"
 import { isTauri } from "@/lib/native/utils"
+import { recordSilentFailure } from "../contracts/diagnostics-store"
 
 /**
  * Full plugin context combining base and extended APIs.
@@ -128,6 +142,7 @@ export function createPluginContext(
     window: createWindowAPI(pluginId),
     secrets: createSecretsAPI(pluginId),
     scheduler: createSchedulerAPI(pluginId),
+    workflow: createWorkflowAPI(pluginId),
   }
 
   // If debug mode is enabled, wrap the context with debug instrumentation
@@ -347,7 +362,7 @@ function createEventEmitter(pluginId: string): PluginEventEmitter {
 // UI API
 // =============================================================================
 
-function createUIAPI(_pluginId: string): PluginUIAPI {
+function createUIAPI(pluginId: string): PluginUIAPI {
   // Status bar items registry
   const statusBarItems = new Map<string, PluginStatusBarItem>()
   // Sidebar panels registry
@@ -362,7 +377,15 @@ function createUIAPI(_pluginId: string): PluginUIAPI {
           icon: options.icon,
         })
       } catch (error) {
-        loggers.manager.error("Failed to show notification:", error)
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "ui.showNotification",
+            message: "Failed to show notification",
+            expected: false,
+          },
+          error
+        )
       }
     },
 
@@ -868,8 +891,16 @@ function createFileSystemAPI(pluginId: string): PluginFileSystemAPI {
 
     watch: (path: string, callback: (event: FileWatchEvent) => void) => {
       const watchId = `${pluginId}:${path}:${Date.now()}`
-      invoke("plugin_fs_watch", { pluginId, path, watchId }).catch((e) =>
-        loggers.manager.error("Failed to watch path:", e)
+      invoke("plugin_fs_watch", { pluginId, path, watchId }).catch((error) =>
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "fs.watch",
+            message: `Failed to watch path: ${path}`,
+            expected: false,
+          },
+          error
+        )
       )
 
       const handler = (event: CustomEvent<FileWatchEvent>) => {
@@ -882,8 +913,16 @@ function createFileSystemAPI(pluginId: string): PluginFileSystemAPI {
 
       return () => {
         window.removeEventListener(`plugin-fs-watch:${watchId}`, handler as EventListener)
-        invoke("plugin_fs_unwatch", { watchId }).catch((e) =>
-          loggers.manager.error("Failed to unwatch:", e)
+        invoke("plugin_fs_unwatch", { watchId }).catch((error) =>
+          recordSilentFailure(
+            pluginId,
+            {
+              site: "fs.unwatch",
+              message: `Failed to unwatch path: ${path}`,
+              expected: false,
+            },
+            error
+          )
         )
       }
     },
@@ -1029,7 +1068,17 @@ function createShellAPI(pluginId: string): PluginShellAPI {
         .then((result) => {
           pid = result.pid || 0
         })
-        .catch((e) => loggers.sandbox.error("Failed to spawn process:", e))
+        .catch((error) =>
+          recordSilentFailure(
+            pluginId,
+            {
+              site: "shell.spawn",
+              message: `Failed to spawn process: ${command}`,
+              expected: false,
+            },
+            error
+          )
+        )
 
       return {
         pid,
@@ -1037,8 +1086,16 @@ function createShellAPI(pluginId: string): PluginShellAPI {
         stdout: new ReadableStream(),
         stderr: new ReadableStream(),
         kill: (signal?: string) => {
-          invoke("plugin_process_kill", { processId, signal }).catch((e) =>
-            loggers.sandbox.error("Failed to kill process:", e)
+          invoke("plugin_process_kill", { processId, signal }).catch((error) =>
+            recordSilentFailure(
+              pluginId,
+              {
+                site: "process.kill",
+                message: `Failed to kill process ${processId}`,
+                expected: false,
+              },
+              error
+            )
           )
         },
         onExit: (callback: (code: number) => void) => {
@@ -1121,8 +1178,16 @@ function createShortcutsAPI(pluginId: string): PluginShortcutsAPI {
       const id = `${pluginId}:${shortcut}`
       registeredShortcuts.add(shortcut)
 
-      invoke("plugin_shortcut_register", { pluginId, shortcut, options }).catch((e) =>
-        loggers.manager.error("Failed to register shortcut:", e)
+      invoke("plugin_shortcut_register", { pluginId, shortcut, options }).catch((error) =>
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "shortcut.register",
+            message: `Failed to register shortcut: ${shortcut}`,
+            expected: false,
+          },
+          error
+        )
       )
 
       const handler = () => callback()
@@ -1131,8 +1196,16 @@ function createShortcutsAPI(pluginId: string): PluginShortcutsAPI {
       return () => {
         registeredShortcuts.delete(shortcut)
         window.removeEventListener(`plugin-shortcut:${id}`, handler)
-        invoke("plugin_shortcut_unregister", { pluginId, shortcut }).catch((e) =>
-          loggers.manager.error("Failed to unregister shortcut:", e)
+        invoke("plugin_shortcut_unregister", { pluginId, shortcut }).catch((error) =>
+          recordSilentFailure(
+            pluginId,
+            {
+              site: "shortcut.unregister",
+              message: `Failed to unregister shortcut: ${shortcut}`,
+              expected: false,
+            },
+            error
+          )
         )
       }
     },
@@ -1165,7 +1238,17 @@ function createContextMenuAPI(pluginId: string): PluginContextMenuAPI {
       invoke("plugin_context_menu_register", {
         pluginId,
         item: { ...item, id },
-      }).catch((e) => loggers.manager.error("Failed to register context menu:", e))
+      }).catch((error) =>
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "contextMenu.register",
+            message: `Failed to register context menu: ${item.id}`,
+            expected: false,
+          },
+          error
+        )
+      )
 
       const handler = ((e: CustomEvent<ContextMenuClickContext>) => {
         item.onClick(e.detail)
@@ -1176,8 +1259,16 @@ function createContextMenuAPI(pluginId: string): PluginContextMenuAPI {
       return () => {
         handlers.delete(id)
         window.removeEventListener(`plugin-context-menu:${id}`, handler)
-        invoke("plugin_context_menu_unregister", { pluginId, itemId: id }).catch((e) =>
-          loggers.manager.error("Failed to unregister context menu:", e)
+        invoke("plugin_context_menu_unregister", { pluginId, itemId: id }).catch((error) =>
+          recordSilentFailure(
+            pluginId,
+            {
+              site: "contextMenu.unregister",
+              message: `Failed to unregister context menu: ${item.id}`,
+              expected: false,
+            },
+            error
+          )
         )
       }
     },
@@ -1668,4 +1759,158 @@ function mapToPluginExecution(
           : undefined,
     })),
   }
+}
+
+// =============================================================================
+// Workflow API — plugin-contributed node executors and trigger sources.
+// (ADR 0017)
+// =============================================================================
+
+/**
+ * Per-plugin teardown bookkeeping. The PluginContext is recreated on
+ * activate/deactivate, but we track registrations on a module-level map
+ * keyed by pluginId so a manager-driven force-disable still finds the
+ * right rows to clean up.
+ */
+const pluginWorkflowRegistrations = new Map<
+  string,
+  {
+    nodes: Set<string> // prefixed kinds to unregister
+    nodeVersions: Map<string, number> // version per kind, for unregisterNodeExecutor
+    triggers: Set<string> // prefixed kinds to unregister
+    triggerVersions: Map<string, number>
+  }
+>()
+
+function getOrCreatePluginRegistry(pluginId: string) {
+  let row = pluginWorkflowRegistrations.get(pluginId)
+  if (!row) {
+    row = {
+      nodes: new Set(),
+      nodeVersions: new Map(),
+      triggers: new Set(),
+      triggerVersions: new Map(),
+    }
+    pluginWorkflowRegistrations.set(pluginId, row)
+  }
+  return row
+}
+
+function prefixKind(pluginId: string, raw: string): string {
+  // `trigger.foo` → `trigger.<pluginId>.foo`; everything else → `<pluginId>.<raw>`
+  // The trigger prefix preserves the leading `trigger.` segment so the
+  // orchestrator can still pattern-match by the namespace.
+  if (raw.startsWith("trigger.")) {
+    const rest = raw.slice("trigger.".length)
+    return `trigger.${pluginId}.${rest}`
+  }
+  return `${pluginId}.${raw}`
+}
+
+function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
+  return {
+    registerNode(def: PluginNodeDef): () => void {
+      const prefixed = prefixKind(pluginId, def.kind)
+      const registry = getOrCreatePluginRegistry(pluginId)
+      // Cast — the registry's `WorkflowNodeKind` is a closed union of
+      // built-ins, but plugin-contributed kinds intentionally extend it
+      // at runtime. Catalog merging is the only consumer that cares.
+      registerNodeExecutor({
+        kind: prefixed as never,
+        typeVersion: def.typeVersion,
+        execute: def.execute,
+        retryable: def.retryable,
+        timeoutMs: def.timeoutMs,
+      })
+      const catalogEntry: NodeCatalogEntry = {
+        kind: prefixed as never,
+        category: def.category,
+        label: def.label,
+        description: def.description,
+        iconName: def.iconName,
+        keywords: def.keywords ?? [],
+        desktopOnly: def.desktopOnly,
+        pluginId,
+        // Surfacing the JSON Schema lets the inspector render a SchemaForm
+        // instead of falling back to a raw-JSON editor.
+        paramsSchema: def.paramsSchema,
+      }
+      addPluginCatalogEntry(catalogEntry)
+      registry.nodes.add(prefixed)
+      registry.nodeVersions.set(prefixed, def.typeVersion)
+      return () => {
+        unregisterNodeExecutor(prefixed as never, def.typeVersion)
+        removePluginCatalogEntry(prefixed)
+        registry.nodes.delete(prefixed)
+        registry.nodeVersions.delete(prefixed)
+      }
+    },
+
+    registerTrigger(def: PluginTriggerDef): () => void {
+      const prefixed = prefixKind(pluginId, def.kind)
+      const registry = getOrCreatePluginRegistry(pluginId)
+      const reg: TriggerRegistration = {
+        kind: prefixed,
+        typeVersion: def.typeVersion,
+        pluginId,
+        def,
+        instances: new Map(),
+      }
+      registerPluginTrigger(reg)
+      // Plugin triggers also surface as a sidebar entry under the trigger
+      // category so authors can drag them onto canvases.
+      addPluginCatalogEntry({
+        kind: prefixed as never,
+        category: "trigger",
+        label: def.label,
+        description: def.description,
+        iconName: def.iconName,
+        keywords: [],
+        desktopOnly: def.desktopOnly,
+        pluginId,
+        paramsSchema: def.paramsSchema,
+      })
+      registry.triggers.add(prefixed)
+      registry.triggerVersions.set(prefixed, def.typeVersion)
+      return () => {
+        void unregisterPluginTrigger(prefixed, def.typeVersion)
+        removePluginCatalogEntry(prefixed)
+        registry.triggers.delete(prefixed)
+        registry.triggerVersions.delete(prefixed)
+      }
+    },
+
+    emitTriggerEvent(_workflowId: string, _kind: string, _payload: unknown): void {
+      // Routing into the orchestrator's trigger queue is the host's job.
+      // For Phase 1 we record the call so plugin authors can verify the
+      // wiring without crashing — actual delivery lands in Phase 2 when
+      // the trigger-bridge gets a `dispatchPluginTrigger` entry point.
+      loggers.manager.debug("plugin emitted trigger event (Phase 1 stub)", {
+        pluginId,
+        workflowId: _workflowId,
+        kind: _kind,
+      })
+    },
+  }
+}
+
+/**
+ * Tear down every workflow registration owned by `pluginId`. Called by the
+ * plugin manager during deactivate / unload so the editor + runtime stop
+ * surfacing the plugin's contributions immediately. Idempotent.
+ */
+export async function teardownPluginWorkflowRegistrations(pluginId: string): Promise<void> {
+  const row = pluginWorkflowRegistrations.get(pluginId)
+  if (!row) return
+  for (const kind of row.nodes) {
+    const v = row.nodeVersions.get(kind) ?? 1
+    unregisterNodeExecutor(kind as never, v)
+    removePluginCatalogEntry(kind)
+  }
+  for (const kind of row.triggers) {
+    const v = row.triggerVersions.get(kind) ?? 1
+    await unregisterPluginTrigger(kind, v)
+    removePluginCatalogEntry(kind)
+  }
+  pluginWorkflowRegistrations.delete(pluginId)
 }

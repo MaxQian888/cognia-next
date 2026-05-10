@@ -163,6 +163,11 @@ const ACTIVATION_POINT_TESTS = [
   "lib/plugin/core/manager.test.ts",
   "lib/plugin/contracts/plugin-points.test.ts",
 ] as const
+const RUNTIME_POINT_DOCS = "docs/content/docs/adr/0017-workflow-plugin-extension-points.md"
+const RUNTIME_POINT_TESTS = [
+  "lib/workflow/nodes/registry.test.ts",
+  "lib/plugin/contracts/plugin-points.test.ts",
+] as const
 
 export const CANONICAL_HOOK_POINTS = [
   "onLoad",
@@ -227,9 +232,6 @@ export const CANONICAL_HOOK_POINTS = [
   "onExportTransform",
   "onProjectExportStart",
   "onProjectExportComplete",
-  "onThemeModeChange",
-  "onColorPresetChange",
-  "onCustomThemeActivate",
   "onChatRequest",
   "onStreamStart",
   "onStreamChunk",
@@ -273,9 +275,29 @@ export const CANONICAL_HOOK_POINTS = [
   "onMCPServerDisconnect",
   "onMCPToolCall",
   "onMCPToolResult",
+  "onWorkflowNodeRegister",
+  "onWorkflowNodeUnregister",
+  "onWorkflowTriggerRegister",
+  "onWorkflowTriggerUnregister",
 ] as const
 
 export type CanonicalHookPoint = (typeof CANONICAL_HOOK_POINTS)[number]
+
+/**
+ * Hook points that were demoted from canonical status because the host
+ * event source genuinely doesn't exist in a permissible host file.
+ *
+ * `validatePluginManifest` may still emit a one-shot warning when a plugin
+ * declares one of these, but they are no longer dispatched. See ADR 0016
+ * "Demoted hook points" for per-entry demotion reasoning.
+ */
+export const DEPRECATED_HOOK_POINTS = [
+  "onThemeModeChange",
+  "onColorPresetChange",
+  "onCustomThemeActivate",
+] as const
+
+export type DeprecatedHookPoint = (typeof DEPRECATED_HOOK_POINTS)[number]
 
 export const CANONICAL_ACTIVATION_PATTERNS = [
   "startup",
@@ -409,6 +431,46 @@ const hookPointContracts: Record<CanonicalHookPoint, PluginPointContract> = Obje
     } as PluginPointContract,
   ])
 ) as Record<CanonicalHookPoint, PluginPointContract>
+
+/**
+ * Runtime extension points — host-managed registries plugins can contribute
+ * implementations to (e.g., workflow node executors and triggers). Distinct
+ * from `ui-slot` (host renders a plugin's React node) and `hook` (host fires
+ * an event a plugin handler reacts to). See ADR 0012.
+ */
+export const CANONICAL_RUNTIME_POINTS = [
+  "workflow.node",
+  "workflow.trigger",
+  "workflow.task",
+] as const
+
+export type CanonicalRuntimePoint = (typeof CANONICAL_RUNTIME_POINTS)[number]
+
+const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
+  "workflow.node": "lib/workflow/nodes/registry.ts:registerNodeExecutor",
+  "workflow.trigger": "lib/workflow/triggers/registry.ts:registerPluginTrigger",
+  "workflow.task":
+    "lib/workflow/nodes/built-ins.ts:executePluginInvoke (action.plugin.invoke node)",
+}
+
+const runtimePointContracts: Record<CanonicalRuntimePoint, PluginPointContract> =
+  Object.fromEntries(
+    CANONICAL_RUNTIME_POINTS.map((id) => [
+      id,
+      {
+        id,
+        kind: "runtime",
+        stability: "stable",
+        status: "implemented",
+        owner: "plugin-platform",
+        binding: RUNTIME_POINT_BINDINGS[id],
+        docs: RUNTIME_POINT_DOCS,
+        requiredTests: RUNTIME_POINT_TESTS,
+        introducedIn: "0.3.0",
+        permission: "extension:workflow",
+      } as PluginPointContract,
+    ])
+  ) as Record<CanonicalRuntimePoint, PluginPointContract>
 
 const activationPatternContracts: Record<CanonicalActivationPattern, PluginPointContract> = {
   startup: {
@@ -551,8 +613,13 @@ const activationPatternContracts: Record<CanonicalActivationPattern, PluginPoint
 export const PLUGIN_POINT_CONTRACTS: readonly PluginPointContract[] = [
   ...Object.values(extensionPointContracts),
   ...Object.values(hookPointContracts),
+  ...Object.values(runtimePointContracts),
   ...Object.values(activationPatternContracts),
 ]
+
+export function getRuntimePointContract(point: CanonicalRuntimePoint): PluginPointContract {
+  return runtimePointContracts[point]
+}
 
 export function auditPluginPointContracts(): PluginPointProofAudit[] {
   return PLUGIN_POINT_CONTRACTS.map((contract) => {

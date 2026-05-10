@@ -89,40 +89,42 @@ function PermissionReviewContent({ pluginId, onClose }: { pluginId: string; onCl
 
       <Card className="p-0">
         <ScrollArea className="max-h-[40vh]">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("colPermission")}</TableHead>
-                <TableHead className="w-24 text-center">{t("colDeclared")}</TableHead>
-                <TableHead className="w-24 text-center">{t("colOptional")}</TableHead>
-                <TableHead className="w-24 text-center">{t("colGranted")}</TableHead>
-                <TableHead className="w-32 text-right">{t("colActions")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {allListed.length === 0 ? (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
-                    {t("empty")}
-                  </TableCell>
+                  <TableHead className="min-w-[10rem]">{t("colPermission")}</TableHead>
+                  <TableHead className="min-w-[6rem] text-center">{t("colDeclared")}</TableHead>
+                  <TableHead className="min-w-[6rem] text-center">{t("colOptional")}</TableHead>
+                  <TableHead className="min-w-[6rem] text-center">{t("colGranted")}</TableHead>
+                  <TableHead className="min-w-[8rem] text-right">{t("colActions")}</TableHead>
                 </TableRow>
-              ) : (
-                allListed.map((perm) => (
-                  <PermissionRow
-                    key={perm}
-                    perm={perm}
-                    declared={declared.includes(perm)}
-                    optional={optional.includes(perm)}
-                    granted={granted.has(perm)}
-                    dangerous={perms.isDangerous(perm)}
-                    onGrant={() => perms.grant(pluginId, perm, { grantedBy: "user" })}
-                    onRevoke={() => perms.revoke(pluginId, perm)}
-                    description={perms.descriptions[perm] ?? perm}
-                  />
-                ))
-              )}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {allListed.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
+                      {t("empty")}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  allListed.map((perm) => (
+                    <PermissionRow
+                      key={perm}
+                      perm={perm}
+                      declared={declared.includes(perm)}
+                      optional={optional.includes(perm)}
+                      granted={granted.has(perm)}
+                      dangerous={perms.isDangerous(perm)}
+                      onGrant={() => perms.grant(pluginId, perm, { grantedBy: "user" })}
+                      onRevoke={() => perms.revoke(pluginId, perm)}
+                      description={perms.descriptions[perm] ?? perm}
+                    />
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </ScrollArea>
       </Card>
 

@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { listen, UnlistenFn } from "@tauri-apps/api/event"
 import type { Plugin, PluginDefinition } from "@/types/plugin"
 import { loggers } from "../core/logger"
+import { recordSilentFailure } from "../contracts/diagnostics-store"
 
 // =============================================================================
 // Types
@@ -372,7 +373,17 @@ export class PluginHotReload {
         await invoke("plugin_set_state", {
           pluginId,
           state: _runtime,
-        }).catch(() => {})
+        }).catch((error) =>
+          recordSilentFailure(
+            pluginId,
+            {
+              site: "hotReload.restoreState",
+              message: "Failed to restore plugin runtime state during hot reload",
+              expected: false,
+            },
+            error
+          )
+        )
       }
 
       // Clean up

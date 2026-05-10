@@ -13,6 +13,8 @@
     "0010-claude-subscription-oauth",
     "0011-workflows-subsystem",
     "0012-transport-abstraction",
-    "0013-command-manifest"
+    "0013-command-manifest",
+    "0016-plugin-system-completion",
+    "0017-workflow-plugin-extension-points"
   ]
 }

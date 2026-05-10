@@ -1,4 +1,3 @@
-import path from "node:path"
 import type {
   ExtensionCompatibilityDiagnostic,
   ExtensionDescriptor,
@@ -22,6 +21,19 @@ export function derivePluginInstallRootKind(source: PluginSource): PluginInstall
   if (source === "builtin") return "builtin"
   if (source === "dev") return "dev"
   return "installed"
+}
+
+/**
+ * Cross-platform `path.dirname` replacement. Works on Unix (`/`) and
+ * Windows (`\`) separators without dragging the `node:path` module into
+ * the browser bundle. Mirrors Node's behaviour for the inputs this file
+ * actually feeds it (relative + absolute filesystem paths).
+ */
+function dirname(p: string): string {
+  const trimmed = p.replace(/[/\\]+$/, "")
+  const idx = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"))
+  if (idx <= 0) return trimmed.length === 0 ? "." : trimmed.charAt(0) || "."
+  return trimmed.slice(0, idx)
 }
 
 function buildCompatibilityStatus(
@@ -94,7 +106,7 @@ export function buildExtensionDescriptor({
     resolvedPath,
     installRoot: {
       kind: installRootKind,
-      path: pluginDirectory || path.dirname(resolvedPath),
+      path: pluginDirectory || dirname(resolvedPath),
     },
     entrypoints: {
       main: manifest.main,
