@@ -619,6 +619,81 @@ pub fn companion_push_clear_apns() {
     super::push_dispatchers().clear_apns();
 }
 
+// ---------------------------------------------------------------------------
+// Connection diagnostics (Phase C2)
+// ---------------------------------------------------------------------------
+
+/// Per-candidate test-connection result.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompanionReachability {
+    pub url: String,
+    pub reachable: bool,
+    pub latency_ms: Option<u64>,
+    pub error: Option<String>,
+}
+
+/// Probe the local companion server on every plausible host (loopback, LAN
+/// IP, optional tunnel) and report which paths are reachable. The mobile
+/// app uses the same priority list (`lib/connectivity/connection-strategy.ts`)
+/// but from the phone side; this command is the desktop's mirror — useful
+/// for "is my server reachable at all" diagnostics.
+#[tauri::command]
+pub async fn companion_test_local_reachability(
+    state: State<'_, CompanionServerState>,
+    app_handle: tauri::AppHandle,
+) -> Result<Vec<CompanionReachability>, String> {
+    let port = state.bound_port().ok_or_else(|| "server not running".to_string())?;
+    let mut candidates: Vec<String> = vec![format!("https://127.0.0.1:{port}")];
+    if let Some(lan) = detect_lan_ip() {
+        candidates.push(format!("https://{lan}:{port}"));
+    }
+    if let Some(info) = state.tunnel.current() {
+        candidates.push(info.public_url);
+    }
+
+    let fp = ensure_tls_fingerprint(&app_handle).unwrap_or_default();
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("reqwest builder: {e}"))?;
+
+    let mut out = Vec::with_capacity(candidates.len());
+    for url in candidates {
+        let started = std::time::Instant::now();
+        // Hit a public-pre-auth endpoint so we don't need a JWT — issue/pair
+        // accepts an empty POST and returns 200.
+        let probe_url = format!("{}/api/v1/auth/pair/issue", url.trim_end_matches('/'));
+        match client.post(&probe_url).send().await {
+            Ok(resp) => {
+                let ok = resp.status().is_success();
+                out.push(CompanionReachability {
+                    url,
+                    reachable: ok,
+                    latency_ms: Some(started.elapsed().as_millis() as u64),
+                    error: if ok {
+                        None
+                    } else {
+                        Some(format!("HTTP {}", resp.status()))
+                    },
+                });
+            }
+            Err(err) => {
+                out.push(CompanionReachability {
+                    url,
+                    reachable: false,
+                    latency_ms: None,
+                    error: Some(err.to_string()),
+                });
+            }
+        }
+    }
+    // Silence unused warning on the fingerprint when it's not consumed.
+    let _ = fp;
+    Ok(out)
+}
+
 /// Return the active tunnel info, or null when no tunnel is running.
 #[tauri::command]
 pub fn companion_tunnel_current(state: State<'_, CompanionServerState>) -> Option<TunnelInfo> {

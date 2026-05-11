@@ -150,6 +150,7 @@ export function CompanionSection() {
       <MdnsCard />
       <PairDeviceCard />
       <PairedDevicesCard />
+      <ReachabilityDiagnosticsCard />
     </div>
   )
 }
@@ -670,6 +671,7 @@ function PairedDevicesCard() {
                 <TableRow>
                   <TableHead>Label</TableHead>
                   <TableHead>Platform</TableHead>
+                  <TableHead>Fingerprint</TableHead>
                   <TableHead>Paired</TableHead>
                   <TableHead>Last seen</TableHead>
                   <TableHead className="w-[80px] text-right">Actions</TableHead>
@@ -692,6 +694,19 @@ function PairedDevicesCard() {
                       </div>
                     </TableCell>
                     <TableCell className="font-mono text-xs uppercase">{row.platform}</TableCell>
+                    <TableCell className="font-mono text-[10px] text-muted-foreground">
+                      {row.serverFingerprint ? (
+                        <span
+                          title={row.serverFingerprint}
+                          className="cursor-help"
+                          aria-label={`Pinned cert ${row.serverFingerprint}`}
+                        >
+                          {row.serverFingerprint.slice(0, 12)}…
+                        </span>
+                      ) : (
+                        <span className="italic text-muted-foreground/60">unpinned</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {formatRelative(row.pairedAt)}
                     </TableCell>
@@ -718,6 +733,94 @@ function PairedDevicesCard() {
               </TableBody>
             </Table>
           </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Reachability diagnostics card (Phase C2)
+// ---------------------------------------------------------------------------
+
+interface ReachabilityRow {
+  url: string
+  reachable: boolean
+  latencyMs?: number
+  error?: string
+}
+
+async function probeLocalReachability(): Promise<ReachabilityRow[]> {
+  if (!isTauri()) return []
+  return transport.call<ReachabilityRow[]>("companion_test_local_reachability")
+}
+
+function ReachabilityDiagnosticsCard() {
+  const [rows, setRows] = useState<ReachabilityRow[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const desktop = isTauri()
+
+  const onTest = useCallback(async () => {
+    setBusy(true)
+    try {
+      const out = await probeLocalReachability()
+      setRows(out)
+    } catch (err) {
+      toast.error(`Probe failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setBusy(false)
+    }
+  }, [])
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-medium">Connection diagnostics</CardTitle>
+        <CardDescription className="text-xs">
+          Test which local URLs the desktop server is reachable on. Useful when a phone reports a
+          connection error and you want to confirm the LAN / tunnel paths are healthy.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Button size="sm" variant="outline" onClick={onTest} disabled={!desktop || busy}>
+          {busy ? "Probing…" : "Test reachability"}
+        </Button>
+        {!desktop && (
+          <p className="text-xs text-muted-foreground">
+            Only available in the Tauri desktop build.
+          </p>
+        )}
+        {rows && rows.length > 0 && (
+          <div className="space-y-1.5">
+            {rows.map((row) => (
+              <div
+                key={row.url}
+                className={cn(
+                  "flex items-start gap-2 rounded border px-3 py-2 text-xs",
+                  row.reachable
+                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                    : "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300"
+                )}
+              >
+                <CircleIcon
+                  className={cn("mt-0.5 h-2 w-2 shrink-0 fill-current", row.reachable ? "" : "")}
+                />
+                <div className="flex-1 space-y-0.5">
+                  <div className="font-mono">{row.url}</div>
+                  <div className="text-[10px] text-muted-foreground">
+                    {row.reachable
+                      ? `OK · ${row.latencyMs ?? "—"} ms`
+                      : `Failed${row.error ? ` · ${row.error}` : ""}`}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {rows && rows.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            No candidates to probe — start the companion server first.
+          </p>
         )}
       </CardContent>
     </Card>

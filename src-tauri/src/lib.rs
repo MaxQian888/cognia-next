@@ -365,6 +365,7 @@ pub fn run() {
             companion_api::commands::companion_push_configure_apns,
             companion_api::commands::companion_push_clear_fcm,
             companion_api::commands::companion_push_clear_apns,
+            companion_api::commands::companion_test_local_reachability,
             proxy_config::commands::proxy_set,
             proxy_config::commands::proxy_get_active,
             proxy_config::commands::proxy_detect,
