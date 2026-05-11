@@ -4147,6 +4147,17 @@
       "tab": "验证",
       "cardBadge": "{count} 个问题"
     },
+    "composer": {
+      "skillPicker": {
+        "title": "附加技能",
+        "description": "选择仅在下一条消息中生效的技能。",
+        "searchPlaceholder": "搜索技能…",
+        "empty": "未找到技能。",
+        "groupHeading": "可用技能",
+        "trigger": "附加技能",
+        "removeChip": "移除 {name}"
+      }
+    },
     "sync": {
       "status": {
         "synced": "已同步",

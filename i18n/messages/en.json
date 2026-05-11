@@ -4147,6 +4147,17 @@
       "tab": "Validation",
       "cardBadge": "{count, plural, =1 {1 issue} other {# issues}}"
     },
+    "composer": {
+      "skillPicker": {
+        "title": "Attach a skill",
+        "description": "Select skills to include in the next message only.",
+        "searchPlaceholder": "Search skills…",
+        "empty": "No skills found.",
+        "groupHeading": "Available skills",
+        "trigger": "Attach skill",
+        "removeChip": "Remove {name}"
+      }
+    },
     "sync": {
       "status": {
         "synced": "Synced",
