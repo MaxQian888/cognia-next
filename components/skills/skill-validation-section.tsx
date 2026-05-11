@@ -48,9 +48,10 @@ export function SkillValidationSection({ errors }: Props) {
 function groupByField(errors: SkillValidationError[]) {
   const map = new Map<string, SkillValidationError[]>()
   for (const e of errors) {
-    const arr = map.get(e.field) ?? []
+    const key = e.field ?? "(general)"
+    const arr = map.get(key) ?? []
     arr.push(e)
-    map.set(e.field, arr)
+    map.set(key, arr)
   }
   return [...map.entries()].map(([field, items]) => ({ field, items }))
 }

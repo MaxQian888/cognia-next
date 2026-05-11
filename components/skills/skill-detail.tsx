@@ -18,6 +18,9 @@ import { toast } from "sonner"
 import type { Skill } from "@/lib/claude/types"
 import { SkillResourceManager } from "./skill-resource-manager"
 import { SkillSecurityScanner } from "./skill-security-scanner"
+import { SkillValidationSection } from "./skill-validation-section"
+import { SkillSyncSection } from "./skill-sync-section"
+import { useSkillValidation } from "@/hooks/skills"
 import { loggers } from "@/lib/logger"
 
 interface Props {
@@ -35,6 +38,7 @@ export function SkillDetail({ skill }: Props) {
   const openEdit = useSkillsStore((s) => s.openEdit)
   const setDeleteTarget = useSkillsStore((s) => s.setDeleteTarget)
   const resources = useLiveQuery(() => listResourcesForSkill(skill.id), [skill.id])
+  useSkillValidation(skill.id)
 
   const handleDuplicate = async () => {
     try {
@@ -163,6 +167,14 @@ export function SkillDetail({ skill }: Props) {
             )}
           </TabsTrigger>
           <TabsTrigger value="security">{tDetail("tabSecurity")}</TabsTrigger>
+          <TabsTrigger value="validation">
+            {tDetail("tabValidation")}
+            {skill.validationErrors && skill.validationErrors.length > 0 && (
+              <Badge variant="destructive" className="ml-1 h-4 px-1.5 text-[10px]">
+                {skill.validationErrors.length}
+              </Badge>
+            )}
+          </TabsTrigger>
         </TabsList>
         <ScrollArea className="flex-1">
           <TabsContent value="overview" className="m-0 px-5 py-4">
@@ -177,6 +189,9 @@ export function SkillDetail({ skill }: Props) {
           <TabsContent value="security" className="m-0 px-5 py-4">
             <SkillSecurityScanner skill={skill} />
           </TabsContent>
+          <TabsContent value="validation" className="m-0 px-5 py-4">
+            <SkillValidationSection errors={skill.validationErrors ?? []} />
+          </TabsContent>
         </ScrollArea>
       </Tabs>
     </div>
@@ -190,24 +205,27 @@ function OverviewSection({ skill }: { skill: Skill }) {
     return new Date(ms).toLocaleString()
   }
   return (
-    <div className="grid gap-3 text-xs">
-      <Row label={t("metaCategory")}>{skill.category ?? "—"}</Row>
-      <Row label={t("metaSource")}>{skill.source ?? "—"}</Row>
-      {skill.author && <Row label={t("metaAuthor")}>{skill.author}</Row>}
-      {skill.version && <Row label={t("metaVersion")}>{skill.version}</Row>}
-      {skill.license && <Row label={t("metaLicense")}>{skill.license}</Row>}
-      <Row label={t("metaCreated")}>{formatTime(skill.createdAt)}</Row>
-      <Row label={t("metaUpdated")}>{formatTime(skill.updatedAt)}</Row>
-      <Row label={t("metaUsage", { count: skill.usageCount ?? 0 })}>
-        {skill.lastUsedAt
-          ? t("metaLastUsed", { when: new Date(skill.lastUsedAt).toLocaleString() })
-          : "—"}
-      </Row>
-      {skill.allowedTools && skill.allowedTools.length > 0 && (
-        <Row label={t("metaTools")}>
-          <span className="font-mono">{skill.allowedTools.join(", ")}</span>
+    <div className="space-y-4">
+      <SkillSyncSection skill={skill} />
+      <div className="grid gap-3 text-xs">
+        <Row label={t("metaCategory")}>{skill.category ?? "—"}</Row>
+        <Row label={t("metaSource")}>{skill.source ?? "—"}</Row>
+        {skill.author && <Row label={t("metaAuthor")}>{skill.author}</Row>}
+        {skill.version && <Row label={t("metaVersion")}>{skill.version}</Row>}
+        {skill.license && <Row label={t("metaLicense")}>{skill.license}</Row>}
+        <Row label={t("metaCreated")}>{formatTime(skill.createdAt)}</Row>
+        <Row label={t("metaUpdated")}>{formatTime(skill.updatedAt)}</Row>
+        <Row label={t("metaUsage", { count: skill.usageCount ?? 0 })}>
+          {skill.lastUsedAt
+            ? t("metaLastUsed", { when: new Date(skill.lastUsedAt).toLocaleString() })
+            : "—"}
         </Row>
-      )}
+        {skill.allowedTools && skill.allowedTools.length > 0 && (
+          <Row label={t("metaTools")}>
+            <span className="font-mono">{skill.allowedTools.join(", ")}</span>
+          </Row>
+        )}
+      </div>
     </div>
   )
 }

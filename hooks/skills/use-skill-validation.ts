@@ -44,9 +44,11 @@ export function useSkillValidation(skillId: string | undefined): void {
 }
 
 function stableKey(errors: SkillValidationError[]): string {
-  return JSON.stringify(
-    [...errors]
-      .map((e) => [e.code, e.field, e.message])
-      .sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]))
-  )
+  const tuples: Array<[string, string, string]> = errors.map((e) => [
+    e.code,
+    e.field ?? "",
+    e.message,
+  ])
+  tuples.sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]))
+  return JSON.stringify(tuples)
 }
