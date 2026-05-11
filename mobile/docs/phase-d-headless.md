@@ -66,8 +66,8 @@ The `cognia-server serve` subcommand:
 
 1. **Sidecar integration** — `cognia-server serve` doesn't itself spawn the Anthropic agent SDK Node sidecar. Message CRUD against SQLite works end-to-end; AI replies need the same `src-tauri/src/claude/sidecar.rs` spawn path. The Dockerfile already includes a Node runtime layer for this.
 2. **Wave 2 RPCs in headless mode** — `character_*` / `skill_set_enabled` / `plugin_set_enabled` etc. still route through `desktop_writes_bridge`. They return an error in headless mode (no app_handle → bridge can't emit). Either add equivalent AppStore methods, or fail fast with a clearer error envelope.
-3. **Push cred storage in headless mode** — `PUSH_DISPATCHERS` is process-wide and in-memory. Persist under `<COGNIA_DATA_DIR>/push-credentials.{fcm,apns}.json`.
-4. **CLI ergonomics** — proper `clap`-based argument parsing once the binary takes more than two subcommands.
+3. ~~Push cred storage in headless mode~~ — **landed.** `FilePushCredStore` in `companion_api/push_creds.rs` writes `<COGNIA_DATA_DIR>/push-credentials.{fcm,apns}.json` (0600 perms on Unix). `cognia-server serve` installs it before starting the axum server and reinstates persisted dispatchers via `reinstall_persisted_dispatchers`.
+4. ~~CLI ergonomics~~ — **landed.** `cognia-server` now uses `clap` v4 with derive macros for `pair --device-name <name>` and `serve --port <port>`.
 5. **mDNS + tunnel** — `cognia-server serve` doesn't broadcast mDNS or run cloudflared. Both are desktop-tray-driven today; headless deployments typically sit behind a reverse proxy with a real domain, so neither is strictly required.
 
 ## Verification today

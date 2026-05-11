@@ -1,6 +1,6 @@
 # Phase B — Push delivery setup
 
-Status: **Code complete, credentials wiring in-memory only, UI pending.**
+Status: **Code complete. Settings UI + keyring/file persistence shipped. External services (real FCM project + Apple Developer account) needed for end-to-end validation.**
 
 After Phase B the desktop ships real `FcmDispatcher` and `ApnsDispatcher` implementations and a process-wide `DispatcherSet` that the event-bus trigger consults. The remaining work is the credentials UX and persistent secret storage.
 
@@ -26,20 +26,17 @@ After Phase B the desktop ships real `FcmDispatcher` and `ApnsDispatcher` implem
   2. Consults the process-wide `DispatcherSet`.
   3. Calls `broadcast_to_offline` for each provider — which iterates registered devices and skips any with an open WebSocket (suppression already lives in `push.rs:178`).
 
+## Newly landed (this iteration)
+
+- **Settings UI card** — `PushCredentialsCard` in `components/settings/companion/companion-section.tsx` renders an FCM textarea (paste service-account JSON) and an APNs form (key id / team id / bundle id / `.p8` paste / production toggle). Each block shows a "configured" badge when persistent state reports the provider is set, plus a Clear button.
+
+- **Persistent secret storage** — new `companion_api/push_creds.rs` exposes a `PushCredStore` trait with two backends:
+  - `KeyringPushCredStore` (service `com.cognia.companion-push/v1`, accounts `fcm` and `apns`) — installed in `lib.rs::run` via the Tauri setup hook.
+  - `FilePushCredStore` writing `<COGNIA_DATA_DIR>/push-credentials.{fcm,apns}.json` with 0600 perms on Unix — installed by `cognia-server::run_serve` for headless deployments.
+  - `reinstall_persisted_dispatchers()` runs at boot from both entry points so the user's last upload survives a restart.
+- **Status command** — `companion_push_status` Tauri command exposes `{ fcmConfigured, apnsConfigured }` for the UI badges.
+
 ## What still needs human / native work
-
-1. **Settings UI card** — `components/settings/companion/companion-section.tsx` should grow a "Push notifications" card with two forms:
-   - **FCM**: textarea for `service-account.json` paste → invokes `companion_push_configure_fcm`.
-   - **APNs**: inputs for `key_id`, `team_id`, `bundle_id`, `.p8` content, plus production toggle → invokes `companion_push_configure_apns`.
-
-   Both forms should show a "Configured" badge after success and a Clear button per provider.
-
-2. **Persistent secret storage**
-   Today the dispatcher state is in-memory only — `DispatcherSet` re-initializes on every desktop boot, so the user has to re-paste credentials. Two viable paths:
-   - **Keyring** (matches the project's `keyring = "3"` dep): per-credential entries under `com.cognia.companion-push/v1`.
-   - **Encrypted file** under `<app_data>/cognia/companion/`.
-
-   Recommendation: keyring for the secret material; a small JSON metadata file for non-secret bits (project id, bundle id, expiry stamp).
 
 3. **External cred validation**
    - FCM project requires Cloud Messaging enabled and a Service Account with the `roles/cloudmessaging.serviceAgent` role. Without a real project, the dispatcher can construct but every send returns `Failed`.

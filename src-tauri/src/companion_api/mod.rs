@@ -35,6 +35,7 @@ pub mod desktop_messages_bridge;
 pub mod desktop_writes_bridge;
 pub mod dispatchers;
 pub mod event_bus;
+pub mod push_creds;
 pub mod store;
 pub mod idempotency;
 pub mod jwt;

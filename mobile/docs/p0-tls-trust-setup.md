@@ -1,6 +1,6 @@
 # P0 — Mobile-side TLS trust setup (M2.9 follow-up)
 
-Status: **JS layer done; native steps PENDING (requires Apple Developer account + device build).**
+Status: **JS layer done. Android native config landed. iOS PENDING (requires `cap add ios` + Apple Developer account + device build).**
 
 After M2.9 the desktop companion server terminates HTTPS with a self-signed certificate generated at runtime by `src-tauri/src/companion_api/tls.rs`. The JS layer routes through `CapacitorHttp` with `serverTrustMode: "self-signed"` (see `lib/tauri/pinned-fetch.ts`). The remaining work below is required for true cert pinning at the platform layer.
 
@@ -16,9 +16,11 @@ After M2.9 the desktop companion server terminates HTTPS with a self-signed cert
 
 ## Native steps still required
 
-### Android — `mobile/android/app/src/main/res/xml/network_security_config.xml`
+### Android — landed
 
-Create the file with an entry that trusts the user-supplied cert hash at app layer. Strict pinning to a build-time hash is **not viable** for our use case because the cert is generated at first desktop launch (i.e., not known to the mobile build pipeline). Two paths:
+`mobile/android/app/src/main/res/xml/network_security_config.xml` exists and is referenced from `AndroidManifest.xml` via `android:networkSecurityConfig="@xml/network_security_config"`. It grants user + system CA trust for `127.0.0.1` and `cognia-companion.local` so the Capacitor WebView accepts the desktop's self-signed cert via the user trust anchor pathway. Strict pinning to a build-time hash is **not viable** because the cert is generated at first desktop launch — identity is established at the app layer via the QR-encoded fingerprint + P0.3 attestation.
+
+For reference, two paths considered but not taken:
 
 1. **Self-signed acceptance for `127.0.0.1` + local IP ranges** (matches today's `serverTrustMode: "self-signed"` behavior):
 

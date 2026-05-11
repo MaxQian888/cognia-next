@@ -38,6 +38,7 @@ use app_lib::companion_api::{
     event_bus::EventBus,
     idempotency::IdempotencyCache,
     push::PushTokenRegistry,
+    push_creds::{self, FilePushCredStore},
     rate_limit::RateLimiter,
     redemption_lru::RedemptionLru,
     secret, server,
@@ -49,69 +50,33 @@ use app_lib::companion_api::{
 };
 use parking_lot::RwLock;
 
-#[derive(Debug)]
-enum Command {
-    Pair { device_name: String },
-    Serve { port: u16 },
-    Help,
+use clap::{Parser, Subcommand};
+
+/// cognia-server — headless cognia companion API.
+///
+/// Set `COGNIA_DATA_DIR` to override the platform data dir; the SQLite
+/// store, TLS cert, and push-credential files all live there.
+#[derive(Debug, Parser)]
+#[command(name = "cognia-server", version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: CliCommand,
 }
 
-fn parse_args() -> Command {
-    let argv: Vec<String> = std::env::args().collect();
-    if argv.len() < 2 {
-        return Command::Help;
-    }
-    match argv[1].as_str() {
-        "pair" => {
-            let mut device_name = "headless-pair".to_string();
-            let mut i = 2;
-            while i < argv.len() {
-                if argv[i] == "--device-name" && i + 1 < argv.len() {
-                    device_name = argv[i + 1].clone();
-                    i += 2;
-                } else {
-                    i += 1;
-                }
-            }
-            Command::Pair { device_name }
-        }
-        "serve" => {
-            let mut port: u16 = 7890;
-            let mut i = 2;
-            while i < argv.len() {
-                if argv[i] == "--port" && i + 1 < argv.len() {
-                    port = argv[i + 1].parse().unwrap_or(7890);
-                    i += 2;
-                } else {
-                    i += 1;
-                }
-            }
-            Command::Serve { port }
-        }
-        _ => Command::Help,
-    }
-}
-
-fn print_usage() {
-    println!(
-        r#"cognia-server — headless cognia companion API (Phase D skeleton)
-
-USAGE:
-    cognia-server pair  [--device-name <name>]
-    cognia-server serve [--port <port>]
-
-ENVIRONMENT:
-    COGNIA_DATA_DIR  — directory for the SQLite store and TLS material.
-                       Defaults to the platform-specific data dir.
-
-EXAMPLES:
-    cognia-server pair --device-name "mobile-1"
-        Issues a pair token + prints the cgnp2 payload the mobile client
-        scans / pastes.
-    cognia-server serve --port 7890
-        Boots the HTTPS server. (Phase D skeleton — see ADR-0014.)
-"#
-    );
+#[derive(Debug, Subcommand)]
+enum CliCommand {
+    /// Issue a one-shot pair token + print the cgnp2 payload the mobile
+    /// app scans or pastes.
+    Pair {
+        /// Human label for the device being paired.
+        #[arg(long, default_value = "headless-pair")]
+        device_name: String,
+    },
+    /// Boot the HTTPS companion server. Binds 0.0.0.0:<port>.
+    Serve {
+        #[arg(long, default_value_t = 7890)]
+        port: u16,
+    },
 }
 
 fn data_dir() -> PathBuf {
@@ -123,9 +88,16 @@ fn data_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Re-evaluate the data dir for callers inside `run_serve` (which don't
+/// have it threaded as a parameter). Cheap — same env-var read + dirs
+/// lookup as the top-level boot, so the location stays consistent.
+fn store_data_dir() -> PathBuf {
+    data_dir()
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cmd = parse_args();
+    let cli = Cli::parse();
 
     let dir = data_dir();
     std::fs::create_dir_all(&dir)?;
@@ -137,13 +109,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let tls_material = tls::ensure_certificate(&dir)?;
 
-    match cmd {
-        Command::Help => {
-            print_usage();
-            Ok(())
-        }
-        Command::Pair { device_name } => run_pair(&store, &tls_material, &device_name).await,
-        Command::Serve { port } => run_serve(&store, &tls_material, port).await,
+    match cli.command {
+        CliCommand::Pair { device_name } => run_pair(&store, &tls_material, &device_name).await,
+        CliCommand::Serve { port } => run_serve(&store, &tls_material, port).await,
     }
 }
 
@@ -192,6 +160,16 @@ async fn run_serve(
     // Install the headless AppStore so every DataPlane::pick lands on the
     // Direct variant (Phase D RPC handler rewrite).
     install_headless_store(Some(store.clone() as Arc<dyn AppStore>));
+
+    // Install the headless push-credential store (JSON file beside the
+    // SQLite store) and reinstate any FCM/APNs dispatchers from a prior
+    // configure command. Failures are logged but don't block startup —
+    // a missing file just means no provider is configured yet.
+    let data_dir = store_data_dir();
+    push_creds::install(FilePushCredStore::new(&data_dir));
+    if let Err(err) = push_creds::reinstall_persisted_dispatchers() {
+        eprintln!("[cognia-server] push-creds reinstall: {err}");
+    }
 
     // Publish the TLS fingerprint for the whoami handler (P0.3).
     set_tls_fingerprint(tls_material.fingerprint_sha256.clone());

@@ -28,7 +28,7 @@ use super::push::{DeliveryOutcome, PushDispatcher, PushPayload, PushTokenRecord}
 
 /// Service-account JSON downloaded from the Google Cloud Console (Service
 /// Accounts → Keys → Create new key → JSON). Only the four fields we need.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FcmServiceAccount {
     pub client_email: String,
     pub private_key: String,

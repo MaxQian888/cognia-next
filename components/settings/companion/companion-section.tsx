@@ -34,6 +34,7 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Switch } from "@/components/ui/switch"
@@ -151,6 +152,7 @@ export function CompanionSection() {
       <PairDeviceCard />
       <PairedDevicesCard />
       <ReachabilityDiagnosticsCard />
+      <PushCredentialsCard />
     </div>
   )
 }
@@ -822,6 +824,270 @@ function ReachabilityDiagnosticsCard() {
             No candidates to probe — start the companion server first.
           </p>
         )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Push credentials card (Phase B follow-up)
+// ---------------------------------------------------------------------------
+
+interface PushConfigStatus {
+  fcmConfigured: boolean
+  apnsConfigured: boolean
+}
+
+async function fetchPushStatus(): Promise<PushConfigStatus> {
+  if (!isTauri()) return { fcmConfigured: false, apnsConfigured: false }
+  return transport.call<PushConfigStatus>("companion_push_status")
+}
+
+async function configureFcm(serviceAccountJson: string): Promise<void> {
+  await transport.call<void>("companion_push_configure_fcm", { serviceAccountJson })
+}
+
+async function clearFcm(): Promise<void> {
+  await transport.call<void>("companion_push_clear_fcm")
+}
+
+async function configureApns(args: {
+  keyId: string
+  teamId: string
+  bundleId: string
+  privateKeyPem: string
+  production: boolean
+}): Promise<void> {
+  await transport.call<void>("companion_push_configure_apns", args)
+}
+
+async function clearApns(): Promise<void> {
+  await transport.call<void>("companion_push_clear_apns")
+}
+
+function PushCredentialsCard() {
+  const desktop = isTauri()
+  const [status, setStatus] = useState<PushConfigStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [fcmJson, setFcmJson] = useState("")
+  const [apns, setApns] = useState({
+    keyId: "",
+    teamId: "",
+    bundleId: "com.cognia.mobile",
+    privateKeyPem: "",
+    production: false,
+  })
+
+  const refresh = useCallback(async () => {
+    if (!desktop) return
+    try {
+      const s = await fetchPushStatus()
+      setStatus(s)
+    } catch (err) {
+      toast.error(`Push status failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }, [desktop])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!desktop) return
+    void (async () => {
+      try {
+        const s = await fetchPushStatus()
+        if (!cancelled) setStatus(s)
+      } catch {
+        // Initial load failures are surfaced when the user interacts;
+        // don't toast on mount.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [desktop])
+
+  const onSubmitFcm = useCallback(async () => {
+    if (!fcmJson.trim()) {
+      toast.error("Paste the FCM service-account JSON first.")
+      return
+    }
+    setBusy(true)
+    try {
+      await configureFcm(fcmJson.trim())
+      setFcmJson("")
+      toast.success("FCM configured.")
+      await refresh()
+    } catch (err) {
+      toast.error(`FCM configure: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setBusy(false)
+    }
+  }, [fcmJson, refresh])
+
+  const onClearFcm = useCallback(async () => {
+    setBusy(true)
+    try {
+      await clearFcm()
+      toast.success("FCM cleared.")
+      await refresh()
+    } catch (err) {
+      toast.error(`FCM clear: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setBusy(false)
+    }
+  }, [refresh])
+
+  const onSubmitApns = useCallback(async () => {
+    const required = ["keyId", "teamId", "bundleId", "privateKeyPem"] as const
+    for (const field of required) {
+      if (!apns[field].trim()) {
+        toast.error(`APNs: ${field} is required.`)
+        return
+      }
+    }
+    setBusy(true)
+    try {
+      await configureApns(apns)
+      toast.success("APNs configured.")
+      setApns((prev) => ({ ...prev, privateKeyPem: "" }))
+      await refresh()
+    } catch (err) {
+      toast.error(`APNs configure: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setBusy(false)
+    }
+  }, [apns, refresh])
+
+  const onClearApns = useCallback(async () => {
+    setBusy(true)
+    try {
+      await clearApns()
+      toast.success("APNs cleared.")
+      await refresh()
+    } catch (err) {
+      toast.error(`APNs clear: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setBusy(false)
+    }
+  }, [refresh])
+
+  return (
+    <Card data-testid="push-credentials-card">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-medium">Push notifications</CardTitle>
+        <CardDescription className="text-xs">
+          Paste FCM (Android) and APNs (iOS) credentials to enable push delivery for paired phones
+          while their WebSocket is disconnected. Secrets are stored in the OS keyring on desktop;
+          headless deployments use a JSON file under the data directory.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {!desktop && (
+          <p className="text-xs text-muted-foreground">
+            Only available in the Tauri desktop build.
+          </p>
+        )}
+
+        {/* FCM */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Label className="text-xs font-medium">FCM (Android)</Label>
+            {status?.fcmConfigured ? (
+              <Badge variant="outline" className="text-[10px] uppercase">
+                configured
+              </Badge>
+            ) : null}
+          </div>
+          <textarea
+            className="h-32 w-full resize-y rounded border bg-background px-2 py-1.5 font-mono text-[10px]"
+            placeholder='Paste the {"type":"service_account",...} JSON downloaded from Google Cloud Console.'
+            value={fcmJson}
+            onChange={(e) => setFcmJson(e.target.value)}
+            disabled={!desktop || busy}
+            aria-label="FCM service-account JSON"
+          />
+          <div className="flex gap-2">
+            <Button size="sm" onClick={onSubmitFcm} disabled={!desktop || busy}>
+              Save FCM
+            </Button>
+            {status?.fcmConfigured && (
+              <Button size="sm" variant="ghost" onClick={onClearFcm} disabled={!desktop || busy}>
+                Clear FCM
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* APNs */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Label className="text-xs font-medium">APNs (iOS)</Label>
+            {status?.apnsConfigured ? (
+              <Badge variant="outline" className="text-[10px] uppercase">
+                configured
+              </Badge>
+            ) : null}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-[10px] text-muted-foreground">Key ID</Label>
+              <Input
+                value={apns.keyId}
+                onChange={(e) => setApns({ ...apns, keyId: e.target.value })}
+                placeholder="ABC1234DEF"
+                disabled={!desktop || busy}
+                className="font-mono text-xs"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] text-muted-foreground">Team ID</Label>
+              <Input
+                value={apns.teamId}
+                onChange={(e) => setApns({ ...apns, teamId: e.target.value })}
+                placeholder="TEAM1234DE"
+                disabled={!desktop || busy}
+                className="font-mono text-xs"
+              />
+            </div>
+            <div className="col-span-2 space-y-1">
+              <Label className="text-[10px] text-muted-foreground">Bundle ID</Label>
+              <Input
+                value={apns.bundleId}
+                onChange={(e) => setApns({ ...apns, bundleId: e.target.value })}
+                placeholder="com.cognia.mobile"
+                disabled={!desktop || busy}
+                className="font-mono text-xs"
+              />
+            </div>
+          </div>
+          <textarea
+            className="h-32 w-full resize-y rounded border bg-background px-2 py-1.5 font-mono text-[10px]"
+            placeholder={`-----BEGIN PRIVATE KEY-----\n...contents of the .p8 file...\n-----END PRIVATE KEY-----`}
+            value={apns.privateKeyPem}
+            onChange={(e) => setApns({ ...apns, privateKeyPem: e.target.value })}
+            disabled={!desktop || busy}
+            aria-label="APNs .p8 private key"
+          />
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5 text-xs">
+              <input
+                type="checkbox"
+                checked={apns.production}
+                onChange={(e) => setApns({ ...apns, production: e.target.checked })}
+                disabled={!desktop || busy}
+                aria-label="APNs production environment"
+              />
+              Production environment
+            </label>
+            <Button size="sm" onClick={onSubmitApns} disabled={!desktop || busy}>
+              Save APNs
+            </Button>
+            {status?.apnsConfigured && (
+              <Button size="sm" variant="ghost" onClick={onClearApns} disabled={!desktop || busy}>
+                Clear APNs
+              </Button>
+            )}
+          </div>
+        </div>
       </CardContent>
     </Card>
   )

@@ -574,13 +574,18 @@ pub fn companion_tunnel_stop(state: State<'_, CompanionServerState>) {
 
 /// Install an FCM dispatcher built from a service-account JSON payload.
 /// The JSON is exactly what the Google Cloud Console hands out under
-/// IAM → Service Accounts → Keys → "Create new key" → JSON.
+/// IAM → Service Accounts → Keys → "Create new key" → JSON. Credentials
+/// are persisted via the active `PushCredStore` (keyring on desktop, JSON
+/// file in headless mode) so they survive restarts.
 #[tauri::command]
 pub fn companion_push_configure_fcm(
     service_account_json: String,
 ) -> Result<(), String> {
     let creds: super::dispatchers::FcmServiceAccount = serde_json::from_str(&service_account_json)
         .map_err(|e| format!("invalid FCM service-account JSON: {e}"))?;
+    if let Some(store) = super::push_creds::active() {
+        store.store_fcm(&creds)?;
+    }
     let dispatcher = super::dispatchers::FcmDispatcher::new(creds);
     super::push_dispatchers().set_fcm(dispatcher);
     Ok(())
@@ -595,28 +600,64 @@ pub fn companion_push_configure_apns(
     private_key_pem: String,
     production: bool,
 ) -> Result<(), String> {
-    let creds = super::dispatchers::ApnsCredentials {
+    let persisted = super::push_creds::PersistedApns {
         key_id,
         team_id,
         bundle_id,
         private_key_pem,
         production,
     };
-    let dispatcher = super::dispatchers::ApnsDispatcher::new(creds)?;
+    if let Some(store) = super::push_creds::active() {
+        store.store_apns(&persisted)?;
+    }
+    let dispatcher = super::dispatchers::ApnsDispatcher::new(persisted.clone().into())?;
     super::push_dispatchers().set_apns(dispatcher);
     Ok(())
 }
 
 /// Clear the FCM dispatcher (e.g. after the user rotates credentials).
 #[tauri::command]
-pub fn companion_push_clear_fcm() {
+pub fn companion_push_clear_fcm() -> Result<(), String> {
+    if let Some(store) = super::push_creds::active() {
+        store.clear_fcm()?;
+    }
     super::push_dispatchers().clear_fcm();
+    Ok(())
 }
 
 /// Clear the APNs dispatcher.
 #[tauri::command]
-pub fn companion_push_clear_apns() {
+pub fn companion_push_clear_apns() -> Result<(), String> {
+    if let Some(store) = super::push_creds::active() {
+        store.clear_apns()?;
+    }
     super::push_dispatchers().clear_apns();
+    Ok(())
+}
+
+/// Diagnostics — which providers are currently configured. Used by the
+/// Settings UI to render the "Configured ✓" badges.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushConfigStatus {
+    pub fcm_configured: bool,
+    pub apns_configured: bool,
+}
+
+#[tauri::command]
+pub fn companion_push_status() -> Result<PushConfigStatus, String> {
+    let store = super::push_creds::active();
+    let (fcm, apns) = match store {
+        Some(s) => (
+            s.load_fcm()?.is_some(),
+            s.load_apns()?.is_some(),
+        ),
+        None => (false, false),
+    };
+    Ok(PushConfigStatus {
+        fcm_configured: fcm,
+        apns_configured: apns,
+    })
 }
 
 // ---------------------------------------------------------------------------

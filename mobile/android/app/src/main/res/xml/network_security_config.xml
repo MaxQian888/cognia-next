@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    P0.2 native — Android Network Security Config for the companion API.
+
+    The desktop server terminates HTTPS with a runtime-generated self-signed
+    cert (src-tauri/src/companion_api/tls.rs). The Capacitor WebView's
+    underlying OkHttp stack will reject it by default. This config grants
+    explicit trust to the loopback + the well-known cognia-companion.local
+    SAN so the pinned-fetch (lib/tauri/pinned-fetch.ts) can complete the
+    handshake.
+
+    Strict pinning to a specific cert hash is NOT viable here because the
+    cert is generated at first desktop launch — not known to the mobile
+    build pipeline. Identity is established at the app layer via the
+    QR-encoded fingerprint + P0.3 attestation against /api/v1/whoami.
+
+    See mobile/docs/p0-tls-trust-setup.md for the full security model.
+-->
+<network-security-config>
+    <!-- Loopback + cognia-companion.local: trust user-installed CAs +
+         system CAs. CapacitorHttp's `serverTrustMode: "self-signed"` then
+         accepts the desktop's runtime cert. -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="true">cognia-companion.local</domain>
+        <trust-anchors>
+            <certificates src="user" />
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- Tunnel hosts (trycloudflare.com) use Cloudflare's real PKI — no
+         exception needed. The mobile transport switches `serverTrustMode`
+         to "default" automatically (lib/tauri/pinned-fetch.ts:pickTrustMode). -->
+
+    <!-- LAN IP ranges (192.168.x.y, 10.x.y.z, 172.16.0.0/12) cannot be
+         expressed as domain entries directly. Capacitor's CapacitorHttp
+         plugin handles cert acceptance per-request via the serverTrustMode
+         option, which bypasses Network Security Config for those calls.
+         WebSocket connections to LAN IPs still need this manifest entry
+         applied at the OS level; that's tracked as a follow-up requiring
+         a custom Capacitor WS plugin. -->
+
+    <!-- Production builds: default-deny cleartext. Debug build's manifest
+         (mobile/android/app/src/debug/AndroidManifest.xml) overrides
+         usesCleartextTraffic="true" so dev-server HTTP loads still work. -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
