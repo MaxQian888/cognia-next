@@ -10,9 +10,11 @@ jest.mock("@/lib/tauri", () => ({
 
 const pushMock = jest.fn()
 const pullMock = jest.fn()
+const pushOneMock = jest.fn()
 jest.mock("@/lib/skills/sync", () => ({
   pushAllToNative: () => pushMock(),
   pullAllFromNative: () => pullMock(),
+  pushOneToNative: (id: string) => pushOneMock(id),
 }))
 
 const toastSuccess = jest.fn()
@@ -34,6 +36,7 @@ beforeEach(() => {
   isTauriMock.mockReturnValue(true)
   pushMock.mockReset()
   pullMock.mockReset()
+  pushOneMock.mockReset()
   toastSuccess.mockClear()
   toastInfo.mockClear()
   toastError.mockClear()
@@ -113,6 +116,49 @@ describe("useSkillSync", () => {
       await result.current.pull()
     })
     expect(toastError).toHaveBeenCalledWith("string-failure")
+  })
+
+  it("pushOne short-circuits outside Tauri", async () => {
+    isTauriMock.mockReturnValue(false)
+    const { result } = renderHook(() => useSkillSync())
+    await act(async () => {
+      await result.current.pushOne("skill_1")
+    })
+    expect(toastError).toHaveBeenCalledWith("Sync requires desktop mode.")
+    expect(pushOneMock).not.toHaveBeenCalled()
+  })
+
+  it("pushOne delegates to pushOneToNative and summarises success", async () => {
+    pushOneMock.mockResolvedValueOnce({ pushed: 1, pulled: 0, skipped: 0, errors: [] })
+    const { result } = renderHook(() => useSkillSync())
+    await act(async () => {
+      await result.current.pushOne("skill_1")
+    })
+    expect(pushOneMock).toHaveBeenCalledWith("skill_1")
+    expect(toastSuccess).toHaveBeenCalledWith("1 pushed")
+  })
+
+  it("pushOne surfaces errors via toast.warning", async () => {
+    pushOneMock.mockResolvedValueOnce({
+      pushed: 0,
+      pulled: 0,
+      skipped: 0,
+      errors: [{ name: "Foo", error: "disk full" }],
+    })
+    const { result } = renderHook(() => useSkillSync())
+    await act(async () => {
+      await result.current.pushOne("skill_1")
+    })
+    expect(toastWarning).toHaveBeenCalledWith("1 errored")
+  })
+
+  it("pushOne thrown error toasts the message", async () => {
+    pushOneMock.mockRejectedValueOnce(new Error("network down"))
+    const { result } = renderHook(() => useSkillSync())
+    await act(async () => {
+      await result.current.pushOne("skill_1")
+    })
+    expect(toastError).toHaveBeenCalledWith("network down")
   })
 
   it("busy toggles around the action", async () => {

@@ -3,12 +3,18 @@
 import { useState } from "react"
 import { toast } from "sonner"
 import { isTauri } from "@/lib/tauri"
-import { pullAllFromNative, pushAllToNative, type SyncResult } from "@/lib/skills/sync"
+import {
+  pullAllFromNative,
+  pushAllToNative,
+  pushOneToNative,
+  type SyncResult,
+} from "@/lib/skills/sync"
 
 export interface UseSkillSync {
   busy: boolean
   push: () => Promise<void>
   pull: () => Promise<void>
+  pushOne: (skillId: string) => Promise<void>
 }
 
 export function useSkillSync(): UseSkillSync {
@@ -46,7 +52,23 @@ export function useSkillSync(): UseSkillSync {
     }
   }
 
-  return { busy, push, pull }
+  const pushOne = async (skillId: string) => {
+    if (!isTauri()) {
+      toast.error("Sync requires desktop mode.")
+      return
+    }
+    setBusy(true)
+    try {
+      const result = await pushOneToNative(skillId)
+      summariseSync(result, "push")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return { busy, push, pull, pushOne }
 }
 
 function summariseSync(result: SyncResult, kind: "push" | "pull") {
