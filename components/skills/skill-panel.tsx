@@ -29,6 +29,7 @@ import { SkillEditor } from "./skill-editor"
 import { SkillPanelProvider } from "./skill-panel-context"
 import { SkillMarketplace } from "./skill-marketplace"
 import { SkillAnalytics } from "./skill-analytics"
+import { SkillEditorWorkspace } from "./editor/skill-editor-workspace"
 import { useSkillAi } from "@/hooks/skills"
 import { isTauri } from "@/lib/tauri"
 
@@ -61,7 +62,7 @@ export function SkillPanel({ className }: Props) {
             </>
           )}
           {activeTab === "browse" && <SkillMarketplace />}
-          {activeTab === "editor" && <EditorTabPlaceholder />}
+          {activeTab === "editor" && <SkillEditorWorkspace />}
           {activeTab === "analytics" && <SkillAnalytics />}
         </div>
 
@@ -75,16 +76,7 @@ export function SkillPanel({ className }: Props) {
     </SkillPanelProvider>
   )
 
-  function EditorTabPlaceholder() {
-    return (
-      <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">
-        <div>
-          <p className="font-medium">{t("tabs.editor")}</p>
-          <p className="mt-1 text-xs">{t("panel.editorPlaceholder")}</p>
-        </div>
-      </div>
-    )
-  }
+  void t // Kept to avoid an unused-import lint after the placeholder removal.
 }
 
 /**

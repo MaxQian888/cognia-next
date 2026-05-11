@@ -35,6 +35,7 @@ interface Props {
   onToggleSelect: (id: string) => void
   onOpen: (id: string) => void
   onEdit: (id: string) => void
+  onOpenInEditor?: (id: string) => void
   onDuplicate: (skill: Skill) => void
   onExport: (skill: Skill) => void
   onDelete: (skill: Skill) => void
@@ -47,6 +48,7 @@ export function SkillCard({
   onToggleSelect,
   onOpen,
   onEdit,
+  onOpenInEditor,
   onDuplicate,
   onExport,
   onDelete,
@@ -100,7 +102,10 @@ export function SkillCard({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48 text-xs">
-            <DropdownMenuItem onSelect={() => onEdit(skill.id)} disabled={isBuiltIn}>
+            <DropdownMenuItem
+              onSelect={() => (onOpenInEditor ?? onEdit)(skill.id)}
+              disabled={isBuiltIn}
+            >
               <FileCodeIcon className="mr-2 size-3.5" />
               {t("card.openInEditor")}
             </DropdownMenuItem>
