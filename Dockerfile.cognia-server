@@ -1,0 +1,40 @@
+## Phase D — headless cognia-server binary.
+##
+## Two-stage build: compile the Rust binary in a builder stage, then ship a
+## minimal runtime image with the binary + a Node sidecar layer for the
+## Anthropic agent SDK once that path is wired (placeholder for now).
+##
+## Usage:
+##   docker build -f Dockerfile.cognia-server -t cognia-server .
+##   docker run --rm -v $HOME/cognia-data:/data -p 7890:7890 cognia-server
+##
+## The container expects `/data` to be a writable volume so the SQLite store
+## and the self-signed TLS cert persist across restarts.
+
+FROM rust:1.83-bookworm AS builder
+WORKDIR /work
+COPY src-tauri /work/src-tauri
+WORKDIR /work/src-tauri
+RUN cargo build --release --bin cognia-server
+
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Sidecar Node runtime — added preemptively so the serve subcommand can
+# spawn @anthropic-ai/claude-agent-sdk once the Phase D follow-up wires it.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /work/src-tauri/target/release/cognia-server /usr/local/bin/cognia-server
+
+ENV COGNIA_DATA_DIR=/data
+VOLUME /data
+EXPOSE 7890
+
+ENTRYPOINT ["/usr/local/bin/cognia-server"]
+CMD ["serve", "--port", "7890"]

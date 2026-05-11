@@ -1,5 +1,5 @@
 mod a2ui_bridge;
-mod companion_api;
+pub mod companion_api;
 mod agents;
 mod anthropic_subscription;
 mod api_key;
