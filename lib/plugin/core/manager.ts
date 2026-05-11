@@ -61,6 +61,19 @@ import {
   recordSilentFailure,
 } from "@/lib/plugin/contracts/diagnostics-store"
 import { getBrowserBuiltinRegistry } from "./browser-builtin-registry"
+import {
+  registerMcpServerPreset,
+  unregisterMcpServerPresetsByPlugin,
+} from "@/lib/plugin/registries/mcp-server-preset-registry"
+import {
+  registerNativeAnthropicTool,
+  unregisterNativeAnthropicToolsByPlugin,
+} from "@/lib/plugin/registries/native-anthropic-tool-registry"
+import { registerSkill, unregisterSkillsByPlugin } from "@/lib/plugin/registries/skill-registry"
+import {
+  registerPreset as registerExternalAgentPresetOverlay,
+  unregisterPresetsByPlugin as unregisterExternalAgentPresetsByPlugin,
+} from "@/lib/ai/agent/external/presets"
 
 // =============================================================================
 // Governance mode resolution
@@ -1738,6 +1751,59 @@ export class PluginManager {
         )
       }
     }
+
+    // M1·T5 — Plugin-first Computer Use capability contributions. Each
+    // declarative manifest array writes into the matching §A-3 overlay
+    // registry, tagged with `pluginId` so bulk cleanup in
+    // `unregisterPluginContributions` can drop everything in one call.
+    // Failures are isolated per-entry so a single malformed def can't block
+    // the rest of the plugin's contributions.
+    if (plugin.manifest.mcpServerPresets?.length) {
+      for (const def of plugin.manifest.mcpServerPresets) {
+        try {
+          registerMcpServerPreset(def.id, def, { pluginId })
+        } catch (err) {
+          loggers.manager.warn(
+            `[plugin:${pluginId}] failed to register MCP server preset ${def.id}:`,
+            err
+          )
+        }
+      }
+    }
+    if (plugin.manifest.nativeAnthropicTools?.length) {
+      for (const def of plugin.manifest.nativeAnthropicTools) {
+        try {
+          registerNativeAnthropicTool(def.id, def, { pluginId })
+        } catch (err) {
+          loggers.manager.warn(
+            `[plugin:${pluginId}] failed to register native Anthropic tool ${def.id}:`,
+            err
+          )
+        }
+      }
+    }
+    if (plugin.manifest.skills?.length) {
+      for (const def of plugin.manifest.skills) {
+        try {
+          registerSkill(def.id, def, { pluginId })
+        } catch (err) {
+          loggers.manager.warn(`[plugin:${pluginId}] failed to register skill ${def.id}:`, err)
+        }
+      }
+    }
+    if (plugin.manifest.externalAgentPresets?.length) {
+      for (const def of plugin.manifest.externalAgentPresets) {
+        try {
+          const { id, ...config } = def
+          registerExternalAgentPresetOverlay(id, config, { pluginId })
+        } catch (err) {
+          loggers.manager.warn(
+            `[plugin:${pluginId}] failed to register external-agent preset ${def.id}:`,
+            err
+          )
+        }
+      }
+    }
   }
 
   private async unregisterPluginContributions(pluginId: string): Promise<void> {
@@ -1784,6 +1850,16 @@ export class PluginManager {
     }
 
     await this.unregisterPluginSlashCommands(pluginId)
+
+    // M1·T5 — Bulk-drop Plugin-first Computer Use overlay contributions.
+    // Each registry's `unregister*ByPlugin` is idempotent and returns the
+    // count removed; we don't act on the count here, but a future
+    // diagnostic surface could surface it.
+    unregisterMcpServerPresetsByPlugin(pluginId)
+    unregisterNativeAnthropicToolsByPlugin(pluginId)
+    unregisterSkillsByPlugin(pluginId)
+    unregisterExternalAgentPresetsByPlugin(pluginId)
+
     this.registry.unregisterAll(pluginId)
   }
 

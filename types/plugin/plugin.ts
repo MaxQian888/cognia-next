@@ -1159,6 +1159,22 @@ export interface PluginAgentAPI {
   unregisterMode: (id: string) => void
   executeAgent: (config: Record<string, unknown>) => Promise<unknown>
   cancelAgent: (agentId: string) => void
+  /**
+   * Plugin-first Computer Use plan (M1·T5). The four register*Preset / *Tool
+   * / *Skill methods below are the imperative-style entry points that mirror
+   * `registerTool`. They write into the matching §A-3 overlay registry under
+   * `lib/plugin/registries/`. The plugin manager also wires the declarative
+   * manifest-driven path: anything listed in `manifest.mcpServerPresets` /
+   * `manifest.nativeAnthropicTools` / `manifest.skills` /
+   * `manifest.externalAgentPresets` is registered on plugin enable, and
+   * unregistered in bulk via `unregister*ByPlugin(pluginId)` on disable —
+   * so plugins typically use the declarative form and only reach for these
+   * imperative methods when they need dynamic ids resolved at activate-time.
+   */
+  registerMcpServerPreset: (def: PluginMcpServerPresetDef) => void
+  registerNativeAnthropicTool: (def: PluginNativeAnthropicToolDef) => void
+  registerSkill: (def: PluginSkillDef) => void
+  registerExternalAgentPreset: (def: PluginExternalAgentPresetDef) => void
 }
 
 export interface PluginSettingsAPI {
