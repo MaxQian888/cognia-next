@@ -20,7 +20,7 @@
     "@capacitor/dialog": "^7.0.0",
     "@capacitor/filesystem": "^7.0.0",
     "@capacitor/geolocation": "^7.0.0",
-    "@capacitor/haptics": "^7.0.0",
+    "@capacitor/haptics": "^8.0.2",
     "@capacitor/keyboard": "^7.0.6",
     "@capacitor/local-notifications": "^7.0.0",
     "@capacitor/network": "^7.0.4",
