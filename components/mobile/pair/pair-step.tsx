@@ -22,6 +22,7 @@ import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { scan as scanBarcode } from "@/lib/capacitor/barcode"
 import { decodePairPayload } from "@/lib/qr/pair-payload"
 import { parsePairQrPayload } from "@/lib/qr/pair-qr"
+import { pinnedFetch } from "@/lib/tauri/pinned-fetch"
 import { saveCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
 
 import {
@@ -128,7 +129,10 @@ export function PairStep({
 
     setPhase({ kind: "pairing" })
     try {
-      const response = await fetch(`${trimmedUrl}/api/v1/auth/pair`, {
+      // Use `pinnedFetch` so Capacitor routes through the native HTTP stack
+      // with `serverTrustMode: "self-signed"` — the desktop's TLS cert is
+      // self-signed (M2.9) and browser fetch can't reach it.
+      const response = await pinnedFetch(`${trimmedUrl}/api/v1/auth/pair`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -138,6 +142,7 @@ export function PairStep({
           device_pubkey: "",
           app_version: "0.1.0",
         }),
+        serverFingerprint: serverFingerprint || undefined,
       })
 
       if (!response.ok) {
@@ -149,6 +154,37 @@ export function PairStep({
       }
 
       const body = (await response.json()) as PairResponseBody
+
+      // P0.3 — app-layer fingerprint attestation. After pair redeem, call
+      // /api/v1/whoami and confirm the server reports the same TLS
+      // fingerprint the QR encoded. Catches "connected to the wrong cognia"
+      // and most cert-rotation cases. Not strict TLS pinning — see
+      // mobile/docs/p0-tls-trust-setup.md.
+      if (serverFingerprint) {
+        try {
+          const whoami = await pinnedFetch(`${trimmedUrl}/api/v1/whoami`, {
+            method: "GET",
+            headers: { Authorization: `Bearer ${body.device_jwt}` },
+            serverFingerprint,
+          })
+          if (whoami.ok) {
+            const data = (await whoami.json()) as { tls_fingerprint?: string }
+            const reported = (data.tls_fingerprint ?? "").toLowerCase()
+            const expected = serverFingerprint.toLowerCase()
+            if (reported && reported !== expected) {
+              setPhase({
+                kind: "error",
+                message: `Server identity mismatch (expected ${expected.slice(0, 8)}…, got ${reported.slice(0, 8)}…). Re-pair from the desktop's current QR.`,
+              })
+              return
+            }
+          }
+        } catch {
+          // Attestation is best-effort; a transport hiccup here shouldn't
+          // block pairing because the JWT itself is already redeemed.
+        }
+      }
+
       const config: CompanionConfig = {
         baseUrl: trimmedUrl,
         deviceJwt: body.device_jwt,

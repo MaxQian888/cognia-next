@@ -45,8 +45,22 @@ const config: CapacitorConfig = {
     PushNotifications: {
       presentationOptions: ["badge", "sound", "alert"],
     },
+    // CapacitorHttp (M2.9) — enabled so HTTPS calls to the desktop server's
+    // self-signed cert can go through a native pinned trust path. Server-trust
+    // mode is configured per call via the `serverTrustMode` request option in
+    // `lib/tauri/transport-companion.ts`.
+    //
+    // Pinning policy:
+    //   - LAN (cgnp2|<fingerprint>): we call with `serverTrustMode: "pinned"`
+    //     and provide the SHA-256 SPKI fingerprint from the QR pair payload.
+    //   - Tunnel (Cloudflare-issued cert): standard OS trust chain via
+    //     `serverTrustMode: "default"`.
+    //
+    // TODO(P0.2 native): the Android Network Security Config and iOS Info.plist
+    // need a matching cert hash entry for `serverTrustMode: "pinned"` to take
+    // effect at the platform layer. See mobile/docs/p0-tls-trust-setup.md.
     CapacitorHttp: {
-      enabled: false,
+      enabled: true,
     },
   },
   ios: {

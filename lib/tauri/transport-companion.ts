@@ -2,6 +2,7 @@
 
 import { type CompanionConfig, companionStorage } from "./companion-storage"
 import type { Transport } from "./transport-types"
+import { pinnedFetch } from "./pinned-fetch"
 
 export type { CompanionConfig } from "./companion-storage"
 
@@ -257,11 +258,18 @@ export class CompanionTransport implements Transport {
 
       let response: Response
       try {
-        response = await fetch(url, {
+        // Routed through `pinnedFetch` so Capacitor mobile can use the
+        // native HTTP stack (CapacitorHttp) which knows how to trust the
+        // desktop's self-signed cert. Web / dev builds fall through to
+        // the platform `fetch`. The pinned fingerprint comes from
+        // CompanionConfig.serverFingerprint (set at pair time from the
+        // QR's `cgnp2|<base64>` payload).
+        response = await pinnedFetch(url, {
           method: "POST",
           headers,
           body,
           signal: controller.signal,
+          serverFingerprint: loadCompanionConfig()?.serverFingerprint,
         })
       } catch (err: unknown) {
         clearTimeout(timeoutId)

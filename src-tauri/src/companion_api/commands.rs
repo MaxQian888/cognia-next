@@ -106,7 +106,17 @@ pub async fn companion_server_start(
         push_tokens: Arc::clone(&state.push_tokens),
     });
 
-    state.start(port, bind_loopback_only, shared).await
+    // Load TLS material (M2.9 — every companion-server bind terminates HTTPS).
+    let dir = data_dir(shared.app_handle.as_ref().expect("app_handle present"))
+        .map_err(CompanionServerError::Tls)?;
+    let tls_material = tls::ensure_certificate(&dir)
+        .map_err(|e| CompanionServerError::Tls(e.to_string()))?;
+
+    // Publish the fingerprint so `whoami` (P0.3) can include it in responses
+    // for app-layer attestation against the QR-pinned value.
+    super::set_tls_fingerprint(tls_material.fingerprint_sha256.clone());
+
+    state.start(port, bind_loopback_only, tls_material, shared).await
 }
 
 // ---------------------------------------------------------------------------
@@ -371,6 +381,8 @@ pub async fn companion_issue_pair_jwt(
     let port = state.bound_port().unwrap_or(DEFAULT_PORT);
 
     // URL priority: active tunnel > LAN > loopback fallback.
+    // Local origins use HTTPS (M2.9 self-signed termination); the tunnel URL
+    // is already Cloudflare HTTPS upstream.
     let base_url = if let Some(info) = state.tunnel.current() {
         info.public_url
     } else {
@@ -378,7 +390,7 @@ pub async fn companion_issue_pair_jwt(
             Some(BindMode::Lan) => detect_lan_ip().unwrap_or_else(|| "127.0.0.1".to_string()),
             _ => "127.0.0.1".to_string(),
         };
-        format!("http://{host}:{port}")
+        format!("https://{host}:{port}")
     };
 
     let fingerprint = ensure_tls_fingerprint(&app_handle).unwrap_or_default();
@@ -555,19 +567,19 @@ mod tests {
     #[tokio::test]
     async fn issue_pair_jwt_returns_loopback_when_stopped() {
         // Server is never started → bind_mode is None → loopback fallback.
+        // Post-M2.9 the loopback URL is HTTPS (the desktop server always
+        // terminates TLS, so the same scheme works whether the QR is
+        // scanned by a phone over LAN or shown to a developer pasting it
+        // into a local browser with cert pinning bypass).
         let server_state = CompanionServerState::new();
-        // Simulate the keyring being unavailable in CI by relying on the
-        // generated-on-demand path — `secret::load_or_generate` writes to the
-        // OS keyring in production, but the function may also fail on
-        // headless CI. We tolerate either branch.
         let result = (|| async {
             let port = server_state.bound_port().unwrap_or(DEFAULT_PORT);
             let host = "127.0.0.1".to_string();
-            Ok::<_, String>(format!("http://{host}:{port}"))
+            Ok::<_, String>(format!("https://{host}:{port}"))
         })()
         .await
         .expect("synthesize url");
-        assert!(result.starts_with("http://127.0.0.1:"));
+        assert!(result.starts_with("https://127.0.0.1:"));
         assert!(result.ends_with(&DEFAULT_PORT.to_string()));
     }
 }

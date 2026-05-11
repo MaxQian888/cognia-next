@@ -17,15 +17,26 @@
 //! loopback-only so the pair/issue endpoint is safe before the LAN-bind toggle
 //! lands.
 //!
+//! # TLS (M2.9)
+//!
+//! The server always terminates HTTPS using the self-signed cert from
+//! [`super::tls::ensure_certificate`]. Mobile clients pin the SPKI fingerprint
+//! out-of-band via the QR pair payload, so chain validation is intentionally
+//! bypassed on the client side. Cloudflared tunnel connects to the local
+//! HTTPS origin with `--no-tls-verify` (see [`super::tunnel::launch`]).
+//!
 //! # Graceful shutdown
 //!
-//! Identical pattern to `mcp_server/http_server.rs`: `tokio::sync::watch`
-//! channel; caller sends `()` to drain and exit.
+//! Uses `axum_server::Handle::graceful_shutdown` driven off the same
+//! `tokio::sync::watch` channel the previous plain-HTTP path used. Callers
+//! send `()` to drain and exit.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::time::Duration;
 
 use axum::{middleware::from_fn_with_state, routing::{any, get, post}, Router};
-use super::{rpc, ws};
+use axum_server::tls_rustls::RustlsConfig;
+use super::{rpc, tls::TlsMaterial, ws};
 use tokio::sync::watch;
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -68,6 +79,8 @@ pub enum CompanionServerError {
         #[source]
         source: std::io::Error,
     },
+    #[error("companion TLS config load failed: {0}")]
+    Tls(String),
 }
 
 impl serde::Serialize for CompanionServerError {
@@ -83,17 +96,19 @@ impl serde::Serialize for CompanionServerError {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Spawn the companion axum server and return a [`ServerHandle`].
+/// Spawn the companion axum server with TLS and return a [`ServerHandle`].
 ///
 /// # Arguments
 ///
 /// - `port` — TCP port.  Pass `0` to let the OS choose an ephemeral port
 ///   (useful in tests).
 /// - `bind_loopback_only` — `true` → `127.0.0.1`; `false` → `0.0.0.0`.
+/// - `tls` — TLS material loaded by [`super::tls::ensure_certificate`].
 /// - `state` — shared companion state (secret, redemption LRU, app handle).
 pub async fn spawn_server(
     port: u16,
     bind_loopback_only: bool,
+    tls: TlsMaterial,
     state: SharedState,
 ) -> Result<ServerHandle, CompanionServerError> {
     let ip: IpAddr = if bind_loopback_only {
@@ -103,24 +118,39 @@ pub async fn spawn_server(
     };
     let addr = SocketAddr::new(ip, port);
 
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
+    // Bind synchronously so we can return the ephemeral port before serving.
+    let std_listener = std::net::TcpListener::bind(addr)
         .map_err(|source| CompanionServerError::Bind { addr, source })?;
-
-    let bound_port = listener
+    std_listener
+        .set_nonblocking(true)
+        .map_err(|source| CompanionServerError::Bind { addr, source })?;
+    let bound_port = std_listener
         .local_addr()
         .map_err(|source| CompanionServerError::Bind { addr, source })?
         .port();
 
+    let rustls_config = RustlsConfig::from_pem_file(&tls.cert_pem_path, &tls.key_pem_path)
+        .await
+        .map_err(|e| CompanionServerError::Tls(e.to_string()))?;
+
     let app = build_router(state);
 
+    let server_handle = axum_server::Handle::new();
     let (tx, mut rx) = watch::channel(());
 
+    // Bridge the watch channel to axum-server's graceful_shutdown.
+    let shutdown_target = server_handle.clone();
     tokio::spawn(async move {
-        let result = axum::serve(listener, app.into_make_service())
-            .with_graceful_shutdown(async move {
-                let _ = rx.changed().await;
-            })
+        if rx.changed().await.is_ok() {
+            shutdown_target.graceful_shutdown(Some(Duration::from_secs(10)));
+        }
+    });
+
+    let serve_handle = server_handle.clone();
+    tokio::spawn(async move {
+        let result = axum_server::from_tcp_rustls(std_listener, rustls_config)
+            .handle(serve_handle)
+            .serve(app.into_make_service())
             .await;
 
         if let Err(e) = result {
@@ -187,9 +217,10 @@ pub fn build_router(state: SharedState) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::companion_api::{redemption_lru::RedemptionLru, CompanionState};
+    use crate::companion_api::{redemption_lru::RedemptionLru, tls, CompanionState};
     use parking_lot::RwLock;
     use std::sync::Arc;
+    use tempfile::TempDir;
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
 
@@ -218,12 +249,28 @@ mod tests {
         })
     }
 
+    /// Generate a fresh TLS cert in a tempdir for tests. Returns the tempdir
+    /// so the caller keeps it alive for the duration of the test.
+    fn test_tls() -> (TempDir, TlsMaterial) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mat = tls::ensure_certificate(tmp.path()).expect("ensure_certificate");
+        (tmp, mat)
+    }
+
+    fn insecure_client() -> reqwest::Client {
+        reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .expect("reqwest client")
+    }
+
     // ── Smoke: spawn + immediate shutdown ────────────────────────────────
 
     #[tokio::test]
     async fn spawn_and_shutdown_loopback() {
         let state = test_state();
-        let handle = spawn_server(0, true, state)
+        let (_tmp, tls_mat) = test_tls();
+        let handle = spawn_server(0, true, tls_mat, state)
             .await
             .expect("spawn on ephemeral port");
         assert!(handle.bound_port > 0);
@@ -234,19 +281,45 @@ mod tests {
     #[tokio::test]
     async fn spawn_and_shutdown_unspecified() {
         let state = test_state();
-        let handle = spawn_server(0, false, state)
+        let (_tmp, tls_mat) = test_tls();
+        let handle = spawn_server(0, false, tls_mat, state)
             .await
             .expect("spawn on ephemeral port");
         assert!(handle.bound_port > 0);
         let _ = handle.shutdown.send(());
     }
 
-    // ── HTTP smoke via reqwest ────────────────────────────────────────────
+    // ── HTTPS smoke via reqwest with cert pinning bypass ──────────────────
 
     #[tokio::test]
     async fn issue_reachable_after_spawn() {
         let state = test_state();
-        let handle = spawn_server(0, true, state)
+        let (_tmp, tls_mat) = test_tls();
+        let handle = spawn_server(0, true, tls_mat, state)
+            .await
+            .expect("spawn");
+
+        let url = format!(
+            "https://127.0.0.1:{}/api/v1/auth/pair/issue",
+            handle.bound_port
+        );
+        let client = insecure_client();
+        let resp = client
+            .post(&url)
+            .send()
+            .await
+            .expect("POST /api/v1/auth/pair/issue over HTTPS");
+        assert_eq!(resp.status().as_u16(), 200);
+
+        let _ = handle.shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn https_rejects_plain_http_clients() {
+        // Verify the listener is actually HTTPS — a plain HTTP request must fail.
+        let state = test_state();
+        let (_tmp, tls_mat) = test_tls();
+        let handle = spawn_server(0, true, tls_mat, state)
             .await
             .expect("spawn");
 
@@ -255,12 +328,12 @@ mod tests {
             handle.bound_port
         );
         let client = reqwest::Client::new();
-        let resp = client
+        let result = client
             .post(&url)
+            .timeout(Duration::from_secs(2))
             .send()
-            .await
-            .expect("POST /api/v1/auth/pair/issue");
-        assert_eq!(resp.status().as_u16(), 200);
+            .await;
+        assert!(result.is_err(), "plain HTTP must not succeed against HTTPS listener");
 
         let _ = handle.shutdown.send(());
     }

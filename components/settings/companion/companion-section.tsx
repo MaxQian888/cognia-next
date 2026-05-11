@@ -185,7 +185,7 @@ function TunnelCard() {
       setBusy(true)
       try {
         if (enabled) {
-          const next = await startTunnel(`http://127.0.0.1:${DEFAULT_PORT}`)
+          const next = await startTunnel(`https://127.0.0.1:${DEFAULT_PORT}`)
           setInfo(next)
           toast.success(t("started"))
         } else {
@@ -462,13 +462,13 @@ function ServerStatusCard() {
         </div>
         {lanWarning && (
           <div
-            role="alert"
-            className="flex items-start gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+            role="status"
+            className="flex items-start gap-2 rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300"
           >
             <ShieldAlertIcon className="h-3.5 w-3.5 shrink-0" />
             <span>
-              Plain HTTP is in use — only enable LAN binding on trusted Wi-Fi. TLS will land in
-              M2.9.
+              Self-signed HTTPS is active. The mobile client pins the cert fingerprint encoded in
+              the QR; a server cert rotation requires re-pairing.
             </span>
           </div>
         )}

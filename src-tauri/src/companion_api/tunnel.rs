@@ -76,13 +76,21 @@ impl TunnelHandle {
 /// Launch `cloudflared tunnel --url <local_url>`. Returns a handle once the
 /// process is spawned. Call `wait_for_url` to block until the trycloudflare
 /// URL appears in stderr.
+///
+/// Since M2.9 the local companion server terminates HTTPS with a self-signed
+/// cert, so `--no-tls-verify` is passed to cloudflared whenever the origin
+/// URL is HTTPS. Cloudflare still terminates HTTPS upstream with its own
+/// real cert; the flag only affects the local origin hop.
 pub async fn launch(local_url: &str) -> Result<Arc<TunnelHandle>, TunnelError> {
     let mut cmd = Command::new("cloudflared");
     cmd.arg("tunnel")
         .arg("--no-autoupdate")
         .arg("--url")
-        .arg(local_url)
-        .stdout(Stdio::piped())
+        .arg(local_url);
+    if local_url.starts_with("https://") {
+        cmd.arg("--no-tls-verify");
+    }
+    cmd.stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 

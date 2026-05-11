@@ -125,6 +125,21 @@ pub struct CompanionState {
     pub push_tokens: Arc<push::PushTokenRegistry>,
 }
 
+/// SHA-256 SPKI fingerprint of the server's TLS cert (M2.9). Stored as a
+/// process-wide value rather than a field on `CompanionState` so the many
+/// test constructors of `CompanionState` aren't forced to pass a value.
+/// Set at server start by [`commands::companion_server_start`] from the
+/// loaded `TlsMaterial`; returned in `/api/v1/whoami` (P0.3).
+static TLS_FINGERPRINT: parking_lot::RwLock<String> = parking_lot::RwLock::new(String::new());
+
+pub fn set_tls_fingerprint(fp: String) {
+    *TLS_FINGERPRINT.write() = fp;
+}
+
+pub fn tls_fingerprint() -> String {
+    TLS_FINGERPRINT.read().clone()
+}
+
 // ---------------------------------------------------------------------------
 // Orchestrator state (Tauri-managed)
 // ---------------------------------------------------------------------------
@@ -235,6 +250,7 @@ impl CompanionServerState {
         &self,
         port: u16,
         bind_loopback_only: bool,
+        tls: tls::TlsMaterial,
         state: SharedState,
     ) -> Result<u16, server::CompanionServerError> {
         {
@@ -246,7 +262,7 @@ impl CompanionServerState {
                 }
             }
         }
-        let handle = server::spawn_server(port, bind_loopback_only, state).await?;
+        let handle = server::spawn_server(port, bind_loopback_only, tls, state).await?;
         let bound_port = handle.bound_port;
         let mode = if bind_loopback_only {
             BindMode::Loopback
@@ -309,6 +325,7 @@ impl Default for CompanionServerState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     fn test_shared_state() -> SharedState {
         Arc::new(CompanionState {
@@ -327,6 +344,12 @@ mod tests {
         })
     }
 
+    fn test_tls() -> (TempDir, tls::TlsMaterial) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mat = tls::ensure_certificate(tmp.path()).expect("ensure_certificate");
+        (tmp, mat)
+    }
+
     #[test]
     fn new_state_is_not_running() {
         let state = CompanionServerState::new();
@@ -338,9 +361,10 @@ mod tests {
     async fn start_stop_round_trip() {
         let server_state = CompanionServerState::new();
         let shared = test_shared_state();
+        let (_tmp, tls_mat) = test_tls();
 
         let port = server_state
-            .start(0, true, shared)
+            .start(0, true, tls_mat, shared)
             .await
             .expect("start");
         assert!(port > 0);
@@ -358,8 +382,9 @@ mod tests {
     async fn lan_bind_records_lan_mode() {
         let server_state = CompanionServerState::new();
         let shared = test_shared_state();
+        let (_tmp, tls_mat) = test_tls();
 
-        let _ = server_state.start(0, false, shared).await.expect("start");
+        let _ = server_state.start(0, false, tls_mat, shared).await.expect("start");
         assert_eq!(server_state.bind_mode(), Some(BindMode::Lan));
 
         server_state.stop();
@@ -371,9 +396,11 @@ mod tests {
         let server_state = CompanionServerState::new();
         let shared1 = test_shared_state();
         let shared2 = test_shared_state();
+        let (_tmp1, tls1) = test_tls();
+        let (_tmp2, tls2) = test_tls();
 
-        let port1 = server_state.start(0, true, shared1).await.expect("start");
-        let port2 = server_state.start(0, true, shared2).await.expect("second start");
+        let port1 = server_state.start(0, true, tls1, shared1).await.expect("start");
+        let port2 = server_state.start(0, true, tls2, shared2).await.expect("second start");
         assert_eq!(port1, port2, "second start must return same port");
 
         server_state.stop();
