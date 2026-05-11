@@ -3966,7 +3966,14 @@
       "validation": "校验",
       "errorRequired": "该字段必填。",
       "errorTooLong": "过长（最大 {max}）。",
-      "errorEmpty": "技能内容不能为空。"
+      "errorEmpty": "技能内容不能为空。",
+      "closeTab": "关闭 {path}",
+      "emptyPickSkill": "从左侧选择一个技能开始编辑。",
+      "closeDirtyConfirm": "该文件有未保存改动。仍然关闭吗？",
+      "unsaved": "● 未保存",
+      "saved": "已保存",
+      "panelValidation": "验证",
+      "savedAll": "已全部保存。"
     },
     "ai": {
       "buttonLabel": "AI 协助",

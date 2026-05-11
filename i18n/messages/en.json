@@ -3966,7 +3966,14 @@
       "validation": "Validation",
       "errorRequired": "This field is required.",
       "errorTooLong": "Too long (max {max}).",
-      "errorEmpty": "Skill content cannot be empty."
+      "errorEmpty": "Skill content cannot be empty.",
+      "closeTab": "Close {path}",
+      "emptyPickSkill": "Pick a skill from the list to start editing.",
+      "closeDirtyConfirm": "This file has unsaved changes. Close anyway?",
+      "unsaved": "● unsaved",
+      "saved": "saved",
+      "panelValidation": "Validation",
+      "savedAll": "All saved."
     },
     "ai": {
       "buttonLabel": "AI assist",
