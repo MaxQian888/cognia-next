@@ -14,7 +14,7 @@ import {
   type NativeSkill,
   type NativeSkillResource,
 } from "@/lib/claude/ipc"
-import { bulkImportSkills, listSkills, updateSkill } from "@/lib/db/skills"
+import { bulkImportSkills, getSkill, listSkills, updateSkill } from "@/lib/db/skills"
 import {
   listResourcesForSkill,
   replaceResourcesForSkill,
@@ -107,6 +107,56 @@ function fromNativeResources(
 }
 
 /**
+ * Push a single skill to ~/.claude/skills/. Mirrors `pushAllToNative`'s loop
+ * body, returning the same SyncResult envelope so callers (per-card UI
+ * buttons + the batch caller) can compose results identically.
+ *
+ * Built-ins are skipped (returns skipped=1). Web-mode returns an "(env)" error.
+ */
+export async function pushOneToNative(skillId: string): Promise<SyncResult> {
+  const result: SyncResult = { pushed: 0, pulled: 0, skipped: 0, errors: [] }
+  if (!isTauri()) {
+    return { ...result, errors: [{ name: "(env)", error: "Desktop only." }] }
+  }
+  const skill = await getSkill(skillId)
+  if (!skill) {
+    return { ...result, errors: [{ name: skillId, error: "Skill not found." }] }
+  }
+  if (skill.isBuiltIn || (skill.source ?? "custom") === "builtin") {
+    return { ...result, skipped: 1 }
+  }
+  try {
+    const resources = await listResourcesForSkill(skill.id)
+    const dirName = skill.nativeDirectory
+      ? skill.nativeDirectory.split(/[\\/]/).pop() || slug(skill.name)
+      : slug(skill.name)
+    const request: InstallSkillRequest = {
+      dirName,
+      content: serializeSkill(skill),
+      resources: toNativeResources(resources),
+      clean: true,
+    }
+    const response = await skillsInstallNative(request)
+    const fp = await fingerprint(skill, resources)
+    await updateSkill(skill.id, {
+      nativeDirectory: response.directory,
+      syncOrigin: "frontend",
+      syncFingerprint: fp,
+      lastSyncedAt: Date.now(),
+      lastSyncError: null,
+    })
+    return { ...result, pushed: 1 }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    await updateSkill(skill.id, {
+      lastSyncError: message,
+      lastSyncedAt: Date.now(),
+    })
+    return { ...result, errors: [{ name: skill.name, error: message }] }
+  }
+}
+
+/**
  * Push every Dexie skill (excluding built-ins) to ~/.claude/skills/. Updates
  * each row's `nativeDirectory`, `syncFingerprint`, `lastSyncedAt`. Built-ins
  * are skipped because they're not user-edited content.
@@ -118,39 +168,10 @@ export async function pushAllToNative(): Promise<SyncResult> {
   }
   const all = await listSkills()
   for (const skill of all) {
-    if (skill.isBuiltIn || (skill.source ?? "custom") === "builtin") {
-      result.skipped += 1
-      continue
-    }
-    try {
-      const resources = await listResourcesForSkill(skill.id)
-      const dirName = skill.nativeDirectory
-        ? skill.nativeDirectory.split(/[\\/]/).pop() || slug(skill.name)
-        : slug(skill.name)
-      const request: InstallSkillRequest = {
-        dirName,
-        content: serializeSkill(skill),
-        resources: toNativeResources(resources),
-        clean: true,
-      }
-      const response = await skillsInstallNative(request)
-      const fp = await fingerprint(skill, resources)
-      await updateSkill(skill.id, {
-        nativeDirectory: response.directory,
-        syncOrigin: "frontend",
-        syncFingerprint: fp,
-        lastSyncedAt: Date.now(),
-        lastSyncError: null,
-      })
-      result.pushed += 1
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      await updateSkill(skill.id, {
-        lastSyncError: message,
-        lastSyncedAt: Date.now(),
-      })
-      result.errors.push({ name: skill.name, error: message })
-    }
+    const one = await pushOneToNative(skill.id)
+    result.pushed += one.pushed
+    result.skipped += one.skipped
+    result.errors.push(...one.errors)
   }
   return result
 }
