@@ -1,0 +1,26 @@
+{
+  "id": "cognia-e2b-sandbox",
+  "name": "E2B Sandbox",
+  "version": "0.1.0",
+  "description": "Run code in ephemeral Firecracker microVM sandboxes via E2B — useful for safe Computer Use isolation, code interpretation, and untrusted execution.",
+  "type": "frontend",
+  "capabilities": ["mcp-server-preset", "commands"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": [],
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "blocked",
+      "hint": "Requires npx to spawn @e2b/mcp-server — desktop only."
+    },
+    "desktop": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  }
+}

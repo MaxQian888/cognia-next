@@ -1,0 +1,26 @@
+{
+  "id": "cognia-stagehand-mcp",
+  "name": "Stagehand Browser",
+  "version": "0.1.0",
+  "description": "AI-native browser automation via Browserbase Stagehand — act/extract/observe/agent primitives over a managed Chromium runtime.",
+  "type": "frontend",
+  "capabilities": ["mcp-server-preset", "commands"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": [],
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "blocked",
+      "hint": "Requires npx to spawn @browserbasehq/mcp-stagehand — desktop only."
+    },
+    "desktop": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  }
+}
