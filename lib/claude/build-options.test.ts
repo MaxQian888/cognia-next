@@ -203,6 +203,43 @@ describe("resolveSendOptions — character + skills", () => {
     expect(mRecordUsage).not.toHaveBeenCalled()
   })
 
+  it("unions ephemeralSkillIds with character.skillIds and de-dupes", async () => {
+    const ch = makeChar({ id: "c1", skillIds: ["sk1"] })
+    mListSkills.mockResolvedValueOnce([
+      { id: "sk1", name: "S1", content: "body1" } as unknown as Skill,
+      { id: "sk2", name: "S2", content: "body2" } as unknown as Skill,
+    ])
+    mRender.mockReturnValueOnce("rendered")
+    await resolveSendOptions({ character: ch, ephemeralSkillIds: ["sk1", "sk2"] })
+    // Character + ephemeral merged, de-duped — sk1 appears once.
+    expect(mListSkills).toHaveBeenCalledWith(["sk1", "sk2"])
+  })
+
+  it("respects session-disable list against ephemeral skills too", async () => {
+    const ch = makeChar({ id: "c1" })
+    mListSkills.mockResolvedValueOnce([
+      { id: "sk2", name: "S2", content: "body" } as unknown as Skill,
+    ])
+    mRender.mockReturnValueOnce("rendered")
+    await resolveSendOptions({
+      character: ch,
+      ephemeralSkillIds: ["sk1", "sk2"],
+      session: makeSession({ id: "s1", disabledSkillIds: ["sk1"] }),
+    })
+    expect(mListSkills).toHaveBeenCalledWith(["sk2"])
+  })
+
+  it("calls recordSkillUsage on the merged ephemeral + character set", async () => {
+    const ch = makeChar({ id: "c1", skillIds: ["sk1"] })
+    mListSkills.mockResolvedValueOnce([
+      { id: "sk1", name: "A", content: "x" } as unknown as Skill,
+      { id: "sk2", name: "B", content: "y" } as unknown as Skill,
+    ])
+    mRender.mockReturnValueOnce("rendered")
+    await resolveSendOptions({ character: ch, ephemeralSkillIds: ["sk2"] })
+    expect(mRecordUsage).toHaveBeenCalledWith(["sk1", "sk2"])
+  })
+
   it("union-merges allowed tools across character + skills + active mode", async () => {
     const ch = makeChar({ id: "c1", allowedTools: ["A", "B"] })
     mListSkills.mockResolvedValueOnce([
