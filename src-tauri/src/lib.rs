@@ -200,7 +200,9 @@ pub fn run() {
         )))
         .manage(remote_control::RemoteControlState::new())
         .manage(mcp_server::McpServerState::new())
-        .manage(companion_api::CompanionServerState::new())
+        .manage(companion_api::CompanionServerState::with_data_dir(
+            dirs::data_dir(),
+        ))
         .manage(external_agent::commands::ExternalAgentState::default())
         .manage(external_agent::commands::AcpTerminalState::default())
         .manage(scheduler::SchedulerState::new(
@@ -359,6 +361,10 @@ pub fn run() {
             companion_api::commands::companion_tunnel_start,
             companion_api::commands::companion_tunnel_stop,
             companion_api::commands::companion_tunnel_current,
+            companion_api::commands::companion_push_configure_fcm,
+            companion_api::commands::companion_push_configure_apns,
+            companion_api::commands::companion_push_clear_fcm,
+            companion_api::commands::companion_push_clear_apns,
             proxy_config::commands::proxy_set,
             proxy_config::commands::proxy_get_active,
             proxy_config::commands::proxy_detect,

@@ -299,6 +299,50 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     register_tauri_event(app, Arc::clone(&bus), "companion://device-paired");
     // Heartbeat / presence signal emitted by the JWT middleware on each request.
     register_tauri_event(app, bus, "companion://device-seen");
+    // Phase B4 — push fan-out for events worth notifying about while the
+    // phone is offline (WS not subscribed).
+    register_push_trigger(app, "claude://message-added");
+}
+
+/// Subscribe to `channel` and, on each emit, broadcast a push payload to
+/// every registered device whose WebSocket isn't currently open. No-op when
+/// no push dispatchers are configured.
+fn register_push_trigger(app: &tauri::AppHandle, channel: &'static str) {
+    use tauri::Listener as _;
+    let app_clone = app.clone();
+    app.listen(channel, move |event| {
+        let raw = event.payload().to_string();
+        let app2 = app_clone.clone();
+        let channel_name = channel.to_string();
+        tauri::async_runtime::spawn(async move {
+            // Probe Tauri-managed state for the registry; absent in tests.
+            let Some(state) = app2.try_state::<super::CompanionServerState>() else {
+                return;
+            };
+            let registry = std::sync::Arc::clone(&state.push_tokens);
+            let dispatchers = super::push_dispatchers();
+
+            let data: serde_json::Map<String, serde_json::Value> =
+                serde_json::from_str(&raw)
+                    .ok()
+                    .and_then(|v: serde_json::Value| v.as_object().cloned())
+                    .unwrap_or_default();
+            let payload = super::push::PushPayload {
+                title: Some("cognia".into()),
+                body: Some(channel_name.replace("claude://", "")),
+                data,
+            };
+
+            for provider in [
+                super::push::PushProvider::Fcm,
+                super::push::PushProvider::Apns,
+            ] {
+                if let Some(d) = dispatchers.for_provider(provider) {
+                    let _ = registry.broadcast_to_offline(&payload, d.as_ref()).await;
+                }
+            }
+        });
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -522,6 +566,57 @@ pub async fn companion_tunnel_start(
 #[tauri::command]
 pub fn companion_tunnel_stop(state: State<'_, CompanionServerState>) {
     state.tunnel.stop();
+}
+
+// ---------------------------------------------------------------------------
+// Push delivery configuration (Phase B2 / B3)
+// ---------------------------------------------------------------------------
+
+/// Install an FCM dispatcher built from a service-account JSON payload.
+/// The JSON is exactly what the Google Cloud Console hands out under
+/// IAM → Service Accounts → Keys → "Create new key" → JSON.
+#[tauri::command]
+pub fn companion_push_configure_fcm(
+    service_account_json: String,
+) -> Result<(), String> {
+    let creds: super::dispatchers::FcmServiceAccount = serde_json::from_str(&service_account_json)
+        .map_err(|e| format!("invalid FCM service-account JSON: {e}"))?;
+    let dispatcher = super::dispatchers::FcmDispatcher::new(creds);
+    super::push_dispatchers().set_fcm(dispatcher);
+    Ok(())
+}
+
+/// Install an APNs dispatcher from key + identifier inputs.
+#[tauri::command]
+pub fn companion_push_configure_apns(
+    key_id: String,
+    team_id: String,
+    bundle_id: String,
+    private_key_pem: String,
+    production: bool,
+) -> Result<(), String> {
+    let creds = super::dispatchers::ApnsCredentials {
+        key_id,
+        team_id,
+        bundle_id,
+        private_key_pem,
+        production,
+    };
+    let dispatcher = super::dispatchers::ApnsDispatcher::new(creds)?;
+    super::push_dispatchers().set_apns(dispatcher);
+    Ok(())
+}
+
+/// Clear the FCM dispatcher (e.g. after the user rotates credentials).
+#[tauri::command]
+pub fn companion_push_clear_fcm() {
+    super::push_dispatchers().clear_fcm();
+}
+
+/// Clear the APNs dispatcher.
+#[tauri::command]
+pub fn companion_push_clear_apns() {
+    super::push_dispatchers().clear_apns();
 }
 
 /// Return the active tunnel info, or null when no tunnel is running.

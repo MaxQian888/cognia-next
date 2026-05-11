@@ -32,6 +32,7 @@ pub mod auth;
 pub mod deny_list;
 pub mod desktop_messages_bridge;
 pub mod desktop_writes_bridge;
+pub mod dispatchers;
 pub mod event_bus;
 pub mod idempotency;
 pub mod jwt;
@@ -123,6 +124,17 @@ pub struct CompanionState {
     /// dispatcher when the desktop emits an event for a phone that has
     /// no live WebSocket subscription.
     pub push_tokens: Arc<push::PushTokenRegistry>,
+}
+
+/// Currently configured push dispatchers (Phase B2). Process-wide singleton
+/// (mirrors `TLS_FINGERPRINT`) so the many test constructors of
+/// `CompanionState` aren't forced to pass it. Populated via the
+/// `companion_push_configure_{fcm,apns}` Tauri commands.
+static PUSH_DISPATCHERS: once_cell::sync::Lazy<Arc<push::DispatcherSet>> =
+    once_cell::sync::Lazy::new(push::DispatcherSet::new);
+
+pub fn push_dispatchers() -> Arc<push::DispatcherSet> {
+    Arc::clone(&PUSH_DISPATCHERS)
 }
 
 /// SHA-256 SPKI fingerprint of the server's TLS cert (M2.9). Stored as a
@@ -217,6 +229,23 @@ pub enum BindMode {
 
 impl CompanionServerState {
     pub fn new() -> Self {
+        Self::new_with(None)
+    }
+
+    /// Construct the long-lived state with persistent push-token storage at
+    /// `<data_dir>/cognia/companion/push-tokens.json` (Phase B1). Mirrors the
+    /// pattern used by `vector::VectorState::new` and the scheduler — a
+    /// data-dir path threaded from `lib.rs::run()` at boot.
+    #[allow(dead_code)] // wired from lib.rs::run.
+    pub fn with_data_dir(data_dir: Option<std::path::PathBuf>) -> Self {
+        Self::new_with(data_dir)
+    }
+
+    fn new_with(data_dir: Option<std::path::PathBuf>) -> Self {
+        let push_tokens = match data_dir.as_deref() {
+            Some(dir) => push::PushTokenRegistry::with_persistence(dir),
+            None => push::PushTokenRegistry::new(),
+        };
         Self {
             inner: Mutex::new(CompanionServerInner {
                 handle: None,
@@ -229,7 +258,7 @@ impl CompanionServerState {
             desktop_writes_bridge: desktop_writes_bridge::DesktopWritesBridge::new(),
             sync_registry: sync_registry::SyncTableRegistry::with_defaults(),
             rate_limiter: rate_limit::RateLimiter::with_defaults(),
-            push_tokens: push::PushTokenRegistry::new(),
+            push_tokens,
             mdns: mdns::BroadcasterState::new(),
             tunnel: tunnel::TunnelState::new(),
         }
