@@ -14,3 +14,4 @@ export {
   type UseSkillMarketplace,
 } from "./use-skill-marketplace"
 export { useSkillSync, type UseSkillSync } from "./use-skill-sync"
+export { useSkillValidation } from "./use-skill-validation"
