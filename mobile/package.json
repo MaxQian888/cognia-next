@@ -26,7 +26,7 @@
     "@capacitor/network": "^7.0.4",
     "@capacitor/preferences": "^7.0.4",
     "@capacitor/push-notifications": "^7.0.6",
-    "@capacitor/screen-orientation": "^7.0.0",
+    "@capacitor/screen-orientation": "^8.0.1",
     "@capacitor/share": "^7.0.0",
     "@capacitor/splash-screen": "^7.0.0",
     "@capacitor/status-bar": "^7.0.0",
