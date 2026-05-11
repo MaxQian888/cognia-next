@@ -8,16 +8,17 @@ description: 跨平台调度器，把任务从应用内 cron 提升到原生 OS 
 <Status variant="stable" />
 
 <TLDR>
-  双层调度器 —— 应用内 cron 循环负责"只在 Cognia 打开时才需要跑"的任务，
-  原生提升路径把选中的任务镜像到 Windows Task Scheduler / launchd / systemd， 应用关闭时也能触发。
+  双层调度器 —— 应用内 cron 循环负责"只在 Cognia
+  打开时才需要跑"的任务，原生提升路径把选中的任务镜像到 Windows Task Scheduler / launchd /
+  systemd，应用关闭时也能触发。 内置 9 个 executor，并支持运行时注册自定义 executor。
 </TLDR>
 
 <StatGrid>
   <Stat label="trigger 类型" value="4" hint="cron · interval · once · event" />
   <Stat
     label="内置 executor"
-    value="6"
-    hint="claude-send · shell · script · backup · twin · plugin"
+    value="9"
+    hint="chat · agent · skill · external-agent · script · plugin · backup · twin · custom"
   />
   <Stat label="原生平台" value="3" hint="Windows · macOS · Linux" />
   <Stat label="历史上限" value="200" hint="每任务" />
@@ -34,10 +35,10 @@ Cognia 自带的调度器子系统跑在两层：
 
 ## 代码位置
 
-```
+```text title="lib/scheduler/ + src-tauri/src/scheduler/"
 lib/scheduler/
   index.ts                       # 公共 API
-  task-scheduler.ts              # 核心调度循环
+  task-scheduler.ts              # 核心调度循环 + registerTaskExecutor
   scheduler-db.ts                # Dexie 表（jobs、history）
   cron-parser.ts                 # 5/6 字段 cron 表达式
   trigger-normalizer.ts          # UI 输入 → cron / interval / once
@@ -51,7 +52,10 @@ lib/scheduler/
   notification-integration.ts    # 成功 / 失败通知
   event-integration.ts
   script-executor.ts             # 安全执行用户脚本
-  executors/                     # 内置执行器实现
+  executors/index.ts             # 注册全部内置 executor
+  executors/backup-executor.ts   # 加密备份产出
+  executors/twin-executor.ts     # 孪生 ingest / distill
+  executors/plugin-executor.ts   # 触发插件任务
 
 src-tauri/src/scheduler/
   mod.rs
@@ -80,9 +84,14 @@ app/scheduler/                   # 工作台路由
       type: "Trigger",
       required: true,
     },
-    executor: {
-      description: "做什么 —— 判别联合（见下）。",
-      type: "Executor",
+    type: {
+      description: "选择哪个 executor —— 字符串标签，由注册表解析。",
+      type: "string",
+      required: true,
+    },
+    payload: {
+      description: "executor 自定义参数（按 type 形态各异）。",
+      type: "Record<string, unknown>",
       required: true,
     },
     enabled: {
@@ -100,26 +109,17 @@ app/scheduler/                   # 工作台路由
   }}
 />
 
-`Trigger` 与 `Executor` 形态：
+`Trigger` 形态：
 
-```ts
+```ts title="types/scheduler/"
 type Trigger =
   | { type: "cron"; expression: string; timezone?: string }
   | { type: "interval"; everyMs: number }
   | { type: "once"; runAt: string }
   | { type: "event"; eventName: string }
-
-type Executor =
-  | { type: "claude-send"; characterId: string; messageTemplate: string }
-  | { type: "shell"; command: string; cwd?: string }
-  | { type: "script"; language: "js"; code: string }
-  | { type: "backup"; folder: string }
-  | { type: "twin-ingest"; sourceId: string }
-  | { type: "twin-distill"; twinId: string }
-  | { type: "plugin"; pluginId: string; jobId: string }
 ```
 
-完整类型在 `lib/scheduler/`。增加新执行器 = 增加判别联合分支 + 在 `executors/` 加实现。
+`type` 字段是字符串而非枚举：内置 executor 注册了固定标签（见下），用户也能通过 `registerTaskExecutor("custom-<name>", fn)` 在运行时注册新标签。
 
 ## Cron 解析器
 
@@ -149,13 +149,13 @@ flowchart TB
   WIN --> CLI[cognia.exe --task task-id]
   MAC --> CLI
   LIN --> CLI
-  CLI --> Exec((执行器))
+  CLI --> Exec((executor))
 
   classDef task fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
   classDef inApp fill:#064e3b,stroke:#10b981,color:#a7f3d0
   classDef native fill:#7c2d12,stroke:#fb923c,color:#fed7aa
   classDef platform fill:#312e81,stroke:#818cf8,color:#e0e7ff
-  classDef terminal fill:#0f172a,stroke:#475569,color:#cbd5e1
+  classDef terminal fill:#1e293b,stroke:#475569,color:#e2e8f0
   class T task
   class InApp,InAppNote inApp
   class Native native
@@ -187,31 +187,50 @@ flowchart TB
 
 工作台的"AI 创建"面板使用这一能力。
 
-## 执行器
+## 内置 executor
 
-内置执行器：
+`lib/scheduler/executors/index.ts` 中的 `registerBuiltInExecutors()` 注册下表全部 9 个内置 executor。所有的 chat 类（chat / agent / skill）都通过同一份 `resolveSendOptions` 流水线，复用交互式 Composer 使用的角色 / agent mode / 技能 / 工具 / MCP / 内置工具配置 —— 调度任务跑出的提示词与人工发送的语义完全一致。
 
-| 执行器                         | 位置                                                                                                    |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `claude-send`                  | `executors/claude-send.ts` —— 通过 `claude_send` 发模板化消息                                           |
-| `shell`                        | `executors/shell.ts` → `lib/native/local-runtime.ts` → `src-tauri/src/shell.rs`；受信任工作区白名单守护 |
-| `script`                       | `executors/script.ts` → `script-executor.ts`（`lib/sandbox/` 沙箱化 JS）                                |
-| `backup`                       | `executors/backup.ts` —— 调 `lib/data/build-package` + 加密                                             |
-| `twin-ingest` / `twin-distill` | `executors/twin-*.ts` —— 入队孪生 worker                                                                |
-| `plugin`                       | `executors/plugin.ts` —— 触发插件的定时任务（见 [插件系统](./plugin-system)）                           |
+| executor 标签    | 用途                                                  | 关键依赖                                                                      |
+| ---------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `chat`           | 跑一次普通的 Claude 会话（无绑定角色）                | `lib/claude/ipc.sendPrompt` + `resolveSendOptions`                            |
+| `agent`          | chat + 绑定的角色（"agent persona"）                  | 同上 + `characterId`                                                          |
+| `skill`          | chat + 一项临时技能叠加                               | 同上 + 单次技能注入                                                           |
+| `external-agent` | 把任务派给 ACP 外部 agent（Claude Desktop、Cursor……） | `lib/ai/agent/external/manager.executeOnExternalAgent`                        |
+| `script`         | 通过受信任工作区跑用户脚本                            | `lib/scheduler/script-executor.ts` → `shell_exec`（`src-tauri/src/shell.rs`） |
+| `plugin`         | 触发插件注册的定时任务                                | `executors/plugin-executor.ts`（见[插件系统](./plugin-system)）               |
+| `backup`         | 构建 + 加密一份备份并写入 `appDataDir()/backups/`     | `executors/backup-executor.ts` + `lib/data/build-package`                     |
+| `twin`           | 入队孪生 ingest 或 distill 任务                       | `executors/twin-executor.ts`                                                  |
+| `custom`         | 默认 no-op；用户可注册自定义实现                      | `registerTaskExecutor("custom-<name>", fn)`                                   |
 
-每个执行器返回：
+每个 executor 返回：
 
 ```ts
 interface ExecutorResult {
-  status: "success" | "failure"
-  output?: string
+  success: boolean
+  output?: Record<string, unknown>
   error?: string
-  durationMs: number
+  durationMs?: number
 }
 ```
 
 结果写入 `schedulerHistory`（每任务最多 200 行）。
+
+## 注册自定义 executor
+
+`registerTaskExecutor(typeTag, fn)`（在 `lib/scheduler/task-scheduler.ts` 中导出）允许在运行时把任意标签接入调度器。常见用法是配合 `custom` 前缀，把团队特有的工作流接入 UI：
+
+```ts title="lib/scheduler/task-scheduler.ts"
+import { registerTaskExecutor } from "@/lib/scheduler/task-scheduler"
+
+registerTaskExecutor("custom-daily-report", async (task) => {
+  const payload = task.payload as { folder: string }
+  const report = await composeReport(payload.folder)
+  return { success: true, output: { lines: report.length } }
+})
+```
+
+注册是幂等的 —— 重复注册同名标签会覆盖前一个 handler。插件 / workflow 系统都用这个钩子接入：[可视化工作流](./visual-workflows)的 `workflow.task` 类节点最终通过它落地。
 
 ## 通知
 
@@ -236,25 +255,36 @@ interface ExecutorResult {
 
 ## 在哪里入手
 
-| 目标              | 文件                                                                  |
-| ----------------- | --------------------------------------------------------------------- |
-| 加新执行器        | `lib/scheduler/executors/<name>.ts` 并注册                            |
-| 加新 trigger 类型 | `lib/scheduler/cron-parser.ts`（或新解析器）、`trigger-normalizer.ts` |
-| 支持新原生平台    | `src-tauri/src/scheduler/<platform>.rs`                               |
-| 调整对话式创作    | `conversational-task-authoring.ts`                                    |
+| 目标                | 文件                                                                            |
+| ------------------- | ------------------------------------------------------------------------------- |
+| 加内置 executor     | 在 `executors/` 写一个，在 `executors/index.ts:registerBuiltInExecutors` 加一行 |
+| 加新 trigger 类型   | `lib/scheduler/cron-parser.ts`（或新解析器）、`trigger-normalizer.ts`           |
+| 支持新原生平台      | `src-tauri/src/scheduler/<platform>.rs`                                         |
+| 调整对话式创作      | `conversational-task-authoring.ts`                                              |
+| 注册自定义 executor | 应用启动后调用 `registerTaskExecutor(...)`                                      |
 
 ## 测试
 
 - `lib/scheduler/cron-parser.test.ts` —— cron 表达式覆盖。
 - `task-scheduler.test.ts` —— fake-timers 驱动的循环模拟。
 - `tab-lock.test.ts` —— 多 tab 竞争。
+- `executors/*.test.ts` —— 每个 executor 单测，并断言注册流程幂等。
 - 原生层在 `src-tauri/tests/` 有集成测试，建临时 DB 并验证元数据往返。
 
 ## 下一篇
 
 <Cards>
+  <Card
+    title="Agent 团队"
+    href="./agent-teams"
+    description="agent / skill executor 服务的角色 / 团队体系"
+  />
+  <Card
+    title="可视化工作流"
+    href="./visual-workflows"
+    description="把 executor 编排成图，调度器是其触发底座"
+  />
   <Card title="插件系统" href="./plugin-system" description="插件可注册自己的定时任务" />
-  <Card title="备份 & 数据传输" href="./backup-and-data" description="备份调度构建在这些原语上" />
   <Card
     title="ADR-0002"
     href="../adr/0002-scheduler-full-agent-resolution"

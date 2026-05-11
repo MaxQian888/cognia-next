@@ -7,26 +7,28 @@
 
 import { useState, useCallback, useMemo, useEffect, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
-import { RefreshCw } from "lucide-react"
 import { useScheduler, useSystemScheduler } from "@/hooks/scheduler"
+import { useUnifiedScheduledItems } from "@/hooks/scheduler/use-unified-items"
+import { bootstrapSchedulerSources } from "@/lib/scheduler/sources/bootstrap"
+import { getSchedulerSourceRegistry } from "@/lib/scheduler/sources/registry"
 import { cn } from "@/lib/utils"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import {
   SchedulerSidebar,
   SchedulerDashboardView,
+  SchedulerSkeleton,
+  SchedulerErrorBoundary,
   TaskDetailView,
-  // WorkflowScheduleDialog / BackupScheduleDialog were removed — cognia-next
-  // has no workflow or backup subsystems. The header menu items that opened
-  // them are pruned too (see scheduler-content-header.tsx).
   TaskTemplateGallery,
   ExportTasksDialog,
   ImportTasksDialog,
+  SystemTaskInspectSheet,
+  SchedulerContentHeader,
+  SchedulerMobileDetailView,
+  SchedulerDialogs,
 } from "@/components/scheduler"
-import { SystemTaskInspectSheet } from "@/components/scheduler/system-task-inspect-sheet"
+import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
 import type { CreateScheduledTaskInput, CreateSystemTaskInput } from "@/types/scheduler"
-import { SchedulerContentHeader } from "./scheduler-content-header"
-import { SchedulerMobileDetailView } from "./scheduler-mobile-detail"
-import { SchedulerDialogs } from "./scheduler-dialogs"
 
 export default function SchedulerPage() {
   const {
@@ -80,6 +82,18 @@ export default function SchedulerPage() {
 
   const t = useTranslations("scheduler")
 
+  // Bootstrap the source registry exactly once per process. The bootstrap
+  // function is idempotent and registers every source against the singleton
+  // registry that `useUnifiedScheduledItems` consumes.
+  useEffect(() => {
+    bootstrapSchedulerSources()
+  }, [])
+  const {
+    items: unifiedItems,
+    countsByKind,
+    activeCountsByKind,
+  } = useUnifiedScheduledItems({ registry: getSchedulerSourceRegistry() })
+
   // --- New layout state ---
   const [mobileView, setMobileView] = useState<"list" | "detail">("list")
   const [searchQuery, setSearchQuery] = useState(filter.search || "")
@@ -113,8 +127,6 @@ export default function SchedulerPage() {
   const [showTemplateGallery, setShowTemplateGallery] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
   const [showImportDialog, setShowImportDialog] = useState(false)
-
-  // Workflow/backup hidden trigger refs were dropped along with their dialogs.
 
   // Derived
   const inspectTask = useMemo(
@@ -394,16 +406,23 @@ export default function SchedulerPage() {
     highlightedIndex,
   ])
 
-  // Loading state
+  // Loading state — show layout-matching skeleton instead of a bare spinner so
+  // the user perceives the page shape immediately.
   if (!isInitialized) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center">
-          <RefreshCw className="h-8 w-8 animate-spin mx-auto text-muted-foreground" />
-          <p className="mt-2 text-sm text-muted-foreground">{t("initializing")}</p>
-        </div>
-      </div>
-    )
+    return <SchedulerSkeleton />
+  }
+
+  // Dispatch unified actions to the right adapter based on item.kind. The
+  // registry holds one source per kind; each source already knows how to
+  // pause/resume/run/delete its native rows.
+  const dispatchUnified = (
+    action: "runNow" | "pause" | "resume" | "delete"
+  ): ((item: UnifiedScheduledItem) => void) => {
+    return (item: UnifiedScheduledItem) => {
+      const source = getSchedulerSourceRegistry().getSource(item.kind)
+      if (!source) return
+      void source[action](item.sourceId)
+    }
   }
 
   return (
@@ -434,6 +453,8 @@ export default function SchedulerPage() {
         <SchedulerSidebar
           tasks={filteredTasks}
           systemTasks={systemTasks}
+          unifiedItems={unifiedItems}
+          countsByKind={countsByKind}
           selectedTaskId={selectedTask?.id ?? null}
           schedulerStatus={schedulerStatus}
           statistics={statistics}
@@ -445,10 +466,22 @@ export default function SchedulerPage() {
           onFilterChange={setActiveFilter}
           onSelectTask={handleSelectTask}
           onSelectSystemTask={setInspectTaskId}
+          onSelectUnifiedItem={(item) => {
+            // For non-app/non-system kinds we have no in-place detail view yet;
+            // deep-link to the source-native editor.
+            if (typeof window !== "undefined") {
+              window.location.assign(item.origin.deepLinkHref)
+            }
+          }}
           onRunNow={handleRunNow}
           onPause={handlePause}
           onResume={handleResume}
           onDelete={setDeleteTaskId}
+          onUnifiedRunNow={dispatchUnified("runNow")}
+          onUnifiedPause={dispatchUnified("pause")}
+          onUnifiedResume={dispatchUnified("resume")}
+          onUnifiedDelete={dispatchUnified("delete")}
+          onCreate={handleCreateClick}
           highlightedIndex={highlightedIndex}
         />
 
@@ -457,6 +490,22 @@ export default function SchedulerPage() {
             selectedTaskName={selectedTask?.name}
             isRefreshing={isLoading}
             onCreate={handleCreateClick}
+            onCreateSystemTask={() => setShowSystemCreateSheet(true)}
+            onCreateWorkflowTrigger={() => {
+              if (typeof window !== "undefined") {
+                window.location.assign("/workflows")
+              }
+            }}
+            onOpenBackupSettings={() => {
+              if (typeof window !== "undefined") {
+                window.location.assign("/settings?section=data&dataTab=backup")
+              }
+            }}
+            onOpenPluginSettings={() => {
+              if (typeof window !== "undefined") {
+                window.location.assign("/settings?section=plugins")
+              }
+            }}
             onRefresh={handleRefresh}
             onExport={() => setShowExportDialog(true)}
             onImport={() => setShowImportDialog(true)}
@@ -466,34 +515,38 @@ export default function SchedulerPage() {
 
           <div className="flex-1 min-h-0 overflow-auto">
             {selectedTask ? (
-              <TaskDetailView
-                task={selectedTask}
-                executions={executions}
-                isLoading={isLoading}
-                onPause={handlePause}
-                onResume={handleResume}
-                onRunNow={handleRunNow}
-                onDelete={setDeleteTaskId}
-                onEdit={() => setShowEditSheet(true)}
-                onCancelPluginExecution={cancelPluginExecution}
-                isPluginExecutionActive={isPluginExecutionActive}
-              />
+              <SchedulerErrorBoundary panelName="detail">
+                <TaskDetailView
+                  task={selectedTask}
+                  executions={executions}
+                  isLoading={isLoading}
+                  onPause={handlePause}
+                  onResume={handleResume}
+                  onRunNow={handleRunNow}
+                  onDelete={setDeleteTaskId}
+                  onEdit={() => setShowEditSheet(true)}
+                  onCancelPluginExecution={cancelPluginExecution}
+                  isPluginExecutionActive={isPluginExecutionActive}
+                />
+              </SchedulerErrorBoundary>
             ) : (
-              <SchedulerDashboardView
-                statistics={statistics}
-                activeTasks={activeTasks}
-                pausedTasks={pausedTasks}
-                upcomingTasks={upcomingTasks}
-                recentExecutions={recentExecutions}
-                schedulerStatus={schedulerStatus}
-                onSelectTask={handleSelectTask}
-              />
+              <SchedulerErrorBoundary panelName="dashboard">
+                <SchedulerDashboardView
+                  statistics={statistics}
+                  activeTasks={activeTasks}
+                  pausedTasks={pausedTasks}
+                  upcomingTasks={upcomingTasks}
+                  recentExecutions={recentExecutions}
+                  schedulerStatus={schedulerStatus}
+                  onSelectTask={handleSelectTask}
+                  countsByKind={countsByKind}
+                  activeCountsByKind={activeCountsByKind}
+                />
+              </SchedulerErrorBoundary>
             )}
           </div>
         </SidebarInset>
       </div>
-
-      {/* Workflow / backup hidden dialogs intentionally omitted. */}
 
       <SystemTaskInspectSheet
         open={!!inspectTaskId}

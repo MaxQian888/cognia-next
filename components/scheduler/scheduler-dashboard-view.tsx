@@ -20,6 +20,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import type { ScheduledTask, TaskExecution, TaskStatistics } from "@/types/scheduler"
+import type { ScheduledItemKind } from "@/types/scheduler/unified"
 import { formatDuration, formatRelativeTime } from "@/lib/scheduler/format-utils"
 import { TaskExecutionChart } from "./task-execution-chart"
 
@@ -31,6 +32,9 @@ export interface SchedulerDashboardViewProps {
   recentExecutions: TaskExecution[]
   schedulerStatus: string
   onSelectTask: (taskId: string) => void
+  /** Per-kind item counts — when supplied, renders the kind summary strip. */
+  countsByKind?: Record<ScheduledItemKind, number>
+  activeCountsByKind?: Record<ScheduledItemKind, number>
 }
 
 // ---------------------------------------------------------------------------
@@ -44,7 +48,6 @@ interface StatCardProps {
   valueClassName?: string
   accentGradient: string
   iconBgClassName: string
-  extra?: React.ReactNode
 }
 
 function StatCard({
@@ -54,7 +57,6 @@ function StatCard({
   valueClassName,
   accentGradient,
   iconBgClassName,
-  extra,
 }: StatCardProps) {
   return (
     <Card
@@ -75,7 +77,7 @@ function StatCard({
               iconBgClassName
             )}
           >
-            {extra ?? icon}
+            {icon}
           </div>
         </div>
       </CardContent>
@@ -148,11 +150,52 @@ function ExecutionStatusIcon({ status }: { status: TaskExecution["status"] }) {
 // Main component
 // ---------------------------------------------------------------------------
 
+const KIND_ORDER: ScheduledItemKind[] = ["app", "workflow", "backup", "plugin", "system"]
+
+interface KindSummaryStripProps {
+  countsByKind?: Record<ScheduledItemKind, number>
+  activeCountsByKind?: Record<ScheduledItemKind, number>
+}
+
+function KindSummaryStrip({ countsByKind, activeCountsByKind }: KindSummaryStripProps) {
+  const t = useTranslations("scheduler")
+  if (!countsByKind) return null
+  return (
+    <div data-testid="kind-summary-strip" className="flex flex-wrap gap-2">
+      {KIND_ORDER.map((kind) => {
+        const total = countsByKind[kind] ?? 0
+        const active = activeCountsByKind?.[kind] ?? 0
+        const muted = total === 0
+        return (
+          <div
+            key={kind}
+            data-testid={`kind-summary-${kind}`}
+            className={cn(
+              "flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs",
+              muted ? "opacity-60 border-border/30" : "border-border/60 bg-card/50"
+            )}
+          >
+            <span className="font-medium capitalize">{t(`kindFilter.${kind}`) || kind}</span>
+            <span className="tabular-nums">{total}</span>
+            {!muted && (
+              <span className="text-[10px] text-green-500 tabular-nums">
+                {active} {t("active") || "active"}
+              </span>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export function SchedulerDashboardView({
   statistics,
   upcomingTasks,
   recentExecutions,
   onSelectTask,
+  countsByKind,
+  activeCountsByKind,
 }: SchedulerDashboardViewProps) {
   const t = useTranslations("scheduler")
 
@@ -167,9 +210,10 @@ export function SchedulerDashboardView({
     successRate >= 90 ? "text-green-500" : successRate >= 70 ? "text-yellow-500" : "text-red-500"
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 p-5 sm:p-6">
+      <KindSummaryStrip countsByKind={countsByKind} activeCountsByKind={activeCountsByKind} />
       {/* Stats cards row */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
         {/* Total Tasks */}
         <StatCard
           label={t("totalTasks") || "Total Tasks"}
@@ -224,7 +268,6 @@ export function SchedulerDashboardView({
                 : "from-red-500 to-rose-400"
           }
           iconBgClassName="bg-transparent"
-          extra={<SuccessRing successRate={successRate} />}
         />
       </div>
 

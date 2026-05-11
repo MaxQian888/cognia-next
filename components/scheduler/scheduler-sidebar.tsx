@@ -5,8 +5,8 @@
  * Displays app tasks, system tasks, search, filters, and footer stats.
  */
 
-import React from "react"
-import { Calendar, Search, X, Circle } from "lucide-react"
+import React, { useMemo, useState } from "react"
+import { Calendar, Search, X } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import {
@@ -24,22 +24,13 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import type { ScheduledTask, SystemTask, TaskStatistics } from "@/types/scheduler"
+import type { ScheduledItemKind, UnifiedScheduledItem } from "@/types/scheduler/unified"
 
 import { FilterChips } from "./filter-chips"
 import { TaskSidebarItem } from "./task-sidebar-item"
-
-// ---------------------------------------------------------------------------
-// System task status helpers
-// ---------------------------------------------------------------------------
-
-const systemStatusDot: Record<string, string> = {
-  enabled: "bg-green-500",
-  running: "bg-blue-500 animate-pulse",
-  completed: "bg-green-400",
-  failed: "bg-red-500",
-  disabled: "bg-gray-400",
-  unknown: "bg-gray-300",
-}
+import { UnifiedTaskSidebarItem } from "./unified-task-sidebar-item"
+import { KindFilterChips } from "./kind-filter-chips"
+import { TaskListEmptyState } from "./empty-states"
 
 // ---------------------------------------------------------------------------
 // Props
@@ -48,6 +39,10 @@ const systemStatusDot: Record<string, string> = {
 export interface SchedulerSidebarProps {
   tasks: ScheduledTask[]
   systemTasks: SystemTask[]
+  /** Unified items merged across all sources (workflow/backup/plugin too). */
+  unifiedItems?: UnifiedScheduledItem[]
+  /** Counts per kind for the kind-filter chips. */
+  countsByKind?: Record<ScheduledItemKind, number>
   selectedTaskId: string | null
   schedulerStatus: string // 'running' | 'stopped' | 'idle'
   statistics: TaskStatistics | null
@@ -59,10 +54,19 @@ export interface SchedulerSidebarProps {
   onFilterChange: (filter: string) => void
   onSelectTask: (taskId: string) => void
   onSelectSystemTask?: (taskId: string) => void
+  /** Click handler for any unified-source item (workflow/backup/plugin/system). */
+  onSelectUnifiedItem?: (item: UnifiedScheduledItem) => void
   onRunNow: (taskId: string) => void
   onPause: (taskId: string) => void
   onResume: (taskId: string) => void
   onDelete: (taskId: string) => void
+  /** Unified run / pause / resume / delete — dispatched per kind by the page. */
+  onUnifiedRunNow?: (item: UnifiedScheduledItem) => void
+  onUnifiedPause?: (item: UnifiedScheduledItem) => void
+  onUnifiedResume?: (item: UnifiedScheduledItem) => void
+  onUnifiedDelete?: (item: UnifiedScheduledItem) => void
+  /** Empty-state CTA — opens the new-task sheet. */
+  onCreate?: () => void
   highlightedIndex?: number
 }
 
@@ -73,6 +77,8 @@ export interface SchedulerSidebarProps {
 export function SchedulerSidebar({
   tasks,
   systemTasks,
+  unifiedItems,
+  countsByKind,
   selectedTaskId,
   schedulerStatus,
   statistics,
@@ -84,10 +90,16 @@ export function SchedulerSidebar({
   onFilterChange,
   onSelectTask,
   onSelectSystemTask,
+  onSelectUnifiedItem,
   onRunNow,
   onPause,
   onResume,
   onDelete,
+  onUnifiedRunNow,
+  onUnifiedPause,
+  onUnifiedResume,
+  onUnifiedDelete,
+  onCreate,
   highlightedIndex,
 }: SchedulerSidebarProps) {
   const t = useTranslations("scheduler")
@@ -121,6 +133,32 @@ export function SchedulerSidebar({
       ? Math.round((statistics.successfulExecutions / statistics.totalExecutions) * 100)
       : 0
 
+  // Kind filter — only when unified items are wired in. Default to "all kinds".
+  const [selectedKinds, setSelectedKinds] = useState<Set<ScheduledItemKind>>(new Set())
+  const filteredUnified = useMemo(() => {
+    if (!unifiedItems) return undefined
+    if (selectedKinds.size === 0) return unifiedItems
+    return unifiedItems.filter((i) => selectedKinds.has(i.kind))
+  }, [unifiedItems, selectedKinds])
+  // Group unified items by kind for collapsible sidebar sections. Sources that
+  // contribute zero items are skipped silently.
+  const groupedUnified = useMemo(() => {
+    if (!filteredUnified) return undefined
+    const groups: Record<ScheduledItemKind, UnifiedScheduledItem[]> = {
+      app: [],
+      workflow: [],
+      backup: [],
+      plugin: [],
+      system: [],
+    }
+    for (const item of filteredUnified) groups[item.kind].push(item)
+    return groups
+  }, [filteredUnified])
+  const showEmptyState =
+    !!unifiedItems && unifiedItems.length === 0 && tasks.length === 0 && systemTasks.length === 0
+  const showFilteredEmpty =
+    !!unifiedItems && unifiedItems.length > 0 && filteredUnified && filteredUnified.length === 0
+
   return (
     <Sidebar collapsible="icon" className="border-r">
       {/* Header */}
@@ -136,7 +174,7 @@ export function SchedulerSidebar({
       </SidebarHeader>
 
       {/* Search */}
-      <div className="px-3 py-2">
+      <div className="px-3 py-2 group-data-[collapsible=icon]:hidden">
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -159,76 +197,125 @@ export function SchedulerSidebar({
         </div>
       </div>
 
-      {/* Filter chips */}
-      <FilterChips filters={filters} activeFilter={activeFilter} onFilterChange={onFilterChange} />
+      {/* Status filter chips */}
+      <div className="group-data-[collapsible=icon]:hidden">
+        <FilterChips
+          filters={filters}
+          activeFilter={activeFilter}
+          onFilterChange={onFilterChange}
+        />
+      </div>
+
+      {/* Kind filter chips (only when unified items are wired) */}
+      {unifiedItems && countsByKind && (
+        <div className="group-data-[collapsible=icon]:hidden">
+          <KindFilterChips
+            selected={selectedKinds}
+            countsByKind={countsByKind}
+            onToggle={(kind) => {
+              setSelectedKinds((prev) => {
+                const next = new Set(prev)
+                if (next.has(kind)) next.delete(kind)
+                else next.add(kind)
+                return next
+              })
+            }}
+            onClear={() => setSelectedKinds(new Set())}
+          />
+        </div>
+      )}
 
       {/* Task lists */}
       <SidebarContent>
-        {/* App Tasks */}
-        <SidebarGroup>
-          <SidebarGroupLabel className="flex items-center gap-2">
-            {t("appTasks")}
-            <Badge variant="secondary" className="ml-auto text-[10px]">
-              {tasks.length}
-            </Badge>
-          </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {tasks.map((task, index) => (
-                <SidebarMenuItem key={task.id}>
-                  <TaskSidebarItem
-                    task={task}
-                    isActive={selectedTaskId === task.id}
-                    isHighlighted={index === highlightedIndex}
-                    onClick={onSelectTask}
-                    onRunNow={onRunNow}
-                    onPause={onPause}
-                    onResume={onResume}
-                    onDelete={onDelete}
-                  />
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {showEmptyState && <TaskListEmptyState onCreate={onCreate} />}
 
-        {/* System Tasks (only when present) */}
-        {systemTasks.length > 0 && (
-          <SidebarGroup>
-            <SidebarGroupLabel className="flex items-center gap-2">
-              {t("systemTasks")}
-              <Badge variant="secondary" className="ml-auto text-[10px]">
-                {systemTasks.length}
-              </Badge>
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {systemTasks.map((st) => {
-                  const dotCls = systemStatusDot[st.status] ?? "bg-gray-300"
-                  return (
-                    <SidebarMenuItem key={st.id}>
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => onSelectSystemTask?.(st.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") onSelectSystemTask?.(st.id)
-                        }}
-                        className="flex cursor-pointer items-center gap-2 px-3 py-2 transition-colors hover:bg-accent/50"
-                      >
-                        <Circle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        <span className="min-w-0 flex-1 truncate text-sm">{st.name}</span>
-                        <span
-                          data-testid={`system-status-dot-${st.id}`}
-                          className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dotCls)}
-                        />
-                      </div>
+        {showFilteredEmpty && (
+          <TaskListEmptyState
+            variant="filtered"
+            onClearFilters={() => setSelectedKinds(new Set())}
+          />
+        )}
+
+        {/* Unified groups by kind — preferred path when unified data is supplied. */}
+        {groupedUnified && !showEmptyState && !showFilteredEmpty && (
+          <>
+            {(["app", "workflow", "backup", "plugin", "system"] as ScheduledItemKind[]).map(
+              (kind) => {
+                const items = groupedUnified[kind]
+                if (items.length === 0) return null
+                return (
+                  <SidebarGroup key={kind}>
+                    <SidebarGroupLabel className="flex items-center gap-2">
+                      {t(`kindFilter.${kind}`) || kind}
+                      <Badge variant="secondary" className="ml-auto text-[10px]">
+                        {items.length}
+                      </Badge>
+                    </SidebarGroupLabel>
+                    <SidebarGroupContent>
+                      <SidebarMenu>
+                        {items.map((item, idx) => (
+                          <SidebarMenuItem key={item.unifiedId}>
+                            <UnifiedTaskSidebarItem
+                              item={item}
+                              isActive={item.kind === "app" && selectedTaskId === item.sourceId}
+                              isHighlighted={item.kind === "app" && idx === highlightedIndex}
+                              onClick={(clickedItem) => {
+                                if (clickedItem.kind === "app") {
+                                  onSelectTask(clickedItem.sourceId)
+                                } else if (clickedItem.kind === "system") {
+                                  onSelectSystemTask?.(clickedItem.sourceId)
+                                } else {
+                                  onSelectUnifiedItem?.(clickedItem)
+                                }
+                              }}
+                              onRunNow={onUnifiedRunNow}
+                              onPause={onUnifiedPause}
+                              onResume={onUnifiedResume}
+                              onDelete={onUnifiedDelete}
+                            />
+                          </SidebarMenuItem>
+                        ))}
+                      </SidebarMenu>
+                    </SidebarGroupContent>
+                  </SidebarGroup>
+                )
+              }
+            )}
+          </>
+        )}
+
+        {/* Legacy fallback — when unified items are NOT supplied, fall back to
+            the original app + system split so the page still works for callers
+            that haven't migrated yet. */}
+        {!unifiedItems && (
+          <>
+            <SidebarGroup>
+              <SidebarGroupLabel className="flex items-center gap-2">
+                {t("appTasks")}
+                <Badge variant="secondary" className="ml-auto text-[10px]">
+                  {tasks.length}
+                </Badge>
+              </SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {tasks.map((task, index) => (
+                    <SidebarMenuItem key={task.id}>
+                      <TaskSidebarItem
+                        task={task}
+                        isActive={selectedTaskId === task.id}
+                        isHighlighted={index === highlightedIndex}
+                        onClick={onSelectTask}
+                        onRunNow={onRunNow}
+                        onPause={onPause}
+                        onResume={onResume}
+                        onDelete={onDelete}
+                      />
                     </SidebarMenuItem>
-                  )
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </>
         )}
       </SidebarContent>
 

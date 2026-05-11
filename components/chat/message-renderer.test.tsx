@@ -88,6 +88,21 @@ jest.mock("@/lib/logger", () => ({
   loggers: {
     chat: { error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
   },
+  // Pulled in transitively by the plugin extension slot → extension-api → core/logger.
+  createLogger: () => ({
+    trace: jest.fn(),
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    fatal: jest.fn(),
+    child: function () {
+      return this
+    },
+    withContext: function () {
+      return this
+    },
+  }),
 }))
 
 import { render, screen, fireEvent } from "@testing-library/react"

@@ -1,0 +1,182 @@
+/**
+ * @jest-environment jsdom
+ */
+
+import { render, screen, fireEvent } from "@testing-library/react"
+
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => key,
+}))
+
+jest.mock("./task-execution-chart", () => ({
+  __esModule: true,
+  TaskExecutionChart: () => <div data-testid="task-execution-chart-stub" />,
+}))
+
+import { SchedulerDashboardView } from "./scheduler-dashboard-view"
+import type { ScheduledTask, TaskExecution, TaskStatistics } from "@/types/scheduler"
+
+const stats: TaskStatistics = {
+  totalTasks: 10,
+  activeTasks: 6,
+  pausedTasks: 2,
+  totalExecutions: 100,
+  successfulExecutions: 95,
+  failedExecutions: 5,
+} as unknown as TaskStatistics
+
+const upcoming: ScheduledTask[] = [
+  {
+    id: "t1",
+    name: "Upcoming task 1",
+    status: "active",
+    nextRunAt: new Date(Date.now() + 60_000),
+  } as unknown as ScheduledTask,
+  {
+    id: "t2",
+    name: "Upcoming task 2",
+    status: "paused",
+    nextRunAt: new Date(Date.now() + 120_000),
+  } as unknown as ScheduledTask,
+]
+
+const recent: TaskExecution[] = [
+  {
+    id: "e1",
+    taskId: "t1",
+    taskName: "Task 1",
+    status: "completed",
+    startedAt: new Date(Date.now() - 60_000),
+    completedAt: new Date(Date.now() - 30_000),
+    duration: 30_000,
+  } as unknown as TaskExecution,
+  {
+    id: "e2",
+    taskId: "t2",
+    taskName: "Task 2",
+    status: "failed",
+    startedAt: new Date(Date.now() - 90_000),
+    duration: 1000,
+  } as unknown as TaskExecution,
+  {
+    id: "e3",
+    taskId: "t3",
+    taskName: "Task 3",
+    status: "running",
+    startedAt: new Date(Date.now() - 5_000),
+    duration: 5000,
+  } as unknown as TaskExecution,
+]
+
+function setup(overrides: Partial<React.ComponentProps<typeof SchedulerDashboardView>> = {}) {
+  const props: React.ComponentProps<typeof SchedulerDashboardView> = {
+    statistics: stats,
+    activeTasks: [],
+    pausedTasks: [],
+    upcomingTasks: upcoming,
+    recentExecutions: recent,
+    schedulerStatus: "running",
+    onSelectTask: jest.fn(),
+    ...overrides,
+  }
+  return { props, ...render(<SchedulerDashboardView {...props} />) }
+}
+
+describe("SchedulerDashboardView", () => {
+  it("returns null when statistics is null", () => {
+    const { container } = render(
+      <SchedulerDashboardView
+        statistics={null}
+        activeTasks={[]}
+        pausedTasks={[]}
+        upcomingTasks={[]}
+        recentExecutions={[]}
+        schedulerStatus="stopped"
+        onSelectTask={jest.fn()}
+      />
+    )
+    expect(container.firstChild).toBeNull()
+  })
+
+  it("renders aggregate stats and the success rate", () => {
+    setup()
+    expect(screen.getByText("10")).toBeInTheDocument()
+    expect(screen.getByText("100")).toBeInTheDocument()
+    expect(screen.getByText("95%")).toBeInTheDocument()
+  })
+
+  it("renders the upcoming tasks list and dispatches onSelectTask on click", () => {
+    const onSelectTask = jest.fn()
+    setup({ onSelectTask })
+    fireEvent.click(screen.getByText("Upcoming task 1"))
+    expect(onSelectTask).toHaveBeenCalledWith("t1")
+  })
+
+  it("renders the no-upcoming empty state when upcomingTasks is empty", () => {
+    setup({ upcomingTasks: [] })
+    expect(screen.getByText("noUpcomingTasks")).toBeInTheDocument()
+  })
+
+  it("renders recent executions with task names and durations", () => {
+    setup()
+    expect(screen.getByText("Task 1")).toBeInTheDocument()
+    expect(screen.getByText("Task 2")).toBeInTheDocument()
+    expect(screen.getByText("Task 3")).toBeInTheDocument()
+  })
+
+  it("renders the no-recent-executions empty state when recentExecutions is empty", () => {
+    setup({ recentExecutions: [] })
+    expect(screen.getByText("noRecentExecutions")).toBeInTheDocument()
+  })
+
+  it("renders the kind summary strip when countsByKind is supplied", () => {
+    setup({
+      countsByKind: { app: 4, workflow: 2, backup: 1, plugin: 0, system: 3 },
+      activeCountsByKind: { app: 2, workflow: 1, backup: 0, plugin: 0, system: 1 },
+    })
+    expect(screen.getByTestId("kind-summary-strip")).toBeInTheDocument()
+    expect(screen.getByTestId("kind-summary-app")).toBeInTheDocument()
+    expect(screen.getByTestId("kind-summary-workflow")).toBeInTheDocument()
+    expect(screen.getByTestId("kind-summary-backup")).toBeInTheDocument()
+    expect(screen.getByTestId("kind-summary-plugin")).toBeInTheDocument()
+    expect(screen.getByTestId("kind-summary-system")).toBeInTheDocument()
+  })
+
+  it("omits the kind summary strip when countsByKind is absent", () => {
+    setup()
+    expect(screen.queryByTestId("kind-summary-strip")).toBeNull()
+  })
+
+  it("applies the right success-rate color band for low success rates", () => {
+    setup({
+      statistics: {
+        ...stats,
+        successfulExecutions: 50,
+        totalExecutions: 100,
+      } as unknown as TaskStatistics,
+    })
+    expect(screen.getByText("50%")).toBeInTheDocument()
+  })
+
+  it("renders 0% success when totalExecutions is zero", () => {
+    setup({
+      statistics: {
+        ...stats,
+        successfulExecutions: 0,
+        totalExecutions: 0,
+      } as unknown as TaskStatistics,
+    })
+    expect(screen.getByText("0%")).toBeInTheDocument()
+  })
+
+  it("renders the middle success-rate band (70–89)", () => {
+    setup({
+      statistics: {
+        ...stats,
+        successfulExecutions: 75,
+        totalExecutions: 100,
+      } as unknown as TaskStatistics,
+    })
+    expect(screen.getByText("75%")).toBeInTheDocument()
+  })
+})

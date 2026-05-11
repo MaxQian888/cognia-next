@@ -91,7 +91,7 @@ export function SkillBatchActionsBar() {
   }
 
   return (
-    <Card className="pointer-events-auto fixed bottom-4 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 px-3 py-2 shadow-lg">
+    <Card className="pointer-events-auto fixed bottom-4 left-1/2 z-30 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2 px-3 py-2 shadow-lg">
       <span className="text-xs font-medium">{tCommon("selectedCount", { count })}</span>
       <span className="h-4 w-px bg-border" />
       <Button size="sm" variant="ghost" onClick={() => void handleEnable()}>

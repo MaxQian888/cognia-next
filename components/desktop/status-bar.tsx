@@ -33,6 +33,7 @@ import { useTheme } from "next-themes"
 import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 const log = loggers.ui
 
@@ -187,7 +188,16 @@ export function StatusBar() {
         </PopoverContent>
       </Popover>
 
-      <span className="flex-1 min-w-0" />
+      <PluginExtensionSlot
+        point="statusbar.left"
+        className="flex h-6 items-center gap-1 px-1 empty:hidden"
+      />
+
+      <PluginExtensionSlot
+        point="statusbar.center"
+        className="flex h-6 items-center gap-1 empty:hidden"
+        fallback={<span className="flex-1 min-w-0" />}
+      />
 
       <StatusItem testId="status-status" aria-label={statusLabel}>
         <span
@@ -285,6 +295,11 @@ export function StatusBar() {
           )}
         </span>
       </Button>
+
+      <PluginExtensionSlot
+        point="statusbar.right"
+        className="flex h-6 items-center gap-1 px-1 empty:hidden"
+      />
     </footer>
   )
 }

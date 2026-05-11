@@ -68,6 +68,9 @@ jobs:
       - name: TypeScript type checking
         run: pnpm typecheck
 
+      - name: Plugin extension slot audit
+        run: pnpm audit:slots
+
       - name: Security audit
         run: pnpm audit --audit-level=moderate
         continue-on-error: true

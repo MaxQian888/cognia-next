@@ -1,14 +1,13 @@
 "use client"
 
-import { makeDefaultLoader } from "@/lib/capacitor/_shared"
-
 /**
  * mDNS / Bonjour discovery (Wave 1.5 / M2.9).
  *
  * Two roles:
  *   - **Mobile**: scans for `_cognia._tcp` services on the LAN and surfaces
- *     them to the pair page's "附近设备" list. Uses
- *     `@jonz94/capacitor-mdns`.
+ *     them to the pair page's "附近设备" list. No Capacitor mDNS plugin is
+ *     currently wired — `defaultMobileLoader` rejects, `subscribe()` returns
+ *     a no-op, and lan-scanner falls back to the IP-segment probe.
  *   - **Desktop**: advertises via Rust (`src-tauri/src/companion_api/mdns.rs`).
  *     The Tauri command surface is kept here so any TS code that wants to
  *     start/stop the broadcaster has one place to import.
@@ -38,10 +37,9 @@ interface MdnsScannerShape {
 
 export type MdnsLoader = () => Promise<MdnsScannerShape>
 
-const defaultMobileLoader: MdnsLoader = makeDefaultLoader<MdnsScannerShape>(
-  "@jonz94/capacitor-mdns",
-  "Mdns"
-)
+const defaultMobileLoader: MdnsLoader = async () => {
+  throw new Error("mDNS plugin not configured")
+}
 
 const SERVICE_TYPE = "_cognia._tcp"
 

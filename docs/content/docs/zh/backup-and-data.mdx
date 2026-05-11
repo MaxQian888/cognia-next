@@ -1,6 +1,6 @@
 ---
 title: 备份 & 数据传输
-description: Schema v3 备份格式（AES-GCM 加密）、定时自动备份、按域传输、第三方聊天导入。
+description: Schema v3 备份格式（AES-GCM 加密）、定时自动备份、20 个按域传输、第三方聊天导入。
 ---
 
 # 备份 & 数据传输
@@ -8,15 +8,16 @@ description: Schema v3 备份格式（AES-GCM 加密）、定时自动备份、�
 <Status variant="stable">schema v3</Status>
 
 <TLDR>
-  AES-GCM 加密、含完整性校验的备份，包格式为 **v3**。每设备自动密钥（无需密码）
-  或用户密码（可移植）。六种按域传输（技能、MCP、预设、角色、团队、主题） 只搬一个切片。ChatGPT /
-  Claude / Gemini 导入器把外部导出映射到 Cognia 的聊天形态。
+  AES-GCM 加密、含 SHA-256 完整性校验的备份，包格式为 **v3**。
+  每设备自动密钥（无需密码）或用户密码（可移植）。 按域传输覆盖 20
+  个域（技能、MCP、预设、角色、团队、主题、画板、A2UI、外部 agent、插件……）， 只搬一个切片。ChatGPT
+  / Claude / Gemini 三个导入器把外部导出映射到 Cognia 的聊天形态。
 </TLDR>
 
 <StatGrid>
   <Stat label="Schema" value="v3" hint="v1 导入时迁移" />
   <Stat label="KDF 迭代" value="60 万" hint="PBKDF2-SHA256" />
-  <Stat label="域传输" value="6" hint="按域导出/导入" />
+  <Stat label="按域传输" value="20" hint="见下表" />
   <Stat label="第三方导入" value="3" hint="ChatGPT · Claude · Gemini" />
 </StatGrid>
 
@@ -26,22 +27,22 @@ Cognia 在 `lib/data/` 下提供完整的备份 / 还原 / 传输系统。当前
 
 ## 代码位置
 
-```
+```text title="lib/data/"
 lib/data/
   types.ts                   # BackupPackageV3、EncryptedEnvelopeV1 等类型
   build-package.ts           # 从 Dexie 构建 BackupPackageV3 快照
   apply-package.ts           # 把 BackupPackageV3 应用到 Dexie
   crypto.ts                  # AES-GCM 加 / 解密
   backup-key.ts              # 自动密钥派生（PBKDF2-SHA256-600000）
-  migrate.ts                 # 导入时 v1 → v3 迁移
+  migrate.ts                 # 导入时 v1 → v3 迁移、规范化 JSON
   export.ts / import.ts      # 顶层编排器
   export-schema.ts           # 域导出 schema
   scheduler.ts               # 定时备份驱动
-  domain/                    # 按域传输（技能、MCP、预设……）
-  importers/                 # 第三方导入（ChatGPT、Claude、Gemini）
+  domain/index.ts            # 按域传输注册表（20 个域）
+  importers/                 # 第三方导入（chatgpt / claude / gemini）
   import-registry.ts         # 第三方导入分发
   sync-projection.ts         # 用于同步的 Dexie 状态投影
-  snapshots/                 # 快照测试夹具
+  snapshots/                 # 快照测试夹具 + localStorage 快照注册表
   clear.ts                   # 清空 Dexie 表（调试）
 
 components/settings/data/    # 设置 UI（概览 / 备份 / 域传输 / 维护）
@@ -50,33 +51,51 @@ lib/db/backup-history.ts     # backupHistory 表（限 50 行）
 
 ## 备份包（schema v3）
 
-`BackupPackageV3` 是带三个顶层字段的 JSON：
+`BackupPackageV3` 是带两个顶层字段的 JSON —— `manifest` 描述这份备份，`payload` 是实际内容：
 
-```ts
-interface BackupPackageV3 {
-  manifest: {
-    schemaVersion: 3
-    createdAt: string // ISO-8601
-    appVersion: string
-    integrity: string // payload 的 SHA-256
-    flags: {
-      includesSessions: boolean
-      includesApiKey: boolean
-    }
-  }
-  payload: {
-    sessions?: ChatSession[]
-    messages?: StoredMessage[]
-    characters: Character[]
-    skills: Skill[]
-    teams: Team[]
-    promptPresets: SystemPromptPreset[]
-    mcpServers: McpServer[]
-    twin?: TwinExport // sources + profile（默认不含 chunk）
-    canvas?: CanvasExport
-    settings: AppSettings
-  }
-  // 这一层未加密
+```ts title="lib/data/types.ts"
+export interface BackupManifestV3 {
+  version: "3.0"
+  schemaVersion: 3
+  traceId: string // 稳定 UUID，便于跨日志关联
+  exportedAt: string // ISO-8601
+  appVersion: string
+  backend: "web-dexie" | "tauri-dexie"
+  integrity: { algorithm: "SHA-256"; checksum: string }
+  encryption?: { enabled: true; format: "encrypted-envelope-v1" }
+}
+
+export interface BackupPayloadV3 {
+  settings?: AppSettings
+  characters?: Character[]
+  skills?: Skill[]
+  skillResources?: SkillResource[]
+  teams?: Team[]
+  promptPresets?: SystemPromptPreset[]
+  mcpServers?: McpServer[]
+  sessions?: ChatSession[]
+  messages?: StoredMessage[]
+  sessionState?: SessionStateRow[]
+  trustedWorkspaces?: TrustedWorkspace[]
+  ttsProviderKeys?: TtsProviderKeyRow[]
+  canvasDocuments?: CanvasDocumentRow[]
+  canvasVersions?: CanvasVersionRow[]
+  canvasComments?: CanvasCommentRow[]
+  canvasSessions?: CanvasSessionRow[]
+  a2uiApps?: A2UIAppRow[]
+  a2uiTemplates?: A2UITemplateRow[]
+  a2uiEventHistory?: A2UIEventHistoryRow[]
+  localStorageSnapshots?: Record<string, LocalStorageSnapshot>
+  plugins?: unknown[]
+  pluginPermissions?: unknown[]
+  pluginReviews?: unknown[]
+  pluginAnalytics?: unknown[]
+  pluginScheduledJobs?: unknown[]
+  twinSources?: TwinSource[]
+  twinChunks?: TwinChunk[]
+  twinProfile?: TwinProfile[]
+  twinDrafts?: TwinDraft[]
+  twinJobs?: TwinJob[]
 }
 ```
 
@@ -84,12 +103,22 @@ interface BackupPackageV3 {
 
 <TypeTable
   type={{
+    version: {
+      description: '面向用户的版本号字符串，固定 `"3.0"`。',
+      type: '"3.0"',
+      required: true,
+    },
     schemaVersion: {
-      description: "当前固定为 `3`。旧文件（`1`）导入时迁移。",
+      description: "数字 schema 版本，当前为 `3`。旧文件（`1`）导入时迁移。",
       type: "3",
       required: true,
     },
-    createdAt: {
+    traceId: {
+      description: "每次导出生成的稳定 UUID，便于跨日志关联。",
+      type: "string",
+      required: true,
+    },
+    exportedAt: {
       description: "构建快照时的 ISO-8601 时间戳。",
       type: "string",
       required: true,
@@ -99,20 +128,19 @@ interface BackupPackageV3 {
       type: "string",
       required: true,
     },
+    backend: {
+      description: "标记导出来源运行环境（Web Dexie 或 Tauri Dexie）。",
+      type: '"web-dexie" | "tauri-dexie"',
+      required: true,
+    },
     integrity: {
-      description: "规范化 JSON `payload` 的 SHA-256。导入时校验 —— 防篡改。",
-      type: "string",
+      description: "规范化 JSON `payload` 的 SHA-256。导入时校验，防篡改。",
+      type: '{ algorithm: "SHA-256"; checksum: string }',
       required: true,
     },
-    "flags.includesSessions": {
-      description: "payload 中是否包含 `sessions` 与 `messages`。",
-      type: "boolean",
-      required: true,
-    },
-    "flags.includesApiKey": {
-      description: "是否包含 API key 引用（默认 false）。",
-      type: "boolean",
-      required: true,
+    encryption: {
+      description: "仅当文件被 `EncryptedEnvelopeV1` 包裹时存在。",
+      type: '{ enabled: true; format: "encrypted-envelope-v1" }',
     },
   }}
 />
@@ -133,7 +161,7 @@ flowchart LR
   ENC --> ENV[EncryptedEnvelopeV1<br/>+ 未加密 manifest 副本]
   ENV --> FILE[(.cgnbk 文件)]
 
-  classDef tbl fill:#0f172a,stroke:#475569,color:#cbd5e1
+  classDef tbl fill:#1e293b,stroke:#475569,color:#e2e8f0
   classDef step fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
   classDef gate fill:#312e81,stroke:#a78bfa,color:#ede9fe
   classDef enc fill:#7c2d12,stroke:#fb923c,color:#fed7aa
@@ -147,7 +175,7 @@ flowchart LR
 
 把 `BackupPackageV3` 包进 `EncryptedEnvelopeV1`：
 
-```ts
+```ts title="lib/data/types.ts"
 interface EncryptedEnvelopeV1 {
   schemaVersion: 1
   encryption: "aes-gcm"
@@ -159,11 +187,11 @@ interface EncryptedEnvelopeV1 {
   }
   iv: string // base64
   ciphertext: string // base64
-  manifest: BackupPackageV3["manifest"] // 未加密的 manifest 副本
+  manifest: BackupManifestV3 // 未加密的 manifest 副本
 }
 ```
 
-manifest 在密文外保留一份副本，让用户在不输入密码的情况下也能看到文件包含*什么*（时间戳、schema 版本、flags）。
+manifest 在密文外保留一份副本，让用户在不输入密码的情况下也能看到文件包含*什么*（时间戳、schema 版本、来源后端）。
 
 `encryptBackupPackage(pkg, passphrase, manifest)` 以 PBKDF2-SHA256（600,000 次迭代，OWASP 2023 建议）派生密钥，再用 AES-GCM 加密规范化 JSON 的 `pkg`。
 
@@ -182,7 +210,7 @@ const pkg = await buildBackupPackage({
   includeSessions: true,
   includeApiKey: false,
 })
-// pkg.manifest.integrity 已设
+// pkg.manifest.integrity.checksum 已设
 ```
 
 内置角色 / 技能 / 团队会从 payload 中过滤掉 —— 导入时自然种子化。只包含用户创建的数据。
@@ -221,7 +249,7 @@ flowchart TB
   Strategy -->|duplicate| Apply
   Apply[applyBackupPackage] --> Dexie[(Dexie 表)]
 
-  classDef io fill:#0f172a,stroke:#475569,color:#cbd5e1
+  classDef io fill:#1e293b,stroke:#475569,color:#e2e8f0
   classDef step fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
   classDef gate fill:#312e81,stroke:#a78bfa,color:#ede9fe
   classDef enc fill:#7c2d12,stroke:#fb923c,color:#fed7aa
@@ -266,27 +294,55 @@ flowchart TB
 
 设置中的"维护" tab 展示历史。
 
-## 按域传输
+## 按域传输（20 个域）
 
-`lib/data/domain/index.ts` 导出 `DOMAIN_TRANSFERS` —— 按域注册的传输模块列表：
+`lib/data/domain/index.ts` 导出 `DOMAIN_TRANSFERS` —— 按域注册的传输模块列表。`DomainKey` 类型枚举了所有可传输的域：
 
-| 域         | 文件                       | 备注                             |
-| ---------- | -------------------------- | -------------------------------- |
-| 技能       | `domain/skills.ts`         | 单技能或整个库                   |
-| MCP 服务器 | `domain/mcp.ts`            | 适合分享工具配置                 |
-| 提示预设   | `domain/prompt-presets.ts` |                                  |
-| 角色       | `domain/characters.ts`     | 孪生绑定按 ID 保留               |
-| 团队       | `domain/teams.ts`          | 团队成员在导入时按角色名重新解析 |
-| 主题       | `domain/theme.ts`          | 自定义主题 JSON                  |
+| 域                  | 内容来源                              | 默认策略    |
+| ------------------- | ------------------------------------- | ----------- |
+| `skills`            | `skills` + `skillResources` 表        | `skip`      |
+| `mcpServers`        | `mcpServers` 表                       | `skip`      |
+| `promptPresets`     | `promptPresets` 表                    | `skip`      |
+| `characters`        | `characters` 表（孪生绑定按 ID 保留） | `skip`      |
+| `teams`             | `teams` 表（成员按角色名重新解析）    | `skip`      |
+| `settingsTheme`     | `settings` 单例中的主题字段           | `overwrite` |
+| `canvas`            | `canvasDocuments` + `canvasVersions`  | `skip`      |
+| `a2ui`              | `a2uiApps` + `a2uiTemplates`          | `skip`      |
+| `externalAgents`    | localStorage 中的外部 agent 列表      | `overwrite` |
+| `customModes`       | localStorage 中的自定义 agent mode    | `overwrite` |
+| `agentTeamsLayout`  | localStorage 中的团队页面布局         | `overwrite` |
+| `agentRuntime`      | localStorage 中的 agent 运行偏好      | `overwrite` |
+| `customThemes`      | localStorage 中的自定义主题列表       | `overwrite` |
+| `artifacts`         | localStorage 中的 artifact 缓存       | `overwrite` |
+| `a2uiSurfaces`      | localStorage 中保存的 surface 草稿    | `overwrite` |
+| `canvasKeybindings` | localStorage 中的 Monaco 键位         | `overwrite` |
+| `canvasComments`    | `canvasComments` 表                   | `skip`      |
+| `canvasSettings`    | localStorage 中的画板偏好             | `overwrite` |
+| `schedulerPrefs`    | localStorage 中的调度器偏好           | `overwrite` |
+| `plugins`           | 5 张插件表（含权限与遥测）            | `skip`      |
 
 API：
 
 ```ts
-const blob = await buildDomainExport("skills") // → Blob
-await applyDomainImport("skills", file, "overwrite") // 策略
+import { buildDomainExport, applyDomainImport } from "@/lib/data/domain"
+
+const blob = await buildDomainExport("skills")
+await applyDomainImport("skills", file, "overwrite") // 用户选择的策略
 ```
 
-每个域传输都有同名 `<key>.test.ts`。
+域文件格式：
+
+```ts
+interface DomainExportFile {
+  version: "cognia-domain-1.0"
+  domain: DomainKey
+  exportedAt: string
+  appVersion: string
+  payload: BackupPayloadV3
+}
+```
+
+底层复用同一份 `applyBackupPackage` 编排器，所以单域导出 / 整包导出共享同一组合并逻辑。每个域传输都有同名 `<key>.test.ts`。
 
 ## 第三方导入
 
@@ -312,7 +368,7 @@ await applyDomainImport("skills", file, "overwrite") // 策略
 
 - **概览** —— 备份当前状态、向量后端、孪生计数。
 - **备份与还原** —— 手动导入/导出、定时控件、密码设置。
-- **域传输** —— 按域导入/导出。
+- **域传输** —— 按域导入/导出，含每域的策略选择器。
 - **维护** —— 清空数据库、查看备份历史、完整性检查。
 
 活动 tab 反映在 URL（`?dataTab=...`），便于深链。
@@ -323,28 +379,30 @@ await applyDomainImport("skills", file, "overwrite") // 策略
 
 ## 单会话导出
 
-每个聊天头部的 `SingleExportTrigger`（`components/chat/dialogs/single-export-trigger.tsx`）用于**单会话**导出 —— Markdown / JSON / 纯文本 / 美化 HTML / 动画 HTML。它独立于备份系统，不走 `lib/data/`。
+每个聊天头部的 `SingleExportTrigger`（`components/chat/dialogs/single-export-trigger.tsx`）用于**单会话**导出 —— Markdown / JSON / 纯文本 / 美化 HTML / 动画 HTML。它独立于备份系统，不走 `lib/data/`。完整流水线见 [导出系统](./export-system)。
 
 ## 在哪里入手
 
-| 目标            | 文件                                                                           |
-| --------------- | ------------------------------------------------------------------------------ |
-| 加新域传输      | `lib/data/domain/<name>.ts`，在 `index.ts` 注册                                |
-| 加第三方导入    | `lib/data/importers/<name>.ts`，在 `import-registry.ts` 注册                   |
-| 调整调度间隔    | `lib/data/scheduler.ts`                                                        |
-| 升级备份 schema | 新建 `BackupPackageV4` 类型，在 `migrate.ts` 加 v3→v4，更新 `build-package.ts` |
+| 目标            | 文件                                                                                             |
+| --------------- | ------------------------------------------------------------------------------------------------ |
+| 加新域传输      | `lib/data/domain/index.ts`：扩展 `DomainKey` 联合，向 `DOMAIN_TRANSFERS` 加入新的 `DomainSpec`。 |
+| 加第三方导入    | `lib/data/importers/<name>.ts`，在 `import-registry.ts` 注册                                     |
+| 调整调度间隔    | `lib/data/scheduler.ts`                                                                          |
+| 升级备份 schema | 新建 `BackupPackageV4` 类型，在 `migrate.ts` 加 v3→v4，更新 `build-package.ts`                   |
 
 ## 测试
 
 - `apply-package.test.ts`、`build-package.test.ts`、`crypto.test.ts`、`migrate.test.ts` —— 备份核心。
 - `scheduler.test.ts` —— fake-timers 驱动；覆盖间隔与失败处理。
+- 每个域传输都有同名 `<key>.test.ts`。
 - 主版本各保留一份快照（`lib/data/snapshots/`）以发现 schema 漂移。
 
 ## 下一篇
 
 <Cards>
-  <Card title="存储" href="./storage" description="底层 Dexie schema" />
-  <Card title="调度器" href="./scheduler" description="备份调度构建在其上的通用调度原语" />
+  <Card title="存储" href="./storage" description="底层 Dexie schema v26" />
+  <Card title="导出系统" href="./export-system" description="单会话导出与 HTML 美化" />
+  <Card title="数据 hooks" href="./data-hooks" description="dexie-react-hooks 的实战模式" />
   <Card
     title="ADR-0001"
     href="../adr/0001-backup-schema-v3"

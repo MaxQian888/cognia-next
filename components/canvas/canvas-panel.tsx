@@ -63,6 +63,7 @@ import {
   type FormatAction,
 } from "@/components/document/document-format-toolbar"
 import { FORMAT_ACTION_MAP, TRANSLATE_LANGUAGES } from "@/lib/canvas/constants"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 const MonacoEditorView = dynamic(() => import("@monaco-editor/react").then((mod) => mod.default), {
   ssr: false,
@@ -321,6 +322,11 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
         onTriggerSuggestions={triggerSuggestions}
         onSaveVersion={() => activeDoc && saveVersion(activeDoc.id, "manual")}
         onFormat={handleFormat}
+      />
+
+      <PluginExtensionSlot
+        point="canvas.toolbar"
+        className="flex items-center gap-1 border-b bg-muted/20 px-2 py-1 empty:hidden"
       />
 
       <div ref={editorContainerRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">

@@ -25,6 +25,7 @@ import { CommentPanel } from "./comment-panel"
 import { CollaborationPanel } from "./collaboration-panel"
 import { CodeExecutionPanel } from "./code-execution-panel"
 import { useCanvasCodeExecution } from "@/hooks/canvas"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 export const CANVAS_SIDE_PANELS_ICON_ONLY_BREAKPOINT = 280
 
@@ -80,6 +81,10 @@ export function CanvasSidePanels() {
 
   return (
     <div ref={containerRef} className="flex h-full min-h-0 min-w-0 flex-col">
+      <PluginExtensionSlot
+        point="canvas.sidebar"
+        className="flex flex-col gap-1 border-b bg-muted/20 px-2 py-1 empty:hidden"
+      />
       <Tabs
         value={activeRightTab}
         onValueChange={(value) => setActiveRightTab(value as CanvasRightTab)}

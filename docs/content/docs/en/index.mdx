@@ -142,7 +142,52 @@ Read the [Architecture](./architecture) page for how these layers fit together.
   />
 </Cards>
 
-<Callout type="info" title="ADRs">
-  The four [Architecture Decision Records](../adr/0001-backup-schema-v3) are referenced from the
-  relevant pages and explain **why** each subsystem looks the way it does.
+<Callout type="info" title="More documentation in Chinese">
+  The Chinese version of these docs covers ~20 additional subsystem pages (visual workflows,
+  platform connectors, external bridge, MCP servers, mobile architecture, …) plus all 17
+  [Architecture Decision Records](/docs/adr/0001-backup-schema-v3). Use the language switcher in the
+  top bar to jump to 中文.
 </Callout>
+
+## Pick your runtime mode
+
+<Tabs items={["Web", "Desktop", "Docs site"]}>
+  <Tab value="Web">
+    ```bash pnpm install pnpm dev # → http://localhost:3000 ``` Web mode runs only the Next.js dev
+    server. Tauri-only features (scheduler, native vector store, connectors, MCP servers) become
+    no-ops behind `isTauri()` guards.
+  </Tab>
+  <Tab value="Desktop">
+    ```bash pnpm install pnpm tauri dev ``` Full-featured desktop run. The Tauri shell starts the
+    Next.js dev server, spawns the Node sidecar, and registers all 27 Rust modules.
+  </Tab>
+  <Tab value="Docs site">
+    ```bash pnpm docs:dev # → http://localhost:3001 ``` This site you're reading. Built with
+    Fumadocs — the dev server hot-reloads MDX edits instantly.
+  </Tab>
+</Tabs>
+
+## First contribution in 4 steps
+
+<Steps>
+  <Step>
+    ### Read the architecture overview
+    [Architecture](./architecture) introduces the four-layer model
+    (Browser → IPC → Rust → sidecar) and where each subsystem lives.
+  </Step>
+  <Step>
+    ### Pick a subsystem
+    Find the page above that matches what you want to change. Each page links
+    back to its source folder under `lib/`, `components/`, or `src-tauri/src/`.
+  </Step>
+  <Step>
+    ### Run with hot reload
+    `pnpm tauri dev` reloads the React side instantly; Rust changes recompile
+    on save.
+  </Step>
+  <Step>
+    ### Add tests
+    The project enforces ≥90% coverage. Co-locate tests as
+    `<file>.test.ts(x)` and run `pnpm test:coverage`.
+  </Step>
+</Steps>

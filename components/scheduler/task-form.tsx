@@ -698,7 +698,7 @@ export function TaskForm({
 
         <div className="space-y-4">
           {/* Trigger Type Selection */}
-          <div className="grid grid-cols-1 xs:grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {TRIGGER_TYPES.map((type) => (
               <button
                 key={type.value}
@@ -1227,7 +1227,7 @@ export function TaskForm({
       </Collapsible>
 
       {/* Actions */}
-      <div className="flex flex-col-reverse xs:flex-row gap-2 sm:gap-3 pt-2">
+      <div className="flex flex-col-reverse sm:flex-row gap-2 sm:gap-3 pt-2">
         <Button
           variant="outline"
           onClick={onCancel}

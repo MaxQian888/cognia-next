@@ -6264,9 +6264,14 @@
       "active": "active",
       "paused": "paused",
       "successRate": "success",
-      "executions": "executions"
+      "executions": "executions",
+      "avgDuration": "Avg duration",
+      "failed": "Failed",
+      "nextRun": "Next run",
+      "successful": "Successful"
     },
     "filter": {
+      "all": "All",
       "statusLabel": "Status",
       "typeLabel": "Type",
       "allStatuses": "All statuses",
@@ -6540,7 +6545,27 @@
     "exportError": "Export failed: {message}",
     "importError": "Import failed: {message}",
     "noExecutionsYet": "No executions yet",
-    "inspectDegradedTask": "Inspect Degraded Task"
+    "inspectDegradedTask": "Inspect Degraded Task",
+    "kindFilter": {
+      "all": "All",
+      "app": "App",
+      "workflow": "Workflow",
+      "backup": "Backup",
+      "plugin": "Plugin",
+      "system": "System"
+    },
+    "emptyTitle": "No scheduled tasks yet",
+    "emptyDescription": "Create your first scheduled task to automate recurring work.",
+    "emptyCreateCta": "Create task",
+    "emptyFilteredTitle": "No matching tasks",
+    "emptyFilteredDescription": "Try different search terms or clear filters.",
+    "emptyClearFilters": "Clear filters",
+    "panelErrorTitle": "Something went wrong",
+    "panelErrorDescription": "This panel failed to render.",
+    "panelErrorRetry": "Retry",
+    "openInSourceEditor": "Open in source editor",
+    "createTaskKind": "Choose task kind",
+    "active": "active"
   },
   "desktop": {
     "channelList": {
@@ -8284,8 +8309,12 @@
       "targetSearchPlaceholder": "Search conversations…",
       "queuedToast": "Queued for delivery.",
       "noConversations": "No conversations available yet.",
+      "noConversationsDescription": "Open a chat first, then come back to share.",
       "receivedText": "Received text",
-      "receivedUrl": "Link"
+      "receivedUrl": "Link",
+      "errorTitle": "Share failed to open",
+      "errorDescription": "We couldn't load your conversations to receive the shared content. Try again, or open Cognia and retry the share.",
+      "retry": "Try again"
     },
     "offline": {
       "bannerOffline": "Offline — sends will queue and retry automatically.",

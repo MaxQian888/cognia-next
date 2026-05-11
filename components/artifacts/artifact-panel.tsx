@@ -58,6 +58,7 @@ import {
 } from "@/lib/artifacts"
 import { getArtifactTypeIcon } from "./artifact-icons"
 import { useArtifactPanelState } from "@/hooks/artifacts/use-artifact-panel"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 type ArtifactPanelAction =
   | "modeTabs"
@@ -298,12 +299,20 @@ export function ArtifactPanel() {
           <Artifact className="h-full min-h-0 border-0 rounded-none">
             <ArtifactHeader className="flex-col items-stretch gap-2">
               {renderIdentityRow()}
+              <PluginExtensionSlot
+                point="artifact.toolbar"
+                className="flex items-center gap-1 empty:hidden"
+              />
               {panelMode !== "mobile" && (
                 <ArtifactActions
                   data-testid="artifact-header-row-actions"
                   className="flex items-center gap-1 flex-wrap"
                 >
                   {renderActionZone()}
+                  <PluginExtensionSlot
+                    point="artifact.actions"
+                    className="flex items-center gap-1 empty:hidden"
+                  />
                 </ArtifactActions>
               )}
             </ArtifactHeader>

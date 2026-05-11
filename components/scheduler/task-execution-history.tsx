@@ -4,8 +4,10 @@
  * TaskExecutionHistory - Scrollable execution log list for a scheduled task
  */
 
+import { useState } from "react"
 import { useFormatter, useTranslations } from "next-intl"
 import { Clock, CheckCircle, XCircle, RefreshCw, AlertCircle } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { formatDuration } from "@/lib/scheduler/format-utils"
 import type { TaskExecution, TaskExecutionStatus } from "@/types/scheduler"
@@ -59,14 +61,20 @@ function getResultSummary(result: unknown): string | null {
 
 interface TaskExecutionHistoryProps {
   executions: TaskExecution[]
+  /**
+   * Initial page size and increment per "Load more" click. Defaults to 10.
+   */
   maxItems?: number
 }
 
 export function TaskExecutionHistory({ executions, maxItems = 10 }: TaskExecutionHistoryProps) {
   const t = useTranslations("scheduler")
   const format = useFormatter()
+  const [displayCount, setDisplayCount] = useState(maxItems)
 
-  const displayed = executions.slice(0, maxItems)
+  const displayed = executions.slice(0, displayCount)
+  const hasMore = executions.length > displayed.length
+  const remaining = executions.length - displayed.length
 
   if (displayed.length === 0) {
     return (
@@ -146,6 +154,19 @@ export function TaskExecutionHistory({ executions, maxItems = 10 }: TaskExecutio
           </div>
         )
       })}
+
+      {hasMore && (
+        <div className="flex justify-center pt-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setDisplayCount((count) => count + maxItems)}
+            data-testid="execution-load-more"
+          >
+            {t("loadMore") || "Load more"} ({remaining})
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

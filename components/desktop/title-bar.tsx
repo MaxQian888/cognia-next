@@ -41,6 +41,7 @@ import {
 import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
 import { useEffect, useState, useSyncExternalStore } from "react"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 const log = loggers.ui
 const NARROW_QUERY = "(max-width: 760px)"
@@ -403,6 +404,10 @@ export function TitleBar() {
     >
       <div className="flex items-center gap-1">
         <SparklesIcon aria-hidden className="size-4 shrink-0 text-primary" />
+        <PluginExtensionSlot
+          point="toolbar.left"
+          className="flex items-center gap-1 empty:hidden"
+        />
         {!isMac &&
           (narrow ? (
             <DropdownMenu>
@@ -678,7 +683,16 @@ export function TitleBar() {
           kbdHint={t("kbdHint")}
           onClick={handleCommandPalette}
         />
+        <PluginExtensionSlot
+          point="toolbar.center"
+          className="ml-2 flex items-center gap-1 empty:hidden"
+        />
       </div>
+
+      <PluginExtensionSlot
+        point="toolbar.right"
+        className="flex items-center gap-1 px-1 empty:hidden"
+      />
 
       {!isMac ? (
         <div className="flex items-center">

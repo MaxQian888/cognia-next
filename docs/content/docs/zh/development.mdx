@@ -40,6 +40,7 @@ pnpm test             # Jest
 pnpm test:watch       # Jest watch
 pnpm test:coverage    # Jest 覆盖率（≥90% 阈值）
 pnpm sidecar:test     # Sidecar/builtin-tools 的 Node test runner
+pnpm audit:slots      # 扫描插件 slot 契约（contracts/plugin-points.ts）
 
 # 桌面（Tauri）
 pnpm tauri dev        # 桌面热重载
@@ -51,6 +52,11 @@ pnpm tauri icon       # 由源 PNG 生成桌面图标
 pnpm docs:dev         # Fumadocs 开发（同时生成 docs/.source/）
 pnpm docs:build       # 文档生产构建
 pnpm docs:start       # 文档生产服务器
+
+# 移动端（Capacitor）
+pnpm mobile:sync      # next build + capacitor sync
+pnpm mobile:open:ios
+pnpm mobile:open:android
 
 # Monaco 编辑器（自动通过 predev / prebuild 运行）
 pnpm monaco:copy      # 把 Monaco 资源复制到 public/
@@ -73,13 +79,13 @@ pnpm monaco:copy      # 把 Monaco 资源复制到 public/
       <Folder name="twin">
         <File name="page.tsx" />
       </Folder>
-      <Folder name="scheduler">
-        <File name="page.tsx" />
-      </Folder>
+      <Folder name="scheduler" />
       <Folder name="agent-teams" />
       <Folder name="canvas" />
       <Folder name="skills" />
       <Folder name="a2ui" />
+      <Folder name="workflows" />
+      <Folder name="inbox" />
       <Folder name="logs" />
     </Folder>
     <Folder name="components">
@@ -90,6 +96,8 @@ pnpm monaco:copy      # 把 Monaco 资源复制到 public/
       <Folder name="settings" />
       <Folder name="scheduler" />
       <Folder name="plugin" />
+      <Folder name="workflow" />
+      <Folder name="inbox" />
       <Folder name="providers" />
     </Folder>
     <Folder name="lib">
@@ -98,11 +106,16 @@ pnpm monaco:copy      # 把 Monaco 资源复制到 public/
       <Folder name="claude">— Agent SDK 胶水</Folder>
       <Folder name="twin">— ingest / distill / runtime</Folder>
       <Folder name="vector">— sqlite-vec + 5 个云端后端</Folder>
-      <Folder name="data">— 备份 schema v3</Folder>
+      <Folder name="data">— 备份 schema v3 + 20 个域</Folder>
       <Folder name="scheduler" />
       <Folder name="plugin" />
-      <Folder name="db">— Dexie schema v15</Folder>
+      <Folder name="connectors" />
+      <Folder name="workflow" />
+      <Folder name="external-bridge" />
+      <Folder name="anthropic-subscription" />
+      <Folder name="db">— Dexie schema v26</Folder>
       <Folder name="ai" />
+      <Folder name="appearance" />
       <Folder name="i18n" />
       <Folder name="themes" />
     </Folder>
@@ -126,6 +139,8 @@ pnpm monaco:copy      # 把 Monaco 资源复制到 public/
         <Folder name="claude" />
         <Folder name="scheduler" />
         <Folder name="vector" />
+        <Folder name="workflow" />
+        <Folder name="connectors" />
         <Folder name="tts" />
       </Folder>
       <File name="tauri.conf.json" />
@@ -248,7 +263,7 @@ flowchart LR
   classDef step fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
   classDef hook fill:#312e81,stroke:#a78bfa,color:#ede9fe
   classDef ci fill:#064e3b,stroke:#10b981,color:#a7f3d0
-  classDef terminal fill:#0f172a,stroke:#475569,color:#cbd5e1
+  classDef terminal fill:#1e293b,stroke:#475569,color:#e2e8f0
   classDef reject fill:#7f1d1d,stroke:#fca5a5,color:#fee2e2
   class Stage,Pretty,ES,Commit,Local,Push step
   class Husky,LS,CM,CL hook
@@ -294,7 +309,7 @@ Jest 配置（`jest.config.ts`）通过 `coverageThreshold` 按文件强制阈�
 
 ### 测试样板
 
-```ts
+```tsx title="components/ui/button.test.tsx"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { Button } from "./button"
@@ -316,7 +331,7 @@ describe("Button", () => {
 
 Rust：
 
-```rust
+```rust title="src-tauri/src/scheduler/mod.rs"
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -360,7 +375,7 @@ Husky 安装：
 
 ## Conventional Commits
 
-```
+```text
 <type>(<scope>): <description>
 ```
 
@@ -368,7 +383,7 @@ Husky 安装：
 
 示例：
 
-```
+```text
 feat(twin): add per-source re-embed action
 fix(scheduler): handle DST transitions in cron next()
 docs(adr): add 0004 vector backend
@@ -409,6 +424,7 @@ pnpm typecheck
 | Dexie                | DevTools → Application → IndexedDB → `cognia-claude`                |
 | 原生日志             | OS 原生日志查看器（事件查看器 / Console.app / `journalctl --user`） |
 | 向量库（sqlite-vec） | `sqlite3 <app_data>/cognia/vectors.sqlite` 然后 `.tables`           |
+| 结构化追踪           | 见 [可观测性](./observability)：sidecar / Tauri / Web 三段链路      |
 
 ## 常见重构模式
 
@@ -432,6 +448,8 @@ pnpm typecheck
 ## 下一篇
 
 <Cards>
+  <Card title="可观测性" href="./observability" description="日志、追踪、Sentry 接线" />
+  <Card title="shadcn/ui 接入" href="./shadcn-ui-setup" description="57 个组件的工程约定" />
   <Card title="部署" href="./deployment" description="Web、桌面、文档站点的构建" />
   <Card title="架构" href="./architecture" description="所有约定背后的分层设计" />
 </Cards>

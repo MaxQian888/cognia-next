@@ -5,6 +5,14 @@ description: 把 Cognia 打包为 Web、桌面（按平台）和文档站点，�
 
 # 部署
 
+<Status variant="stable" />
+
+<TLDR>
+  三种发布形式：Web（静态导出，托管在任意 CDN）、桌面（Tauri 在 Windows / macOS / Linux
+  出三套安装包）、 文档（Fumadocs 全服务模式）。GitHub Actions 已配好 quality / test / build-tauri /
+  release / deploy 五条工作流。 应用内更新默认禁用，等签名密钥就绪后启用。
+</TLDR>
+
 Cognia 有三种发布形式：
 
 1. **Web** —— 静态导出，可部署到任意静态托管。
@@ -28,7 +36,7 @@ flowchart LR
   ND --> DocsOut[(docs/.next/)]
   DocsOut --> NodeHost[Node 托管<br/>Vercel · Railway · …]
 
-  classDef src fill:#0f172a,stroke:#475569,color:#cbd5e1
+  classDef src fill:#1e293b,stroke:#475569,color:#e2e8f0
   classDef step fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
   classDef out fill:#064e3b,stroke:#10b981,color:#a7f3d0
   classDef host fill:#312e81,stroke:#a78bfa,color:#ede9fe
@@ -60,7 +68,7 @@ pnpm build
 - **静态 Nginx / Apache** —— 把 `out/` 拷到文档根；配置 SPA 回落。
 - **S3 / CloudFront** —— 把 `out/` 同步到 bucket；设 index document。
 
-Web 模式下 UI 层会通过 `isTauri()` 检查隐藏桌面专属功能（原生向量库、定时备份、原生调度器提升）。
+Web 模式下 UI 层会通过 `isTauri()` 检查隐藏桌面专属功能（原生向量库、定时备份、原生调度器提升、平台连接器收发、Workflow webhook 等）。
 
 ### 环境变量
 
@@ -78,7 +86,7 @@ pnpm build
 
 为了最佳缓存：
 
-```
+```text
 out/_next/static/**/*  →  Cache-Control: public, max-age=31536000, immutable
 out/**/*.html          →  Cache-Control: no-cache
 ```
@@ -101,7 +109,7 @@ pnpm tauri build
 
 <Tabs groupId="os" persist items={["Windows", "macOS", "Linux"]}>
   <Tab value="Windows">
-    ```
+    ```text
     src-tauri/target/release/bundle/
       msi/Cognia_<version>_x64_en-US.msi
       nsis/Cognia_<version>_x64-setup.exe   # 如配置
@@ -111,7 +119,7 @@ pnpm tauri build
 
   </Tab>
   <Tab value="macOS">
-    ```
+    ```text
     src-tauri/target/release/bundle/
       dmg/Cognia_<version>_<arch>.dmg
       macos/Cognia.app
@@ -122,7 +130,7 @@ pnpm tauri build
 
   </Tab>
   <Tab value="Linux">
-    ```
+    ```text
     src-tauri/target/release/bundle/
       appimage/cognia_<version>_amd64.AppImage
       deb/cognia_<version>_amd64.deb        # 如配置
@@ -148,13 +156,13 @@ pnpm tauri build --bundles deb,rpm,appimage         # 指定 bundle 类型
 Tauri 跨编译需要可观的搭建（Docker 镜像、sysroot）。日常做法：
 
 - 用各平台原生 CI runner 各自构建。
-- GitHub Actions 矩阵是标准模式；见 `.github/workflows/release.yml`。
+- GitHub Actions 矩阵是标准模式；见 `.github/workflows/build-tauri.yml`，由 `release.yml` 调用。
 
 ### 资源
 
 `tauri.conf.json` → `bundle.resources` 列出要拷到包里的文件：
 
-```jsonc
+```jsonc title="src-tauri/tauri.conf.json"
 "resources": [
   "../sidecar/claude-host.mjs",
   "../sidecar/a2ui-mcp.mjs",
@@ -164,6 +172,14 @@ Tauri 跨编译需要可观的搭建（Docker 镜像、sysroot）。日常做法
 ```
 
 Sidecar 的整个 `node_modules/` 都被打进去，因为 sidecar 作为独立 Node 进程运行，需要这些依赖。生产用户**不**需要本地 Node —— 包内的 Node 二进制（或宿主系统的）会运行 sidecar。
+
+### 已安装 Tauri 插件
+
+`tauri.conf.json` + `Cargo.toml` 中目前接入的 Tauri 插件包括：
+
+- `plugin-autostart`、`plugin-cli`、`plugin-clipboard-manager`、`plugin-deep-link`（`cognia://` scheme）、`plugin-dialog`、`plugin-fs`、`plugin-notification`、`plugin-opener`、`plugin-os`、`plugin-process`、`plugin-store`、`plugin-updater`（默认未启用，见下）、`plugin-window-state`。
+
+deep-link 的桌面 scheme 是 `cognia`，移动端列表留空（[移动端架构](./mobile-architecture)章节单独管）。
 
 ## 代码签名
 
@@ -189,7 +205,7 @@ Sidecar 的整个 `node_modules/` 都被打进去，因为 sidecar 作为独立 
   </Tab>
 </Tabs>
 
-仓库自带 `.github/workflows/release.yml`，在多 OS 矩阵上跑 Tauri 构建并把安装包作为 release asset 上传。代码签名 env 注释保留 —— 拿到证书后取消注释。
+仓库自带 `.github/workflows/release.yml`，配合 `build-tauri.yml` 在多 OS 矩阵上跑 Tauri 构建并把安装包作为 release asset 上传。代码签名 env 注释保留 —— 拿到证书后取消注释。
 
 ## 应用内更新
 
@@ -214,7 +230,7 @@ Sidecar 的整个 `node_modules/` 都被打进去，因为 sidecar 作为独立 
   <Step>
     ### 把公钥写进 `tauri.conf.json`
 
-    ```jsonc
+    ```jsonc title="src-tauri/tauri.conf.json"
     "plugins": {
       "updater": {
         "active": true,
@@ -290,11 +306,14 @@ Fumadocs 用 Orama 在浏览器内做全文搜索。索引在构建期由 MDX �
 
 仓库自带 `.github/workflows/`：
 
-| Workflow           | 触发                     | 内容                                             |
-| ------------------ | ------------------------ | ------------------------------------------------ |
-| `ci.yml`（或等价） | PR、push                 | Lint、typecheck、test、Web 构建、有时 Tauri 冒烟 |
-| `release.yml`      | 匹配 `v*.*.*` 的 tag     | Tauri 构建矩阵 → 把安装包作为 release asset 上传 |
-| `docs.yml`         | 推送到 `main`、docs/\*\* | 构建 + 部署文档                                  |
+| Workflow          | 触发             | 内容                                                      |
+| ----------------- | ---------------- | --------------------------------------------------------- |
+| `ci.yml`          | PR、push         | Lint、typecheck、test 全套（开箱即用，不需要任何 secret） |
+| `quality.yml`     | `workflow_call`  | ESLint + typecheck + security audit；release 链路复用     |
+| `test.yml`        | `workflow_call`  | `pnpm test:coverage`；release 链路复用                    |
+| `build-tauri.yml` | `workflow_call`  | 跨 OS 矩阵跑 `pnpm tauri build`；release 链路复用         |
+| `release.yml`     | 匹配 `v*` 的 tag | 串联 quality → test → build-tauri → 上传安装包            |
+| `deploy.yml`      | push 到 `main`   | 部署 Web / 文档（按配置）                                 |
 
 如要 fork Cognia 并发布二进制，把这些 workflow 一起 fork —— 它们编码了矩阵目标和签名接线。
 
@@ -327,7 +346,7 @@ Cognia 在 `package.json` 与 `Cargo.toml` 都用 **semver**，需手动同步�
 | 目标                | 文件                                                                   |
 | ------------------- | ---------------------------------------------------------------------- |
 | 加新构建目标        | `src-tauri/Cargo.toml`（target 依赖）、`tauri.conf.json`               |
-| 调发版流水线        | `.github/workflows/release.yml`                                        |
+| 调发版流水线        | `.github/workflows/release.yml` + `build-tauri.yml`                    |
 | 自定义安装包        | `tauri.conf.json` → `bundle.windows` / `bundle.macOS` / `bundle.linux` |
 | 加 runtime 环境变量 | `lib/env.ts`、`.env.example`、部署文档                                 |
 
@@ -335,6 +354,20 @@ Cognia 在 `package.json` 与 `Cargo.toml` 都用 **semver**，需手动同步�
 
 <Cards>
   <Card title="概览" href="./" description="回到中文文档首页" />
+  <Card
+    title="移动端架构"
+    href="./mobile-architecture"
+    description="Capacitor + Web 一体化的移动客户端"
+  />
+  <Card title="伴随 API" href="./companion-api" description="远端 / 云端客户端对应的服务端协议" />
+  <Card
+    title="运行时 & Tauri"
+    href="./runtime-and-tauri"
+    description="桌面运行时的 IPC、命令、事件模型"
+  />
+</Cards>
+
+<Cards>
   <Card
     title="ADR-0001 · 备份 schema v3"
     href="../adr/0001-backup-schema-v3"

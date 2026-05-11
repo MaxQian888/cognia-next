@@ -23,11 +23,19 @@ export { TaskForm } from "./task-form"
 export { ScriptTaskEditor } from "./script-task-editor"
 export { TaskConfirmationDialog, AdminElevationDialog } from "./task-confirmation-dialog"
 export { SystemTaskForm } from "./system-task-form"
-// Workflow/backup dialogs are not ported — cognia-next has no workflow or
-// backup subsystems to drive their payloads. The /scheduler page guards on
-// these via header-menu items that we hide.
 export { SchedulerInitializer } from "./scheduler-initializer"
+export { SchedulerSkeleton } from "./scheduler-skeleton"
+export { TaskListEmptyState, PanelErrorState } from "./empty-states"
+export { SchedulerErrorBoundary } from "./scheduler-error-boundary"
 export { TimezoneSelect } from "./timezone-select"
 export { TaskTemplateGallery } from "./task-template-gallery"
 export { ExportTasksDialog, ImportTasksDialog } from "./import-export-dialog"
 export { SystemTaskInspectSheet } from "./system-task-inspect-sheet"
+
+// Page-level composition (moved from app/scheduler/)
+export { SchedulerContentHeader } from "./scheduler-content-header"
+export type { SchedulerContentHeaderProps } from "./scheduler-content-header"
+export { SchedulerDialogs } from "./scheduler-dialogs"
+export type { SchedulerDialogsProps } from "./scheduler-dialogs"
+export { SchedulerMobileDetailView } from "./scheduler-mobile-detail"
+export type { SchedulerMobileDetailViewProps } from "./scheduler-mobile-detail"

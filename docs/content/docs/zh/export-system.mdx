@@ -1,0 +1,295 @@
+---
+title: 导出系统
+description: 单会话 5 种格式 + 批量 ZIP 导出 —— Markdown / JSON / 纯文本 / Beautiful HTML / Animated HTML，8 套主题 + 自定义。
+---
+
+# 导出系统
+
+<Status variant="stable" />
+
+<TLDR>
+  统一入口 `renderSingleExport({ format, session, messages })` 派发到 5 种格式：
+  rich Markdown、rich JSON、plain text、beautiful HTML（8 套主题 + 自定义 tokens）、
+  animated HTML（淡入 + 逐字打字效果）。批量导出 (`exportBatch`) 把多个会话打成 ZIP，
+  JSZip 懒加载。所有 HTML 自包含 —— 内联样式 + 内联脚本 + 零外部请求。
+</TLDR>
+
+<StatGrid>
+  <Stat label="单会话格式" value="5" hint="markdown · json · text · html · animated" />
+  <Stat
+    label="HTML 主题"
+    value="8"
+    hint="light · dark · sepia · github · dracula · nord · solarized · monokai"
+  />
+  <Stat label="自定义" value="是" hint="ThemeTokens 11 个 token，可在 dialog 内即时编辑" />
+  <Stat label="批量" value="ZIP" hint="懒加载 jszip" />
+</StatGrid>
+
+## 适用场景
+
+| 场景                                        | 格式                                                                |
+| ------------------------------------------- | ------------------------------------------------------------------- |
+| 上交给 GitHub / Obsidian 等 markdown 阅读器 | Rich Markdown（保留 tool 调用块、reasoning fenced block）           |
+| 程序处理 / 编程接入                         | Rich JSON（保留 `UIMessage.parts` 原始结构）                        |
+| 复制到邮件 / 简单文档                       | Plain text（去格式）                                                |
+| 离线分享给非技术读者                        | Beautiful HTML（自包含，主题精美）                                  |
+| 演示用、电影感播放                          | Animated HTML（淡入 + 打字效果，类似终端回放）                      |
+| 历史归档                                    | Batch ZIP（per-session 文件命名按 slug 唯一）                       |
+| 自定义品牌色                                | Beautiful / Animated HTML + `customTheme: ThemeTokens` 覆盖默认主题 |
+
+对于**整库快照（多设备搬运 + 加密）**，请用 [备份与数据](./backup-and-data) 的 `BackupPackageV3` 流水线 —— 那是一条独立的、加密的、覆盖全部 Dexie 表的导出路径。本页的导出系统专注于"单会话 / 多会话的可读副本"。
+
+## 架构图
+
+```mermaid
+flowchart TB
+  subgraph Entry["📥 入口"]
+    Trigger[components/chat/dialogs/<br/>single-export-trigger.tsx<br/>聊天头部下载按钮]
+    Dialog[components/data/export/<br/>single-export-dialog.tsx<br/>批量 dialog]
+    Plugin[Plugin Export API<br/>generateFilename / exportToHTML 等]
+  end
+
+  subgraph Single["📄 单会话"]
+    direction TB
+    Render[lib/export/single/index.ts<br/>renderSingleExport<br/>switch format]
+  end
+
+  subgraph Writers["✍️ 格式化器"]
+    MD[text/rich-markdown.ts<br/>exportToRichMarkdown]
+    JSON[exportToRichJSON]
+    Plain[exportToPlainText]
+    HTML[html/beautiful-html.ts<br/>exportToBeautifulHtml<br/>内联 CSS + collapsible script]
+    Animated[html/animated-html.ts<br/>exportToAnimatedHtml<br/>HTML + 动画 script + 打字 CSS]
+    Themes[html/syntax-themes.ts<br/>ThemeTokens × 8]
+  end
+
+  subgraph Batch["📦 批量"]
+    BatchFn[batch/batch-export.ts<br/>exportBatch<br/>JSZip 懒加载]
+  end
+
+  Trigger --> Dialog
+  Dialog --> Render
+  Plugin --> Render
+  Plugin --> BatchFn
+  Render --> MD
+  Render --> JSON
+  Render --> Plain
+  Render --> HTML
+  Render --> Animated
+  Animated --> HTML
+  HTML --> Themes
+  BatchFn --> Render
+
+  classDef entry fill:#312e81,stroke:#818cf8,color:#e0e7ff
+  classDef single fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
+  classDef writer fill:#7c2d12,stroke:#fb923c,color:#fed7aa
+  classDef batch fill:#064e3b,stroke:#34d399,color:#d1fae5
+  class Trigger,Dialog,Plugin entry
+  class Render single
+  class MD,JSON,Plain,HTML,Animated,Themes writer
+  class BatchFn batch
+```
+
+## 关键模块与文件路径
+
+### 公共 API
+
+| 文件                  | 用途                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------- |
+| `lib/export/index.ts` | 桶导出 + `generateFilename(title, ext)`；插件期望的稳定 API 别名（`exportToHTML` 等） |
+
+```ts
+// 插件 / UI 推荐写法
+import { renderSingleExport, exportToHTML, generateFilename } from "@/lib/export"
+```
+
+### 单会话编排
+
+| 文件                              | 用途                                                         |
+| --------------------------------- | ------------------------------------------------------------ |
+| `lib/export/single/index.ts`      | `renderSingleExport(opts) → { content, filename, mimeType }` |
+| `lib/export/single/index.test.ts` | 五种格式 + slug + mime 边界测试                              |
+
+### 文本写入器
+
+| 文件                               | 函数                                                              |
+| ---------------------------------- | ----------------------------------------------------------------- |
+| `lib/export/text/rich-markdown.ts` | `exportToRichMarkdown` / `exportToRichJSON` / `exportToPlainText` |
+
+每个写入器接受 `RichExportData = { session, messages, exportedAt, includeMetadata?, includeTokens? }`。Markdown 输出可在 GitHub / Obsidian / VS Code 直接渲染（toolcall 用 ` ``` ` fenced，reasoning 用 collapsible note）。
+
+### HTML 写入器
+
+| 文件                                | 用途                                                                                                      |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `lib/export/html/beautiful-html.ts` | 内联 `<style>` 块（构建自 `ThemeTokens`）+ `<details>` collapsible tool/reasoning + 紧凑 readable 布局    |
+| `lib/export/html/animated-html.ts`  | wraps beautiful；在 `</body>` 前注入一段 `<style>` 和 `<script>` 实现淡入 + 逐字打字（默认 12 ms/char）   |
+| `lib/export/html/syntax-themes.ts`  | `ThemeId × 8`（light / dark / sepia / github / dracula / nord / solarized / monokai）+ `ThemeTokens` 接口 |
+
+`ThemeTokens` 11 个 token：`bg` / `surface` / `text` / `muted` / `border` / `accent` / `userBg` / `assistantBg` / `codeBg` / `codeText` / `detailBg`。dialog 中的"自定义主题"编辑器（`components/data/export/custom-theme-editor.tsx`）实时改 token 直接覆盖默认。
+
+### 批量
+
+| 文件                               | 用途                                                                                                         |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `lib/export/batch/batch-export.ts` | `exportBatch({ sessions, format, theme?, customTheme?, onProgress? })` —— JSZip 懒加载；slug 冲突自动加 `-N` |
+
+### UI 触发
+
+| 文件                                                | 用途                                                           |
+| --------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------- |
+| `components/chat/dialogs/single-export-trigger.tsx` | 聊天头部下载图标按钮；`variant: "icon"                         | "labeled"`；打开 `SingleExportDialog` |
+| `components/data/export/single-export-dialog.tsx`   | 格式 picker + 主题 picker + 自定义主题编辑器 + 预览 + 下载按钮 |
+| `components/data/export/batch-export-dialog.tsx`    | 批量选择 + 进度条                                              |
+| `components/data/export/custom-theme-editor.tsx`    | 11 个 token 的颜色选择器，实时预览                             |
+| `components/data/export/schedule-card.tsx`          | 把批量导出绑定到调度器任务（"每周日导出最近一周")              |
+
+## 数据流：单会话导出
+
+```mermaid
+sequenceDiagram
+  participant U as 用户
+  participant Btn as SingleExportTrigger
+  participant Dlg as SingleExportDialog
+  participant Db as Dexie
+  participant R as renderSingleExport
+  participant W as 格式化器
+  participant F as 文件系统
+
+  U->>Btn: 点聊天头部"下载"
+  Btn->>Dlg: open with session
+  Dlg->>Db: 读全部 messages
+  U->>Dlg: 选 format + 主题 + 自定义 tokens
+  Dlg->>R: renderSingleExport({ format, session, messages, theme, customTheme })
+  R->>W: 派发到对应 exporter
+  W->>W: 拼接 lines / JSON.stringify / 生成 HTML
+  W-->>R: string
+  R-->>Dlg: { content, filename, mimeType }
+  Dlg->>F: download via Blob + URL.createObjectURL
+  F-->>U: 文件落盘
+```
+
+## 数据流：批量导出
+
+```mermaid
+sequenceDiagram
+  participant U as 用户
+  participant Dlg as BatchExportDialog
+  participant Batch as exportBatch
+  participant Db as Dexie
+  participant Z as JSZip
+  participant F as 文件系统
+
+  U->>Dlg: 选 N 个会话 + format
+  Dlg->>Batch: exportBatch({ sessions, format, onProgress })
+  Batch->>Batch: await import("jszip")（懒加载）
+  Batch->>Batch: new JSZip()
+  loop 每个 session
+    Batch->>Db: listMessages(sessionId)
+    Batch->>Batch: renderSingleExport（单文件）
+    Batch->>Batch: slug 冲突时加 -1 / -2 / ...
+    Batch->>Z: zip.file(filename, content)
+    Batch->>Dlg: onProgress({ completed, total, currentTitle })
+  end
+  Batch->>Z: zip.generateAsync({ type: "blob" })
+  Z-->>Batch: Blob
+  Batch-->>Dlg: { blob, filename, exportedCount }
+  Dlg->>F: download
+```
+
+## 数据库表
+
+导出系统**不引入新 Dexie 表**：
+
+- 读：`sessions` / `messages` 既有表。
+- 写：直接到本地文件系统（Blob + `URL.createObjectURL` + `<a download>` 点击；Tauri 模式可走 `tauri-plugin-dialog` 让用户选保存位置）。
+
+定时批量导出走调度器（参见 [调度器](./scheduler)），任务元数据进 `scheduledTasks` 表，导出本身不持久化产物。
+
+## 配置项与扩展点
+
+### 单会话选项
+
+```ts
+interface SingleExportOptions {
+  format: "markdown" | "json" | "text" | "html" | "animated"
+  session: ChatSession
+  messages: StoredMessage[]
+  exportedAt?: Date
+  theme?: ThemeId // HTML 格式专用
+  customTheme?: ThemeTokens // 覆盖 theme
+  includeMetadata?: boolean
+  includeTimestamps?: boolean
+  includeTokens?: boolean // markdown 写入器是否展示 tool token 计数
+}
+```
+
+### Beautiful HTML 选项
+
+```ts
+interface BeautifulHtmlOptions {
+  session
+  messages
+  exportedAt
+  theme?: ThemeId
+  customTheme?: ThemeTokens
+  includeMetadata?: boolean // 默认 true
+  includeTimestamps?: boolean // 默认 true
+  expandDetails?: boolean // 工具/reasoning collapsible 默认展开
+}
+```
+
+### Animated HTML 选项
+
+继承 Beautiful HTML 全部选项，加：
+
+```ts
+typingSpeedMs?: number // 每字符毫秒，默认 12
+```
+
+### 文件名生成
+
+```ts
+generateFilename(title: string, extension: string): string
+```
+
+slugify 规则：`toLowerCase` → 非字母数字替换为 `-` → 截 60 字符 → 空时回退 `"conversation"`。
+
+### 插件稳定 API 别名
+
+```ts
+export { exportToBeautifulHtml as exportToHTML } from "./html/beautiful-html"
+export { exportToAnimatedHtml as exportToAnimatedHTML } from "./html/animated-html"
+```
+
+历史大小写保留，方便第三方插件调用。
+
+## 关联子系统
+
+<Cards>
+  <Card title="聊天与技能" href="./chat-and-skills" description="导出的源头是聊天会话 + 消息" />
+  <Card
+    title="备份与数据"
+    href="./backup-and-data"
+    description="加密整库快照走另一条 BackupPackageV3 流水线"
+  />
+  <Card title="调度器" href="./scheduler" description="批量导出可挂载到定时任务" />
+</Cards>
+
+## 关联 ADR
+
+本子系统在 ADR 体系前已建立，未单独立 ADR。设计原则：
+
+- 输出文件**自包含、零运行时依赖** —— 主题 token 全内联到 `<style>` 块。
+- 内置 JSZip **懒加载** —— 不开批量 dialog 不进 bundle。
+- **公共 API 稳定** —— `generateFilename` / `exportToHTML` 等给插件长期保证向后兼容。
+
+## 已知限制
+
+- **HTML 不渲染 Mermaid / Math** —— 当前 Beautiful / Animated HTML 输出原始代码块；如果用户需要 Mermaid 渲染，请走 markdown 后再用支持 Mermaid 的渲染器（GitHub README、Obsidian 等）。
+- **批量 ZIP 内存模型**：JSZip 把全部内容放内存；几百 MB 级别 OK，GB 级别请逐个会话单独导出。
+- **slug 冲突 fallback 简单**：同标题第 2 份起加 `-1` / `-2` / …；不带时间戳。
+- **animated HTML 大文件不友好**：同时给数万字符做打字效果可能在低端浏览器卡顿；演示场景请缩范围。
+- **不导出附件 / 工件**：附件 / artifact 的 blob 不打包进导出文件 —— 当前仅文本 / Markdown / JSON 内引用路径。把附件捎上是 Phase 2 工作。
+- **plain text 丢失结构**：tool 调用、reasoning、引用等会被压扁。要保留结构请走 Markdown / JSON。
+- **整库迁移请走备份系统**：本子系统不处理 characters / skills / teams / twin / settings 等的导出 —— 那是 `BackupPackageV3` 的工作（见 [备份与数据](./backup-and-data)）。

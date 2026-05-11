@@ -28,11 +28,12 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
+import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
+import { Item, ItemGroup, ItemContent, ItemTitle, ItemActions } from "@/components/ui/item"
 import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { listSessions } from "@/lib/db/sessions"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import type { ChatSession } from "@/lib/claude/types"
-import { cn } from "@/lib/utils"
 
 export default function ShareTargetPage() {
   return (
@@ -100,15 +101,17 @@ function ShareTargetPageInner() {
       data-testid="share-target-page"
     >
       <header className="flex items-center gap-2 border-b border-border px-4 py-3">
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon"
           onClick={() => router.back()}
           aria-label={t("cancel")}
-          className="touch-target -ml-2 flex size-9 items-center justify-center rounded-full text-muted-foreground hover:bg-muted/60"
+          className="-ml-2 rounded-full"
           data-testid="share-target-back"
         >
           <ArrowLeftIcon className="size-5" />
-        </button>
+        </Button>
         <h1 className="text-lg font-semibold">{t("title")}</h1>
       </header>
 
@@ -154,28 +157,34 @@ function ShareTargetPageInner() {
           data-testid="share-target-search"
         />
         {filtered.length === 0 ? (
-          <p className="px-1 text-sm text-muted-foreground">{t("noConversations")}</p>
+          <Empty data-testid="share-target-empty">
+            <EmptyHeader>
+              <EmptyTitle>{t("noConversations")}</EmptyTitle>
+              <EmptyDescription>{t("noConversationsDescription")}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
-          <ul className="flex flex-col gap-2">
+          <ItemGroup className="gap-2">
             {filtered.map((s) => (
-              <li key={s.id}>
-                <Button
+              <Item key={s.id} variant="outline" size="sm" asChild>
+                <button
                   type="button"
                   onClick={() => void onSendTo(s)}
                   disabled={busyId === s.id || !body}
-                  className={cn("w-full justify-between")}
-                  variant="outline"
                   data-testid={`share-target-pick-${s.id}`}
+                  className="w-full text-left disabled:opacity-50"
                 >
-                  <span className="truncate">{s.title ?? s.id}</span>
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <ItemContent>
+                    <ItemTitle className="truncate">{s.title ?? s.id}</ItemTitle>
+                  </ItemContent>
+                  <ItemActions className="text-xs text-muted-foreground">
                     <SendIcon className="size-3.5" />
                     {t("sendCta")}
-                  </span>
-                </Button>
-              </li>
+                  </ItemActions>
+                </button>
+              </Item>
             ))}
-          </ul>
+          </ItemGroup>
         )}
       </section>
     </main>

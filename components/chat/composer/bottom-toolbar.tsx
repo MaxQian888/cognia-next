@@ -32,6 +32,7 @@ import { AgentModeSelector } from "@/components/agent/agent-mode-selector"
 import { ExternalAgentSelector } from "@/components/agent/external-agent-selector"
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
+import { PluginExtensionSlotWithOverflow } from "@/components/plugins/plugin-extension-slot-with-overflow"
 
 interface BottomToolbarProps {
   session: ChatSession | null
@@ -111,6 +112,11 @@ export function BottomToolbar({ session }: BottomToolbarProps) {
             disabled={isStreaming}
           />
         )}
+        <PluginExtensionSlotWithOverflow
+          point="chat.input.actions"
+          limit={3}
+          className="flex items-center gap-1 empty:hidden"
+        />
       </div>
 
       <Context maxTokens={max} modelId={modelId} usage={aiUsage} usedTokens={used}>

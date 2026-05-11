@@ -11,9 +11,9 @@ import { enumerateSlash24, getPrivateLocalIps } from "./local-ip"
  *
  * Two parallel paths:
  *
- *   1. **mDNS** — `subscribeMdns()` (a thin wrapper over
- *      `@jonz94/capacitor-mdns`, only present on Capacitor) listens for
- *      `_cognia._tcp` advertisements. Hits carry the server's TLS SPKI
+ *   1. **mDNS** — `subscribeMdns()` listens for `_cognia._tcp`
+ *      advertisements when a Capacitor mDNS plugin is wired in via the
+ *      injected loader. Hits carry the server's TLS SPKI
  *      fingerprint in the TXT records, so we can later refuse a different
  *      desktop signing key on reconnect.
  *   2. **IP-segment probe (fallback)** — when mDNS yields no results

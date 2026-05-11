@@ -10,8 +10,8 @@
  *   - File     → web file input (Capacitor filesystem v7 lacks a unified
  *                picker; `<input type="file">` works on both Capacitor and
  *                browsers)
- *   - Voice    → `@capacitor-community/voice-recorder` (loaded lazily so
- *                the web bundle skips the native module)
+ *   - Voice    → `capacitor-voice-recorder` (loaded lazily so the web
+ *                bundle skips the native module)
  *
  * The menu is purely an action launcher — the chosen attachment is
  * forwarded to `onAttach(payload)` so the chat-room component can persist
@@ -70,7 +70,7 @@ interface VoiceRecorderShape {
 }
 
 const voiceLoader = makeDefaultLoader<VoiceRecorderShape>(
-  "@capacitor-community/voice-recorder",
+  "capacitor-voice-recorder",
   "VoiceRecorder"
 )
 

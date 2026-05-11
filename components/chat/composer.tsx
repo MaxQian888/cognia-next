@@ -95,6 +95,7 @@ import { DragOverlay } from "./composer/drag-overlay"
 import { HelperHints } from "./composer/helper-hints"
 import { ScreenshotButton } from "./composer/screenshot-button"
 import { VoiceControls } from "./composer/voice-controls"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 interface Props {
   session?: ChatSession | null
@@ -694,6 +695,7 @@ function ComposerInner(props: InnerProps) {
     <div ref={setContainerEl}>
       <ReferenceChips />
       <AttachmentPreview />
+      <PluginExtensionSlot point="chat.input.above" className="px-1 empty:hidden" />
       <div
         className={cn(
           "relative flex items-end gap-2 rounded-2xl border border-input/60 bg-background/70 px-2 py-2 shadow-sm transition-shadow",
@@ -810,6 +812,8 @@ function ComposerInner(props: InnerProps) {
           </Tooltip>
         </div>
       </div>
+
+      <PluginExtensionSlot point="chat.input.below" className="px-1 pt-1 empty:hidden" />
 
       {cwd && (
         <div className="flex items-center gap-1 px-2 pb-1 text-[11px] text-muted-foreground">

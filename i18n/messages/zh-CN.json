@@ -6264,9 +6264,14 @@
       "active": "运行中",
       "paused": "已暂停",
       "successRate": "成功率",
-      "executions": "次执行"
+      "executions": "次执行",
+      "avgDuration": "平均耗时",
+      "failed": "失败",
+      "nextRun": "下次运行",
+      "successful": "成功"
     },
     "filter": {
+      "all": "全部",
       "statusLabel": "状态",
       "typeLabel": "类型",
       "allStatuses": "全部状态",
@@ -6540,7 +6545,27 @@
     "exportError": "导出失败：{message}",
     "importError": "导入失败：{message}",
     "noExecutionsYet": "暂无执行记录",
-    "inspectDegradedTask": "查看降级任务"
+    "inspectDegradedTask": "查看降级任务",
+    "kindFilter": {
+      "all": "全部",
+      "app": "应用",
+      "workflow": "工作流",
+      "backup": "备份",
+      "plugin": "插件",
+      "system": "系统"
+    },
+    "emptyTitle": "暂无定时任务",
+    "emptyDescription": "创建你的第一个定时任务，让重复性工作自动运行。",
+    "emptyCreateCta": "新建任务",
+    "emptyFilteredTitle": "未找到匹配的任务",
+    "emptyFilteredDescription": "请调整搜索关键词或清除筛选条件。",
+    "emptyClearFilters": "清除筛选",
+    "panelErrorTitle": "出错啦",
+    "panelErrorDescription": "该面板未能加载。",
+    "panelErrorRetry": "重试",
+    "openInSourceEditor": "在源编辑器中打开",
+    "createTaskKind": "选择任务类型",
+    "active": "活跃"
   },
   "desktop": {
     "channelList": {
@@ -8326,8 +8351,12 @@
       "targetSearchPlaceholder": "搜索会话…",
       "queuedToast": "已加入发送队列。",
       "noConversations": "尚无可发送的会话。",
+      "noConversationsDescription": "请先打开一个会话，然后再来分享。",
       "receivedText": "收到内容",
-      "receivedUrl": "链接"
+      "receivedUrl": "链接",
+      "errorTitle": "分享页面加载失败",
+      "errorDescription": "无法加载会话列表来接收分享内容。请重试，或打开 Cognia 后重新发起分享。",
+      "retry": "重试"
     },
     "offline": {
       "bannerOffline": "离线中 — 仍可浏览，发送将进入队列。",

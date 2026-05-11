@@ -63,3 +63,4 @@ next-env.d.ts
 # coverage / build artifact dumps
 coverage_output.txt
 .playwright-mcp
+.VSCodeCounter

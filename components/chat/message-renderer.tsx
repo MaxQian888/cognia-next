@@ -43,6 +43,7 @@ import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { useChatStore } from "@/stores/chat"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { loggers } from "@/lib/logger"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 interface Props {
   message: UIMessage
@@ -175,6 +176,8 @@ function MessageRendererInner({
         </div>
       )}
 
+      <PluginExtensionSlot point="chat.message.before" className="mb-1 empty:hidden" />
+
       {editing ? (
         <div
           className={cn(
@@ -214,6 +217,8 @@ function MessageRendererInner({
           )}
         </MessageContent>
       )}
+
+      <PluginExtensionSlot point="chat.message.after" className="mt-1 empty:hidden" />
 
       {!editing && (
         <MessageActions
@@ -277,6 +282,11 @@ function MessageRendererInner({
               <RefreshCcwIcon className="size-3.5" />
             </MessageAction>
           )}
+
+          <PluginExtensionSlot
+            point="chat.message.footer"
+            className="flex items-center gap-1 empty:hidden"
+          />
         </MessageActions>
       )}
     </Message>
