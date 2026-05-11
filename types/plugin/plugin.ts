@@ -13,8 +13,12 @@ import type {
   A2UISurfaceType,
 } from "../artifact/a2ui"
 import type { AgentModeConfig } from "../agent/agent-mode"
+import type { ExternalAgentPresetConfig } from "@/lib/ai/agent/external/presets"
 import type { Skill as _Skill } from "./_compat"
+import type { PluginMcpServerPresetDef } from "./plugin-mcp-preset"
+import type { PluginNativeAnthropicToolDef } from "./plugin-native-tool"
 import type { PluginSchedulerAPI } from "./plugin-scheduler"
+import type { PluginSkillDef } from "./plugin-skill"
 import type { PluginVerificationSnapshot } from "./plugin-verification"
 // `ActivationEventDeclaration` lives in `lib/plugin/contracts/plugin-points`,
 // added by Task #10. Importing the real type keeps the manifest schema and
@@ -40,6 +44,7 @@ export type PluginType =
  */
 export type PluginCapability =
   | "tools" // Provides Agent tools
+  | "native-anthropic-tool" // Wraps an Anthropic native tool (computer/bash/text_editor)
   | "components" // Provides A2UI components
   | "modes" // Provides Agent modes
   | "skills" // Provides Skills
@@ -57,6 +62,7 @@ export type PluginCapability =
   | "python" // Python runtime capability
   | "scheduler" // Provides scheduled tasks
   | "external-agent-preset" // cognia-next: contributes external-agent presets (Claude Code / Codex / etc.)
+  | "mcp-server-preset" // Contributes MCP server presets to the gallery
   | "connectors" // Provides Platform Connector adapters (Task 110)
   | "workflow" // Contributes custom workflow node executors (ADR 0017)
   | "workflow-trigger" // Contributes custom workflow trigger sources (ADR 0017)
@@ -386,6 +392,16 @@ export interface PluginManifest {
    */
   connectors?: PluginConnectorDef[]
 
+  // Plugin-first Computer Use plumbing (M1·T1)
+  /** MCP server presets contributed by this plugin (mcp-server-preset capability). */
+  mcpServerPresets?: PluginMcpServerPresetDef[]
+  /** Anthropic native tool definitions contributed by this plugin (native-anthropic-tool capability). */
+  nativeAnthropicTools?: PluginNativeAnthropicToolDef[]
+  /** Agent skills contributed by this plugin (skills capability — unblocked in M1). */
+  skills?: PluginSkillDef[]
+  /** External-agent presets — backfill: contract declares this field at plugin-capabilities.ts:346 but the manifest type doesn't expose it yet. */
+  externalAgentPresets?: PluginExternalAgentPresetDef[]
+
   // Visual Workflows (ADR 0017)
   /**
    * Custom workflow node executors and trigger sources contributed by this
@@ -454,6 +470,19 @@ export interface PluginConnectorDef {
   defaultTrigger?: Record<string, unknown>
   /** Transport modes this adapter supports. */
   transportModes: string[]
+}
+
+/**
+ * One external-agent preset definition inside `PluginManifest.externalAgentPresets`.
+ *
+ * Adds a registry `id` on top of `ExternalAgentPresetConfig` (the shape used
+ * inside `lib/ai/agent/external/presets.ts`, which keys presets by id rather
+ * than carrying the id inline). The plugin manager passes `(id, config)` into
+ * `presets.registerPreset` on enable and removes them on disable.
+ */
+export interface PluginExternalAgentPresetDef extends ExternalAgentPresetConfig {
+  /** Stable id used as the registry key (e.g. "claude-code", "codex"). */
+  id: string
 }
 
 /**
