@@ -15,7 +15,7 @@
     "@capacitor-mlkit/barcode-scanning": "^7.5.0",
     "@capacitor/android": "^7.6.3",
     "@capacitor/app": "^7.1.2",
-    "@capacitor/browser": "^7.0.0",
+    "@capacitor/browser": "^8.0.3",
     "@capacitor/camera": "^7.0.0",
     "@capacitor/dialog": "^7.0.0",
     "@capacitor/filesystem": "^7.0.0",
