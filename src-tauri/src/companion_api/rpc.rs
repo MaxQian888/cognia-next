@@ -179,6 +179,8 @@ const KNOWN_COMMANDS: &[&str] = &[
     "message_update",
     "message_delete",
     "session_list",
+    "message_get_by_session",
+    "message_send",
     // Wave 2 mutating RPCs — round-trip through desktop_writes_bridge.
     "character_upsert",
     "character_delete",
@@ -220,6 +222,9 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // returns the same page; skip the cache so a slow desktop write doesn't
     // serve stale rows to a polling phone.
     "session_list",
+    // Read-only message-by-session listing — same `(session_id, limit, offset)`
+    // returns the same page.
+    "message_get_by_session",
     // Wave 2 read-only twin profile projection.
     "twin_profile_get",
 ];
@@ -693,6 +698,40 @@ async fn dispatch(
                     limit,
                     offset,
                     before,
+                    crate::companion_api::desktop_messages_bridge::DEFAULT_TIMEOUT,
+                )
+                .await
+                .map_err(RpcError::internal)
+        }
+
+        "message_get_by_session" => {
+            let session_id: String = required(&args, "session_id")?;
+            let limit: Option<u32> = optional(&args, "limit")?;
+            let offset: Option<u32> = optional(&args, "offset")?;
+            let bridge = std::sync::Arc::clone(&state.desktop_messages_bridge);
+            bridge
+                .get_messages_by_session(
+                    app,
+                    session_id,
+                    limit,
+                    offset,
+                    crate::companion_api::desktop_messages_bridge::DEFAULT_TIMEOUT,
+                )
+                .await
+                .map_err(RpcError::internal)
+        }
+
+        "message_send" => {
+            let session_id: String = required(&args, "session_id")?;
+            let content: String = required(&args, "content")?;
+            let role: Option<String> = optional(&args, "role")?;
+            let bridge = std::sync::Arc::clone(&state.desktop_messages_bridge);
+            bridge
+                .send_message(
+                    app,
+                    session_id,
+                    content,
+                    role,
                     crate::companion_api::desktop_messages_bridge::DEFAULT_TIMEOUT,
                 )
                 .await

@@ -28,6 +28,8 @@ import type { UIMessage } from "@/types"
 const UPDATE_EVENT = "companion://message-update-request"
 const DELETE_EVENT = "companion://message-delete-request"
 const LIST_EVENT = "companion://session-list-request"
+const GET_BY_SESSION_EVENT = "companion://message-get-by-session-request"
+const SEND_EVENT = "companion://message-send-request"
 const RESPONSE_COMMAND = "companion_message_response"
 
 interface UpdateRequestEvent {
@@ -51,6 +53,22 @@ interface SessionListRequestEvent {
   limit: number
   offset: number
   before?: number
+}
+
+interface GetMessagesRequestEvent {
+  requestId: string
+  kind: "message_get_by_session"
+  sessionId: string
+  limit?: number
+  offset?: number
+}
+
+interface SendMessageRequestEvent {
+  requestId: string
+  kind: "message_send"
+  sessionId: string
+  content: string
+  role?: string
 }
 
 /** Tiny Tauri shape so the file types-check in pure-web tests too. */
@@ -99,12 +117,23 @@ export async function installDesktopMessageSource(opts: InstallOptions = {}): Pr
   const offList = await bridge.listen<SessionListRequestEvent>(LIST_EVENT, (event) => {
     void respondList(event.payload, bridge)
   })
+  const offGetBySession = await bridge.listen<GetMessagesRequestEvent>(
+    GET_BY_SESSION_EVENT,
+    (event) => {
+      void respondGetMessages(event.payload, bridge)
+    }
+  )
+  const offSend = await bridge.listen<SendMessageRequestEvent>(SEND_EVENT, (event) => {
+    void respondSendMessage(event.payload, bridge)
+  })
 
   return () => {
     installed = false
     offUpdate()
     offDelete()
     offList()
+    offGetBySession()
+    offSend()
   }
 }
 
@@ -159,6 +188,46 @@ async function respondList(req: SessionListRequestEvent, bridge: TauriBridge): P
   }
 }
 
+async function respondGetMessages(
+  req: GetMessagesRequestEvent,
+  bridge: TauriBridge
+): Promise<void> {
+  try {
+    const page = await readMessagesPage(req.sessionId, req.limit, req.offset)
+    await bridge.invoke(RESPONSE_COMMAND, {
+      requestId: req.requestId,
+      result: page,
+      error: null,
+    })
+  } catch (err: unknown) {
+    await bridge.invoke(RESPONSE_COMMAND, {
+      requestId: req.requestId,
+      result: null,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
+async function respondSendMessage(
+  req: SendMessageRequestEvent,
+  bridge: TauriBridge
+): Promise<void> {
+  try {
+    const created = await persistIncomingMessage(req.sessionId, req.content, req.role)
+    await bridge.invoke(RESPONSE_COMMAND, {
+      requestId: req.requestId,
+      result: created,
+      error: null,
+    })
+  } catch (err: unknown) {
+    await bridge.invoke(RESPONSE_COMMAND, {
+      requestId: req.requestId,
+      result: null,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
 export interface SessionListPage {
   rows: ChatSession[]
   total: number
@@ -194,6 +263,86 @@ export async function readSessionPage(
     total,
     next_offset: nextOffset,
   }
+}
+
+export interface MessagesPage {
+  rows: UIMessage[]
+  total: number
+  next_offset?: number
+}
+
+/**
+ * Exposed for tests — production callers use the listener installed above.
+ *
+ * Reads messages for a single session via `messageRepository.getBySessionId`
+ * (defined in `lib/plugin/api/session-api.ts`) and applies the same
+ * offset/limit pagination the mobile UI expects.
+ */
+export async function readMessagesPage(
+  sessionId: string,
+  limit?: number,
+  offset?: number
+): Promise<MessagesPage> {
+  const all = await messageRepository.getBySessionId(sessionId)
+  const total = all.length
+  const start = typeof offset === "number" && offset > 0 ? offset : 0
+  const end = typeof limit === "number" && limit > 0 ? Math.min(start + limit, total) : total
+  const rows = all.slice(start, end)
+  return {
+    rows,
+    total,
+    next_offset: end < total ? end : undefined,
+  }
+}
+
+/**
+ * Exposed for tests — production callers use the listener installed above.
+ *
+ * Persists a message that arrived from a remote client (mobile) into the
+ * desktop's Dexie. The desktop's normal chat flow drives any AI reply: if
+ * the session is currently open on the desktop, the sidecar pipeline will
+ * pick up the new message and stream a reply; if the desktop has the
+ * session closed, the user message sits until the session is resumed.
+ *
+ * Phase A2 deliberately leaves the auto-trigger-sidecar step out — that
+ * needs a UX design pass for offline-session handling, streaming UI on
+ * mobile, and concurrent-edit collision recovery. Captured for follow-up.
+ */
+export async function persistIncomingMessage(
+  sessionId: string,
+  content: string,
+  role: string | undefined
+): Promise<{ message_id: string }> {
+  if (!sessionId || typeof sessionId !== "string") {
+    throw new Error("sessionId must be a non-empty string")
+  }
+  if (typeof content !== "string" || content.length === 0) {
+    throw new Error("content must be a non-empty string")
+  }
+  const normalizedRole: "user" | "assistant" = role === "assistant" ? "assistant" : "user"
+  const message: UIMessage = {
+    id: generateMessageId(),
+    role: normalizedRole,
+    content,
+    createdAt: new Date(),
+  }
+  const created = await messageRepository.create(sessionId, message)
+  return { message_id: created.id }
+}
+
+function generateMessageId(): string {
+  // 16 chars of base32-ish — enough for collision-free addressing without
+  // pulling nanoid into this module (Dexie consumers already use nanoid
+  // elsewhere; this helper avoids adding another import path here).
+  const bytes = new Uint8Array(12)
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes)
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256)
+  }
+  return Array.from(bytes)
+    .map((b) => b.toString(36).padStart(2, "0"))
+    .join("")
 }
 
 /** Test-only — reset the install guard. */

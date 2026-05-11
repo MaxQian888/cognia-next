@@ -289,6 +289,12 @@ pub async fn companion_unrevoke_device(
 pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus>) {
     // Primary chat-streaming channel — the most latency-sensitive event.
     register_tauri_event(app, Arc::clone(&bus), "claude://message");
+    // Phase A3 — fine-grained message mutation events emitted by the
+    // JS-side `messageRepository` (lib/db/plugin-bridge.ts). Mobile WS
+    // subscribers observe these to keep their session view in sync.
+    register_tauri_event(app, Arc::clone(&bus), "claude://message-added");
+    register_tauri_event(app, Arc::clone(&bus), "claude://message-updated");
+    register_tauri_event(app, Arc::clone(&bus), "claude://message-deleted");
     // Pairing-lifecycle events — useful for multi-device observation.
     register_tauri_event(app, Arc::clone(&bus), "companion://device-paired");
     // Heartbeat / presence signal emitted by the JWT middleware on each request.
