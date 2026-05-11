@@ -3915,13 +3915,15 @@
       "delete": "Delete",
       "enable": "Enable",
       "disable": "Disable",
-      "open": "Open"
+      "open": "Open",
+      "openInEditor": "Open in editor"
     },
     "detail": {
       "tabOverview": "Overview",
       "tabContent": "Content",
       "tabResources": "Resources",
       "tabSecurity": "Security",
+      "tabValidation": "Validation",
       "tabEdit": "Edit",
       "metaCategory": "Category",
       "metaSource": "Source",
@@ -4132,6 +4134,23 @@
       "importPartUpdated": "{count} updated",
       "importPartSkipped": "{count} skipped",
       "importPartErrored": "{count} errored"
+    },
+    "validation": {
+      "empty": "No validation issues.",
+      "tab": "Validation",
+      "cardBadge": "{count, plural, =1 {1 issue} other {# issues}}"
+    },
+    "sync": {
+      "status": {
+        "synced": "Synced",
+        "outOfSync": "Out of sync",
+        "error": "Sync error",
+        "never": "Never synced"
+      },
+      "syncNow": "Sync now",
+      "retry": "Retry",
+      "lastAt": "Last: {when}",
+      "desktopOnly": "Sync is only available in the desktop app."
     },
     "back": "Back"
   },

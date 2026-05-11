@@ -3915,13 +3915,15 @@
       "delete": "删除",
       "enable": "启用",
       "disable": "停用",
-      "open": "打开"
+      "open": "打开",
+      "openInEditor": "在编辑器中打开"
     },
     "detail": {
       "tabOverview": "概览",
       "tabContent": "内容",
       "tabResources": "资源",
       "tabSecurity": "安全",
+      "tabValidation": "验证",
       "tabEdit": "编辑",
       "metaCategory": "类别",
       "metaSource": "来源",
@@ -4132,6 +4134,23 @@
       "importPartUpdated": "更新 {count}",
       "importPartSkipped": "跳过 {count}",
       "importPartErrored": "失败 {count}"
+    },
+    "validation": {
+      "empty": "没有验证问题。",
+      "tab": "验证",
+      "cardBadge": "{count} 个问题"
+    },
+    "sync": {
+      "status": {
+        "synced": "已同步",
+        "outOfSync": "未同步",
+        "error": "同步错误",
+        "never": "从未同步"
+      },
+      "syncNow": "立即同步",
+      "retry": "重试",
+      "lastAt": "上次：{when}",
+      "desktopOnly": "同步仅在桌面端可用。"
     },
     "back": "返回"
   },
