@@ -270,6 +270,34 @@ describe("useChatStore", () => {
     })
   })
 
+  describe("ephemeralSkillIds", () => {
+    it("starts empty", () => {
+      const { result } = renderHook(() => useChatStore())
+      expect(result.current.ephemeralSkillIds).toEqual([])
+    })
+
+    it("setEphemeralSkillIds replaces the list", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setEphemeralSkillIds(["a", "b"]))
+      expect(result.current.ephemeralSkillIds).toEqual(["a", "b"])
+    })
+
+    it("toggleEphemeralSkill adds and removes", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.toggleEphemeralSkill("a"))
+      expect(result.current.ephemeralSkillIds).toEqual(["a"])
+      act(() => result.current.toggleEphemeralSkill("a"))
+      expect(result.current.ephemeralSkillIds).toEqual([])
+    })
+
+    it("clearEphemeralSkillIds empties the list", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setEphemeralSkillIds(["a", "b"]))
+      act(() => result.current.clearEphemeralSkillIds())
+      expect(result.current.ephemeralSkillIds).toEqual([])
+    })
+  })
+
   describe("clear", () => {
     it("resets every transient field back to its default", () => {
       const { result } = renderHook(() => useChatStore())
