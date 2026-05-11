@@ -29,6 +29,7 @@
 //! `addPairedDevice` from `lib/db/paired-devices.ts`.
 
 pub mod auth;
+pub mod data_plane;
 pub mod deny_list;
 pub mod desktop_messages_bridge;
 pub mod desktop_writes_bridge;

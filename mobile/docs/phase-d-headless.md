@@ -1,6 +1,6 @@
-# Phase D — Headless cognia-server skeleton
+# Phase D — Headless cognia-server
 
-Status: **AppStore + SQLite + binary skeleton + Dockerfile shipped. Full RPC-handler rewrite to use `AppStore` is the next milestone.**
+Status: **AppStore + SQLite + binary + Dockerfile + RPC-handler rewrite all shipped. `cognia-server serve` now boots a working HTTPS listener that handles every message / session RPC against SQLite.**
 
 This document captures the architectural choices made on the spot for Phase D and outlines what still needs to land before the headless deployment is usable end-to-end.
 
@@ -39,37 +39,42 @@ Two-stage build (Rust builder → Debian slim runtime), volume-mounted `/data`, 
 | RPC handler dispatch         | Bridges still own the Tauri-mode path                       | The bridges remain for the WebView-backed desktop. Headless mode will dispatch via `AppStore` once handlers are rewritten.                                                                               |
 | Sidecar deployment           | Same Node child process pattern Tauri uses                  | Reuses the existing `@anthropic-ai/claude-agent-sdk` integration without surgery.                                                                                                                        |
 
+## RPC-handler rewrite (now landed)
+
+`companion_api::rpc::rpc_handler` arms for `session_list`, `message_get_by_session`, `message_send`, `message_update`, `message_delete` all route through a `DataPlane` abstraction now:
+
+```rust
+pub enum DataPlane {
+    TauriBridge { bridge: Arc<DesktopMessagesBridge>, app: AppHandle },
+    Direct(Arc<dyn AppStore>),
+}
+```
+
+`DataPlane::pick(state)` picks Direct if a headless store has been installed via `install_headless_store`, falls back to the Tauri bridge otherwise. The desktop flow stays byte-identical; the headless flow short-circuits to SQLite without ever round-tripping to a WebView.
+
+The `cognia-server serve` subcommand:
+
+1. Opens `<COGNIA_DATA_DIR>/cognia-server.sqlite`.
+2. Calls `tls::ensure_certificate` to load / generate the self-signed cert.
+3. Installs the SqliteAppStore via `install_headless_store`.
+4. Publishes the cert fingerprint via `set_tls_fingerprint` (so `/api/v1/whoami` returns it — P0.3).
+5. Builds a `SharedState` with `app_handle: None`.
+6. Calls `server::spawn_server(port, false /* LAN bind */, tls_material, shared)`.
+7. Awaits Ctrl-C, then triggers graceful shutdown.
+
 ## What still needs landing
 
-The remaining work is _not_ skeleton-shaped — it's the actual content rewrite. Listed in priority order:
-
-1. **RPC-handler rewrite** — `companion_api::rpc::rpc_handler` arms for `session_list`, `message_get_by_session`, `message_send`, `message_update`, `message_delete` currently call `state.desktop_messages_bridge.<method>` which emits a Tauri event and awaits the WebView. They need a parallel headless path that hits `AppStore` directly. The clean shape:
-
-   ```rust
-   enum DataPlane {
-       TauriBridge(Arc<DesktopMessagesBridge>),
-       Direct(Arc<dyn AppStore>),
-   }
-   ```
-
-   Each RPC arm picks based on the variant. This keeps the desktop flow byte-identical.
-
-2. **SharedState refactor** — `CompanionState::app_handle` is currently `Option<tauri::AppHandle>`. In headless mode it's always `None`, so the parts that emit Tauri events (sidecar streaming → event_bus, audit events) need a `HeadlessEmitter` shim. The simplest is to have `EventBus::publish` get called directly from headless code paths and skip the `app.listen` registration.
-
-3. **Wire the binary's `serve` subcommand**:
-   - Build a headless `SharedState` (`app_handle: None`, the SQLite store wrapped in `DataPlane::Direct`, an empty deny list, etc.).
-   - Call `server::spawn_server(port, false /* LAN bind */, tls_material, shared)` — already takes `TlsMaterial` after P0.1.
-   - Wait on a shutdown signal (Ctrl-C / SIGTERM).
-
-4. **Cred storage in headless mode** — push dispatcher credentials currently live in a process-wide `Lazy` (`PUSH_DISPATCHERS`). For headless, persist them next to the SQLite store under `/data/push-credentials.{fcm,apns}.json` (encrypted with a key derived from `COGNIA_DATA_DIR`'s perms).
-
-5. **CLI ergonomics** — proper `clap`-based argument parsing once the binary takes more than two subcommands. The hand-rolled parser here is intentionally minimal.
+1. **Sidecar integration** — `cognia-server serve` doesn't itself spawn the Anthropic agent SDK Node sidecar. Message CRUD against SQLite works end-to-end; AI replies need the same `src-tauri/src/claude/sidecar.rs` spawn path. The Dockerfile already includes a Node runtime layer for this.
+2. **Wave 2 RPCs in headless mode** — `character_*` / `skill_set_enabled` / `plugin_set_enabled` etc. still route through `desktop_writes_bridge`. They return an error in headless mode (no app_handle → bridge can't emit). Either add equivalent AppStore methods, or fail fast with a clearer error envelope.
+3. **Push cred storage in headless mode** — `PUSH_DISPATCHERS` is process-wide and in-memory. Persist under `<COGNIA_DATA_DIR>/push-credentials.{fcm,apns}.json`.
+4. **CLI ergonomics** — proper `clap`-based argument parsing once the binary takes more than two subcommands.
+5. **mDNS + tunnel** — `cognia-server serve` doesn't broadcast mDNS or run cloudflared. Both are desktop-tray-driven today; headless deployments typically sit behind a reverse proxy with a real domain, so neither is strictly required.
 
 ## Verification today
 
 - `cargo build --release --bin cognia-server` succeeds.
-- `cargo test -p cognia-next companion_api::store::sqlite` covers the store roundtrip.
-- `cargo check --tests` clean across the workspace.
-- Dockerfile builds (manual smoke — not enforced in CI).
+- `cargo check --tests` clean.
+- `companion_api::store::sqlite::tests` (4 cases) cover the SQLite store.
+- `companion_api::data_plane::tests` (4 cases) cover the dispatch + Direct round-trip.
 
-The headless `serve` path is **not** runnable end-to-end yet — pairing works, but RPCs against the running binary would hit unimplemented handlers. That's the next milestone, tracked in this doc.
+The headless `serve` path is now runnable end-to-end for message / session CRUD — `cognia-server serve --port 7890` boots an HTTPS listener that accepts every message-related RPC against SQLite. AI-reply generation is the remaining gap (needs the sidecar).

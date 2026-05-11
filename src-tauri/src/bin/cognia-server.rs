@@ -28,12 +28,26 @@
 //! from a standalone binary; ADR-0014 follow-up tracks the rewrite.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use app_lib::companion_api::{
-    secret,
+    data_plane::install_headless_store,
+    deny_list::DenyList,
+    desktop_messages_bridge::DesktopMessagesBridge,
+    desktop_writes_bridge::DesktopWritesBridge,
+    event_bus::EventBus,
+    idempotency::IdempotencyCache,
+    push::PushTokenRegistry,
+    rate_limit::RateLimiter,
+    redemption_lru::RedemptionLru,
+    secret, server,
+    set_tls_fingerprint,
     store::{sqlite::SqliteAppStore, AppStore},
-    tls,
+    sync_bridge::SyncBridge,
+    sync_registry::SyncTableRegistry,
+    tls, CompanionState, SharedState,
 };
+use parking_lot::RwLock;
 
 #[derive(Debug)]
 enum Command {
@@ -171,13 +185,54 @@ async fn run_pair(
 }
 
 async fn run_serve(
-    _store: &std::sync::Arc<SqliteAppStore>,
-    _tls: &tls::TlsMaterial,
+    store: &std::sync::Arc<SqliteAppStore>,
+    tls_material: &tls::TlsMaterial,
     port: u16,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("[cognia-server] HTTPS serve on port {port} — not yet wired.");
-    eprintln!("[cognia-server] Phase D skeleton landed; RPC-handler rewrite to consume");
-    eprintln!("[cognia-server] `AppStore` (bypassing the WebView bridges) is the next");
-    eprintln!("[cognia-server] milestone. See mobile/docs/phase-d-headless.md.");
+    // Install the headless AppStore so every DataPlane::pick lands on the
+    // Direct variant (Phase D RPC handler rewrite).
+    install_headless_store(Some(store.clone() as Arc<dyn AppStore>));
+
+    // Publish the TLS fingerprint for the whoami handler (P0.3).
+    set_tls_fingerprint(tls_material.fingerprint_sha256.clone());
+
+    // Build a SharedState with `app_handle: None` — the bridges remain
+    // instantiated but the DataPlane never picks them in headless mode.
+    let signing_secret = secret::load_or_generate()?;
+    let shared: SharedState = Arc::new(CompanionState {
+        secret: RwLock::new(signing_secret),
+        redemption_lru: RedemptionLru::new(),
+        deny_list: Arc::new(DenyList::new()),
+        app_handle: None,
+        idempotency: Arc::new(IdempotencyCache::new()),
+        event_bus: EventBus::new(),
+        sync_bridge: SyncBridge::new(),
+        desktop_messages_bridge: DesktopMessagesBridge::new(),
+        desktop_writes_bridge: DesktopWritesBridge::new(),
+        sync_registry: SyncTableRegistry::with_defaults(),
+        rate_limiter: RateLimiter::with_defaults(),
+        push_tokens: PushTokenRegistry::new(),
+    });
+
+    // LAN bind (false) so the headless server is reachable on every
+    // interface — the typical deployment puts this behind a reverse proxy
+    // or VPN; binding to loopback in a server context defeats the purpose.
+    let handle = server::spawn_server(port, false, tls_material.clone(), shared).await?;
+    println!(
+        "[cognia-server] HTTPS listening on https://0.0.0.0:{}",
+        handle.bound_port
+    );
+    println!("[cognia-server] fingerprint: {}", tls_material.fingerprint_sha256);
+    println!("[cognia-server] press Ctrl-C to stop.");
+
+    // Block until Ctrl-C, then trigger graceful shutdown.
+    tokio::signal::ctrl_c()
+        .await
+        .map_err(|e| format!("ctrl-c handler: {e}"))?;
+    println!("[cognia-server] shutting down…");
+    let _ = handle.shutdown.send(());
+    // Brief grace period so axum-server's graceful_shutdown(Some(10s)) has
+    // time to drain in-flight requests.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     Ok(())
 }

@@ -318,6 +318,24 @@ pub async fn rpc_handler(
 }
 
 // ---------------------------------------------------------------------------
+// DataPlane selection helper
+// ---------------------------------------------------------------------------
+
+/// Resolve the DataPlane for the current process. Returns a 503 error
+/// envelope when no plane is selectable — happens in test states where
+/// both the Tauri AppHandle and the headless store are absent.
+fn pick_data_plane(
+    state: &SharedState,
+) -> Result<super::data_plane::DataPlane, (StatusCode, Json<RpcError>)> {
+    super::data_plane::DataPlane::pick(state).ok_or_else(|| {
+        RpcError::internal(
+            "no data plane available — neither a Tauri AppHandle nor a headless AppStore is configured"
+                .to_string(),
+        )
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Deserialisation helpers
 // ---------------------------------------------------------------------------
 
@@ -652,38 +670,29 @@ async fn dispatch(
         }
 
         // ── Desktop-message bridge (Mobile completeness P2) ──────────────────
+        //
+        // All five message / session RPCs route through `DataPlane::pick`,
+        // which selects the Tauri-bridge variant (existing desktop flow) or
+        // the Direct variant against a `SqliteAppStore` in headless mode
+        // (Phase D). The return shape is identical so the rest of the RPC
+        // pipeline stays unchanged.
 
         "message_update" => {
             let session_id: String = required(&args, "session_id")?;
             let message_id: String = required(&args, "message_id")?;
             let updates: Value = required(&args, "updates")?;
-            let bridge = std::sync::Arc::clone(&state.desktop_messages_bridge);
-            bridge
-                .update_message(
-                    app,
-                    session_id,
-                    message_id,
-                    updates,
-                    crate::companion_api::desktop_messages_bridge::DEFAULT_TIMEOUT,
-                )
+            let dp = pick_data_plane(state)?;
+            dp.update_message(session_id, message_id, updates)
                 .await
-                .map(|_| Value::Null)
                 .map_err(RpcError::internal)
         }
 
         "message_delete" => {
             let session_id: String = required(&args, "session_id")?;
             let message_id: String = required(&args, "message_id")?;
-            let bridge = std::sync::Arc::clone(&state.desktop_messages_bridge);
-            bridge
-                .delete_message(
-                    app,
-                    session_id,
-                    message_id,
-                    crate::companion_api::desktop_messages_bridge::DEFAULT_TIMEOUT,
-                )
+            let dp = pick_data_plane(state)?;
+            dp.delete_message(session_id, message_id)
                 .await
-                .map(|_| Value::Null)
                 .map_err(RpcError::internal)
         }
 
@@ -691,15 +700,8 @@ async fn dispatch(
             let limit: u32 = required(&args, "limit")?;
             let offset: u32 = required(&args, "offset")?;
             let before: Option<i64> = optional(&args, "before")?;
-            let bridge = std::sync::Arc::clone(&state.desktop_messages_bridge);
-            bridge
-                .list_sessions(
-                    app,
-                    limit,
-                    offset,
-                    before,
-                    crate::companion_api::desktop_messages_bridge::DEFAULT_TIMEOUT,
-                )
+            let dp = pick_data_plane(state)?;
+            dp.list_sessions(limit, offset, before)
                 .await
                 .map_err(RpcError::internal)
         }
@@ -708,15 +710,8 @@ async fn dispatch(
             let session_id: String = required(&args, "session_id")?;
             let limit: Option<u32> = optional(&args, "limit")?;
             let offset: Option<u32> = optional(&args, "offset")?;
-            let bridge = std::sync::Arc::clone(&state.desktop_messages_bridge);
-            bridge
-                .get_messages_by_session(
-                    app,
-                    session_id,
-                    limit,
-                    offset,
-                    crate::companion_api::desktop_messages_bridge::DEFAULT_TIMEOUT,
-                )
+            let dp = pick_data_plane(state)?;
+            dp.get_messages_by_session(session_id, limit, offset)
                 .await
                 .map_err(RpcError::internal)
         }
@@ -725,15 +720,8 @@ async fn dispatch(
             let session_id: String = required(&args, "session_id")?;
             let content: String = required(&args, "content")?;
             let role: Option<String> = optional(&args, "role")?;
-            let bridge = std::sync::Arc::clone(&state.desktop_messages_bridge);
-            bridge
-                .send_message(
-                    app,
-                    session_id,
-                    content,
-                    role,
-                    crate::companion_api::desktop_messages_bridge::DEFAULT_TIMEOUT,
-                )
+            let dp = pick_data_plane(state)?;
+            dp.send_message(session_id, content, role)
                 .await
                 .map_err(RpcError::internal)
         }
