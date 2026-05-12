@@ -8,7 +8,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Label } from "@/components/ui/label"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item"
 import { updateSkill } from "@/lib/db/skills"
 import { SkillResourceManager } from "@/components/skills/skill-resource-manager"
 import { SkillValidationSection } from "@/components/skills/skill-validation-section"
@@ -58,49 +59,55 @@ export function MobileSkillSheet({ skill, open, onOpenChange }: Props) {
             <TabsTrigger value="resources">{t("tabResources")}</TabsTrigger>
             <TabsTrigger value="validation">{t("tabValidation")}</TabsTrigger>
           </TabsList>
-          <TabsContent value="overview" className="flex-1 overflow-y-auto px-4 py-3 text-xs">
-            <div className="space-y-2">
-              <div>
-                <span className="text-muted-foreground">{t("metaCategory")}: </span>
-                {skill.category ?? "—"}
-              </div>
-              <div>
-                <span className="text-muted-foreground">{t("metaUsage")}: </span>
-                {skill.usageCount ?? 0}
-              </div>
-              <div>
-                <span className="text-muted-foreground">{t("metaUpdated")}: </span>
-                {new Date(skill.updatedAt).toLocaleString()}
-              </div>
-            </div>
+          <TabsContent value="overview" className="flex-1 overflow-y-auto px-4 py-3">
+            <ItemGroup>
+              <Item>
+                <ItemContent>
+                  <ItemTitle>{t("metaCategory")}</ItemTitle>
+                  <ItemDescription>{skill.category ?? "—"}</ItemDescription>
+                </ItemContent>
+              </Item>
+              <Item>
+                <ItemContent>
+                  <ItemTitle>{t("metaUsage")}</ItemTitle>
+                  <ItemDescription>{skill.usageCount ?? 0}</ItemDescription>
+                </ItemContent>
+              </Item>
+              <Item>
+                <ItemContent>
+                  <ItemTitle>{t("metaUpdated")}</ItemTitle>
+                  <ItemDescription>{new Date(skill.updatedAt).toLocaleString()}</ItemDescription>
+                </ItemContent>
+              </Item>
+            </ItemGroup>
           </TabsContent>
           <TabsContent value="edit" className="flex-1 overflow-y-auto px-4 py-3">
-            <div className="space-y-3">
-              <div>
-                <Label htmlFor="m-skill-name">{t("name")}</Label>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="m-skill-name">{t("name")}</FieldLabel>
                 <Input id="m-skill-name" value={name} onChange={(e) => setName(e.target.value)} />
-              </div>
-              <div>
-                <Label htmlFor="m-skill-desc">{t("description")}</Label>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="m-skill-desc">{t("description")}</FieldLabel>
                 <Input
                   id="m-skill-desc"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                 />
-              </div>
-              <div>
-                <Label htmlFor="m-skill-content">{t("content")}</Label>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="m-skill-content">{t("content")}</FieldLabel>
                 <Textarea
                   id="m-skill-content"
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   rows={12}
                 />
-              </div>
+              </Field>
               <Button onClick={() => void save()} disabled={saving} className="w-full">
                 {t("save")}
               </Button>
-            </div>
+            </FieldGroup>
           </TabsContent>
           <TabsContent value="resources" className="flex-1 overflow-y-auto px-4 py-3">
             <SkillResourceManager skillId={skill.id} />

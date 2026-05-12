@@ -6,6 +6,13 @@ import { useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
+import {
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item"
 import { setSkillStatus } from "@/lib/db/skills"
 import { MobileSkillSheet } from "@/components/mobile/skills/mobile-skill-sheet"
 import type { Skill } from "@/lib/claude/types"
@@ -35,37 +42,33 @@ export function SkillCard({ skill, onToggle, className }: SkillCardProps) {
         onClick={() => setOpen(true)}
         aria-label={tSkills("openSheet", { name: skill.name })}
         className={cn(
-          "relative flex w-full items-start gap-3 rounded-md border border-border bg-card p-3 text-left",
+          "flex w-full items-start gap-3 rounded-md border border-border bg-card p-3 text-left",
           "active:bg-muted/50 transition-colors",
           className
         )}
         data-testid={`skill-card-${skill.id}`}
         data-enabled={enabled ? "true" : "false"}
       >
-        <span
-          aria-hidden
-          className={cn(
-            "flex size-9 shrink-0 items-center justify-center rounded-md",
-            enabled ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
-          )}
+        <ItemMedia
+          variant="icon"
+          className={cn(enabled ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}
         >
           <SparklesIcon className="size-5" />
-        </span>
-        <div className="min-w-0 flex-1 pr-12">
-          <div className="flex items-center gap-2">
-            <h3 className="truncate text-sm font-semibold">{skill.name}</h3>
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle className="flex items-center gap-2">
+            <span className="truncate">{skill.name}</span>
             {skill.isBuiltIn ? (
               <Badge variant="outline" className="text-[10px]">
                 {t("builtInBadge")}
               </Badge>
             ) : null}
-          </div>
+          </ItemTitle>
           {skill.description ? (
-            <p className="line-clamp-2 text-xs text-muted-foreground">{skill.description}</p>
+            <ItemDescription className="line-clamp-2">{skill.description}</ItemDescription>
           ) : null}
-        </div>
-        <span
-          className="absolute right-2 top-2"
+        </ItemContent>
+        <ItemActions
           onClick={(e) => e.stopPropagation()}
           onPointerDown={(e) => e.stopPropagation()}
         >
@@ -77,7 +80,7 @@ export function SkillCard({ skill, onToggle, className }: SkillCardProps) {
             }}
             aria-label={tSkills("toggleEnabled")}
           />
-        </span>
+        </ItemActions>
       </button>
       <MobileSkillSheet skill={skill} open={open} onOpenChange={setOpen} />
     </>
