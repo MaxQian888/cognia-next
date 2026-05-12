@@ -77,6 +77,14 @@ const ENTRIES: Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | "categor
     keywords: ["webhook", "http", "post", "endpoint"],
     desktopOnly: true,
   },
+  "trigger.github.webhook": {
+    label: "On GitHub event",
+    description:
+      "Fires when GitHub posts a webhook (PR opened, Issue labeled, push, …). Verifies x-hub-signature-256.",
+    iconName: "Github",
+    keywords: ["github", "webhook", "pr", "issue", "push", "release"],
+    desktopOnly: true,
+  },
   // ── Actions ───────────────────────────────────────────────────────────────
   "action.character.send": {
     label: "Send as character",
@@ -161,6 +169,80 @@ const ENTRIES: Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | "categor
     description: "Calls a plugin task handler registered in the plugin runtime.",
     iconName: "Boxes",
     keywords: ["plugin", "extension", "run"],
+  },
+  // ── GitHub Delivery ───────────────────────────────────────────────────────
+  "action.github.openPr": {
+    label: "Open GitHub PR",
+    description: "Opens a pull request via the GitHub Delivery plugin (policy-gated).",
+    iconName: "GitPullRequest",
+    keywords: ["github", "pr", "pull request", "open"],
+  },
+  "action.github.closePr": {
+    label: "Close GitHub PR",
+    description: "Closes an open pull request without merging.",
+    iconName: "GitPullRequestClosed",
+    keywords: ["github", "pr", "close"],
+  },
+  "action.github.mergePr": {
+    label: "Merge GitHub PR",
+    description: "Merges a pull request. Requires CI green + human approval per policy.",
+    iconName: "GitMerge",
+    keywords: ["github", "pr", "merge", "squash", "rebase"],
+  },
+  "action.github.reviewPr": {
+    label: "Review GitHub PR",
+    description: "Submits a review (APPROVE / REQUEST_CHANGES / COMMENT) on a PR.",
+    iconName: "Eye",
+    keywords: ["github", "pr", "review", "approve"],
+  },
+  "action.github.commentPr": {
+    label: "Comment on PR",
+    description: "Posts a comment on a pull request.",
+    iconName: "MessageCircle",
+    keywords: ["github", "pr", "comment"],
+  },
+  "action.github.commentIssue": {
+    label: "Comment on Issue",
+    description: "Posts a comment on an issue.",
+    iconName: "MessageCircle",
+    keywords: ["github", "issue", "comment"],
+  },
+  "action.github.labelIssue": {
+    label: "Label Issue/PR",
+    description: "Adds or removes labels on an issue or pull request.",
+    iconName: "Tag",
+    keywords: ["github", "label", "tag"],
+  },
+  "action.github.closeIssue": {
+    label: "Close Issue",
+    description: "Closes an issue with optional reason (completed / not_planned).",
+    iconName: "CircleDot",
+    keywords: ["github", "issue", "close"],
+  },
+  "action.github.createRelease": {
+    label: "Create Release",
+    description: "Creates a Release. Drafts always allowed; published releases gated.",
+    iconName: "Tag",
+    keywords: ["github", "release", "publish", "draft"],
+  },
+  "action.github.generateChangelog": {
+    label: "Generate changelog",
+    description: "Computes Conventional-Commit semver bump + Markdown release notes.",
+    iconName: "FileText",
+    keywords: ["github", "release", "changelog", "conventional"],
+  },
+  "action.github.pushTag": {
+    label: "Push tag",
+    description: "Pushes a git tag to the repo.",
+    iconName: "Tag",
+    keywords: ["github", "tag", "push"],
+  },
+  "action.github.runIssueLoop": {
+    label: "Issue → PR loop",
+    description:
+      "End-to-end Issue → AI worktree → PR loop. Clones, drives the AI, opens a PR.",
+    iconName: "Repeat",
+    keywords: ["github", "issue", "pr", "ai", "loop", "claude"],
   },
   // ── AI primitives ─────────────────────────────────────────────────────────
   "ai.prompt": {

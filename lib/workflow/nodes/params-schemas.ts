@@ -328,6 +328,7 @@ export const PARAMS_SCHEMAS: Record<WorkflowNodeKind, z.ZodTypeAny> = {
   "trigger.connector.inbound": ConnectorInboundParams,
   "trigger.chat.message": ChatMessageTriggerParams,
   "trigger.webhook": WebhookTriggerParams,
+  "trigger.github.webhook": WebhookTriggerParams,
   // Actions: characters
   "action.character.send": CharacterSendParams,
   "action.character.create": CharacterCreateParams,
@@ -348,6 +349,20 @@ export const PARAMS_SCHEMAS: Record<WorkflowNodeKind, z.ZodTypeAny> = {
   // Actions: extensibility
   "action.mcp.invokeTool": McpInvokeToolParams,
   "action.plugin.invoke": PluginInvokeParams,
+  // GitHub Delivery (param shapes are deliberately permissive at this layer —
+  // each node's inspector form provides richer client-side validation.)
+  "action.github.openPr": z.object({}).passthrough(),
+  "action.github.closePr": z.object({}).passthrough(),
+  "action.github.mergePr": z.object({}).passthrough(),
+  "action.github.reviewPr": z.object({}).passthrough(),
+  "action.github.commentPr": z.object({}).passthrough(),
+  "action.github.commentIssue": z.object({}).passthrough(),
+  "action.github.labelIssue": z.object({}).passthrough(),
+  "action.github.closeIssue": z.object({}).passthrough(),
+  "action.github.createRelease": z.object({}).passthrough(),
+  "action.github.generateChangelog": z.object({}).passthrough(),
+  "action.github.pushTag": z.object({}).passthrough(),
+  "action.github.runIssueLoop": z.object({}).passthrough(),
   // AI
   "ai.prompt": AiPromptParams,
   "ai.classify": AiClassifyParams,

@@ -26,7 +26,10 @@ export interface ParsedCommit {
   authorEmail?: string
 }
 
-const HEADER_RE = /^(?<type>[a-zA-Z]+)(?:\((?<scope>[^)]+)\))?(?<bang>!?):\s*(?<subject>.+)$/
+// Indexed groups for compatibility with the project's TypeScript target
+// (named regex groups require ES2018+ which the lib's tsconfig doesn't enable).
+//   1 = type, 2 = scope (optional), 3 = bang ("!" or ""), 4 = subject
+const HEADER_RE = /^([a-zA-Z]+)(?:\(([^)]+)\))?(!?):\s*(.+)$/
 const BREAKING_FOOTER_RE = /(^|\n)BREAKING CHANGE:/i
 
 /**
@@ -42,14 +45,14 @@ export function parseCommitMessage(
   const lines = message.split(/\r?\n/)
   const header = lines[0]?.trim() ?? ""
   const m = HEADER_RE.exec(header)
-  if (!m?.groups) return null
+  if (!m) return null
   const body = lines.slice(1).join("\n").trim() || undefined
   return {
     hash,
-    type: m.groups.type.toLowerCase(),
-    scope: m.groups.scope,
-    breaking: !!m.groups.bang || (body ? BREAKING_FOOTER_RE.test(body) : false),
-    subject: m.groups.subject.trim(),
+    type: m[1].toLowerCase(),
+    scope: m[2],
+    breaking: !!m[3] || (body ? BREAKING_FOOTER_RE.test(body) : false),
+    subject: m[4].trim(),
     body,
     ...meta,
   }
@@ -65,7 +68,7 @@ export function computeBump(commits: ReadonlyArray<ParsedCommit>): SemverPart {
   let bump: SemverPart = "none"
   for (const c of commits) {
     if (c.breaking) return "major"
-    if (c.type === "feat" && bump !== "major") bump = "minor"
+    if (c.type === "feat") bump = "minor"
     else if (c.type === "fix" && bump === "none") bump = "patch"
   }
   return bump
