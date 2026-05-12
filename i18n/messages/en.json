@@ -8547,6 +8547,22 @@
       "style": "Style",
       "updatedAt": "Updated {when}",
       "noUpdates": "Not yet generated"
+    },
+    "skills": {
+      "tabOverview": "Overview",
+      "tabEdit": "Edit",
+      "tabResources": "Resources",
+      "tabValidation": "Validation",
+      "name": "Name",
+      "description": "Description",
+      "content": "Content",
+      "save": "Save",
+      "saved": "Saved.",
+      "metaCategory": "Category",
+      "metaUsage": "Usage count",
+      "metaUpdated": "Last updated",
+      "openSheet": "Open {name}",
+      "toggleEnabled": "Enable skill"
     }
   },
   "workflows": {

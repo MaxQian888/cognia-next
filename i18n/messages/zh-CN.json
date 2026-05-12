@@ -8589,6 +8589,22 @@
       "style": "风格",
       "updatedAt": "更新于 {when}",
       "noUpdates": "尚未生成"
+    },
+    "skills": {
+      "tabOverview": "概览",
+      "tabEdit": "编辑",
+      "tabResources": "资源",
+      "tabValidation": "验证",
+      "name": "名称",
+      "description": "描述",
+      "content": "内容",
+      "save": "保存",
+      "saved": "已保存。",
+      "metaCategory": "类别",
+      "metaUsage": "使用次数",
+      "metaUpdated": "最近更新",
+      "openSheet": "打开 {name}",
+      "toggleEnabled": "启用技能"
     }
   },
   "workflows": {
