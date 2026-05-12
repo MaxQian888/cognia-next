@@ -222,6 +222,15 @@ const config: Config = {
     "^remark-gfm$": "<rootDir>/__mocks__/esm-plugin-stub.js",
     "^remark-math$": "<rootDir>/__mocks__/esm-plugin-stub.js",
     "^rehype-raw$": "<rootDir>/__mocks__/esm-plugin-stub.js",
+
+    // @octokit/* v7 packages are pure ESM and Next.js's transform doesn't
+    // strip ESM imports inside node_modules. Manual mocks expose only the
+    // surface our lib/github/* modules use.
+    "^@octokit/core$": "<rootDir>/__mocks__/@octokit/core.js",
+    "^@octokit/auth-token$": "<rootDir>/__mocks__/@octokit/auth-token.js",
+    "^@octokit/auth-app$": "<rootDir>/__mocks__/@octokit/auth-app.js",
+    "^@octokit/plugin-throttling$": "<rootDir>/__mocks__/@octokit/plugin-throttling.js",
+    "^@octokit/plugin-retry$": "<rootDir>/__mocks__/@octokit/plugin-retry.js",
   },
 
   // An array of regexp pattern strings, matched against all module paths before considered 'visible' to the module loader
@@ -338,7 +347,7 @@ const config: Config = {
   // `.pnpm/<scope>+<pkg>@<ver>/node_modules/<scope>/<pkg>` layout. Add new
   // ESM packages to the negative-lookahead alternation as they surface.
   transformIgnorePatterns: [
-    "/node_modules/(?!.*(?:@qdrant\\+|@qdrant/|@huggingface\\+|@huggingface/|chromadb|@chroma-core|@pinecone-database\\+|@pinecone-database/|weaviate-client|simple-git|onnxruntime-common|@tokenlens\\+|@tokenlens/|use-stick-to-bottom|tokenlens|shiki|@shikijs|@streamdown|streamdown|hast-util-|mdast-util-|micromark|unist-util-|vfile|react-markdown|remark-gfm|remark-math|rehype-raw|rehype-sanitize|remark-parse|remark-rehype|rehype-stringify|unified|bail|is-plain-obj|trough|zwitch|ccount|character-entities|comma-separated-tokens|decode-named-character-reference|devlop|extend|html-void-elements|longest-streak|property-information|space-separated-tokens|stringify-entities|web-namespaces))",
+    "/node_modules/(?!.*(?:@qdrant\\+|@qdrant/|@huggingface\\+|@huggingface/|chromadb|@chroma-core|@pinecone-database\\+|@pinecone-database/|weaviate-client|simple-git|onnxruntime-common|@tokenlens\\+|@tokenlens/|use-stick-to-bottom|tokenlens|shiki|@shikijs|@streamdown|streamdown|hast-util-|mdast-util-|micromark|unist-util-|vfile|react-markdown|remark-gfm|remark-math|rehype-raw|rehype-sanitize|remark-parse|remark-rehype|rehype-stringify|unified|bail|is-plain-obj|trough|zwitch|ccount|character-entities|comma-separated-tokens|decode-named-character-reference|devlop|extend|html-void-elements|longest-streak|property-information|space-separated-tokens|stringify-entities|web-namespaces|@octokit\\+|@octokit/|universal-user-agent|before-after-hook|deprecation|once|wrappy|btoa-lite|fast-content-type-parse|toad-cache|bottleneck|@types\\+|@types/))",
     "\\.pnp\\.[^\\\\]+$",
   ],
 
