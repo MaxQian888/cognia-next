@@ -1,4 +1,16 @@
-import { nameFromFilename, parseSkillMarkdown, serializeSkill, skillFilename } from "./skills-io"
+import {
+  nameFromFilename,
+  parseSkillMarkdown,
+  resolveSkillMarkdown,
+  serializeSkill,
+  skillFilename,
+} from "./skills-io"
+import { isTauri } from "@/lib/tauri"
+import type { PluginSkillDef } from "@/types/plugin/plugin-skill"
+
+jest.mock("@/lib/tauri", () => ({
+  isTauri: jest.fn(() => false),
+}))
 
 describe("serializeSkill", () => {
   it("produces frontmatter with name and content body", () => {
@@ -106,5 +118,70 @@ describe("filename helpers", () => {
   it("recovers a name from a filename", () => {
     expect(nameFromFilename("cite-sources.md")).toBe("cite sources")
     expect(nameFromFilename("step_by_step.markdown")).toBe("step by step")
+  })
+})
+
+describe("resolveSkillMarkdown (M4)", () => {
+  const mIsTauri = isTauri as jest.Mock
+
+  beforeEach(() => {
+    mIsTauri.mockReturnValue(false)
+  })
+
+  it("returns the inline body verbatim for inline source", async () => {
+    const def: PluginSkillDef = {
+      id: "code-review",
+      name: "Code Review",
+      description: "Review code.",
+      source: {
+        kind: "inline",
+        markdown: "# Code Review\n\nDo it carefully.",
+      },
+    }
+    const body = await resolveSkillMarkdown(def)
+    expect(body).toBe("# Code Review\n\nDo it carefully.")
+  })
+
+  it("returns undefined for anthropic-managed source", async () => {
+    const def: PluginSkillDef = {
+      id: "managed",
+      name: "Managed",
+      description: "Anthropic managed.",
+      source: {
+        kind: "anthropic-managed",
+        containerSkillId: "container-1",
+        version: "1.0.0",
+      },
+    }
+    const body = await resolveSkillMarkdown(def)
+    expect(body).toBeUndefined()
+  })
+
+  it("returns a browser-mode placeholder for local-folder when isTauri is false", async () => {
+    const def: PluginSkillDef = {
+      id: "local-test",
+      name: "Local Test",
+      description: "Local folder skill.",
+      source: { kind: "local-folder", path: "/tmp/skills/local-test" },
+    }
+    mIsTauri.mockReturnValue(false)
+    const body = await resolveSkillMarkdown(def)
+    expect(body).toContain("local-test")
+    expect(body).toContain("not available in browser mode")
+  })
+
+  it("returns an error placeholder when the local-folder read throws in Tauri", async () => {
+    const def: PluginSkillDef = {
+      id: "broken",
+      name: "Broken",
+      description: "Local folder skill that fails to read.",
+      source: { kind: "local-folder", path: "/no/such/path" },
+    }
+    mIsTauri.mockReturnValue(true)
+    // In jest/jsdom there's no @tauri-apps/plugin-fs runtime — the dynamic
+    // import throws which is caught by the try/catch and produces a
+    // user-friendly placeholder rather than escaping to the caller.
+    const body = await resolveSkillMarkdown(def)
+    expect(body).toMatch(/^\[skill "broken": failed to read SKILL\.md:/)
   })
 })

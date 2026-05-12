@@ -18,6 +18,8 @@
 import matter from "gray-matter"
 import type { Skill, SkillCategory } from "./types"
 import type { SkillDraft } from "@/lib/db/skills"
+import type { PluginSkillDef } from "@/types/plugin/plugin-skill"
+import { isTauri } from "@/lib/tauri"
 
 const VALID_CATEGORIES: SkillCategory[] = [
   "creative-design",
@@ -186,6 +188,46 @@ function parseList(v: unknown): string[] | undefined {
       .map((s) => s.trim())
       .filter(Boolean)
     return arr.length > 0 ? arr : undefined
+  }
+  return undefined
+}
+
+// ---- Plugin skill IO (M4) -----------------------------------------------
+//
+// Plugins shipping the `skills` capability (`PluginSkillDef`) supply skill
+// content through one of three sources: `inline` markdown, an Anthropic
+// managed container skill (referenced by id, no body to read), or a
+// `local-folder` path containing a `SKILL.md`. `resolveSkillMarkdown` is
+// the single entry point the runtime uses to fetch the body — it returns
+// `undefined` for the managed flavour so the caller routes it via the
+// sidecar's `containerSkillIds` channel instead.
+
+/**
+ * Read the SKILL.md body for a plugin-contributed skill.
+ *
+ * - `inline`: return the markdown verbatim.
+ * - `anthropic-managed`: returns `undefined` (the skill content lives in
+ *   Anthropic's container and is referenced by `containerSkillId` instead).
+ * - `local-folder`: read `<path>/SKILL.md` off disk. Tauri only. In browser
+ *   mode this returns a placeholder string explaining the limitation —
+ *   the same defensive shape it uses when fs read fails so resolver
+ *   callers never see a thrown error.
+ */
+export async function resolveSkillMarkdown(def: PluginSkillDef): Promise<string | undefined> {
+  if (def.source.kind === "inline") return def.source.markdown
+  if (def.source.kind === "anthropic-managed") return undefined
+  if (def.source.kind === "local-folder") {
+    if (!isTauri()) {
+      return `[skill "${def.id}": local-folder source not available in browser mode]`
+    }
+    try {
+      const { readTextFile } = await import("@tauri-apps/plugin-fs")
+      const root = def.source.path.replace(/[/\\]+$/, "")
+      const fullPath = `${root}/SKILL.md`
+      return await readTextFile(fullPath)
+    } catch (err) {
+      return `[skill "${def.id}": failed to read SKILL.md: ${err instanceof Error ? err.message : String(err)}]`
+    }
   }
   return undefined
 }

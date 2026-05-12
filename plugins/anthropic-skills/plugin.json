@@ -1,0 +1,25 @@
+{
+  "id": "cognia-anthropic-skills",
+  "name": "Anthropic Skills",
+  "version": "0.1.0",
+  "description": "Bundled Anthropic Agent Skills — code review, data analysis, web research. Pulled from the anthropics/skills public repo as inline starter content.",
+  "type": "frontend",
+  "capabilities": ["skills", "commands"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  }
+}
