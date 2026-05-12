@@ -52,6 +52,8 @@ describe("getDb", () => {
     expect(db.connectorAudit).toBeDefined()
     expect(db.connectorDrafts).toBeDefined()
     expect(db.connectorAttachments).toBeDefined()
+    // v27 — Plugin Dexie table registry (M0 platform feature).
+    expect(db.pluginDexieMeta).toBeDefined()
   })
 
   // §A-Schema migration check for v18: Platform Connectors tables open

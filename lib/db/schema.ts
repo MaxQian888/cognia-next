@@ -143,6 +143,8 @@ export class CogniaDB extends Dexie {
   // upgrade hook. Primary key `sessionId` makes upserts trivial; `updatedAt`
   // is indexed so debug surfaces can sort newest-first.
   chatDrafts!: Table<ChatDraftRow, string>
+  // v27 — plugin Dexie table registry (M0 platform feature).
+  pluginDexieMeta!: Table<PluginDexieMeta, string>
 
   constructor() {
     super("cognia-claude")
@@ -871,6 +873,17 @@ export class CogniaDB extends Dexie {
     this.version(26).stores({
       chatDrafts: "&sessionId, updatedAt",
     })
+
+    // v27 — Plugin Dexie table registry (M0 platform feature).
+    //   Tracks which dynamic schema versions have been applied per plugin so
+    //   that applyPluginTables can compute the next Dexie version number
+    //   without a full db.tables scan, and so that removePluginTables knows
+    //   which namespaced table names to drop.
+    //   • `&pluginId`   — primary key; one row per plugin.
+    //   • `appliedAt`   — debug/audit timestamp.
+    this.version(27).stores({
+      pluginDexieMeta: "&pluginId, appliedAt",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -892,6 +905,17 @@ export interface SessionStateRow {
   sessionId: string
   lastReadAt: number
   unreadCount: number
+}
+
+/** Registry entry for a plugin's declared Dexie tables. Written by applyPluginTables. */
+export interface PluginDexieMeta {
+  /** Primary key — the plugin's id. */
+  pluginId: string
+  /** Namespaced table names currently registered for this plugin. */
+  tableNames: string[]
+  /** The Dexie db version at which these tables were last registered. */
+  dexieVersion: number
+  appliedAt: number
 }
 
 let _db: CogniaDB | null = null

@@ -39,6 +39,8 @@ import { createPluginA2UIBridge, type PluginA2UIBridge } from "@/lib/plugin/brid
 import { PluginThemesBridge } from "@/lib/plugin/bridge/themes-bridge"
 import { PluginLifecycleHooks, getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
+import { applyPluginTables, removePluginTables } from "@/lib/plugin/dexie-bridge"
+import { getDb } from "@/lib/db/schema"
 import { clearPluginExtensions } from "@/lib/plugin/api/extension-api"
 import { getPluginExtensions, restorePluginExtensions } from "@/lib/plugin/api/extension-api"
 import {
@@ -972,6 +974,16 @@ export class PluginManager {
         await this.loadPlugin(pluginId)
       }
 
+      // Apply any declared Dexie tables before enabling the plugin so that
+      // ctx.dexie is ready when the plugin's activate() runs.
+      if (plugin.manifest.dexie) {
+        await applyPluginTables(
+          getDb() as unknown as import("dexie").default,
+          pluginId,
+          plugin.manifest.dexie
+        )
+      }
+
       // Enable the plugin
       await store.enablePlugin(pluginId, { viaManager: false })
 
@@ -1128,7 +1140,7 @@ export class PluginManager {
     }
   }
 
-  async uninstallPlugin(pluginId: string): Promise<void> {
+  async uninstallPlugin(pluginId: string, options?: { purgeData?: boolean }): Promise<void> {
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
 
@@ -1152,6 +1164,14 @@ export class PluginManager {
 
       // Remove from store
       await store.uninstallPlugin(pluginId, { skipFileRemoval: true, viaManager: false })
+
+      // Remove plugin Dexie tables. Default: keep data (allows reinstall to resume).
+      // Pass purgeData: true from the settings "Delete plugin data" action.
+      await removePluginTables(
+        getDb() as unknown as import("dexie").default,
+        pluginId,
+        options?.purgeData ? "purge" : "keep"
+      )
 
       await this.revokePluginPermissions(pluginId, plugin.manifest.permissions || [])
       getPermissionGuard().unregisterPlugin(pluginId)

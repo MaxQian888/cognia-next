@@ -100,6 +100,8 @@ import {
   createMediaAPI,
   createStorageAPI,
 } from "../api"
+import { createDexieAPI } from "../api/dexie-api"
+import { getDb } from "@/lib/db/schema"
 import { createIPCAPI } from "../messaging/ipc"
 import { createEventAPI } from "../messaging/message-bus"
 import { getPluginI18nLoader } from "../utils/i18n-loader"
@@ -151,6 +153,9 @@ export function createPluginContext(
     secrets: createSecretsAPI(pluginId),
     scheduler: createSchedulerAPI(pluginId),
     workflow: createWorkflowAPI(pluginId),
+    dexie: plugin.manifest.dexie
+      ? createDexieAPI(getDb() as unknown as import("dexie").default, pluginId)
+      : undefined,
   }
 
   // If debug mode is enabled, wrap the context with debug instrumentation

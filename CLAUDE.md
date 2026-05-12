@@ -375,6 +375,40 @@ Lark (Feishu), and QQ/NapCat (OneBot v11). The subsystem lives under
 
 See `docs/content/docs/adr/0009-platform-connectors.md` for the full ADR.
 
+## Plugin Dexie Tables
+
+Plugins can declare their own IndexedDB tables in `manifest.dexie.tables`.
+The subsystem lives under `lib/plugin/dexie-namespace.ts`,
+`lib/plugin/dexie-bridge.ts`, `lib/plugin/dexie-meta.ts`,
+`lib/plugin/dexie-migration-runner.ts`, `lib/plugin/api/dexie-api.ts`,
+and `components/settings/plugins/plugin-data-management.tsx`.
+
+- **Schema (v27)**: 1 new core table — `pluginDexieMeta` (`&pluginId, appliedAt`).
+  Tracks which dynamic schema versions have been applied per plugin.
+- **Namespace**: every plugin table is stored as `<pluginId>:<tableName>` in
+  CogniaDB. `lib/plugin/dexie-namespace.ts` is the single source of truth for
+  the `toNamespacedTableName` / `fromNamespacedTableName` / `isValidPluginTableName`
+  helpers. Regex: `^[a-z][a-zA-Z0-9_]{0,30}$`. Max 20 tables per plugin.
+- **dexie-bridge** (`lib/plugin/dexie-bridge.ts`): `applyPluginTables(db, pluginId, block)`
+  closes CogniaDB, bumps the version, re-opens it, and writes to `pluginDexieMeta`.
+  Idempotent: re-calling with the same table set is a no-op. `removePluginTables`
+  supports `"keep"` (default, data preserved) and `"purge"` (drops the stores).
+- **Context API** (`lib/plugin/api/dexie-api.ts`): `createDexieAPI(db, pluginId)`
+  returns `{ table<T>(name), rawDb() }`. `table()` enforces the namespace — a plugin
+  cannot access another plugin's tables. Exposed as `ctx.dexie` (optional, only
+  present when `manifest.dexie` is declared).
+- **Manager hooks** (`lib/plugin/core/manager.ts`): `enablePlugin` calls
+  `applyPluginTables` so tables are ready before `activate()` runs.
+  `uninstallPlugin({ purgeData?: boolean })` calls `removePluginTables`.
+- **Migration runner** (`lib/plugin/dexie-migration-runner.ts`):
+  `runPendingMigrations(tx, migrations, ctx)` runs upgrade callbacks in ascending
+  `toVersion` order, skipping already-applied ones.
+- **Settings UI** (`components/settings/plugins/plugin-data-management.tsx`):
+  `<PluginDataManagement />` lists plugins with registered tables and lets the
+  user purge data via an AlertDialog.
+
+See `docs/content/docs/plugin-dev/dexie-tables.mdx` for the developer guide.
+
 ## Visual Workflows
 
 cognia-next ships an n8n-style visual orchestration layer that lets users
