@@ -80,14 +80,15 @@ Expected: one match, likely `lib/plugin/api/database.ts`
 
 Use Read tool on the file from step 1 and Read on `types/plugin/plugin.ts` around line 944 (search for `PluginDatabaseAPI` definition).
 
-- [ ] **Step 3: Decide integration shape and document in this plan**
+- [x] **Step 3: Decide integration shape and document in this plan**
 
-Edit this plan file inline at the bottom of Task 0 with one of:
+**Decision: B — add new `ctx.dexie` API surface as a sibling to `ctx.db`.**
 
-- **Decision A**: `ctx.db` already provides plugin-scoped Dexie table access → extend `ctx.db.table()` to namespace-enforce, no new API surface
-- **Decision B**: `ctx.db` is a different abstraction (e.g., SQLite via Tauri) → add new `ctx.dexie` API surface
+Findings (verified against worktree at commit `d29fb0b`):
 
-Add a 3-line note explaining what the existing API does and which decision was made. **All later tasks reference "the dexie context API" without prejudging A vs B.**
+- `ctx.db: PluginDatabaseAPI` is defined at `types/plugin/plugin.ts:1411` and surfaces a SQL-style API: `query<T>(sql, params)`, `execute(sql, params)`, `transaction(fn)`, `createTable(name, schema)`, `dropTable(name)`, `tableExists(name)` — strongly indicating a sqlite/Tauri SQL-plugin backend, **not** IndexedDB/Dexie.
+- IndexedDB/Dexie has a fundamentally different access model (collections, hooks, compound indexes, liveQuery). Forcing Dexie tables behind `query("SELECT...")` would be lossy and surprising for plugin authors.
+- Therefore Tasks 10–11 add `ctx.dexie: PluginDexieAPI` as a new sibling property; `ctx.db` is left untouched.
 
 - [ ] **Step 4: Commit decision note**
 
