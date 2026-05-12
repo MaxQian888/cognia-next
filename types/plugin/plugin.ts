@@ -414,6 +414,15 @@ export interface PluginManifest {
    */
   workflows?: import("./plugin-workflow").PluginManifestWorkflowsBlock
 
+  /**
+   * Plugin-declared Dexie (IndexedDB) tables. The host's
+   * `lib/plugin/dexie-bridge.ts` aggregates declarations across all enabled
+   * plugins and bumps the shared CogniaDB schema once on plugin enable.
+   * Tables are namespaced as `<pluginId>:<tableName>` to prevent collisions.
+   * Plugins access their tables via `ctx.dexie.table<T>(name)`.
+   */
+  dexie?: PluginManifestDexieBlock
+
   // Themes (capability "themes")
   /**
    * UI theme contributions surfaced in Settings → Appearance → Theme as
@@ -1807,3 +1816,51 @@ export type PythonIPCMessage =
   | { type: "register_hook"; hook: PythonHookRegistration }
   | { type: "ready" }
   | { type: "shutdown" }
+
+// =============================================================================
+// Plugin Dexie tables (manifest.dexie)
+// =============================================================================
+
+/**
+ * Plugin-declared Dexie tables. Tables are namespaced as
+ * `<pluginId>:<tableName>` in the underlying CogniaDB instance.
+ *
+ * Plugins access their tables via `ctx.dexie.table<T>(name)` — the
+ * pluginId prefix is stripped from the public name.
+ */
+export interface PluginManifestDexieBlock {
+  /** Table declarations. Maximum 20 per plugin. */
+  tables: PluginDexieTableDef[]
+  /** Optional migration callbacks invoked once per (pluginId, toVersion). */
+  migrations?: PluginDexieMigrationDef[]
+}
+
+export interface PluginDexieTableDef {
+  /**
+   * Logical table name without the pluginId prefix.
+   * Must match `^[a-z][a-zA-Z0-9_]{0,30}$` — runtime-enforced in
+   * `lib/plugin/core/validation.ts`.
+   */
+  name: string
+  /**
+   * Dexie schema string (same syntax as `db.version().stores({})` values).
+   * Examples: "++id, name", "deliveryId, [target+at]", "&pluginId, updatedAt".
+   */
+  schema: string
+}
+
+export interface PluginDexieMigrationDef {
+  /**
+   * The manifest plugin-version (parsed from manifest.version major) this
+   * migration upgrades to. Runs when the plugin's recorded manifest version
+   * is < toVersion.
+   */
+  toVersion: number
+  /**
+   * Name of an exported function on the plugin module. Receives no args
+   * (the plugin can use `ctx.dexie` to operate on its tables). Errors put
+   * the plugin into an "error" state and the migration is retried on next
+   * enable, so make migrations idempotent.
+   */
+  upgrade: string
+}
