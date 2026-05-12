@@ -6,11 +6,13 @@
 //     prompt: string | Array<{ type: "text", text } | { type: "image", source }>
 //   { type: "interrupt",           sessionId }
 //   { type: "permission_response", sessionId, requestId, decision: "allow"|"allow_always"|"deny" }
+//   { type: "plugin_tool_response", sessionId, toolUseId, result?, error? }
 //   { type: "close",               sessionId }
 //
 // Outbound (sidecar -> parent) on stdout, one JSON object per line:
 //   { type: "event",              sessionId, event: SDKMessage }
 //   { type: "permission_request", sessionId, requestId, toolName, input, title?, displayName?, description? }
+//   { type: "plugin_tool_exec",   sessionId, toolUseId, name, args }
 //   { type: "session_ended",      sessionId, result?: SDKResultMessage, error?: string }
 //   { type: "ready",              sdkVersion?, sidecarVersion?, builtinToolsCount? }
 //   { type: "log",                level, message }
@@ -68,6 +70,7 @@ function log(level, message) {
  * @property {(msg: any) => void} pushUserMessage  push next user turn into the streaming input
  * @property {() => void} closeInput               signal end-of-input to the SDK
  * @property {Map<string, {resolve: (r: any) => void}>} pendingApprovals
+ * @property {Map<string, {resolve: (r: any) => void}>} [pendingPluginToolCalls]
  */
 
 /** @type {Map<string, Session>} */
@@ -158,6 +161,26 @@ function handlePermissionResponse(msg) {
   }
 }
 
+/**
+ * Resolve a pending plugin tool call (M2). Parallels
+ * `handlePermissionResponse` — the renderer's `handlePluginToolExec`
+ * resolved this `toolUseId`, sent the response back via Tauri, and now
+ * we hand the result to the in-process MCP wrapper waiting on it.
+ *
+ * Unknown `toolUseId`s are silently ignored — they only happen when the
+ * sidecar already restarted (the pending map is per-session) or the
+ * response races a session close, neither of which should fault the host.
+ */
+function handlePluginToolResponse(msg) {
+  const { sessionId, toolUseId, result, error } = msg
+  const s = sessions.get(sessionId)
+  if (!s || !s.pendingPluginToolCalls) return
+  const pending = s.pendingPluginToolCalls.get(toolUseId)
+  if (!pending) return
+  s.pendingPluginToolCalls.delete(toolUseId)
+  pending.resolve({ result, error })
+}
+
 function handleClose(msg) {
   const { sessionId } = msg
   const s = sessions.get(sessionId)
@@ -213,6 +236,9 @@ if (process.argv.includes("--smoke")) {
         break
       case "permission_response":
         handlePermissionResponse(msg)
+        break
+      case "plugin_tool_response":
+        handlePluginToolResponse(msg)
         break
       case "close":
         handleClose(msg)
