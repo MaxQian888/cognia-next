@@ -45,10 +45,13 @@ export interface GuardedExecutorOptions<TParams, TOutput> {
 /**
  * Build a NodeExecuteFn that handles repo / octokit / policy / audit boilerplate.
  */
-export function guardedExecutor<TParams extends Record<string, unknown>, TOutput>(
+export function guardedExecutor<TParams, TOutput>(
   opts: GuardedExecutorOptions<TParams, TOutput>
-) {
-  return async (step: StepExecutionContext<TParams>): Promise<StepExecutionResult> => {
+): (step: StepExecutionContext<Record<string, unknown>>) => Promise<StepExecutionResult> {
+  return async (
+    rawStep: StepExecutionContext<Record<string, unknown>>
+  ): Promise<StepExecutionResult> => {
+    const step = rawStep as unknown as StepExecutionContext<TParams>
     const runtime = requireGithubRuntime()
     const repoFullName = opts.repoFrom(step.params)
     if (!repoFullName) {

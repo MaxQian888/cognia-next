@@ -61,7 +61,7 @@ function makeStep<TParams>(params: TParams): StepExecutionContext<TParams> {
   } as unknown as StepExecutionContext<TParams>
 }
 
-async function exec(kind: string, params: unknown) {
+async function exec(kind: string, params: Record<string, unknown>) {
   const reg = getExecutor(kind as never, 1)
   if (!reg) throw new Error(`no executor registered for ${kind}@1`)
   return reg.execute(makeStep(params))

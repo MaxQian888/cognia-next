@@ -81,7 +81,7 @@ const ENTRIES: Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | "categor
     label: "On GitHub event",
     description:
       "Fires when GitHub posts a webhook (PR opened, Issue labeled, push, …). Verifies x-hub-signature-256.",
-    iconName: "Github",
+    iconName: "GitBranch",
     keywords: ["github", "webhook", "pr", "issue", "push", "release"],
     desktopOnly: true,
   },

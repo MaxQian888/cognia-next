@@ -534,6 +534,60 @@ connector.inbound / chat.message`) route through `trigger-bridge.ts`
 
 See `docs/content/docs/adr/0011-workflows-subsystem.md` for the full ADR.
 
+## GitHub Delivery
+
+cognia-next users can compose **PR auto-review + Issue → PR loops + Release
+automation** as visual workflows that run on top of cognia's existing
+primitives. Every bot action is policy-gated, audit-logged, and surfaces
+in the same Inbox that handles platform messages. The subsystem is a thin
+core layer (`lib/github/`) + plugin shell (`plugins/github-delivery/`).
+
+- **Core layer** (`lib/github/`): `types.ts` (GhRepoEntry / GhPolicy /
+  GhAction / GhAuditEntry / GhWorkOrder / NormalizedGhEvent), `octokit-
+factory.ts` (App + PAT routing, throttling/retry plugins), `auth-app.ts`
+  (installation token cache, refreshes 5 min before expiry), `auth-pat.ts`,
+  `webhook-verify.ts` (timing-safe HMAC SHA-256 for `x-hub-signature-256`),
+  `event-normalizer.ts` (webhook + polling → NormalizedGhEvent),
+  `policy-gate.ts` (single guard for 6 action kinds, reuses
+  `lib/connectors/outbound-runner.isInQuietHours` and `msUntilQuietEnd`),
+  `workspace.ts` (simple-git worktree, local + e2b stub), `changelog.ts`
+  (Conventional Commits → semver bump + Markdown notes).
+- **Plugin** (`plugins/github-delivery/`):
+  - `plugin.json` declares 4 dexie tables (repos / workOrders / events /
+    audit) — first user of the M0 Plugin Dexie Tables feature.
+  - `src/index.ts` is the plugin entry; activates by touching each table
+    and clearing on deactivate.
+  - `src/github-poll.ts` is the ETag-based polling task that maps
+    `/repos/{owner}/{repo}/events` rows to `NormalizedGhEvent` and dedupes.
+  - `src/workflow/runtime.ts` exposes a singleton GithubRuntime that the
+    plugin activate fills in with the octokit factory / audit writer /
+    policy gate.
+  - `src/workflow/shared.ts` provides `guardedExecutor()` which factors
+    policy + audit + octokit boilerplate out of every node.
+  - `src/workflow/nodes.ts` registers 12 `action.github.*` executors via
+    `registerNodeExecutor`. `runIssueLoop` throws an M5-pending error
+    until the Claude Code subprocess integration lands.
+- **Built-in templates** (`lib/workflow/definition/seed-github.ts`):
+  7 templates ship out of the box — PR auto-review, Issue smart triage,
+  Issue → PR loop, Release (Conventional / continuous / manual), CI
+  failure diagnosis. Wired into `buildBuiltInWorkflowTemplates()`.
+- **Settings UI** (`components/settings/github-delivery/`): 5-tab shell
+  at `?section=github-delivery` (Repos / Credentials / Policies / Audit
+  / Usage). URL-reflected via `?ghTab=...`. Each tab degrades to an
+  empty-state card when the plugin isn't enabled.
+- **Independent page** (`app/github-delivery/page.tsx`): 6-column kanban
+  (Open / In progress / PR opened / Awaiting review / Merged / Failed)
+  over the namespaced `workOrders` table.
+- **Rust signature mode** (`src-tauri/src/workflow/triggers/
+webhook_router.rs`): `SignatureMode { Cognia | Github }` enum on every
+  `WebhookEntry`. `verify_hmac_signature` reads `mode.header_name()` so
+  `trigger.github.webhook` triggers verify `x-hub-signature-256` while
+  cognia triggers continue using `x-signature-256`. `workflow_register_
+trigger` IPC picks `Github` automatically when the kind is the
+  github-flavored one; an explicit `signatureMode` field still overrides.
+
+See `docs/content/docs/adr/0012-github-delivery.md` for the full ADR.
+
 ## Testing Standards
 
 - **Coverage requirement**: every source file must reach **≥90% test coverage** (lines, branches, functions). Verify with `pnpm test:coverage`.
