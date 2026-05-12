@@ -49,14 +49,7 @@ export function createDexieAPI(db: Dexie, pluginId: string): PluginDexieAPI {
         )
       }
 
-      const t = db.table<T, K>(namespacedName)
-      if (!t) {
-        throw new Error(
-          `Plugin "${pluginId}" attempted to access table "${name}" which has not been registered. ` +
-            `Make sure the table is declared in manifest.dexie.tables.`
-        )
-      }
-      return t
+      return db.table<T, K>(namespacedName)
     },
 
     rawDb(): Dexie {

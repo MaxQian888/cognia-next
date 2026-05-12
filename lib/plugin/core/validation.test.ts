@@ -467,7 +467,7 @@ describe("Plugin Validation", () => {
 
     it("accepts a manifest with a valid dexie block", () => {
       const manifest = createValidManifest()
-      ;(manifest as Record<string, unknown>).dexie = {
+      ;(manifest as unknown as Record<string, unknown>).dexie = {
         tables: [{ name: "repos", schema: "++id, fullName" }],
       }
       const result = validatePluginManifest(manifest)
@@ -483,7 +483,7 @@ describe("Plugin Validation", () => {
 
     it("rejects when dexie is not an object", () => {
       const manifest = createValidManifest()
-      ;(manifest as Record<string, unknown>).dexie = "not-an-object"
+      ;(manifest as unknown as Record<string, unknown>).dexie = "not-an-object"
       const result = validatePluginManifest(manifest)
       expect(result.valid).toBe(false)
       expect(result.errors.some((e) => e.includes("dexie"))).toBe(true)
@@ -491,7 +491,7 @@ describe("Plugin Validation", () => {
 
     it("rejects when dexie.tables is missing", () => {
       const manifest = createValidManifest()
-      ;(manifest as Record<string, unknown>).dexie = {}
+      ;(manifest as unknown as Record<string, unknown>).dexie = {}
       const result = validatePluginManifest(manifest)
       expect(result.valid).toBe(false)
       expect(result.diagnostics!.some((d) => d.field === "dexie.tables")).toBe(true)
@@ -499,7 +499,7 @@ describe("Plugin Validation", () => {
 
     it("rejects when dexie.tables is empty", () => {
       const manifest = createValidManifest()
-      ;(manifest as Record<string, unknown>).dexie = { tables: [] }
+      ;(manifest as unknown as Record<string, unknown>).dexie = { tables: [] }
       const result = validatePluginManifest(manifest)
       expect(result.valid).toBe(false)
       expect(result.diagnostics!.some((d) => d.code === "manifest.dexie.tables.empty")).toBe(true)
@@ -507,7 +507,7 @@ describe("Plugin Validation", () => {
 
     it("rejects an invalid table name", () => {
       const manifest = createValidManifest()
-      ;(manifest as Record<string, unknown>).dexie = {
+      ;(manifest as unknown as Record<string, unknown>).dexie = {
         tables: [{ name: "BadName", schema: "++id" }],
       }
       const result = validatePluginManifest(manifest)
@@ -519,7 +519,7 @@ describe("Plugin Validation", () => {
 
     it("rejects a duplicate table name", () => {
       const manifest = createValidManifest()
-      ;(manifest as Record<string, unknown>).dexie = {
+      ;(manifest as unknown as Record<string, unknown>).dexie = {
         tables: [
           { name: "repos", schema: "++id" },
           { name: "repos", schema: "++id, name" },
@@ -534,7 +534,7 @@ describe("Plugin Validation", () => {
 
     it("rejects an empty schema string", () => {
       const manifest = createValidManifest()
-      ;(manifest as Record<string, unknown>).dexie = {
+      ;(manifest as unknown as Record<string, unknown>).dexie = {
         tables: [{ name: "repos", schema: "" }],
       }
       const result = validatePluginManifest(manifest)
@@ -546,7 +546,7 @@ describe("Plugin Validation", () => {
 
     it("rejects more than 20 tables", () => {
       const manifest = createValidManifest()
-      ;(manifest as Record<string, unknown>).dexie = {
+      ;(manifest as unknown as Record<string, unknown>).dexie = {
         tables: Array.from({ length: 21 }, (_, i) => ({
           name: `table${i}`,
           schema: "++id",
@@ -559,7 +559,7 @@ describe("Plugin Validation", () => {
 
     it("rejects a migration with a non-positive toVersion", () => {
       const manifest = createValidManifest()
-      ;(manifest as Record<string, unknown>).dexie = {
+      ;(manifest as unknown as Record<string, unknown>).dexie = {
         tables: [{ name: "repos", schema: "++id" }],
         migrations: [{ toVersion: 0, upgrade: "migrateV1" }],
       }
@@ -572,7 +572,7 @@ describe("Plugin Validation", () => {
 
     it("rejects a migration with an empty upgrade string", () => {
       const manifest = createValidManifest()
-      ;(manifest as Record<string, unknown>).dexie = {
+      ;(manifest as unknown as Record<string, unknown>).dexie = {
         tables: [{ name: "repos", schema: "++id" }],
         migrations: [{ toVersion: 2, upgrade: "" }],
       }
@@ -585,7 +585,7 @@ describe("Plugin Validation", () => {
 
     it("accepts multiple valid tables with migrations", () => {
       const manifest = createValidManifest()
-      ;(manifest as Record<string, unknown>).dexie = {
+      ;(manifest as unknown as Record<string, unknown>).dexie = {
         tables: [
           { name: "repos", schema: "++id, fullName" },
           { name: "workOrders", schema: "++id, [status+repoFullName]" },

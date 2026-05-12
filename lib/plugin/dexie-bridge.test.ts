@@ -150,4 +150,17 @@ describe("removePluginTables", () => {
   it("is a no-op for a plugin with no registered tables", async () => {
     await expect(removePluginTables(db, "unknown-plugin", "keep")).resolves.toBeUndefined()
   })
+
+  it("purge mode drops stores and removes meta", async () => {
+    await applyPluginTables(db, "github-delivery", {
+      tables: [{ name: "repos", schema: "++id, fullName" }],
+    })
+    expect(db.tables.map((t) => t.name)).toContain("github-delivery:repos")
+
+    await removePluginTables(db, "github-delivery", "purge")
+
+    const meta = await getPluginDexieMeta("github-delivery")
+    expect(meta).toBeUndefined()
+    expect(db.tables.map((t) => t.name)).not.toContain("github-delivery:repos")
+  })
 })

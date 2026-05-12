@@ -44,6 +44,12 @@ describe("createDexieAPI", () => {
     expect(() => api.table("bad-plugin:data")).toThrow()
   })
 
+  it("table() with empty name throws because fromNamespacedTableName returns null", () => {
+    db = makePluginDb("github-delivery", "repos")
+    const api = createDexieAPI(db, "github-delivery")
+    expect(() => api.table("")).toThrow(/not in its namespace/)
+  })
+
   it("two plugins with the same logical table name get separate tables", () => {
     const dbA = new Dexie(`test-plugin-a-${Math.random().toString(36).slice(2)}`)
     dbA.version(1).stores({ "plugin-a:items": "++id", "plugin-b:items": "++id, name" })
