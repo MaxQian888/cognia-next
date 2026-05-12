@@ -90,6 +90,7 @@ import {
 } from "@/lib/db/chat-drafts"
 import { AttachmentPreview } from "./composer/attachment-preview"
 import { BottomToolbar } from "./composer/bottom-toolbar"
+import { SkillChipRow } from "./composer/skill-chip-row"
 import { CharCounter } from "./composer/char-counter"
 import { DragOverlay } from "./composer/drag-overlay"
 import { HelperHints } from "./composer/helper-hints"
@@ -691,11 +692,15 @@ function ComposerInner(props: InnerProps) {
 
   const isStreaming = props.status === "streaming"
 
+  const ephemeralSkillIds = useChatStore((s) => s.ephemeralSkillIds)
+  const toggleEphemeralSkill = useChatStore((s) => s.toggleEphemeralSkill)
+
   return (
     <div ref={setContainerEl}>
       <ReferenceChips />
       <AttachmentPreview />
       <PluginExtensionSlot point="chat.input.above" className="px-1 empty:hidden" />
+      <SkillChipRow ids={ephemeralSkillIds} onRemove={toggleEphemeralSkill} />
       <div
         className={cn(
           "relative flex items-end gap-2 rounded-2xl border border-input/60 bg-background/70 px-2 py-2 shadow-sm transition-shadow",
