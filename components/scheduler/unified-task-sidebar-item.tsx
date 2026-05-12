@@ -11,18 +11,7 @@
 
 import React from "react"
 import { useTranslations } from "next-intl"
-import {
-  Calendar,
-  Workflow,
-  Archive,
-  Plug,
-  Cog,
-  Play,
-  Pause,
-  Pencil,
-  Trash2,
-  ArrowUpRight,
-} from "lucide-react"
+import { Play, Pause, Pencil, Trash2, ArrowUpRight } from "lucide-react"
 import Link from "next/link"
 import {
   DropdownMenu,
@@ -33,41 +22,12 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { formatNextRun } from "@/lib/scheduler/format-utils"
+import { kindConfig } from "./details/_shared/kind-config"
 import type {
-  ScheduledItemKind,
   UnifiedScheduledItem,
   UnifiedItemStatus,
   UnifiedTriggerSummary,
 } from "@/types/scheduler/unified"
-
-const kindConfig: Record<ScheduledItemKind, { icon: React.ReactNode; bg: string; color: string }> =
-  {
-    app: {
-      icon: <Calendar className="h-3.5 w-3.5" />,
-      bg: "bg-indigo-500/10",
-      color: "text-indigo-500",
-    },
-    workflow: {
-      icon: <Workflow className="h-3.5 w-3.5" />,
-      bg: "bg-violet-500/10",
-      color: "text-violet-500",
-    },
-    backup: {
-      icon: <Archive className="h-3.5 w-3.5" />,
-      bg: "bg-orange-500/10",
-      color: "text-orange-500",
-    },
-    plugin: {
-      icon: <Plug className="h-3.5 w-3.5" />,
-      bg: "bg-emerald-500/10",
-      color: "text-emerald-500",
-    },
-    system: {
-      icon: <Cog className="h-3.5 w-3.5" />,
-      bg: "bg-slate-500/10",
-      color: "text-slate-500",
-    },
-  }
 
 const statusDotColor: Record<UnifiedItemStatus, string> = {
   active: "bg-green-500",
@@ -107,6 +67,10 @@ export interface UnifiedTaskSidebarItemProps {
   onResume?: (item: UnifiedScheduledItem) => void
   onEdit?: (item: UnifiedScheduledItem) => void
   onDelete?: (item: UnifiedScheduledItem) => void
+  /** When the user toggles the row's multi-select checkbox. */
+  onToggleSelect?: (item: UnifiedScheduledItem) => void
+  /** Whether this item is currently in the multi-select set. */
+  isSelected?: boolean
 }
 
 export function UnifiedTaskSidebarItem({
@@ -119,6 +83,8 @@ export function UnifiedTaskSidebarItem({
   onResume,
   onEdit,
   onDelete,
+  onToggleSelect,
+  isSelected,
 }: UnifiedTaskSidebarItemProps) {
   const t = useTranslations("scheduler")
   const kindConf = kindConfig[item.kind]
@@ -144,11 +110,26 @@ export function UnifiedTaskSidebarItem({
         if (e.key === "Enter" || e.key === " ") onClick(item)
       }}
       className={cn(
-        "flex cursor-pointer items-center gap-2 px-3 py-2 transition-all duration-200 hover:bg-accent/50",
+        "group flex cursor-pointer items-center gap-2 px-3 py-2 transition-all duration-200 hover:bg-accent/50",
         isActive && "bg-accent border-l-2 border-primary",
-        isHighlighted && "ring-1 ring-primary/50"
+        isHighlighted && "ring-1 ring-primary/50",
+        isSelected && "bg-accent/70"
       )}
     >
+      {onToggleSelect && (
+        <input
+          type="checkbox"
+          checked={!!isSelected}
+          onClick={(e) => e.stopPropagation()}
+          onChange={() => onToggleSelect(item)}
+          aria-label={t("selectRow") || "Select row"}
+          data-testid={`unified-row-checkbox-${item.unifiedId}`}
+          className={cn(
+            "h-3.5 w-3.5 shrink-0 cursor-pointer rounded border-border accent-primary transition-opacity",
+            isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus:opacity-100"
+          )}
+        />
+      )}
       <span
         className={cn(
           "flex h-6 w-6 shrink-0 items-center justify-center rounded",

@@ -128,6 +128,32 @@ describe("createAppSource", () => {
     expect(items[1].unifiedId).toBe("app:b")
   })
 
+  it("excludes connector-owned tasks (type prefixed with 'connection:') from the app kind", async () => {
+    const tasks: ScheduledTask[] = [
+      makeTask({ id: "app-row" }),
+      makeTask({ id: "digest-row", type: "connection:scheduled:digest" }),
+      makeTask({ id: "send-row", type: "connection:outbound:send" }),
+    ]
+    const db = {
+      getAllTasks: jest.fn(async () => tasks),
+      getTask: jest.fn(async (id: string) => tasks.find((t) => t.id === id) ?? null),
+    }
+    const scheduler = {
+      createTask: jest.fn(),
+      updateTask: jest.fn(),
+      deleteTask: jest.fn(),
+      pauseTask: jest.fn(),
+      resumeTask: jest.fn(),
+      runTaskNow: jest.fn(),
+    }
+    const source = createAppSource({ scheduler, db })
+    const items = await source.list()
+    expect(items.map((i) => i.sourceId)).toEqual(["app-row"])
+    expect(await source.get("digest-row")).toBeUndefined()
+    expect(await source.get("send-row")).toBeUndefined()
+    expect((await source.get("app-row"))?.sourceId).toBe("app-row")
+  })
+
   it("get() returns undefined for a missing id", async () => {
     const { db, scheduler } = makeStubs()
     const source = createAppSource({ scheduler, db })

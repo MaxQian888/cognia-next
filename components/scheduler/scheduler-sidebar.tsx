@@ -65,6 +65,10 @@ export interface SchedulerSidebarProps {
   onUnifiedPause?: (item: UnifiedScheduledItem) => void
   onUnifiedResume?: (item: UnifiedScheduledItem) => void
   onUnifiedDelete?: (item: UnifiedScheduledItem) => void
+  /** Multi-select: which unifiedIds are currently checked. */
+  selectedUnifiedIds?: string[]
+  /** Multi-select: toggle membership on a row. */
+  onToggleUnifiedSelection?: (item: UnifiedScheduledItem) => void
   /** Empty-state CTA — opens the new-task sheet. */
   onCreate?: () => void
   highlightedIndex?: number
@@ -99,6 +103,8 @@ export function SchedulerSidebar({
   onUnifiedPause,
   onUnifiedResume,
   onUnifiedDelete,
+  selectedUnifiedIds,
+  onToggleUnifiedSelection,
   onCreate,
   highlightedIndex,
 }: SchedulerSidebarProps) {
@@ -150,6 +156,7 @@ export function SchedulerSidebar({
       backup: [],
       plugin: [],
       system: [],
+      connector: [],
     }
     for (const item of filteredUnified) groups[item.kind].push(item)
     return groups
@@ -259,6 +266,8 @@ export function SchedulerSidebar({
                               item={item}
                               isActive={item.kind === "app" && selectedTaskId === item.sourceId}
                               isHighlighted={item.kind === "app" && idx === highlightedIndex}
+                              isSelected={selectedUnifiedIds?.includes(item.unifiedId)}
+                              onToggleSelect={onToggleUnifiedSelection}
                               onClick={(clickedItem) => {
                                 if (clickedItem.kind === "app") {
                                   onSelectTask(clickedItem.sourceId)

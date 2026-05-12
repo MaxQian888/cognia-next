@@ -21,8 +21,10 @@ import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import type { ScheduledTask, TaskExecution, TaskStatistics } from "@/types/scheduler"
 import type { ScheduledItemKind } from "@/types/scheduler/unified"
+import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 import { formatDuration, formatRelativeTime } from "@/lib/scheduler/format-utils"
 import { TaskExecutionChart } from "./task-execution-chart"
+import { UnifiedRecentRuns } from "./unified-recent-runs"
 
 export interface SchedulerDashboardViewProps {
   statistics: TaskStatistics | null
@@ -35,6 +37,13 @@ export interface SchedulerDashboardViewProps {
   /** Per-kind item counts — when supplied, renders the kind summary strip. */
   countsByKind?: Record<ScheduledItemKind, number>
   activeCountsByKind?: Record<ScheduledItemKind, number>
+  /**
+   * When supplied, the dashboard's Recent Executions card switches from the
+   * app-only `recentExecutions` slice to the cross-kind unified view fed by
+   * `useUnifiedRecentRuns`. Clicking a row emits the unified run so the
+   * page can open `RunDetailSheet`.
+   */
+  onSelectRun?: (run: UnifiedExecutionRun) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +205,7 @@ export function SchedulerDashboardView({
   onSelectTask,
   countsByKind,
   activeCountsByKind,
+  onSelectRun,
 }: SchedulerDashboardViewProps) {
   const t = useTranslations("scheduler")
 
@@ -317,36 +327,42 @@ export function SchedulerDashboardView({
           </CardContent>
         </Card>
 
-        {/* Recent Executions card */}
-        <Card className="border-border/50 bg-card/80">
-          <CardContent className="p-4">
-            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
-              <Activity className="h-4 w-4 text-purple-500" aria-hidden="true" />
-              {t("recentExecutions") || "Recent Executions"}
-            </h3>
+        {/* Recent Executions card — unified (cross-kind) when onSelectRun is
+            provided by the page; otherwise falls back to the app-only slice so
+            legacy callers/tests keep their existing behavior. */}
+        {onSelectRun ? (
+          <UnifiedRecentRuns limit={5} onSelectRun={onSelectRun} />
+        ) : (
+          <Card className="border-border/50 bg-card/80">
+            <CardContent className="p-4">
+              <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                <Activity className="h-4 w-4 text-purple-500" aria-hidden="true" />
+                {t("recentExecutions") || "Recent Executions"}
+              </h3>
 
-            {recentExecutions.length === 0 ? (
-              <p className="py-4 text-center text-xs text-muted-foreground">
-                {t("noRecentExecutions") || "No recent executions"}
-              </p>
-            ) : (
-              <div className="space-y-0.5">
-                {recentExecutions.slice(0, 5).map((exec) => (
-                  <div key={exec.id} className="flex items-center gap-3 rounded-lg px-2 py-2">
-                    <ExecutionStatusIcon status={exec.status} />
-                    <p className="flex-1 truncate text-xs font-medium">{exec.taskName}</p>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {formatDuration(exec.duration)}
-                    </span>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {formatRelativeTime(exec.completedAt ?? exec.startedAt)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              {recentExecutions.length === 0 ? (
+                <p className="py-4 text-center text-xs text-muted-foreground">
+                  {t("noRecentExecutions") || "No recent executions"}
+                </p>
+              ) : (
+                <div className="space-y-0.5">
+                  {recentExecutions.slice(0, 5).map((exec) => (
+                    <div key={exec.id} className="flex items-center gap-3 rounded-lg px-2 py-2">
+                      <ExecutionStatusIcon status={exec.status} />
+                      <p className="flex-1 truncate text-xs font-medium">{exec.taskName}</p>
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        {formatDuration(exec.duration)}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        {formatRelativeTime(exec.completedAt ?? exec.startedAt)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   )

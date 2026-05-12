@@ -12,6 +12,7 @@ import { createWorkflowSource } from "./workflow-source"
 import { createBackupSource } from "./backup-source"
 import { createPluginSource } from "./plugin-source"
 import { createSystemSource } from "./system-source"
+import { createConnectorSource } from "./connector-source"
 
 let bootstrapped = false
 
@@ -23,6 +24,7 @@ export function bootstrapSchedulerSources(): void {
   registry.register(createBackupSource())
   registry.register(createPluginSource())
   registry.register(createSystemSource())
+  registry.register(createConnectorSource())
   bootstrapped = true
 }
 

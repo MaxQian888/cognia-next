@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { scanLan, type DiscoveredServer } from "./lan-scanner"
+import { pickProbeTargets, scanLan, type DiscoveredServer } from "./lan-scanner"
 
 type MdnsHandler = (svc: {
   name: string
@@ -311,5 +311,61 @@ describe("scanLan", () => {
     })
     expect(getLocalIps).not.toHaveBeenCalled()
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("short-circuits the /24 probe on Android emulator (10.0.2.15 → only probe 10.0.2.2)", async () => {
+    const mdns = makeMdns()
+    const calls: string[] = []
+    const fetchMock = makeFetch((url) => {
+      calls.push(url)
+      if (url.startsWith("http://10.0.2.2:7890")) return cogniaResp()
+      return okResp()
+    })
+    const result = await scanLan({
+      signal: new AbortController().signal,
+      onFound: jest.fn(),
+      mdnsWindowMs: 5,
+      mdnsSubscribe: mdns.subscribe as never,
+      getLocalIps: async () => ["10.0.2.15"],
+      fetchImpl: fetchMock,
+    })
+    // Exactly one probe — not 254. This is what unfreezes the Discover step.
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toBe("http://10.0.2.2:7890/api/v1/whoami")
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe("10.0.2.2:7890")
+  })
+})
+
+describe("pickProbeTargets", () => {
+  it("returns the full /24 for a real LAN address", () => {
+    const out = pickProbeTargets(["192.168.1.42"])
+    expect(out.length).toBe(253) // 254 less the source IP
+    expect(out).toContain("192.168.1.1")
+    expect(out).toContain("192.168.1.254")
+    expect(out).not.toContain("192.168.1.42")
+  })
+
+  it("dedupes overlapping /24 ranges", () => {
+    const out = pickProbeTargets(["192.168.1.10", "192.168.1.99"])
+    // Both source IPs fall in the same /24. Each enumerator drops only its
+    // own source, so the union covers the full /24 — we just want no
+    // duplicate entries.
+    expect(new Set(out).size).toBe(out.length)
+    // Sanity-check that the union really did fill in for the other source.
+    expect(out).toContain("192.168.1.10")
+    expect(out).toContain("192.168.1.99")
+  })
+
+  it("collapses to a single gateway probe when only the Android emulator IP is present", () => {
+    expect(pickProbeTargets(["10.0.2.15"])).toEqual(["10.0.2.2"])
+  })
+
+  it("does NOT short-circuit when the emulator IP is mixed with a real LAN IP", () => {
+    // Defensive: a multi-NIC device that happens to expose 10.0.2.15 alongside
+    // a real LAN address should still get the full probe over the LAN side.
+    const out = pickProbeTargets(["10.0.2.15", "192.168.1.7"])
+    expect(out.length).toBeGreaterThan(200)
+    expect(out).toContain("192.168.1.1")
   })
 })

@@ -67,6 +67,14 @@ jest.mock("./task-tags-display", () => ({
   TaskTagsDisplay: () => <div data-testid="task-tags-display-stub" />,
 }))
 
+// The unified mode delegates the body to the orchestrator; stub it so the
+// mobile test stays isolated from the entire scheduler subsystem.
+jest.mock("./unified-task-detail-view", () => ({
+  UnifiedTaskDetailView: ({ item }: { item: { unifiedId: string; name: string } }) => (
+    <div data-testid={`unified-detail-stub-${item.unifiedId}`}>{item.name}</div>
+  ),
+}))
+
 import { SchedulerMobileDetailView } from "./scheduler-mobile-detail"
 import type { ScheduledTask } from "@/types/scheduler"
 
@@ -196,6 +204,34 @@ describe("SchedulerMobileDetailView", () => {
     expect(screen.getByTestId("task-configuration-stub")).toBeInTheDocument()
     expect(screen.getByTestId("task-notification-display-stub")).toBeInTheDocument()
     expect(screen.getByTestId("task-tags-display-stub")).toBeInTheDocument()
+  })
+
+  it("renders the unified orchestrator path when unifiedItem is supplied (no task)", () => {
+    const cbs = callbacks()
+    render(
+      <SchedulerMobileDetailView
+        unifiedItem={{
+          unifiedId: "workflow:wf-1",
+          kind: "workflow",
+          sourceId: "wf-1",
+          name: "My workflow",
+          status: "active",
+          triggerSummary: { type: "cron", cron: "0 9 * * *" },
+          origin: { deepLinkHref: "/workflows/wf-1" },
+          capabilities: { runNow: true, pause: true, edit: false, delete: false },
+        }}
+        {...cbs}
+      />
+    )
+    expect(screen.getByTestId("unified-detail-stub-workflow:wf-1")).toHaveTextContent("My workflow")
+    // The app-only sub-components must NOT render in unified mode.
+    expect(screen.queryByTestId("task-stats-cards-stub")).toBeNull()
+  })
+
+  it("renders nothing when neither task nor unifiedItem is supplied", () => {
+    const cbs = callbacks()
+    const { container } = render(<SchedulerMobileDetailView {...cbs} />)
+    expect(container).toBeEmptyDOMElement()
   })
 
   it("falls back to an empty tags array if task.tags is undefined", () => {

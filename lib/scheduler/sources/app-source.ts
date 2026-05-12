@@ -28,6 +28,16 @@ import type {
   ScheduledItemSourceObserver,
   ScheduledItemSubscription,
 } from "./types"
+import { CONNECTOR_TASK_TYPE_PREFIX } from "./connector-source"
+
+/**
+ * Tasks owned by the connector subsystem live in the same Dexie table as
+ * app tasks but belong under the `connector` kind in the unified UI. Skip
+ * them so they don't appear twice.
+ */
+function isAppOwnedTask(task: ScheduledTask): boolean {
+  return !task.type.startsWith(CONNECTOR_TASK_TYPE_PREFIX)
+}
 
 /**
  * Minimal slice of `getTaskScheduler()` we depend on — narrows the surface so
@@ -84,7 +94,7 @@ export function createAppSource(
     subscribe(observer: ScheduledItemSourceObserver): ScheduledItemSubscription {
       const sub = observe(() => db.getAllTasks()).subscribe({
         next: (tasks: ScheduledTask[]) => {
-          observer.next(tasks.map(toUnified))
+          observer.next(tasks.filter(isAppOwnedTask).map(toUnified))
         },
         error: (err: unknown) => observer.error?.(err),
       })
@@ -93,12 +103,14 @@ export function createAppSource(
 
     async list(): Promise<UnifiedScheduledItem[]> {
       const tasks = await db.getAllTasks()
-      return tasks.map(toUnified)
+      return tasks.filter(isAppOwnedTask).map(toUnified)
     },
 
     async get(sourceId: string): Promise<UnifiedScheduledItem | undefined> {
       const task = await db.getTask(sourceId)
-      return task ? toUnified(task) : undefined
+      if (!task) return undefined
+      if (!isAppOwnedTask(task)) return undefined
+      return toUnified(task)
     },
 
     async create(input: CreateScheduledTaskInput): Promise<UnifiedScheduledItem> {

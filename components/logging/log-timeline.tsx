@@ -9,7 +9,7 @@
  * Includes level-specific mini-sparklines below the main bar.
  */
 
-import { useMemo, useCallback, useState, useRef } from "react"
+import { memo, useEffect, useMemo, useCallback, useState, useRef } from "react"
 import { useTranslations } from "next-intl"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -56,6 +56,96 @@ function isInRange(bucket: TimelineBucket, range: { start: Date; end: Date } | n
   return bucket.start >= range.start && bucket.end <= range.end
 }
 
+interface TimelineBucketTileProps {
+  index: number
+  total: number
+  error: number
+  warn: number
+  startMs: number
+  colorClass: string
+  opacity: number
+  isSelected: boolean
+  isInBrush: boolean
+  clickable: boolean
+  onMouseDown: (idx: number) => void
+  onMouseEnter: (idx: number) => void
+  onMouseUp: () => void
+  totalLabel: string
+  errorsLabel: string
+  warningsLabel: string
+}
+
+const TimelineBucketTile = memo(function TimelineBucketTile({
+  index,
+  total,
+  error,
+  warn,
+  startMs,
+  colorClass,
+  opacity,
+  isSelected,
+  isInBrush,
+  clickable,
+  onMouseDown,
+  onMouseEnter,
+  onMouseUp,
+  totalLabel,
+  errorsLabel,
+  warningsLabel,
+}: TimelineBucketTileProps) {
+  const handleMouseDown = useCallback(() => onMouseDown(index), [onMouseDown, index])
+  const handleMouseEnter = useCallback(() => onMouseEnter(index), [onMouseEnter, index])
+  const startLabel = useMemo(
+    () =>
+      new Date(startMs).toLocaleTimeString("en-US", {
+        hour12: false,
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
+    [startMs]
+  )
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          className={cn(
+            "flex-1 min-w-0 transition-all",
+            colorClass,
+            clickable && "cursor-pointer",
+            isSelected && "ring-2 ring-primary ring-inset",
+            isInBrush && "ring-1 ring-primary/70 ring-inset brightness-125",
+            !isSelected && !isInBrush && "hover:ring-1 hover:ring-primary/50"
+          )}
+          style={{ opacity: isSelected || isInBrush ? Math.max(opacity, 0.6) : opacity }}
+          onMouseDown={handleMouseDown}
+          onMouseEnter={handleMouseEnter}
+          onMouseUp={onMouseUp}
+          aria-label={`${total} logs`}
+        />
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="text-xs">
+        <div className="space-y-0.5">
+          <p className="font-medium">{startLabel}</p>
+          <p>
+            {totalLabel}: {total}
+          </p>
+          {error > 0 && (
+            <p className="text-red-400">
+              {errorsLabel}: {error}
+            </p>
+          )}
+          {warn > 0 && (
+            <p className="text-yellow-400">
+              {warningsLabel}: {warn}
+            </p>
+          )}
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  )
+})
+
 export function LogTimeline({
   logs,
   className,
@@ -67,6 +157,23 @@ export function LogTimeline({
   const [dragStartIdx, setDragStartIdx] = useState<number | null>(null)
   const [dragCurrentIdx, setDragCurrentIdx] = useState<number | null>(null)
   const isDragging = useRef(false)
+
+  // Mirror drag-state and the callback into refs so handleMouseUp can stay
+  // identity-stable; otherwise every mouse-move re-creates it and invalidates
+  // every memoized TimelineBucket below.
+  const dragStartIdxRef = useRef<number | null>(null)
+  const dragCurrentIdxRef = useRef<number | null>(null)
+  const bucketsRef = useRef<TimelineBucket[]>([])
+  const onTimeRangeClickRef = useRef(onTimeRangeClick)
+  useEffect(() => {
+    dragStartIdxRef.current = dragStartIdx
+  }, [dragStartIdx])
+  useEffect(() => {
+    dragCurrentIdxRef.current = dragCurrentIdx
+  }, [dragCurrentIdx])
+  useEffect(() => {
+    onTimeRangeClickRef.current = onTimeRangeClick
+  }, [onTimeRangeClick])
 
   const buckets = useMemo((): TimelineBucket[] => {
     if (logs.length === 0) return []
@@ -110,6 +217,11 @@ export function LogTimeline({
     return result
   }, [logs, bucketCount])
 
+  // Keep the latest buckets accessible from the identity-stable handleMouseUp.
+  useEffect(() => {
+    bucketsRef.current = buckets
+  }, [buckets])
+
   const maxCount = useMemo(() => {
     let max = 1
     for (const b of buckets) {
@@ -131,14 +243,8 @@ export function LogTimeline({
     return { error: maxError, warn: maxWarn, info: maxInfo }
   }, [buckets])
 
-  const handleBucketClick = useCallback(
-    (bucket: TimelineBucket) => {
-      onTimeRangeClick?.(bucket.start, bucket.end)
-    },
-    [onTimeRangeClick]
-  )
-
-  // Brush selection handlers
+  // Brush selection handlers — all three are identity-stable so the memoized
+  // TimelineBucket children below only re-render when their own props change.
   const handleMouseDown = useCallback((idx: number) => {
     setDragStartIdx(idx)
     setDragCurrentIdx(idx)
@@ -152,22 +258,29 @@ export function LogTimeline({
   }, [])
 
   const handleMouseUp = useCallback(() => {
-    if (isDragging.current && dragStartIdx !== null && dragCurrentIdx !== null) {
-      const startIdx = Math.min(dragStartIdx, dragCurrentIdx)
-      const endIdx = Math.max(dragStartIdx, dragCurrentIdx)
-
-      if (startIdx !== endIdx && buckets.length > 0) {
-        // Brush selection: range across multiple buckets
-        onTimeRangeClick?.(buckets[startIdx].start, buckets[endIdx].end)
+    const startRaw = dragStartIdxRef.current
+    const currentRaw = dragCurrentIdxRef.current
+    const cb = onTimeRangeClickRef.current
+    const currentBuckets = bucketsRef.current
+    if (
+      isDragging.current &&
+      startRaw !== null &&
+      currentRaw !== null &&
+      currentBuckets.length > 0
+    ) {
+      const startIdx = Math.min(startRaw, currentRaw)
+      const endIdx = Math.max(startRaw, currentRaw)
+      if (startIdx !== endIdx) {
+        cb?.(currentBuckets[startIdx].start, currentBuckets[endIdx].end)
       } else {
-        // Single click
-        handleBucketClick(buckets[startIdx])
+        const b = currentBuckets[startIdx]
+        cb?.(b.start, b.end)
       }
     }
     setDragStartIdx(null)
     setDragCurrentIdx(null)
     isDragging.current = false
-  }, [dragStartIdx, dragCurrentIdx, buckets, onTimeRangeClick, handleBucketClick])
+  }, [])
 
   const brushRange = useMemo(() => {
     if (dragStartIdx === null || dragCurrentIdx === null) return null
@@ -176,6 +289,17 @@ export function LogTimeline({
       max: Math.max(dragStartIdx, dragCurrentIdx),
     }
   }, [dragStartIdx, dragCurrentIdx])
+
+  // Hoist i18n strings once per render so every TimelineBucketTile receives the
+  // same primitive prop instances and short-circuits its memo comparison.
+  const timelineLabels = useMemo(
+    () => ({
+      total: t("timeline.total"),
+      errors: t("timeline.errors"),
+      warnings: t("timeline.warnings"),
+    }),
+    [t]
+  )
 
   if (logs.length === 0) return null
 
@@ -221,59 +345,27 @@ export function LogTimeline({
         onMouseLeave={handleMouseUp}
         onMouseUp={handleMouseUp}
       >
-        {buckets.map((bucket, i) => {
-          const color = getBucketColor(bucket)
-          const opacity = getBucketOpacity(bucket, maxCount)
-          const isSelected = isInRange(bucket, selectedRange)
-          const isInBrush = brushRange ? i >= brushRange.min && i <= brushRange.max : false
-
-          return (
-            <Tooltip key={i}>
-              <TooltipTrigger asChild>
-                <button
-                  className={cn(
-                    "flex-1 min-w-0 transition-all",
-                    color,
-                    onTimeRangeClick && "cursor-pointer",
-                    isSelected && "ring-2 ring-primary ring-inset",
-                    isInBrush && "ring-1 ring-primary/70 ring-inset brightness-125",
-                    !isSelected && !isInBrush && "hover:ring-1 hover:ring-primary/50"
-                  )}
-                  style={{ opacity: isSelected || isInBrush ? Math.max(opacity, 0.6) : opacity }}
-                  onMouseDown={() => handleMouseDown(i)}
-                  onMouseEnter={() => handleMouseMove(i)}
-                  onMouseUp={handleMouseUp}
-                  aria-label={`${bucket.total} logs`}
-                />
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs">
-                <div className="space-y-0.5">
-                  <p className="font-medium">
-                    {bucket.start.toLocaleTimeString("en-US", {
-                      hour12: false,
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      second: "2-digit",
-                    })}
-                  </p>
-                  <p>
-                    {t("timeline.total")}: {bucket.total}
-                  </p>
-                  {bucket.error > 0 && (
-                    <p className="text-red-400">
-                      {t("timeline.errors")}: {bucket.error}
-                    </p>
-                  )}
-                  {bucket.warn > 0 && (
-                    <p className="text-yellow-400">
-                      {t("timeline.warnings")}: {bucket.warn}
-                    </p>
-                  )}
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          )
-        })}
+        {buckets.map((bucket, i) => (
+          <TimelineBucketTile
+            key={i}
+            index={i}
+            total={bucket.total}
+            error={bucket.error}
+            warn={bucket.warn}
+            startMs={bucket.start.getTime()}
+            colorClass={getBucketColor(bucket)}
+            opacity={getBucketOpacity(bucket, maxCount)}
+            isSelected={isInRange(bucket, selectedRange)}
+            isInBrush={brushRange ? i >= brushRange.min && i <= brushRange.max : false}
+            clickable={Boolean(onTimeRangeClick)}
+            onMouseDown={handleMouseDown}
+            onMouseEnter={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            totalLabel={timelineLabels.total}
+            errorsLabel={timelineLabels.errors}
+            warningsLabel={timelineLabels.warnings}
+          />
+        ))}
       </div>
 
       {/* Level-specific mini-sparklines */}

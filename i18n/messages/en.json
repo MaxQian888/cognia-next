@@ -6677,7 +6677,8 @@
       "desktopOnlyTitle": "Run inside Tauri",
       "desktopOnlyBodyPrefix": "The Claude Code agent runs in a Node sidecar that ships with the desktop build. To use the chat, launch the app with ",
       "desktopOnlyBodyMiddle": " rather than ",
-      "desktopOnlyBodySuffix": "."
+      "desktopOnlyBodySuffix": ".",
+      "emptyTitle": "Cognia"
     },
     "titleBar": {
       "minimize": "Minimize",
@@ -8129,7 +8130,43 @@
       "signOutTitle": "Sign out",
       "signOutReason": "Confirm sign out",
       "signOutDescription": "You'll need to scan the QR again to reconnect.",
-      "biometricFailed": "Biometric check failed ({reason}); did not sign out."
+      "biometricFailed": "Biometric check failed ({reason}); did not sign out.",
+      "discover": {
+        "title": "Find your desktop",
+        "subtitle": "Pick a server below, or skip to enter details manually.",
+        "scanning": "Scanning the local network…",
+        "rescanCta": "Rescan",
+        "skipToManual": "Enter manually",
+        "foundCount": "{count, plural, =0 {No servers found} =1 {1 server} other {# servers}}",
+        "emptyTitle": "No servers detected",
+        "emptyDescription": "Make sure the desktop is on the same network with the companion server enabled.",
+        "backToDiscover": "Back to discover",
+        "baseUrlLocked": "URL locked from discovery",
+        "latencyMs": "{ms} ms",
+        "tlsPinned": "Identity verified",
+        "tlsUnverified": "Unverified",
+        "viaMdns": "mDNS",
+        "viaProbe": "LAN probe",
+        "viaHistory": "History"
+      },
+      "permissions": {
+        "localNetwork": {
+          "title": "Local network access required",
+          "description": "Grant local-network access so the phone can find the desktop on your Wi-Fi."
+        }
+      },
+      "step": {
+        "ariaLabel": "Pairing progress",
+        "discover": "Discover",
+        "pair": "Pair",
+        "paired": "Connected"
+      },
+      "scanError": {
+        "notPairCode": "That QR code isn't a Cognia pair code.",
+        "permissionDenied": "Camera permission denied. Enable it in system settings to scan QR codes.",
+        "unsupported": "This device can't scan QR codes. Paste the pair token manually below.",
+        "failed": "Scan failed: {message}"
+      }
     },
     "messageActions": {
       "title": "Message",
@@ -8155,7 +8192,10 @@
       "emptyCharacters": "No characters yet — create one on the desktop.",
       "emptyTeams": "No teams yet.",
       "emptySkills": "No skills yet.",
-      "emptyTwinDrafts": "No pending twin drafts."
+      "emptyTwinDrafts": "No pending twin drafts.",
+      "search": "Search discover…",
+      "searchAria": "Search discover",
+      "featured": "Featured"
     },
     "me": {
       "title": "Me",
@@ -8172,7 +8212,25 @@
       "appSecurity": "App security",
       "biometricToggle": "Require biometric to unlock",
       "biometricUnavailable": "This device has no biometric enrolled.",
-      "versionLabel": "Version"
+      "versionLabel": "Version",
+      "profile": {
+        "fallbackName": "Signed-out",
+        "fallbackPlan": "Local account",
+        "manageAccount": "Manage account"
+      },
+      "quickToggles": {
+        "themeAria": "Switch theme",
+        "languageAria": "Switch language",
+        "themeLight": "Light",
+        "themeDark": "Dark",
+        "themeAuto": "Auto"
+      },
+      "todayStats": {
+        "sessions": "Sessions",
+        "drafts": "Drafts",
+        "backup": "Last backup",
+        "backupNever": "Never"
+      }
     },
     "companion": {
       "tunnel": {
@@ -8247,7 +8305,11 @@
       "statusFailed": "Failed",
       "statusCancelled": "Cancelled",
       "statusSkipped": "Skipped",
-      "statusWaiting": "Waiting"
+      "statusWaiting": "Waiting",
+      "all": "All",
+      "pinned": "Pinned",
+      "pinned_added": "Pinned.",
+      "pinned_removed": "Unpinned."
     },
     "twinSources": {
       "title": "Twin sources",
@@ -8299,7 +8361,11 @@
       "autoBackupInterval": "Interval (days)",
       "historyHeader": "History",
       "historyEmpty": "No history yet.",
-      "passphraseLabel": "Optional passphrase (blank uses auto key)"
+      "passphraseLabel": "Optional passphrase (blank uses auto key)",
+      "exportBiometricTitle": "Confirm export",
+      "exportBiometricReason": "Authenticate to export an encrypted backup.",
+      "biometricBlocked": "Biometric check failed. Export cancelled.",
+      "passphraseRequiredHint": "Required so the encrypted archive can be opened later."
     },
     "shareTarget": {
       "title": "Share via cognia",
@@ -8331,6 +8397,107 @@
       "empty": "No members in this team yet.",
       "noMatches": "No matches for \"{query}\"",
       "dismiss": "Dismiss"
+    },
+    "shell": {
+      "openNav": "Open navigation",
+      "navSheetTitle": "Navigation",
+      "openMembers": "Open team members",
+      "sessionMenu": "Session menu",
+      "newChat": "New chat",
+      "settings": "Settings",
+      "deleteSession": "Delete this session",
+      "memberSheetTitle": "Team members",
+      "directSessionTitle": "Chat with {name}",
+      "tabBarAria": "Main navigation",
+      "clearSearch": "Clear search"
+    },
+    "home": {
+      "search": "Search chats…",
+      "searchAria": "Search chats",
+      "pinned": "Pinned",
+      "recent": "Recent",
+      "emptyChats": "No chats yet. Tap + to start one.",
+      "emptyFiltered": "No chats match “{query}”.",
+      "swipePin": "Pin",
+      "swipeUnpin": "Unpin",
+      "swipeDelete": "Delete",
+      "presenceStreaming": "Streaming"
+    },
+    "settingsPanel": {
+      "theme": "Theme",
+      "themeLight": "Light",
+      "themeDark": "Dark",
+      "themeSystem": "System",
+      "fontScale": "Font scale",
+      "fontScaleSm": "S",
+      "fontScaleMd": "M",
+      "fontScaleLg": "L",
+      "language": "Language",
+      "defaultModel": "Default model",
+      "queueLabel": "Queued — desktop will apply this when online."
+    },
+    "characterEdit": {
+      "createTitle": "New character",
+      "editTitle": "Edit character",
+      "description": "Tune the system prompt, model, and avatar.",
+      "nameLabel": "Name",
+      "descriptionLabel": "Description",
+      "systemPromptLabel": "System prompt",
+      "defaultModelLabel": "Default model",
+      "avatarEmojiLabel": "Avatar emoji",
+      "avatarColorLabel": "Avatar color",
+      "save": "Save",
+      "saving": "Saving…",
+      "savedCreate": "Character created.",
+      "savedUpdate": "Character updated.",
+      "saveFailed": "Save failed: {message}",
+      "create": "Create",
+      "delete": "Delete",
+      "deleted": "Character deleted.",
+      "deleteFailed": "Delete failed: {message}",
+      "cannotDeleteBuiltIn": "Built-in characters can't be deleted.",
+      "queueLabelCreate": "Queued — desktop will create when online.",
+      "queueLabelUpdate": "Queued — desktop will save when online.",
+      "queueLabelDelete": "Queued — desktop will delete when online."
+    },
+    "connectorPolicy": {
+      "title": "Conversation settings",
+      "description": "Choose how this conversation handles incoming messages.",
+      "defaultMode": "Default mode",
+      "defaultModeHelp": "Auto replies via AI. Draft requires your approval. Manual silences AI.",
+      "modeAuto": "Auto",
+      "modeDraft": "Draft",
+      "modeManual": "Manual",
+      "quietHours": "Quiet hours",
+      "quietHoursHelp": "Outbound replies pause during this window.",
+      "from": "From",
+      "to": "To",
+      "muted": "Mute this conversation",
+      "mutedHelp": "Inbound messages still arrive; outbound replies are blocked.",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Settings saved.",
+      "saveFailed": "Save failed: {message}",
+      "queueLabel": "Queued — desktop will apply when online."
+    },
+    "plugins": {
+      "empty": "No plugins installed.",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "toggleAria": "Toggle plugin",
+      "toggleFailed": "Toggle failed: {message}",
+      "queueLabel": "Queued — desktop will apply when online."
+    },
+    "twinProfile": {
+      "title": "Twin profile",
+      "loading": "Loading twin profile…",
+      "loadFailed": "Couldn't load twin profile.",
+      "empty": "No twin profile yet. Add a source on the desktop to start.",
+      "entities": "{count, plural, =0 {No entities} =1 {1 entity} other {# entities}}",
+      "samples": "{count, plural, =0 {No samples} =1 {1 sample} other {# samples}}",
+      "style": "Style",
+      "updatedAt": "Updated {when}",
+      "noUpdates": "Not yet generated"
     }
   },
   "workflows": {

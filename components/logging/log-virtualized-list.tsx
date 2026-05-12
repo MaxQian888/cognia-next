@@ -236,8 +236,8 @@ export function VirtualizedLogList({
               <MemoizedLogEntry
                 log={log}
                 isExpanded={expandedIds.has(log.id)}
-                onToggle={() => toggleExpanded(log.id)}
-                onSelect={() => handleSelectLog(log)}
+                onToggle={toggleExpanded}
+                onSelect={handleSelectLog}
                 onFocusTrace={handleFocusTrace}
                 onFocusSession={handleFocusSession}
                 searchQuery={searchQuery}

@@ -131,8 +131,15 @@ describe("SchedulerDashboardView", () => {
 
   it("renders the kind summary strip when countsByKind is supplied", () => {
     setup({
-      countsByKind: { app: 4, workflow: 2, backup: 1, plugin: 0, system: 3 },
-      activeCountsByKind: { app: 2, workflow: 1, backup: 0, plugin: 0, system: 1 },
+      countsByKind: { app: 4, workflow: 2, backup: 1, plugin: 0, system: 3, connector: 0 },
+      activeCountsByKind: {
+        app: 2,
+        workflow: 1,
+        backup: 0,
+        plugin: 0,
+        system: 1,
+        connector: 0,
+      },
     })
     expect(screen.getByTestId("kind-summary-strip")).toBeInTheDocument()
     expect(screen.getByTestId("kind-summary-app")).toBeInTheDocument()

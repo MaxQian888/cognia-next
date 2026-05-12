@@ -49,6 +49,7 @@ export function MobileChannelList({
   onDelete,
 }: MobileChannelListProps) {
   const t = useTranslations("mobile.home")
+  const tShell = useTranslations("mobile.shell")
   const [query, setQuery] = useState("")
 
   const characters = useClientLiveQuery<Character[]>(() => listCharacters(), [], [])
@@ -117,7 +118,7 @@ export function MobileChannelList({
           {query.length > 0 ? (
             <button
               type="button"
-              aria-label="Clear search"
+              aria-label={tShell("clearSearch")}
               data-testid="mobile-channel-search-clear"
               onClick={() => setQuery("")}
               className="absolute right-1.5 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-muted"
@@ -132,7 +133,7 @@ export function MobileChannelList({
           variant="ghost"
           className="size-8"
           onClick={onNewDirect}
-          aria-label="New chat"
+          aria-label={tShell("newChat")}
           data-testid="mobile-channel-new"
         >
           <PlusIcon className="size-4" />

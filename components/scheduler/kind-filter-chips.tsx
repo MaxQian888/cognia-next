@@ -19,7 +19,14 @@ export interface KindFilterChipsProps {
   countsByKind: Record<ScheduledItemKind, number>
 }
 
-const KIND_ORDER: ScheduledItemKind[] = ["app", "workflow", "backup", "plugin", "system"]
+const KIND_ORDER: ScheduledItemKind[] = [
+  "app",
+  "workflow",
+  "backup",
+  "plugin",
+  "system",
+  "connector",
+]
 
 export function KindFilterChips({
   selected,
@@ -83,5 +90,7 @@ function labelFallback(kind: ScheduledItemKind): string {
       return "Plugin"
     case "system":
       return "System"
+    case "connector":
+      return "Connector"
   }
 }

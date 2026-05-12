@@ -109,6 +109,16 @@ const taskTypeConfig: Record<
     bg: "bg-teal-500/10",
     color: "text-teal-500",
   },
+  "connection:scheduled:digest": {
+    icon: <Send className="h-3.5 w-3.5" />,
+    bg: "bg-cyan-500/10",
+    color: "text-cyan-500",
+  },
+  "connection:outbound:send": {
+    icon: <Send className="h-3.5 w-3.5" />,
+    bg: "bg-cyan-500/10",
+    color: "text-cyan-500",
+  },
 }
 
 const statusDotColor: Record<ScheduledTaskStatus, string> = {

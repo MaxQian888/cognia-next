@@ -107,6 +107,60 @@ describe("UnifiedTaskSidebarItem", () => {
     expect(screen.getByText(/5/)).toBeInTheDocument()
   })
 
+  it("renders the multi-select checkbox only when onToggleSelect is supplied", () => {
+    const item = makeItem()
+    const onToggleSelect = jest.fn()
+    const { rerender } = render(
+      <UnifiedTaskSidebarItem item={item} isActive={false} onClick={() => {}} />
+    )
+    expect(screen.queryByTestId(`unified-row-checkbox-${item.unifiedId}`)).toBeNull()
+    rerender(
+      <UnifiedTaskSidebarItem
+        item={item}
+        isActive={false}
+        onClick={() => {}}
+        onToggleSelect={onToggleSelect}
+      />
+    )
+    expect(screen.getByTestId(`unified-row-checkbox-${item.unifiedId}`)).toBeInTheDocument()
+  })
+
+  it("fires onToggleSelect (not onClick) when the checkbox is clicked", () => {
+    const item = makeItem()
+    const onClick = jest.fn()
+    const onToggleSelect = jest.fn()
+    render(
+      <UnifiedTaskSidebarItem
+        item={item}
+        isActive={false}
+        onClick={onClick}
+        onToggleSelect={onToggleSelect}
+      />
+    )
+    const checkbox = screen.getByTestId(`unified-row-checkbox-${item.unifiedId}`)
+    fireEvent.click(checkbox)
+    expect(onToggleSelect).toHaveBeenCalledWith(item)
+    // The row's own onClick must NOT fire — checkbox stops propagation.
+    expect(onClick).not.toHaveBeenCalled()
+  })
+
+  it("reflects the isSelected prop on the checkbox's checked attribute", () => {
+    const item = makeItem()
+    render(
+      <UnifiedTaskSidebarItem
+        item={item}
+        isActive={false}
+        onClick={() => {}}
+        onToggleSelect={() => {}}
+        isSelected
+      />
+    )
+    const checkbox = screen.getByTestId(
+      `unified-row-checkbox-${item.unifiedId}`
+    ) as HTMLInputElement
+    expect(checkbox.checked).toBe(true)
+  })
+
   it("falls back to event-type text for event triggers", () => {
     render(
       <UnifiedTaskSidebarItem

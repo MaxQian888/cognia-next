@@ -27,8 +27,16 @@ import {
   SchedulerMobileDetailView,
   SchedulerDialogs,
 } from "@/components/scheduler"
+import { UnifiedTaskDetailView } from "@/components/scheduler/unified-task-detail-view"
+import { RunDetailSheet } from "@/components/scheduler/run-detail-sheet"
+import { SchedulerBulkToolbar } from "@/components/scheduler/scheduler-bulk-toolbar"
+import { QuickWorkflowTriggerDialog } from "@/components/scheduler/dialogs/quick-workflow-trigger-dialog"
+import { BackupScheduleDialog } from "@/components/scheduler/backup-schedule-dialog"
+import { toUnifiedFromTaskExecution } from "@/hooks/scheduler/use-unified-recent-runs"
 import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
+import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 import type { CreateScheduledTaskInput, CreateSystemTaskInput } from "@/types/scheduler"
+import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
 
 export default function SchedulerPage() {
   const {
@@ -64,6 +72,14 @@ export default function SchedulerPage() {
     bulkResume: _bulkResume,
     bulkDelete: _bulkDelete,
   } = useScheduler()
+
+  // Multi-select state (unified-item ids) lives in the scheduler store so it
+  // persists across the dashboard ↔ detail transitions during a single bulk
+  // session. The hover-revealed checkbox on each `UnifiedTaskSidebarItem`
+  // toggles membership; the `SchedulerBulkToolbar` consumes the resolved set.
+  const multiSelection = useSchedulerStore((s) => s.multiSelection)
+  const toggleMultiSelection = useSchedulerStore((s) => s.toggleMultiSelection)
+  const clearMultiSelection = useSchedulerStore((s) => s.clearMultiSelection)
 
   const {
     capabilities,
@@ -127,6 +143,11 @@ export default function SchedulerPage() {
   const [showTemplateGallery, setShowTemplateGallery] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
   const [showImportDialog, setShowImportDialog] = useState(false)
+  // Phase 8 additions: unified-detail / run-detail / quick-create dialogs
+  const [selectedUnifiedItem, setSelectedUnifiedItem] = useState<UnifiedScheduledItem | null>(null)
+  const [selectedRun, setSelectedRun] = useState<UnifiedExecutionRun | null>(null)
+  const [showQuickWorkflowDialog, setShowQuickWorkflowDialog] = useState(false)
+  const [showBackupDialog, setShowBackupDialog] = useState(false)
 
   // Derived
   const inspectTask = useMemo(
@@ -430,21 +451,31 @@ export default function SchedulerPage() {
       data-bg-target="chat"
       className="flex h-full min-h-0 w-full flex-1 overflow-hidden"
     >
-      {/* Mobile detail view — full-screen push */}
-      {isMobile && mobileView === "detail" && selectedTask && (
+      {/* Mobile detail view — full-screen push. Supports both the app-kind
+          rich path (selectedTask) and any unified-kind path
+          (selectedUnifiedItem) so users on mobile aren't dead-ended on
+          workflow / backup / plugin / connector selections. */}
+      {isMobile && mobileView === "detail" && (selectedTask || selectedUnifiedItem) && (
         <SchedulerMobileDetailView
-          task={selectedTask}
+          task={selectedTask ?? undefined}
           executions={executions}
+          unifiedItem={selectedTask ? undefined : (selectedUnifiedItem ?? undefined)}
           isLoading={isLoading}
           onBack={() => {
             setMobileView("list")
             selectTask(null)
+            setSelectedUnifiedItem(null)
           }}
           onPause={handlePause}
           onResume={handleResume}
           onRunNow={handleRunNow}
           onDelete={setDeleteTaskId}
           onEdit={() => setShowEditSheet(true)}
+          onUnifiedRunNow={dispatchUnified("runNow")}
+          onUnifiedPause={dispatchUnified("pause")}
+          onUnifiedResume={dispatchUnified("resume")}
+          onUnifiedDelete={dispatchUnified("delete")}
+          onSelectRun={setSelectedRun}
         />
       )}
 
@@ -467,10 +498,17 @@ export default function SchedulerPage() {
           onSelectTask={handleSelectTask}
           onSelectSystemTask={setInspectTaskId}
           onSelectUnifiedItem={(item) => {
-            // For non-app/non-system kinds we have no in-place detail view yet;
-            // deep-link to the source-native editor.
-            if (typeof window !== "undefined") {
-              window.location.assign(item.origin.deepLinkHref)
+            // Render the unified detail view in-place. App-kind items route
+            // through the dedicated TaskDetailView via the orchestrator.
+            if (item.kind === "app") {
+              handleSelectTask(item.sourceId)
+              setSelectedUnifiedItem(null)
+            } else if (item.kind === "system") {
+              setInspectTaskId(item.sourceId)
+              setSelectedUnifiedItem(null)
+            } else {
+              selectTask(null)
+              setSelectedUnifiedItem(item)
             }
           }}
           onRunNow={handleRunNow}
@@ -481,6 +519,8 @@ export default function SchedulerPage() {
           onUnifiedPause={dispatchUnified("pause")}
           onUnifiedResume={dispatchUnified("resume")}
           onUnifiedDelete={dispatchUnified("delete")}
+          selectedUnifiedIds={multiSelection}
+          onToggleUnifiedSelection={(item) => toggleMultiSelection(item.unifiedId)}
           onCreate={handleCreateClick}
           highlightedIndex={highlightedIndex}
         />
@@ -491,16 +531,8 @@ export default function SchedulerPage() {
             isRefreshing={isLoading}
             onCreate={handleCreateClick}
             onCreateSystemTask={() => setShowSystemCreateSheet(true)}
-            onCreateWorkflowTrigger={() => {
-              if (typeof window !== "undefined") {
-                window.location.assign("/workflows")
-              }
-            }}
-            onOpenBackupSettings={() => {
-              if (typeof window !== "undefined") {
-                window.location.assign("/settings?section=data&dataTab=backup")
-              }
-            }}
+            onCreateWorkflowTrigger={() => setShowQuickWorkflowDialog(true)}
+            onOpenBackupSettings={() => setShowBackupDialog(true)}
             onOpenPluginSettings={() => {
               if (typeof window !== "undefined") {
                 window.location.assign("/settings?section=plugins")
@@ -527,6 +559,18 @@ export default function SchedulerPage() {
                   onEdit={() => setShowEditSheet(true)}
                   onCancelPluginExecution={cancelPluginExecution}
                   isPluginExecutionActive={isPluginExecutionActive}
+                  onSelectExecution={(exec) => setSelectedRun(toUnifiedFromTaskExecution(exec))}
+                />
+              </SchedulerErrorBoundary>
+            ) : selectedUnifiedItem ? (
+              <SchedulerErrorBoundary panelName="detail">
+                <UnifiedTaskDetailView
+                  item={selectedUnifiedItem}
+                  onRunNow={dispatchUnified("runNow")}
+                  onPause={dispatchUnified("pause")}
+                  onResume={dispatchUnified("resume")}
+                  onDelete={dispatchUnified("delete")}
+                  onSelectRun={setSelectedRun}
                 />
               </SchedulerErrorBoundary>
             ) : (
@@ -541,6 +585,7 @@ export default function SchedulerPage() {
                   onSelectTask={handleSelectTask}
                   countsByKind={countsByKind}
                   activeCountsByKind={activeCountsByKind}
+                  onSelectRun={setSelectedRun}
                 />
               </SchedulerErrorBoundary>
             )}
@@ -600,6 +645,33 @@ export default function SchedulerPage() {
       <ExportTasksDialog open={showExportDialog} onOpenChange={setShowExportDialog} />
 
       <ImportTasksDialog open={showImportDialog} onOpenChange={setShowImportDialog} />
+
+      <QuickWorkflowTriggerDialog
+        open={showQuickWorkflowDialog}
+        onOpenChange={setShowQuickWorkflowDialog}
+      />
+
+      {showBackupDialog && (
+        <BackupScheduleDialog
+          onScheduled={() => {
+            setShowBackupDialog(false)
+            refresh()
+          }}
+        />
+      )}
+
+      <RunDetailSheet
+        open={selectedRun !== null}
+        onOpenChange={(open) => {
+          if (!open) setSelectedRun(null)
+        }}
+        run={selectedRun}
+      />
+
+      <SchedulerBulkToolbar
+        selectedItems={unifiedItems.filter((item) => multiSelection.includes(item.unifiedId))}
+        onClearSelection={clearMultiSelection}
+      />
     </SidebarProvider>
   )
 }

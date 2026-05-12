@@ -17,7 +17,7 @@
 
 import type { TaskTriggerType } from "@/types/scheduler"
 
-export type ScheduledItemKind = "app" | "workflow" | "backup" | "plugin" | "system"
+export type ScheduledItemKind = "app" | "workflow" | "backup" | "plugin" | "system" | "connector"
 
 export type UnifiedItemStatus = "active" | "paused" | "disabled" | "expired" | "unknown"
 
@@ -110,7 +110,8 @@ export function parseUnifiedId(
     kind !== "workflow" &&
     kind !== "backup" &&
     kind !== "plugin" &&
-    kind !== "system"
+    kind !== "system" &&
+    kind !== "connector"
   ) {
     return undefined
   }

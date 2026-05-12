@@ -10,6 +10,7 @@ const COUNTS: Record<ScheduledItemKind, number> = {
   backup: 1,
   plugin: 0,
   system: 4,
+  connector: 0,
 }
 
 describe("KindFilterChips", () => {

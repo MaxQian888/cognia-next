@@ -46,6 +46,7 @@ const EMPTY_COUNTS = {
   backup: 0,
   plugin: 0,
   system: 0,
+  connector: 0,
 } satisfies Record<ScheduledItemKind, number>
 
 export function useUnifiedScheduledItems(
@@ -60,6 +61,7 @@ export function useUnifiedScheduledItems(
     backup: [],
     plugin: [],
     system: [],
+    connector: [],
   })
   const [errors, setErrors] = useState<Partial<Record<ScheduledItemKind, unknown>>>({})
 

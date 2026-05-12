@@ -65,9 +65,19 @@ interface TaskExecutionHistoryProps {
    * Initial page size and increment per "Load more" click. Defaults to 10.
    */
   maxItems?: number
+  /**
+   * Fired when the user clicks (or Enter/Space-keys) a row. When set the rows
+   * render as buttons; consumers typically open a `RunDetailSheet` for the
+   * selected execution.
+   */
+  onSelectExecution?: (execution: TaskExecution) => void
 }
 
-export function TaskExecutionHistory({ executions, maxItems = 10 }: TaskExecutionHistoryProps) {
+export function TaskExecutionHistory({
+  executions,
+  maxItems = 10,
+  onSelectExecution,
+}: TaskExecutionHistoryProps) {
   const t = useTranslations("scheduler")
   const format = useFormatter()
   const [displayCount, setDisplayCount] = useState(maxItems)
@@ -85,6 +95,8 @@ export function TaskExecutionHistory({ executions, maxItems = 10 }: TaskExecutio
     )
   }
 
+  const isClickable = !!onSelectExecution
+
   return (
     <div className="flex flex-col">
       {displayed.map((execution, index) => {
@@ -93,14 +105,27 @@ export function TaskExecutionHistory({ executions, maxItems = 10 }: TaskExecutio
         const isLast = index === displayed.length - 1
         const resultSummary =
           execution.status === "completed" ? getResultSummary(execution.output) : null
+        const handleKey = (e: React.KeyboardEvent) => {
+          if (!onSelectExecution) return
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault()
+            onSelectExecution(execution)
+          }
+        }
 
         return (
           <div
             key={execution.id}
             data-testid="execution-row"
+            role={isClickable ? "button" : undefined}
+            tabIndex={isClickable ? 0 : undefined}
+            onClick={isClickable ? () => onSelectExecution!(execution) : undefined}
+            onKeyDown={isClickable ? handleKey : undefined}
             className={cn(
               "flex items-start gap-3 py-2.5 px-1",
-              !isLast && "border-b border-border/30"
+              !isLast && "border-b border-border/30",
+              isClickable &&
+                "cursor-pointer hover:bg-accent/50 focus:bg-accent/50 focus:outline-none"
             )}
           >
             {/* Status icon */}

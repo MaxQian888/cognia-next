@@ -269,7 +269,7 @@ describe("SchedulerSidebar", () => {
       tasks: [],
       systemTasks: [],
       unifiedItems: [],
-      countsByKind: { app: 0, workflow: 0, backup: 0, plugin: 0, system: 0 },
+      countsByKind: { app: 0, workflow: 0, backup: 0, plugin: 0, system: 0, connector: 0 },
     })
     expect(screen.getByTestId("empty-state-default")).toBeInTheDocument()
   })
@@ -279,7 +279,7 @@ describe("SchedulerSidebar", () => {
       tasks: [],
       systemTasks: [],
       unifiedItems: [buildUnified("app", "app:1")],
-      countsByKind: { app: 1, workflow: 0, backup: 0, plugin: 0, system: 0 },
+      countsByKind: { app: 1, workflow: 0, backup: 0, plugin: 0, system: 0, connector: 0 },
     })
     fireEvent.click(screen.getByTestId("kind-toggle-workflow"))
     expect(screen.getByTestId("empty-state-filtered")).toBeInTheDocument()
@@ -295,7 +295,7 @@ describe("SchedulerSidebar", () => {
         buildUnified("workflow", "workflow:2"),
         buildUnified("system", "system:3"),
       ],
-      countsByKind: { app: 1, workflow: 1, backup: 0, plugin: 0, system: 1 },
+      countsByKind: { app: 1, workflow: 1, backup: 0, plugin: 0, system: 1, connector: 0 },
     })
     expect(screen.getByTestId("unified-app:1")).toBeInTheDocument()
     expect(screen.getByTestId("unified-workflow:2")).toBeInTheDocument()
@@ -314,7 +314,7 @@ describe("SchedulerSidebar", () => {
         buildUnified("system", "system:2"),
         buildUnified("workflow", "workflow:3"),
       ],
-      countsByKind: { app: 1, workflow: 1, backup: 0, plugin: 0, system: 1 },
+      countsByKind: { app: 1, workflow: 1, backup: 0, plugin: 0, system: 1, connector: 0 },
       onSelectTask,
       onSelectSystemTask,
       onSelectUnifiedItem,

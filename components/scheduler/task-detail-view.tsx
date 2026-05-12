@@ -39,6 +39,12 @@ export interface TaskDetailViewProps {
   onEdit: () => void
   onCancelPluginExecution?: (executionId: string) => boolean
   isPluginExecutionActive?: (executionId: string) => boolean
+  /**
+   * Optional: fired when the user clicks a row in the execution history.
+   * The page maps the click to opening the `RunDetailSheet` with a unified
+   * execution-run view of the selected row.
+   */
+  onSelectExecution?: (execution: TaskExecution) => void
 }
 
 const statusBadgeClass: Record<string, string> = {
@@ -59,6 +65,7 @@ export function TaskDetailView({
   onEdit,
   onCancelPluginExecution: _onCancelPluginExecution,
   isPluginExecutionActive: _isPluginExecutionActive,
+  onSelectExecution,
 }: TaskDetailViewProps) {
   const t = useTranslations("scheduler")
 
@@ -194,7 +201,7 @@ export function TaskDetailView({
           </div>
 
           <div className="mt-5">
-            <TaskExecutionHistory executions={executions} />
+            <TaskExecutionHistory executions={executions} onSelectExecution={onSelectExecution} />
           </div>
 
           <div className="mt-5">

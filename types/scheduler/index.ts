@@ -30,6 +30,11 @@ export type ScheduledTaskType =
   | "im-push"
   | "skill"
   | "external-agent"
+  // Connector subsystem registers two task-types via `registerTaskExecutor`
+  // in `lib/connectors/scheduled-outbound.ts`. Listed here so connector rows
+  // in the same `tasks` Dexie store are typed properly across the codebase.
+  | "connection:scheduled:digest"
+  | "connection:outbound:send"
 
 // Task execution status
 export type TaskExecutionStatus =

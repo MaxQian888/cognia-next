@@ -33,6 +33,13 @@ describe("makeUnifiedId / parseUnifiedId", () => {
     })
   })
 
+  it("accepts the connector kind (added when the connector source was wired in)", () => {
+    expect(parseUnifiedId(makeUnifiedId("connector", "outbound:queue"))).toEqual({
+      kind: "connector",
+      sourceId: "outbound:queue",
+    })
+  })
+
   it("returns undefined for malformed ids", () => {
     expect(parseUnifiedId("")).toBeUndefined()
     expect(parseUnifiedId("nopecolon")).toBeUndefined()
