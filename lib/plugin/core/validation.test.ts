@@ -202,22 +202,20 @@ describe("Plugin Validation", () => {
       )
     })
 
-    it("should fail validation for blocked capabilities in block mode", () => {
+    it("should pass validation for skills capability (unblocked in M1·T4)", () => {
+      // Historical note: this test previously asserted that declaring
+      // `capabilities: ["skills"]` in block mode produced an error because
+      // the skills contract was support: "blocked". M1·T4 of the plugin-first
+      // Computer Use plan flipped skills to "supported" once skill-registry +
+      // build-options + sidecar passthrough landed (M1·T3 / M4). No real
+      // capability is currently in the "blocked" status, so the validation
+      // path is exercised by the "unknown capability" test above instead.
       const manifest = createValidManifest()
       manifest.capabilities = ["skills"]
 
       const result = validatePluginManifest(manifest, { governanceMode: "block" })
 
-      expect(result.valid).toBe(false)
-      expect(result.diagnostics).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            severity: "error",
-            field: "capabilities",
-            code: "manifest.capabilities.plugin.capability.blocked",
-          }),
-        ])
-      )
+      expect(result.valid).toBe(true)
     })
 
     it("should require main for frontend plugins", () => {
