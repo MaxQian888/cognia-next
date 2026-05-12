@@ -43,6 +43,12 @@ function makeFakeRuntime(opts: {
       decision: opts.decision ?? { allow: true },
       effectivePolicy: { ...DEFAULT_GH_POLICY, ...(override as Partial<GhPolicy>) },
     }),
+    getWorkOrder: async () => null,
+    upsertWorkOrder: async (p) => ({
+      ...p,
+      createdAt: 0,
+      updatedAt: 0,
+    }),
   })
   return { octokit, audit }
 }
@@ -339,6 +345,8 @@ describe("action.github.runIssueLoop", () => {
         decision: { allow: true },
         effectivePolicy: DEFAULT_GH_POLICY,
       }),
+      getWorkOrder: async () => null,
+      upsertWorkOrder: async (p) => ({ ...p, createdAt: 0, updatedAt: 0 }),
     })
     await exec("action.github.runIssueLoop", {
       repoFullName: "o/r",

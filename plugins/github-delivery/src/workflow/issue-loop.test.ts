@@ -14,7 +14,7 @@ function fakeOctokit(responses: Record<string, unknown>) {
   } as unknown as import("@octokit/core").Octokit
 }
 
-function installRuntime(octokit: unknown) {
+function installRuntime(octokit: unknown, opts: { workOrders?: jest.Mock } = {}) {
   setGithubRuntime({
     getRepo: async () => null,
     getOctokit: async () => octokit as import("@octokit/core").Octokit,
@@ -23,6 +23,12 @@ function installRuntime(octokit: unknown) {
       decision: { allow: true },
       effectivePolicy: DEFAULT_GH_POLICY,
     }),
+    getWorkOrder: async () => null,
+    upsertWorkOrder: opts.workOrders ?? jest.fn(async (p) => ({
+      ...p,
+      createdAt: 0,
+      updatedAt: 0,
+    })),
   })
 }
 
@@ -131,6 +137,83 @@ describe("runIssueLoop", () => {
     const result = await runIssueLoop({ repoFullName: "o/r", issueNumber: 1 })
     expect(result.status).toBe("failed")
     expect(result.reason).toMatch(/clone token/)
+  })
+})
+
+describe("runIssueLoop work-order writes", () => {
+  it("writes in_progress on entry and pr_opened on success", async () => {
+    const upsertSpy = jest.fn(async (p) => ({ ...p, createdAt: 0, updatedAt: 0 }))
+    const octokit = fakeOctokit({
+      "GET /repos/{owner}/{repo}/issues/{issue_number}": {
+        data: { title: "T", body: "B" },
+      },
+      "POST /repos/{owner}/{repo}/pulls": {
+        data: { number: 11, html_url: "u" },
+      },
+      "POST /repos/{owner}/{repo}/issues/{issue_number}/labels": { data: {} },
+    })
+    installRuntime(octokit, { workOrders: upsertSpy })
+    setIssueLoopDriver({
+      run: jest.fn(async () => ({ summary: "did it", durationMs: 1 })),
+    })
+    const result = await runIssueLoop(
+      { repoFullName: "o/r", issueNumber: 5 },
+      {
+        cloneToWorkspace: async () => ({
+          backend: "local" as const,
+          path: "/tmp",
+          repoFullName: "o/r",
+          branch: "main",
+          createdAt: 0,
+        }),
+        commitAndPush: async () => "sha",
+      }
+    )
+    expect(result.status).toBe("pr_opened")
+    // First write: in_progress; second write: pr_opened.
+    expect(upsertSpy).toHaveBeenCalledTimes(2)
+    expect(upsertSpy.mock.calls[0][0]).toMatchObject({
+      repoFullName: "o/r",
+      issueNumber: 5,
+      status: "in_progress",
+      branch: "cognia/issue-5",
+    })
+    expect(upsertSpy.mock.calls[1][0]).toMatchObject({
+      status: "pr_opened",
+      prNumber: 11,
+    })
+  })
+
+  it("writes failed status with lastError when the driver throws", async () => {
+    const upsertSpy = jest.fn(async (p) => ({ ...p, createdAt: 0, updatedAt: 0 }))
+    installRuntime(
+      fakeOctokit({
+        "GET /repos/{owner}/{repo}/issues/{issue_number}": {
+          data: { title: "T", body: "B" },
+        },
+      }),
+      { workOrders: upsertSpy }
+    )
+    setIssueLoopDriver({
+      run: jest.fn(async () => Promise.reject(new Error("AI ran out of context"))),
+    })
+    await runIssueLoop(
+      { repoFullName: "o/r", issueNumber: 9 },
+      {
+        cloneToWorkspace: async () => ({
+          backend: "local" as const,
+          path: "/tmp",
+          repoFullName: "o/r",
+          branch: "main",
+          createdAt: 0,
+        }),
+      }
+    )
+    // First call = in_progress, second = failed.
+    expect(upsertSpy.mock.calls[1][0]).toMatchObject({
+      status: "failed",
+      lastError: expect.stringMatching(/AI ran out of context/),
+    })
   })
 })
 

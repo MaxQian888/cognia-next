@@ -246,16 +246,13 @@ async function safeUpdateWorkOrder(
     status: WorkOrderStatus
   }
 ): Promise<void> {
-  // The runtime doesn't expose work-order CRUD directly; the plugin entry
-  // would normally wire this. We swallow errors so the loop's main path
-  // doesn't depend on it.
   try {
-    void rt
-    void fields
-    // Wire in a follow-up — keeps this module self-contained while the
-    // workOrders table grows the right indexes.
-  } catch {
-    // ignore
+    await rt.upsertWorkOrder(fields)
+  } catch (err) {
+    // Swallow — the loop's main path must not depend on Dexie writes. The
+    // audit table is the canonical history; workOrders is a UX convenience.
+    // eslint-disable-next-line no-console
+    console.error("safeUpdateWorkOrder failed:", err)
   }
 }
 

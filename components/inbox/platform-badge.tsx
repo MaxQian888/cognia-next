@@ -40,6 +40,7 @@ const PLATFORM_CONFIG: Record<PlatformKind, PlatformConfig> = {
   kook: { label: "KK", icon: GitBranchIcon, colorClass: "text-violet-500" },
   line: { label: "LN", icon: MessageCircleIcon, colorClass: "text-green-400" },
   mattermost: { label: "MM", icon: HashIcon, colorClass: "text-blue-700" },
+  github: { label: "GH", icon: GitBranchIcon, colorClass: "text-slate-700" },
 }
 
 interface PlatformBadgeProps {

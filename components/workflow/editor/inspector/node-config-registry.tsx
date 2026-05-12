@@ -14,6 +14,21 @@ import type { WorkflowNodeKind } from "@/types/workflow/visual"
 import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 import { SchemaForm } from "./forms/schema-form"
 import {
+  GithubClosePrConfig,
+  GithubCloseIssueConfig,
+  GithubCommentIssueConfig,
+  GithubCommentPrConfig,
+  GithubCreateReleaseConfig,
+  GithubGenerateChangelogConfig,
+  GithubLabelIssueConfig,
+  GithubMergePrConfig,
+  GithubOpenPrConfig,
+  GithubPushTagConfig,
+  GithubReviewPrConfig,
+  GithubRunIssueLoopConfig,
+  GithubWebhookTriggerConfig,
+} from "./forms/github-forms"
+import {
   AiClassifyConfig,
   AiEmbedConfig,
   AiExtractConfig,
@@ -111,6 +126,20 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   // Annotations
   "annotation.note": NoteConfig,
   "annotation.group": GroupAnnotationConfig,
+  // GitHub Delivery
+  "trigger.github.webhook": GithubWebhookTriggerConfig,
+  "action.github.openPr": GithubOpenPrConfig,
+  "action.github.closePr": GithubClosePrConfig,
+  "action.github.mergePr": GithubMergePrConfig,
+  "action.github.reviewPr": GithubReviewPrConfig,
+  "action.github.commentPr": GithubCommentPrConfig,
+  "action.github.commentIssue": GithubCommentIssueConfig,
+  "action.github.labelIssue": GithubLabelIssueConfig,
+  "action.github.closeIssue": GithubCloseIssueConfig,
+  "action.github.createRelease": GithubCreateReleaseConfig,
+  "action.github.generateChangelog": GithubGenerateChangelogConfig,
+  "action.github.pushTag": GithubPushTagConfig,
+  "action.github.runIssueLoop": GithubRunIssueLoopConfig,
 }
 
 /**

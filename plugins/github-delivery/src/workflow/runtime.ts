@@ -16,7 +16,9 @@ import type {
   GhAuditEntry,
   GhPolicy,
   GhRepoEntry,
+  GhWorkOrder,
   PolicyDecision,
+  WorkOrderStatus,
 } from "@/lib/github/types"
 
 export interface GithubRuntime {
@@ -36,6 +38,25 @@ export interface GithubRuntime {
     action: GhAction,
     overrides?: Partial<GhPolicy>
   ): Promise<{ decision: PolicyDecision; effectivePolicy: GhPolicy }>
+
+  /**
+   * Look up an existing work order by (repo, issueNumber). Returns null when
+   * no row exists yet — issue-loop creates the row on first transition.
+   */
+  getWorkOrder(repoFullName: string, issueNumber: number): Promise<GhWorkOrder | null>
+
+  /**
+   * Insert or update a work order. Used by issue-loop on every status
+   * transition (open → in_progress → pr_opened / failed). The kanban page
+   * live-queries this table.
+   */
+  upsertWorkOrder(
+    patch: Partial<GhWorkOrder> & {
+      repoFullName: string
+      issueNumber: number
+      status: WorkOrderStatus
+    }
+  ): Promise<GhWorkOrder>
 }
 
 let _runtime: GithubRuntime | null = null
