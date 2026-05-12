@@ -74,6 +74,7 @@ const log = loggers.shell
 
 export function AppShellMobile() {
   const t = useTranslations("desktop.shell")
+  const tShell = useTranslations("mobile.shell")
   const router = useRouter()
   const { sessions, activeSessionId, select, create, remove } = useSessions()
   const directChat = useClaudeChat()
@@ -245,7 +246,7 @@ export function AppShellMobile() {
               variant="ghost"
               size="icon"
               className="touch-target"
-              aria-label="Open navigation"
+              aria-label={tShell("openNav")}
               data-testid="mobile-nav-trigger"
             >
               <MenuIcon className="size-5" />
@@ -258,7 +259,7 @@ export function AppShellMobile() {
             data-testid="mobile-nav-sheet"
           >
             <SheetHeader className="sr-only">
-              <SheetTitle>Navigation</SheetTitle>
+              <SheetTitle>{tShell("navSheetTitle")}</SheetTitle>
             </SheetHeader>
             <div className="flex flex-1 overflow-hidden">
               <GuildRail
@@ -297,7 +298,7 @@ export function AppShellMobile() {
               variant="ghost"
               size="icon"
               className="touch-target"
-              aria-label="Open team members"
+              aria-label={tShell("openMembers")}
               onClick={() => setMemberSheetOpen(true)}
               data-testid="mobile-members-trigger"
             >
@@ -312,7 +313,7 @@ export function AppShellMobile() {
                 variant="ghost"
                 size="icon"
                 className="touch-target"
-                aria-label="Session menu"
+                aria-label={tShell("sessionMenu")}
                 data-testid="mobile-actions-trigger"
               >
                 <MoreVerticalIcon className="size-5" />
@@ -321,7 +322,7 @@ export function AppShellMobile() {
             <DropdownMenuContent align="end">
               <DropdownMenuItem onSelect={handleNewDirect} data-testid="mobile-action-new-chat">
                 <UserPlusIcon className="size-4" />
-                <span>New chat</span>
+                <span>{tShell("newChat")}</span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -329,7 +330,7 @@ export function AppShellMobile() {
                 data-testid="mobile-action-settings"
               >
                 <SettingsIcon className="size-4" />
-                <span>Settings</span>
+                <span>{tShell("settings")}</span>
               </DropdownMenuItem>
               {activeSessionId ? (
                 <DropdownMenuItem
@@ -343,7 +344,7 @@ export function AppShellMobile() {
                   className="text-destructive focus:text-destructive"
                 >
                   <XIcon className="size-4" />
-                  <span>Delete this session</span>
+                  <span>{tShell("deleteSession")}</span>
                 </DropdownMenuItem>
               ) : null}
             </DropdownMenuContent>
@@ -381,7 +382,7 @@ export function AppShellMobile() {
             data-testid="mobile-members-sheet"
           >
             <SheetHeader>
-              <SheetTitle>Team members</SheetTitle>
+              <SheetTitle>{tShell("memberSheetTitle")}</SheetTitle>
             </SheetHeader>
             <div className="flex flex-1 overflow-hidden">
               <MemberList
@@ -403,7 +404,7 @@ export function AppShellMobile() {
         onOpenChange={setCharacterPickerOpen}
         onPick={async (c) => {
           const s = await create({
-            title: `Chat with ${c.name}`,
+            title: tShell("directSessionTitle", { name: c.name }),
             kind: "direct",
             characterId: c.id,
           })
@@ -420,7 +421,7 @@ export function AppShellMobile() {
         }}
         onPickCharacter={async (c) => {
           const s = await create({
-            title: `Chat with ${c.name}`,
+            title: tShell("directSessionTitle", { name: c.name }),
             kind: "direct",
             characterId: c.id,
           })

@@ -19,6 +19,7 @@ import {
   validateActivationEvent,
   type PluginPointGovernanceMode,
 } from "@/lib/plugin/contracts/plugin-points"
+import { isValidPluginTableName, MAX_TABLES_PER_PLUGIN } from "@/lib/plugin/dexie-namespace"
 
 // =============================================================================
 // Types
@@ -442,6 +443,110 @@ export function validatePluginManifest(
       "manifest.activateOnStartup.invalid_type",
       '"activateOnStartup" must be a boolean'
     )
+  }
+
+  if (m.dexie !== undefined) {
+    if (!m.dexie || typeof m.dexie !== "object") {
+      pushError("dexie", "manifest.dexie.invalid_type", '"dexie" must be an object if provided')
+    } else {
+      const dexie = m.dexie as Record<string, unknown>
+      if (!Array.isArray(dexie.tables)) {
+        pushError(
+          "dexie.tables",
+          "manifest.dexie.tables.missing",
+          '"dexie.tables" must be an array'
+        )
+      } else {
+        if (dexie.tables.length === 0) {
+          pushError(
+            "dexie.tables",
+            "manifest.dexie.tables.empty",
+            '"dexie.tables" must not be empty'
+          )
+        }
+        if (dexie.tables.length > MAX_TABLES_PER_PLUGIN) {
+          pushError(
+            "dexie.tables",
+            "manifest.dexie.tables.tooMany",
+            `"dexie.tables" exceeds the maximum of ${MAX_TABLES_PER_PLUGIN}`
+          )
+        }
+        const seen = new Set<string>()
+        for (let i = 0; i < dexie.tables.length; i++) {
+          const t = dexie.tables[i] as Record<string, unknown>
+          if (!t || typeof t !== "object") {
+            pushError(
+              `dexie.tables[${i}]`,
+              "manifest.dexie.tables.invalid_item",
+              `Table at index ${i} must be an object`
+            )
+            continue
+          }
+          if (typeof t.name !== "string" || !isValidPluginTableName(t.name)) {
+            pushError(
+              `dexie.tables[${i}].name`,
+              "manifest.dexie.tables.nameInvalid",
+              `Table name at index ${i} is invalid: must match ^[a-z][a-zA-Z0-9_]{0,30}$`
+            )
+          } else if (seen.has(t.name)) {
+            pushError(
+              `dexie.tables[${i}].name`,
+              "manifest.dexie.tables.duplicate",
+              `Duplicate table name "${t.name}"`
+            )
+          } else {
+            seen.add(t.name)
+          }
+          if (typeof t.schema !== "string" || t.schema.trim().length === 0) {
+            pushError(
+              `dexie.tables[${i}].schema`,
+              "manifest.dexie.tables.schemaInvalid",
+              `Table at index ${i} missing or empty "schema"`
+            )
+          }
+        }
+      }
+
+      if (dexie.migrations !== undefined) {
+        if (!Array.isArray(dexie.migrations)) {
+          pushError(
+            "dexie.migrations",
+            "manifest.dexie.migrations.invalid",
+            '"dexie.migrations" must be an array if provided'
+          )
+        } else {
+          for (let i = 0; i < dexie.migrations.length; i++) {
+            const mig = dexie.migrations[i] as Record<string, unknown>
+            if (!mig || typeof mig !== "object") {
+              pushError(
+                `dexie.migrations[${i}]`,
+                "manifest.dexie.migrations.invalid_item",
+                `Migration at index ${i} must be an object`
+              )
+              continue
+            }
+            if (
+              typeof mig.toVersion !== "number" ||
+              !Number.isInteger(mig.toVersion) ||
+              mig.toVersion < 1
+            ) {
+              pushError(
+                `dexie.migrations[${i}].toVersion`,
+                "manifest.dexie.migrations.toVersionInvalid",
+                `Migration at index ${i} requires positive integer "toVersion"`
+              )
+            }
+            if (typeof mig.upgrade !== "string" || mig.upgrade.length === 0) {
+              pushError(
+                `dexie.migrations[${i}].upgrade`,
+                "manifest.dexie.migrations.upgradeInvalid",
+                `Migration at index ${i} requires non-empty "upgrade" function name`
+              )
+            }
+          }
+        }
+      }
+    }
   }
 
   const errors = diagnostics.filter((item) => item.severity === "error").map((item) => item.message)

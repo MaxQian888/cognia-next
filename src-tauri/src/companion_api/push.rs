@@ -24,10 +24,13 @@
 //! registry on connect/disconnect.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+
+const PUSH_TOKENS_FILE: &str = "push-tokens.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -104,6 +107,8 @@ impl PushDispatcher for NoopDispatcher {
 /// Per-device push token registry plus the active-WS suppression flag.
 pub struct PushTokenRegistry {
     inner: RwLock<RegistryInner>,
+    /// Where to persist the token map. `None` ⇒ in-memory only (tests).
+    persistence: Option<PathBuf>,
 }
 
 #[allow(dead_code)] // websocket_active is consumed via the helper methods below.
@@ -121,17 +126,78 @@ impl PushTokenRegistry {
                 tokens: HashMap::new(),
                 websocket_active: HashMap::new(),
             }),
+            persistence: None,
+        })
+    }
+
+    /// Construct a registry that persists its token map to
+    /// `<data_dir>/cognia/companion/push-tokens.json`. Reads the file on
+    /// startup if it exists; missing or corrupt files start empty.
+    ///
+    /// Persistence (Phase B1) — keeps registered devices stable across
+    /// desktop restarts so the user doesn't have to re-pair just because
+    /// they closed the app.
+    #[allow(dead_code)] // used by `companion_server_start` in commands.rs.
+    pub fn with_persistence(data_dir: &std::path::Path) -> Arc<Self> {
+        let dir = data_dir.join("cognia").join("companion");
+        let path = dir.join(PUSH_TOKENS_FILE);
+        let tokens = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|contents| serde_json::from_str::<HashMap<String, PushTokenRecord>>(&contents).ok())
+            .unwrap_or_default();
+        Arc::new(Self {
+            inner: RwLock::new(RegistryInner {
+                tokens,
+                websocket_active: HashMap::new(),
+            }),
+            persistence: Some(path),
         })
     }
 
     pub fn register(&self, record: PushTokenRecord) {
-        let mut g = self.inner.write();
-        g.tokens.insert(record.device_id.clone(), record);
+        {
+            let mut g = self.inner.write();
+            g.tokens.insert(record.device_id.clone(), record);
+        }
+        self.save_to_disk();
     }
 
     pub fn revoke(&self, device_id: &str) {
-        let mut g = self.inner.write();
-        g.tokens.remove(device_id);
+        {
+            let mut g = self.inner.write();
+            g.tokens.remove(device_id);
+        }
+        self.save_to_disk();
+    }
+
+    /// Best-effort persistence — failures are logged but never propagated
+    /// because losing a write here just means the user re-registers on
+    /// the next push token rotation (Capacitor calls register on every
+    /// app boot).
+    fn save_to_disk(&self) {
+        let Some(path) = self.persistence.as_ref() else {
+            return;
+        };
+        let snapshot = {
+            let g = self.inner.read();
+            g.tokens.clone()
+        };
+        let json = match serde_json::to_string_pretty(&snapshot) {
+            Ok(s) => s,
+            Err(err) => {
+                log::warn!("push-tokens serialize failed: {err}");
+                return;
+            }
+        };
+        if let Some(parent) = path.parent() {
+            if let Err(err) = std::fs::create_dir_all(parent) {
+                log::warn!("push-tokens dir create failed: {err}");
+                return;
+            }
+        }
+        if let Err(err) = std::fs::write(path, json) {
+            log::warn!("push-tokens write failed: {err}");
+        }
     }
 
     #[allow(dead_code)] // public for the dispatcher path landing in a follow-up.
@@ -188,6 +254,82 @@ impl PushTokenRegistry {
     #[cfg(test)]
     pub fn token_count(&self) -> usize {
         self.inner.read().tokens.len()
+    }
+
+    /// Iterate every registered device and call `dispatch_to_device` on the
+    /// supplied dispatcher. Used by the event-bus trigger wiring in Phase B4
+    /// to deliver a single payload to all offline phones.
+    #[allow(dead_code)]
+    pub async fn broadcast_to_offline(
+        &self,
+        payload: &PushPayload,
+        dispatcher: &dyn PushDispatcher,
+    ) -> usize {
+        let device_ids: Vec<String> = {
+            let g = self.inner.read();
+            g.tokens.keys().cloned().collect()
+        };
+        let mut sent = 0;
+        for id in device_ids {
+            let outcome = self.dispatch_to_device(&id, payload, dispatcher).await;
+            if matches!(outcome, DeliveryOutcome::Sent) {
+                sent += 1;
+            }
+        }
+        sent
+    }
+}
+
+/// Holds the currently configured FCM + APNs dispatchers (Phase B2/B4).
+/// Both slots start empty; the user uploads credentials via Tauri commands
+/// to populate. The trigger wiring picks the right dispatcher based on
+/// each device's `PushProvider`.
+pub struct DispatcherSet {
+    inner: parking_lot::RwLock<DispatcherSlots>,
+}
+
+struct DispatcherSlots {
+    fcm: Option<Arc<dyn PushDispatcher>>,
+    apns: Option<Arc<dyn PushDispatcher>>,
+}
+
+impl DispatcherSet {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            inner: parking_lot::RwLock::new(DispatcherSlots {
+                fcm: None,
+                apns: None,
+            }),
+        })
+    }
+
+    #[allow(dead_code)]
+    pub fn set_fcm(&self, dispatcher: Arc<dyn PushDispatcher>) {
+        self.inner.write().fcm = Some(dispatcher);
+    }
+
+    #[allow(dead_code)]
+    pub fn set_apns(&self, dispatcher: Arc<dyn PushDispatcher>) {
+        self.inner.write().apns = Some(dispatcher);
+    }
+
+    #[allow(dead_code)]
+    pub fn clear_fcm(&self) {
+        self.inner.write().fcm = None;
+    }
+
+    #[allow(dead_code)]
+    pub fn clear_apns(&self) {
+        self.inner.write().apns = None;
+    }
+
+    #[allow(dead_code)]
+    pub fn for_provider(&self, provider: PushProvider) -> Option<Arc<dyn PushDispatcher>> {
+        let g = self.inner.read();
+        match provider {
+            PushProvider::Fcm => g.fcm.clone(),
+            PushProvider::Apns => g.apns.clone(),
+        }
     }
 }
 
@@ -296,5 +438,157 @@ mod tests {
             )
             .await;
         assert!(matches!(outcome, DeliveryOutcome::NotConfigured));
+    }
+
+    #[test]
+    fn persistence_roundtrip_through_disk() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // First registry populates and writes to disk.
+        let r1 = PushTokenRegistry::with_persistence(tmp.path());
+        r1.register(make_record("dev-1"));
+        r1.register(PushTokenRecord {
+            device_id: "dev-2".to_string(),
+            provider: PushProvider::Apns,
+            token: "tok-2".to_string(),
+            app_version: None,
+            device_locale: None,
+            registered_at: 0,
+        });
+
+        // Second registry reads the same dir and sees both entries.
+        let r2 = PushTokenRegistry::with_persistence(tmp.path());
+        assert_eq!(r2.token_count(), 2);
+        let dev1 = r2.get("dev-1").expect("dev-1 reloaded");
+        assert_eq!(dev1.token, "tok-1");
+        let dev2 = r2.get("dev-2").expect("dev-2 reloaded");
+        assert!(matches!(dev2.provider, PushProvider::Apns));
+    }
+
+    #[test]
+    fn persistence_revoke_is_persisted() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let r1 = PushTokenRegistry::with_persistence(tmp.path());
+        r1.register(make_record("dev-1"));
+        r1.revoke("dev-1");
+
+        let r2 = PushTokenRegistry::with_persistence(tmp.path());
+        assert_eq!(r2.token_count(), 0);
+    }
+
+    #[test]
+    fn persistence_corrupt_file_starts_empty() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().join("cognia").join("companion");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("push-tokens.json"), "this is not json").unwrap();
+
+        let r = PushTokenRegistry::with_persistence(tmp.path());
+        assert_eq!(r.token_count(), 0);
+    }
+
+    // ── DispatcherSet ─────────────────────────────────────────────────────────
+
+    struct StubDispatcher {
+        outcome: DeliveryOutcome,
+    }
+
+    #[async_trait::async_trait]
+    impl PushDispatcher for StubDispatcher {
+        async fn deliver(
+            &self,
+            _record: &PushTokenRecord,
+            _payload: &PushPayload,
+        ) -> DeliveryOutcome {
+            self.outcome
+        }
+    }
+
+    #[test]
+    fn dispatcher_set_empty_returns_none() {
+        let set = DispatcherSet::new();
+        assert!(set.for_provider(PushProvider::Fcm).is_none());
+        assert!(set.for_provider(PushProvider::Apns).is_none());
+    }
+
+    #[test]
+    fn dispatcher_set_set_and_clear_per_provider() {
+        let set = DispatcherSet::new();
+        let stub: Arc<dyn PushDispatcher> = Arc::new(StubDispatcher {
+            outcome: DeliveryOutcome::Sent,
+        });
+        set.set_fcm(Arc::clone(&stub));
+        assert!(set.for_provider(PushProvider::Fcm).is_some());
+        assert!(set.for_provider(PushProvider::Apns).is_none());
+
+        set.set_apns(Arc::clone(&stub));
+        assert!(set.for_provider(PushProvider::Apns).is_some());
+
+        set.clear_fcm();
+        assert!(set.for_provider(PushProvider::Fcm).is_none());
+        assert!(set.for_provider(PushProvider::Apns).is_some());
+
+        set.clear_apns();
+        assert!(set.for_provider(PushProvider::Apns).is_none());
+    }
+
+    #[tokio::test]
+    async fn broadcast_to_offline_sends_to_every_registered_device() {
+        let r = PushTokenRegistry::new();
+        r.register(make_record("dev-1"));
+        r.register(PushTokenRecord {
+            device_id: "dev-2".to_string(),
+            provider: PushProvider::Fcm,
+            token: "tok-2".to_string(),
+            app_version: None,
+            device_locale: None,
+            registered_at: 0,
+        });
+
+        let dispatcher = StubDispatcher {
+            outcome: DeliveryOutcome::Sent,
+        };
+        let count = r
+            .broadcast_to_offline(
+                &PushPayload {
+                    title: Some("t".into()),
+                    body: None,
+                    data: Default::default(),
+                },
+                &dispatcher,
+            )
+            .await;
+        assert_eq!(count, 2);
+    }
+
+    #[tokio::test]
+    async fn broadcast_to_offline_skips_active_ws_devices() {
+        let r = PushTokenRegistry::new();
+        r.register(make_record("dev-1"));
+        r.register(PushTokenRecord {
+            device_id: "dev-2".to_string(),
+            provider: PushProvider::Fcm,
+            token: "tok-2".to_string(),
+            app_version: None,
+            device_locale: None,
+            registered_at: 0,
+        });
+        // Mark dev-2 as actively subscribed so it should be suppressed.
+        r.note_websocket_open("dev-2");
+
+        let dispatcher = StubDispatcher {
+            outcome: DeliveryOutcome::Sent,
+        };
+        let count = r
+            .broadcast_to_offline(
+                &PushPayload {
+                    title: None,
+                    body: None,
+                    data: Default::default(),
+                },
+                &dispatcher,
+            )
+            .await;
+        // Only dev-1 should have been delivered to.
+        assert_eq!(count, 1);
     }
 }

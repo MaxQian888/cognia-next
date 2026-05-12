@@ -1,0 +1,152 @@
+---
+title: Plugin Dexie Tables
+description: How plugins declare and use their own IndexedDB tables via CogniaDB.
+---
+
+## Overview
+
+Plugins can declare their own IndexedDB tables by adding a `dexie` block to
+their manifest. cognia-next namespaces these tables automatically so two
+plugins can use the same logical name without collisions, and the built-in
+CogniaDB core tables are never accessible from plugin code.
+
+## Declaring tables
+
+```json title="manifest.json"
+{
+  "id": "github-delivery",
+  "name": "GitHub Delivery",
+  "version": "1.0.0",
+  "dexie": {
+    "tables": [
+      { "name": "repos",      "schema": "++id, fullName, credentialMode" },
+      { "name": "workOrders", "schema": "++id, [status+repoFullName], issueNumber" },
+      { "name": "events",     "schema": "deliveryId, [repoFullName+seenAt]" },
+      { "name": "audit",      "schema": "++id, [repoFullName+at], runId" }
+    ]
+  }
+}
+```
+
+### Naming rules
+
+| Rule | Detail |
+|------|--------|
+| Regex | `^[a-z][a-zA-Z0-9_]{0,30}$` |
+| Must start with lowercase letter | `repos` ✅, `Repos` ❌, `1repos` ❌ |
+| No hyphens, spaces, or colons | `work_orders` ✅, `work-orders` ❌ |
+| Maximum length | 31 characters (1 leading + 30 trailing) |
+| Maximum tables per plugin | 20 |
+| Duplicate names | Not allowed within the same plugin |
+
+### Schema string
+
+The `schema` value follows [Dexie's `stores()` syntax](https://dexie.org/docs/Version/Version.stores()):
+- `++id` — auto-increment primary key
+- `&id` — unique non-auto primary key
+- `name` — indexed non-unique field
+- `[field1+field2]` — compound index
+
+## Accessing tables at runtime
+
+When a plugin manifest contains a `dexie` block, cognia-next provides
+`ctx.dexie` in the plugin context. The `table()` method accepts the
+**logical name** (without the `<pluginId>:` prefix):
+
+```typescript title="src/index.ts"
+import type { PluginContext } from "cognia/plugin"
+
+export async function activate(ctx: PluginContext) {
+  // TypeScript type parameter matches your table's row shape.
+  const repos = ctx.dexie!.table<{ id?: number; fullName: string; credentialMode: string }>("repos")
+
+  // Standard Dexie Table API.
+  await repos.add({ fullName: "octocat/hello-world", credentialMode: "app" })
+  const all = await repos.toArray()
+
+  // For transactions or advanced queries, use rawDb():
+  await ctx.dexie!.rawDb().transaction("rw", repos, async () => {
+    await repos.where("fullName").equals("octocat/hello-world").modify({ credentialMode: "pat" })
+  })
+}
+```
+
+`ctx.dexie` is `undefined` when the manifest has no `dexie` block, so
+always guard with `ctx.dexie?.table(...)` or a manifest-level check.
+
+## Namespace isolation
+
+Every table is stored in CogniaDB under the namespaced key
+`<pluginId>:<tableName>`. For example, `github-delivery` declaring `repos`
+creates `github-delivery:repos`. Two plugins can both declare `repos` without
+collision:
+
+| Plugin | Declared name | Stored as |
+|--------|---------------|-----------|
+| `github-delivery` | `repos` | `github-delivery:repos` |
+| `gitlab-delivery` | `repos` | `gitlab-delivery:repos` |
+
+`ctx.dexie.table("repos")` always resolves to the calling plugin's own table.
+Attempting to access another plugin's table throws immediately.
+
+## Data retention on uninstall
+
+By default, **plugin data is retained when a plugin is uninstalled** — tables
+stay in the schema and data is not deleted. This lets a plugin be reinstalled
+and resume from its last state.
+
+To permanently erase data, the user clicks **"Delete data"** in
+**Settings → Plugins → Installed**. This calls
+`manager.uninstallPlugin(pluginId, { purgeData: true })` which drops the
+IndexedDB stores and removes the namespace registration.
+
+## Migrations
+
+For schema changes between plugin versions, declare a `migrations` array:
+
+```json
+{
+  "dexie": {
+    "tables": [
+      { "name": "repos", "schema": "++id, fullName, credentialMode, lastSyncAt" }
+    ],
+    "migrations": [
+      { "toVersion": 2, "upgrade": "addLastSyncAt" }
+    ]
+  }
+}
+```
+
+```typescript title="src/index.ts"
+// Export the upgrade function by the name declared in migrations[].upgrade.
+export async function addLastSyncAt(tx: import("dexie").Transaction) {
+  await tx.table("github-delivery:repos").toCollection().modify((row) => {
+    row.lastSyncAt = 0
+  })
+}
+```
+
+Migration rules:
+
+- `toVersion` must be a positive integer matching or derived from your
+  manifest `version` (e.g. major part).
+- Each migration runs **once and only once** when the plugin's recorded
+  version is less than `toVersion`.
+- Make migrations **idempotent** — they may be retried if the plugin enters
+  an error state mid-upgrade.
+- The upgrade function receives a Dexie `Transaction`; use the full namespaced
+  table name (`<pluginId>:<tableName>`) when accessing tables through `tx.table()`.
+
+## Limits
+
+| Resource | Limit | Reason |
+|----------|-------|--------|
+| Tables per plugin | 20 | Keeps the IndexedDB schema bounded |
+| Table name length | 31 chars | Prevents excessively long IndexedDB object-store names |
+| Data retention | ∞ (until explicit purge) | Reinstall safety |
+
+## DexieDevTools visibility
+
+Plugin tables appear in the [DexieDevTools](https://dexie.org/docs/dexie-react-hooks/useLiveQuery())
+browser extension prefixed with `<pluginId>:`, making them easy to identify
+during development.

@@ -2,8 +2,10 @@
 
 import { useTranslations } from "next-intl"
 import {
+  AlertTriangleIcon,
   CopyIcon,
   DownloadIcon,
+  FileCodeIcon,
   MoreHorizontalIcon,
   PencilIcon,
   PowerIcon,
@@ -20,10 +22,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { Skill } from "@/lib/claude/types"
 import { inferCategory, inferSource } from "@/lib/db/skills"
 import { getCategoryMeta, getSourceMeta } from "@/lib/skills/categories"
+import { isTauri } from "@/lib/tauri"
 
 interface Props {
   skill: Skill
@@ -31,6 +35,7 @@ interface Props {
   onToggleSelect: (id: string) => void
   onOpen: (id: string) => void
   onEdit: (id: string) => void
+  onOpenInEditor?: (id: string) => void
   onDuplicate: (skill: Skill) => void
   onExport: (skill: Skill) => void
   onDelete: (skill: Skill) => void
@@ -43,6 +48,7 @@ export function SkillCard({
   onToggleSelect,
   onOpen,
   onEdit,
+  onOpenInEditor,
   onDuplicate,
   onExport,
   onDelete,
@@ -96,6 +102,13 @@ export function SkillCard({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48 text-xs">
+            <DropdownMenuItem
+              onSelect={() => (onOpenInEditor ?? onEdit)(skill.id)}
+              disabled={isBuiltIn}
+            >
+              <FileCodeIcon className="mr-2 size-3.5" />
+              {t("card.openInEditor")}
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => onEdit(skill.id)} disabled={isBuiltIn}>
               <PencilIcon className="mr-2 size-3.5" />
               {t("card.edit")}
@@ -132,6 +145,31 @@ export function SkillCard({
         <Badge variant="outline" className="h-5 text-[10px]">
           {t(`category.${category.labelKey}` as never)}
         </Badge>
+        {skill.validationErrors && skill.validationErrors.length > 0 && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge
+                variant="destructive"
+                className="h-5 gap-1 text-[10px]"
+                aria-label={t("validation.cardBadge", { count: skill.validationErrors.length })}
+              >
+                <AlertTriangleIcon className="size-3" />
+                {t("validation.cardBadge", { count: skill.validationErrors.length })}
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>
+              <ul className="space-y-0.5 text-xs">
+                {skill.validationErrors.slice(0, 3).map((e, i) => (
+                  <li key={i}>• {e.message}</li>
+                ))}
+                {skill.validationErrors.length > 3 && (
+                  <li>… +{skill.validationErrors.length - 3} more</li>
+                )}
+              </ul>
+            </TooltipContent>
+          </Tooltip>
+        )}
+        {isTauri() && <SyncDot skill={skill} />}
         {status === "disabled" && (
           <Badge variant="secondary" className="h-5 text-[10px]">
             {t("status.disabled")}
@@ -155,5 +193,16 @@ export function SkillCard({
         </p>
       )}
     </Card>
+  )
+}
+
+function SyncDot({ skill }: { skill: Skill }) {
+  const color = skill.lastSyncError
+    ? "bg-destructive"
+    : skill.syncFingerprint
+      ? "bg-emerald-500"
+      : "bg-muted"
+  return (
+    <span data-testid="skill-sync-dot" className={cn("size-2 rounded-full", color)} aria-hidden />
   )
 }

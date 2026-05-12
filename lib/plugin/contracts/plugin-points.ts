@@ -127,14 +127,38 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "artifact.actions",
   "canvas.toolbar",
   "canvas.sidebar",
-  "panel.header",
-  "panel.footer",
   "settings.general",
   "settings.appearance",
-  "settings.ai",
   "settings.plugins",
   "command-palette",
 ])
+
+const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoint, string>> = {
+  "sidebar.left.top": "components/desktop/guild-rail.tsx",
+  "sidebar.left.bottom": "components/desktop/guild-rail.tsx",
+  "toolbar.left": "components/desktop/title-bar.tsx",
+  "toolbar.center": "components/desktop/title-bar.tsx",
+  "toolbar.right": "components/desktop/title-bar.tsx",
+  "statusbar.left": "components/desktop/status-bar.tsx",
+  "statusbar.center": "components/desktop/status-bar.tsx",
+  "statusbar.right": "components/desktop/status-bar.tsx",
+  "chat.header": "components/chat/chat-header.tsx",
+  "chat.footer": "components/chat/chat-view.tsx",
+  "chat.input.above": "components/chat/composer.tsx",
+  "chat.input.below": "components/chat/composer.tsx",
+  "chat.input.actions": "components/chat/composer/bottom-toolbar.tsx",
+  "chat.message.before": "components/chat/message-renderer.tsx",
+  "chat.message.after": "components/chat/message-renderer.tsx",
+  "chat.message.footer": "components/chat/message-renderer.tsx",
+  "artifact.toolbar": "components/artifacts/artifact-panel.tsx",
+  "artifact.actions": "components/artifacts/artifact-panel.tsx",
+  "canvas.toolbar": "components/canvas/canvas-panel.tsx",
+  "canvas.sidebar": "components/canvas/canvas-side-panels.tsx",
+  "settings.general": "components/settings/general-section.tsx",
+  "settings.appearance": "components/settings/appearance/appearance-section.tsx",
+  "settings.plugins": "components/plugins/plugin-panel.tsx",
+  "command-palette": "components/desktop/command-palette.tsx",
+}
 
 const EXTENSION_POINT_ALIASES: Record<string, CanonicalExtensionPoint> = {
   "sidebar:top": "sidebar.left.top",
@@ -363,6 +387,30 @@ const UI_SLOT_OVERRIDES: Partial<Record<CanonicalExtensionPoint, UiSlotOverride>
     deprecatedIn: "0.2.0",
     retirementNote: "Use chat.message.footer to render per-message action buttons.",
   },
+  "panel.header": {
+    status: "deprecated",
+    stability: "deprecated",
+    binding: "retired (no generic panel shell component exists)",
+    deprecatedIn: "0.4.0",
+    retirementNote:
+      "No generic panel-shell wrapper exists in cognia-next; demoted in SP-1 (2026-05-11) after Phase A audit found no viable host.",
+  },
+  "panel.footer": {
+    status: "deprecated",
+    stability: "deprecated",
+    binding: "retired (no generic panel shell component exists)",
+    deprecatedIn: "0.4.0",
+    retirementNote:
+      "No generic panel-shell wrapper exists in cognia-next; demoted in SP-1 (2026-05-11) after Phase A audit found no viable host.",
+  },
+  "settings.ai": {
+    status: "deprecated",
+    stability: "deprecated",
+    binding: "retired (AI settings split across multiple sections)",
+    deprecatedIn: "0.4.0",
+    retirementNote:
+      "AI settings are split across api-key, agent-runtime, subscription, and ccswitch sections; no single host file exists. Demoted in SP-1 (2026-05-11).",
+  },
 }
 
 const extensionPointContracts: Record<CanonicalExtensionPoint, PluginPointContract> =
@@ -393,6 +441,7 @@ const extensionPointContracts: Record<CanonicalExtensionPoint, PluginPointContra
       const status: PluginPointStatus = IMPLEMENTED_EXTENSION_POINTS.has(id)
         ? "implemented"
         : "deprecated"
+      const implementedBinding = IMPLEMENTED_EXTENSION_POINT_BINDINGS[id]
       return [
         id,
         {
@@ -403,7 +452,7 @@ const extensionPointContracts: Record<CanonicalExtensionPoint, PluginPointContra
           owner: "plugin-platform",
           binding:
             status === "implemented"
-              ? "components/* via PluginExtensionPoint"
+              ? (implementedBinding ?? "components/* via PluginExtensionPoint")
               : "retired (no host mount)",
           docs: UI_POINT_DOCS,
           requiredTests: UI_POINT_TESTS,

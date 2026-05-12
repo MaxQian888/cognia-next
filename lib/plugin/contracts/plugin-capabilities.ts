@@ -116,15 +116,32 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     requiredTests: ["lib/plugin/core/manager.test.ts"],
   },
   {
+    // Plugin-first Computer Use plan (M1·T4). Unblocked from the previous
+    // support: "blocked" — host runtime binding lives in
+    // `lib/plugin/registries/skill-registry.ts` (M1·T3). Plugins declare
+    // skills via `manifest.skills`; the plugin manager registers each into
+    // the overlay on enable and unregisters on disable. Consumed by
+    // `build-options.ts` (local-folder / inline skills render into
+    // `appendSystemPrompt`; anthropic-managed skills become
+    // `container.skill_id` on the sidecar request — M4).
     id: "skills",
-    support: "blocked",
-    manifestFields: [],
-    runtimeBinding: "No host skill runtime binding",
-    hostBindings: [],
-    typescriptSdk: ["plugin-sdk/typescript/cli/commands/capability-contract.ts"],
-    pythonSdk: ["plugin-sdk/python/src/cognia/capability_contract.py"],
+    support: "supported",
+    manifestFields: ["skills"],
+    runtimeBinding:
+      "context.agent.registerSkill + skill-registry overlay + container.skill_id passthrough",
+    hostBindings: [
+      "lib/plugin/registries/skill-registry.ts",
+      "lib/claude/build-options.ts",
+      "sidecar/dispatch/anthropic.mjs",
+    ],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/api/skill.ts",
+      "plugin-sdk/typescript/src/context/extended.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    builtinContributionPaths: ["plugins/anthropic-skills/src/index.ts"],
     docs: "docs/features/plugin-development.md#capabilities",
-    requiredTests: ["lib/plugin/core/validation.test.ts"],
+    requiredTests: ["lib/plugin/registries/skill-registry.test.ts"],
   },
   {
     id: "media",
@@ -369,6 +386,69 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
     docs: "docs/content/docs/plugins/external-agents.mdx",
     requiredTests: ["lib/ai/agent/external/presets.test.ts"],
+  },
+  {
+    // Plugin-first Computer Use plan (M1·T4). Plugins declaring this
+    // capability contribute MCP server presets (Playwright MCP, Stagehand
+    // MCP, E2B sandbox, …) that flow into the dynamic overlay at
+    // `lib/plugin/registries/mcp-server-preset-registry.ts`. The plugin's
+    // manifest carries an `mcpServerPresets` array; the plugin manager
+    // calls `registerMcpServerPreset(id, def, {pluginId})` on enable and
+    // `unregisterMcpServerPresetsByPlugin(pluginId)` on disable.
+    // Downstream consumers (M3 `lib/claude/mcp-presets.ts`) merge the
+    // overlay with the static MCP_PRESETS table.
+    id: "mcp-server-preset",
+    support: "supported",
+    manifestFields: ["mcpServerPresets"],
+    runtimeBinding: "context.agent.registerMcpServerPreset + mcp-server-preset-registry overlay",
+    hostBindings: [
+      "lib/plugin/registries/mcp-server-preset-registry.ts",
+      "lib/plugin/bridge/agent-integration.ts",
+      "lib/claude/mcp-presets.ts",
+    ],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/api/mcp-server-preset.ts",
+      "plugin-sdk/typescript/src/context/extended.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    builtinContributionPaths: [
+      "plugins/playwright-mcp/src/index.ts",
+      "plugins/stagehand-mcp/src/index.ts",
+      "plugins/e2b-sandbox/src/index.ts",
+    ],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/registries/mcp-server-preset-registry.test.ts"],
+  },
+  {
+    // Plugin-first Computer Use plan (M1·T4). Plugins declaring this
+    // capability contribute Anthropic native tool definitions
+    // (computer_20251124, bash_20250124, text_editor_20250728) along with
+    // their Tauri-command execution handlers. The plugin's manifest carries
+    // a `nativeAnthropicTools` array; the plugin manager calls
+    // `registerNativeAnthropicTool(id, def, {pluginId})` on enable.
+    // `build-options.ts:resolveSendOptions` pulls enabled tools per
+    // character, computes required `anthropic-beta` headers via
+    // `computeAnthropicBetaHeaders()`, and the sidecar dispatches via
+    // `native-tool-loop.mjs` (M5).
+    id: "native-anthropic-tool",
+    support: "supported",
+    manifestFields: ["nativeAnthropicTools"],
+    runtimeBinding:
+      "context.agent.registerNativeAnthropicTool + native-anthropic-tool-registry overlay + sidecar tools[] passthrough",
+    hostBindings: [
+      "lib/plugin/registries/native-anthropic-tool-registry.ts",
+      "lib/claude/build-options.ts",
+      "sidecar/dispatch/anthropic.mjs",
+      "sidecar/dispatch/native-tool-loop.mjs",
+    ],
+    typescriptSdk: [
+      "plugin-sdk/typescript/src/api/native-anthropic-tool.ts",
+      "plugin-sdk/typescript/src/context/extended.ts",
+    ],
+    pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
+    builtinContributionPaths: ["plugins/computer-use/src/index.ts"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: ["lib/plugin/registries/native-anthropic-tool-registry.test.ts"],
   },
 ] as const
 

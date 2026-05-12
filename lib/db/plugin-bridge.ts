@@ -97,6 +97,29 @@ function normalizeTimestamp(value: unknown): number {
   return Date.now()
 }
 
+/**
+ * Phase A3 — broadcast a message mutation to companion WebSocket subscribers
+ * (mobile). Uses a lazy import of `@tauri-apps/api/event` so the web build
+ * stays decoupled from Tauri at the type level. Failures are swallowed:
+ * the database write has already succeeded and we never want a broadcast
+ * hiccup to surface as a Dexie error.
+ */
+async function emitMessageEvent(
+  kind: "added" | "updated" | "deleted",
+  payload: { sessionId: string; messageId: string; updates?: Record<string, unknown> }
+): Promise<void> {
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return
+  try {
+    const moduleId = "@tauri-apps/api/event"
+    const mod = (await import(/* webpackIgnore: true */ moduleId)) as {
+      emit: (event: string, payload: unknown) => Promise<void>
+    }
+    await mod.emit(`claude://message-${kind}`, payload)
+  } catch {
+    // Tauri unavailable or transport hiccup — best effort.
+  }
+}
+
 export const messageRepository = {
   /** Fetch all messages for a session, ordered by createdAt asc. */
   async getBySessionId(sessionId: string): Promise<UIMessage[]> {
@@ -124,6 +147,7 @@ export const messageRepository = {
   async create(sessionId: string, message: UIMessage): Promise<UIMessage> {
     const row = pluginToStored(sessionId, message)
     await getDb().messages.put(row)
+    void emitMessageEvent("added", { sessionId, messageId: message.id })
     return storedToPlugin(row)
   },
 
@@ -151,10 +175,22 @@ export const messageRepository = {
     }
 
     await dexie.messages.update(messageId, patch as Partial<StoredMessage>)
+    void emitMessageEvent("updated", {
+      sessionId: existing.sessionId,
+      messageId,
+      updates: updates as Record<string, unknown>,
+    })
   },
 
   async delete(messageId: string): Promise<void> {
+    const existing = await getDb().messages.get(messageId)
     await getDb().messages.delete(messageId)
+    if (existing) {
+      void emitMessageEvent("deleted", {
+        sessionId: existing.sessionId,
+        messageId,
+      })
+    }
   },
 
   async deleteBySessionId(sessionId: string): Promise<void> {

@@ -11,7 +11,6 @@
     "add:android": "cap add android"
   },
   "dependencies": {
-    "@capacitor-community/voice-recorder": "^7.0.0",
     "@capacitor-mlkit/barcode-scanning": "^7.5.0",
     "@capacitor/android": "^7.6.3",
     "@capacitor/app": "^7.1.2",
@@ -22,7 +21,7 @@
     "@capacitor/geolocation": "^7.0.0",
     "@capacitor/haptics": "^7.0.0",
     "@capacitor/keyboard": "^7.0.6",
-    "@capacitor/local-notifications": "^7.0.0",
+    "@capacitor/local-notifications": "7.0.7-dev-2508-20260401T112736.0",
     "@capacitor/network": "^7.0.4",
     "@capacitor/preferences": "^7.0.4",
     "@capacitor/push-notifications": "^7.0.6",
@@ -31,9 +30,9 @@
     "@capacitor/splash-screen": "^7.0.0",
     "@capacitor/status-bar": "^7.0.0",
     "@capacitor/toast": "^7.0.0",
-    "@jonz94/capacitor-mdns": "^7.0.0",
-    "capacitor-native-biometric": "^7.0.0",
-    "capacitor-secure-storage-plugin": "^0.13.0"
+    "capacitor-native-biometric": "^4.2.2",
+    "capacitor-secure-storage-plugin": "^0.13.0",
+    "capacitor-voice-recorder": "^7.0.6"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.0.0",

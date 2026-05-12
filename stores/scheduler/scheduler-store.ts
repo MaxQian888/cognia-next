@@ -47,6 +47,13 @@ interface SchedulerState {
 
   // UI State
   selectedTaskId: string | null
+  /**
+   * Multi-select set for the unified scheduler page's bulk-action toolbar.
+   * Persisted as `string[]` (Zustand persist middleware can't round-trip
+   * `Set`s through JSON); the API surface still uses Set-like semantics via
+   * helper actions.
+   */
+  multiSelection: string[]
   filter: TaskFilter
   isLoading: boolean
   error: string | null
@@ -121,6 +128,12 @@ interface SchedulerActions {
   setFilter: (filter: Partial<TaskFilter>) => void
   clearFilter: () => void
   clearSelection: () => void
+  /** Toggle the unifiedId in/out of the multi-select set. */
+  toggleMultiSelection: (unifiedId: string) => void
+  /** Clear the multi-select set. */
+  clearMultiSelection: () => void
+  /** Replace the multi-select set wholesale (used by 'select all'). */
+  setMultiSelection: (unifiedIds: string[]) => void
   setError: (error: string | null) => void
   clearError: () => void
 
@@ -140,6 +153,7 @@ const initialState: SchedulerState = {
   upcomingTasks: [],
   statistics: null,
   selectedTaskId: null,
+  multiSelection: [],
   filter: {},
   isLoading: false,
   error: null,
@@ -458,6 +472,23 @@ export const useSchedulerStore = create<SchedulerStore>()(
 
       clearSelection: () => {
         set({ selectedTaskId: null, executions: [] })
+      },
+
+      toggleMultiSelection: (unifiedId: string) => {
+        const current = get().multiSelection
+        const next = current.includes(unifiedId)
+          ? current.filter((id) => id !== unifiedId)
+          : [...current, unifiedId]
+        set({ multiSelection: next })
+      },
+
+      clearMultiSelection: () => {
+        set({ multiSelection: [] })
+      },
+
+      setMultiSelection: (unifiedIds: string[]) => {
+        // Dedup while preserving insertion order
+        set({ multiSelection: Array.from(new Set(unifiedIds)) })
       },
 
       setError: (error) => {

@@ -98,6 +98,36 @@ export interface SendOptions {
    */
   builtinTools?: BuiltinToolsConfig
 
+  /**
+   * Plugin tool manifest for the SDK sidecar runtime — bridges plugin
+   * `.tools[]` contributions (which already feed ai-sdk via
+   * `lib/plugin/bridge/tools-bridge.ts`) into the SDK sidecar via a
+   * synthetic `cognia-plugin-tools` MCP server. Set by
+   * `lib/claude/build-options.ts:resolveSendOptions` when the plugin
+   * store reports enabled plugins with `tools` capability.
+   *
+   * Sidecar-protocol field — stripped from the SDK `options` blob before
+   * `query()` is called. The sidecar synthesizes an in-process MCP server
+   * from this manifest and proxies tool invocations back to the renderer
+   * via `plugin_tool_exec` events on stdout.
+   */
+  pluginTools?: Array<{
+    name: string
+    description: string
+    jsonSchema: object
+    pluginId: string
+  }>
+
+  /**
+   * Anthropic `container.skill_id` entries forwarded to the sidecar.
+   * Sourced from plugin-contributed skills with
+   * `source.kind === "anthropic-managed"` via
+   * `lib/claude/skills-bridge.ts:extractContainerSkillIds`. The Anthropic
+   * API caps a single request at 8 container skills. Added in M4 of the
+   * plugin-first Computer Use plan.
+   */
+  containerSkillIds?: Array<{ skill_id: string; version?: string }>
+
   // ---- Convenience modes (sidecar-protocol fields) -------------------------
   // The dispatcher in `sidecar/dispatch/anthropic.mjs` strips these three
   // fields before calling `query()`. Translation to real SDK options happens
@@ -1084,6 +1114,13 @@ export interface Character {
   mcpServerIds?: string[]
   /** Ordered list of skills appended to the system prompt at send time. */
   skillIds?: string[]
+  /**
+   * Plugin-contributed skill ids attached to this character. Separate from
+   * the existing `skillIds` (chat skills) — these resolve through the
+   * skill-registry overlay (M1·T3) and may include anthropic-managed
+   * container.skill_id entries. See `lib/claude/skills-bridge.ts`.
+   */
+  pluginSkillIds?: string[]
   workingDir?: string
   /**
    * Per-character extended-thinking budget. Beats the app default but loses to
@@ -1096,6 +1133,14 @@ export interface Character {
   debugMode?: boolean
   /** Per-character default for cognia-next's brief-output mode. */
   briefMode?: boolean
+  /**
+   * Opt-out of the synthetic `cognia-plugin-tools` in-process MCP server.
+   * When `true`, `resolveSendOptions` skips populating
+   * `SendOptions.pluginTools` for this character even if the plugin store
+   * has enabled tool-contributing plugins. Leave unset / `false` to keep
+   * the default opt-in behaviour.
+   */
+  disablePluginTools?: boolean
   /** Seeded built-ins are read-only (UI offers "Duplicate" instead of edit). */
   isBuiltIn?: boolean
   /** Whether this character is allowed to drive A2UI surfaces (4-tool whitelist + system prompt). */

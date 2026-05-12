@@ -1,0 +1,350 @@
+---
+title: A2UI 系统
+description: Agent-to-UI 协议——Claude 通过 MCP 工具创建可交互的 React 面板，并接收用户操作回执。
+---
+
+# A2UI 系统
+
+<Status variant="experimental" />
+
+<TLDR>
+  Claude（或任意外部 agent）通过四个 MCP 工具生成一棵声明式组件树；renderer 在 webview
+  内把它渲染成真正的 React 面板；用户操作 / 数据模型变更经事件总线回流给
+  agent。Renderer、catalog、parser、events 都跑在浏览器层；sidecar 端 MCP 服务器 + Rust 桥负责让外部
+  agent 也能接进来。
+</TLDR>
+
+<StatGrid>
+  <Stat label="MCP 工具" value="4" hint="create / update / dataModel / delete" />
+  <Stat label="组件目录" value="50+" hint="layout · display · form · data · overlay" />
+  <Stat label="Dexie 表" value="4" hint="apps · surfaces · templates · eventHistory" />
+  <Stat label="Schema 版本" value="v0.9" hint="lib/a2ui/mcp-tool-schemas.ts" />
+</StatGrid>
+
+## 它解决什么
+
+模型不止能输出 markdown 文本——也能输出**真正的 UI**：一个表单、一张图表、一个仪表盘。
+A2UI（Agent-to-UI）协议把这件事标准化：
+
+- agent 调一个 MCP 工具（`a2ui_create_surface`）→ webview 渲染出一个面板。
+- agent 调 `a2ui_update_components` → 组件树被替换，DOM diff 更新视图。
+- 用户点了某个按钮 → renderer 通过事件总线把 `userAction` 推回 agent。
+- agent 接到事件，继续编排下一轮。
+
+这条回路完全运行在 cognia-next 自身的进程边界内——sidecar 的 `claude-host.mjs` 通过
+内嵌 MCP 直接落到 webview；外部 agent（Claude Code CLI、Cursor、Codex、Gemini）通
+过独立的 stdio MCP 服务器 `sidecar/a2ui-mcp.mjs` 接入，dispatch 经一个本地 socket
+回传到 webview。详见 [./mcp-server-sidecar](./mcp-server-sidecar)。
+
+## 代码位置
+
+<Files>
+  <Folder name="lib/a2ui/" defaultOpen>
+    <File name="index.ts — 公共 API 桶导出" />
+    <File name="parser.ts — A2UI JSON 消息解析与类型守卫" />
+    <File name="catalog.ts — 组件目录（type → React 组件）" />
+    <File name="data-model.ts — JSON Pointer / path 绑定" />
+    <File name="events.ts — 事件总线 + AI 消息格式化" />
+    <File name="ipc.ts — Tauri a2ui://dispatch 监听" />
+    <File name="mcp-tool-schemas.ts — 四个 MCP 工具的 JSON Schema" />
+    <File name="output-profiles.ts — 21 类输出意图 → 渲染策略" />
+    <File name="app-generator.ts — 自然语言 → A2UI 组件树" />
+    <File name="templates/ — 14 个内置 mini-app 模板" />
+    <File name="academic-templates.ts — 学术场景模板" />
+    <File name="thumbnail.ts — 缩略图生成" />
+  </Folder>
+  <Folder name="components/a2ui/">
+    <File name="a2ui-renderer.tsx — 组件 dispatcher" />
+    <File name="a2ui-surface.tsx — Surface 容器（inline/dialog/panel/fullscreen）" />
+    <File name="a2ui-context.tsx — Surface 上下文 + 数据绑定 hooks" />
+    <File name="a2ui-message-renderer.tsx — 聊天 inline 渲染" />
+    <File name="a2ui-error-boundary.tsx — 渲染错误隔离" />
+    <File name="a2ui-widget-shell.tsx — 容纳 widget metadata" />
+    <File name="layout/ display/ form/ data/ overlay/ rich-output/ — 组件实现" />
+    <File name="workspace/ — 工作台编辑器" />
+    <File name="quick-app-builder/ — 模板挑选与快速创建" />
+  </Folder>
+  <Folder name="src-tauri/src/a2ui_bridge/">
+    <File name="mod.rs — 本地 socket / 命名管道监听" />
+    <File name="commands.rs — a2ui_bridge_runtime_paths Tauri 命令" />
+  </Folder>
+  <Folder name="sidecar/">
+    <File name="a2ui-mcp.mjs — 独立 stdio MCP 服务器（外部 agent 接入点）" />
+  </Folder>
+  <Folder name="app/a2ui/">
+    <File name="page.tsx — A2UI Hub（迷你应用画廊 + 创建工作室）" />
+    <File name="layout.tsx" />
+  </Folder>
+  <Folder name="lib/db/">
+    <File name="a2ui-types.ts — 4 张 Dexie 表的行类型" />
+    <File name="a2ui-apps.ts a2ui-surfaces.ts a2ui-templates.ts a2ui-event-history.ts — CRUD" />
+  </Folder>
+  <Folder name="stores/a2ui/">
+    <File name="a2ui-store.ts — Zustand store，processMessage 是消息入口" />
+  </Folder>
+</Files>
+
+## 数据流
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as 用户
+  participant A as Claude (或外部 agent)
+  participant SC as sidecar a2ui-mcp.mjs<br/>(stdio MCP)
+  participant SOCK as Tauri socket<br/>(a2ui_bridge)
+  participant ST as useA2UIStore<br/>(Zustand)
+  participant R as A2UIRenderer<br/>(React)
+
+  A->>SC: tools/call a2ui_create_surface
+  SC-->>SOCK: a2ui_dispatch JSON 行
+  SOCK->>ST: emit a2ui://dispatch
+  ST->>R: processMessage(createSurface)
+  R-->>U: 渲染面板
+
+  A->>SC: tools/call a2ui_update_components
+  SC-->>SOCK: a2ui_dispatch
+  SOCK->>ST: updateComponents
+  ST->>R: 替换组件树
+
+  U->>R: 点击按钮
+  R->>ST: emitAction(userAction)
+  ST-->>A: 通过聊天循环把事件回灌
+
+  classDef agent fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
+  classDef bridge fill:#0f172a,stroke:#a78bfa,color:#e9d5ff
+  classDef ui fill:#7c2d12,stroke:#fb923c,color:#fed7aa
+  class A,SC agent
+  class SOCK,ST bridge
+  class R,U ui
+```
+
+## 四个 MCP 工具
+
+权威定义在 `lib/a2ui/mcp-tool-schemas.ts`，由 `sidecar/a2ui-mcp.mjs` 与内嵌 MCP
+共享同一份 schema。
+
+<TypeTable
+  type={{
+    a2ui_create_surface: {
+      description:
+        "创建一个 surface（inline / dialog / panel / fullscreen）。后续 update 复用同一个 surfaceId。",
+      type: "{ surfaceId, surfaceType, catalogId?, title?, widget? }",
+    },
+    a2ui_update_components: {
+      description: "完全替换某个 surface 的组件树。新组件必须符合 A2UI v0.9 schema。",
+      type: "{ surfaceId, components[] }",
+    },
+    a2ui_data_model_update: {
+      description:
+        "增量 patch（默认 merge）或整体替换 surface 的 dataModel —— 表单值、表格行、图表数据。",
+      type: "{ surfaceId, data, merge?: boolean }",
+    },
+    a2ui_delete_surface: {
+      description: "删除 surface，释放资源。",
+      type: "{ surfaceId }",
+    },
+  }}
+/>
+
+工具命名空间在外部 agent 中显示为 `mcp__a2ui-bridge__a2ui_create_surface` 等
+（参见 `namespacedA2UIToolNames()`）。
+
+## Surface 类型
+
+| 类型         | 行为                                 | 持久化                     |
+| ------------ | ------------------------------------ | -------------------------- |
+| `inline`     | 渲染进当前聊天消息气泡内             | 不进 Dexie；消息本身是边界 |
+| `dialog`     | 弹出 Radix Dialog；可拖动            | 不进 Dexie                 |
+| `panel`      | 嵌入侧边栏 / 工作台 panel            | `a2uiSurfaces` 表持久化    |
+| `fullscreen` | 接管主区域；通常用于 mini-app 编辑器 | `a2uiSurfaces` 表持久化    |
+
+`inline` 消息绑定在 chat message id 上，会随消息一起销毁；`panel` 与 `fullscreen`
+需要跨重启恢复，所以走 Dexie。
+
+## 组件目录
+
+`lib/a2ui/catalog.ts:DEFAULT_CATALOG_ID = "cognia-standard-v1"`——目录是一个
+type → React 组件的映射表。50+ 个内置组件按类别分组：
+
+| 类别           | 例子                                                                                   |
+| -------------- | -------------------------------------------------------------------------------------- |
+| **Layout**     | `Row` `Column` `Card` `Tabs` `Accordion` `Dialog` `Divider` `Spacer`                   |
+| **Display**    | `Text` `Image` `Icon` `Link` `Badge` `Alert` `Progress` `Loading` `Empty`              |
+| **Form**       | `Button` `TextField` `Select` `Checkbox` `RadioGroup` `Slider` `DatePicker` `Combobox` |
+| **Data**       | `Table` `List` `Chart` `DataExplorer`                                                  |
+| **Overlay**    | `Tooltip` `Popover` `HoverCard` `DropdownMenu` `ContextMenu`                           |
+| **RichOutput** | `RichOutput` `ComparisonCards` `WidgetStatus` 学术场景 adapter                         |
+
+第三方目录可以通过 `createCatalog()` + `registerCatalog()` 注册，agent 调
+`createSurface` 时指定 `catalogId`。`FALLBACK_COMPONENT_TYPE` 处理未知组件类型——
+不会崩溃，而是渲染一个明确的占位提示。
+
+## 数据模型 + 绑定
+
+每个 surface 持有一个 `dataModel: Record<string, unknown>`，组件用 JSON Pointer
+读写：
+
+```ts title="lib/a2ui/data-model.ts"
+// 任何接受 string | { path } 的属性都会被解析
+resolveStringOrPath({ path: "/form/name" }, dataModel, "")
+resolveBooleanOrPath({ path: "/checked" }, dataModel, false)
+```
+
+- `setValueByPath(model, "/items/0/done", true)` 触发 `dataModelChange` 事件。
+- `watchPaths()` 在多个路径上注册订阅。
+- `resolveComputedFields()` 允许 `{ "@computed": "sum:/items/*/price" }` 这类
+  派生字段——用于让 agent 写一次表达式、客户端自动重算。
+
+## 事件回路
+
+renderer 不直接调 agent。它发事件到 `globalEventEmitter`（`lib/a2ui/events.ts`）：
+
+```ts title="lib/a2ui/events.ts (摘要)"
+emitter.emitAction({
+  type: "userAction",
+  surfaceId,
+  action: "click",
+  componentId: "btn-submit",
+  data: { value: 42 },
+  timestamp: Date.now(),
+})
+```
+
+聊天循环（`lib/claude/build-options.ts`）订阅事件总线，把 `formatActionForAI(...)`
+拼进下一条用户消息——这样 agent 在下一轮上下文里看到的是：
+
+```
+User action: click
+Data: { value: 42 }
+```
+
+`batchEventsForAI()` 把多个连续事件合并成一条消息，避免短时间内反复打断 agent。
+
+## Output Profiles —— 让模型知道选什么 UI
+
+`lib/a2ui/output-profiles.ts` 把 21 类常见请求意图（"画一张架构图"、"展示一份对
+比"、"做一个仪表盘"…）映射到推荐的输出类型 + 技术栈 + 宿主策略：
+
+| 类别                      | 输出    | 技术    | 宿主策略         |
+| ------------------------- | ------- | ------- | ---------------- |
+| `how-it-works-physical`   | svg     | svg     | artifact-preview |
+| `database-schema-erd`     | mermaid | mermaid | native           |
+| `trends-over-time`        | chart   | chartjs | native           |
+| `design-a-ui`             | html    | html    | sandboxed-html   |
+| `3d-visualization`        | html    | threejs | lazy-runtime     |
+| `physics-math-simulation` | canvas  | canvas  | sandboxed-html   |
+
+`routeRichOutputProfile()` 是 agent 端调度函数：给定意图、给定上下文，返回应该
+开 surface 还是落到 artifact。配合 [./artifacts-sandbox](./artifacts-sandbox)
+理解两条路径的区别——A2UI 是声明式可交互组件，Artifact 是一次性的内容产物。
+
+## 跨进程桥（外部 agent 接入）
+
+让 Claude Desktop / Cursor / Codex 也能写 A2UI，需要绕过 cognia-next 自己的
+sidecar——它们 spawn 的 MCP 服务器**有自己的 stdin/stdout**，不是 Tauri 的。
+
+解决方案：`src-tauri/src/a2ui_bridge/`
+
+1. Tauri 启动时在 `app_local_data_dir` 下监听一个 Unix 域 socket / Windows 命
+   名管道（路径写到 `COGNIA_BRIDGE_SOCKET` 环境变量）。
+2. `sidecar/a2ui-mcp.mjs` 作为独立 MCP 服务器，被外部 agent spawn 时，从环境变
+   量读 socket 路径，建立侧通道。
+3. 工具调用先在本地完成（agent 拿到 ok 响应），然后通过 socket 写一行
+   `{"type":"a2ui_dispatch", "message": ...}` 到 cognia-next。
+4. Rust 桥（`forward_line`）解析后 `app.emit("a2ui://dispatch", ...)`；
+   webview 端 `lib/a2ui/ipc.ts:subscribeA2UIDispatch()` 监听并落到 store。
+
+如果 cognia-next 没运行 / socket 拒连——agent 仍然得到成功响应，但没有 surface
+出现。这是有意为之：不要让外部 agent 因为我们没启动而陷入死循环。
+
+## Dexie schema（v13）
+
+```ts title="lib/db/a2ui-types.ts (摘录)"
+a2uiApps: "id, name, updatedAt, createdAt, isBuiltIn, category, isFavorite, sortOrder"
+a2uiSurfaces: "id, appId, sessionId, updatedAt, createdAt, type"
+a2uiTemplates: "id, name, category, updatedAt, source"
+a2uiEventHistory: "id, surfaceId, [surfaceId+timestamp], timestamp, type"
+```
+
+- **a2uiApps**——用户在 Hub 里保存的 mini-app 定义。built-in 行由 `lib/db/seed.ts`
+  注入，CRUD 层保护其不被销毁性编辑。
+- **a2uiSurfaces**——`panel` / `fullscreen` 运行时 surface 的快照，跨重启恢复用。
+- **a2uiTemplates**——用户自定义模板（14 个内置模板是静态的，不在表里）。
+- **a2uiEventHistory**——容量上限 1000 行的审计 trail，给 Settings → A2UI →
+  Debugger 用。
+
+v13 升级时还会写入一条 `a2ui-bridge` MCP 服务器行（`enabled: false`，仅给外部
+agent 投影用）。
+
+## App Hub 与 Workspace
+
+`app/a2ui/page.tsx` 是个双模式页面：
+
+- **Hub**——浏览所有 mini-app 卡片、按类别过滤、用 `Flash Generate` 模式从自然
+  语言一键造一个 app（`generateAppFromDescription` 走 `lib/a2ui/app-generator/`
+  的规则匹配，**无需 LLM**）。
+- **Workspace**——`?app=<id>` 进入 `A2UIWorkspace`，可视化编辑组件树、调整
+  dataModel、保存版本。
+
+14 个内置模板分布在 `lib/a2ui/templates/{data,form,productivity,social,utility}.ts`，
+覆盖 todo list、计算器、表单、仪表盘、计时器、笔记、便签、汇率、习惯追踪等场景。
+
+## 安全 & 沙箱
+
+A2UI 组件**直接渲染到主 React 树**——不像 Artifacts/Sandbox 用 iframe 隔离。这
+意味着：
+
+- 组件树只能用目录里**预注册**的 React 组件——agent 给一个未知 `component` 字段，
+  fallback 路径接住、不解释为代码。
+- 不允许内联 HTML / 脚本字符串。`Text` 组件的 `text` 属性纯文本渲染，不走
+  `dangerouslyInnerHTML`。
+- 用户操作走事件总线，不直接执行 agent 提供的回调字符串。
+- widget metadata 的 `hostStrategy` 选 `sandboxed-html` / `artifact-preview` 时，
+  内容会路由到 iframe-based artifact panel，不再走 A2UI 内联渲染。
+
+如果你要扩组件目录，**审查每个新组件**是否会引入 XSS 面：富文本 / iframe / svg
+foreign object / data: URL 这些都要白名单过滤。
+
+## 测试
+
+| 文件                                            | 覆盖                                           |
+| ----------------------------------------------- | ---------------------------------------------- |
+| `lib/a2ui/parser.test.ts`                       | 消息解析、混合 payload、错误恢复               |
+| `lib/a2ui/data-model.test.ts`                   | JSON pointer、深合并、computed fields          |
+| `lib/a2ui/events.test.ts`                       | emitter 订阅、AI 格式化、批量合并              |
+| `lib/a2ui/catalog.test.ts`                      | 目录注册、fallback、widget resolve             |
+| `lib/a2ui/templates.test.ts`                    | 14 个内置模板完整性 + integrity 校验           |
+| `lib/a2ui/app-generator.test.ts`                | 18 类自动检测 + 名称提取                       |
+| `lib/a2ui/output-profiles.test.ts`              | 21 类意图路由                                  |
+| `components/a2ui/a2ui-renderer.test.tsx`        | 组件 dispatch、fallback、错误边界              |
+| `components/a2ui/a2ui-widget-families.test.tsx` | 各组件家族的可访问性 + 行为                    |
+| `src-tauri/src/a2ui_bridge/`                    | `runtime_paths_serialize_uses_snake_case_keys` |
+
+## 在哪里入手
+
+| 目标                           | 文件                                                                    |
+| ------------------------------ | ----------------------------------------------------------------------- |
+| 加新组件类型                   | `lib/a2ui/catalog.ts` + `components/a2ui/<category>/`                   |
+| 调整 MCP 工具 schema           | `lib/a2ui/mcp-tool-schemas.ts` + `sidecar/a2ui-mcp.mjs`（两边保持一致） |
+| 加新模板                       | `lib/a2ui/templates/<category>.ts` + integrity test                     |
+| 改本地桥协议                   | `src-tauri/src/a2ui_bridge/mod.rs` + `sidecar/a2ui-mcp.mjs`             |
+| 给某个 RichOutput 类别绑新策略 | `lib/a2ui/output-profiles.ts`                                           |
+| 调试事件回路                   | Settings → A2UI → Debugger（看 `a2uiEventHistory`）                     |
+
+## 下一篇
+
+<Cards>
+  <Card
+    title="Sidecar MCP 服务器"
+    href="./mcp-server-sidecar"
+    description="a2ui-mcp.mjs 的完整工具表 + 协议细节"
+  />
+  <Card title="External Bridge" href="./external-bridge" description="把这些工具暴露给外部 agent" />
+  <Card
+    title="Artifacts / Sandbox"
+    href="./artifacts-sandbox"
+    description="另一条 UI 路径：iframe 隔离的一次性内容"
+  />
+  <Card title="聊天 & 技能" href="./chat-and-skills" description="A2UI 事件回灌进消息循环" />
+</Cards>

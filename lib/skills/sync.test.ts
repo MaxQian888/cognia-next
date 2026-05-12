@@ -9,6 +9,7 @@ jest.mock("@/lib/db/skills", () => ({
   bulkImportSkills: jest.fn(),
   listSkills: jest.fn(),
   updateSkill: jest.fn(),
+  getSkill: jest.fn(),
 }))
 jest.mock("@/lib/db/skill-resources", () => ({
   listResourcesForSkill: jest.fn(),
@@ -20,10 +21,10 @@ jest.mock("@/lib/claude/skills-io", () => ({
   skillFilename: jest.fn((n: string) => `${n}.skill.md`),
 }))
 
-import { pushAllToNative, pullAllFromNative, suggestedFilename } from "./sync"
+import { pushAllToNative, pullAllFromNative, pushOneToNative, suggestedFilename } from "./sync"
 import { isTauri } from "@/lib/tauri"
 import { skillsInstallNative, skillsScanNative } from "@/lib/claude/ipc"
-import { bulkImportSkills, listSkills, updateSkill } from "@/lib/db/skills"
+import { bulkImportSkills, getSkill, listSkills, updateSkill } from "@/lib/db/skills"
 import { listResourcesForSkill, replaceResourcesForSkill } from "@/lib/db/skill-resources"
 import { parseSkillMarkdown } from "@/lib/claude/skills-io"
 import type { Skill, SkillResource } from "@/lib/claude/types"
@@ -33,6 +34,7 @@ const mockedInstall = skillsInstallNative as unknown as jest.Mock
 const mockedScan = skillsScanNative as unknown as jest.Mock
 const mockedListSkills = listSkills as unknown as jest.Mock
 const mockedUpdateSkill = updateSkill as unknown as jest.Mock
+const mockedGetSkill = getSkill as unknown as jest.Mock
 const mockedListRes = listResourcesForSkill as unknown as jest.Mock
 const mockedReplaceRes = replaceResourcesForSkill as unknown as jest.Mock
 const mockedBulk = bulkImportSkills as unknown as jest.Mock
@@ -40,6 +42,15 @@ const mockedParse = parseSkillMarkdown as unknown as jest.Mock
 
 beforeEach(() => {
   jest.clearAllMocks()
+  // Default `getSkill` resolution: look up the row by id from whatever
+  // `listSkills` was mocked to return for the current test. This keeps the
+  // pre-existing `pushAllToNative` tests working after the loop body was
+  // factored into `pushOneToNative` (which calls `getSkill`).
+  mockedGetSkill.mockImplementation(async (id: string) => {
+    const last = mockedListSkills.mock.results[mockedListSkills.mock.results.length - 1]
+    const rows = (await Promise.resolve(last?.value ?? [])) as Array<{ id: string }>
+    return rows.find((r) => r.id === id)
+  })
 })
 
 describe("suggestedFilename", () => {
@@ -362,5 +373,108 @@ describe("pullAllFromNative", () => {
     })
     const r = await pullAllFromNative()
     expect(r.errors[0].error).toBe("plain")
+  })
+})
+
+describe("pushOneToNative", () => {
+  it("returns a SyncResult with pushed=1 on success", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedGetSkill.mockResolvedValue({
+      id: "c",
+      name: "Custom",
+      source: "custom",
+    })
+    mockedListRes.mockResolvedValue([])
+    mockedInstall.mockResolvedValue({ directory: "/u/.claude/skills/custom" })
+    mockedUpdateSkill.mockResolvedValue(undefined)
+    const result = await pushOneToNative("c")
+    expect(result.pushed).toBe(1)
+    expect(result.errors).toEqual([])
+    expect(mockedUpdateSkill).toHaveBeenCalledWith(
+      "c",
+      expect.objectContaining({
+        nativeDirectory: "/u/.claude/skills/custom",
+        syncOrigin: "frontend",
+        lastSyncError: null,
+      })
+    )
+  })
+
+  it("returns errors=[error] and writes lastSyncError on failure", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedGetSkill.mockResolvedValue({
+      id: "c",
+      name: "Custom",
+      source: "custom",
+    })
+    mockedListRes.mockResolvedValue([])
+    mockedInstall.mockRejectedValue(new Error("disk full"))
+    mockedUpdateSkill.mockResolvedValue(undefined)
+    const result = await pushOneToNative("c")
+    expect(result.pushed).toBe(0)
+    expect(result.errors).toHaveLength(1)
+    expect(result.errors[0]).toEqual({ name: "Custom", error: "disk full" })
+    expect(mockedUpdateSkill).toHaveBeenCalledWith(
+      "c",
+      expect.objectContaining({ lastSyncError: "disk full" })
+    )
+  })
+
+  it("returns a single (env) error in web mode", async () => {
+    mockedIsTauri.mockReturnValue(false)
+    const result = await pushOneToNative("c")
+    expect(result.errors[0]).toMatchObject({ name: "(env)" })
+    expect(mockedGetSkill).not.toHaveBeenCalled()
+  })
+
+  it("returns skipped=1 for built-in skills", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedGetSkill.mockResolvedValue({
+      id: "b",
+      name: "Built-in",
+      source: "builtin",
+      isBuiltIn: true,
+    })
+    const result = await pushOneToNative("b")
+    expect(result.skipped).toBe(1)
+    expect(result.pushed).toBe(0)
+    expect(mockedInstall).not.toHaveBeenCalled()
+  })
+
+  it("returns a 'not found' error when the skill is missing", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedGetSkill.mockResolvedValue(undefined)
+    const result = await pushOneToNative("missing")
+    expect(result.errors).toEqual([{ name: "missing", error: "Skill not found." }])
+  })
+
+  it("preserves the existing nativeDirectory tail when present", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedGetSkill.mockResolvedValue({
+      id: "x",
+      name: "OldName",
+      source: "custom",
+      nativeDirectory: "/abs/path/OldDir",
+    })
+    mockedListRes.mockResolvedValue([])
+    mockedInstall.mockResolvedValue({ directory: "/abs/path/OldDir" })
+    await pushOneToNative("x")
+    expect(mockedInstall).toHaveBeenCalledWith(
+      expect.objectContaining({ dirName: "OldDir", clean: true })
+    )
+  })
+
+  it("captures non-Error rejections from the IPC layer", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedGetSkill.mockResolvedValue({
+      id: "c",
+      name: "Custom",
+      source: "custom",
+    })
+    mockedListRes.mockResolvedValue([])
+    mockedInstall.mockRejectedValue("plain")
+    mockedUpdateSkill.mockResolvedValue(undefined)
+    const result = await pushOneToNative("c")
+    expect(result.errors[0].error).toBe("plain")
   })
 })

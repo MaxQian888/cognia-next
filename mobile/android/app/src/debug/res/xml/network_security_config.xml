@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    DEBUG-ONLY override of mobile/android/app/src/main/res/xml/network_security_config.xml.
+
+    Resource overlay: when assembling the debug variant, this file replaces
+    the main one verbatim, so release builds inherit the production policy
+    unchanged. Reverts automatically the moment you assemble release.
+
+    Permits cleartext to localhost / 127.0.0.1 so the WebView can load the
+    Next.js dev server through `adb reverse tcp:3000 tcp:3000`. That same
+    port-forward lets the desktop Tauri shell and the emulator share one
+    dev server without diverging `assetPrefix` values.
+-->
+<network-security-config>
+    <!-- Live-reload dev loop: emulator → host localhost via adb reverse. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+
+    <!-- Companion-server runtime cert: trust user-installed CAs so the
+         self-signed cert from the desktop's first launch verifies. Mirrors
+         the production rule for cognia-companion.local. -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">cognia-companion.local</domain>
+        <trust-anchors>
+            <certificates src="user" />
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

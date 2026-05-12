@@ -2,6 +2,7 @@
  * AI Provider type definitions
  */
 
+import { getDynamicProviders } from "@/lib/ai/providers/provider-loader"
 import type { BuiltInProviderId } from "./built-in-provider-catalog"
 
 export type ProviderType = "cloud" | "local"
@@ -1745,28 +1746,13 @@ export function getProviderConfig(providerId: string): ProviderConfig | undefine
 }
 
 /**
- * Returns the full provider map: JSON-loaded definitions (preferred)
- * merged with inline PROVIDERS (fallback) and any dynamic providers
- * registered at runtime by plugins.
- *
- * Priority: dynamic (runtime) > JSON config files > inline PROVIDERS
+ * Returns the full provider map: inline PROVIDERS merged with any
+ * dynamic providers registered at runtime by plugins via
+ * `lib/ai/providers/provider-loader`. Dynamic entries spread last so
+ * they win on id collision.
  */
 export function getAllProviders(): Record<string, ProviderConfig> {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { PROVIDER_DEFINITIONS } = require("@/config/providers")
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getDynamicProviders } = require("@/lib/ai/providers/provider-loader")
-    return { ...PROVIDERS, ...PROVIDER_DEFINITIONS, ...getDynamicProviders() }
-  } catch {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { PROVIDER_DEFINITIONS } = require("@/config/providers")
-      return { ...PROVIDERS, ...PROVIDER_DEFINITIONS }
-    } catch {
-      return PROVIDERS
-    }
-  }
+  return { ...PROVIDERS, ...getDynamicProviders() }
 }
 
 // ============================================================================

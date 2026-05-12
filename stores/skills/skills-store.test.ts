@@ -24,6 +24,12 @@ const RESET = {
   editorTarget: null,
   importStaging: null,
   deleteTarget: null,
+  editorWorkspace: {
+    activeSkillId: null,
+    openFiles: [],
+    activeFileId: null,
+    rightPaneOpen: true,
+  },
 }
 
 describe("useSkillsStore", () => {
@@ -185,6 +191,105 @@ describe("useSkillsStore", () => {
       expect(result.current.deleteTarget).toEqual({ skillId: "s1", name: "Skill One" })
       act(() => result.current.setDeleteTarget(null))
       expect(result.current.deleteTarget).toBeNull()
+    })
+  })
+
+  describe("editorWorkspace", () => {
+    it("openSkillInEditor seeds the workspace with the main file", () => {
+      const { result } = renderHook(() => useSkillsStore())
+      act(() => result.current.openSkillInEditor("skill_1", "body content"))
+      const ws = result.current.editorWorkspace
+      expect(ws.activeSkillId).toBe("skill_1")
+      expect(ws.openFiles).toHaveLength(1)
+      expect(ws.openFiles[0]).toMatchObject({
+        id: "main",
+        kind: "main",
+        path: "SKILL.md",
+        language: "markdown",
+        draftContent: "body content",
+        savedContent: "body content",
+      })
+      expect(ws.activeFileId).toBe("main")
+    })
+
+    it("openFile dedupes by id and focuses it", () => {
+      const { result } = renderHook(() => useSkillsStore())
+      act(() => result.current.openSkillInEditor("skill_1", "body"))
+      const file = {
+        id: "res_1",
+        kind: "resource" as const,
+        resourceId: "res_1",
+        path: "scripts/x.sh",
+        language: "shell" as const,
+        draftContent: "echo",
+        savedContent: "echo",
+      }
+      act(() => result.current.openFile(file))
+      expect(result.current.editorWorkspace.openFiles).toHaveLength(2)
+      act(() => result.current.openFile({ ...file, draftContent: "new" }))
+      // Same id → list does not grow.
+      expect(result.current.editorWorkspace.openFiles).toHaveLength(2)
+      expect(result.current.editorWorkspace.activeFileId).toBe("res_1")
+    })
+
+    it("updateDraftContent mutates the draft without touching savedContent", () => {
+      const { result } = renderHook(() => useSkillsStore())
+      act(() => result.current.openSkillInEditor("skill_1", "body"))
+      act(() => result.current.updateDraftContent("main", "edited"))
+      const f = result.current.editorWorkspace.openFiles[0]
+      expect(f.draftContent).toBe("edited")
+      expect(f.savedContent).toBe("body")
+    })
+
+    it("markSaved syncs savedContent", () => {
+      const { result } = renderHook(() => useSkillsStore())
+      act(() => result.current.openSkillInEditor("skill_1", "body"))
+      act(() => result.current.updateDraftContent("main", "edited"))
+      act(() => result.current.markSaved("main", "edited"))
+      const f = result.current.editorWorkspace.openFiles[0]
+      expect(f.savedContent).toBe(f.draftContent)
+    })
+
+    it("closeFile removes the file and updates activeFileId", () => {
+      const { result } = renderHook(() => useSkillsStore())
+      act(() => result.current.openSkillInEditor("skill_1", "body"))
+      act(() => result.current.closeFile("main", true))
+      expect(result.current.editorWorkspace.openFiles).toHaveLength(0)
+      expect(result.current.editorWorkspace.activeFileId).toBeNull()
+    })
+
+    it("closeFile keeps activeFileId when closing a non-active tab", () => {
+      const { result } = renderHook(() => useSkillsStore())
+      act(() => result.current.openSkillInEditor("skill_1", "body"))
+      act(() =>
+        result.current.openFile({
+          id: "r1",
+          kind: "resource",
+          resourceId: "r1",
+          path: "x.sh",
+          language: "shell",
+          draftContent: "",
+          savedContent: "",
+        })
+      )
+      act(() => result.current.setActiveFile("main"))
+      act(() => result.current.closeFile("r1", true))
+      expect(result.current.editorWorkspace.activeFileId).toBe("main")
+    })
+
+    it("discardDrafts resets every file's draft to its saved content", () => {
+      const { result } = renderHook(() => useSkillsStore())
+      act(() => result.current.openSkillInEditor("skill_1", "body"))
+      act(() => result.current.updateDraftContent("main", "edited"))
+      act(() => result.current.discardDrafts())
+      expect(result.current.editorWorkspace.openFiles[0].draftContent).toBe("body")
+    })
+
+    it("toggleRightPane flips the boolean", () => {
+      const { result } = renderHook(() => useSkillsStore())
+      const before = result.current.editorWorkspace.rightPaneOpen
+      act(() => result.current.toggleRightPane())
+      expect(result.current.editorWorkspace.rightPaneOpen).toBe(!before)
     })
   })
 })

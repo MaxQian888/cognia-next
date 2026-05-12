@@ -30,7 +30,10 @@ describe("plugin point contracts", () => {
     expect(deprecated.length).toBeGreaterThan(0)
     for (const entry of deprecated) {
       expect(entry.deprecatedIn).toBeDefined()
-      expect(entry.replacementId).toBeDefined()
+      // Demotion is migration metadata too: an entry must either redirect to a
+      // replacement OR explain why no replacement exists via a retirement note.
+      const hasMigrationPath = Boolean(entry.replacementId) || Boolean(entry.retirementNote)
+      expect(hasMigrationPath).toBe(true)
     }
   })
 

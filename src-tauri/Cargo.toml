@@ -7,12 +7,18 @@ license = "MIT"
 repository = "https://github.com/AstroAir/cognia-next"
 edition = "2021"
 rust-version = "1.77.2"
+default-run = "cognia-next"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+# Headless cognia-server binary (Phase D / ADR-0014).
+[[bin]]
+name = "cognia-server"
+path = "src/bin/cognia-server.rs"
 
 [build-dependencies]
 tauri-build = { version = "2.5.0", features = [] }
@@ -41,7 +47,7 @@ tauri-plugin-clipboard-manager = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-os = "2"
 tauri-plugin-store = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "sync", "time", "net"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "sync", "time", "net", "signal"] }
 dirs = "6"
 ignore = "0.4"
 
@@ -61,7 +67,7 @@ gray_matter = { version = "0.2", default-features = false, features = ["yaml"] }
 wait-timeout = "0.2"
 regex = "1"
 toml_edit = { version = "0.22", features = ["serde"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2"] }
 tokio-socks = "0.5"
 tokio-rustls = "0.26"
 rustls-pki-types = "1"
@@ -84,6 +90,9 @@ cron = "0.12"
 # MCP HTTP server — axum for the inbound listener, subtle for constant-time
 # bearer-token comparison, tower-http for body-size limits.
 axum = { version = "0.8", features = ["macros", "ws"] }
+# axum-server (M2.9) — TLS termination for the companion API. `tls-rustls`
+# pulls in rustls + ring; matches the project's existing tokio-rustls path.
+axum-server = { version = "0.7", features = ["tls-rustls"] }
 subtle = "2"
 tower = { version = "0.5", features = ["util", "limit", "timeout"] }
 tower-http = { version = "0.6", features = ["limit", "trace", "cors"] }
@@ -128,6 +137,12 @@ mdns-sd = "0.13"
 notify = "6"
 flate2 = "1"
 tar = "0.4"
+
+# CLI argument parsing for the cognia-server binary (Phase D follow-up).
+# `derive` gives us the `#[derive(Parser)]` macro; `std` keeps default
+# features (env / wrap_help / etc.). Pulling clap is cheap compared to
+# maintaining a hand-rolled parser as the subcommand surface grows.
+clap = { version = "=4.6.0", features = ["derive"] }
 
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-window-state = "2"

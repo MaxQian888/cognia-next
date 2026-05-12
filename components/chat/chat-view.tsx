@@ -11,6 +11,7 @@ import { ExternalAgentSessionPanel } from "@/components/agent/external-agent-ses
 import { useChatStore } from "@/stores/chat"
 import type { Character, ChatSession, SendContent } from "@/lib/claude/types"
 import { toast } from "sonner"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 interface ChatPaneProps {
   activeSession: ChatSession | null
@@ -118,6 +119,10 @@ export function ChatPane({
           onDismiss={() => useChatStore.getState().setError(null)}
         />
       )}
+      <PluginExtensionSlot
+        point="chat.footer"
+        className="flex items-center justify-center gap-2 px-3 empty:hidden"
+      />
       <Composer
         ref={composerRef}
         session={activeSession}

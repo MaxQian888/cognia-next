@@ -1,39 +1,35 @@
 "use client"
 
 /**
- * SystemTaskInspectSheet - Read-only inspection of degraded system tasks
- * Shows a two-column comparison of platform-reported data vs. metadata-store data.
+ * SystemTaskInspectSheet — Read-only inspection of degraded system tasks.
+ * Shows a 3-column comparison of platform-reported data vs. metadata-store
+ * data, with optional Edit / Delete actions in the footer.
+ *
+ * The body has been split into `<SystemTaskInspectBody>` so the unified
+ * detail orchestrator (`unified-task-detail-view.tsx`) can embed the same
+ * layout inline for the `system` kind without rendering a sheet shell.
  */
 
 import { useTranslations } from "next-intl"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Badge } from "@/components/ui/badge"
-import { AlertTriangle } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { AlertTriangle, Pencil, Trash2 } from "lucide-react"
 import type { SystemTask } from "@/types/scheduler"
+import { InspectRow } from "./details/_shared/inspect-row"
 
 interface SystemTaskInspectSheetProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   task: SystemTask | null
+  /** Optional: invoked when the user clicks Edit in the sheet footer. */
+  onRequestEdit?: (taskId: string) => void
+  /** Optional: invoked when the user clicks Delete in the sheet footer. */
+  onRequestDelete?: (taskId: string) => void
 }
 
-function InspectRow({
-  label,
-  platform,
-  metadata,
-}: {
-  label: string
-  platform: string
-  metadata: string
-}) {
-  const mismatch = platform !== metadata && platform !== "" && metadata !== ""
-  return (
-    <div className="grid grid-cols-[1fr_1fr_1fr] gap-2 py-1.5 border-b border-border/40 text-xs">
-      <span className="font-medium text-muted-foreground">{label}</span>
-      <span className={mismatch ? "text-amber-600 font-medium" : ""}>{platform || "-"}</span>
-      <span className={mismatch ? "text-amber-600 font-medium" : ""}>{metadata || "-"}</span>
-    </div>
-  )
+export interface SystemTaskInspectBodyProps {
+  task: SystemTask
 }
 
 function formatTrigger(trigger: SystemTask["trigger"]): string {
@@ -68,10 +64,94 @@ function formatAction(action: SystemTask["action"]): string {
   }
 }
 
-export function SystemTaskInspectSheet({ open, onOpenChange, task }: SystemTaskInspectSheetProps) {
+/**
+ * Embeddable body of the system-task inspector. Renders the comparison rows
+ * + the degradation banner, but not the sheet shell. Used by both
+ * `SystemTaskInspectSheet` and `UnifiedTaskDetailView`.
+ */
+export function SystemTaskInspectBody({ task }: SystemTaskInspectBodyProps) {
+  const t = useTranslations("scheduler")
+
+  return (
+    <div className="space-y-4">
+      {task.degraded_reasons?.length ? (
+        <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3">
+          <p className="text-xs font-medium text-amber-600 mb-1">
+            {t("degradedReasons") || "Degradation Reasons"}
+          </p>
+          {task.degraded_reasons.map((reason, i) => (
+            <p key={i} className="text-xs text-muted-foreground">
+              {reason}
+            </p>
+          ))}
+        </div>
+      ) : null}
+
+      <div>
+        <div className="grid grid-cols-[1fr_1fr_1fr] gap-2 pb-1.5 border-b border-border text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span>{t("field") || "Field"}</span>
+          <span>{t("platformData") || "Platform"}</span>
+          <span>{t("metadataData") || "Metadata"}</span>
+        </div>
+
+        <InspectRow
+          label={t("systemTaskName") || "Name"}
+          value={task.name}
+          compareValue={task.name}
+        />
+        <InspectRow
+          label={t("status") || "Status"}
+          value={task.status}
+          compareValue={task.metadata_state === "full" ? task.status : "unknown"}
+        />
+        <InspectRow
+          label={t("systemTriggerType") || "Trigger"}
+          value={formatTrigger(task.trigger)}
+          compareValue={
+            task.metadata_state === "full" ? formatTrigger(task.trigger) : "(incomplete)"
+          }
+        />
+        <InspectRow
+          label={t("systemActionType") || "Action"}
+          value={formatAction(task.action)}
+          compareValue={task.metadata_state === "full" ? formatAction(task.action) : "(incomplete)"}
+        />
+        <InspectRow
+          label={t("systemRunLevel") || "Run Level"}
+          value={task.run_level}
+          compareValue={task.run_level}
+        />
+        {task.next_run_at && (
+          <InspectRow
+            label={t("nextRun") || "Next Run"}
+            value={new Date(task.next_run_at).toLocaleString()}
+            compareValue=""
+          />
+        )}
+        {task.last_run_at && (
+          <InspectRow
+            label={t("lastRun") || "Last Run"}
+            value={new Date(task.last_run_at).toLocaleString()}
+            compareValue=""
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+export function SystemTaskInspectSheet({
+  open,
+  onOpenChange,
+  task,
+  onRequestEdit,
+  onRequestDelete,
+}: SystemTaskInspectSheetProps) {
   const t = useTranslations("scheduler")
 
   if (!task) return null
+
+  const showFooter = !!onRequestEdit || !!onRequestDelete
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -90,68 +170,7 @@ export function SystemTaskInspectSheet({ open, onOpenChange, task }: SystemTaskI
         </SheetHeader>
 
         <div className="flex-1 min-h-0 overflow-auto px-5 py-4 space-y-4">
-          {task.degraded_reasons?.length ? (
-            <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3">
-              <p className="text-xs font-medium text-amber-600 mb-1">
-                {t("degradedReasons") || "Degradation Reasons"}
-              </p>
-              {task.degraded_reasons.map((reason, i) => (
-                <p key={i} className="text-xs text-muted-foreground">
-                  {reason}
-                </p>
-              ))}
-            </div>
-          ) : null}
-
-          <div>
-            <div className="grid grid-cols-[1fr_1fr_1fr] gap-2 pb-1.5 border-b border-border text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              <span>{t("field") || "Field"}</span>
-              <span>{t("platformData") || "Platform"}</span>
-              <span>{t("metadataData") || "Metadata"}</span>
-            </div>
-
-            <InspectRow
-              label={t("systemTaskName") || "Name"}
-              platform={task.name}
-              metadata={task.name}
-            />
-            <InspectRow
-              label={t("status") || "Status"}
-              platform={task.status}
-              metadata={task.metadata_state === "full" ? task.status : "unknown"}
-            />
-            <InspectRow
-              label={t("systemTriggerType") || "Trigger"}
-              platform={formatTrigger(task.trigger)}
-              metadata={
-                task.metadata_state === "full" ? formatTrigger(task.trigger) : "(incomplete)"
-              }
-            />
-            <InspectRow
-              label={t("systemActionType") || "Action"}
-              platform={formatAction(task.action)}
-              metadata={task.metadata_state === "full" ? formatAction(task.action) : "(incomplete)"}
-            />
-            <InspectRow
-              label={t("systemRunLevel") || "Run Level"}
-              platform={task.run_level}
-              metadata={task.run_level}
-            />
-            {task.next_run_at && (
-              <InspectRow
-                label={t("nextRun") || "Next Run"}
-                platform={new Date(task.next_run_at).toLocaleString()}
-                metadata=""
-              />
-            )}
-            {task.last_run_at && (
-              <InspectRow
-                label={t("lastRun") || "Last Run"}
-                platform={new Date(task.last_run_at).toLocaleString()}
-                metadata=""
-              />
-            )}
-          </div>
+          <SystemTaskInspectBody task={task} />
 
           <div className="pt-2">
             <Badge variant="outline" className="text-amber-500 border-amber-500/20">
@@ -160,6 +179,39 @@ export function SystemTaskInspectSheet({ open, onOpenChange, task }: SystemTaskI
             </Badge>
           </div>
         </div>
+
+        {showFooter && (
+          <div className="border-t px-5 py-3 flex items-center justify-end gap-2">
+            {onRequestEdit && (
+              <Button
+                size="sm"
+                variant="outline"
+                data-testid="system-inspect-edit"
+                onClick={() => {
+                  onRequestEdit(task.id)
+                  onOpenChange(false)
+                }}
+              >
+                <Pencil className="mr-2 h-3.5 w-3.5" />
+                {t("edit") || "Edit"}
+              </Button>
+            )}
+            {onRequestDelete && (
+              <Button
+                size="sm"
+                variant="destructive"
+                data-testid="system-inspect-delete"
+                onClick={() => {
+                  onRequestDelete(task.id)
+                  onOpenChange(false)
+                }}
+              >
+                <Trash2 className="mr-2 h-3.5 w-3.5" />
+                {t("delete") || "Delete"}
+              </Button>
+            )}
+          </div>
+        )}
       </SheetContent>
     </Sheet>
   )

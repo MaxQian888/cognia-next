@@ -41,6 +41,8 @@ use uuid::Uuid;
 const UPDATE_EVENT: &str = "companion://message-update-request";
 const DELETE_EVENT: &str = "companion://message-delete-request";
 const LIST_EVENT: &str = "companion://session-list-request";
+const GET_BY_SESSION_EVENT: &str = "companion://message-get-by-session-request";
+const SEND_EVENT: &str = "companion://message-send-request";
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Payload emitted to the WebView for a `message_update` RPC.
@@ -74,6 +76,36 @@ pub struct SessionListRequest {
     pub offset: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub before: Option<i64>,
+}
+
+/// Payload emitted to the WebView for a `message_get_by_session` RPC (Phase A1).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetMessagesRequest {
+    pub request_id: String,
+    pub kind: &'static str,
+    pub session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u32>,
+}
+
+/// Payload emitted to the WebView for a `message_send` RPC (Phase A2).
+/// The TS-side handler writes a user message into the session via
+/// `messageRepository.addMessage` and returns the new message id. AI reply
+/// arrives asynchronously via the existing sidecar pipeline when the
+/// desktop has the session open; otherwise the message sits until the
+/// next session resume. See `lib/companion/desktop-message-source.ts`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendMessageRequest {
+    pub request_id: String,
+    pub kind: &'static str,
+    pub session_id: String,
+    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
 }
 
 /// Generic response from the WebView. The TS-side handler always sets
@@ -166,6 +198,54 @@ impl DesktopMessagesBridge {
         if let Err(err) = app.emit(LIST_EVENT, payload) {
             self.pending.lock().remove(&request_id);
             return Err(format!("failed to emit session-list-request: {err}"));
+        }
+        self.await_response(request_id, rx, timeout).await
+    }
+
+    /// Run a `message_get_by_session` round-trip through the bridge (Phase A1).
+    pub async fn get_messages_by_session(
+        self: Arc<Self>,
+        app: &AppHandle,
+        session_id: String,
+        limit: Option<u32>,
+        offset: Option<u32>,
+        timeout: Duration,
+    ) -> Result<Value, String> {
+        let (request_id, rx) = self.register();
+        let payload = GetMessagesRequest {
+            request_id: request_id.clone(),
+            kind: "message_get_by_session",
+            session_id,
+            limit,
+            offset,
+        };
+        if let Err(err) = app.emit(GET_BY_SESSION_EVENT, payload) {
+            self.pending.lock().remove(&request_id);
+            return Err(format!("failed to emit message-get-by-session-request: {err}"));
+        }
+        self.await_response(request_id, rx, timeout).await
+    }
+
+    /// Run a `message_send` round-trip through the bridge (Phase A2).
+    pub async fn send_message(
+        self: Arc<Self>,
+        app: &AppHandle,
+        session_id: String,
+        content: String,
+        role: Option<String>,
+        timeout: Duration,
+    ) -> Result<Value, String> {
+        let (request_id, rx) = self.register();
+        let payload = SendMessageRequest {
+            request_id: request_id.clone(),
+            kind: "message_send",
+            session_id,
+            content,
+            role,
+        };
+        if let Err(err) = app.emit(SEND_EVENT, payload) {
+            self.pending.lock().remove(&request_id);
+            return Err(format!("failed to emit message-send-request: {err}"));
         }
         self.await_response(request_id, rx, timeout).await
     }

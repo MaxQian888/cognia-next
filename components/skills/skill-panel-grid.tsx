@@ -23,6 +23,8 @@ export function SkillPanelGrid({ skills }: Props) {
   const openEdit = useSkillsStore((s) => s.openEdit)
   const openCreate = useSkillsStore((s) => s.openCreate)
   const setDeleteTarget = useSkillsStore((s) => s.setDeleteTarget)
+  const openSkillInEditor = useSkillsStore((s) => s.openSkillInEditor)
+  const setActiveTab = useSkillsStore((s) => s.setActiveTab)
 
   if (skills.length === 0) {
     return (
@@ -49,6 +51,10 @@ export function SkillPanelGrid({ skills }: Props) {
           onToggleSelect={toggleSelection}
           onOpen={openDetail}
           onEdit={openEdit}
+          onOpenInEditor={(id) => {
+            openSkillInEditor(id, sk.content)
+            setActiveTab("editor")
+          }}
           onDuplicate={async (s) => {
             const dup = await duplicateSkill(s.id)
             toast.success(`Duplicated as "${dup.name}".`)

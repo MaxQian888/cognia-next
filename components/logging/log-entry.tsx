@@ -141,8 +141,9 @@ export function HighlightedText({
 export interface LogEntryProps {
   log: StructuredLogEntry
   isExpanded: boolean
-  onToggle: () => void
-  onSelect?: () => void
+  /** Called with `log.id`; bind once at the call site so `React.memo` short-circuits. */
+  onToggle: (id: string) => void
+  onSelect?: (log: StructuredLogEntry) => void
   onFocusTrace?: (traceId: string, log: StructuredLogEntry) => void
   onFocusSession?: (sessionId: string, log: StructuredLogEntry) => void
   searchQuery: string
@@ -186,6 +187,19 @@ export function LogEntry({
     setTimeout(() => setCopied(false), 2000)
   }, [log])
 
+  const handleToggle = useCallback(() => onToggle(log.id), [onToggle, log.id])
+  const handleSelect = useCallback(() => onSelect?.(log), [onSelect, log])
+  const handleToggleBookmark = useCallback(
+    () => onToggleBookmark?.(log.id),
+    [onToggleBookmark, log.id]
+  )
+  const handleFocusTrace = useCallback(() => {
+    if (log.traceId) onFocusTrace?.(log.traceId, log)
+  }, [onFocusTrace, log])
+  const handleFocusSession = useCallback(() => {
+    if (log.sessionId) onFocusSession?.(log.sessionId, log)
+  }, [onFocusSession, log])
+
   const timestamp = new Date(log.timestamp)
   const timeStr = timestamp.toLocaleTimeString("en-US", {
     hour12: false,
@@ -209,7 +223,7 @@ export function LogEntry({
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault()
-              onToggle()
+              handleToggle()
             }
           }}
           className={cn(
@@ -219,7 +233,7 @@ export function LogEntry({
             config.gutterClass
           )}
         >
-          <div className="flex items-start gap-2 px-3 py-2 cursor-pointer" onClick={onToggle}>
+          <div className="flex items-start gap-2 px-3 py-2 cursor-pointer" onClick={handleToggle}>
             {hasDetails ? (
               isExpanded ? (
                 <ChevronDown className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
@@ -270,7 +284,7 @@ export function LogEntry({
                       )}
                       onClick={(e) => {
                         e.stopPropagation()
-                        onToggleBookmark(log.id)
+                        handleToggleBookmark()
                       }}
                     >
                       {isBookmarked ? (
@@ -297,7 +311,7 @@ export function LogEntry({
                       aria-label={t("panel.viewDetails")}
                       onClick={(e) => {
                         e.stopPropagation()
-                        onSelect()
+                        handleSelect()
                       }}
                     >
                       <PanelRightOpen className="h-3 w-3" />
@@ -317,7 +331,7 @@ export function LogEntry({
                       aria-label={t("panel.focusTrace")}
                       onClick={(e) => {
                         e.stopPropagation()
-                        onFocusTrace(log.traceId!, log)
+                        handleFocusTrace()
                       }}
                     >
                       <Crosshair className="h-3 w-3" />
@@ -337,7 +351,7 @@ export function LogEntry({
                       aria-label={t("panel.focusSession")}
                       onClick={(e) => {
                         e.stopPropagation()
-                        onFocusSession(log.sessionId!, log)
+                        handleFocusSession()
                       }}
                     >
                       <Filter className="h-3 w-3" />
@@ -405,23 +419,23 @@ export function LogEntry({
           <Copy className="h-4 w-4 mr-2" /> {t("panel.copyLogEntry")}
         </ContextMenuItem>
         {onSelect && (
-          <ContextMenuItem onClick={() => onSelect()}>
+          <ContextMenuItem onClick={handleSelect}>
             <PanelRightOpen className="h-4 w-4 mr-2" /> {t("panel.viewDetailsMenu")}
           </ContextMenuItem>
         )}
         {onFocusTrace && log.traceId && (
-          <ContextMenuItem onClick={() => onFocusTrace(log.traceId!, log)}>
+          <ContextMenuItem onClick={handleFocusTrace}>
             <Crosshair className="h-4 w-4 mr-2" /> {t("panel.focusTraceMenu")}
           </ContextMenuItem>
         )}
         {onFocusSession && log.sessionId && (
-          <ContextMenuItem onClick={() => onFocusSession(log.sessionId!, log)}>
+          <ContextMenuItem onClick={handleFocusSession}>
             <Filter className="h-4 w-4 mr-2" /> {t("panel.focusSessionMenu")}
           </ContextMenuItem>
         )}
         <ContextMenuSeparator />
         {onToggleBookmark && (
-          <ContextMenuItem onClick={() => onToggleBookmark(log.id)}>
+          <ContextMenuItem onClick={handleToggleBookmark}>
             {isBookmarked ? (
               <>
                 <BookmarkCheck className="h-4 w-4 mr-2 text-yellow-500" />{" "}
@@ -492,11 +506,11 @@ export function TraceGroup({
       </CollapsibleTrigger>
       <CollapsibleContent>
         {logs.map((log) => (
-          <LogEntry
+          <MemoizedLogEntry
             key={log.id}
             log={log}
             isExpanded={expandedIds.has(log.id)}
-            onToggle={() => toggleExpanded(log.id)}
+            onToggle={toggleExpanded}
             onFocusTrace={onFocusTrace}
             onFocusSession={onFocusSession}
             searchQuery={searchQuery}

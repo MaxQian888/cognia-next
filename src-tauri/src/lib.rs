@@ -1,5 +1,5 @@
 mod a2ui_bridge;
-mod companion_api;
+pub mod companion_api;
 mod agents;
 mod anthropic_subscription;
 mod api_key;
@@ -200,7 +200,22 @@ pub fn run() {
         )))
         .manage(remote_control::RemoteControlState::new())
         .manage(mcp_server::McpServerState::new())
-        .manage(companion_api::CompanionServerState::new())
+        .manage(companion_api::CompanionServerState::with_data_dir(
+            dirs::data_dir(),
+        ))
+        .setup(|app| {
+            // Phase B follow-up — install the keyring-backed push credential
+            // store before any push-related command can fire, then reinstate
+            // any FCM/APNs dispatchers the user uploaded in a prior session.
+            companion_api::push_creds::install(
+                companion_api::push_creds::KeyringPushCredStore::new(),
+            );
+            if let Err(err) = companion_api::push_creds::reinstall_persisted_dispatchers() {
+                log::warn!("push-creds reinstall failed: {err}");
+            }
+            let _ = app;
+            Ok(())
+        })
         .manage(external_agent::commands::ExternalAgentState::default())
         .manage(external_agent::commands::AcpTerminalState::default())
         .manage(scheduler::SchedulerState::new(
@@ -359,6 +374,12 @@ pub fn run() {
             companion_api::commands::companion_tunnel_start,
             companion_api::commands::companion_tunnel_stop,
             companion_api::commands::companion_tunnel_current,
+            companion_api::commands::companion_push_configure_fcm,
+            companion_api::commands::companion_push_configure_apns,
+            companion_api::commands::companion_push_clear_fcm,
+            companion_api::commands::companion_push_clear_apns,
+            companion_api::commands::companion_push_status,
+            companion_api::commands::companion_test_local_reachability,
             proxy_config::commands::proxy_set,
             proxy_config::commands::proxy_get_active,
             proxy_config::commands::proxy_detect,

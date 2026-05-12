@@ -3915,13 +3915,15 @@
       "delete": "删除",
       "enable": "启用",
       "disable": "停用",
-      "open": "打开"
+      "open": "打开",
+      "openInEditor": "在编辑器中打开"
     },
     "detail": {
       "tabOverview": "概览",
       "tabContent": "内容",
       "tabResources": "资源",
       "tabSecurity": "安全",
+      "tabValidation": "验证",
       "tabEdit": "编辑",
       "metaCategory": "类别",
       "metaSource": "来源",
@@ -3964,7 +3966,14 @@
       "validation": "校验",
       "errorRequired": "该字段必填。",
       "errorTooLong": "过长（最大 {max}）。",
-      "errorEmpty": "技能内容不能为空。"
+      "errorEmpty": "技能内容不能为空。",
+      "closeTab": "关闭 {path}",
+      "emptyPickSkill": "从左侧选择一个技能开始编辑。",
+      "closeDirtyConfirm": "该文件有未保存改动。仍然关闭吗？",
+      "unsaved": "● 未保存",
+      "saved": "已保存",
+      "panelValidation": "验证",
+      "savedAll": "已全部保存。"
     },
     "ai": {
       "buttonLabel": "AI 协助",
@@ -4132,6 +4141,46 @@
       "importPartUpdated": "更新 {count}",
       "importPartSkipped": "跳过 {count}",
       "importPartErrored": "失败 {count}"
+    },
+    "validation": {
+      "empty": "没有验证问题。",
+      "tab": "验证",
+      "cardBadge": "{count} 个问题"
+    },
+    "composer": {
+      "skillPicker": {
+        "title": "附加技能",
+        "description": "选择仅在下一条消息中生效的技能。",
+        "searchPlaceholder": "搜索技能…",
+        "empty": "未找到技能。",
+        "groupHeading": "可用技能",
+        "trigger": "附加技能",
+        "removeChip": "移除 {name}"
+      }
+    },
+    "marketplaceEmpty": {
+      "title": "市场未配置",
+      "subtitle": "在设置里配置 SkillsMP 端点即可浏览和安装社区技能。下面是部分可用示例：",
+      "configure": "去设置配置"
+    },
+    "analytics": {
+      "trend": {
+        "title": "使用趋势",
+        "window7": "7天",
+        "window30": "30天"
+      }
+    },
+    "sync": {
+      "status": {
+        "synced": "已同步",
+        "outOfSync": "未同步",
+        "error": "同步错误",
+        "never": "从未同步"
+      },
+      "syncNow": "立即同步",
+      "retry": "重试",
+      "lastAt": "上次：{when}",
+      "desktopOnly": "同步仅在桌面端可用。"
     },
     "back": "返回"
   },
@@ -6264,9 +6313,14 @@
       "active": "运行中",
       "paused": "已暂停",
       "successRate": "成功率",
-      "executions": "次执行"
+      "executions": "次执行",
+      "avgDuration": "平均耗时",
+      "failed": "失败",
+      "nextRun": "下次运行",
+      "successful": "成功"
     },
     "filter": {
+      "all": "全部",
       "statusLabel": "状态",
       "typeLabel": "类型",
       "allStatuses": "全部状态",
@@ -6540,7 +6594,27 @@
     "exportError": "导出失败：{message}",
     "importError": "导入失败：{message}",
     "noExecutionsYet": "暂无执行记录",
-    "inspectDegradedTask": "查看降级任务"
+    "inspectDegradedTask": "查看降级任务",
+    "kindFilter": {
+      "all": "全部",
+      "app": "应用",
+      "workflow": "工作流",
+      "backup": "备份",
+      "plugin": "插件",
+      "system": "系统"
+    },
+    "emptyTitle": "暂无定时任务",
+    "emptyDescription": "创建你的第一个定时任务，让重复性工作自动运行。",
+    "emptyCreateCta": "新建任务",
+    "emptyFilteredTitle": "未找到匹配的任务",
+    "emptyFilteredDescription": "请调整搜索关键词或清除筛选条件。",
+    "emptyClearFilters": "清除筛选",
+    "panelErrorTitle": "出错啦",
+    "panelErrorDescription": "该面板未能加载。",
+    "panelErrorRetry": "重试",
+    "openInSourceEditor": "在源编辑器中打开",
+    "createTaskKind": "选择任务类型",
+    "active": "活跃"
   },
   "desktop": {
     "channelList": {
@@ -6652,7 +6726,8 @@
       "desktopOnlyTitle": "请在 Tauri 中运行",
       "desktopOnlyBodyPrefix": "Claude Code 代理运行在桌面构建一同打包的 Node 子进程中。请使用 ",
       "desktopOnlyBodyMiddle": " 启动应用，而不是 ",
-      "desktopOnlyBodySuffix": "。"
+      "desktopOnlyBodySuffix": "。",
+      "emptyTitle": "Cognia"
     },
     "titleBar": {
       "minimize": "最小化",
@@ -8146,7 +8221,43 @@
       "signOutTitle": "退出登录",
       "signOutReason": "确认退出当前配对",
       "signOutDescription": "退出后需重新扫码配对才能再次连接。",
-      "biometricFailed": "生物识别失败（{reason}），未退出登录。"
+      "biometricFailed": "生物识别失败（{reason}），未退出登录。",
+      "discover": {
+        "title": "查找你的桌面",
+        "subtitle": "选择下方的服务器，或跳过手动输入。",
+        "scanning": "正在扫描局域网…",
+        "rescanCta": "重新扫描",
+        "skipToManual": "手动输入",
+        "foundCount": "{count, plural, =0 {未发现服务器} other {发现 # 台}}",
+        "emptyTitle": "未发现服务器",
+        "emptyDescription": "请确认桌面与手机连在同一网络，且桌面端已开启 Companion 服务。",
+        "backToDiscover": "返回扫描列表",
+        "baseUrlLocked": "地址已从扫描结果锁定",
+        "latencyMs": "{ms} 毫秒",
+        "tlsPinned": "身份已验证",
+        "tlsUnverified": "未验证",
+        "viaMdns": "mDNS",
+        "viaProbe": "局域网探测",
+        "viaHistory": "历史"
+      },
+      "permissions": {
+        "localNetwork": {
+          "title": "需要本地网络权限",
+          "description": "请授予本地网络访问权限，本机才能在 Wi-Fi 上发现桌面端。"
+        }
+      },
+      "step": {
+        "ariaLabel": "配对进度",
+        "discover": "发现",
+        "pair": "配对",
+        "paired": "已连接"
+      },
+      "scanError": {
+        "notPairCode": "这个二维码不是 Cognia 配对码。",
+        "permissionDenied": "未授予相机权限。请在系统设置里开启后再扫码。",
+        "unsupported": "本设备不支持扫码，请在下方手动粘贴配对令牌。",
+        "failed": "扫码失败：{message}"
+      }
     },
     "messageActions": {
       "title": "消息",
@@ -8172,7 +8283,10 @@
       "emptyCharacters": "还没有角色 — 在桌面端创建一个吧。",
       "emptyTeams": "还没有团队。",
       "emptySkills": "还没有技能。",
-      "emptyTwinDrafts": "暂无待审孪生草稿。"
+      "emptyTwinDrafts": "暂无待审孪生草稿。",
+      "search": "搜索…",
+      "searchAria": "搜索发现内容",
+      "featured": "精选"
     },
     "me": {
       "title": "我",
@@ -8189,7 +8303,25 @@
       "appSecurity": "应用安全",
       "biometricToggle": "启用生物识别解锁",
       "biometricUnavailable": "本设备未注册生物识别。",
-      "versionLabel": "版本"
+      "versionLabel": "版本",
+      "profile": {
+        "fallbackName": "未登录",
+        "fallbackPlan": "本机账号",
+        "manageAccount": "管理账号"
+      },
+      "quickToggles": {
+        "themeAria": "切换主题",
+        "languageAria": "切换语言",
+        "themeLight": "浅色",
+        "themeDark": "深色",
+        "themeAuto": "自动"
+      },
+      "todayStats": {
+        "sessions": "会话",
+        "drafts": "草稿",
+        "backup": "上次备份",
+        "backupNever": "从未"
+      }
     },
     "companion": {
       "tunnel": {
@@ -8264,7 +8396,11 @@
       "statusFailed": "失败",
       "statusCancelled": "已取消",
       "statusSkipped": "跳过",
-      "statusWaiting": "等待"
+      "statusWaiting": "等待",
+      "all": "全部",
+      "pinned": "置顶",
+      "pinned_added": "已置顶。",
+      "pinned_removed": "已取消置顶。"
     },
     "twinSources": {
       "title": "孪生数据源",
@@ -8316,7 +8452,11 @@
       "autoBackupInterval": "间隔（天）",
       "historyHeader": "历史",
       "historyEmpty": "尚无历史记录。",
-      "passphraseLabel": "可选密码（留空则使用自动密钥）"
+      "passphraseLabel": "可选密码（留空则使用自动密钥）",
+      "exportBiometricTitle": "确认导出",
+      "exportBiometricReason": "通过生物识别验证后导出加密备份。",
+      "biometricBlocked": "生物识别失败，已取消导出。",
+      "passphraseRequiredHint": "需要密码短语才能在以后解开加密备份。"
     },
     "shareTarget": {
       "title": "通过 cognia 分享",
@@ -8326,8 +8466,12 @@
       "targetSearchPlaceholder": "搜索会话…",
       "queuedToast": "已加入发送队列。",
       "noConversations": "尚无可发送的会话。",
+      "noConversationsDescription": "请先打开一个会话，然后再来分享。",
       "receivedText": "收到内容",
-      "receivedUrl": "链接"
+      "receivedUrl": "链接",
+      "errorTitle": "分享页面加载失败",
+      "errorDescription": "无法加载会话列表来接收分享内容。请重试，或打开 Cognia 后重新发起分享。",
+      "retry": "重试"
     },
     "offline": {
       "bannerOffline": "离线中 — 仍可浏览，发送将进入队列。",
@@ -8344,6 +8488,123 @@
       "empty": "该团队暂无成员。",
       "noMatches": "未找到匹配「{query}」的成员",
       "dismiss": "关闭"
+    },
+    "shell": {
+      "openNav": "打开导航",
+      "navSheetTitle": "导航",
+      "openMembers": "打开成员列表",
+      "sessionMenu": "会话菜单",
+      "newChat": "新建聊天",
+      "settings": "设置",
+      "deleteSession": "删除此会话",
+      "memberSheetTitle": "团队成员",
+      "directSessionTitle": "与 {name} 的聊天",
+      "tabBarAria": "主导航",
+      "clearSearch": "清空搜索"
+    },
+    "home": {
+      "search": "搜索聊天…",
+      "searchAria": "搜索聊天",
+      "pinned": "置顶",
+      "recent": "最近",
+      "emptyChats": "还没有聊天，点击 + 新建一个。",
+      "emptyFiltered": "没有与「{query}」匹配的聊天。",
+      "swipePin": "置顶",
+      "swipeUnpin": "取消置顶",
+      "swipeDelete": "删除",
+      "presenceStreaming": "回复中"
+    },
+    "settingsPanel": {
+      "theme": "主题",
+      "themeLight": "浅色",
+      "themeDark": "深色",
+      "themeSystem": "跟随系统",
+      "fontScale": "字号",
+      "fontScaleSm": "小",
+      "fontScaleMd": "中",
+      "fontScaleLg": "大",
+      "language": "语言",
+      "defaultModel": "默认模型",
+      "queueLabel": "已排队——桌面上线后会自动同步。"
+    },
+    "characterEdit": {
+      "createTitle": "新建角色",
+      "editTitle": "编辑角色",
+      "description": "调整系统提示词、模型和头像。",
+      "nameLabel": "名称",
+      "descriptionLabel": "描述",
+      "systemPromptLabel": "系统提示词",
+      "defaultModelLabel": "默认模型",
+      "avatarEmojiLabel": "头像表情",
+      "avatarColorLabel": "头像颜色",
+      "save": "保存",
+      "saving": "保存中…",
+      "savedCreate": "角色已创建。",
+      "savedUpdate": "角色已更新。",
+      "saveFailed": "保存失败：{message}",
+      "create": "创建",
+      "delete": "删除",
+      "deleted": "角色已删除。",
+      "deleteFailed": "删除失败：{message}",
+      "cannotDeleteBuiltIn": "内置角色不可删除。",
+      "queueLabelCreate": "已排队——桌面上线后会创建。",
+      "queueLabelUpdate": "已排队——桌面上线后会保存。",
+      "queueLabelDelete": "已排队——桌面上线后会删除。"
+    },
+    "connectorPolicy": {
+      "title": "会话设置",
+      "description": "选择此会话如何处理收到的消息。",
+      "defaultMode": "默认模式",
+      "defaultModeHelp": "Auto：AI 自动回复；Draft：起草草稿等你确认；Manual：完全手动。",
+      "modeAuto": "自动",
+      "modeDraft": "草稿",
+      "modeManual": "手动",
+      "quietHours": "免打扰时段",
+      "quietHoursHelp": "此时段内不发出自动回复。",
+      "from": "起始",
+      "to": "结束",
+      "muted": "静音此会话",
+      "mutedHelp": "仍能收到消息，但不会自动回复。",
+      "save": "保存",
+      "saving": "保存中…",
+      "saved": "已保存。",
+      "saveFailed": "保存失败：{message}",
+      "queueLabel": "已排队——桌面上线后会同步。"
+    },
+    "plugins": {
+      "empty": "尚未安装任何插件。",
+      "enabled": "已启用",
+      "disabled": "已禁用",
+      "toggleAria": "切换插件状态",
+      "toggleFailed": "切换失败：{message}",
+      "queueLabel": "已排队——桌面上线后会同步。"
+    },
+    "twinProfile": {
+      "title": "数字分身画像",
+      "loading": "加载分身画像…",
+      "loadFailed": "无法加载分身画像。",
+      "empty": "尚未生成分身画像。请在桌面端添加资料源后再试。",
+      "entities": "{count, plural, =0 {无实体} other {# 个实体}}",
+      "samples": "{count, plural, =0 {无样本} other {# 个样本}}",
+      "style": "风格",
+      "updatedAt": "更新于 {when}",
+      "noUpdates": "尚未生成"
+    },
+    "skills": {
+      "tabOverview": "概览",
+      "tabEdit": "编辑",
+      "tabResources": "资源",
+      "tabValidation": "验证",
+      "name": "名称",
+      "description": "描述",
+      "content": "内容",
+      "save": "保存",
+      "saved": "已保存。",
+      "metaCategory": "类别",
+      "metaUsage": "使用次数",
+      "metaUpdated": "最近更新",
+      "openSheet": "打开 {name}",
+      "toggleEnabled": "启用技能"
     }
   },
   "workflows": {

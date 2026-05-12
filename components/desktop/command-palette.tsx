@@ -42,6 +42,7 @@ import { isTauri } from "@/lib/tauri"
 import { getPluginEventHooks } from "@/lib/plugin"
 import { toast } from "sonner"
 import { AvatarBadge } from "./avatar-badge"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 const log = loggers.ui
 
@@ -307,6 +308,8 @@ export function CommandPalette({ onOpenSettings }: Props) {
             </CommandGroup>
           </>
         )}
+
+        <PluginExtensionSlot point="command-palette" className="border-t pt-1 empty:hidden" />
       </CommandList>
     </CommandDialog>
   )

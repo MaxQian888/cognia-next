@@ -5,9 +5,12 @@
 // real switch lives in Settings), the active permission mode, and the
 // running token / context-window indicator.
 
-import { useCallback } from "react"
+import { useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
+import { SparklesIcon } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { SkillPicker } from "@/components/chat/skill-picker"
 import {
   Context,
   ContextContent,
@@ -32,6 +35,7 @@ import { AgentModeSelector } from "@/components/agent/agent-mode-selector"
 import { ExternalAgentSelector } from "@/components/agent/external-agent-selector"
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
+import { PluginExtensionSlotWithOverflow } from "@/components/plugins/plugin-extension-slot-with-overflow"
 
 interface BottomToolbarProps {
   session: ChatSession | null
@@ -43,6 +47,10 @@ export function BottomToolbar({ session }: BottomToolbarProps) {
   const messages = useChatStore((s) => s.messages)
   const status = useChatStore((s) => s.status)
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
+  const ephemeralSkillIds = useChatStore((s) => s.ephemeralSkillIds) ?? []
+  const setEphemeralSkillIds = useChatStore((s) => s.setEphemeralSkillIds) ?? (() => {})
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const tSkill = useTranslations("skills.composer.skillPicker")
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const modeId = useAgentRuntimeStore((s) => s.modeId)
   const setModeId = useAgentRuntimeStore((s) => s.setModeId)
@@ -94,6 +102,23 @@ export function BottomToolbar({ session }: BottomToolbarProps) {
           disabled={isStreaming}
         />
         <WebSearchToggle disabled={isStreaming} />
+        <Button
+          type="button"
+          size="icon"
+          variant={ephemeralSkillIds.length > 0 ? "default" : "ghost"}
+          onClick={() => setPickerOpen(true)}
+          aria-label={tSkill("trigger")}
+          disabled={isStreaming}
+          className="size-7"
+        >
+          <SparklesIcon className="size-3.5" />
+        </Button>
+        <SkillPicker
+          open={pickerOpen}
+          onOpenChange={setPickerOpen}
+          value={ephemeralSkillIds}
+          onChange={setEphemeralSkillIds}
+        />
         <AgentRuntimeSelector disabled={isStreaming} />
         {runtime === "claude-sdk" && (
           <AgentModeSelector
@@ -111,6 +136,11 @@ export function BottomToolbar({ session }: BottomToolbarProps) {
             disabled={isStreaming}
           />
         )}
+        <PluginExtensionSlotWithOverflow
+          point="chat.input.actions"
+          limit={3}
+          className="flex items-center gap-1 empty:hidden"
+        />
       </div>
 
       <Context maxTokens={max} modelId={modelId} usage={aiUsage} usedTokens={used}>

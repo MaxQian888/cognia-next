@@ -66,6 +66,7 @@ import { forkSessionFromParent } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
 import { toast } from "sonner"
 import { loggers } from "@/lib/logger"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 const MODEL_PRESETS: {
   value: string
@@ -389,6 +390,8 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
           <TooltipContent>{t("forkTooltip")}</TooltipContent>
         </Tooltip>
       )}
+
+      <PluginExtensionSlot point="chat.header" className="flex items-center gap-1 empty:hidden" />
 
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>

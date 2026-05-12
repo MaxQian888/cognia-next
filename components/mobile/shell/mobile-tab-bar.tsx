@@ -85,6 +85,7 @@ export function MobileTabBar({ className, badges }: MobileTabBarProps) {
   const [, startTransition] = useTransition()
   const t = useTranslations("mobile.tabs")
   const tBar = useTranslations("mobile.tabBar")
+  const tShell = useTranslations("mobile.shell")
 
   const onTap = () => {
     // Light haptic on every tab press; failure = no-op on non-mobile.
@@ -98,7 +99,7 @@ export function MobileTabBar({ className, badges }: MobileTabBarProps) {
         className
       )}
       role="tablist"
-      aria-label="Main navigation"
+      aria-label={tShell("tabBarAria")}
       data-testid="mobile-tab-bar"
     >
       {MOBILE_TABS.map((tab) => {

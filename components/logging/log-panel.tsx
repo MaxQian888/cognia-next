@@ -149,12 +149,30 @@ export function LogPanel({
 
   const agentTraceLogs = useAgentTraceAsLogs({ enabled: includeAgentTrace, maxLogs: 200 })
 
-  // Merged and filtered logs
+  // Merged and filtered logs.
+  // Both inputs come from `useLogStream` / `useAgentTraceAsLogs`, which
+  // produce timestamp-descending arrays. A linear two-pointer merge is O(n+m)
+  // and avoids the per-poll O(n log n) sort + allocation of a doubled array.
   const mergedLogs = useMemo(() => {
     if (!includeAgentTrace || agentTraceLogs.logs.length === 0) return logs
-    return [...logs, ...agentTraceLogs.logs]
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-      .slice(0, 1000)
+    const a = logs
+    const b = agentTraceLogs.logs
+    const limit = Math.min(1000, a.length + b.length)
+    const out: StructuredLogEntry[] = new Array(limit)
+    let ai = 0
+    let bi = 0
+    for (let i = 0; i < limit; i++) {
+      if (ai >= a.length) {
+        out[i] = b[bi++]
+      } else if (bi >= b.length) {
+        out[i] = a[ai++]
+      } else if (a[ai].timestamp >= b[bi].timestamp) {
+        out[i] = a[ai++]
+      } else {
+        out[i] = b[bi++]
+      }
+    }
+    return out
   }, [logs, agentTraceLogs.logs, includeAgentTrace])
 
   const augmentedModules = useMemo(() => {
@@ -168,54 +186,63 @@ export function LogPanel({
   }, [filters.timeRange])
 
   const filteredLogs = useMemo(() => {
-    let result = mergedLogs.filter((log) => allowedSources.includes(getLogSource(log)))
+    // Hoist all filter inputs once so each predicate is a constant-time check.
+    const moduleFilter = filters.moduleFilter
+    const moduleIsAgentTrace = moduleFilter === AGENT_TRACE_MODULE
+    const moduleIsSpecific = moduleFilter !== "all" && !moduleIsAgentTrace
+    const customStartMs = customTimeRange?.start.getTime() ?? 0
+    const customEndMs = customTimeRange?.end.getTime() ?? 0
+    const hasCustomTimeRange = customTimeRange !== null
+    const hasPresetTimeRange = !hasCustomTimeRange && filters.timeRange !== "all"
+    const presetCutoff = hasPresetTimeRange ? getTimeRangeCutoff() : 0
+    const highSeverityOnly = filters.highSeverityOnly
+    const traceFocusId = filters.traceFocusId
+    const sessionFilterTrimmed = filters.sessionFilter.trim()
+    const hasSessionFilter = sessionFilterTrimmed.length > 0
+    const diagnosticTransport = filters.diagnosticTransportFilter
+    const bookmarkFilterActive = filters.bookmarkFilterActive
+    const bookmarkedIds = filters.bookmarkedIds
+    const allowedSourcesSet =
+      allowedSources.length === ALL_PANEL_SOURCES.length
+        ? null
+        : new Set<PanelSource>(allowedSources)
 
-    if (filters.moduleFilter === AGENT_TRACE_MODULE) {
-      result = result.filter((log) => log.module === AGENT_TRACE_MODULE)
-    } else if (filters.moduleFilter !== "all") {
-      result = result.filter((log) => log.module !== AGENT_TRACE_MODULE)
-    }
+    const result: StructuredLogEntry[] = []
+    for (let i = 0; i < mergedLogs.length; i++) {
+      const log = mergedLogs[i]
 
-    if (effectiveSourceFilter !== "all") {
-      result = result.filter((log) => getLogSource(log) === effectiveSourceFilter)
-    }
+      // Single getLogSource() lookup per row (was previously computed twice).
+      const source = getLogSource(log)
+      if (allowedSourcesSet && !allowedSourcesSet.has(source)) continue
+      if (effectiveSourceFilter !== "all" && source !== effectiveSourceFilter) continue
 
-    if (customTimeRange) {
-      const startMs = customTimeRange.start.getTime()
-      const endMs = customTimeRange.end.getTime()
-      result = result.filter((log) => {
+      const isAgentTrace = log.module === AGENT_TRACE_MODULE
+      if (moduleIsAgentTrace) {
+        if (!isAgentTrace) continue
+      } else if (moduleIsSpecific && isAgentTrace) {
+        continue
+      }
+
+      if (hasCustomTimeRange || hasPresetTimeRange) {
         const ts = new Date(log.timestamp).getTime()
-        return ts >= startMs && ts <= endMs
-      })
-    } else if (filters.timeRange !== "all") {
-      const cutoff = getTimeRangeCutoff()
-      result = result.filter((log) => new Date(log.timestamp).getTime() >= cutoff)
-    }
+        if (hasCustomTimeRange) {
+          if (ts < customStartMs || ts > customEndMs) continue
+        } else if (ts < presetCutoff) {
+          continue
+        }
+      }
 
-    if (filters.highSeverityOnly) {
-      result = result.filter((log) => log.level === "error" || log.level === "fatal")
-    }
+      if (highSeverityOnly && log.level !== "error" && log.level !== "fatal") continue
+      if (traceFocusId && log.traceId !== traceFocusId) continue
+      if (hasSessionFilter && log.sessionId !== sessionFilterTrimmed) continue
+      if (diagnosticTransport) {
+        if (log.module !== "logger.internal") continue
+        if (String(log.data?.sourceTransport || "") !== diagnosticTransport) continue
+      }
+      if (bookmarkFilterActive && !bookmarkedIds.has(log.id)) continue
 
-    if (filters.traceFocusId) {
-      result = result.filter((log) => log.traceId === filters.traceFocusId)
+      result.push(log)
     }
-
-    if (filters.sessionFilter.trim()) {
-      result = result.filter((log) => log.sessionId === filters.sessionFilter.trim())
-    }
-
-    if (filters.diagnosticTransportFilter) {
-      result = result.filter(
-        (log) =>
-          log.module === "logger.internal" &&
-          String(log.data?.sourceTransport || "") === filters.diagnosticTransportFilter
-      )
-    }
-
-    if (filters.bookmarkFilterActive) {
-      result = result.filter((log) => filters.bookmarkedIds.has(log.id))
-    }
-
     return result
   }, [
     mergedLogs,
@@ -429,6 +456,11 @@ export function LogPanel({
     [filters, resetPagination]
   )
 
+  // Stable wrapper so the toolbar's `clearSessionFocus` prop keeps its identity.
+  const handleClearSessionFocus = useCallback(() => {
+    handleSessionFilterChange("")
+  }, [handleSessionFilterChange])
+
   const handleTimeRangeChange = useCallback(
     (value: typeof filters.timeRange) => {
       resetPagination()
@@ -544,43 +576,64 @@ export function LogPanel({
     }
   }, [])
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts — read latest filter state / paginated logs via a ref
+  // so polling-driven re-renders don't detach + reattach the listener every
+  // 2 seconds. The effect itself only re-runs when view mode flips or the
+  // list transitions between empty and non-empty (the virtualizer host div
+  // only mounts when there's data).
+  const keyboardLatestRef = useRef({
+    filters,
+    refresh,
+    handleSearchQueryChange,
+    paginatedLogs,
+  })
+  useEffect(() => {
+    keyboardLatestRef.current = { filters, refresh, handleSearchQueryChange, paginatedLogs }
+  })
+
+  const hasPaginatedLogs = paginatedLogs.length > 0
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      const {
+        filters: latestFilters,
+        refresh: latestRefresh,
+        handleSearchQueryChange: latestHandleSearch,
+        paginatedLogs: latestPaginatedLogs,
+      } = keyboardLatestRef.current
 
       if (e.key === "r" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault()
-        refresh()
+        latestRefresh()
       } else if (e.key === "Escape") {
-        if (filters.showDetailPanel) filters.setShowDetailPanel(false)
-        else handleSearchQueryChange("")
+        if (latestFilters.showDetailPanel) latestFilters.setShowDetailPanel(false)
+        else latestHandleSearch("")
       } else if (e.key === "d" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault()
-        filters.setViewMode((prev) => (prev === "list" ? "dashboard" : "list"))
+        latestFilters.setViewMode((prev) => (prev === "list" ? "dashboard" : "list"))
       } else if (e.key === "ArrowDown" || e.key === "j") {
         e.preventDefault()
-        filters.setFocusedIndex((prev) => Math.min(prev + 1, paginatedLogs.length - 1))
+        latestFilters.setFocusedIndex((prev) => Math.min(prev + 1, latestPaginatedLogs.length - 1))
       } else if (e.key === "ArrowUp" || e.key === "k") {
         e.preventDefault()
-        filters.setFocusedIndex((prev) => Math.max(prev - 1, 0))
+        latestFilters.setFocusedIndex((prev) => Math.max(prev - 1, 0))
       } else if (
         e.key === "Enter" &&
-        filters.focusedIndex >= 0 &&
-        filters.focusedIndex < paginatedLogs.length
+        latestFilters.focusedIndex >= 0 &&
+        latestFilters.focusedIndex < latestPaginatedLogs.length
       ) {
         e.preventDefault()
-        filters.toggleExpanded(paginatedLogs[filters.focusedIndex].id)
+        latestFilters.toggleExpanded(latestPaginatedLogs[latestFilters.focusedIndex].id)
       } else if (
         e.key === "o" &&
-        filters.focusedIndex >= 0 &&
-        filters.focusedIndex < paginatedLogs.length
+        latestFilters.focusedIndex >= 0 &&
+        latestFilters.focusedIndex < latestPaginatedLogs.length
       ) {
         e.preventDefault()
-        filters.handleSelectLog(paginatedLogs[filters.focusedIndex])
+        latestFilters.handleSelectLog(latestPaginatedLogs[latestFilters.focusedIndex])
       } else if (e.key === "?" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault()
-        filters.setShowShortcutsDialog(true)
+        latestFilters.setShowShortcutsDialog(true)
       }
     }
 
@@ -589,7 +642,7 @@ export function LogPanel({
       container.addEventListener("keydown", handleKeyDown)
       return () => container.removeEventListener("keydown", handleKeyDown)
     }
-  }, [refresh, filters, handleSearchQueryChange, paginatedLogs])
+  }, [filters.viewMode, hasPaginatedLogs])
 
   // Auto-scroll to bottom on new logs
   useEffect(() => {
@@ -646,7 +699,7 @@ export function LogPanel({
         setAutoScroll={filters.setAutoScroll}
         scrollToTop={scrollToTop}
         scrollToBottom={scrollToBottom}
-        clearSessionFocus={() => handleSessionFilterChange("")}
+        clearSessionFocus={handleClearSessionFocus}
         hasSessionFocus={!!filters.sessionFilter.trim()}
         bookmarkFilterActive={filters.bookmarkFilterActive}
         setBookmarkFilterActive={filters.setBookmarkFilterActive}

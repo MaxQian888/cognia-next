@@ -17,6 +17,10 @@ import {
   SERVER_NAME as BUILTIN_SERVER_NAME,
 } from "../builtin-tools/index.mjs"
 import { buildA2UIBridgeServer, SERVER_NAME as A2UI_SERVER_NAME } from "../a2ui-tools/index.mjs"
+import {
+  buildPluginToolsServer,
+  SERVER_NAME as PLUGIN_TOOLS_SERVER_NAME,
+} from "../builtin-tools/plugin-tools.mjs"
 import { makeInputStream } from "./input-stream.mjs"
 
 /**
@@ -32,6 +36,13 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   const inputStream = makeInputStream()
   /** @type {Map<string, { resolve: (r: any) => void }>} */
   const pendingApprovals = new Map()
+  /**
+   * Plugin tool calls awaiting a `plugin_tool_response` from the renderer.
+   * Keyed by `toolUseId`. Drained by `claude-host.mjs` when a response
+   * arrives over stdin. See `sidecar/builtin-tools/plugin-tools.mjs`.
+   * @type {Map<string, { resolve: (r: any) => void }>}
+   */
+  const pendingPluginToolCalls = new Map()
 
   const resumeId = sendOptions.resumeSessionId ?? sendOptions.forkFromSessionId
   const isFork = sendOptions.forkFromSessionId != null
@@ -54,7 +65,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
 
   // A2UI bridge: always-on in-process MCP server.
   const a2uiServer = buildA2UIBridgeServer({ sessionId, emit })
-  const mergedMcpServers = Object.prototype.hasOwnProperty.call(withBuiltins, A2UI_SERVER_NAME)
+  const withA2UI = Object.prototype.hasOwnProperty.call(withBuiltins, A2UI_SERVER_NAME)
     ? (() => {
         log(
           "warn",
@@ -64,6 +75,32 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       })()
     : { ...withBuiltins, [A2UI_SERVER_NAME]: a2uiServer }
 
+  // Plugin tools bridge (M2). When the renderer passes a plugin tools
+  // manifest, synthesize an in-process MCP server that proxies invocations
+  // back over stdio via `plugin_tool_exec` events. The `pendingPluginToolCalls`
+  // map is shared with `claude-host.mjs` so the renderer-side response can
+  // resolve the in-flight tool call.
+  let mergedMcpServers = withA2UI
+  if (Array.isArray(sendOptions.pluginTools) && sendOptions.pluginTools.length > 0) {
+    const pluginToolsServer = buildPluginToolsServer({
+      tools: sendOptions.pluginTools,
+      emit,
+      sessionId,
+      pendingPluginToolCalls,
+    })
+    if (pluginToolsServer) {
+      mergedMcpServers = Object.prototype.hasOwnProperty.call(withA2UI, PLUGIN_TOOLS_SERVER_NAME)
+        ? (() => {
+            log(
+              "warn",
+              `user-defined mcp server '${PLUGIN_TOOLS_SERVER_NAME}' shadows plugin-tools — keeping user's`
+            )
+            return withA2UI
+          })()
+        : { ...withA2UI, [PLUGIN_TOOLS_SERVER_NAME]: pluginToolsServer }
+    }
+  }
+
   // Defence-in-depth: stamp disabled-category tool names onto disallowedTools.
   const disallowed = new Set(sendOptions.disallowedTools ?? [])
   if (builtinEnabled !== undefined) {
@@ -72,13 +109,29 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     }
   }
 
+  // Plugin-first Computer Use M4 — Anthropic Agent Skills passthrough.
+  // The agent SDK reads the public `anthropic-beta` header from
+  // `ANTHROPIC_DEFAULT_HEADERS` (comma-separated list of `key=value` pairs)
+  // when present. We only set it when the renderer actually attached
+  // container skills so non-skills sends stay on stable behaviour.
+  const baseEnv = { ...process.env, ...(sendOptions.env ?? {}) }
+  if (Array.isArray(sendOptions.containerSkillIds) && sendOptions.containerSkillIds.length > 0) {
+    const existingHeaders = baseEnv.ANTHROPIC_DEFAULT_HEADERS
+    const skillsHeader = "anthropic-beta=skills-2025-10-02"
+    baseEnv.ANTHROPIC_DEFAULT_HEADERS = existingHeaders
+      ? `${existingHeaders},${skillsHeader}`
+      : skillsHeader
+  }
+
   // Allowlist construction — only fields listed below reach the SDK. This is
   // intentional: cognia-next sends a few sidecar-protocol-only fields
   // (`builtinTools`, `bareMode`, `debugMode`, `briefMode`, `aliasResolution`,
-  // `routingDecision`, `provider`, `providerCredentials`) that the SDK doesn't
-  // recognise. They're consumed earlier in `resolveSendOptions` (translated
-  // into env / settingSources / appendSystemPrompt / etc.) or in this
-  // dispatcher before this object is built (`builtinTools` → `mergedMcpServers`).
+  // `routingDecision`, `provider`, `providerCredentials`,
+  // `containerSkillIds`) that the SDK doesn't recognise. They're consumed
+  // earlier in `resolveSendOptions` (translated into env / settingSources /
+  // appendSystemPrompt / etc.) or in this dispatcher before this object is
+  // built (`builtinTools` → `mergedMcpServers`,
+  // `containerSkillIds` → env header + SDK `containerSkillIds` field).
   const options = {
     cwd: sendOptions.cwd,
     model: sendOptions.model,
@@ -99,7 +152,11 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     effort: sendOptions.effort,
     resume: resumeId,
     forkSession: isFork ? true : undefined,
-    env: { ...process.env, ...(sendOptions.env ?? {}) },
+    // Anthropic Agent Skills: forwarded to the SDK as-is. When unset the SDK
+    // omits the field and the request is plain Claude. The SDK accepts the
+    // shape `{ skill_id: string; version?: string }[]`.
+    containerSkillIds: sendOptions.containerSkillIds,
+    env: baseEnv,
 
     canUseTool: (toolName, input, ctx) => {
       const requestId = randomUUID()
@@ -151,6 +208,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       }),
     closeInput: inputStream.close,
     pendingApprovals,
+    pendingPluginToolCalls,
     sendOptions,
   }
 

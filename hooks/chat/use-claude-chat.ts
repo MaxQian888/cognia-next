@@ -141,6 +141,12 @@ export function useClaudeChat() {
           : (content.find((b) => b.type === "text") as { text?: string } | undefined)?.text
       let sendOptions = opts ?? (await buildSendOptions(session, userMessageText))
 
+      // ephemeralSkillIds were consumed by buildSendOptions; clear them so
+      // the next turn starts with a fresh attachment set.
+      if ((useChatStore.getState().ephemeralSkillIds ?? []).length > 0) {
+        useChatStore.getState().clearEphemeralSkillIds?.()
+      }
+
       // Apply per-command frontmatter overrides set by the composer when the
       // user picked a custom slash command. Cleared after merge so the next
       // turn doesn't inherit them.
@@ -487,12 +493,18 @@ async function buildSendOptions(
   // run the injection based on `character.twinId`.
   const twinHandshake = userMessage?.trim() ? await tryBuildTwinDeps() : undefined
 
+  // Per-message ephemeral skills attached via the composer's SkillPicker.
+  // These are unioned with character.skillIds in resolveSendOptions and
+  // cleared after the send dispatches.
+  const ephemeralSkillIds = useChatStore.getState().ephemeralSkillIds ?? []
+
   return resolveSendOptions({
     session,
     appSettings,
     referencedPaths,
     twinDeps: twinHandshake,
     twinUserMessage: twinHandshake ? userMessage : undefined,
+    ephemeralSkillIds,
   })
 }
 

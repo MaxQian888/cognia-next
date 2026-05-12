@@ -32,7 +32,7 @@ export function SkillCategorySidebar({ total, countsByCategory, countsBySource }
   const isAll = filters.source === "all" && filters.category === "all"
 
   return (
-    <aside className="w-52 shrink-0 border-r bg-muted/20 px-2 py-3 text-sm">
+    <aside className="hidden w-52 shrink-0 border-r bg-muted/20 px-2 py-3 text-sm lg:block">
       <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
         {t("filter.byCategory")}
       </p>

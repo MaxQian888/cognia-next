@@ -75,7 +75,7 @@ export function TaskStatsCards({ task, executions }: TaskStatsCardsProps) {
   ]
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       {cards.map((card) => (
         <Card
           key={card.label}

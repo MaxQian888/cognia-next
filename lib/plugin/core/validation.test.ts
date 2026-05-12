@@ -202,22 +202,20 @@ describe("Plugin Validation", () => {
       )
     })
 
-    it("should fail validation for blocked capabilities in block mode", () => {
+    it("should pass validation for skills capability (unblocked in M1·T4)", () => {
+      // Historical note: this test previously asserted that declaring
+      // `capabilities: ["skills"]` in block mode produced an error because
+      // the skills contract was support: "blocked". M1·T4 of the plugin-first
+      // Computer Use plan flipped skills to "supported" once skill-registry +
+      // build-options + sidecar passthrough landed (M1·T3 / M4). No real
+      // capability is currently in the "blocked" status, so the validation
+      // path is exercised by the "unknown capability" test above instead.
       const manifest = createValidManifest()
       manifest.capabilities = ["skills"]
 
       const result = validatePluginManifest(manifest, { governanceMode: "block" })
 
-      expect(result.valid).toBe(false)
-      expect(result.diagnostics).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            severity: "error",
-            field: "capabilities",
-            code: "manifest.capabilities.plugin.capability.blocked",
-          }),
-        ])
-      )
+      expect(result.valid).toBe(true)
     })
 
     it("should require main for frontend plugins", () => {
@@ -453,6 +451,150 @@ describe("Plugin Validation", () => {
       const result = validatePluginConfig(config, undefined)
 
       expect(result.valid).toBe(true)
+    })
+  })
+
+  describe("validatePluginManifest — dexie block", () => {
+    const createValidManifest = (): PluginManifest => ({
+      id: "test-plugin",
+      name: "Test Plugin",
+      version: "1.0.0",
+      description: "A test plugin",
+      type: "frontend",
+      capabilities: ["tools"],
+      main: "index.js",
+    })
+
+    it("accepts a manifest with a valid dexie block", () => {
+      const manifest = createValidManifest()
+      ;(manifest as unknown as Record<string, unknown>).dexie = {
+        tables: [{ name: "repos", schema: "++id, fullName" }],
+      }
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(true)
+      expect(result.errors).toHaveLength(0)
+    })
+
+    it("accepts a manifest without a dexie block", () => {
+      const manifest = createValidManifest()
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(true)
+    })
+
+    it("rejects when dexie is not an object", () => {
+      const manifest = createValidManifest()
+      ;(manifest as unknown as Record<string, unknown>).dexie = "not-an-object"
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(result.errors.some((e) => e.includes("dexie"))).toBe(true)
+    })
+
+    it("rejects when dexie.tables is missing", () => {
+      const manifest = createValidManifest()
+      ;(manifest as unknown as Record<string, unknown>).dexie = {}
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(result.diagnostics!.some((d) => d.field === "dexie.tables")).toBe(true)
+    })
+
+    it("rejects when dexie.tables is empty", () => {
+      const manifest = createValidManifest()
+      ;(manifest as unknown as Record<string, unknown>).dexie = { tables: [] }
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(result.diagnostics!.some((d) => d.code === "manifest.dexie.tables.empty")).toBe(true)
+    })
+
+    it("rejects an invalid table name", () => {
+      const manifest = createValidManifest()
+      ;(manifest as unknown as Record<string, unknown>).dexie = {
+        tables: [{ name: "BadName", schema: "++id" }],
+      }
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(result.diagnostics!.some((d) => d.code === "manifest.dexie.tables.nameInvalid")).toBe(
+        true
+      )
+    })
+
+    it("rejects a duplicate table name", () => {
+      const manifest = createValidManifest()
+      ;(manifest as unknown as Record<string, unknown>).dexie = {
+        tables: [
+          { name: "repos", schema: "++id" },
+          { name: "repos", schema: "++id, name" },
+        ],
+      }
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(result.diagnostics!.some((d) => d.code === "manifest.dexie.tables.duplicate")).toBe(
+        true
+      )
+    })
+
+    it("rejects an empty schema string", () => {
+      const manifest = createValidManifest()
+      ;(manifest as unknown as Record<string, unknown>).dexie = {
+        tables: [{ name: "repos", schema: "" }],
+      }
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(
+        result.diagnostics!.some((d) => d.code === "manifest.dexie.tables.schemaInvalid")
+      ).toBe(true)
+    })
+
+    it("rejects more than 20 tables", () => {
+      const manifest = createValidManifest()
+      ;(manifest as unknown as Record<string, unknown>).dexie = {
+        tables: Array.from({ length: 21 }, (_, i) => ({
+          name: `table${i}`,
+          schema: "++id",
+        })),
+      }
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(result.diagnostics!.some((d) => d.code === "manifest.dexie.tables.tooMany")).toBe(true)
+    })
+
+    it("rejects a migration with a non-positive toVersion", () => {
+      const manifest = createValidManifest()
+      ;(manifest as unknown as Record<string, unknown>).dexie = {
+        tables: [{ name: "repos", schema: "++id" }],
+        migrations: [{ toVersion: 0, upgrade: "migrateV1" }],
+      }
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(
+        result.diagnostics!.some((d) => d.code === "manifest.dexie.migrations.toVersionInvalid")
+      ).toBe(true)
+    })
+
+    it("rejects a migration with an empty upgrade string", () => {
+      const manifest = createValidManifest()
+      ;(manifest as unknown as Record<string, unknown>).dexie = {
+        tables: [{ name: "repos", schema: "++id" }],
+        migrations: [{ toVersion: 2, upgrade: "" }],
+      }
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(
+        result.diagnostics!.some((d) => d.code === "manifest.dexie.migrations.upgradeInvalid")
+      ).toBe(true)
+    })
+
+    it("accepts multiple valid tables with migrations", () => {
+      const manifest = createValidManifest()
+      ;(manifest as unknown as Record<string, unknown>).dexie = {
+        tables: [
+          { name: "repos", schema: "++id, fullName" },
+          { name: "workOrders", schema: "++id, [status+repoFullName]" },
+        ],
+        migrations: [{ toVersion: 2, upgrade: "migrateToV2" }],
+      }
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(true)
+      expect(result.errors).toHaveLength(0)
     })
   })
 })

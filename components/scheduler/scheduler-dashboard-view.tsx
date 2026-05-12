@@ -20,8 +20,11 @@ import {
 import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import type { ScheduledTask, TaskExecution, TaskStatistics } from "@/types/scheduler"
+import type { ScheduledItemKind } from "@/types/scheduler/unified"
+import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 import { formatDuration, formatRelativeTime } from "@/lib/scheduler/format-utils"
 import { TaskExecutionChart } from "./task-execution-chart"
+import { UnifiedRecentRuns } from "./unified-recent-runs"
 
 export interface SchedulerDashboardViewProps {
   statistics: TaskStatistics | null
@@ -31,6 +34,16 @@ export interface SchedulerDashboardViewProps {
   recentExecutions: TaskExecution[]
   schedulerStatus: string
   onSelectTask: (taskId: string) => void
+  /** Per-kind item counts — when supplied, renders the kind summary strip. */
+  countsByKind?: Record<ScheduledItemKind, number>
+  activeCountsByKind?: Record<ScheduledItemKind, number>
+  /**
+   * When supplied, the dashboard's Recent Executions card switches from the
+   * app-only `recentExecutions` slice to the cross-kind unified view fed by
+   * `useUnifiedRecentRuns`. Clicking a row emits the unified run so the
+   * page can open `RunDetailSheet`.
+   */
+  onSelectRun?: (run: UnifiedExecutionRun) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -44,7 +57,6 @@ interface StatCardProps {
   valueClassName?: string
   accentGradient: string
   iconBgClassName: string
-  extra?: React.ReactNode
 }
 
 function StatCard({
@@ -54,7 +66,6 @@ function StatCard({
   valueClassName,
   accentGradient,
   iconBgClassName,
-  extra,
 }: StatCardProps) {
   return (
     <Card
@@ -75,7 +86,7 @@ function StatCard({
               iconBgClassName
             )}
           >
-            {extra ?? icon}
+            {icon}
           </div>
         </div>
       </CardContent>
@@ -148,11 +159,53 @@ function ExecutionStatusIcon({ status }: { status: TaskExecution["status"] }) {
 // Main component
 // ---------------------------------------------------------------------------
 
+const KIND_ORDER: ScheduledItemKind[] = ["app", "workflow", "backup", "plugin", "system"]
+
+interface KindSummaryStripProps {
+  countsByKind?: Record<ScheduledItemKind, number>
+  activeCountsByKind?: Record<ScheduledItemKind, number>
+}
+
+function KindSummaryStrip({ countsByKind, activeCountsByKind }: KindSummaryStripProps) {
+  const t = useTranslations("scheduler")
+  if (!countsByKind) return null
+  return (
+    <div data-testid="kind-summary-strip" className="flex flex-wrap gap-2">
+      {KIND_ORDER.map((kind) => {
+        const total = countsByKind[kind] ?? 0
+        const active = activeCountsByKind?.[kind] ?? 0
+        const muted = total === 0
+        return (
+          <div
+            key={kind}
+            data-testid={`kind-summary-${kind}`}
+            className={cn(
+              "flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs",
+              muted ? "opacity-60 border-border/30" : "border-border/60 bg-card/50"
+            )}
+          >
+            <span className="font-medium capitalize">{t(`kindFilter.${kind}`) || kind}</span>
+            <span className="tabular-nums">{total}</span>
+            {!muted && (
+              <span className="text-[10px] text-green-500 tabular-nums">
+                {active} {t("active") || "active"}
+              </span>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export function SchedulerDashboardView({
   statistics,
   upcomingTasks,
   recentExecutions,
   onSelectTask,
+  countsByKind,
+  activeCountsByKind,
+  onSelectRun,
 }: SchedulerDashboardViewProps) {
   const t = useTranslations("scheduler")
 
@@ -167,9 +220,10 @@ export function SchedulerDashboardView({
     successRate >= 90 ? "text-green-500" : successRate >= 70 ? "text-yellow-500" : "text-red-500"
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 p-5 sm:p-6">
+      <KindSummaryStrip countsByKind={countsByKind} activeCountsByKind={activeCountsByKind} />
       {/* Stats cards row */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
         {/* Total Tasks */}
         <StatCard
           label={t("totalTasks") || "Total Tasks"}
@@ -224,7 +278,6 @@ export function SchedulerDashboardView({
                 : "from-red-500 to-rose-400"
           }
           iconBgClassName="bg-transparent"
-          extra={<SuccessRing successRate={successRate} />}
         />
       </div>
 
@@ -274,36 +327,42 @@ export function SchedulerDashboardView({
           </CardContent>
         </Card>
 
-        {/* Recent Executions card */}
-        <Card className="border-border/50 bg-card/80">
-          <CardContent className="p-4">
-            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
-              <Activity className="h-4 w-4 text-purple-500" aria-hidden="true" />
-              {t("recentExecutions") || "Recent Executions"}
-            </h3>
+        {/* Recent Executions card — unified (cross-kind) when onSelectRun is
+            provided by the page; otherwise falls back to the app-only slice so
+            legacy callers/tests keep their existing behavior. */}
+        {onSelectRun ? (
+          <UnifiedRecentRuns limit={5} onSelectRun={onSelectRun} />
+        ) : (
+          <Card className="border-border/50 bg-card/80">
+            <CardContent className="p-4">
+              <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                <Activity className="h-4 w-4 text-purple-500" aria-hidden="true" />
+                {t("recentExecutions") || "Recent Executions"}
+              </h3>
 
-            {recentExecutions.length === 0 ? (
-              <p className="py-4 text-center text-xs text-muted-foreground">
-                {t("noRecentExecutions") || "No recent executions"}
-              </p>
-            ) : (
-              <div className="space-y-0.5">
-                {recentExecutions.slice(0, 5).map((exec) => (
-                  <div key={exec.id} className="flex items-center gap-3 rounded-lg px-2 py-2">
-                    <ExecutionStatusIcon status={exec.status} />
-                    <p className="flex-1 truncate text-xs font-medium">{exec.taskName}</p>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {formatDuration(exec.duration)}
-                    </span>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {formatRelativeTime(exec.completedAt ?? exec.startedAt)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              {recentExecutions.length === 0 ? (
+                <p className="py-4 text-center text-xs text-muted-foreground">
+                  {t("noRecentExecutions") || "No recent executions"}
+                </p>
+              ) : (
+                <div className="space-y-0.5">
+                  {recentExecutions.slice(0, 5).map((exec) => (
+                    <div key={exec.id} className="flex items-center gap-3 rounded-lg px-2 py-2">
+                      <ExecutionStatusIcon status={exec.status} />
+                      <p className="flex-1 truncate text-xs font-medium">{exec.taskName}</p>
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        {formatDuration(exec.duration)}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        {formatRelativeTime(exec.completedAt ?? exec.startedAt)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   )

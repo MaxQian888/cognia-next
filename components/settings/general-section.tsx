@@ -23,6 +23,7 @@ import type { AppSettings } from "@/lib/claude/types"
 import { useSettingsStore } from "@/stores/settings"
 import { createLogger } from "@/lib/logger"
 import { MODEL_PRESET_VALUES, PERMISSION_MODE_VALUES } from "@/lib/claude/model-presets"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 const log = createLogger("settings.general")
 
@@ -247,6 +248,11 @@ export function GeneralSection({ onClose }: { onClose: () => void }) {
           ))}
         </div>
       </div>
+
+      <PluginExtensionSlot
+        point="settings.general"
+        className="space-y-2 border-t pt-4 empty:hidden"
+      />
 
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="ghost" onClick={onClose}>

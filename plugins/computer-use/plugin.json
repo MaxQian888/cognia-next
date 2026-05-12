@@ -1,0 +1,25 @@
+{
+  "id": "cognia-computer-use",
+  "name": "Computer Use",
+  "version": "0.1.0",
+  "description": "Native Anthropic Computer Use tool (computer_20251124) — screen capture, mouse/keyboard control via the Operator action protocol. Tauri Rust backend ships in a follow-up.",
+  "type": "frontend",
+  "capabilities": ["native-anthropic-tool", "commands"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": { "cognia": ">=0.1.0" },
+  "permissions": ["native:input", "native:screen"],
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "blocked",
+      "hint": "Requires Tauri Rust commands for screen capture and input synthesis — desktop only."
+    },
+    "desktop": {
+      "availability": "experimental",
+      "entrypoint": "src/index.ts",
+      "hint": "The plugin registers the native tool definitions and renderer-side dispatch wiring. The Rust enigo/xcap backend ships in a follow-up commit."
+    }
+  }
+}

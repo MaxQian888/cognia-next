@@ -31,6 +31,7 @@ import type { LucideIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { usePathname, useRouter } from "next/navigation"
 import { AvatarBadge } from "./avatar-badge"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 const log = loggers.ui
 
@@ -127,6 +128,10 @@ export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
     >
       <ScrollArea className="w-full flex-1">
         <div className="flex flex-col items-center gap-2 px-2">
+          <PluginExtensionSlot
+            point="sidebar.left.top"
+            className="flex flex-col items-center gap-2 empty:hidden"
+          />
           <RailButton
             active={isDmActive}
             ariaLabel={t("directMessages")}
@@ -212,6 +217,11 @@ export function GuildRail({ onCreateTeam, onOpenSettings }: Props) {
       >
         <SettingsIcon className="size-4" />
       </RailButton>
+
+      <PluginExtensionSlot
+        point="sidebar.left.bottom"
+        className="mt-2 flex flex-col items-center gap-2 empty:hidden"
+      />
     </aside>
   )
 }

@@ -29,6 +29,7 @@ import { WallpaperTab } from "./tabs/wallpaper-tab"
 import { CustomThemeTab } from "./tabs/custom-theme-tab"
 import { VscodeImportTab } from "./tabs/vscode-import-tab"
 import { AdvancedTab } from "./tabs/advanced-tab"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 const APPEARANCE_TAB_PARAM = "appearanceTab"
 
@@ -130,6 +131,11 @@ export function AppearanceSection() {
           <AdvancedTab />
         </TabsContent>
       </Tabs>
+
+      <PluginExtensionSlot
+        point="settings.appearance"
+        className="space-y-2 border-t pt-4 empty:hidden"
+      />
 
       <AlertDialog open={showReset} onOpenChange={setShowReset}>
         <AlertDialogContent>

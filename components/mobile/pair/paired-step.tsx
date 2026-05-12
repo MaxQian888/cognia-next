@@ -12,6 +12,7 @@ import {
   RefreshCwIcon,
 } from "lucide-react"
 
+import { ConnectionStateBadge } from "@/components/mobile/connection-state-badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -245,9 +246,12 @@ function ConnectionHealthCard({
         <CardTitle className="flex items-center gap-2 text-base">
           <CircleIcon className={cn("size-2.5", dotClass)} aria-hidden="true" />
           {t(titleKey)}
-          <Badge variant="outline" className="ml-auto text-[10px] uppercase">
-            {t(badgeKey)}
-          </Badge>
+          <div className="ml-auto flex items-center gap-1.5">
+            <ConnectionStateBadge />
+            <Badge variant="outline" className="text-[10px] uppercase">
+              {t(badgeKey)}
+            </Badge>
+          </div>
         </CardTitle>
         <CardDescription>{t(subtitleKey)}</CardDescription>
       </CardHeader>

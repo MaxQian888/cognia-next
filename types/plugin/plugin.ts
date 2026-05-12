@@ -13,8 +13,12 @@ import type {
   A2UISurfaceType,
 } from "../artifact/a2ui"
 import type { AgentModeConfig } from "../agent/agent-mode"
+import type { ExternalAgentPresetConfig } from "@/lib/ai/agent/external/presets"
 import type { Skill as _Skill } from "./_compat"
+import type { PluginMcpServerPresetDef } from "./plugin-mcp-preset"
+import type { PluginNativeAnthropicToolDef } from "./plugin-native-tool"
 import type { PluginSchedulerAPI } from "./plugin-scheduler"
+import type { PluginSkillDef } from "./plugin-skill"
 import type { PluginVerificationSnapshot } from "./plugin-verification"
 // `ActivationEventDeclaration` lives in `lib/plugin/contracts/plugin-points`,
 // added by Task #10. Importing the real type keeps the manifest schema and
@@ -40,6 +44,7 @@ export type PluginType =
  */
 export type PluginCapability =
   | "tools" // Provides Agent tools
+  | "native-anthropic-tool" // Wraps an Anthropic native tool (computer/bash/text_editor)
   | "components" // Provides A2UI components
   | "modes" // Provides Agent modes
   | "skills" // Provides Skills
@@ -57,6 +62,7 @@ export type PluginCapability =
   | "python" // Python runtime capability
   | "scheduler" // Provides scheduled tasks
   | "external-agent-preset" // cognia-next: contributes external-agent presets (Claude Code / Codex / etc.)
+  | "mcp-server-preset" // Contributes MCP server presets to the gallery
   | "connectors" // Provides Platform Connector adapters (Task 110)
   | "workflow" // Contributes custom workflow node executors (ADR 0017)
   | "workflow-trigger" // Contributes custom workflow trigger sources (ADR 0017)
@@ -386,6 +392,16 @@ export interface PluginManifest {
    */
   connectors?: PluginConnectorDef[]
 
+  // Plugin-first Computer Use plumbing (M1·T1)
+  /** MCP server presets contributed by this plugin (mcp-server-preset capability). */
+  mcpServerPresets?: PluginMcpServerPresetDef[]
+  /** Anthropic native tool definitions contributed by this plugin (native-anthropic-tool capability). */
+  nativeAnthropicTools?: PluginNativeAnthropicToolDef[]
+  /** Agent skills contributed by this plugin (skills capability — unblocked in M1). */
+  skills?: PluginSkillDef[]
+  /** External-agent presets — backfill: contract declares this field at plugin-capabilities.ts:346 but the manifest type doesn't expose it yet. */
+  externalAgentPresets?: PluginExternalAgentPresetDef[]
+
   // Visual Workflows (ADR 0017)
   /**
    * Custom workflow node executors and trigger sources contributed by this
@@ -397,6 +413,15 @@ export interface PluginManifest {
    * be declared in `capabilities[]` for the bridge to pick them up.
    */
   workflows?: import("./plugin-workflow").PluginManifestWorkflowsBlock
+
+  /**
+   * Plugin-declared Dexie (IndexedDB) tables. The host's
+   * `lib/plugin/dexie-bridge.ts` aggregates declarations across all enabled
+   * plugins and bumps the shared CogniaDB schema once on plugin enable.
+   * Tables are namespaced as `<pluginId>:<tableName>` to prevent collisions.
+   * Plugins access their tables via `ctx.dexie.table<T>(name)`.
+   */
+  dexie?: PluginManifestDexieBlock
 
   // Themes (capability "themes")
   /**
@@ -454,6 +479,19 @@ export interface PluginConnectorDef {
   defaultTrigger?: Record<string, unknown>
   /** Transport modes this adapter supports. */
   transportModes: string[]
+}
+
+/**
+ * One external-agent preset definition inside `PluginManifest.externalAgentPresets`.
+ *
+ * Adds a registry `id` on top of `ExternalAgentPresetConfig` (the shape used
+ * inside `lib/ai/agent/external/presets.ts`, which keys presets by id rather
+ * than carrying the id inline). The plugin manager passes `(id, config)` into
+ * `presets.registerPreset` on enable and removes them on disable.
+ */
+export interface PluginExternalAgentPresetDef extends ExternalAgentPresetConfig {
+  /** Stable id used as the registry key (e.g. "claude-code", "codex"). */
+  id: string
 }
 
 /**
@@ -983,6 +1021,13 @@ export interface PluginContext {
    * `lib/plugin/workflow-bridge.ts` (default in cognia-next 0.3.0+).
    */
   workflow: PluginWorkflowAPI
+
+  /**
+   * Dexie table API — only present when the plugin manifest declares a
+   * `dexie` block. Plugins access their IndexedDB tables through this API;
+   * the namespace prefix is applied automatically.
+   */
+  dexie?: PluginDexieAPI
 }
 
 /**
@@ -1130,6 +1175,22 @@ export interface PluginAgentAPI {
   unregisterMode: (id: string) => void
   executeAgent: (config: Record<string, unknown>) => Promise<unknown>
   cancelAgent: (agentId: string) => void
+  /**
+   * Plugin-first Computer Use plan (M1·T5). The four register*Preset / *Tool
+   * / *Skill methods below are the imperative-style entry points that mirror
+   * `registerTool`. They write into the matching §A-3 overlay registry under
+   * `lib/plugin/registries/`. The plugin manager also wires the declarative
+   * manifest-driven path: anything listed in `manifest.mcpServerPresets` /
+   * `manifest.nativeAnthropicTools` / `manifest.skills` /
+   * `manifest.externalAgentPresets` is registered on plugin enable, and
+   * unregistered in bulk via `unregister*ByPlugin(pluginId)` on disable —
+   * so plugins typically use the declarative form and only reach for these
+   * imperative methods when they need dynamic ids resolved at activate-time.
+   */
+  registerMcpServerPreset: (def: PluginMcpServerPresetDef) => void
+  registerNativeAnthropicTool: (def: PluginNativeAnthropicToolDef) => void
+  registerSkill: (def: PluginSkillDef) => void
+  registerExternalAgentPreset: (def: PluginExternalAgentPresetDef) => void
 }
 
 export interface PluginSettingsAPI {
@@ -1762,3 +1823,72 @@ export type PythonIPCMessage =
   | { type: "register_hook"; hook: PythonHookRegistration }
   | { type: "ready" }
   | { type: "shutdown" }
+
+// =============================================================================
+// Plugin Dexie tables (manifest.dexie)
+// =============================================================================
+
+/**
+ * Plugin-declared Dexie tables. Tables are namespaced as
+ * `<pluginId>:<tableName>` in the underlying CogniaDB instance.
+ *
+ * Plugins access their tables via `ctx.dexie.table<T>(name)` — the
+ * pluginId prefix is stripped from the public name.
+ */
+export interface PluginManifestDexieBlock {
+  /** Table declarations. Maximum 20 per plugin. */
+  tables: PluginDexieTableDef[]
+  /** Optional migration callbacks invoked once per (pluginId, toVersion). */
+  migrations?: PluginDexieMigrationDef[]
+}
+
+export interface PluginDexieTableDef {
+  /**
+   * Logical table name without the pluginId prefix.
+   * Must match `^[a-z][a-zA-Z0-9_]{0,30}$` — runtime-enforced in
+   * `lib/plugin/core/validation.ts`.
+   */
+  name: string
+  /**
+   * Dexie schema string (same syntax as `db.version().stores({})` values).
+   * Examples: "++id, name", "deliveryId, [target+at]", "&pluginId, updatedAt".
+   */
+  schema: string
+}
+
+export interface PluginDexieMigrationDef {
+  /**
+   * The manifest plugin-version (parsed from manifest.version major) this
+   * migration upgrades to. Runs when the plugin's recorded manifest version
+   * is < toVersion.
+   */
+  toVersion: number
+  /**
+   * Name of an exported function on the plugin module. Receives no args
+   * (the plugin can use `ctx.dexie` to operate on its tables). Errors put
+   * the plugin into an "error" state and the migration is retried on next
+   * enable, so make migrations idempotent.
+   */
+  upgrade: string
+}
+
+/**
+ * Runtime API for accessing a plugin's declared Dexie tables.
+ * Obtained via `ctx.dexie` — only present when the plugin manifest
+ * includes a `dexie` block.
+ */
+export interface PluginDexieAPI {
+  /**
+   * Returns a Dexie Table for the given logical name (as declared in
+   * manifest.dexie.tables, WITHOUT the `<pluginId>:` prefix).
+   * Throws if the table is not in this plugin's namespace.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  table<T = unknown, K = any>(name: string): import("dexie").Table<T, K>
+
+  /**
+   * Returns the raw Dexie instance for advanced queries / transactions.
+   * The plugin is responsible for only reading/writing its own tables.
+   */
+  rawDb(): import("dexie").Dexie
+}

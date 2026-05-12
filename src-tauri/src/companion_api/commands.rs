@@ -106,7 +106,17 @@ pub async fn companion_server_start(
         push_tokens: Arc::clone(&state.push_tokens),
     });
 
-    state.start(port, bind_loopback_only, shared).await
+    // Load TLS material (M2.9 — every companion-server bind terminates HTTPS).
+    let dir = data_dir(shared.app_handle.as_ref().expect("app_handle present"))
+        .map_err(CompanionServerError::Tls)?;
+    let tls_material = tls::ensure_certificate(&dir)
+        .map_err(|e| CompanionServerError::Tls(e.to_string()))?;
+
+    // Publish the fingerprint so `whoami` (P0.3) can include it in responses
+    // for app-layer attestation against the QR-pinned value.
+    super::set_tls_fingerprint(tls_material.fingerprint_sha256.clone());
+
+    state.start(port, bind_loopback_only, tls_material, shared).await
 }
 
 // ---------------------------------------------------------------------------
@@ -279,10 +289,60 @@ pub async fn companion_unrevoke_device(
 pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus>) {
     // Primary chat-streaming channel — the most latency-sensitive event.
     register_tauri_event(app, Arc::clone(&bus), "claude://message");
+    // Phase A3 — fine-grained message mutation events emitted by the
+    // JS-side `messageRepository` (lib/db/plugin-bridge.ts). Mobile WS
+    // subscribers observe these to keep their session view in sync.
+    register_tauri_event(app, Arc::clone(&bus), "claude://message-added");
+    register_tauri_event(app, Arc::clone(&bus), "claude://message-updated");
+    register_tauri_event(app, Arc::clone(&bus), "claude://message-deleted");
     // Pairing-lifecycle events — useful for multi-device observation.
     register_tauri_event(app, Arc::clone(&bus), "companion://device-paired");
     // Heartbeat / presence signal emitted by the JWT middleware on each request.
     register_tauri_event(app, bus, "companion://device-seen");
+    // Phase B4 — push fan-out for events worth notifying about while the
+    // phone is offline (WS not subscribed).
+    register_push_trigger(app, "claude://message-added");
+}
+
+/// Subscribe to `channel` and, on each emit, broadcast a push payload to
+/// every registered device whose WebSocket isn't currently open. No-op when
+/// no push dispatchers are configured.
+fn register_push_trigger(app: &tauri::AppHandle, channel: &'static str) {
+    use tauri::Listener as _;
+    let app_clone = app.clone();
+    app.listen(channel, move |event| {
+        let raw = event.payload().to_string();
+        let app2 = app_clone.clone();
+        let channel_name = channel.to_string();
+        tauri::async_runtime::spawn(async move {
+            // Probe Tauri-managed state for the registry; absent in tests.
+            let Some(state) = app2.try_state::<super::CompanionServerState>() else {
+                return;
+            };
+            let registry = std::sync::Arc::clone(&state.push_tokens);
+            let dispatchers = super::push_dispatchers();
+
+            let data: serde_json::Map<String, serde_json::Value> =
+                serde_json::from_str(&raw)
+                    .ok()
+                    .and_then(|v: serde_json::Value| v.as_object().cloned())
+                    .unwrap_or_default();
+            let payload = super::push::PushPayload {
+                title: Some("cognia".into()),
+                body: Some(channel_name.replace("claude://", "")),
+                data,
+            };
+
+            for provider in [
+                super::push::PushProvider::Fcm,
+                super::push::PushProvider::Apns,
+            ] {
+                if let Some(d) = dispatchers.for_provider(provider) {
+                    let _ = registry.broadcast_to_offline(&payload, d.as_ref()).await;
+                }
+            }
+        });
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -371,6 +431,8 @@ pub async fn companion_issue_pair_jwt(
     let port = state.bound_port().unwrap_or(DEFAULT_PORT);
 
     // URL priority: active tunnel > LAN > loopback fallback.
+    // Local origins use HTTPS (M2.9 self-signed termination); the tunnel URL
+    // is already Cloudflare HTTPS upstream.
     let base_url = if let Some(info) = state.tunnel.current() {
         info.public_url
     } else {
@@ -378,7 +440,7 @@ pub async fn companion_issue_pair_jwt(
             Some(BindMode::Lan) => detect_lan_ip().unwrap_or_else(|| "127.0.0.1".to_string()),
             _ => "127.0.0.1".to_string(),
         };
-        format!("http://{host}:{port}")
+        format!("https://{host}:{port}")
     };
 
     let fingerprint = ensure_tls_fingerprint(&app_handle).unwrap_or_default();
@@ -506,6 +568,173 @@ pub fn companion_tunnel_stop(state: State<'_, CompanionServerState>) {
     state.tunnel.stop();
 }
 
+// ---------------------------------------------------------------------------
+// Push delivery configuration (Phase B2 / B3)
+// ---------------------------------------------------------------------------
+
+/// Install an FCM dispatcher built from a service-account JSON payload.
+/// The JSON is exactly what the Google Cloud Console hands out under
+/// IAM → Service Accounts → Keys → "Create new key" → JSON. Credentials
+/// are persisted via the active `PushCredStore` (keyring on desktop, JSON
+/// file in headless mode) so they survive restarts.
+#[tauri::command]
+pub fn companion_push_configure_fcm(
+    service_account_json: String,
+) -> Result<(), String> {
+    let creds: super::dispatchers::FcmServiceAccount = serde_json::from_str(&service_account_json)
+        .map_err(|e| format!("invalid FCM service-account JSON: {e}"))?;
+    if let Some(store) = super::push_creds::active() {
+        store.store_fcm(&creds)?;
+    }
+    let dispatcher = super::dispatchers::FcmDispatcher::new(creds);
+    super::push_dispatchers().set_fcm(dispatcher);
+    Ok(())
+}
+
+/// Install an APNs dispatcher from key + identifier inputs.
+#[tauri::command]
+pub fn companion_push_configure_apns(
+    key_id: String,
+    team_id: String,
+    bundle_id: String,
+    private_key_pem: String,
+    production: bool,
+) -> Result<(), String> {
+    let persisted = super::push_creds::PersistedApns {
+        key_id,
+        team_id,
+        bundle_id,
+        private_key_pem,
+        production,
+    };
+    if let Some(store) = super::push_creds::active() {
+        store.store_apns(&persisted)?;
+    }
+    let dispatcher = super::dispatchers::ApnsDispatcher::new(persisted.clone().into())?;
+    super::push_dispatchers().set_apns(dispatcher);
+    Ok(())
+}
+
+/// Clear the FCM dispatcher (e.g. after the user rotates credentials).
+#[tauri::command]
+pub fn companion_push_clear_fcm() -> Result<(), String> {
+    if let Some(store) = super::push_creds::active() {
+        store.clear_fcm()?;
+    }
+    super::push_dispatchers().clear_fcm();
+    Ok(())
+}
+
+/// Clear the APNs dispatcher.
+#[tauri::command]
+pub fn companion_push_clear_apns() -> Result<(), String> {
+    if let Some(store) = super::push_creds::active() {
+        store.clear_apns()?;
+    }
+    super::push_dispatchers().clear_apns();
+    Ok(())
+}
+
+/// Diagnostics — which providers are currently configured. Used by the
+/// Settings UI to render the "Configured ✓" badges.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushConfigStatus {
+    pub fcm_configured: bool,
+    pub apns_configured: bool,
+}
+
+#[tauri::command]
+pub fn companion_push_status() -> Result<PushConfigStatus, String> {
+    let store = super::push_creds::active();
+    let (fcm, apns) = match store {
+        Some(s) => (
+            s.load_fcm()?.is_some(),
+            s.load_apns()?.is_some(),
+        ),
+        None => (false, false),
+    };
+    Ok(PushConfigStatus {
+        fcm_configured: fcm,
+        apns_configured: apns,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Connection diagnostics (Phase C2)
+// ---------------------------------------------------------------------------
+
+/// Per-candidate test-connection result.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompanionReachability {
+    pub url: String,
+    pub reachable: bool,
+    pub latency_ms: Option<u64>,
+    pub error: Option<String>,
+}
+
+/// Probe the local companion server on every plausible host (loopback, LAN
+/// IP, optional tunnel) and report which paths are reachable. The mobile
+/// app uses the same priority list (`lib/connectivity/connection-strategy.ts`)
+/// but from the phone side; this command is the desktop's mirror — useful
+/// for "is my server reachable at all" diagnostics.
+#[tauri::command]
+pub async fn companion_test_local_reachability(
+    state: State<'_, CompanionServerState>,
+    app_handle: tauri::AppHandle,
+) -> Result<Vec<CompanionReachability>, String> {
+    let port = state.bound_port().ok_or_else(|| "server not running".to_string())?;
+    let mut candidates: Vec<String> = vec![format!("https://127.0.0.1:{port}")];
+    if let Some(lan) = detect_lan_ip() {
+        candidates.push(format!("https://{lan}:{port}"));
+    }
+    if let Some(info) = state.tunnel.current() {
+        candidates.push(info.public_url);
+    }
+
+    let fp = ensure_tls_fingerprint(&app_handle).unwrap_or_default();
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("reqwest builder: {e}"))?;
+
+    let mut out = Vec::with_capacity(candidates.len());
+    for url in candidates {
+        let started = std::time::Instant::now();
+        // Hit a public-pre-auth endpoint so we don't need a JWT — issue/pair
+        // accepts an empty POST and returns 200.
+        let probe_url = format!("{}/api/v1/auth/pair/issue", url.trim_end_matches('/'));
+        match client.post(&probe_url).send().await {
+            Ok(resp) => {
+                let ok = resp.status().is_success();
+                out.push(CompanionReachability {
+                    url,
+                    reachable: ok,
+                    latency_ms: Some(started.elapsed().as_millis() as u64),
+                    error: if ok {
+                        None
+                    } else {
+                        Some(format!("HTTP {}", resp.status()))
+                    },
+                });
+            }
+            Err(err) => {
+                out.push(CompanionReachability {
+                    url,
+                    reachable: false,
+                    latency_ms: None,
+                    error: Some(err.to_string()),
+                });
+            }
+        }
+    }
+    // Silence unused warning on the fingerprint when it's not consumed.
+    let _ = fp;
+    Ok(out)
+}
+
 /// Return the active tunnel info, or null when no tunnel is running.
 #[tauri::command]
 pub fn companion_tunnel_current(state: State<'_, CompanionServerState>) -> Option<TunnelInfo> {
@@ -555,19 +784,19 @@ mod tests {
     #[tokio::test]
     async fn issue_pair_jwt_returns_loopback_when_stopped() {
         // Server is never started → bind_mode is None → loopback fallback.
+        // Post-M2.9 the loopback URL is HTTPS (the desktop server always
+        // terminates TLS, so the same scheme works whether the QR is
+        // scanned by a phone over LAN or shown to a developer pasting it
+        // into a local browser with cert pinning bypass).
         let server_state = CompanionServerState::new();
-        // Simulate the keyring being unavailable in CI by relying on the
-        // generated-on-demand path — `secret::load_or_generate` writes to the
-        // OS keyring in production, but the function may also fail on
-        // headless CI. We tolerate either branch.
         let result = (|| async {
             let port = server_state.bound_port().unwrap_or(DEFAULT_PORT);
             let host = "127.0.0.1".to_string();
-            Ok::<_, String>(format!("http://{host}:{port}"))
+            Ok::<_, String>(format!("https://{host}:{port}"))
         })()
         .await
         .expect("synthesize url");
-        assert!(result.starts_with("http://127.0.0.1:"));
+        assert!(result.starts_with("https://127.0.0.1:"));
         assert!(result.ends_with(&DEFAULT_PORT.to_string()));
     }
 }

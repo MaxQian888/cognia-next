@@ -95,6 +95,13 @@ export interface BuildOptionsContext {
    * multiple twin-bound members per turn.
    */
   precomputedQueryEmbedding?: number[]
+  /**
+   * Per-message ephemeral skill ids unioned with the active character's
+   * `skillIds`. The composer's SkillPicker drives this; the chat send hook
+   * is expected to clear the store slice after dispatch. Disabled skills
+   * and ids already on the character are de-duped at resolve time.
+   */
+  ephemeralSkillIds?: string[]
 }
 
 /**
@@ -185,15 +192,26 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     character = (await getCharacter(session.characterId)) ?? null
   }
 
-  // --- Resolve skills attached to this character (minus session-disables) --
+  // --- Resolve skills: character.skillIds ∪ ephemeralSkillIds, minus session-disables.
   // Honour the per-skill `status` flag — disabled skills don't get appended,
-  // even if the character references them. Non-fatal: a missing/legacy row
-  // that has no status is treated as "enabled".
+  // even if the character references them or the user attached them ad-hoc.
+  // Non-fatal: a missing/legacy row that has no status is treated as enabled.
   let skills: Skill[] = []
-  if (character?.skillIds?.length) {
+  const characterSkillIds = character?.skillIds ?? []
+  const ephemeralIds = ctx.ephemeralSkillIds ?? []
+  if (characterSkillIds.length || ephemeralIds.length) {
     const disabled = new Set(session?.disabledSkillIds ?? [])
-    const wantedIds = character.skillIds.filter((id) => !disabled.has(id))
-    skills = await listEnabledSkillsByIds(wantedIds)
+    const seen = new Set<string>()
+    const wantedIds: string[] = []
+    for (const id of [...characterSkillIds, ...ephemeralIds]) {
+      if (disabled.has(id)) continue
+      if (seen.has(id)) continue
+      seen.add(id)
+      wantedIds.push(id)
+    }
+    if (wantedIds.length) {
+      skills = await listEnabledSkillsByIds(wantedIds)
+    }
   }
   // Bump usage counters for the skills that actually made it into the prompt.
   // Fire-and-forget: a failed write here shouldn't block the send.
@@ -366,7 +384,31 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
 
   const skillSection = renderSkillsSection(skills)
   const modeSection = activeMode?.systemPrompt?.trim() || ""
-  const systemPrompt = [baseSystem, modeSection, skillSection]
+
+  // --- Plugin-contributed skills (M4) -------------------------------------
+  // Resolve registry-sourced skills (the skill-registry overlay landed in
+  // M1·T3, lifecycle wiring landed in M1·T5). Plugin skills with
+  // local-folder / inline source append their body to the system prompt
+  // like chat skills; anthropic-managed plugin skills become
+  // `container.skill_id` entries on the sidecar request. Best-effort —
+  // a resolution failure must never block the send.
+  let pluginSkillSection = ""
+  if (character?.pluginSkillIds?.length) {
+    try {
+      const { resolveSkillsForCharacter, extractContainerSkillIds, renderResolvedSkillsSection } =
+        await import("@/lib/claude/skills-bridge")
+      const resolvedPlugin = await resolveSkillsForCharacter(character.pluginSkillIds)
+      const containerSkillIds = extractContainerSkillIds(resolvedPlugin)
+      if (containerSkillIds.length > 0) {
+        opts.containerSkillIds = containerSkillIds
+      }
+      pluginSkillSection = renderResolvedSkillsSection(resolvedPlugin)
+    } catch (err) {
+      console.warn("plugin skill resolution failed", err)
+    }
+  }
+
+  const systemPrompt = [baseSystem, modeSection, skillSection, pluginSkillSection]
     .filter((p) => p && p.trim().length > 0)
     .join("\n\n---\n\n")
   if (systemPrompt) opts.systemPrompt = systemPrompt
@@ -474,6 +516,23 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // override could later be added without changing the sidecar protocol.
   if (appSettings?.builtinTools) {
     opts.builtinTools = appSettings.builtinTools
+  }
+
+  // --- Plugin tools → SDK sidecar (M2) -------------------------------------
+  // When the plugin store has enabled `tools` plugins, surface their tool
+  // manifest so the sidecar can build a synthetic `cognia-plugin-tools`
+  // in-process MCP server. Functions don't cross the stdio channel; the
+  // sidecar emits `plugin_tool_exec` events and the renderer dispatches
+  // them via `lib/claude/plugin-tool-ipc.ts:handlePluginToolExec`.
+  if (!character?.disablePluginTools) {
+    try {
+      const { buildPluginToolsManifest } = await import("@/lib/plugin/bridge/sidecar-tools-bridge")
+      const manifest = buildPluginToolsManifest()
+      if (manifest.length > 0) opts.pluginTools = manifest
+    } catch {
+      // Non-fatal — skip plugin tools for this turn if the bridge isn't
+      // ready (e.g. the plugin store hasn't been hydrated yet on cold boot).
+    }
   }
 
   // --- Convenience modes (bare / debug / brief) ----------------------------

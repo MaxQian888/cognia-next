@@ -9,6 +9,8 @@ import { getDb } from "@/lib/db/schema"
 import {
   __resetInstalledForTests,
   installDesktopMessageSource,
+  persistIncomingMessage,
+  readMessagesPage,
   readSessionPage,
 } from "./desktop-message-source"
 
@@ -348,7 +350,7 @@ describe("install guard", () => {
     teardown2()
     teardown1()
     // The second listen/listen/listen triple did NOT fire.
-    expect(listen).toHaveBeenCalledTimes(3)
+    expect(listen).toHaveBeenCalledTimes(5)
   })
 
   it("forceReinstall: false short-circuits when already installed", async () => {
@@ -365,16 +367,125 @@ describe("install guard", () => {
       forceReinstall: true,
     })
     // 3 listeners registered.
-    expect(listen).toHaveBeenCalledTimes(3)
+    expect(listen).toHaveBeenCalledTimes(5)
 
     // Second call with forceReinstall: false short-circuits — no extra listens.
     const teardown2 = await installDesktopMessageSource({
       bridge: { listen, invoke },
       forceReinstall: false,
     })
-    expect(listen).toHaveBeenCalledTimes(3)
+    expect(listen).toHaveBeenCalledTimes(5)
 
     teardown2()
     teardown1()
+  })
+})
+
+describe("readMessagesPage", () => {
+  beforeEach(async () => {
+    __resetInstalledForTests()
+    await getDb().messages.clear()
+  })
+
+  it("returns messages in createdAt-ascending order for the session", async () => {
+    const db = getDb()
+    await db.messages.bulkPut([
+      {
+        id: "m3",
+        sessionId: "s1",
+        role: "user",
+        parts: [{ type: "text", text: "third" }],
+        createdAt: 30,
+      },
+      {
+        id: "m1",
+        sessionId: "s1",
+        role: "user",
+        parts: [{ type: "text", text: "first" }],
+        createdAt: 10,
+      },
+      {
+        id: "m2",
+        sessionId: "s1",
+        role: "assistant",
+        parts: [{ type: "text", text: "second" }],
+        createdAt: 20,
+      },
+      {
+        id: "x",
+        sessionId: "other",
+        role: "user",
+        parts: [{ type: "text", text: "elsewhere" }],
+        createdAt: 0,
+      },
+    ] as never)
+
+    const page = await readMessagesPage("s1")
+    expect(page.rows.map((r) => r.id)).toEqual(["m1", "m2", "m3"])
+    expect(page.total).toBe(3)
+    expect(page.next_offset).toBeUndefined()
+  })
+
+  it("paginates with limit + offset and reports next_offset", async () => {
+    const db = getDb()
+    const rows = Array.from({ length: 5 }, (_, i) => ({
+      id: `m${i}`,
+      sessionId: "s1",
+      role: "user" as const,
+      parts: [{ type: "text" as const, text: `t${i}` }],
+      createdAt: i,
+    }))
+    await db.messages.bulkPut(rows as never)
+
+    const page1 = await readMessagesPage("s1", 2, 0)
+    expect(page1.rows.map((r) => r.id)).toEqual(["m0", "m1"])
+    expect(page1.next_offset).toBe(2)
+
+    const page2 = await readMessagesPage("s1", 2, 2)
+    expect(page2.rows.map((r) => r.id)).toEqual(["m2", "m3"])
+    expect(page2.next_offset).toBe(4)
+
+    const page3 = await readMessagesPage("s1", 2, 4)
+    expect(page3.rows.map((r) => r.id)).toEqual(["m4"])
+    expect(page3.next_offset).toBeUndefined()
+  })
+
+  it("returns an empty page for a session with no messages", async () => {
+    const page = await readMessagesPage("ghost")
+    expect(page.rows).toEqual([])
+    expect(page.total).toBe(0)
+    expect(page.next_offset).toBeUndefined()
+  })
+})
+
+describe("persistIncomingMessage", () => {
+  beforeEach(async () => {
+    __resetInstalledForTests()
+    await getDb().messages.clear()
+  })
+
+  it("creates a user message in Dexie and returns its id", async () => {
+    const out = await persistIncomingMessage("s1", "hello from phone", undefined)
+    expect(out.message_id).toMatch(/^[0-9a-z]+$/)
+
+    const row = await getDb().messages.get(out.message_id)
+    expect(row?.sessionId).toBe("s1")
+    expect(row?.role).toBe("user")
+    const text = (row?.parts?.[0] as { text?: string } | undefined)?.text
+    expect(text).toBe("hello from phone")
+  })
+
+  it("honors explicit assistant role", async () => {
+    const out = await persistIncomingMessage("s1", "from assistant", "assistant")
+    const row = await getDb().messages.get(out.message_id)
+    expect(row?.role).toBe("assistant")
+  })
+
+  it("rejects empty content", async () => {
+    await expect(persistIncomingMessage("s1", "", undefined)).rejects.toThrow(/content/)
+  })
+
+  it("rejects empty sessionId", async () => {
+    await expect(persistIncomingMessage("", "x", undefined)).rejects.toThrow(/sessionId/)
   })
 })

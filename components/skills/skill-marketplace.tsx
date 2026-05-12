@@ -13,6 +13,7 @@ import { useSkillMarketplace, type MarketplaceSourceFilter } from "@/hooks/skill
 import type { MarketplaceItem } from "@/lib/skills/marketplace-types"
 import { SkillMarketplaceCard } from "./skill-marketplace-card"
 import { SkillMarketplaceDetail } from "./skill-marketplace-detail"
+import { SkillMarketplaceEmpty } from "./skill-marketplace-empty"
 import { loggers } from "@/lib/logger"
 
 export function SkillMarketplace() {
@@ -122,6 +123,8 @@ export function SkillMarketplace() {
           <div className="p-6 text-center text-xs text-destructive">
             {t("errorLoad", { error: m.state.error })}
           </div>
+        ) : !m.isSkillsMpEnabled && m.state.items.length === 0 ? (
+          <SkillMarketplaceEmpty />
         ) : m.state.items.length === 0 ? (
           <div className="p-12 text-center text-xs text-muted-foreground">{t("empty")}</div>
         ) : (

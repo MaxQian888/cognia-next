@@ -39,6 +39,8 @@ import { createPluginA2UIBridge, type PluginA2UIBridge } from "@/lib/plugin/brid
 import { PluginThemesBridge } from "@/lib/plugin/bridge/themes-bridge"
 import { PluginLifecycleHooks, getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
+import { applyPluginTables, removePluginTables } from "@/lib/plugin/dexie-bridge"
+import { getDb } from "@/lib/db/schema"
 import { clearPluginExtensions } from "@/lib/plugin/api/extension-api"
 import { getPluginExtensions, restorePluginExtensions } from "@/lib/plugin/api/extension-api"
 import {
@@ -61,6 +63,19 @@ import {
   recordSilentFailure,
 } from "@/lib/plugin/contracts/diagnostics-store"
 import { getBrowserBuiltinRegistry } from "./browser-builtin-registry"
+import {
+  registerMcpServerPreset,
+  unregisterMcpServerPresetsByPlugin,
+} from "@/lib/plugin/registries/mcp-server-preset-registry"
+import {
+  registerNativeAnthropicTool,
+  unregisterNativeAnthropicToolsByPlugin,
+} from "@/lib/plugin/registries/native-anthropic-tool-registry"
+import { registerSkill, unregisterSkillsByPlugin } from "@/lib/plugin/registries/skill-registry"
+import {
+  registerPreset as registerExternalAgentPresetOverlay,
+  unregisterPresetsByPlugin as unregisterExternalAgentPresetsByPlugin,
+} from "@/lib/ai/agent/external/presets"
 
 // =============================================================================
 // Governance mode resolution
@@ -959,6 +974,16 @@ export class PluginManager {
         await this.loadPlugin(pluginId)
       }
 
+      // Apply any declared Dexie tables before enabling the plugin so that
+      // ctx.dexie is ready when the plugin's activate() runs.
+      if (plugin.manifest.dexie) {
+        await applyPluginTables(
+          getDb() as unknown as import("dexie").default,
+          pluginId,
+          plugin.manifest.dexie
+        )
+      }
+
       // Enable the plugin
       await store.enablePlugin(pluginId, { viaManager: false })
 
@@ -1115,7 +1140,7 @@ export class PluginManager {
     }
   }
 
-  async uninstallPlugin(pluginId: string): Promise<void> {
+  async uninstallPlugin(pluginId: string, options?: { purgeData?: boolean }): Promise<void> {
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
 
@@ -1139,6 +1164,14 @@ export class PluginManager {
 
       // Remove from store
       await store.uninstallPlugin(pluginId, { skipFileRemoval: true, viaManager: false })
+
+      // Remove plugin Dexie tables. Default: keep data (allows reinstall to resume).
+      // Pass purgeData: true from the settings "Delete plugin data" action.
+      await removePluginTables(
+        getDb() as unknown as import("dexie").default,
+        pluginId,
+        options?.purgeData ? "purge" : "keep"
+      )
 
       await this.revokePluginPermissions(pluginId, plugin.manifest.permissions || [])
       getPermissionGuard().unregisterPlugin(pluginId)
@@ -1738,6 +1771,59 @@ export class PluginManager {
         )
       }
     }
+
+    // M1·T5 — Plugin-first Computer Use capability contributions. Each
+    // declarative manifest array writes into the matching §A-3 overlay
+    // registry, tagged with `pluginId` so bulk cleanup in
+    // `unregisterPluginContributions` can drop everything in one call.
+    // Failures are isolated per-entry so a single malformed def can't block
+    // the rest of the plugin's contributions.
+    if (plugin.manifest.mcpServerPresets?.length) {
+      for (const def of plugin.manifest.mcpServerPresets) {
+        try {
+          registerMcpServerPreset(def.id, def, { pluginId })
+        } catch (err) {
+          loggers.manager.warn(
+            `[plugin:${pluginId}] failed to register MCP server preset ${def.id}:`,
+            err
+          )
+        }
+      }
+    }
+    if (plugin.manifest.nativeAnthropicTools?.length) {
+      for (const def of plugin.manifest.nativeAnthropicTools) {
+        try {
+          registerNativeAnthropicTool(def.id, def, { pluginId })
+        } catch (err) {
+          loggers.manager.warn(
+            `[plugin:${pluginId}] failed to register native Anthropic tool ${def.id}:`,
+            err
+          )
+        }
+      }
+    }
+    if (plugin.manifest.skills?.length) {
+      for (const def of plugin.manifest.skills) {
+        try {
+          registerSkill(def.id, def, { pluginId })
+        } catch (err) {
+          loggers.manager.warn(`[plugin:${pluginId}] failed to register skill ${def.id}:`, err)
+        }
+      }
+    }
+    if (plugin.manifest.externalAgentPresets?.length) {
+      for (const def of plugin.manifest.externalAgentPresets) {
+        try {
+          const { id, ...config } = def
+          registerExternalAgentPresetOverlay(id, config, { pluginId })
+        } catch (err) {
+          loggers.manager.warn(
+            `[plugin:${pluginId}] failed to register external-agent preset ${def.id}:`,
+            err
+          )
+        }
+      }
+    }
   }
 
   private async unregisterPluginContributions(pluginId: string): Promise<void> {
@@ -1784,6 +1870,16 @@ export class PluginManager {
     }
 
     await this.unregisterPluginSlashCommands(pluginId)
+
+    // M1·T5 — Bulk-drop Plugin-first Computer Use overlay contributions.
+    // Each registry's `unregister*ByPlugin` is idempotent and returns the
+    // count removed; we don't act on the count here, but a future
+    // diagnostic surface could surface it.
+    unregisterMcpServerPresetsByPlugin(pluginId)
+    unregisterNativeAnthropicToolsByPlugin(pluginId)
+    unregisterSkillsByPlugin(pluginId)
+    unregisterExternalAgentPresetsByPlugin(pluginId)
+
     this.registry.unregisterAll(pluginId)
   }
 

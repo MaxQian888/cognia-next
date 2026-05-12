@@ -56,9 +56,17 @@ import type {
   WindowOptions,
   PluginWindow,
   PluginWorkflowAPI,
+  PluginMcpServerPresetDef,
+  PluginNativeAnthropicToolDef,
+  PluginSkillDef,
+  PluginExternalAgentPresetDef,
 } from "@/types/plugin"
 import type { PluginNodeDef, PluginTriggerDef } from "@/types/plugin/plugin-workflow"
 import { registerNodeExecutor, unregisterNodeExecutor } from "@/lib/workflow/nodes/registry"
+import { registerMcpServerPreset } from "@/lib/plugin/registries/mcp-server-preset-registry"
+import { registerNativeAnthropicTool } from "@/lib/plugin/registries/native-anthropic-tool-registry"
+import { registerSkill } from "@/lib/plugin/registries/skill-registry"
+import { registerPreset as registerExternalAgentPresetOverlay } from "@/lib/ai/agent/external/presets"
 import {
   addPluginCatalogEntry,
   removePluginCatalogEntry,
@@ -92,6 +100,8 @@ import {
   createMediaAPI,
   createStorageAPI,
 } from "../api"
+import { createDexieAPI } from "../api/dexie-api"
+import { getDb } from "@/lib/db/schema"
 import { createIPCAPI } from "../messaging/ipc"
 import { createEventAPI } from "../messaging/message-bus"
 import { getPluginI18nLoader } from "../utils/i18n-loader"
@@ -143,6 +153,9 @@ export function createPluginContext(
     secrets: createSecretsAPI(pluginId),
     scheduler: createSchedulerAPI(pluginId),
     workflow: createWorkflowAPI(pluginId),
+    dexie: plugin.manifest.dexie
+      ? createDexieAPI(getDb() as unknown as import("dexie").default, pluginId)
+      : undefined,
   }
 
   // If debug mode is enabled, wrap the context with debug instrumentation
@@ -542,6 +555,27 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
           }
         })
         .catch((e) => loggers.agent.error("Failed to cancel agent:", e))
+    },
+
+    // M1·T5 — Plugin-first Computer Use capability registration.
+    // Each method writes into the matching §A-3 overlay registry. The plugin
+    // manager calls `unregister*ByPlugin(pluginId)` during disable, so plugins
+    // don't have to track ids individually — bulk cleanup is automatic.
+    registerMcpServerPreset: (def: PluginMcpServerPresetDef) => {
+      registerMcpServerPreset(def.id, def, { pluginId })
+    },
+
+    registerNativeAnthropicTool: (def: PluginNativeAnthropicToolDef) => {
+      registerNativeAnthropicTool(def.id, def, { pluginId })
+    },
+
+    registerSkill: (def: PluginSkillDef) => {
+      registerSkill(def.id, def, { pluginId })
+    },
+
+    registerExternalAgentPreset: (def: PluginExternalAgentPresetDef) => {
+      const { id, ...config } = def
+      registerExternalAgentPresetOverlay(id, config, { pluginId })
     },
   }
 }

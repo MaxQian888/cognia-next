@@ -1,19 +1,26 @@
 {
-  "title": "English",
+  "title": "cognia-next",
   "pages": [
+    "---Getting started---",
     "index",
     "getting-started",
+    "---Core architecture---",
     "architecture",
     "runtime-and-tauri",
     "sidecar-and-claude-sdk",
+    "---Chat & agents---",
     "chat-and-skills",
     "employee-twin",
+    "---Data & storage---",
+    "storage",
     "vector-store",
     "backup-and-data",
+    "---Subsystems---",
     "scheduler",
     "plugin-system",
-    "storage",
+    "---Platform & UI---",
     "theming-and-i18n",
+    "---Dev & deploy---",
     "development",
     "deployment"
   ]

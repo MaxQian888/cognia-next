@@ -18,6 +18,8 @@ export interface SkillAnalytics {
   recentlyUsed: Skill[]
   byCategory: Array<{ category: SkillCategory; count: number; usage: number }>
   bySource: Array<{ source: SkillSource; count: number; usage: number }>
+  /** Daily-bucketed usage for the last 30 days, oldest → newest. */
+  usageByDay: Array<{ date: string; count: number }>
 }
 
 const TOP_LIMIT = 8
@@ -41,6 +43,7 @@ function buildAnalytics(rows: Skill[] | undefined): SkillAnalytics {
       recentlyUsed: [],
       byCategory: [],
       bySource: [],
+      usageByDay: [],
     }
   }
   const totalSkills = rows.length
@@ -89,5 +92,32 @@ function buildAnalytics(rows: Skill[] | undefined): SkillAnalytics {
     bySource: Array.from(bySource.entries())
       .map(([source, v]) => ({ source, count: v.count, usage: v.usage }))
       .sort((a, b) => b.usage - a.usage),
+    usageByDay: bucketUsageByDay(rows),
   }
+}
+
+/**
+ * Project lastUsedAt timestamps onto the last 30 calendar days. Newer days
+ * inherit the skill's full usageCount (we lack per-day granularity); older
+ * days stay zero. Good enough for a sparkline.
+ */
+function bucketUsageByDay(rows: Skill[]): Array<{ date: string; count: number }> {
+  const days: { date: string; count: number }[] = []
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(today)
+    d.setDate(d.getDate() - i)
+    days.push({ date: d.toISOString().slice(0, 10), count: 0 })
+  }
+  const indexByDate = new Map(days.map((d, i) => [d.date, i]))
+  for (const s of rows) {
+    if (!s.lastUsedAt) continue
+    const d = new Date(s.lastUsedAt)
+    d.setHours(0, 0, 0, 0)
+    const key = d.toISOString().slice(0, 10)
+    const idx = indexByDate.get(key)
+    if (idx !== undefined) days[idx].count += s.usageCount ?? 1
+  }
+  return days
 }

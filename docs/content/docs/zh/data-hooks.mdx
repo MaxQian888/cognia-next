@@ -1,0 +1,248 @@
+---
+title: 数据 Hooks
+description: DataAdapter 抽象——让聊天组件以同一份代码跑在 Dexie（桌面）或 WebSocket 桥（移动端 PWA）上。
+---
+
+# 数据 Hooks
+
+`lib/data-hooks/` 是聊天 UI 与持久层之间的"插槽"。它把组件原本直连 Dexie 的写法（`useLiveQuery(() => listCharacters())`）抽到一个名为 `DataAdapter` 的接口背后，由 `<DataAdapterProvider adapter={...}>` 注入。桌面注入 Dexie 实现，移动端 PWA 之后将注入 WebSocket 桥实现 —— 同一份组件代码两个形态都能跑。
+
+<TLDR>
+  `types.ts` 定义 `DataAdapter` 接口（4 个反应式 `use*` 读 + 4 个一次性 mutation）。`context.tsx` 是
+  React Context + 一组便捷 hooks（`useCharacters / useCharacter / useSkillsByIds / usePresets`
+  等），消费方只需要这些 hooks，不感知底下是谁。`dexie-adapter.tsx` 是桌面端的产线实现，直接复用
+  `lib/db/*` 的现成函数，反应式读用 `dexie-react-hooks` 的 `useLiveQuery`。所有 hooks 都做 SSR
+  guard（`typeof window !== "undefined"`），可以在 `output: "export"` 下安全使用。
+</TLDR>
+
+## 设计动机
+
+cognia-next 的桌面端把数据放 Dexie（IndexedDB），聊天组件直接 `useLiveQuery(() => listCharacters())` 读得到。但移动端 PWA 不能复制 Dexie —— 数据要保留在桌面机器上，手机通过 LAN/tunnel 走 WebSocket 拿。同一个 `ChatHeader / Composer / MessageRenderer` 不该有两份代码。
+
+DataAdapter 把"反应式拉数据 + 提交变更"统一为接口；桌面注入 Dexie 实现，移动端注入 WS 实现，组件不知道也不需要知道。
+
+## 接口
+
+```ts title="lib/data-hooks/types.ts"
+export type SessionPatch = Partial<Omit<ChatSession, "id" | "createdAt">>
+
+export interface DataAdapter {
+  // === 反应式读（React hooks，必须在组件 / hook 顶层调用） ===
+  useCharacters(): Character[] | undefined
+  useCharacter(id: string | null | undefined): Character | undefined
+  useSkillsByIds(ids: readonly string[] | null | undefined): Skill[] | undefined
+  usePresets(): SystemPromptPreset[] | undefined
+
+  // === Mutation（普通 Promise） ===
+  clearMessages(sessionId: string): Promise<void>
+  updateSession(id: string, patch: SessionPatch): Promise<void>
+  recordPresetUsage(id: string): Promise<void>
+  trustWorkspace(path: string, note?: string): Promise<void>
+}
+```
+
+关键约束：
+
+- **`use*` 是真的 React hooks** —— 实现里必须在每次调用时按相同顺序触发同样的 hook（`useLiveQuery` 等）。WS 实现要自己保证这点。
+- **返回 `undefined` 表示 loading** —— 任何实现在数据还没就绪时都返回 `undefined`，组件统一按"加载中"渲染。
+- **空集合返回 `[]`**，不返回 `undefined`（避免 loading 与"列表为空"歧义）。
+- **Mutation 不要求等待** —— `void adapter.recordPresetUsage(id)` 是合法用法，UI 用乐观更新。
+
+## React Context 与便捷 hooks
+
+`context.tsx` 提供 Provider + 一组只读 / 写入便捷 hooks：
+
+```tsx title="lib/data-hooks/context.tsx"
+const DataAdapterContext = createContext<DataAdapter | null>(null)
+
+export function DataAdapterProvider({ adapter, children }: ProviderProps) {
+  return <DataAdapterContext.Provider value={adapter}>{children}</DataAdapterContext.Provider>
+}
+
+export function useDataAdapter(): DataAdapter {
+  const adapter = useContext(DataAdapterContext)
+  if (!adapter) {
+    throw new Error(
+      "useDataAdapter() called outside of <DataAdapterProvider>. " +
+        "Mount it once near the root of your app (see app/layout.tsx)."
+    )
+  }
+  return adapter
+}
+
+// 便捷 hooks —— 组件代码只导入这些
+export function useCharacters() {
+  return useDataAdapter().useCharacters()
+}
+export function useCharacter(id) {
+  return useDataAdapter().useCharacter(id)
+}
+export function useSkillsByIds(ids) {
+  return useDataAdapter().useSkillsByIds(ids)
+}
+export function usePresets() {
+  return useDataAdapter().usePresets()
+}
+
+export function useClearMessages() {
+  const adapter = useDataAdapter()
+  return (sessionId: string) => adapter.clearMessages(sessionId)
+}
+// ... 其余 mutation 同理
+```
+
+组件层面看到的就是 `import { useCharacters } from "@/lib/data-hooks/context"`，等价于"无论谁在底下都给我一份字符表"。
+
+Provider 必须挂在树顶 —— `app/layout.tsx` 在 `DataAdapterProvider` 之外的任何位置调用便捷 hooks 都会抛错。错误信息明确指向"挂 Provider"，避免在测试 / 子树漏配时静默失败。
+
+## Dexie 适配器
+
+桌面产线实现：
+
+```tsx title="lib/data-hooks/dexie-adapter.tsx"
+const isClient = (): boolean => typeof window !== "undefined"
+
+export const dexieAdapter: DataAdapter = {
+  useCharacters() {
+    return useLiveQuery(() => (isClient() ? listCharacters() : Promise.resolve([])), [])
+  },
+
+  useCharacter(id) {
+    return useLiveQuery(
+      () => (isClient() && id ? getCharacter(id) : Promise.resolve(undefined)),
+      [id ?? ""]
+    )
+  },
+
+  useSkillsByIds(ids) {
+    const key = ids?.join(",") ?? "" // 稳定 key 避免 array ref 抖动
+    return useLiveQuery(
+      () => (isClient() && ids && ids.length > 0 ? listSkillsByIds([...ids]) : Promise.resolve([])),
+      [key]
+    )
+  },
+
+  usePresets() {
+    return useLiveQuery(() => (isClient() ? listPresets() : Promise.resolve([])), [])
+  },
+
+  async clearMessages(sessionId) {
+    await clearMessages(sessionId)
+  },
+  async updateSession(id, patch) {
+    await updateSession(id, patch)
+  },
+  async recordPresetUsage(id) {
+    await recordPresetUsage(id)
+  },
+  async trustWorkspace(path, note) {
+    await trustWorkspace(path, note)
+  },
+}
+```
+
+实现要点：
+
+- **SSR guard** —— 所有读取都先检查 `typeof window !== "undefined"`。Next.js 静态导出会在 build 期执行组件树，IndexedDB 在 Node 里不存在；guard 保证 build 不爆。Mutation 不需要 guard，因为它们只在用户交互后触发。
+- **稳定 dependency key** —— `useSkillsByIds` 接受数组 `ids`，但父组件每次 render 给到的可能是新 ref。`ids.join(",")` 让 `useLiveQuery` 仅在成员变化时重跑，避免无谓的 IndexedDB 往返。
+- **Promise.resolve fallback** —— `useLiveQuery` 期望函数返回 Promise；SSR / 空输入时给一个 resolved Promise，类型契约不变。
+
+## 挂载位置
+
+`app/layout.tsx` 中 Provider 链尾部：
+
+```tsx title="app/layout.tsx (节选)"
+<ThemeProvider>
+  <LocaleGate>
+    <SettingsSyncProvider>
+      <TauriProvider>
+        <TooltipProvider>
+          <LoggerProvider>
+            {/* ...更多 Provider... */}
+            <DataAdapterProvider adapter={dexieAdapter}>{children}</DataAdapterProvider>
+          </LoggerProvider>
+        </TooltipProvider>
+      </TauriProvider>
+    </SettingsSyncProvider>
+  </LocaleGate>
+</ThemeProvider>
+```
+
+`DataAdapterProvider` 必须在所有消费数据的组件之上，所以放在链末尾。详细的 Provider 顺序与原因见 [架构](./architecture#第-1-层--浏览器--react)。
+
+## 消费方示例
+
+```tsx title="components/chat/chat-header.tsx (示意)"
+import { useCharacters, useUpdateSession } from "@/lib/data-hooks/context"
+
+export function ChatHeader({ sessionId }: { sessionId: string }) {
+  const characters = useCharacters() // undefined → loading; Character[] → ready
+  const updateSession = useUpdateSession()
+
+  if (!characters) return <Skeleton />
+
+  return (
+    <CharacterPicker
+      options={characters}
+      onChange={(id) => updateSession(sessionId, { characterId: id })}
+    />
+  )
+}
+```
+
+组件代码不引用 `@/lib/db/*` 或 `dexie-react-hooks`。如果未来移动端实现一个 `wsAdapter`，把它丢进 Provider 就好，组件无改动。
+
+## 测试
+
+`dexie-adapter.test.tsx` 用 React Testing Library + fake Dexie（`fake-indexeddb`）验证：
+
+- 读 hooks 在挂载后能拿到当前数据。
+- 数据库变化时 hook 重渲。
+- SSR 模拟（`window === undefined`）时不抛错，返回 `undefined`。
+- Mutation 调用确实修改了 Dexie。
+
+任何新增 `DataAdapter` 实现都应复用同一组测试用例（按"行为合约"测，不按实现细节测），保证桌面 / 移动两条路径行为一致。
+
+## 演进路径
+
+当前接口只覆盖了聊天/角色/技能/preset/trusted-workspace。其他数据（消息列表、agent team、画板）仍直接读 Dexie。原则上每当一种数据要被"远程消费"时，再补到 DataAdapter：
+
+1. 接口加方法（`useMessages(sessionId): ChatMessage[] | undefined`）。
+2. `dexie-adapter.tsx` 加 Dexie 实现。
+3. 组件改成 `import { useMessages } from "@/lib/data-hooks/context"`。
+4. 未来 WS adapter 出现时再实现同一方法。
+
+不要为暂时不需要远程化的数据预留 adapter 方法 —— 直接消费 `lib/db/*` 更便宜。
+
+## 与上层集成
+
+| 调用方                  | 用途                                               |
+| ----------------------- | -------------------------------------------------- |
+| `components/chat/*`     | 字符 / 技能 / preset 的反应式读 + session 状态变更 |
+| `components/settings/*` | 在编辑器外侧反应式读"当前列表"，编辑后写回         |
+| `components/skills/*`   | `useSkillsByIds` 在 skill 选择器里批量读           |
+| `app/layout.tsx`        | 挂载 `<DataAdapterProvider>`                       |
+
+不在 Provider 树之内的位置（如 `lib/twin/*` 后台 worker、调度器执行器）继续直接调 `lib/db/*` —— DataAdapter 是 UI 抽象，不是数据层抽象。
+
+## 关联文档
+
+<Cards>
+  <Card title="存储" href="./storage" description="Dexie schema 与各业务表的位置" />
+  <Card
+    title="备份与数据迁移"
+    href="./backup-and-data"
+    description="DataAdapter 影响不到备份层 —— 备份直读 Dexie"
+  />
+  <Card title="架构" href="./architecture" description="Provider 链中 DataAdapter 的相对位置" />
+  <Card title="聊天与技能" href="./chat-and-skills" description="DataAdapter 的主要消费方" />
+</Cards>
+
+## 在哪里入手
+
+| 目标                             | 文件                                                                                 |
+| -------------------------------- | ------------------------------------------------------------------------------------ |
+| 给 DataAdapter 加新方法          | `types.ts` 接口扩展 → `dexie-adapter.tsx` 实现 → `context.tsx` 加便捷 hook           |
+| 写新的 adapter 实现（移动端 WS） | 新文件 `<name>-adapter.tsx` 实现 `DataAdapter`；在移动端入口 swap Provider 注入      |
+| 在测试里 mock                    | 直接构造一个 partial `DataAdapter` 对象，注入 `<DataAdapterProvider adapter={mock}>` |
+| 调 SSR fallback 行为             | `dexie-adapter.tsx` 的 `isClient` guard                                              |

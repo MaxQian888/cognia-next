@@ -11,9 +11,9 @@ import { enumerateSlash24, getPrivateLocalIps } from "./local-ip"
  *
  * Two parallel paths:
  *
- *   1. **mDNS** — `subscribeMdns()` (a thin wrapper over
- *      `@jonz94/capacitor-mdns`, only present on Capacitor) listens for
- *      `_cognia._tcp` advertisements. Hits carry the server's TLS SPKI
+ *   1. **mDNS** — `subscribeMdns()` listens for `_cognia._tcp`
+ *      advertisements when a Capacitor mDNS plugin is wired in via the
+ *      injected loader. Hits carry the server's TLS SPKI
  *      fingerprint in the TXT records, so we can later refuse a different
  *      desktop signing key on reconnect.
  *   2. **IP-segment probe (fallback)** — when mDNS yields no results
@@ -52,11 +52,12 @@ export interface ScanLanOptions {
   onFound: (server: DiscoveredServer) => void
   /** Disable the IP-segment probe path entirely. Default true. */
   enableProbeFallback?: boolean
-  /** Concurrent fetch ceiling for the probe path. Default 16. */
+  /** Concurrent fetch ceiling for the probe path. Default 8. */
   probeConcurrency?: number
   /** Wait at least this long for mDNS to surface candidates. Default 5000 ms. */
   mdnsWindowMs?: number
-  /** Per-IP fetch timeout. Default 1500 ms. */
+  /** Per-IP fetch timeout. Default 600 ms — a real LAN companion responds
+   *  well under 100 ms; anything slower is almost certainly a dead host. */
   perProbeTimeoutMs?: number
   /** Pre-populate the list with previously-paired servers (rendered as `history`). */
   history?: DiscoveredServer[]
@@ -72,14 +73,21 @@ export interface ScanLanOptions {
 
 const DEFAULT_PORT = 7890
 
+/** Android emulator's NAT-assigned guest IP. The host loopback is at
+ *  10.0.2.2 and `enumerateSlash24` of 10.0.2.0/24 fans out 254 dead probes
+ *  that the WebView can't answer — short-circuit so dev iteration stays
+ *  fast. No real Android/iOS device sits at this exact IP. */
+const ANDROID_EMULATOR_GUEST_IP = "10.0.2.15"
+const ANDROID_EMULATOR_HOST_IP = "10.0.2.2"
+
 export async function scanLan(opts: ScanLanOptions): Promise<DiscoveredServer[]> {
   const {
     signal,
     onFound,
     enableProbeFallback = true,
-    probeConcurrency = 16,
+    probeConcurrency = 8,
     mdnsWindowMs = 5_000,
-    perProbeTimeoutMs = 1_500,
+    perProbeTimeoutMs = 600,
     history = [],
     fetchImpl = typeof fetch !== "undefined" ? fetch : undefined,
     mdnsSubscribe = subscribeMdns,
@@ -112,7 +120,7 @@ export async function scanLan(opts: ScanLanOptions): Promise<DiscoveredServer[]>
     if (!enableProbeFallback || !fetchImpl) return
     const ips = await getLocalIps({ signal, timeoutMs: 1_200 })
     if (signal.aborted || ips.length === 0) return
-    const targets = Array.from(new Set(ips.flatMap(enumerateSlash24)))
+    const targets = pickProbeTargets(ips)
     await runWithConcurrency(targets, probeConcurrency, async (ip) => {
       if (signal.aborted) return
       const hit = await probeServer(ip, port, signal, perProbeTimeoutMs, fetchImpl)
@@ -139,6 +147,22 @@ export async function scanLan(opts: ScanLanOptions): Promise<DiscoveredServer[]>
   }
 
   return Array.from(dedupe.values())
+}
+
+/**
+ * Decide which IPs to probe given the device's private addresses.
+ *
+ * Default: fan out each address into its full /24. On the Android emulator
+ * (guest IP exactly 10.0.2.15) every /24 probe lands inside the NAT'd
+ * subnet that has no real hosts — the desktop is reachable only via the
+ * `10.0.2.2` gateway alias. Probing 254 dead IPs adds ~24 s of background
+ * fetch + AbortController churn, which is the lag users feel when they
+ * land on the Discover step. Short-circuit by probing the gateway alone.
+ */
+export function pickProbeTargets(ips: readonly string[]): string[] {
+  const onlyEmulator = ips.length === 1 && ips[0] === ANDROID_EMULATOR_GUEST_IP
+  if (onlyEmulator) return [ANDROID_EMULATOR_HOST_IP]
+  return Array.from(new Set(ips.flatMap(enumerateSlash24)))
 }
 
 function rank(source: DiscoveredServerSource): number {

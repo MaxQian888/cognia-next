@@ -17,11 +17,30 @@ const config: CapacitorConfig = {
   webDir: "../out",
   server: {
     androidScheme: "https",
+    // DEV-ONLY live reload.
+    //
+    // The Next.js dev server is reached at http://localhost:3000 from inside
+    // the emulator by way of `adb reverse tcp:3000 tcp:3000` (run once per
+    // emulator session). Using the same hostname the desktop tauri dev uses
+    // means `next.config.ts`'s assetPrefix (`http://localhost:3000`) resolves
+    // correctly for both targets off a single dev server.
+    //
+    // Comment out (or unset COGNIA_MOBILE_DEV) and re-run `cap sync` before
+    // building a release / pushing this file.
+    ...(process.env.COGNIA_MOBILE_DEV
+      ? {
+          url: "http://localhost:3000",
+          cleartext: true,
+        }
+      : {}),
   },
   plugins: {
     SplashScreen: {
-      launchShowDuration: 600,
-      launchAutoHide: false,
+      launchShowDuration: process.env.COGNIA_MOBILE_DEV ? 1500 : 600,
+      // DEV: auto-hide so a bug in the boot path doesn't leave the user
+      // staring at the Capacitor logo. Production keeps the explicit
+      // hideSplash() call from CompanionBootProvider as the source of truth.
+      launchAutoHide: process.env.COGNIA_MOBILE_DEV ? true : false,
       backgroundColor: "#ffffff",
       androidSplashResourceName: "splash",
       androidScaleType: "CENTER_CROP",
@@ -45,8 +64,22 @@ const config: CapacitorConfig = {
     PushNotifications: {
       presentationOptions: ["badge", "sound", "alert"],
     },
+    // CapacitorHttp (M2.9) — enabled so HTTPS calls to the desktop server's
+    // self-signed cert can go through a native pinned trust path. Server-trust
+    // mode is configured per call via the `serverTrustMode` request option in
+    // `lib/tauri/transport-companion.ts`.
+    //
+    // Pinning policy:
+    //   - LAN (cgnp2|<fingerprint>): we call with `serverTrustMode: "pinned"`
+    //     and provide the SHA-256 SPKI fingerprint from the QR pair payload.
+    //   - Tunnel (Cloudflare-issued cert): standard OS trust chain via
+    //     `serverTrustMode: "default"`.
+    //
+    // TODO(P0.2 native): the Android Network Security Config and iOS Info.plist
+    // need a matching cert hash entry for `serverTrustMode: "pinned"` to take
+    // effect at the platform layer. See mobile/docs/p0-tls-trust-setup.md.
     CapacitorHttp: {
-      enabled: false,
+      enabled: true,
     },
   },
   ios: {
@@ -57,7 +90,9 @@ const config: CapacitorConfig = {
   android: {
     allowMixedContent: false,
     captureInput: true,
-    webContentsDebuggingEnabled: false,
+    // DEV: expose the WebView to `chrome://inspect/#devices` so we can
+    // open DevTools against the emulator. Release builds keep this off.
+    webContentsDebuggingEnabled: Boolean(process.env.COGNIA_MOBILE_DEV),
   },
 }
 

@@ -200,14 +200,23 @@ pub async fn pair_handler(
 /// `GET /api/v1/whoami`
 ///
 /// Protected endpoint (behind [`super::middleware::require_device_jwt`]).
-/// Returns the device ID and server version so the mobile app can verify
-/// that its JWT is still valid after pairing.
+/// Returns the device ID, server version, and the server's TLS SPKI
+/// fingerprint so the mobile app can:
+///   1. verify that its JWT is still valid after pairing (existing behavior)
+///   2. compare the server's fingerprint to the one pinned in the QR pair
+///      payload (P0.3 app-layer attestation — see `lib/tauri/pinned-fetch.ts`)
+///
+/// The fingerprint is **not** a strict TLS pinning replacement; the mobile
+/// JS layer cannot inspect the actual negotiated TLS cert from a browser
+/// webview. It's an app-layer sanity check that catches the "you connected
+/// to the wrong cognia desktop" case.
 pub async fn whoami_handler(Extension(ctx): Extension<DeviceContext>) -> Response {
     (
         StatusCode::OK,
         Json(json!({
             "device_id": ctx.device_id,
             "server_version": env!("CARGO_PKG_VERSION"),
+            "tls_fingerprint": super::tls_fingerprint(),
         })),
     )
         .into_response()

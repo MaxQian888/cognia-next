@@ -9,7 +9,7 @@
  *   Layer 3: Advanced filters — collapsible (module, source, session, time, presets, focus chips)
  */
 
-import { Fragment, useMemo, useRef, useState } from "react"
+import { Fragment, memo, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   Search,
@@ -152,7 +152,7 @@ export interface LogPanelToolbarProps {
 // Levels to show as tabs (fatal is merged into error)
 const TAB_LEVELS: Array<LogLevel> = ["error", "warn", "info", "debug", "trace"]
 
-export function LogPanelToolbar({
+function LogPanelToolbarImpl({
   viewMode,
   setViewMode,
   includeAgentTrace,
@@ -968,5 +968,7 @@ function SearchWithHistory({
     </div>
   )
 }
+
+export const LogPanelToolbar = memo(LogPanelToolbarImpl)
 
 export default LogPanelToolbar

@@ -74,6 +74,12 @@ interface ChatState {
    */
   webSearchOnForNextSend: boolean
   /**
+   * Per-message ephemeral skill ids — these get unioned with the active
+   * character's skillIds in `resolveSendOptions` for the next send only,
+   * then cleared. The composer's SkillPicker drives this.
+   */
+  ephemeralSkillIds: string[]
+  /**
    * Per-session snapshot of the last send so a `session_ended` with a
    * transient error can re-issue the turn through the alias's fallback
    * chain without re-running `resolveSendOptions`. Cleared on a clean
@@ -96,6 +102,9 @@ interface ChatState {
   setPendingCommandOverrides: (overrides: PendingCommandOverrides | null) => void
   toggleBookmark: (messageId: string) => void
   setWebSearchOnForNextSend: (v: boolean) => void
+  setEphemeralSkillIds: (ids: string[]) => void
+  toggleEphemeralSkill: (id: string) => void
+  clearEphemeralSkillIds: () => void
   setLastSend: (sessionId: string, entry: LastSendCacheEntry) => void
   bumpLastSendAttempt: (sessionId: string) => void
   clearLastSend: (sessionId: string) => void
@@ -113,6 +122,7 @@ export const useChatStore = create<ChatState>((set) => ({
   pendingCommandOverrides: null,
   bookmarkedIds: [],
   webSearchOnForNextSend: false,
+  ephemeralSkillIds: [],
   lastSendBySession: {},
 
   setActiveSession: (id) =>
@@ -127,6 +137,7 @@ export const useChatStore = create<ChatState>((set) => ({
       pendingCommandOverrides: null,
       bookmarkedIds: [],
       webSearchOnForNextSend: false,
+      ephemeralSkillIds: [],
       lastSendBySession: {},
     }),
   setMessages: (msgs) => set({ messages: msgs }),
@@ -170,6 +181,14 @@ export const useChatStore = create<ChatState>((set) => ({
       }
     }),
   setWebSearchOnForNextSend: (v) => set({ webSearchOnForNextSend: v }),
+  setEphemeralSkillIds: (ids) => set({ ephemeralSkillIds: ids }),
+  toggleEphemeralSkill: (id) =>
+    set((s) => ({
+      ephemeralSkillIds: s.ephemeralSkillIds.includes(id)
+        ? s.ephemeralSkillIds.filter((x) => x !== id)
+        : [...s.ephemeralSkillIds, id],
+    })),
+  clearEphemeralSkillIds: () => set({ ephemeralSkillIds: [] }),
   setLastSend: (sessionId, entry) =>
     set((s) => ({
       lastSendBySession: { ...s.lastSendBySession, [sessionId]: entry },
@@ -204,6 +223,7 @@ export const useChatStore = create<ChatState>((set) => ({
       pendingCommandOverrides: null,
       bookmarkedIds: [],
       webSearchOnForNextSend: false,
+      ephemeralSkillIds: [],
       lastSendBySession: {},
     }),
 }))

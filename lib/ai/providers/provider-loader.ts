@@ -11,6 +11,12 @@
  * register on every activation.
  */
 
+import type {
+  ProviderConfig,
+  ModelConfig,
+  ProviderType as CanonicalProviderType,
+} from "@/types/provider/provider"
+
 export type ProviderType = "cloud" | "local" | "self-hosted"
 
 export type ProviderProtocol = "openai" | "anthropic" | "google" | "mistral" | "cohere"
@@ -94,4 +100,62 @@ export function listProviderDefinitions(filter?: {
 /** Test-only escape hatch. */
 export function __resetProviderRegistryForTesting(): void {
   registry.clear()
+}
+
+/**
+ * Returns plugin-registered providers in the ProviderConfig shape so they
+ * can be merged into getAllProviders(). Adapts ProviderDefinition →
+ * ProviderConfig: maps protocol/category/type to the narrower canonical
+ * unions used throughout the rest of the codebase.
+ */
+export function getDynamicProviders(): Record<string, ProviderConfig> {
+  const out: Record<string, ProviderConfig> = {}
+  for (const def of listProviderDefinitions()) {
+    out[def.id] = adaptDefinitionToConfig(def)
+  }
+  return out
+}
+
+function adaptDefinitionToConfig(def: ProviderDefinition): ProviderConfig {
+  return {
+    id: def.id,
+    name: def.name,
+    type: adaptType(def.type),
+    apiKeyRequired: def.apiKeyRequired,
+    baseURLRequired: def.baseURLRequired,
+    protocol: adaptProtocol(def.protocol),
+    defaultEnabled: def.defaultEnabled,
+    defaultModel: def.defaultModel,
+    description: def.description,
+    category: adaptCategory(def.category),
+    models: def.models.map(adaptModel),
+  }
+}
+
+function adaptType(t: ProviderType): CanonicalProviderType {
+  return t === "cloud" ? "cloud" : "local"
+}
+
+function adaptProtocol(p: ProviderProtocol): ProviderConfig["protocol"] {
+  if (p === "google") return "gemini"
+  if (p === "anthropic") return "anthropic"
+  return "openai"
+}
+
+function adaptCategory(c: ProviderDefinition["category"]): ProviderConfig["category"] {
+  if (c === "core") return "flagship"
+  return "specialized"
+}
+
+function adaptModel(m: ProviderModelDefinition): ModelConfig {
+  return {
+    id: m.id,
+    name: m.name,
+    contextLength: m.contextLength,
+    supportsTools: m.supportsTools,
+    supportsVision: m.supportsVision,
+    supportsAudio: m.supportsAudio,
+    supportsVideo: m.supportsVideo,
+    supportsStreaming: m.supportsStreaming,
+  }
 }
