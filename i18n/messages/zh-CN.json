@@ -4158,6 +4158,18 @@
         "removeChip": "移除 {name}"
       }
     },
+    "marketplaceEmpty": {
+      "title": "市场未配置",
+      "subtitle": "在设置里配置 SkillsMP 端点即可浏览和安装社区技能。下面是部分可用示例：",
+      "configure": "去设置配置"
+    },
+    "analytics": {
+      "trend": {
+        "title": "使用趋势",
+        "window7": "7天",
+        "window30": "30天"
+      }
+    },
     "sync": {
       "status": {
         "synced": "已同步",

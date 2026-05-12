@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { useSkillAnalytics } from "@/hooks/skills"
 import { getCategoryMeta, getSourceMeta } from "@/lib/skills/categories"
 import { useSkillsStore } from "@/stores/skills"
+import { SkillUsageTrend } from "./skill-usage-trend"
 
 export function SkillAnalytics() {
   const t = useTranslations("skills.analytics")
@@ -43,6 +44,8 @@ export function SkillAnalytics() {
           <SummaryCard label={t("totalUsage")} value={data.totalUsage} />
           <SummaryCard label={t("tokensEstimated")} value={data.estimatedTokens.toLocaleString()} />
         </div>
+
+        <SkillUsageTrend />
 
         <Card className="p-4">
           <p className="mb-2 text-xs font-medium">{t("mostUsedTitle")}</p>

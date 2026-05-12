@@ -4158,6 +4158,18 @@
         "removeChip": "Remove {name}"
       }
     },
+    "marketplaceEmpty": {
+      "title": "Marketplace not configured",
+      "subtitle": "Configure a SkillsMP endpoint in settings to browse and install community skills. A few examples of what's available:",
+      "configure": "Configure in settings"
+    },
+    "analytics": {
+      "trend": {
+        "title": "Usage trend",
+        "window7": "7d",
+        "window30": "30d"
+      }
+    },
     "sync": {
       "status": {
         "synced": "Synced",
