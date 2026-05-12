@@ -28,8 +28,20 @@ export interface GhRepoEntry {
   credentialMode: CredentialMode
   /** App installation id (only when credentialMode === "app"). */
   installationId?: number
+  /** GitHub App numeric id (only when credentialMode === "app"). */
+  appId?: number
+  /**
+   * App private key (PEM). Stored in the IndexedDB row directly. On desktop
+   * builds, the plugin runtime mirrors this to the OS keyring on first
+   * activation and clears it from the row; on web builds it stays here.
+   * IndexedDB is per-origin so the blast radius is one user / one browser
+   * profile.
+   */
+  appPrivateKey?: string
   /** PAT keyring slot id (only when credentialMode === "pat"). */
   patKeyringId?: string
+  /** Raw PAT value, same trade-off as appPrivateKey above. */
+  patToken?: string
   /** How AI changes get pushed. */
   pushTarget: PushTarget
   /** Where the AI runs work — locally or in an E2B sandbox. */

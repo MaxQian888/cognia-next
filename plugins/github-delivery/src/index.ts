@@ -1,30 +1,175 @@
 /**
  * GitHub Delivery — built-in plugin entry point.
  *
- * The plugin's responsibilities split across 5 surfaces:
+ * `activate()` wires the plugin's runtime services:
+ *   1. Touches the 4 declared Dexie tables (repos / workOrders / events / audit)
+ *      to surface mis-declared schemas at activation time.
+ *   2. Imports `./workflow/nodes` for its side-effect of registering all 12
+ *      `action.github.*` node executors against the workflow registry.
+ *   3. Calls `setGithubRuntime(...)` with real implementations of `getRepo`,
+ *      `getOctokit`, `recordAudit`, and `checkPolicy` so those node executors
+ *      can resolve credentials, persist audit rows, and gate actions.
  *
- *   1. Setup wizard for App + PAT credentials (M1) — invoked via the
- *      Settings → GitHub Delivery tab.
- *   2. ConnectorBus adapter routing PR / Issue events into the inbox (M4).
- *   3. Workflow nodes (12 × action.github.*) registered against the visual
- *      workflow runtime (M3).
- *   4. Webhook trigger (trigger.github.webhook) + polling task
- *      (github-poll) routed through the Rust signature verifier (M2).
- *   5. Independent kanban page at /github-delivery (M4).
- *
- * In M1 the entry only:
- *   - Creates the four Dexie tables via `ctx.dexie!.table(...)` lazy access.
- *   - Logs activation. Functional registration lands in M2/M3/M4.
+ * `deactivate()` clears the singleton and resets internal state. The plugin
+ * manager re-runs `activate()` on the next enable so this is safe.
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import type { GhAuditEntry, GhRepoEntry, GhWorkOrder, NormalizedGhEvent } from "@/lib/github/types"
+import { getOctokitForRepo } from "@/lib/github/octokit-factory"
+import { checkPolicy as runPolicyGate, mergePolicy } from "@/lib/github/policy-gate"
+import {
+  DEFAULT_GH_POLICY,
+  type GhAuditEntry,
+  type GhAction,
+  type GhPolicy,
+  type GhRepoEntry,
+  type GhWorkOrder,
+  type NormalizedGhEvent,
+} from "@/lib/github/types"
+import { setGithubRuntime, type GithubRuntime } from "./workflow/runtime"
+
+// Side-effect import — registers all 12 action.github.* executors.
+import "./workflow/nodes"
 
 interface ActivationState {
   activatedAt: number
+  ctx: PluginContext
 }
 
 let state: ActivationState | null = null
+
+// ── Runtime implementation backed by the plugin context ──────────────────────
+
+async function lookupRepo(
+  ctx: PluginContext,
+  fullName: string
+): Promise<GhRepoEntry | null> {
+  if (!ctx.dexie) return null
+  const table = ctx.dexie.table<GhRepoEntry, string>("repos")
+  return (await table.get(fullName)) ?? null
+}
+
+async function buildOctokit(ctx: PluginContext, fullName: string) {
+  const repo = await lookupRepo(ctx, fullName)
+  if (!repo) {
+    throw new Error(`github-delivery: repo "${fullName}" is not registered`)
+  }
+  if (repo.credentialMode === "pat") {
+    // Prefer keyring slot when present; fall back to the row's patToken.
+    const token =
+      (repo.patKeyringId && (await ctx.secrets?.get?.(repo.patKeyringId))) ?? repo.patToken
+    if (!token) {
+      throw new Error(`github-delivery: PAT for "${fullName}" not found`)
+    }
+    return getOctokitForRepo({
+      repoFullName: fullName,
+      mode: "pat",
+      pat: { token },
+      onWarning: (m) => ctx.logger?.warn?.(`[github-delivery] ${m}`),
+    })
+  }
+  // App mode — appId + privateKey live on the row; installationId is required.
+  if (!repo.installationId) {
+    throw new Error(`github-delivery: repo "${fullName}" missing installationId`)
+  }
+  const appId = repo.appId ?? parseInt((await ctx.secrets?.get?.("github-delivery:appId")) ?? "0", 10)
+  const privateKey =
+    repo.appPrivateKey ?? (await ctx.secrets?.get?.("github-delivery:privateKey")) ?? ""
+  if (!appId || !privateKey) {
+    throw new Error(`github-delivery: App credentials missing for "${fullName}"`)
+  }
+  return getOctokitForRepo({
+    repoFullName: fullName,
+    mode: "app",
+    app: { appId, privateKey, installationId: repo.installationId },
+    onWarning: (m) => ctx.logger?.warn?.(`[github-delivery] ${m}`),
+  })
+}
+
+async function persistAudit(
+  ctx: PluginContext,
+  row: GhAuditEntry
+): Promise<void> {
+  if (!ctx.dexie) return
+  const table = ctx.dexie.table<GhAuditEntry, number>("audit")
+  await table.put(row)
+  // Cap at 5000 newest — same convention as connectorAudit.
+  const count = await table.toCollection().count()
+  if (count > 5000) {
+    const overflow = count - 5000
+    const oldest = await table.orderBy("at").limit(overflow).primaryKeys()
+    if (oldest.length > 0) {
+      await table.bulkDelete(oldest as number[])
+    }
+  }
+}
+
+async function evaluatePolicy(
+  ctx: PluginContext,
+  action: GhAction,
+  override?: Partial<GhPolicy>
+): Promise<{ decision: ReturnType<typeof runPolicyGate>; effectivePolicy: GhPolicy }> {
+  // Resolve the repo from the action (every GhAction shape carries a repo).
+  const repoFullName = repoOfAction(action)
+  const repo = repoFullName ? await lookupRepo(ctx, repoFullName) : null
+  const base = repo?.policy ?? DEFAULT_GH_POLICY
+  const effectivePolicy = mergePolicy(base, override)
+
+  // Count today's merges from the audit table for the maxDailyMerges check.
+  const today = startOfUtcDay(Date.now())
+  let mergesToday = 0
+  if (ctx.dexie && repoFullName) {
+    const auditTable = ctx.dexie.table<GhAuditEntry, number>("audit")
+    const rows = await auditTable
+      .where("[repoFullName+at]")
+      .between([repoFullName, today], [repoFullName, Number.MAX_SAFE_INTEGER])
+      .toArray()
+    mergesToday = rows.filter(
+      (r) => r.action.kind === "merge" && r.decision.allow === true
+    ).length
+  }
+
+  const decision = runPolicyGate(action, {
+    policy: effectivePolicy,
+    now: Date.now(),
+    mergesTodayCount: mergesToday,
+    // Author / CI / approval signals come from the node inspector form or the
+    // upstream trigger payload. The current minimal wiring leaves them empty;
+    // the node author can override per-node via `policyOverride`.
+  })
+  return { decision, effectivePolicy }
+}
+
+function repoOfAction(action: GhAction): string | null {
+  switch (action.kind) {
+    case "push":
+    case "release":
+      return action.repo
+    case "merge":
+      return action.pr.repo
+    case "label":
+    case "close":
+      return action.target.repo
+    case "comment":
+      return action.pr?.repo ?? action.issue?.repo ?? null
+  }
+}
+
+function startOfUtcDay(ms: number): number {
+  const d = new Date(ms)
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+}
+
+function makeRuntime(ctx: PluginContext): GithubRuntime {
+  return {
+    getRepo: (fullName) => lookupRepo(ctx, fullName),
+    getOctokit: (fullName) => buildOctokit(ctx, fullName),
+    recordAudit: (row) => persistAudit(ctx, row),
+    checkPolicy: (action, override) => evaluatePolicy(ctx, action, override),
+  }
+}
+
+// ── Plugin definition ─────────────────────────────────────────────────────────
 
 const definition: PluginDefinition = {
   manifest: {
@@ -41,23 +186,20 @@ const definition: PluginDefinition = {
       throw new Error("github-delivery requires the platform Dexie API (manifest.dexie missing?)")
     }
 
-    // Touch each declared table to surface mis-declared schemas at activation
-    // rather than at first use. Dexie .toCollection().count() is cheap.
-    const repos = ctx.dexie.table<GhRepoEntry>("repos")
-    const workOrders = ctx.dexie.table<GhWorkOrder>("workOrders")
-    const events = ctx.dexie.table<NormalizedGhEvent>("events")
-    const audit = ctx.dexie.table<GhAuditEntry>("audit")
+    // Touch each declared table.
     await Promise.all([
-      repos.toCollection().count(),
-      workOrders.toCollection().count(),
-      events.toCollection().count(),
-      audit.toCollection().count(),
+      ctx.dexie.table<GhRepoEntry>("repos").toCollection().count(),
+      ctx.dexie.table<GhWorkOrder>("workOrders").toCollection().count(),
+      ctx.dexie.table<NormalizedGhEvent>("events").toCollection().count(),
+      ctx.dexie.table<GhAuditEntry>("audit").toCollection().count(),
     ])
 
-    state = { activatedAt: Date.now() }
+    setGithubRuntime(makeRuntime(ctx))
+    state = { activatedAt: Date.now(), ctx }
     ctx.logger?.info("github-delivery: activated")
   },
   deactivate: async (ctx?: PluginContext) => {
+    setGithubRuntime(null)
     state = null
     ctx?.logger?.info("github-delivery: deactivated")
   },

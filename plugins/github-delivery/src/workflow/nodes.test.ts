@@ -315,20 +315,23 @@ describe("action.github.pushTag", () => {
 })
 
 describe("action.github.runIssueLoop", () => {
-  it("throws the M5-pending error after passing the policy gate", async () => {
+  it("returns status=failed when no driver is registered (clear error)", async () => {
     makeFakeRuntime({})
-    await expect(
-      exec("action.github.runIssueLoop", { repoFullName: "o/r", issueNumber: 1 })
-    ).rejects.toThrow(/M5/)
+    const result = await exec("action.github.runIssueLoop", {
+      repoFullName: "o/r",
+      issueNumber: 1,
+    })
+    const out = result.output as { status: string; reason?: string }
+    expect(out.status).toBe("failed")
+    expect(out.reason).toMatch(/no issue-loop AI driver/i)
   })
 
   it("substitutes {n} in branchTemplate when building the audited action", async () => {
-    // Verify the action's branch field — we can read it back from the audit
-    // row that the guard wrote.
     let captured: GhAction | null = null
     setGithubRuntime({
       getRepo: async () => null,
-      getOctokit: async () => ({ request: jest.fn() } as unknown as import("@octokit/core").Octokit),
+      getOctokit: async () =>
+        ({ request: jest.fn(), auth: jest.fn() } as unknown as import("@octokit/core").Octokit),
       recordAudit: async (row) => {
         captured = row.action
       },
@@ -337,13 +340,11 @@ describe("action.github.runIssueLoop", () => {
         effectivePolicy: DEFAULT_GH_POLICY,
       }),
     })
-    await expect(
-      exec("action.github.runIssueLoop", {
-        repoFullName: "o/r",
-        issueNumber: 42,
-        branchTemplate: "cognia/x-{n}",
-      })
-    ).rejects.toThrow(/M5/)
+    await exec("action.github.runIssueLoop", {
+      repoFullName: "o/r",
+      issueNumber: 42,
+      branchTemplate: "cognia/x-{n}",
+    })
     expect(captured).toMatchObject({ kind: "push", branch: "cognia/x-42" })
   })
 })

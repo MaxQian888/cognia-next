@@ -29,6 +29,31 @@ export interface WorkspaceHandle {
   createdAt: number
 }
 
+/**
+ * Pluggable E2B backend. The github-delivery plugin's activate() may wire
+ * a real implementation backed by the `e2b-sandbox` plugin when present.
+ * Tests inject fakes.
+ */
+export interface E2BBackend {
+  clone(opts: { repoFullName: string; branch: string; token: string }): Promise<WorkspaceHandle>
+  commitAndPush(opts: {
+    workspace: WorkspaceHandle
+    message: string
+    remoteBranch?: string
+  }): Promise<string>
+  remove(handle: WorkspaceHandle): Promise<boolean>
+}
+
+let _e2bBackend: E2BBackend | null = null
+
+export function setE2BBackend(b: E2BBackend | null): void {
+  _e2bBackend = b
+}
+
+export function getE2BBackend(): E2BBackend | null {
+  return _e2bBackend
+}
+
 export interface CloneOptions {
   repoFullName: string
   /** Branch to check out. */
@@ -78,7 +103,16 @@ export function _defaultGitFactory(): GitClient {
  */
 export async function cloneToWorkspace(opts: CloneOptions): Promise<WorkspaceHandle> {
   if (opts.backend === "e2b") {
-    throw new Error("e2b workspace backend is not yet implemented (planned for M5)")
+    if (!_e2bBackend) {
+      throw new Error(
+        "e2b workspace backend not registered. Install the e2b-sandbox plugin and enable it."
+      )
+    }
+    return _e2bBackend.clone({
+      repoFullName: opts.repoFullName,
+      branch: opts.branch,
+      token: opts.token,
+    })
   }
   const baseDir = opts.baseDir ?? DEFAULT_BASE_DIR
   const sanitizedRepo = opts.repoFullName.replace(/[^a-zA-Z0-9._-]/g, "_")
@@ -115,7 +149,16 @@ export interface CommitAndPushOptions {
  */
 export async function commitAndPush(opts: CommitAndPushOptions): Promise<string> {
   if (opts.workspace.backend === "e2b") {
-    throw new Error("e2b commitAndPush is not yet implemented")
+    if (!_e2bBackend) {
+      throw new Error(
+        "e2b workspace backend not registered. Install the e2b-sandbox plugin and enable it."
+      )
+    }
+    return _e2bBackend.commitAndPush({
+      workspace: opts.workspace,
+      message: opts.message,
+      remoteBranch: opts.remoteBranch,
+    })
   }
   const git = (opts.gitFactory ?? _defaultGitFactory)()
   await git.cwd({ path: opts.workspace.path, root: false })
@@ -138,7 +181,15 @@ export async function commitAndPush(opts: CommitAndPushOptions): Promise<string>
  * doesn't abort the GC pass.
  */
 export async function removeWorkspace(handle: WorkspaceHandle): Promise<boolean> {
-  if (handle.backend !== "local") return false
+  if (handle.backend === "e2b") {
+    if (!_e2bBackend) return false
+    try {
+      return await _e2bBackend.remove(handle)
+    } catch (err) {
+      console.error(`e2b removeWorkspace failed for ${handle.path}`, err)
+      return false
+    }
+  }
   try {
     await rm(handle.path, { recursive: true, force: true })
     return true

@@ -19,6 +19,7 @@ import {
   renderChangelog,
 } from "@/lib/github/changelog"
 import { guardedExecutor, splitRepo } from "./shared"
+import { runIssueLoop, type RunIssueLoopResult } from "./issue-loop"
 
 // ── Type definitions for params (mirrors what the inspector form will write) ──
 
@@ -457,7 +458,7 @@ registerNodeExecutor({
 registerNodeExecutor({
   kind: "action.github.runIssueLoop",
   typeVersion: 1,
-  execute: guardedExecutor<RunIssueLoopParams, { status: string; reason: string }>({
+  execute: guardedExecutor<RunIssueLoopParams, RunIssueLoopResult>({
     repoFrom: (p) => p.repoFullName,
     policyOverride: policyOverrideOf,
     action: (p): GhAction => ({
@@ -465,11 +466,6 @@ registerNodeExecutor({
       repo: p.repoFullName,
       branch: (p.branchTemplate ?? "cognia/issue-{n}").replace("{n}", String(p.issueNumber)),
     }),
-    run: async ({ step }) => {
-      throw new Error(
-        `runIssueLoop is gated behind the M5 Claude Code integration. ` +
-          `Issue #${step.params.issueNumber} on ${step.params.repoFullName} could not proceed.`
-      )
-    },
+    run: async ({ step }) => runIssueLoop(step.params),
   }),
 })
