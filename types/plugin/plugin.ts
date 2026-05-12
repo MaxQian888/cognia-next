@@ -1021,6 +1021,13 @@ export interface PluginContext {
    * `lib/plugin/workflow-bridge.ts` (default in cognia-next 0.3.0+).
    */
   workflow: PluginWorkflowAPI
+
+  /**
+   * Dexie table API — only present when the plugin manifest declares a
+   * `dexie` block. Plugins access their IndexedDB tables through this API;
+   * the namespace prefix is applied automatically.
+   */
+  dexie?: PluginDexieAPI
 }
 
 /**
@@ -1863,4 +1870,25 @@ export interface PluginDexieMigrationDef {
    * enable, so make migrations idempotent.
    */
   upgrade: string
+}
+
+/**
+ * Runtime API for accessing a plugin's declared Dexie tables.
+ * Obtained via `ctx.dexie` — only present when the plugin manifest
+ * includes a `dexie` block.
+ */
+export interface PluginDexieAPI {
+  /**
+   * Returns a Dexie Table for the given logical name (as declared in
+   * manifest.dexie.tables, WITHOUT the `<pluginId>:` prefix).
+   * Throws if the table is not in this plugin's namespace.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  table<T = unknown, K = any>(name: string): import("dexie").Table<T, K>
+
+  /**
+   * Returns the raw Dexie instance for advanced queries / transactions.
+   * The plugin is responsible for only reading/writing its own tables.
+   */
+  rawDb(): import("dexie").Dexie
 }
