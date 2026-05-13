@@ -77,9 +77,20 @@ export async function withPlugin<P, R>(
  * Build a default loader that dynamic-imports a plugin module by name and
  * returns the named export. The `webpackIgnore` comment keeps the web bundle
  * from trying to resolve the native package.
+ *
+ * On web (no Tauri, no Capacitor native) the loader short-circuits with a
+ * throw so `withPlugin` collapses to `{ kind: "unsupported" }`. Without
+ * this guard, Capacitor's web shim returns a Proxy whose `.then` getter
+ * throws ("Haptics.then() is not implemented on web") the moment we
+ * `await` the resolved export — which would surface as an unhandled
+ * rejection in tests and a confusing runtime crash for users who happen
+ * to load the wrappers in plain browser context.
  */
 export function makeDefaultLoader<P>(moduleId: string, exportName: string): () => Promise<P> {
   return async () => {
+    if (detectNativePlatform() === "web") {
+      throw new Error(`${moduleId} not available on web`)
+    }
     const mod = (await import(/* webpackIgnore: true */ moduleId)) as Record<string, unknown>
     const exported = mod[exportName]
     if (!exported) {
