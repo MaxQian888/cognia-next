@@ -328,6 +328,7 @@ export const PARAMS_SCHEMAS: Record<WorkflowNodeKind, z.ZodTypeAny> = {
   "trigger.connector.inbound": ConnectorInboundParams,
   "trigger.chat.message": ChatMessageTriggerParams,
   "trigger.webhook": WebhookTriggerParams,
+  "trigger.github.webhook": WebhookTriggerParams,
   // Actions: characters
   "action.character.send": CharacterSendParams,
   "action.character.create": CharacterCreateParams,
@@ -348,6 +349,35 @@ export const PARAMS_SCHEMAS: Record<WorkflowNodeKind, z.ZodTypeAny> = {
   // Actions: extensibility
   "action.mcp.invokeTool": McpInvokeToolParams,
   "action.plugin.invoke": PluginInvokeParams,
+  // GitHub Delivery (param shapes are deliberately permissive at this layer —
+  // each node's inspector form provides richer client-side validation.)
+  "action.github.openPr": z.object({}).passthrough(),
+  "action.github.closePr": z.object({}).passthrough(),
+  "action.github.mergePr": z.object({}).passthrough(),
+  "action.github.reviewPr": z.object({}).passthrough(),
+  "action.github.reviewPrInline": z.object({}).passthrough(),
+  "action.github.commentPr": z.object({}).passthrough(),
+  "action.github.commentIssue": z.object({}).passthrough(),
+  "action.github.labelIssue": z.object({}).passthrough(),
+  "action.github.closeIssue": z.object({}).passthrough(),
+  "action.github.createRelease": z.object({}).passthrough(),
+  "action.github.generateChangelog": z.object({}).passthrough(),
+  "action.github.pushTag": z.object({}).passthrough(),
+  "action.github.runIssueLoop": z.object({}).passthrough(),
+  // Desktop UI automation — param shapes are permissive; inspector forms
+  // provide richer validation against the lib/automation/types.ts mirror.
+  "action.desktop.screenshot": z.object({}).passthrough(),
+  "action.desktop.findElement": z.object({}).passthrough(),
+  "action.desktop.readTree": z.object({}).passthrough(),
+  "action.desktop.click": z.object({}).passthrough(),
+  "action.desktop.type": z.object({}).passthrough(),
+  "action.desktop.keys": z.object({}).passthrough(),
+  "action.desktop.invokePattern": z.object({}).passthrough(),
+  "action.desktop.windowFocus": z.object({}).passthrough(),
+  "action.desktop.windowClose": z.object({}).passthrough(),
+  "action.desktop.windowResize": z.object({}).passthrough(),
+  "action.desktop.wait": z.object({}).passthrough(),
+  "trigger.desktop.event": z.object({}).passthrough(),
   // AI
   "ai.prompt": AiPromptParams,
   "ai.classify": AiClassifyParams,

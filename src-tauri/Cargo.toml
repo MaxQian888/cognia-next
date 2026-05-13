@@ -46,6 +46,10 @@ tauri-plugin-notification = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-os = "2"
+# `tauri-plugin-shell` powers cloudflared tunnel spawn for the
+# GitHub Delivery one-click webhook receiver (`lib/github/cloudflared-tauri.ts`).
+# Scope-locked to the `cloudflared` binary in `tauri.conf.json`.
+tauri-plugin-shell = "2"
 tauri-plugin-store = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "sync", "time", "net", "signal"] }
 dirs = "6"
@@ -144,6 +148,11 @@ tar = "0.4"
 # maintaining a hand-rolled parser as the subcommand surface grows.
 clap = { version = "=4.6.0", features = ["derive"] }
 
+# UI automation — cross-platform screenshot (xcap works on Win/macOS/Linux).
+# Windows UIA bindings (`uiautomation`) and macOS/Linux a11y crates are
+# target-gated below.
+xcap = "0.0.12"
+
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-window-state = "2"
 tauri-plugin-global-shortcut = "2"
@@ -151,9 +160,13 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-cli = "2"
 
-# Platform-native logging backends.
+# Platform-native logging backends + UI automation back-ends.
 [target."cfg(target_os = \"windows\")".dependencies]
 eventlog = "0.3"
+# UI Automation — leexgone/uiautomation-rs. Pins `windows = 0.62.2`; if that
+# duplicates with Tauri's `windows` dep, run `cargo tree -d` and either pin
+# down or accept the duplication (it's at most a few hundred kB).
+uiautomation = { version = "0.25", features = ["process"] }
 
 [target."cfg(target_os = \"macos\")".dependencies]
 oslog = "0.2"

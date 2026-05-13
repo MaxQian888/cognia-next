@@ -1,10 +1,12 @@
 /**
  * Plan-approval bus for the Agent Teams runtime.
  *
- * The runtime suspends a team's lifecycle while a human reviews the lead's
- * proposed plan. Rather than coupling the runtime to a specific store
- * action or React render path, the suspension awaits a single `Promise`
- * resolved by this small pub/sub.
+ * Thin wrapper around the generic `lib/runtime/approval-bus`. The agent-team
+ * runtime suspends a team's lifecycle while a human reviews the lead's
+ * proposed plan; this module preserves the legacy `teamId`-keyed API so
+ * existing call sites and tests don't change, while the shared primitive
+ * now also powers GitHub Delivery's HITL guard (and any future "wait for
+ * a human decision" use case).
  *
  * Producers: the plan-approval UI calls `approve(teamId, plan)` /
  * `reject(teamId, feedback)`.
@@ -13,19 +15,23 @@
  * `await`s the returned promise.
  */
 
-export interface PlanApprovalDecision {
-  /** "approve" — runtime proceeds with the plan as-is. */
-  /** "reject" — runtime hands feedback back to the lead and aborts the run. */
-  outcome: "approve" | "reject"
-  /** Caller-supplied feedback string. Optional on approve. */
-  feedback?: string
-  /** The plan blob the producer wishes to commit. Forwarded verbatim. */
-  plan?: unknown
-}
+import {
+  approve as genericApprove,
+  pendingCount as genericPendingCount,
+  reject as genericReject,
+  waitForDecision as genericWaitForDecision,
+  __resetForTesting as genericReset,
+  type ApprovalDecision,
+} from "@/lib/runtime/approval-bus"
 
-type Resolver = (decision: PlanApprovalDecision) => void
+const SCOPE = "agent-team"
 
-const pending = new Map<string, Set<Resolver>>()
+/**
+ * Decision payload — kept as a named export so existing code that imports
+ * `PlanApprovalDecision` keeps compiling. Shape is identical to the
+ * generic `ApprovalDecision`.
+ */
+export type PlanApprovalDecision = ApprovalDecision
 
 /**
  * Wait for an approve or reject signal for `teamId`. Resolves with the
@@ -37,61 +43,25 @@ export function waitForDecision(
   teamId: string,
   signal?: AbortSignal
 ): Promise<PlanApprovalDecision> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(signal.reason ?? new Error("Aborted"))
-      return
-    }
-    const set = pending.get(teamId) ?? new Set<Resolver>()
-    pending.set(teamId, set)
-
-    const resolver: Resolver = (decision) => {
-      set.delete(resolver)
-      if (set.size === 0) pending.delete(teamId)
-      if (signal) signal.removeEventListener("abort", onAbort)
-      resolve(decision)
-    }
-
-    const onAbort = () => {
-      set.delete(resolver)
-      if (set.size === 0) pending.delete(teamId)
-      reject(signal?.reason ?? new Error("Aborted"))
-    }
-
-    set.add(resolver)
-    if (signal) signal.addEventListener("abort", onAbort, { once: true })
-  })
+  return genericWaitForDecision({ scope: SCOPE, id: teamId }, signal)
 }
 
 /** Notify every waiter for `teamId` that the plan was approved. */
 export function approve(teamId: string, plan?: unknown): number {
-  const set = pending.get(teamId)
-  if (!set || set.size === 0) return 0
-  // Snapshot — resolvers mutate the set as they fire.
-  const fanout = [...set]
-  for (const resolver of fanout) {
-    resolver({ outcome: "approve", plan })
-  }
-  return fanout.length
+  return genericApprove({ scope: SCOPE, id: teamId }, plan)
 }
 
 /** Notify every waiter for `teamId` that the plan was rejected. */
 export function reject(teamId: string, feedback?: string): number {
-  const set = pending.get(teamId)
-  if (!set || set.size === 0) return 0
-  const fanout = [...set]
-  for (const resolver of fanout) {
-    resolver({ outcome: "reject", feedback })
-  }
-  return fanout.length
+  return genericReject({ scope: SCOPE, id: teamId }, feedback)
 }
 
 /** Test utility — drop every pending waiter without resolving. */
 export function __resetForTesting(): void {
-  pending.clear()
+  genericReset()
 }
 
 /** Test utility — count of currently-pending waiters for `teamId`. */
 export function pendingCount(teamId: string): number {
-  return pending.get(teamId)?.size ?? 0
+  return genericPendingCount({ scope: SCOPE, id: teamId })
 }

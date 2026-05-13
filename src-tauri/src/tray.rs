@@ -22,6 +22,9 @@ pub fn install(app: &App) -> tauri::Result<()> {
     let open_logs = MenuItemBuilder::new("Open Log Panel")
         .id("tray-open-logs")
         .build(handle)?;
+    let automation_kill = MenuItemBuilder::new("🛑 Engage automation kill switch")
+        .id("tray-automation-kill")
+        .build(handle)?;
     let quit = PredefinedMenuItem::quit(handle, Some("Quit"))?;
 
     let menu = MenuBuilder::new(handle)
@@ -30,6 +33,7 @@ pub fn install(app: &App) -> tauri::Result<()> {
         .item(&settings)
         .separator()
         .item(&open_logs)
+        .item(&automation_kill)
         .separator()
         .item(&quit)
         .build()?;
@@ -75,6 +79,13 @@ pub fn install(app: &App) -> tauri::Result<()> {
                         let _ = window.set_focus();
                     }
                     let _ = app.emit("tray://open-logs", serde_json::Value::Null);
+                }
+                "tray-automation-kill" => {
+                    // Flip the Rust-side gate immediately, then emit so the
+                    // renderer can toast / refresh its mirror.
+                    let state = app.state::<crate::automation::commands::AutomationState>();
+                    state.gate.engage_kill_switch();
+                    let _ = app.emit("automation:kill-switch", serde_json::Value::Null);
                 }
                 _ => {}
             }

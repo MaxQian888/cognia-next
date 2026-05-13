@@ -431,32 +431,45 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
       sessionState: "sessionId, lastReadAt",
     })
     await legacy.open()
-    await legacy.table("teams").put({
-      id: "team_legacy",
-      name: "Legacy",
-      memberCharacterIds: ["c1", "c2"],
-      orchestration: "round_robin",
-      avatarColor: "x",
-      createdAt: 0,
-      updatedAt: 0,
-    })
-    // Legacy mcpServers row missing appsEnabled — v7 hook should backfill {}
-    await legacy.table("mcpServers").put({
-      id: "mcp_legacy",
-      name: "old",
-      enabled: true,
-      transport: "stdio",
-      config: {},
-    })
-    // Legacy skills row missing source/status/category — v8 hook backfills.
-    await legacy.table("skills").put({
-      id: "skill_legacy",
-      name: "old",
-      content: "x",
-      isBuiltIn: false,
-      createdAt: 0,
-      updatedAt: 0,
-    })
+    // Wrap the three puts in one explicit transaction so they all commit
+    // atomically before `legacy.close()` runs. Under fake-indexeddb the
+    // implicit per-put auto-commit transactions can race with the close
+    // and lose rows; this transaction guarantees the rows land before
+    // the connection is torn down for the v28 reopen below.
+    await legacy.transaction(
+      "rw",
+      legacy.table("teams"),
+      legacy.table("mcpServers"),
+      legacy.table("skills"),
+      async () => {
+        await legacy.table("teams").put({
+          id: "team_legacy",
+          name: "Legacy",
+          memberCharacterIds: ["c1", "c2"],
+          orchestration: "round_robin",
+          avatarColor: "x",
+          createdAt: 0,
+          updatedAt: 0,
+        })
+        // Legacy mcpServers row missing appsEnabled — v7 hook should backfill {}
+        await legacy.table("mcpServers").put({
+          id: "mcp_legacy",
+          name: "old",
+          enabled: true,
+          transport: "stdio",
+          config: {},
+        })
+        // Legacy skills row missing source/status/category — v8 hook backfills.
+        await legacy.table("skills").put({
+          id: "skill_legacy",
+          name: "old",
+          content: "x",
+          isBuiltIn: false,
+          createdAt: 0,
+          updatedAt: 0,
+        })
+      }
+    )
     legacy.close()
 
     // Now open through the production schema: every upgrade hook runs.

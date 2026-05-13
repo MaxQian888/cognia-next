@@ -6,6 +6,7 @@ import type {
 
 import clipboardHistoryManifest from "../../../plugins/clipboard-history/plugin.json"
 import clipboardToolsManifest from "../../../plugins/clipboard-tools/plugin.json"
+import githubDeliveryManifest from "../../../plugins/github-delivery/plugin.json"
 import promptTemplatesManifest from "../../../plugins/prompt-templates/plugin.json"
 import screenshotManifest from "../../../plugins/screenshot/plugin.json"
 import webToolsManifest from "../../../plugins/web-tools/plugin.json"
@@ -74,6 +75,15 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     compatibilityDiagnostics: [],
     load: async () => {
       const mod = await import("../../../plugins/clipboard-history/src/index")
+      return (mod.default || mod) as PluginDefinition
+    },
+  },
+  {
+    manifest: asPluginManifest(githubDeliveryManifest),
+    path: "builtin://github-delivery",
+    compatibilityDiagnostics: [],
+    load: async () => {
+      const mod = await import("../../../plugins/github-delivery/src/index")
       return (mod.default || mod) as PluginDefinition
     },
   },

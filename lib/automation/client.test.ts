@@ -1,0 +1,156 @@
+/**
+ * Unit tests for `lib/automation/client.ts`.
+ *
+ * The transport layer is mocked so we can assert each automation client
+ * method marshals the Tauri command name and payload correctly. The actual
+ * Tauri IPC is not exercised here — that's covered by Rust-side integration
+ * tests on a Windows runner.
+ */
+
+// Mock the transport *before* importing the client so the client picks up
+// the mock at module-load time.
+jest.mock("@/lib/tauri", () => ({
+  transport: {
+    call: jest.fn(),
+  },
+}))
+
+import { transport } from "@/lib/tauri"
+
+import { desktop, defaultAutomationSettings } from "./client"
+import { elementRef, keyChord } from "./types"
+
+const mockCall = transport.call as unknown as jest.Mock
+
+afterEach(() => {
+  mockCall.mockReset()
+})
+
+describe("desktop client", () => {
+  it("desktop.capabilities invokes desktop_capabilities with empty args", async () => {
+    mockCall.mockResolvedValueOnce({
+      platform: "windows",
+      hasUia: true,
+      hasInputSim: true,
+      hasScreenshot: true,
+      hasEvents: true,
+    })
+    const caps = await desktop.capabilities()
+    expect(mockCall).toHaveBeenCalledWith("desktop_capabilities", {})
+    expect(caps.platform).toBe("windows")
+  })
+
+  it("desktop.getFocus forwards ctx", async () => {
+    mockCall.mockResolvedValueOnce({})
+    await desktop.getFocus({ surface: "mcp", pluginId: "demo" })
+    expect(mockCall).toHaveBeenCalledWith("desktop_get_focus", {
+      ctx: { surface: "mcp", pluginId: "demo" },
+    })
+  })
+
+  it("desktop.readTree marshals root + opts + ctx", async () => {
+    mockCall.mockResolvedValueOnce([])
+    const r = elementRef("abc")
+    await desktop.readTree(r, { maxDepth: 3 }, { surface: "workflow" })
+    expect(mockCall).toHaveBeenCalledWith("desktop_read_tree", {
+      args: {
+        root: r,
+        opts: { maxDepth: 3 },
+        ctx: { surface: "workflow" },
+      },
+    })
+  })
+
+  it("desktop.find marshals locator + ctx", async () => {
+    mockCall.mockResolvedValueOnce(null)
+    await desktop.find({ name: "OK" }, { surface: "computerUse" })
+    expect(mockCall).toHaveBeenCalledWith("desktop_find", {
+      args: { locator: { name: "OK" }, ctx: { surface: "computerUse" } },
+    })
+  })
+
+  it("desktop.screenshot marshals opts + ctx", async () => {
+    mockCall.mockResolvedValueOnce({
+      bytes: "AA==",
+      width: 0,
+      height: 0,
+      capturedAt: 0,
+      format: "png",
+    })
+    await desktop.screenshot({ format: "png" }, { surface: "mcp" })
+    expect(mockCall).toHaveBeenCalledWith("desktop_screenshot", {
+      args: { opts: { format: "png" }, ctx: { surface: "mcp" } },
+    })
+  })
+
+  it("desktop.click marshals target + opts + ctx", async () => {
+    mockCall.mockResolvedValueOnce(undefined)
+    const target = { kind: "point" as const, x: 10, y: 20 }
+    await desktop.click(target, { button: "left" }, { surface: "workflow" })
+    expect(mockCall).toHaveBeenCalledWith("desktop_click", {
+      args: { target, opts: { button: "left" }, ctx: { surface: "workflow" } },
+    })
+  })
+
+  it("desktop.type marshals text + opts + ctx", async () => {
+    mockCall.mockResolvedValueOnce(undefined)
+    await desktop.type("hello", { delayMs: 5 }, { surface: "plugin", pluginId: "p1" })
+    expect(mockCall).toHaveBeenCalledWith("desktop_type", {
+      args: { text: "hello", opts: { delayMs: 5 }, ctx: { surface: "plugin", pluginId: "p1" } },
+    })
+  })
+
+  it("desktop.keys marshals chord + ctx", async () => {
+    mockCall.mockResolvedValueOnce(undefined)
+    await desktop.keys(keyChord("ctrl+shift+t"))
+    expect(mockCall).toHaveBeenCalledWith("desktop_keys", {
+      args: { chord: keyChord("ctrl+shift+t"), ctx: {} },
+    })
+  })
+
+  it("desktop.invokePattern marshals target + pattern + args + ctx", async () => {
+    mockCall.mockResolvedValueOnce({})
+    const target = elementRef("xyz")
+    await desktop.invokePattern(target, "invoke", { value: "x" }, { surface: "workflow" })
+    expect(mockCall).toHaveBeenCalledWith("desktop_invoke_pattern", {
+      args: {
+        target,
+        pattern: "invoke",
+        args: { value: "x" },
+        ctx: { surface: "workflow" },
+      },
+    })
+  })
+
+  it("desktop.auditSnapshot returns the array", async () => {
+    mockCall.mockResolvedValueOnce([])
+    const snap = await desktop.auditSnapshot()
+    expect(snap).toEqual([])
+    expect(mockCall).toHaveBeenCalledWith("automation_audit_snapshot", {})
+  })
+
+  it("desktop.settingsGet / settingsSet round-trip", async () => {
+    const s = defaultAutomationSettings()
+    mockCall.mockResolvedValueOnce(s).mockResolvedValueOnce(undefined)
+    const got = await desktop.settingsGet()
+    expect(got).toEqual(s)
+    await desktop.settingsSet(s)
+    expect(mockCall).toHaveBeenCalledWith("automation_settings_set", { settings: s })
+  })
+
+  it("desktop.killSwitch invokes the kill switch command", async () => {
+    mockCall.mockResolvedValueOnce(undefined)
+    await desktop.killSwitch()
+    expect(mockCall).toHaveBeenCalledWith("automation_kill_switch", {})
+  })
+})
+
+describe("defaultAutomationSettings", () => {
+  it("is fully disabled by default", () => {
+    const s = defaultAutomationSettings()
+    expect(s.enabled).toBe(false)
+    expect(s.defaultTier).toBe("off")
+    expect(s.perSurface.workflow.tier).toBe("off")
+    expect(s.perSurface.plugin.perPluginOverrides).toEqual({})
+  })
+})

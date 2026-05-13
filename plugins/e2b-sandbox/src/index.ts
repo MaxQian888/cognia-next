@@ -18,6 +18,8 @@
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import { defineMcpServerPreset } from "@/lib/plugin/sdk"
 import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { setE2BBackend } from "@/lib/github/workspace"
+import { E2BWorkspaceBackend } from "./workspace-backend"
 
 const E2B_PRESET = defineMcpServerPreset({
   id: "e2b-sandbox",
@@ -60,6 +62,13 @@ const definition: PluginDefinition = {
 
     ctx.agent?.registerMcpServerPreset?.(E2B_PRESET)
 
+    // Register the cloud-sandbox workspace backend so GitHub Delivery's
+    // Issue → PR loop can opt in via `worktreeMode: "e2b"`. The backend
+    // lazy-loads `@e2b/sdk`; if the SDK isn't installed it surfaces a
+    // helpful install hint at the first clone attempt instead of failing
+    // here at activation time.
+    setE2BBackend(new E2BWorkspaceBackend())
+
     registerSlashCommand({
       id: "e2b.attach",
       name: "/sandbox",
@@ -73,6 +82,7 @@ const definition: PluginDefinition = {
     })
   },
   deactivate: async (ctx?: PluginContext) => {
+    setE2BBackend(null)
     if (ctx?.pluginId) {
       unregisterCommandsByPlugin(ctx.pluginId)
     }

@@ -31,6 +31,7 @@ export type WorkflowNodeKind =
   | "trigger.connector.inbound"
   | "trigger.chat.message"
   | "trigger.webhook"
+  | "trigger.github.webhook"
   // Actions on cognia-next runtime entities
   | "action.character.send"
   | "action.character.create"
@@ -46,6 +47,34 @@ export type WorkflowNodeKind =
   | "action.connector.draft"
   | "action.mcp.invokeTool"
   | "action.plugin.invoke"
+  // GitHub Delivery (provided by the github-delivery plugin)
+  | "action.github.openPr"
+  | "action.github.closePr"
+  | "action.github.mergePr"
+  | "action.github.reviewPr"
+  | "action.github.reviewPrInline"
+  | "action.github.commentPr"
+  | "action.github.commentIssue"
+  | "action.github.labelIssue"
+  | "action.github.closeIssue"
+  | "action.github.createRelease"
+  | "action.github.generateChangelog"
+  | "action.github.pushTag"
+  | "action.github.runIssueLoop"
+  // Desktop UI automation (provided by the automation subsystem — see
+  // `docs/superpowers/specs/2026-05-12-ui-automation-subsystem-design.md`)
+  | "action.desktop.screenshot"
+  | "action.desktop.findElement"
+  | "action.desktop.readTree"
+  | "action.desktop.click"
+  | "action.desktop.type"
+  | "action.desktop.keys"
+  | "action.desktop.invokePattern"
+  | "action.desktop.windowFocus"
+  | "action.desktop.windowClose"
+  | "action.desktop.windowResize"
+  | "action.desktop.wait"
+  | "trigger.desktop.event"
   // AI primitives
   | "ai.prompt"
   | "ai.classify"
@@ -101,6 +130,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.connector.inbound",
   "trigger.chat.message",
   "trigger.webhook",
+  "trigger.github.webhook",
   "action.character.send",
   "action.character.create",
   "action.character.update",
@@ -115,6 +145,31 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.connector.draft",
   "action.mcp.invokeTool",
   "action.plugin.invoke",
+  "action.github.openPr",
+  "action.github.closePr",
+  "action.github.mergePr",
+  "action.github.reviewPr",
+  "action.github.reviewPrInline",
+  "action.github.commentPr",
+  "action.github.commentIssue",
+  "action.github.labelIssue",
+  "action.github.closeIssue",
+  "action.github.createRelease",
+  "action.github.generateChangelog",
+  "action.github.pushTag",
+  "action.github.runIssueLoop",
+  "action.desktop.screenshot",
+  "action.desktop.findElement",
+  "action.desktop.readTree",
+  "action.desktop.click",
+  "action.desktop.type",
+  "action.desktop.keys",
+  "action.desktop.invokePattern",
+  "action.desktop.windowFocus",
+  "action.desktop.windowClose",
+  "action.desktop.windowResize",
+  "action.desktop.wait",
+  "trigger.desktop.event",
   "ai.prompt",
   "ai.classify",
   "ai.extract",
@@ -351,6 +406,8 @@ export type RunEventType =
   | "run_completed"
   | "run_failed"
   | "run_cancelled"
+  | "step.long_running.checkpoint"
+  | "step.long_running.progress"
 
 export type RunEventLogLevel = "debug" | "info" | "warn" | "error"
 
@@ -461,6 +518,15 @@ export interface RegisterTriggerInput {
   webhookResponseStatus?: number
   /** Optional response body template. */
   webhookResponseBody?: string
+  /**
+   * Which signature header convention to verify against:
+   *   - "cognia" (default) → reads `x-signature-256: sha256=<hex>`
+   *   - "github"           → reads `x-hub-signature-256: sha256=<hex>`
+   * Used by the Rust verifier; the trigger node kind alone (e.g.
+   * trigger.github.webhook) is also a valid signal but this field is the
+   * authoritative override.
+   */
+  signatureMode?: "cognia" | "github"
   binding?: WorkflowTriggerBinding
   enabled: boolean
 }

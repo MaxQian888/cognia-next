@@ -40,17 +40,35 @@ pub async fn workflow_register_trigger(
         }
         // Webhook triggers register a path in the local axum router. The
         // path / method / response settings ride along on the same input.
-        "trigger.webhook" => {
+        // `trigger.webhook` registers under the cognia signature convention.
+        // `trigger.github.webhook` registers under the GitHub convention. Both
+        // route through the same axum receiver and only differ on which header
+        // (`x-signature-256` vs `x-hub-signature-256`) carries the HMAC.
+        "trigger.webhook" | "trigger.github.webhook" => {
             let path = input
                 .webhook_path
                 .clone()
-                .ok_or_else(|| "trigger.webhook requires a 'webhookPath' field".to_string())?;
+                .ok_or_else(|| format!("{} requires a 'webhookPath' field", input.kind))?;
+            // Implicit signature_mode = github when the trigger kind is the
+            // github-flavored one; an explicit `signature_mode` field on the
+            // input still overrides for forward compatibility.
+            let signature_mode = match input.signature_mode.as_deref() {
+                Some(m) => crate::workflow::triggers::webhook_router::SignatureMode::from_str(m),
+                None => {
+                    if input.kind == "trigger.github.webhook" {
+                        crate::workflow::triggers::webhook_router::SignatureMode::Github
+                    } else {
+                        crate::workflow::triggers::webhook_router::SignatureMode::Cognia
+                    }
+                }
+            };
             let entry = WebhookEntry {
                 trigger_id: input.trigger_id.clone(),
                 workflow_id: input.workflow_id.clone(),
                 path,
                 method: input.webhook_method.clone().unwrap_or_else(|| "POST".into()),
                 hmac_secret: input.webhook_hmac_secret.clone(),
+                signature_mode,
                 enabled: input.enabled,
                 binding: input.binding.clone(),
                 response_status: input.webhook_response_status.unwrap_or(200),

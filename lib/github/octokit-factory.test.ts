@@ -1,0 +1,84 @@
+import { clearInstallationTokenCache } from "./auth-app"
+import { _throttleHandlers, getOctokitForRepo } from "./octokit-factory"
+
+beforeEach(() => clearInstallationTokenCache())
+
+describe("getOctokitForRepo", () => {
+  it("builds a PAT-mode Octokit when opts.mode === 'pat'", async () => {
+    const client = await getOctokitForRepo({
+      repoFullName: "octocat/hello-world",
+      mode: "pat",
+      pat: { token: "ghp_test" },
+    })
+    expect(client).toBeDefined()
+    expect(typeof client.request).toBe("function")
+    const cred = await client.auth()
+    expect(cred).toMatchObject({ type: "token", token: "ghp_test" })
+  })
+
+  it("throws when PAT mode is requested without a token", async () => {
+    await expect(
+      getOctokitForRepo({ repoFullName: "octocat/hello-world", mode: "pat" })
+    ).rejects.toThrow(/requires opts\.pat\.token/)
+  })
+
+  it("builds an App-mode Octokit using the supplied installation token minter", async () => {
+    const mintToken = jest.fn(async () => ({
+      token: "ghs_app_token",
+      expiresAt: Date.now() + 60 * 60_000,
+    }))
+    const client = await getOctokitForRepo({
+      repoFullName: "octocat/hello-world",
+      mode: "app",
+      app: { appId: 1, privateKey: "pk", installationId: 100 },
+      refreshDeps: { mintToken },
+    })
+    expect(client).toBeDefined()
+    expect(mintToken).toHaveBeenCalledTimes(1)
+    const cred = await client.auth()
+    expect(cred).toMatchObject({ type: "token", token: "ghs_app_token" })
+  })
+
+  it("throws when App mode is requested without app credentials", async () => {
+    await expect(
+      getOctokitForRepo({ repoFullName: "octocat/hello-world", mode: "app" })
+    ).rejects.toThrow(/App mode requires/)
+  })
+
+  it("calls onWarning when supplied (no-op default does not throw)", async () => {
+    const onWarning = jest.fn()
+    const client = await getOctokitForRepo({
+      repoFullName: "octocat/hello-world",
+      mode: "pat",
+      pat: { token: "ghp_test" },
+      onWarning,
+    })
+    expect(client).toBeDefined()
+    expect(onWarning).not.toHaveBeenCalled() // no rate-limit triggered in unit test
+  })
+})
+
+describe("_throttleHandlers", () => {
+  it("onRateLimit retries up to 3 times and logs each attempt", () => {
+    const onWarning = jest.fn()
+    const h = _throttleHandlers(onWarning)
+    expect(h.onRateLimit(1, { method: "GET", url: "/repos" }, null, 0)).toBe(true)
+    expect(h.onRateLimit(1, { method: "GET", url: "/repos" }, null, 2)).toBe(true)
+    expect(h.onRateLimit(1, { method: "GET", url: "/repos" }, null, 3)).toBe(false)
+    expect(onWarning).toHaveBeenCalledTimes(3)
+    expect(onWarning.mock.calls[0][0]).toMatch(/rate limit hit/)
+  })
+
+  it("onSecondaryRateLimit logs the secondary event", () => {
+    const onWarning = jest.fn()
+    const h = _throttleHandlers(onWarning)
+    h.onSecondaryRateLimit(2, { method: "POST", url: "/issues" }, null)
+    expect(onWarning).toHaveBeenCalledWith(expect.stringMatching(/secondary rate limit/))
+  })
+
+  it("uses a no-op when onWarning is omitted (does not throw)", () => {
+    const h = _throttleHandlers(undefined)
+    expect(() => h.onRateLimit(1, { url: "/x" }, null, 0)).not.toThrow()
+    expect(() => h.onSecondaryRateLimit(1, { url: "/x" }, null)).not.toThrow()
+  })
+})
