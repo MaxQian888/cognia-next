@@ -195,6 +195,13 @@ const ENTRIES: Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | "categor
     iconName: "Eye",
     keywords: ["github", "pr", "review", "approve"],
   },
+  "action.github.reviewPrInline": {
+    label: "Inline review with AI",
+    description:
+      "Uses an LLM to produce a structured review (overall body + line-anchored inline comments) for a PR.",
+    iconName: "Eye",
+    keywords: ["github", "pr", "review", "ai", "inline", "comments"],
+  },
   "action.github.commentPr": {
     label: "Comment on PR",
     description: "Posts a comment on a pull request.",
@@ -239,10 +246,82 @@ const ENTRIES: Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | "categor
   },
   "action.github.runIssueLoop": {
     label: "Issue → PR loop",
-    description:
-      "End-to-end Issue → AI worktree → PR loop. Clones, drives the AI, opens a PR.",
+    description: "End-to-end Issue → AI worktree → PR loop. Clones, drives the AI, opens a PR.",
     iconName: "Repeat",
     keywords: ["github", "issue", "pr", "ai", "loop", "claude"],
+  },
+  // ── Desktop UI automation ─────────────────────────────────────────────────
+  "action.desktop.screenshot": {
+    label: "Screenshot",
+    description: "Capture the primary monitor or a region. Returns PNG bytes + dims.",
+    iconName: "Camera",
+    keywords: ["desktop", "screen", "screenshot", "capture", "image"],
+  },
+  "action.desktop.findElement": {
+    label: "Find element",
+    description: "Locate a UI element by name / automation id / control type.",
+    iconName: "Crosshair",
+    keywords: ["desktop", "find", "element", "uia", "accessibility"],
+  },
+  "action.desktop.readTree": {
+    label: "Read tree",
+    description: "Snapshot the accessibility subtree as JSON for downstream nodes.",
+    iconName: "ListTree",
+    keywords: ["desktop", "tree", "accessibility", "uia"],
+  },
+  "action.desktop.click": {
+    label: "Click",
+    description: "Click an element or absolute screen coordinate.",
+    iconName: "MousePointerClick",
+    keywords: ["desktop", "click", "mouse"],
+  },
+  "action.desktop.type": {
+    label: "Type text",
+    description: "Type a string into the focused element via SendInput.",
+    iconName: "Keyboard",
+    keywords: ["desktop", "type", "keyboard", "input"],
+  },
+  "action.desktop.keys": {
+    label: "Send keys",
+    description: "Send a keyboard chord like ctrl+shift+t.",
+    iconName: "Keyboard",
+    keywords: ["desktop", "keys", "chord", "hotkey", "keyboard"],
+  },
+  "action.desktop.invokePattern": {
+    label: "Invoke pattern",
+    description: "Dispatch a UIA pattern (Invoke / Toggle / Value / Transform / …).",
+    iconName: "Zap",
+    keywords: ["desktop", "uia", "pattern", "invoke", "toggle"],
+  },
+  "action.desktop.windowFocus": {
+    label: "Focus window",
+    description: "Bring a window to the foreground.",
+    iconName: "AppWindow",
+    keywords: ["desktop", "window", "focus", "foreground"],
+  },
+  "action.desktop.windowClose": {
+    label: "Close window",
+    description: "Close a window via the UIA Window pattern.",
+    iconName: "X",
+    keywords: ["desktop", "window", "close"],
+  },
+  "action.desktop.windowResize": {
+    label: "Resize window",
+    description: "Move/resize a window via the UIA Transform pattern.",
+    iconName: "Move",
+    keywords: ["desktop", "window", "resize", "move"],
+  },
+  "action.desktop.wait": {
+    label: "Wait for element",
+    description: "Block until an element appears, disappears, or matches a property.",
+    iconName: "Hourglass",
+    keywords: ["desktop", "wait", "element", "appear"],
+  },
+  "trigger.desktop.event": {
+    label: "On UIA event",
+    description: "Fire when a UIA focus / structure / property event matches.",
+    iconName: "Bell",
+    keywords: ["desktop", "trigger", "event", "uia", "focus"],
   },
   // ── AI primitives ─────────────────────────────────────────────────────────
   "ai.prompt": {

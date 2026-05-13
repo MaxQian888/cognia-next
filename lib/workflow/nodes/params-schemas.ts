@@ -355,6 +355,7 @@ export const PARAMS_SCHEMAS: Record<WorkflowNodeKind, z.ZodTypeAny> = {
   "action.github.closePr": z.object({}).passthrough(),
   "action.github.mergePr": z.object({}).passthrough(),
   "action.github.reviewPr": z.object({}).passthrough(),
+  "action.github.reviewPrInline": z.object({}).passthrough(),
   "action.github.commentPr": z.object({}).passthrough(),
   "action.github.commentIssue": z.object({}).passthrough(),
   "action.github.labelIssue": z.object({}).passthrough(),
@@ -363,6 +364,20 @@ export const PARAMS_SCHEMAS: Record<WorkflowNodeKind, z.ZodTypeAny> = {
   "action.github.generateChangelog": z.object({}).passthrough(),
   "action.github.pushTag": z.object({}).passthrough(),
   "action.github.runIssueLoop": z.object({}).passthrough(),
+  // Desktop UI automation — param shapes are permissive; inspector forms
+  // provide richer validation against the lib/automation/types.ts mirror.
+  "action.desktop.screenshot": z.object({}).passthrough(),
+  "action.desktop.findElement": z.object({}).passthrough(),
+  "action.desktop.readTree": z.object({}).passthrough(),
+  "action.desktop.click": z.object({}).passthrough(),
+  "action.desktop.type": z.object({}).passthrough(),
+  "action.desktop.keys": z.object({}).passthrough(),
+  "action.desktop.invokePattern": z.object({}).passthrough(),
+  "action.desktop.windowFocus": z.object({}).passthrough(),
+  "action.desktop.windowClose": z.object({}).passthrough(),
+  "action.desktop.windowResize": z.object({}).passthrough(),
+  "action.desktop.wait": z.object({}).passthrough(),
+  "trigger.desktop.event": z.object({}).passthrough(),
   // AI
   "ai.prompt": AiPromptParams,
   "ai.classify": AiClassifyParams,

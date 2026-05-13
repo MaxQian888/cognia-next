@@ -161,7 +161,9 @@ export function GithubClosePrConfig({ params, onChange }: ConfigProps) {
         <Input
           type="number"
           value={readNumber(params, "prNumber", 0) || ""}
-          onChange={(e) => onChange(patchParam(params, "prNumber", parseInt(e.target.value, 10) || 0))}
+          onChange={(e) =>
+            onChange(patchParam(params, "prNumber", parseInt(e.target.value, 10) || 0))
+          }
         />
       </Field>
     </FieldGroup>
@@ -179,11 +181,16 @@ export function GithubMergePrConfig({ params, onChange }: ConfigProps) {
         <Input
           type="number"
           value={readNumber(params, "prNumber", 0) || ""}
-          onChange={(e) => onChange(patchParam(params, "prNumber", parseInt(e.target.value, 10) || 0))}
+          onChange={(e) =>
+            onChange(patchParam(params, "prNumber", parseInt(e.target.value, 10) || 0))
+          }
         />
       </Field>
       <Field label="Merge method" name="mergeMethod" required>
-        <Select value={method} onValueChange={(v) => onChange(patchParam(params, "mergeMethod", v))}>
+        <Select
+          value={method}
+          onValueChange={(v) => onChange(patchParam(params, "mergeMethod", v))}
+        >
           <SelectTrigger>
             <SelectValue />
           </SelectTrigger>
@@ -215,7 +222,9 @@ export function GithubReviewPrConfig({ params, onChange }: ConfigProps) {
         <Input
           type="number"
           value={readNumber(params, "prNumber", 0) || ""}
-          onChange={(e) => onChange(patchParam(params, "prNumber", parseInt(e.target.value, 10) || 0))}
+          onChange={(e) =>
+            onChange(patchParam(params, "prNumber", parseInt(e.target.value, 10) || 0))
+          }
         />
       </Field>
       <Field label="Review verdict" name="event" required>
@@ -234,6 +243,89 @@ export function GithubReviewPrConfig({ params, onChange }: ConfigProps) {
         <ExpressionField
           value={readString(params, "body")}
           onChange={(v) => onChange(patchParam(params, "body", v))}
+          multiline
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+// ── action.github.reviewPrInline (LLM-driven inline review) ─────────────
+
+export function GithubReviewPrInlineConfig({ params, onChange }: ConfigProps) {
+  return (
+    <FieldGroup>
+      <RepoFullNameField params={params} onChange={onChange} />
+      <Field label="PR number" name="prNumber" required>
+        <Input
+          type="number"
+          value={readNumber(params, "prNumber", 0) || ""}
+          onChange={(e) =>
+            onChange(patchParam(params, "prNumber", parseInt(e.target.value, 10) || 0))
+          }
+        />
+      </Field>
+      <Field
+        label="LLM provider"
+        name="provider"
+        required
+        hint="Must match a configured provider id (e.g. anthropic, openai)."
+      >
+        <Input
+          value={readString(params, "provider")}
+          onChange={(e) => onChange(patchParam(params, "provider", e.target.value))}
+          placeholder="anthropic"
+        />
+      </Field>
+      <Field label="Model" name="model" required>
+        <Input
+          value={readString(params, "model")}
+          onChange={(e) => onChange(patchParam(params, "model", e.target.value))}
+          placeholder="claude-sonnet-4-6"
+        />
+      </Field>
+      <Field
+        label="API key"
+        name="apiKey"
+        required
+        hint="Secret. Stored in the workflow definition — consider a credential ref instead."
+      >
+        <Input
+          type="password"
+          value={readString(params, "apiKey")}
+          onChange={(e) => onChange(patchParam(params, "apiKey", e.target.value))}
+        />
+      </Field>
+      <Field label="Base URL" name="baseURL" hint="Optional. For self-hosted or proxied providers.">
+        <Input
+          value={readString(params, "baseURL")}
+          onChange={(e) => onChange(patchParam(params, "baseURL", e.target.value))}
+          placeholder="https://api.anthropic.com"
+        />
+      </Field>
+      <Field
+        label="Max files"
+        name="maxFiles"
+        hint="How many changed files to inspect (1–30). Default 5."
+      >
+        <Input
+          type="number"
+          min={1}
+          max={30}
+          value={readNumber(params, "maxFiles", 5) || ""}
+          onChange={(e) =>
+            onChange(patchParam(params, "maxFiles", parseInt(e.target.value, 10) || 5))
+          }
+        />
+      </Field>
+      <Field
+        label="Focus"
+        name="focus"
+        hint="Optional review angle, e.g. 'security' or 'performance'. Supports {{ }} expressions."
+      >
+        <ExpressionField
+          value={readString(params, "focus")}
+          onChange={(v) => onChange(patchParam(params, "focus", v))}
           multiline
         />
       </Field>
@@ -366,7 +458,10 @@ export function GithubCloseIssueConfig({ params, onChange }: ConfigProps) {
         />
       </Field>
       <Field label="Close reason" name="reason">
-        <Select value={reason || "completed"} onValueChange={(v) => onChange(patchParam(params, "reason", v))}>
+        <Select
+          value={reason || "completed"}
+          onValueChange={(v) => onChange(patchParam(params, "reason", v))}
+        >
           <SelectTrigger>
             <SelectValue />
           </SelectTrigger>

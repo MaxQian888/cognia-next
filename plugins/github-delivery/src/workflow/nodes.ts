@@ -12,14 +12,10 @@
 
 import { registerNodeExecutor } from "@/lib/workflow/nodes/registry"
 import type { GhAction } from "@/lib/github/types"
-import {
-  computeBump,
-  parseCommitMessage,
-  applyBump,
-  renderChangelog,
-} from "@/lib/github/changelog"
+import { computeBump, parseCommitMessage, applyBump, renderChangelog } from "@/lib/github/changelog"
 import { guardedExecutor, splitRepo } from "./shared"
 import { runIssueLoop, type RunIssueLoopResult } from "./issue-loop"
+import { runPRReviewAgent, type RunPRReviewAgentResult } from "./review-pr-inline"
 
 // ── Type definitions for params (mirrors what the inspector form will write) ──
 
@@ -88,6 +84,15 @@ interface RunIssueLoopParams extends Common {
   worktreeMode?: "local" | "e2b"
   /** Branch name template, default `cognia/issue-{n}`. */
   branchTemplate?: string
+}
+interface ReviewPrInlineParams extends Common {
+  prNumber: number
+  provider: string
+  model: string
+  apiKey: string
+  baseURL?: string
+  maxFiles?: number
+  focus?: string
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -269,10 +274,7 @@ registerNodeExecutor({
 registerNodeExecutor({
   kind: "action.github.labelIssue",
   typeVersion: 1,
-  execute: guardedExecutor<
-    LabelIssueParams,
-    { added: string[]; removed: string[] }
-  >({
+  execute: guardedExecutor<LabelIssueParams, { added: string[]; removed: string[] }>({
     repoFrom: (p) => p.repoFullName,
     policyOverride: policyOverrideOf,
     action: (p): GhAction => ({
@@ -293,15 +295,12 @@ registerNodeExecutor({
         })
       }
       for (const label of remove) {
-        await octokit.request(
-          "DELETE /repos/{owner}/{repo}/issues/{issue_number}/labels/{name}",
-          {
-            owner,
-            repo,
-            issue_number: step.params.issueNumber,
-            name: label,
-          }
-        )
+        await octokit.request("DELETE /repos/{owner}/{repo}/issues/{issue_number}/labels/{name}", {
+          owner,
+          repo,
+          issue_number: step.params.issueNumber,
+          name: label,
+        })
       }
       return { added: add, removed: remove }
     },
@@ -339,10 +338,7 @@ registerNodeExecutor({
 registerNodeExecutor({
   kind: "action.github.createRelease",
   typeVersion: 1,
-  execute: guardedExecutor<
-    CreateReleaseParams,
-    { id: number; htmlUrl: string; tag: string }
-  >({
+  execute: guardedExecutor<CreateReleaseParams, { id: number; htmlUrl: string; tag: string }>({
     repoFrom: (p) => p.repoFullName,
     policyOverride: policyOverrideOf,
     action: (p): GhAction => ({
@@ -387,14 +383,11 @@ registerNodeExecutor({
       const { owner, repo } = splitRepo(repoFullName)
       // Use "compare commits" — endpoint emits a flat list of commits from
       // the comparison base to HEAD (default branch).
-      const resp = (await octokit.request(
-        "GET /repos/{owner}/{repo}/compare/{basehead}",
-        {
-          owner,
-          repo,
-          basehead: `${step.params.since}...HEAD`,
-        }
-      )) as {
+      const resp = (await octokit.request("GET /repos/{owner}/{repo}/compare/{basehead}", {
+        owner,
+        repo,
+        basehead: `${step.params.since}...HEAD`,
+      })) as {
         data: {
           commits: Array<{
             sha: string
@@ -466,6 +459,48 @@ registerNodeExecutor({
       repo: p.repoFullName,
       branch: (p.branchTemplate ?? "cognia/issue-{n}").replace("{n}", String(p.issueNumber)),
     }),
-    run: async ({ step }) => runIssueLoop(step.params),
+    describe: (p) => `Issue → PR loop for issue #${p.issueNumber} in ${p.repoFullName}`,
+    run: async ({ step }) =>
+      runIssueLoop({
+        ...step.params,
+        workflowRunId: step.runId,
+        workflowStepId: step.stepId,
+      }),
+  }),
+})
+
+// ── reviewPrInline ────────────────────────────────────────────────────────
+//
+// Upgrade of the legacy ai.prompt + commentPr chain. Lets the LLM emit
+// structured inline comments alongside an overall review body. Posts via
+// Octokit's POST /pulls/{n}/reviews so reviewers see comments anchored to
+// real diff lines.
+
+registerNodeExecutor({
+  kind: "action.github.reviewPrInline",
+  typeVersion: 1,
+  execute: guardedExecutor<ReviewPrInlineParams, RunPRReviewAgentResult>({
+    repoFrom: (p) => p.repoFullName,
+    policyOverride: policyOverrideOf,
+    action: (p): GhAction => ({
+      kind: "comment",
+      pr: { repo: p.repoFullName, prNumber: p.prNumber },
+      body: "[inline review]",
+    }),
+    describe: (p) => `Inline review of PR #${p.prNumber} in ${p.repoFullName}`,
+    run: async ({ octokit, step }) =>
+      runPRReviewAgent(
+        {
+          repoFullName: step.params.repoFullName,
+          prNumber: step.params.prNumber,
+          provider: step.params.provider,
+          model: step.params.model,
+          apiKey: step.params.apiKey,
+          baseURL: step.params.baseURL,
+          maxFiles: step.params.maxFiles,
+          focus: step.params.focus,
+        },
+        octokit
+      ),
   }),
 })

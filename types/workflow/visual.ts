@@ -52,6 +52,7 @@ export type WorkflowNodeKind =
   | "action.github.closePr"
   | "action.github.mergePr"
   | "action.github.reviewPr"
+  | "action.github.reviewPrInline"
   | "action.github.commentPr"
   | "action.github.commentIssue"
   | "action.github.labelIssue"
@@ -60,6 +61,20 @@ export type WorkflowNodeKind =
   | "action.github.generateChangelog"
   | "action.github.pushTag"
   | "action.github.runIssueLoop"
+  // Desktop UI automation (provided by the automation subsystem — see
+  // `docs/superpowers/specs/2026-05-12-ui-automation-subsystem-design.md`)
+  | "action.desktop.screenshot"
+  | "action.desktop.findElement"
+  | "action.desktop.readTree"
+  | "action.desktop.click"
+  | "action.desktop.type"
+  | "action.desktop.keys"
+  | "action.desktop.invokePattern"
+  | "action.desktop.windowFocus"
+  | "action.desktop.windowClose"
+  | "action.desktop.windowResize"
+  | "action.desktop.wait"
+  | "trigger.desktop.event"
   // AI primitives
   | "ai.prompt"
   | "ai.classify"
@@ -134,6 +149,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.github.closePr",
   "action.github.mergePr",
   "action.github.reviewPr",
+  "action.github.reviewPrInline",
   "action.github.commentPr",
   "action.github.commentIssue",
   "action.github.labelIssue",
@@ -142,6 +158,18 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.github.generateChangelog",
   "action.github.pushTag",
   "action.github.runIssueLoop",
+  "action.desktop.screenshot",
+  "action.desktop.findElement",
+  "action.desktop.readTree",
+  "action.desktop.click",
+  "action.desktop.type",
+  "action.desktop.keys",
+  "action.desktop.invokePattern",
+  "action.desktop.windowFocus",
+  "action.desktop.windowClose",
+  "action.desktop.windowResize",
+  "action.desktop.wait",
+  "trigger.desktop.event",
   "ai.prompt",
   "ai.classify",
   "ai.extract",
@@ -378,6 +406,8 @@ export type RunEventType =
   | "run_completed"
   | "run_failed"
   | "run_cancelled"
+  | "step.long_running.checkpoint"
+  | "step.long_running.progress"
 
 export type RunEventLogLevel = "debug" | "info" | "warn" | "error"
 

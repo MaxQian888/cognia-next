@@ -4,8 +4,13 @@ import { WORKFLOW_NODE_KINDS } from "@/types/workflow/visual"
 describe("buildGithubDeliveryTemplates", () => {
   const templates = buildGithubDeliveryTemplates()
 
-  it("emits all 7 templates", () => {
-    expect(templates).toHaveLength(7)
+  it("emits all 8 templates", () => {
+    expect(templates).toHaveLength(8)
+  })
+
+  it("includes the new inline PR review template", () => {
+    const names = templates.map((t) => t.name)
+    expect(names).toContain("[GitHub] PR inline AI review")
   })
 
   it("every template id is unique and starts with wf_builtin_gh_", () => {

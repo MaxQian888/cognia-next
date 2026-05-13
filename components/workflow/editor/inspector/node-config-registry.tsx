@@ -25,6 +25,7 @@ import {
   GithubOpenPrConfig,
   GithubPushTagConfig,
   GithubReviewPrConfig,
+  GithubReviewPrInlineConfig,
   GithubRunIssueLoopConfig,
   GithubWebhookTriggerConfig,
 } from "./forms/github-forms"
@@ -132,6 +133,7 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "action.github.closePr": GithubClosePrConfig,
   "action.github.mergePr": GithubMergePrConfig,
   "action.github.reviewPr": GithubReviewPrConfig,
+  "action.github.reviewPrInline": GithubReviewPrInlineConfig,
   "action.github.commentPr": GithubCommentPrConfig,
   "action.github.commentIssue": GithubCommentIssueConfig,
   "action.github.labelIssue": GithubLabelIssueConfig,

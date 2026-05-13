@@ -11,7 +11,6 @@
  * is responsible for actually calling it after the bridge produces an event.
  */
 
-import { buildConversationKey } from "@/types/connectors/event"
 import type {
   ChannelDescriptor,
   ConversationReference,
@@ -19,6 +18,11 @@ import type {
   PlatformIdentity,
 } from "@/types/connectors/event"
 import type { NormalizedGhEvent, NormalizedGhEventKind } from "@/lib/github/types"
+import {
+  GITHUB_ADAPTER_ID,
+  buildRemoteChatId,
+  encodeConversationKey,
+} from "../adapter/conversation-key"
 
 /** Which event kinds should appear in the Inbox. */
 const INBOX_KINDS: ReadonlySet<NormalizedGhEventKind> = new Set([
@@ -30,7 +34,7 @@ const INBOX_KINDS: ReadonlySet<NormalizedGhEventKind> = new Set([
   "issue_comment.created",
 ])
 
-const ADAPTER_ID = "github-delivery"
+const ADAPTER_ID = GITHUB_ADAPTER_ID
 /** Self-id is constant — the github-delivery plugin acts as a single principal. */
 const SELF_ID = "github-delivery-bot"
 
@@ -48,7 +52,8 @@ export function ghEventToInbound(event: NormalizedGhEvent): NormalizedInboundEve
   // The "conversation" for GitHub events is keyed by the repo plus the
   // numeric id of the PR or issue, so threads in the Inbox track per-item
   // back-and-forth (multiple comments on the same PR collapse into one).
-  const remoteChatId = buildRemoteChatId(event)
+  const coords = remoteChatCoords(event)
+  const remoteChatId = coords ? buildRemoteChatId(coords) : event.repoFullName
   const conversationRef: ConversationReference = {
     platform: "github",
     adapterId: ADAPTER_ID,
@@ -56,7 +61,9 @@ export function ghEventToInbound(event: NormalizedGhEvent): NormalizedInboundEve
     refKind: event.pr ? "pr" : event.issue ? "issue" : "repo",
     refNumber: event.pr?.prNumber ?? event.issue?.issueNumber,
   }
-  const conversationKey = buildConversationKey("github", ADAPTER_ID, remoteChatId)
+  const conversationKey = coords
+    ? encodeConversationKey(coords)
+    : `github:${ADAPTER_ID}:${event.repoFullName}`
 
   const sender: PlatformIdentity = {
     id: `${ADAPTER_ID}:${event.senderLogin ?? "anonymous"}`,
@@ -97,10 +104,16 @@ export function ghEventToInbound(event: NormalizedGhEvent): NormalizedInboundEve
   }
 }
 
-function buildRemoteChatId(event: NormalizedGhEvent): string {
-  if (event.pr) return `${event.repoFullName}#pr-${event.pr.prNumber}`
-  if (event.issue) return `${event.repoFullName}#issue-${event.issue.issueNumber}`
-  return event.repoFullName
+function remoteChatCoords(event: NormalizedGhEvent) {
+  const [owner, repo] = event.repoFullName.split("/")
+  if (!owner || !repo) return null
+  if (event.pr) {
+    return { owner, repo, kind: "pr" as const, number: event.pr.prNumber }
+  }
+  if (event.issue) {
+    return { owner, repo, kind: "issue" as const, number: event.issue.issueNumber }
+  }
+  return null
 }
 
 /**

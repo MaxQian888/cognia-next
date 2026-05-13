@@ -124,7 +124,19 @@ export type GhAction =
 
 export type PolicyDecision =
   | { allow: true }
-  | { allow: false; reason: string; mustWait?: { until: number } }
+  | {
+      allow: false
+      reason: string
+      mustWait?: { until: number }
+      /**
+       * When true, the deny is recoverable via human approval — the caller
+       * (typically the GitHub Delivery draft-bridge) should suspend the
+       * workflow step, surface an Inbox draft to the user, and resume once
+       * `approveDraft` flips the row. When undefined/false the deny is
+       * permanent and the step should abort.
+       */
+      needsApproval?: boolean
+    }
 
 export interface GhPolicyContext {
   policy: GhPolicy

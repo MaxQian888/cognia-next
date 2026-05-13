@@ -119,8 +119,7 @@ function issueTriageTemplate(): VisualWorkflow {
         data: {
           label: "Classify",
           params: {
-            text:
-              "{{ $trigger.payload.body.issue.title }}\n\n{{ $trigger.payload.body.issue.body }}",
+            text: "{{ $trigger.payload.body.issue.title }}\n\n{{ $trigger.payload.body.issue.body }}",
             categories: ["bug", "feature", "question"],
           },
         },
@@ -405,9 +404,56 @@ function ciFailureDiagnosisTemplate(): VisualWorkflow {
   })
 }
 
+// 8) PR inline review — newer companion to template 1. Uses the
+// `action.github.reviewPrInline` executor so reviewers see line-anchored
+// comments alongside the high-level summary. Kept side-by-side with the
+// "quick" variant in template 1 so users can pick the level of fidelity
+// they need.
+function prInlineReviewTemplate(): VisualWorkflow {
+  return tmpl({
+    id: "wf_builtin_gh_pr_inline_review",
+    name: "[GitHub] PR inline AI review",
+    description:
+      "When a PR opens or syncs, run an LLM over the diff and post a structured review with inline comments anchored to specific lines.",
+    icon: "Eye",
+    tags: ["github", "ai", "review", "pr", "inline"],
+    nodes: [
+      {
+        id: "n_trigger",
+        type: "trigger.github.webhook",
+        typeVersion: 1,
+        position: { x: 80, y: 140 },
+        data: {
+          label: "GitHub: PR opened/synced",
+          params: { events: ["pull_request.opened", "pull_request.synchronize"] },
+        },
+      },
+      {
+        id: "n_review",
+        type: "action.github.reviewPrInline",
+        typeVersion: 1,
+        position: { x: 380, y: 140 },
+        data: {
+          label: "Inline review with AI",
+          params: {
+            repoFullName: "{{ $trigger.payload.body.repository.full_name }}",
+            prNumber: "{{ $trigger.payload.body.pull_request.number }}",
+            provider: "anthropic",
+            model: "claude-sonnet-4-6",
+            apiKey: "",
+            maxFiles: 5,
+          },
+        },
+      },
+    ],
+    edges: [{ id: "e1", source: "n_trigger", target: "n_review" }],
+  })
+}
+
 export function buildGithubDeliveryTemplates(): VisualWorkflow[] {
   return [
     prAutoReviewTemplate(),
+    prInlineReviewTemplate(),
     issueTriageTemplate(),
     issuePrLoopTemplate(),
     releaseConventionalTemplate(),

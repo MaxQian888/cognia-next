@@ -15,17 +15,21 @@
 
 import type { Octokit } from "@octokit/core"
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
-import type {
-  GhAction,
-  GhAuditEntry,
-  GhPolicy,
-} from "@/lib/github/types"
+import type { GhAction, GhAuditEntry, GhPolicy } from "@/lib/github/types"
 import { requireGithubRuntime } from "./runtime"
+import { requestHitlApproval, type HitlApprovalResult } from "../approval/draft-bridge"
 
 export interface GuardedExecutorContext<TParams> {
   step: StepExecutionContext<TParams>
   octokit: Octokit
   repoFullName: string
+  /**
+   * Populated when the action was suspended for HITL approval and the user
+   * approved with edits. Run implementations that respect this — e.g. PR
+   * comment executors — should prefer `approval.editedBody` over the
+   * proposed body in their `step.params`.
+   */
+  approval?: HitlApprovalResult
 }
 
 export interface GuardedExecutorOptions<TParams, TOutput> {
@@ -40,6 +44,18 @@ export interface GuardedExecutorOptions<TParams, TOutput> {
   policyOverride?: (params: TParams) => Partial<GhPolicy> | undefined
   /** Actually call Octokit. */
   run: (g: GuardedExecutorContext<TParams>) => Promise<TOutput>
+  /**
+   * Optional short human-readable description of the proposed action for
+   * the HITL approval card ("Merge PR #42 in foo/bar"). Defaults to
+   * `${action.kind} ${repoFullName}` when omitted.
+   */
+  describe?: (params: TParams, action: GhAction) => string
+  /**
+   * Optional proposed comment / review body for HITL approval. When
+   * present, the draft is editable and `approval.editedBody` is forwarded
+   * to `run` so executors can post the user's revised text.
+   */
+  proposedBody?: (params: TParams, action: GhAction) => string | undefined
 }
 
 /**
@@ -60,6 +76,7 @@ export function guardedExecutor<TParams, TOutput>(
 
     // Policy gate (skip for null actions — read-only).
     const action = opts.action(step.params)
+    let approval: HitlApprovalResult | undefined
     if (action) {
       const { decision, effectivePolicy } = await runtime.checkPolicy(
         action,
@@ -76,19 +93,66 @@ export function guardedExecutor<TParams, TOutput>(
       })
       void effectivePolicy
       if (!decision.allow) {
-        return {
-          output: {
-            skipped: true,
-            reason: decision.reason,
-            mustWait: decision.mustWait,
-          },
+        if (decision.needsApproval) {
+          // Surface a HITL draft in the Inbox and block until the user
+          // approves or rejects it. Approval implies the action is good
+          // to run; we skip a second policy round-trip because the user
+          // is the override.
+          const describeFn = opts.describe ?? ((_p, a) => `${a.kind} ${repoFullName}`)
+          const summary = describeFn(step.params, action)
+          step.log("info", `github: awaiting HITL approval — ${summary}`)
+          approval = await requestHitlApproval({
+            runId: step.runId,
+            stepId: step.stepId,
+            repoFullName,
+            actionSummary: summary,
+            proposedBody: opts.proposedBody?.(step.params, action),
+            signal: step.signal,
+          })
+          if (approval.outcome === "reject") {
+            await runtime.recordAudit({
+              repoFullName,
+              runId: step.runId,
+              stepId: step.stepId,
+              action,
+              decision: { allow: false, reason: "user rejected HITL approval" },
+              at: Date.now(),
+              reason: approval.feedback ?? "user rejected",
+            })
+            return {
+              output: {
+                skipped: true,
+                reason: `HITL rejected: ${approval.feedback ?? "no feedback"}`,
+                draftId: approval.draftId,
+              },
+            }
+          }
+          // approve — log the approval as an allow audit row for the
+          // history view and fall through to execute the action.
+          await runtime.recordAudit({
+            repoFullName,
+            runId: step.runId,
+            stepId: step.stepId,
+            action,
+            decision: { allow: true },
+            at: Date.now(),
+            reason: `HITL approved (draft ${approval.draftId})`,
+          })
+        } else {
+          return {
+            output: {
+              skipped: true,
+              reason: decision.reason,
+              mustWait: decision.mustWait,
+            },
+          }
         }
       }
     }
 
     const octokit = await runtime.getOctokit(repoFullName)
     try {
-      const out = await opts.run({ step, octokit, repoFullName })
+      const out = await opts.run({ step, octokit, repoFullName, approval })
       // Record success audit when an action was attempted (already done above
       // for the allow leg). For read-only actions log an info-level audit.
       if (!action) {

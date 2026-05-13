@@ -6,7 +6,7 @@
  * with reset-time hints.
  */
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { GaugeIcon, RefreshCwIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -59,8 +59,9 @@ export function UsageTab() {
     lastRefreshAt: null,
   })
   const [refreshing, setRefreshing] = useState(false)
+  const [nowTick, setNowTick] = useState(() => Date.now())
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     if (!repos || repos.length === 0) return
     const rt = getGithubRuntime()
     if (!rt) return
@@ -80,15 +81,23 @@ export function UsageTab() {
     )
     setState({ byRepo: newByRepo, errors: newErrors, lastRefreshAt: Date.now() })
     setRefreshing(false)
-  }
+  }, [repos])
 
   useEffect(() => {
     if (!repos || repos.length === 0) return
-    refresh()
-    const id = setInterval(refresh, POLL_INTERVAL_MS)
-    return () => clearInterval(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repos?.length])
+    let cancelled = false
+    queueMicrotask(() => {
+      if (!cancelled) void refresh()
+    })
+    const id = setInterval(() => {
+      void refresh()
+      setNowTick(Date.now())
+    }, POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [repos?.length, refresh])
 
   if (repos === null) {
     return (
@@ -113,7 +122,7 @@ export function UsageTab() {
     )
   }
 
-  const now = Date.now()
+  const now = nowTick
   return (
     <div className="space-y-3" data-testid="usage-tab">
       <div className="flex items-center justify-between">

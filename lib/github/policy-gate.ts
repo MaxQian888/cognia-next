@@ -6,23 +6,22 @@
  * runId / stepId / repoFullName context lives in the workflow step.
  */
 
-import {
-  isInQuietHours,
-  msUntilQuietEnd,
-} from "@/lib/connectors/outbound-runner"
-import type {
-  GhAction,
-  GhPolicy,
-  GhPolicyContext,
-  PolicyDecision,
-  PrRef,
-  IssueRef,
-} from "./types"
+import { isInQuietHours, msUntilQuietEnd } from "@/lib/connectors/outbound-runner"
+import type { GhAction, GhPolicy, GhPolicyContext, PolicyDecision, PrRef, IssueRef } from "./types"
 
 const ALLOW: PolicyDecision = { allow: true }
 
 function deny(reason: string, mustWait?: { until: number }): PolicyDecision {
   return mustWait ? { allow: false, reason, mustWait } : { allow: false, reason }
+}
+
+/**
+ * Recoverable deny — the caller can resolve it via human approval (Inbox
+ * draft). Tagged with `needsApproval: true` so the GitHub Delivery
+ * draft-bridge can route it to a HITL flow instead of aborting the step.
+ */
+function denyAwaitingApproval(reason: string): PolicyDecision {
+  return { allow: false, reason, needsApproval: true }
 }
 
 function targetRepo(target: PrRef | IssueRef): string {
@@ -57,10 +56,7 @@ function pickAuthorPolicy(
   }
 }
 
-function checkBranchProtection(
-  policy: GhPolicy,
-  branch: string
-): PolicyDecision {
+function checkBranchProtection(policy: GhPolicy, branch: string): PolicyDecision {
   const matched = policy.branchProtection.find((re) => new RegExp(re).test(branch))
   if (matched) {
     return deny(`branch "${branch}" matches protection regex "${matched}"`)
@@ -93,7 +89,7 @@ export function checkPolicy(action: GhAction, ctx: GhPolicyContext): PolicyDecis
         return deny(`merge requires CI=success but got "${ctx.ciStatus ?? "unknown"}"`)
       }
       if (policy.requireHumanApproval && !ctx.humanApproved) {
-        return deny("merge requires explicit human approval")
+        return denyAwaitingApproval("merge requires explicit human approval")
       }
       if (ctx.mergesTodayCount >= policy.maxDailyMerges) {
         return deny(
@@ -115,7 +111,7 @@ export function checkPolicy(action: GhAction, ctx: GhPolicyContext): PolicyDecis
       // Drafts are always allowed; only published releases honor approval.
       if (action.draft) return ALLOW
       if (policy.requireHumanApproval && !ctx.humanApproved) {
-        return deny("publishing a release requires explicit human approval")
+        return denyAwaitingApproval("publishing a release requires explicit human approval")
       }
       return ALLOW
     }

@@ -221,8 +221,8 @@ export function CredentialsTab() {
           <KeyIcon className="h-4 w-4" />
           <AlertTitle>Use a fine-scoped token</AlertTitle>
           <AlertDescription>
-            Pick "Only select repositories" and specific permissions
-            (issues: read/write, pull-requests: read/write, contents: read).
+            Pick &quot;Only select repositories&quot; and specific permissions (issues: read/write,
+            pull-requests: read/write, contents: read).
           </AlertDescription>
         </Alert>
         <div className="space-y-2">

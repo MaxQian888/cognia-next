@@ -15,13 +15,9 @@
  * driver backed by `lib/claude/agents/claude-code`.
  */
 
-import type { Octokit } from "@octokit/core"
 import { cloneToWorkspace, commitAndPush, type WorkspaceHandle } from "@/lib/github/workspace"
-import type {
-  GhAction,
-  GhWorkOrder,
-  WorkOrderStatus,
-} from "@/lib/github/types"
+import type { GhAction, GhWorkOrder, WorkOrderStatus } from "@/lib/github/types"
+import { runLongStep } from "@/lib/workflow/runtime/long-step-runner"
 import { requireGithubRuntime } from "./runtime"
 
 /** Hard wall-clock cap (60 min) so a stuck driver doesn't run forever. */
@@ -58,6 +54,14 @@ export interface RunIssueLoopParams {
   issueNumber: number
   worktreeMode?: "local" | "e2b"
   branchTemplate?: string
+  /**
+   * Workflow context — passed by the executor in nodes.ts so the AI run
+   * checkpoints into the parent workflow's event log via long-step-runner.
+   * Tests can omit; the loop falls back to a synthetic runId/stepId so
+   * checkpoints still write (harmless when there's no parent workflow).
+   */
+  workflowRunId?: string
+  workflowStepId?: string
 }
 
 export interface RunIssueLoopResult {
@@ -120,7 +124,10 @@ export async function runIssueLoop(
   const now = hooks.now ?? Date.now
   const controller = hooks.abortController ?? new AbortController()
 
-  const timeout = setTimeout(() => controller.abort("runIssueLoop: hard 60-min timeout"), HARD_TIMEOUT_MS)
+  const timeout = setTimeout(
+    () => controller.abort("runIssueLoop: hard 60-min timeout"),
+    HARD_TIMEOUT_MS
+  )
   const start = now()
   const branch = (params.branchTemplate ?? "cognia/issue-{n}").replace(
     "{n}",
@@ -145,10 +152,11 @@ export async function runIssueLoop(
     const [owner, repo] = params.repoFullName.split("/")
 
     // 2. Fetch issue.
-    const issue = (await octokit.request(
-      "GET /repos/{owner}/{repo}/issues/{issue_number}",
-      { owner, repo, issue_number: params.issueNumber }
-    )) as IssueResp
+    const issue = (await octokit.request("GET /repos/{owner}/{repo}/issues/{issue_number}", {
+      owner,
+      repo,
+      issue_number: params.issueNumber,
+    })) as IssueResp
     if (controller.signal.aborted) throw new Error("runIssueLoop aborted")
 
     // 3. Resolve token for clone (use the same octokit, but we need the raw
@@ -165,15 +173,43 @@ export async function runIssueLoop(
       backend: params.worktreeMode ?? "local",
     })
 
-    // 5. Drive the AI.
-    const driverResult = await driver.run({
-      workspacePath: workspace.path,
-      repoFullName: params.repoFullName,
-      issueNumber: params.issueNumber,
-      issueTitle: issue.data.title,
-      issueBody: issue.data.body ?? "",
-      signal: controller.signal,
+    // 5. Drive the AI inside a long-step-runner so the run survives
+    //    process crashes — the runner writes incremental checkpoints to
+    //    the parent workflow's event log; on resume, runIssueLoop is
+    //    re-entered and the AI summary is replayed from the latest
+    //    checkpoint instead of re-running the agent.
+    const runId = params.workflowRunId ?? `issue-loop:${params.repoFullName}:${params.issueNumber}`
+    const stepId = params.workflowStepId ?? "ai-driver"
+    const workspaceForDriver = workspace
+    type DriverState =
+      | { phase: "running" }
+      | { phase: "completed"; summary: string; durationMs: number }
+    const driverHandle = runLongStep<{ summary: string; durationMs: number }, DriverState>({
+      runId,
+      stepId,
+      checkpointKey: "issue-loop:ai",
+      initialState: { phase: "running" },
+      onResume: async (state) => state,
+      run: async (ctx) => {
+        if (ctx.state.phase === "completed") {
+          await ctx.progress("resumed from checkpoint — skipping AI run")
+          return { summary: ctx.state.summary, durationMs: ctx.state.durationMs }
+        }
+        await ctx.progress("starting AI driver")
+        const r = await driver.run({
+          workspacePath: workspaceForDriver.path,
+          repoFullName: params.repoFullName,
+          issueNumber: params.issueNumber,
+          issueTitle: issue.data.title,
+          issueBody: issue.data.body ?? "",
+          signal: controller.signal,
+        })
+        await ctx.checkpoint({ phase: "completed", summary: r.summary, durationMs: r.durationMs })
+        await ctx.progress("AI driver completed", { durationMs: r.durationMs })
+        return r
+      },
     })
+    const driverResult = await driverHandle.promise
 
     // 6. Commit + push to the issue branch.
     workspace.branch = branch
@@ -196,15 +232,12 @@ export async function runIssueLoop(
     })) as PrResp
 
     // 8. Tag the PR.
-    await octokit.request(
-      "POST /repos/{owner}/{repo}/issues/{issue_number}/labels",
-      {
-        owner,
-        repo,
-        issue_number: pr.data.number,
-        labels: ["cognia:opened-by-bot"],
-      }
-    )
+    await octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/labels", {
+      owner,
+      repo,
+      issue_number: pr.data.number,
+      labels: ["cognia:opened-by-bot"],
+    })
 
     await safeUpdateWorkOrder(rt, {
       repoFullName: params.repoFullName,
@@ -251,7 +284,6 @@ async function safeUpdateWorkOrder(
   } catch (err) {
     // Swallow — the loop's main path must not depend on Dexie writes. The
     // audit table is the canonical history; workOrders is a UX convenience.
-    // eslint-disable-next-line no-console
     console.error("safeUpdateWorkOrder failed:", err)
   }
 }

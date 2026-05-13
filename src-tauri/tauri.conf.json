@@ -81,6 +81,16 @@
           "description": "Open a fresh chat after launch"
         }
       ]
+    },
+    "shell": {
+      "open": false,
+      "scope": [
+        {
+          "name": "cloudflared-tunnel",
+          "command": "cloudflared",
+          "args": ["tunnel", "--url", { "validator": "^https?://.+" }]
+        }
+      ]
     }
   }
 }

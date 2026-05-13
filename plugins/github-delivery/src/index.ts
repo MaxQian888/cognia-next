@@ -27,9 +27,13 @@ import {
   type NormalizedGhEvent,
   type WorkOrderStatus,
 } from "@/lib/github/types"
-import { setGithubRuntime, type GithubRuntime } from "./workflow/runtime"
+import { requireGithubRuntime, setGithubRuntime, type GithubRuntime } from "./workflow/runtime"
 import { ghEventToInbound } from "./connector/inbox-bridge"
 import { runGithubPoll, type GhTable } from "./github-poll"
+import { setIssueLoopDriver } from "./workflow/issue-loop"
+import { SidecarIssueLoopDriver } from "./drivers/sidecar-driver"
+import { GithubAdapter } from "./adapter/github-adapter"
+import type { PluginAdapterContext } from "@/lib/plugin/connectors-bridge"
 
 // Side-effect import — registers all 12 action.github.* executors.
 import "./workflow/nodes"
@@ -43,10 +47,7 @@ let state: ActivationState | null = null
 
 // ── Runtime implementation backed by the plugin context ──────────────────────
 
-async function lookupRepo(
-  ctx: PluginContext,
-  fullName: string
-): Promise<GhRepoEntry | null> {
+async function lookupRepo(ctx: PluginContext, fullName: string): Promise<GhRepoEntry | null> {
   if (!ctx.dexie) return null
   const table = ctx.dexie.table<GhRepoEntry, string>("repos")
   return (await table.get(fullName)) ?? null
@@ -75,7 +76,8 @@ async function buildOctokit(ctx: PluginContext, fullName: string) {
   if (!repo.installationId) {
     throw new Error(`github-delivery: repo "${fullName}" missing installationId`)
   }
-  const appId = repo.appId ?? parseInt((await ctx.secrets?.get?.("github-delivery:appId")) ?? "0", 10)
+  const appId =
+    repo.appId ?? parseInt((await ctx.secrets?.get?.("github-delivery:appId")) ?? "0", 10)
   const privateKey =
     repo.appPrivateKey ?? (await ctx.secrets?.get?.("github-delivery:privateKey")) ?? ""
   if (!appId || !privateKey) {
@@ -89,10 +91,7 @@ async function buildOctokit(ctx: PluginContext, fullName: string) {
   })
 }
 
-async function persistAudit(
-  ctx: PluginContext,
-  row: GhAuditEntry
-): Promise<void> {
+async function persistAudit(ctx: PluginContext, row: GhAuditEntry): Promise<void> {
   if (!ctx.dexie) return
   const table = ctx.dexie.table<GhAuditEntry, number>("audit")
   await table.put(row)
@@ -127,9 +126,7 @@ async function evaluatePolicy(
       .where("[repoFullName+at]")
       .between([repoFullName, today], [repoFullName, Number.MAX_SAFE_INTEGER])
       .toArray()
-    mergesToday = rows.filter(
-      (r) => r.action.kind === "merge" && r.decision.allow === true
-    ).length
+    mergesToday = rows.filter((r) => r.action.kind === "merge" && r.decision.allow === true).length
   }
 
   const decision = runPolicyGate(action, {
@@ -235,10 +232,16 @@ const definition: PluginDefinition = {
     ])
 
     setGithubRuntime(makeRuntime(ctx))
+    // Real driver for `action.github.runIssueLoop` — uses the existing
+    // Claude sidecar (+ its built-in cognia-tools MCP) to drive the agent
+    // SDK inside the cloned workspace. Without this, the executor returns
+    // the friendly "No issue-loop AI driver" failure result.
+    setIssueLoopDriver(new SidecarIssueLoopDriver())
     state = { activatedAt: Date.now(), ctx }
     ctx.logger?.info("github-delivery: activated")
   },
   deactivate: async (ctx?: PluginContext) => {
+    setIssueLoopDriver(null)
     setGithubRuntime(null)
     state = null
     ctx?.logger?.info("github-delivery: deactivated")
@@ -250,6 +253,20 @@ export default definition
 /** Test-only — peek at activation state without touching internals. */
 export function _peekState(): ActivationState | null {
   return state
+}
+
+/**
+ * Plugin connector bridge factory — referenced by `plugin.json:connectors[]`.
+ * The bridge calls this with `{ pluginId, connectorDef }`; we build a
+ * GithubAdapter whose `getOctokit` delegates to the GithubRuntime singleton
+ * (installed by `activate`). Exporting from the main entrypoint is how
+ * `registerPluginAdapters` discovers the function — see
+ * `lib/plugin/connectors-bridge.ts`.
+ */
+export function createGithubAdapterForBridge(ctx: PluginAdapterContext): GithubAdapter {
+  return new GithubAdapter(`${ctx.pluginId}/${ctx.connectorDef.type}`, {
+    getOctokit: (fullName) => requireGithubRuntime().getOctokit(fullName),
+  })
 }
 
 /**

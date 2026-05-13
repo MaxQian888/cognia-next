@@ -30,6 +30,7 @@
     "plugin-system",
     "visual-workflows",
     "platform-connectors",
+    "github-delivery",
     "external-bridge",
     "mcp-server-tauri",
     "mcp-server-sidecar",

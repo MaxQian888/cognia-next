@@ -37,6 +37,7 @@ import {
   LinkIcon,
   WorkflowIcon,
   SmartphoneIcon,
+  MousePointerClickIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
@@ -78,6 +79,7 @@ export type SettingsSectionId =
   | "logs"
   | "diagnostics"
   | "desktop"
+  | "automation"
   | "about"
 
 export interface NavItem {
@@ -340,6 +342,14 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "externalBridge",
     group: "system",
     icon: WebhookIcon,
+  },
+  {
+    id: "automation",
+    labelKey: "automation",
+    descriptionKey: "automation",
+    group: "system",
+    icon: MousePointerClickIcon,
+    desktopOnly: true,
   },
   {
     id: "companion",
@@ -798,6 +808,19 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "外部桥接",
     "插件桥",
     "知识对外",
+  ],
+  automation: [
+    "automation",
+    "ui automation",
+    "desktop automation",
+    "uia",
+    "screenshot",
+    "click",
+    "type",
+    "computer use",
+    "桌面自动化",
+    "界面自动化",
+    "无障碍",
   ],
   companion: [
     "mobile",

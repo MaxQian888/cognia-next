@@ -35,5 +35,13 @@
         "schema": "++id, [repoFullName+at], runId, &[runId+stepId+at]"
       }
     ]
-  }
+  },
+  "connectors": [
+    {
+      "type": "github",
+      "factory": "createGithubAdapterForBridge",
+      "configSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+      "transportModes": ["webhook"]
+    }
+  ]
 }
