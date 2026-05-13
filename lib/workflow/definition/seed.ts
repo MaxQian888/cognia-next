@@ -12,6 +12,7 @@
 
 import { seedBuiltInWorkflows } from "@/lib/db/workflows"
 import { DEFAULT_WORKFLOW_SETTINGS, type VisualWorkflow } from "@/types/workflow/visual"
+import { buildGithubDeliveryTemplates } from "./seed-github"
 
 const NOW = 1_730_000_000_000 // Stable timestamp so re-seeds don't change row hashes.
 
@@ -723,6 +724,7 @@ export function buildBuiltInWorkflowTemplates(): VisualWorkflow[] {
     webhookEchoTemplate(),
     loopOverItemsTemplate(),
     subworkflowOrchestratorTemplate(),
+    ...buildGithubDeliveryTemplates(),
   ]
 }
 

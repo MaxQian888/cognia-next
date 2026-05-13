@@ -3,6 +3,7 @@ pub mod companion_api;
 mod agents;
 mod anthropic_subscription;
 mod api_key;
+mod automation;
 mod canvas;
 mod ccswitch;
 mod claude;
@@ -142,12 +143,15 @@ pub fn run() {
             .plugin(
                 tauri_plugin_global_shortcut::Builder::new()
                     .with_handler(|app, shortcut, event| {
-                        // Two chords share this handler:
+                        // Three chords share this handler:
                         //   Ctrl+Shift+Space — toggle main window visibility
                         //   Ctrl+Shift+L     — surface the window and emit
                         //                       `tray://open-logs` so the renderer
                         //                       navigates to /logs (same handler the
                         //                       tray + View menu use).
+                        //   Ctrl+Alt+K       — engage the automation kill switch,
+                        //                       same effect as the tray menu item
+                        //                       and the renderer's Overview tab.
                         if event.state() != ShortcutState::Pressed {
                             return;
                         }
@@ -155,6 +159,8 @@ pub fn run() {
                             Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
                         let logs_chord =
                             Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyL);
+                        let automation_kill_chord =
+                            Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyK);
                         if shortcut == &toggle_chord {
                             if let Some(window) = app.get_webview_window("main") {
                                 let visible = window.is_visible().unwrap_or(false);
@@ -173,6 +179,10 @@ pub fn run() {
                                 let _ = window.set_focus();
                             }
                             let _ = app.emit("tray://open-logs", serde_json::Value::Null);
+                        } else if shortcut == &automation_kill_chord {
+                            let state = app.state::<crate::automation::commands::AutomationState>();
+                            state.gate.engage_kill_switch();
+                            let _ = app.emit("automation:kill-switch", serde_json::Value::Null);
                         }
                     })
                     .build(),
@@ -190,6 +200,11 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_os::init())
+        // Shell plugin powers the one-click cloudflared tunnel button in
+        // Settings → GitHub Delivery → Repos. Scope is locked to the
+        // `cloudflared` binary in `tauri.conf.json`; we don't expose a
+        // generic shell to the renderer.
+        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(claude::SidecarState::new())
         .manage(ApiKeyState::new())
@@ -229,6 +244,19 @@ pub fn run() {
                 .map(|d| d.join("cognia").join("plugins"))
                 .unwrap_or_else(|| std::path::PathBuf::from(".")),
         ))
+        .manage({
+            // Automation subsystem state — spawn the worker thread once, build
+            // the permission gate with disabled defaults (renderer enables via
+            // Settings → Automation), and a fresh in-memory audit ring. The
+            // back-end is constructed *on* the worker thread so Windows UIA
+            // can initialize COM there.
+            let handle = automation::Worker::spawn(automation::make_default_backend);
+            let gate = automation::PermissionGate::new(
+                automation::permission::AutomationSettings::default(),
+            );
+            let audit = automation::AuditRing::new();
+            automation::commands::AutomationState::new(handle, gate, audit)
+        })
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             claude::commands::claude_send,
@@ -458,6 +486,19 @@ pub fn run() {
             plugin_api::devtools::plugin_watch_stop,
             plugin_api::devtools::plugin_reload,
             plugin_api::devtools::plugin_list_dev_plugins,
+            automation::commands::desktop_capabilities,
+            automation::commands::desktop_get_focus,
+            automation::commands::desktop_read_tree,
+            automation::commands::desktop_find,
+            automation::commands::desktop_screenshot,
+            automation::commands::desktop_click,
+            automation::commands::desktop_type,
+            automation::commands::desktop_keys,
+            automation::commands::desktop_invoke_pattern,
+            automation::commands::automation_audit_snapshot,
+            automation::commands::automation_settings_get,
+            automation::commands::automation_settings_set,
+            automation::commands::automation_kill_switch,
         ])
         .setup(|app| {
             // Bootstrap native logging in *all* builds. Installs tauri-plugin-log
@@ -532,6 +573,13 @@ pub fn run() {
                     Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyL);
                 if let Err(e) = app.global_shortcut().register(logs_chord) {
                     log::warn!("failed to register Ctrl+Shift+L (open logs) shortcut: {e}");
+                }
+                let automation_kill_chord =
+                    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyK);
+                if let Err(e) = app.global_shortcut().register(automation_kill_chord) {
+                    log::warn!(
+                        "failed to register Ctrl+Alt+K (automation kill switch) shortcut: {e}",
+                    );
                 }
             }
 

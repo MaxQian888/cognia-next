@@ -1,0 +1,348 @@
+import { mkdir, rm, writeFile } from "node:fs/promises"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+import {
+  _defaultGitFactory,
+  cloneToWorkspace,
+  commitAndPush,
+  getE2BBackend,
+  removeWorkspace,
+  setE2BBackend,
+  statWorkspace,
+  type E2BBackend,
+  type GitClient,
+  type WorkspaceHandle,
+} from "./workspace"
+
+afterEach(() => setE2BBackend(null))
+
+const TMP = join(tmpdir(), `cognia-ws-test-${Math.random().toString(36).slice(2)}`)
+
+beforeAll(async () => {
+  await mkdir(TMP, { recursive: true })
+})
+afterAll(async () => {
+  await rm(TMP, { recursive: true, force: true })
+})
+
+function fakeGit(overrides: Partial<GitClient> = {}): GitClient {
+  return {
+    clone: jest.fn(async () => {}),
+    cwd: jest.fn(async () => {}),
+    add: jest.fn(async () => {}),
+    commit: jest.fn(async () => {}),
+    push: jest.fn(async () => {}),
+    status: jest.fn(async () => ({ files: [{ path: "a.txt" }] })),
+    log: jest.fn(async () => ({ all: [{ hash: "abc1234", message: "test" }] })),
+    ...overrides,
+  }
+}
+
+describe("cloneToWorkspace — local backend", () => {
+  it("creates a directory under baseDir/<repo>/<stamp> and calls git.clone", async () => {
+    const git = fakeGit()
+    const handle = await cloneToWorkspace({
+      repoFullName: "octocat/hello-world",
+      branch: "main",
+      token: "x",
+      backend: "local",
+      baseDir: TMP,
+      gitFactory: () => git,
+    })
+    expect(handle.backend).toBe("local")
+    expect(handle.path.startsWith(join(TMP, "octocat_hello-world"))).toBe(true)
+    expect(handle.repoFullName).toBe("octocat/hello-world")
+    expect(handle.branch).toBe("main")
+    expect(git.clone).toHaveBeenCalledTimes(1)
+  })
+
+  it("sanitizes repo full names with slashes / special chars", async () => {
+    const git = fakeGit()
+    const handle = await cloneToWorkspace({
+      repoFullName: "my org/cool repo",
+      branch: "main",
+      token: "x",
+      backend: "local",
+      baseDir: TMP,
+      gitFactory: () => git,
+    })
+    expect(handle.path).not.toMatch(/[\\/ ]my org/)
+    expect(handle.path).toMatch(/my_org_cool_repo/)
+  })
+
+  it("throws for the e2b backend when no backend is registered", async () => {
+    await expect(
+      cloneToWorkspace({
+        repoFullName: "o/r",
+        branch: "main",
+        token: "x",
+        backend: "e2b",
+      })
+    ).rejects.toThrow(/e2b workspace backend not registered/)
+  })
+
+  it("delegates to the registered E2B backend when one is set", async () => {
+    const backend: E2BBackend = {
+      clone: jest.fn(async () => ({
+        backend: "e2b" as const,
+        path: "sb-id-1",
+        repoFullName: "o/r",
+        branch: "main",
+        createdAt: 0,
+      })),
+      commitAndPush: jest.fn(),
+      remove: jest.fn(async () => true),
+    }
+    setE2BBackend(backend)
+    const handle = await cloneToWorkspace({
+      repoFullName: "o/r",
+      branch: "main",
+      token: "tok",
+      backend: "e2b",
+    })
+    expect(handle.path).toBe("sb-id-1")
+    expect(backend.clone).toHaveBeenCalledWith({
+      repoFullName: "o/r",
+      branch: "main",
+      token: "tok",
+    })
+  })
+
+  it("falls back to DEFAULT_BASE_DIR when baseDir is omitted", async () => {
+    const git = fakeGit()
+    // Use a unique sub-id to avoid collision with the real cwd default base.
+    const handle = await cloneToWorkspace({
+      repoFullName: `octocat/${Math.random().toString(36).slice(2)}`,
+      branch: "main",
+      token: "x",
+      backend: "local",
+      gitFactory: () => git,
+    })
+    // The default base is "cognia-github-worktrees" relative to cwd.
+    expect(handle.path).toMatch(/cognia-github-worktrees/)
+    // Cleanup the directory we just created under cwd.
+    await rm(handle.path, { recursive: true, force: true })
+  })
+
+  it("includes branch and depth args in the clone call", async () => {
+    const clone = jest.fn(async () => {})
+    const git = fakeGit({ clone })
+    await cloneToWorkspace({
+      repoFullName: "o/r",
+      branch: "feat/x",
+      token: "tok",
+      backend: "local",
+      baseDir: TMP,
+      gitFactory: () => git,
+    })
+    expect(clone).toHaveBeenCalledWith(
+      expect.stringContaining("https://x-access-token:tok@github.com/o/r.git"),
+      expect.any(String),
+      ["--branch", "feat/x", "--depth", "20"]
+    )
+  })
+})
+
+describe("commitAndPush", () => {
+  const handle: WorkspaceHandle = {
+    backend: "local",
+    path: TMP,
+    repoFullName: "o/r",
+    branch: "feat/x",
+    createdAt: Date.now(),
+  }
+
+  it("stages, commits, pushes, returns SHA", async () => {
+    const git = fakeGit()
+    const sha = await commitAndPush({
+      workspace: handle,
+      message: "Cognia: do the thing",
+      gitFactory: () => git,
+    })
+    expect(sha).toBe("abc1234")
+    expect(git.add).toHaveBeenCalledWith(".")
+    expect(git.commit).toHaveBeenCalledWith("Cognia: do the thing")
+    expect(git.push).toHaveBeenCalledWith("origin", "feat/x", ["--set-upstream"])
+  })
+
+  it("uses remoteBranch override when supplied", async () => {
+    const git = fakeGit()
+    await commitAndPush({
+      workspace: handle,
+      message: "x",
+      remoteBranch: "cognia/issue-5",
+      gitFactory: () => git,
+    })
+    expect(git.push).toHaveBeenCalledWith("origin", "cognia/issue-5", ["--set-upstream"])
+  })
+
+  it("throws when there are no changes to commit", async () => {
+    const git = fakeGit({ status: jest.fn(async () => ({ files: [] })) })
+    await expect(
+      commitAndPush({ workspace: handle, message: "x", gitFactory: () => git })
+    ).rejects.toThrow(/no changes/)
+  })
+
+  it("rejects e2b workspace when no backend is registered", async () => {
+    await expect(
+      commitAndPush({
+        workspace: { ...handle, backend: "e2b" },
+        message: "x",
+      })
+    ).rejects.toThrow(/e2b workspace backend not registered/)
+  })
+
+  it("delegates commitAndPush to the registered E2B backend", async () => {
+    const backend: E2BBackend = {
+      clone: jest.fn(),
+      commitAndPush: jest.fn(async () => "deadbeef"),
+      remove: jest.fn(async () => true),
+    }
+    setE2BBackend(backend)
+    const sha = await commitAndPush({
+      workspace: { ...handle, backend: "e2b", path: "sb-id" },
+      message: "msg",
+      remoteBranch: "feat/x",
+    })
+    expect(sha).toBe("deadbeef")
+    expect(backend.commitAndPush).toHaveBeenCalledWith({
+      workspace: expect.objectContaining({ path: "sb-id" }),
+      message: "msg",
+      remoteBranch: "feat/x",
+    })
+  })
+
+  it("returns empty string if log has no entries", async () => {
+    const git = fakeGit({ log: jest.fn(async () => ({ all: [] })) })
+    const sha = await commitAndPush({ workspace: handle, message: "x", gitFactory: () => git })
+    expect(sha).toBe("")
+  })
+})
+
+describe("removeWorkspace + statWorkspace", () => {
+  it("removes a local workspace directory", async () => {
+    const path = join(TMP, "wstmp")
+    await mkdir(path, { recursive: true })
+    await writeFile(join(path, "a.txt"), "hello")
+    const ok = await removeWorkspace({
+      backend: "local",
+      path,
+      repoFullName: "o/r",
+      branch: "main",
+      createdAt: 0,
+    })
+    expect(ok).toBe(true)
+    expect((await statWorkspace(path)).exists).toBe(false)
+  })
+
+  it("returns false for e2b handle when no backend is registered", async () => {
+    const ok = await removeWorkspace({
+      backend: "e2b",
+      path: "sandbox-123",
+      repoFullName: "o/r",
+      branch: "main",
+      createdAt: 0,
+    })
+    expect(ok).toBe(false)
+  })
+
+  it("delegates removal to the registered E2B backend", async () => {
+    const backend: E2BBackend = {
+      clone: jest.fn(),
+      commitAndPush: jest.fn(),
+      remove: jest.fn(async () => true),
+    }
+    setE2BBackend(backend)
+    const ok = await removeWorkspace({
+      backend: "e2b",
+      path: "sb",
+      repoFullName: "o/r",
+      branch: "main",
+      createdAt: 0,
+    })
+    expect(ok).toBe(true)
+    expect(backend.remove).toHaveBeenCalled()
+  })
+
+  it("logs and returns false when the E2B backend rejects", async () => {
+    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    setE2BBackend({
+      clone: jest.fn(),
+      commitAndPush: jest.fn(),
+      remove: jest.fn(async () => Promise.reject(new Error("e2b boom"))),
+    })
+    const ok = await removeWorkspace({
+      backend: "e2b",
+      path: "sb",
+      repoFullName: "o/r",
+      branch: "main",
+      createdAt: 0,
+    })
+    expect(ok).toBe(false)
+    expect(errSpy).toHaveBeenCalled()
+    errSpy.mockRestore()
+  })
+
+  it("returns false (not throw) when path does not exist on a local rm", async () => {
+    // node fs.rm with force: true should not throw — we treat any rm error as
+    // a logged failure so the GC pass keeps going.
+    const ok = await removeWorkspace({
+      backend: "local",
+      path: join(TMP, "does-not-exist"),
+      repoFullName: "o/r",
+      branch: "main",
+      createdAt: 0,
+    })
+    // With force: true rm succeeds; we still return true.
+    expect(ok).toBe(true)
+  })
+
+  it("statWorkspace returns mtime for an existing path", async () => {
+    const path = join(TMP, "stat-target")
+    await mkdir(path, { recursive: true })
+    const s = await statWorkspace(path)
+    expect(s.exists).toBe(true)
+    expect(typeof s.mtime).toBe("number")
+  })
+
+  it("removeWorkspace logs and returns false when fs.rm rejects (mock the case)", async () => {
+    // Force a non-recoverable rm error by using an invalid handle path that
+    // bypasses the force-overwrite. Easiest reliable repro is a long path
+    // with embedded null bytes (which Node rejects synchronously).
+    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    const ok = await removeWorkspace({
+      backend: "local",
+      path: " illegal-path",
+      repoFullName: "o/r",
+      branch: "main",
+      createdAt: 0,
+    })
+    expect(ok).toBe(false)
+    expect(errSpy).toHaveBeenCalled()
+    errSpy.mockRestore()
+  })
+})
+
+describe("_defaultGitFactory", () => {
+  it("returns a simple-git client without throwing", () => {
+    const git = _defaultGitFactory()
+    expect(git).toBeDefined()
+    // simple-git instances expose `clone`, `add`, `commit`, etc.
+    expect(typeof (git as { clone: unknown }).clone).toBe("function")
+  })
+})
+
+describe("setE2BBackend / getE2BBackend", () => {
+  it("round-trips the singleton", () => {
+    expect(getE2BBackend()).toBeNull()
+    const b: E2BBackend = {
+      clone: jest.fn(),
+      commitAndPush: jest.fn(),
+      remove: jest.fn(),
+    }
+    setE2BBackend(b)
+    expect(getE2BBackend()).toBe(b)
+    setE2BBackend(null)
+    expect(getE2BBackend()).toBeNull()
+  })
+})

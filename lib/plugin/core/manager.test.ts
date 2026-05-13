@@ -43,6 +43,14 @@ jest.mock("@/lib/chat/slash-command-registry", () => ({
   unregisterSlashCommand: jest.fn(),
 }))
 
+// IndexedDB isn't available in this unit-test environment; the bridge would
+// throw DatabaseClosedError on `applyPluginTables` / `removePluginTables`,
+// blowing up uninstallPlugin's cleanup path before the assertions run.
+jest.mock("@/lib/plugin/dexie-bridge", () => ({
+  applyPluginTables: jest.fn(async () => undefined),
+  removePluginTables: jest.fn(async () => undefined),
+}))
+
 import { usePluginStore } from "@/stores/plugin"
 import {
   getSlashCommand,
@@ -879,6 +887,8 @@ describe("PluginManager", () => {
         plugins: Record<string, Plugin>
         uninstallPlugin: jest.Mock
         unloadPlugin: jest.Mock
+        setPluginError: jest.Mock
+        setPluginStatus: jest.Mock
       } = {
         plugins: {
           "to-remove": {
@@ -891,6 +901,12 @@ describe("PluginManager", () => {
         },
         uninstallPlugin: jest.fn(async () => undefined),
         unloadPlugin: jest.fn(async () => undefined),
+        // Catch path inside PluginManager.uninstallPlugin calls these when the
+        // cleanup phase (removePluginTables, revokePermissions) throws — the
+        // mock store needs them as no-op spies so the catch doesn't blow up
+        // with `setPluginError is not a function` masking the real assertion.
+        setPluginError: jest.fn(),
+        setPluginStatus: jest.fn(),
       }
 
       mockGetState.mockReturnValue(store)

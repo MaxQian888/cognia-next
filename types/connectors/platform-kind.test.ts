@@ -17,6 +17,7 @@ describe("PlatformKind", () => {
       "kook",
       "line",
       "mattermost",
+      "github",
     ])
   })
 

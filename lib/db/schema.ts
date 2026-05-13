@@ -145,6 +145,12 @@ export class CogniaDB extends Dexie {
   chatDrafts!: Table<ChatDraftRow, string>
   // v27 — plugin Dexie table registry (M0 platform feature).
   pluginDexieMeta!: Table<PluginDexieMeta, string>
+  // v28 — UI automation audit log. One row per Tauri command call that
+  // passes through the Rust permission gate. Capped at 5000 newest by
+  // `lib/automation/audit.ts`. Indexed by `ts` for newest-first listings,
+  // `surface` so the Settings → Automation → Audit tab can filter, and
+  // `decision` for the deny-only view.
+  automationAuditLog!: Table<AutomationAuditLogRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -884,6 +890,18 @@ export class CogniaDB extends Dexie {
     this.version(27).stores({
       pluginDexieMeta: "&pluginId, appliedAt",
     })
+
+    // v28 — UI automation audit log. Mirrors `mcpAuditLog` in shape: one row
+    // per Rust-side permission-gate evaluation (allow/deny/consent). Cap is
+    // enforced in `lib/automation/audit.ts:recordEntry`, not in the schema.
+    //   • `&id`         — uuid primary key.
+    //   • `ts`          — newest-first listing.
+    //   • `surface`     — workflow / computerUse / mcp / plugin filter.
+    //   • `decision`    — allow / deny / consent filter (for the "deny only" view).
+    //   • `command`     — drill-down by Tauri command name.
+    this.version(28).stores({
+      automationAuditLog: "&id, ts, surface, decision, command",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -905,6 +923,25 @@ export interface SessionStateRow {
   sessionId: string
   lastReadAt: number
   unreadCount: number
+}
+
+/**
+ * One row per automation Tauri command call. Mirror of
+ * `src-tauri/src/automation/audit.rs:AuditEntry` (camelCase wire format).
+ * Written by the `automation:event` subscriber in `lib/automation/audit.ts`.
+ */
+export interface AutomationAuditLogRow {
+  id: string
+  ts: number
+  surface: "workflow" | "computerUse" | "mcp" | "plugin"
+  pluginId: string | null
+  command: string
+  processName: string | null
+  windowTitle: string | null
+  decision: "allow" | "deny" | "consent"
+  reason: string | null
+  durationMs: number
+  error: string | null
 }
 
 /** Registry entry for a plugin's declared Dexie tables. Written by applyPluginTables. */

@@ -1,0 +1,204 @@
+/**
+ * TypeScript mirror of `src-tauri/src/automation/types.rs`.
+ *
+ * Field names are camelCase to match `#[serde(rename_all = "camelCase")]` on
+ * the Rust side. Discriminated unions use the `kind` tag exactly as serialized
+ * by serde `#[serde(tag = "kind")]`.
+ *
+ * **Source of truth lives on the Rust side.** If you change a field name
+ * here, change it in `src-tauri/src/automation/types.rs` too — the worker
+ * deserialization is the authoritative validator.
+ */
+
+export type Platform = "windows" | "macos" | "linux" | "unsupported"
+
+export interface Capabilities {
+  platform: Platform
+  hasUia: boolean
+  hasInputSim: boolean
+  hasScreenshot: boolean
+  hasEvents: boolean
+}
+
+export interface ElementRef {
+  /** Opaque ref — pass it back unchanged. */
+  0: string
+}
+
+/** Helper to construct an ElementRef from a raw string. */
+export function elementRef(raw: string): ElementRef {
+  return [raw] as unknown as ElementRef
+}
+
+export function elementRefValue(r: ElementRef): string {
+  return (r as unknown as string[])[0]
+}
+
+export interface Rect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface ElementInfo {
+  elementRef: ElementRef
+  name: string | null
+  automationId: string | null
+  controlType: string | null
+  className: string | null
+  boundingRect: Rect | null
+  isEnabled: boolean
+  isFocused: boolean
+  processId: number | null
+  processName: string | null
+  windowTitle: string | null
+  children: ElementInfo[] | null
+}
+
+export interface Locator {
+  name?: string
+  nameContains?: string
+  automationId?: string
+  controlType?: string
+  className?: string
+  processId?: number
+  processName?: string
+  windowTitleContains?: string
+  depth?: number
+  from?: ElementRef
+}
+
+export interface TreeOpts {
+  maxDepth?: number
+  cacheProps?: string[]
+}
+
+export type ImageFormat = "png" | "jpeg"
+
+export interface ScreenshotOpts {
+  region?: Rect
+  format?: ImageFormat
+}
+
+export interface Screenshot {
+  /** base64-encoded image bytes. */
+  bytes: string
+  width: number
+  height: number
+  capturedAt: number
+  format: ImageFormat
+}
+
+export type ClickTarget =
+  | { kind: "element"; elementRef: ElementRef }
+  | { kind: "point"; x: number; y: number }
+
+export type MouseButton = "left" | "right" | "middle"
+
+export interface KeyChord {
+  /** Format: `"ctrl+shift+t"`, `"alt+F4"`, `"Enter"`. */
+  0: string
+}
+
+export function keyChord(raw: string): KeyChord {
+  return [raw] as unknown as KeyChord
+}
+
+export interface ClickOpts {
+  button?: MouseButton
+  double?: boolean
+  modifier?: KeyChord
+}
+
+export interface TypeOpts {
+  delayMs?: number
+  target?: ElementRef
+}
+
+export type PatternKind =
+  | "invoke"
+  | "toggle"
+  | "selectionItem"
+  | "value"
+  | "text"
+  | "rangeValue"
+  | "window"
+  | "transform"
+  | "expandCollapse"
+  | "scrollItem"
+
+export type WindowOp =
+  | { kind: "focus" }
+  | { kind: "close" }
+  | { kind: "minimize" }
+  | { kind: "maximize" }
+  | { kind: "restore" }
+  | { kind: "resize"; rect: Rect }
+
+export type EventKind = "focus-changed" | "structure-changed" | "property-changed"
+
+export interface EventFilter {
+  kinds?: EventKind[]
+  scope?: ElementRef
+}
+
+/**
+ * Discriminated union of every `AutomationError` variant. The Rust side
+ * serializes errors as JSON strings inside `Result<T, String>` (a Tauri
+ * convention); use `parseAutomationError()` to recover the typed shape.
+ */
+export type AutomationError =
+  | { code: "UNSUPPORTED_PLATFORM" }
+  | { code: "KILL_SWITCH_ACTIVE" }
+  | { code: "PERMISSION_DENIED"; reason: string }
+  | { code: "USER_DECLINED" }
+  | { code: "WHITELIST_MISS" }
+  | { code: "ELEMENT_NOT_FOUND" }
+  | { code: "STALE_ELEMENT" }
+  | { code: "BACKEND_ERROR"; message: string }
+  | { code: "INTERNAL"; message: string }
+
+/**
+ * Tauri commands return `Result<T, String>`. The Rust side serializes
+ * `AutomationError` as a JSON string before raising, so the renderer can
+ * recover the typed shape by `JSON.parse`-ing the error string.
+ */
+export function parseAutomationError(raw: unknown): AutomationError | null {
+  if (typeof raw !== "string") return null
+  try {
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === "object" && typeof parsed.code === "string") {
+      return parsed as AutomationError
+    }
+  } catch {
+    // Not JSON — fall through.
+  }
+  return null
+}
+
+/**
+ * Stringify an AutomationError for UI display.
+ */
+export function automationErrorMessage(err: AutomationError): string {
+  switch (err.code) {
+    case "UNSUPPORTED_PLATFORM":
+      return "Desktop automation is not supported on this platform"
+    case "KILL_SWITCH_ACTIVE":
+      return "Automation kill switch is active"
+    case "PERMISSION_DENIED":
+      return `Permission denied: ${err.reason}`
+    case "USER_DECLINED":
+      return "User declined consent"
+    case "WHITELIST_MISS":
+      return "Target window is not on the whitelist"
+    case "ELEMENT_NOT_FOUND":
+      return "Element not found"
+    case "STALE_ELEMENT":
+      return "Element reference is stale"
+    case "BACKEND_ERROR":
+      return `Backend error: ${err.message}`
+    case "INTERNAL":
+      return `Internal error: ${err.message}`
+  }
+}

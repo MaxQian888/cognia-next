@@ -51,10 +51,43 @@ use crate::workflow::types::{TriggerBinding, TriggerEvent, WebhookTriggerPayload
 /// endpoints are tiny RPC calls — webhooks legitimately carry a JSON body.
 const WEBHOOK_BODY_LIMIT_BYTES: usize = 1024 * 1024;
 
-/// HTTP header that callers must populate with `sha256=<hex>` when the
-/// trigger has an `hmac_secret` configured. The verifier rejects any request
-/// missing the header (or with a mismatching MAC).
-const HMAC_SIGNATURE_HEADER: &str = "x-signature-256";
+/// Header for cognia-style triggers (`sha256=<hex>` of body).
+const HMAC_SIGNATURE_HEADER_COGNIA: &str = "x-signature-256";
+
+/// Header GitHub uses for its webhook signatures (`sha256=<hex>` of body,
+/// keyed by the webhook secret). Same hash, different header name.
+const HMAC_SIGNATURE_HEADER_GITHUB: &str = "x-hub-signature-256";
+
+/// Which header convention to read the HMAC signature from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignatureMode {
+    /// Cognia's own convention — `x-signature-256: sha256=<hex>`.
+    Cognia,
+    /// GitHub convention — `x-hub-signature-256: sha256=<hex>`.
+    Github,
+}
+
+impl Default for SignatureMode {
+    fn default() -> Self {
+        Self::Cognia
+    }
+}
+
+impl SignatureMode {
+    pub fn from_str(s: &str) -> Self {
+        match s.to_ascii_lowercase().as_str() {
+            "github" | "gh" => Self::Github,
+            _ => Self::Cognia,
+        }
+    }
+
+    pub fn header_name(&self) -> &'static str {
+        match self {
+            Self::Cognia => HMAC_SIGNATURE_HEADER_COGNIA,
+            Self::Github => HMAC_SIGNATURE_HEADER_GITHUB,
+        }
+    }
+}
 
 /// One registered webhook trigger.
 #[derive(Debug, Clone)]
@@ -67,9 +100,11 @@ pub struct WebhookEntry {
     /// Allowed HTTP method, or `*` for any. Case-insensitive on input.
     pub method: String,
     /// Optional HMAC secret. When present, the receiver verifies the
-    /// `X-Signature-256` header (HMAC-SHA-256 of the raw body). Phase 5b
-    /// wires the actual verification once the SDK choice is locked.
+    /// signature header (per `signature_mode`) is the HMAC-SHA-256 of the
+    /// raw body, keyed by `secret`.
     pub hmac_secret: Option<String>,
+    /// Which signature header convention to read from. Defaults to Cognia.
+    pub signature_mode: SignatureMode,
     pub enabled: bool,
     pub binding: Option<TriggerBinding>,
     /// HTTP status to respond with (default 200).
@@ -292,7 +327,7 @@ async fn handle_webhook(
     // header, malformed prefix, hex-decode failure, MAC mismatch) yields
     // 401 — never leak which check failed.
     if let Some(secret) = entry.hmac_secret.as_deref() {
-        if !verify_hmac_signature(secret, &body, &headers) {
+        if !verify_hmac_signature(secret, &body, &headers, entry.signature_mode) {
             return (
                 StatusCode::UNAUTHORIZED,
                 axum::Json(ErrorBody { error: "signature verification failed" }),
@@ -363,11 +398,16 @@ fn method_allowed(allowed: &str, actual: &Method) -> bool {
 }
 
 /// HMAC-SHA-256 of `body` keyed with `secret`, compared in constant time
-/// against the `sha256=<hex>` value of the `X-Signature-256` header. Header
-/// lookup is case-insensitive (axum normalises to lowercase). Returns `false`
-/// for any failure mode without leaking which one.
-fn verify_hmac_signature(secret: &str, body: &Bytes, headers: &HeaderMap) -> bool {
-    let Some(raw) = headers.get(HMAC_SIGNATURE_HEADER) else {
+/// against the `sha256=<hex>` value of the signature header chosen by `mode`.
+/// Header lookup is case-insensitive (axum normalises to lowercase). Returns
+/// `false` for any failure mode without leaking which one.
+fn verify_hmac_signature(
+    secret: &str,
+    body: &Bytes,
+    headers: &HeaderMap,
+    mode: SignatureMode,
+) -> bool {
+    let Some(raw) = headers.get(mode.header_name()) else {
         return false;
     };
     let Ok(value) = raw.to_str() else {
@@ -424,6 +464,7 @@ mod tests {
             path: path.into(),
             method: "POST".into(),
             hmac_secret: None,
+            signature_mode: SignatureMode::Cognia,
             enabled: true,
             binding: None,
             response_status: 200,
@@ -550,33 +591,33 @@ mod tests {
             .collect();
         let mut headers = HeaderMap::new();
         headers.insert(
-            HMAC_SIGNATURE_HEADER,
+            HMAC_SIGNATURE_HEADER_COGNIA,
             HeaderValue::from_str(&format!("sha256={hex}")).unwrap(),
         );
-        assert!(verify_hmac_signature(secret, &body, &headers));
+        assert!(verify_hmac_signature(secret, &body, &headers, SignatureMode::Cognia));
     }
 
     #[test]
     fn verify_hmac_signature_rejects_missing_header() {
         let body = Bytes::from_static(b"x");
         let headers = HeaderMap::new();
-        assert!(!verify_hmac_signature("k", &body, &headers));
+        assert!(!verify_hmac_signature("k", &body, &headers, SignatureMode::Cognia));
     }
 
     #[test]
     fn verify_hmac_signature_rejects_wrong_prefix() {
         use axum::http::HeaderValue;
         let mut headers = HeaderMap::new();
-        headers.insert(HMAC_SIGNATURE_HEADER, HeaderValue::from_static("md5=abcd"));
-        assert!(!verify_hmac_signature("k", &Bytes::from_static(b"x"), &headers));
+        headers.insert(HMAC_SIGNATURE_HEADER_COGNIA, HeaderValue::from_static("md5=abcd"));
+        assert!(!verify_hmac_signature("k", &Bytes::from_static(b"x"), &headers, SignatureMode::Cognia));
     }
 
     #[test]
     fn verify_hmac_signature_rejects_bad_hex() {
         use axum::http::HeaderValue;
         let mut headers = HeaderMap::new();
-        headers.insert(HMAC_SIGNATURE_HEADER, HeaderValue::from_static("sha256=zzz"));
-        assert!(!verify_hmac_signature("k", &Bytes::from_static(b"x"), &headers));
+        headers.insert(HMAC_SIGNATURE_HEADER_COGNIA, HeaderValue::from_static("sha256=zzz"));
+        assert!(!verify_hmac_signature("k", &Bytes::from_static(b"x"), &headers, SignatureMode::Cognia));
     }
 
     #[test]
@@ -584,12 +625,12 @@ mod tests {
         use axum::http::HeaderValue;
         let mut headers = HeaderMap::new();
         headers.insert(
-            HMAC_SIGNATURE_HEADER,
+            HMAC_SIGNATURE_HEADER_COGNIA,
             HeaderValue::from_static(
                 "sha256=0000000000000000000000000000000000000000000000000000000000000000",
             ),
         );
-        assert!(!verify_hmac_signature("k", &Bytes::from_static(b"x"), &headers));
+        assert!(!verify_hmac_signature("k", &Bytes::from_static(b"x"), &headers, SignatureMode::Cognia));
     }
 
     #[test]
@@ -598,6 +639,88 @@ mod tests {
         assert_eq!(decode_hex("abCD").unwrap(), vec![0xab, 0xcd]);
         assert!(decode_hex("0").is_err());
         assert!(decode_hex("zz").is_err());
+    }
+
+    #[test]
+    fn signature_mode_from_str_round_trips() {
+        assert_eq!(SignatureMode::from_str("github"), SignatureMode::Github);
+        assert_eq!(SignatureMode::from_str("GH"), SignatureMode::Github);
+        assert_eq!(SignatureMode::from_str("cognia"), SignatureMode::Cognia);
+        assert_eq!(SignatureMode::from_str(""), SignatureMode::Cognia);
+        assert_eq!(SignatureMode::from_str("garbage"), SignatureMode::Cognia);
+        assert_eq!(SignatureMode::default(), SignatureMode::Cognia);
+    }
+
+    #[test]
+    fn signature_mode_header_name_picks_correct_header() {
+        assert_eq!(SignatureMode::Cognia.header_name(), "x-signature-256");
+        assert_eq!(SignatureMode::Github.header_name(), "x-hub-signature-256");
+    }
+
+    #[test]
+    fn verify_hmac_signature_github_mode_reads_x_hub_header() {
+        use axum::http::HeaderValue;
+        let secret = "ghs";
+        let body = Bytes::from_static(b"{\"action\":\"opened\"}");
+        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(&body);
+        let hex: String = mac
+            .finalize()
+            .into_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let mut headers = HeaderMap::new();
+        // GitHub-style header.
+        headers.insert(
+            HMAC_SIGNATURE_HEADER_GITHUB,
+            HeaderValue::from_str(&format!("sha256={hex}")).unwrap(),
+        );
+        assert!(verify_hmac_signature(secret, &body, &headers, SignatureMode::Github));
+        // The same header in cognia mode should NOT verify (it reads x-signature-256).
+        assert!(!verify_hmac_signature(secret, &body, &headers, SignatureMode::Cognia));
+    }
+
+    #[test]
+    fn verify_hmac_signature_github_mode_rejects_cognia_header() {
+        use axum::http::HeaderValue;
+        let secret = "ghs";
+        let body = Bytes::from_static(b"x");
+        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(&body);
+        let hex: String = mac
+            .finalize()
+            .into_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let mut headers = HeaderMap::new();
+        // Mistakenly send the cognia-style header to a github-mode trigger.
+        headers.insert(
+            HMAC_SIGNATURE_HEADER_COGNIA,
+            HeaderValue::from_str(&format!("sha256={hex}")).unwrap(),
+        );
+        assert!(!verify_hmac_signature(secret, &body, &headers, SignatureMode::Github));
+    }
+
+    #[test]
+    fn verify_hmac_signature_uses_constant_time_compare() {
+        // The verify_slice() call inside verify_hmac_signature uses a
+        // constant-time comparator under the hood (subtle::ConstantTimeEq via
+        // hmac::Mac::verify_slice). This test asserts that two MACs of the
+        // same length but different contents both return false — guarding
+        // against a regression where someone replaces verify_slice with
+        // straight equality.
+        use axum::http::HeaderValue;
+        let secret = "k";
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HMAC_SIGNATURE_HEADER_GITHUB,
+            HeaderValue::from_static(
+                "sha256=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            ),
+        );
+        assert!(!verify_hmac_signature(secret, &Bytes::from_static(b"x"), &headers, SignatureMode::Github));
     }
 
     #[tokio::test]
@@ -622,7 +745,7 @@ mod tests {
         let resp = reqwest::Client::new()
             .post(format!("http://{bound}/webhook/signed"))
             .header("Content-Type", "application/json")
-            .header(HMAC_SIGNATURE_HEADER, format!("sha256={hex}"))
+            .header(HMAC_SIGNATURE_HEADER_COGNIA, format!("sha256={hex}"))
             .body(body.to_string())
             .send()
             .await

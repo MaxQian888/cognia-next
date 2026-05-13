@@ -186,7 +186,7 @@ describe("CompanionSection", () => {
     expect(await screen.findByText(/No devices paired yet/i)).toBeInTheDocument()
   })
 
-  it("shows a LAN warning when running with bindMode=lan", async () => {
+  it("shows a LAN HTTPS notice when running with bindMode=lan", async () => {
     callSpy.mockImplementation(async (name: string) => {
       if (name === "companion_server_status") {
         return { running: true, bindMode: "lan" as const, boundPort: 7890 }
@@ -195,7 +195,12 @@ describe("CompanionSection", () => {
     })
 
     render(<CompanionSection />)
-    expect(await screen.findByRole("alert", { name: undefined })).toHaveTextContent(/Plain HTTP/i)
+    // The card replaced the V1 "Plain HTTP" warning with a self-signed HTTPS
+    // status row once TLS landed; the role downgraded to "status" since it
+    // describes a benign cert-pinning behavior rather than an insecure mode.
+    expect(await screen.findByRole("status", { name: undefined })).toHaveTextContent(
+      /Self-signed HTTPS/i
+    )
   })
 
   it("changing bind mode while running rebinds the server", async () => {

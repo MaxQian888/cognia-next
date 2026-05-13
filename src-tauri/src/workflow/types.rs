@@ -109,6 +109,10 @@ pub struct RegisterTriggerInput {
     /// Optional response body template, returned verbatim in Phase 5a.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub webhook_response_body: Option<String>,
+    /// Signature header convention. "cognia" (default) reads
+    /// `x-signature-256`; "github" reads `x-hub-signature-256`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binding: Option<TriggerBinding>,
 }
@@ -228,6 +232,7 @@ mod tests {
             webhook_hmac_secret: None,
             webhook_response_status: None,
             webhook_response_body: None,
+            signature_mode: None,
             binding: Some(TriggerBinding {
                 adapter_id: Some("telegram_main".into()),
                 ..Default::default()

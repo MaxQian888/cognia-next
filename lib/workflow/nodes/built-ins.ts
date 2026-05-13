@@ -28,6 +28,10 @@ import { createTeam, deleteTeam, updateTeam } from "@/lib/db/teams"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { createDraft } from "@/lib/db/connector-drafts"
 import { generateTextEmbedding } from "@/lib/ai/embedding/multimodal-embedding"
+// Side-effect import — registers the 12 desktop UI-automation executors at
+// module load time. Keeps the catalog and the registry in sync without any
+// cross-module wiring.
+import "./desktop"
 
 // ── trigger.manual ────────────────────────────────────────────────────────
 registerNodeExecutor({

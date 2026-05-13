@@ -1,0 +1,47 @@
+{
+  "id": "github-delivery",
+  "name": "GitHub Delivery",
+  "version": "1.0.0",
+  "description": "Bring GitHub PR review, Issue→PR loops, and Release automation into the cognia visual workflow editor.",
+  "type": "frontend",
+  "capabilities": ["tools", "components", "providers", "exporters"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": ["network:fetch", "secrets:read", "secrets:write"],
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  },
+  "dexie": {
+    "tables": [
+      { "name": "repos", "schema": "&fullName, credentialMode, createdAt" },
+      {
+        "name": "workOrders",
+        "schema": "++id, [status+repoFullName], issueNumber, prNumber, createdAt, updatedAt"
+      },
+      {
+        "name": "events",
+        "schema": "&deliveryId, [repoFullName+seenAt], kind, source"
+      },
+      {
+        "name": "audit",
+        "schema": "++id, [repoFullName+at], runId, &[runId+stepId+at]"
+      }
+    ]
+  },
+  "connectors": [
+    {
+      "type": "github",
+      "factory": "createGithubAdapterForBridge",
+      "configSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+      "transportModes": ["webhook"]
+    }
+  ]
+}
