@@ -1,0 +1,132 @@
+---
+title: Packaging & Publishing
+description: How to build a .cognia-plugin archive, sign it, and publish to the marketplace.
+---
+
+# Packaging & Publishing
+
+Plugins are distributed as signed `.cognia-plugin` archives (ZIP files containing the manifest, source code, assets, and a signature).
+
+## Building the archive
+
+### 1. Prepare the directory
+
+```
+my-plugin/
+  cognia-plugin.json    # manifest
+  main.js               # entry point
+  icon.svg              # optional icon
+  package.json          # optional: for npm dependencies
+  src/                  # optional: additional source files
+  assets/               # optional: static assets
+```
+
+### 2. Install dependencies
+
+If your plugin uses npm packages, run:
+
+```bash
+cd my-plugin
+npm install
+```
+
+The bundler includes `node_modules` in the archive.
+
+### 3. Build and sign
+
+Use the Cognia CLI (bundled with the app in dev mode):
+
+```bash
+cognia plugin build ./my-plugin --out ./my-plugin.cognia-plugin
+```
+
+This:
+
+1. Validates `cognia-plugin.json` against the Zod schema.
+2. Bundles all files into a ZIP archive.
+3. Generates a signature using your development key.
+4. Outputs `my-plugin.cognia-plugin`.
+
+### 4. Test locally
+
+```bash
+cognia plugin install ./my-plugin.cognia-plugin
+```
+
+Or use the devtools "Load unpacked plugin" feature for faster iteration.
+
+## Signing
+
+Plugins must be signed to be installed from the marketplace. During development, a self-signed key is auto-generated. For distribution:
+
+1. Generate a signing key:
+   ```bash
+   cognia plugin keygen --out ./signing-key.pem
+   ```
+2. Keep the key secure; it identifies your publisher identity.
+3. Pass it to build:
+   ```bash
+   cognia plugin build ./my-plugin --key ./signing-key.pem --out ./my-plugin.cognia-plugin
+   ```
+
+## Publishing to the marketplace
+
+The marketplace is a static JSON feed. To publish:
+
+### Option A: Self-hosted feed
+
+1. Host a JSON file at a URL:
+   ```json
+   {
+     "plugins": [
+       {
+         "id": "com.example.my-plugin",
+         "name": "My Plugin",
+         "version": "1.0.0",
+         "downloadUrl": "https://example.com/plugins/my-plugin-1.0.0.cognia-plugin",
+         "checksum": "sha256:abc123...",
+         "signature": "..."
+       }
+     ]
+   }
+   ```
+2. In Cognia Settings → Plugins → Marketplace, add your feed URL.
+
+### Option B: Submit to the official marketplace
+
+Contact the Cognia team with your signed archive for review. The review checks:
+
+- Manifest validity
+- Permission minimality
+- No malicious code patterns
+- Test coverage for contributed workflow nodes / connectors
+
+## Versioning
+
+Use semantic versioning. The marketplace shows update availability when the feed version is newer than the installed version.
+
+| Change type | Version bump | Example |
+|-------------|--------------|---------|
+| Bug fix | Patch | `1.0.0` → `1.0.1` |
+| New feature | Minor | `1.0.0` → `1.1.0` |
+| Breaking change | Major | `1.0.0` → `2.0.0` |
+
+Breaking changes include: renamed node kinds, removed permissions, changed connector interfaces.
+
+## Uninstallation behavior
+
+By default, plugin data is retained when uninstalled (tables stay in Dexie). To purge data, the user selects "Delete data" in Settings → Plugins. Your plugin can clean up in `onDeactivate()`:
+
+```ts
+export async function onDeactivate(ctx) {
+  await ctx.api.storage.clear()
+}
+```
+
+## Related
+
+<Cards>
+  <Card title="Manifest" href="./manifest" description="Manifest format and validation." />
+  <Card title="Permissions" href="./permissions" description="What permissions to request." />
+  <Card title="Devtools" href="./devtools" description="Hot reload and debugging during development." />
+</Cards>

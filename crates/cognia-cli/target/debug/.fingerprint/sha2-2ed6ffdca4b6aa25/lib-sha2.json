@@ -1,0 +1,24 @@
+{
+  "rustc": 3674164131150989441,
+  "features": "[\"default\", \"std\"]",
+  "declared_features": "[\"asm\", \"asm-aarch64\", \"compress\", \"default\", \"force-soft\", \"force-soft-compact\", \"loongarch64_asm\", \"oid\", \"sha2-asm\", \"std\"]",
+  "target": 9593554856174113207,
+  "profile": 2241668132362809309,
+  "path": 5483754855759012528,
+  "deps": [
+    [7667230146095136825, "cfg_if", false, 9185348584512602414],
+    [17475753849556516473, "digest", false, 2531091630349107550],
+    [17620084158052398167, "cpufeatures", false, 17249456853145696587]
+  ],
+  "local": [
+    {
+      "CheckDepInfo": {
+        "dep_info": "debug\\.fingerprint\\sha2-2ed6ffdca4b6aa25\\dep-lib-sha2",
+        "checksum": false
+      }
+    }
+  ],
+  "rustflags": [],
+  "config": 8247474407144887393,
+  "compile_kind": 0
+}

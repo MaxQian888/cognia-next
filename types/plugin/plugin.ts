@@ -38,6 +38,7 @@ export type PluginType =
   | "frontend" // JavaScript/TypeScript plugin running in renderer
   | "python" // Python plugin running via PyO3
   | "hybrid" // Combination of frontend and Python components
+  | "wasm" // WASM Component Model plugin (wasmtime host, Tauri-only — ADR 0013)
 
 /**
  * Plugin capabilities - what the plugin can provide
@@ -190,6 +191,7 @@ export interface ExtensionDescriptor {
   entrypoints: {
     main?: string
     pythonMain?: string
+    wasmMain?: string
     styles?: string
   }
   declaredCapabilities: PluginCapability[]
@@ -257,6 +259,8 @@ export type PluginPermission =
   | "agent:control" // Control agent execution
   | "python:execute" // Execute Python code
   | "sandbox:web-execute" // Execute code in browser sandbox (Pyodide/JS)
+  | "secrets:read" // Read from OS keyring / secure storage
+  | "secrets:write" // Write to OS keyring / secure storage
 
 export type PluginPermissionDecision = "allow" | "deny"
 export type PluginPermissionPolicy = "ask" | "allow" | "deny"
@@ -286,6 +290,12 @@ export interface PluginManifest {
     name: string
     email?: string
     url?: string
+    /**
+     * Base64-encoded Ed25519 public key (32 bytes raw → 44 char base64).
+     * Required for WASM plugins distributed via HTTP/Git so the host can
+     * verify the `<bundle>.sig` detached signature before install.
+     */
+    publicKey?: string
   }
 
   /** Homepage/documentation URL */
@@ -318,6 +328,36 @@ export interface PluginManifest {
 
   /** Entry point for Python code */
   pythonMain?: string
+
+  /**
+   * Entry point for a WASM Component Model plugin (`.wasm` file, relative to
+   * the plugin install root). Required when `type === "wasm"`. The Rust host
+   * loads this via `wasmtime::component::Component::from_file`.
+   */
+  wasmMain?: string
+
+  /**
+   * WASM-plugin-only block. Carries runtime tunables and capability hints the
+   * host needs at instantiate time. The `cognia:api-version` value is also
+   * embedded as a custom section in the `.wasm` itself; this field exists for
+   * the manifest preview UI and as a sanity check before instantiation.
+   */
+  wasm?: {
+    /** Semver of the WIT contract this plugin was built against (e.g. "0.1.0"). */
+    apiVersion: string
+    /** Linear-memory cap in MiB. Defaults to 64. Host-enforced via `StoreLimits`. */
+    memoryLimitMb?: number
+    /** Per-call wall-clock timeout in milliseconds. Defaults to 30000. */
+    callTimeoutMs?: number
+    /**
+     * Additional filesystem preopens the plugin needs beyond its own
+     * `<app_data>/cognia/plugins/<id>/` data dir. Each entry is granted at
+     * install time via the capability sheet; un-granted entries are dropped.
+     */
+    fs?: {
+      preopens?: string[]
+    }
+  }
 
   /** Style entry point (CSS) */
   styles?: string

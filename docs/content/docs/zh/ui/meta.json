@@ -1,0 +1,10 @@
+{
+  "title": "UI 与平台",
+  "pages": [
+    "chat-ui-architecture",
+    "settings-ui",
+    "shadcn-ui-setup",
+    "theming-and-i18n",
+    "mobile-architecture"
+  ]
+}

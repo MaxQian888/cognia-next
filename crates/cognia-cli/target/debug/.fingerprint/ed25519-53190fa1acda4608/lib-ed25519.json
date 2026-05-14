@@ -1,0 +1,20 @@
+{
+  "rustc": 3674164131150989441,
+  "features": "[\"alloc\", \"std\"]",
+  "declared_features": "[\"alloc\", \"default\", \"pem\", \"pkcs8\", \"serde\", \"serde_bytes\", \"std\", \"zeroize\"]",
+  "target": 108444017173925020,
+  "profile": 15657897354478470176,
+  "path": 1567716495432724902,
+  "deps": [[13895928991373641935, "signature", false, 15754362731145607899]],
+  "local": [
+    {
+      "CheckDepInfo": {
+        "dep_info": "debug\\.fingerprint\\ed25519-53190fa1acda4608\\dep-lib-ed25519",
+        "checksum": false
+      }
+    }
+  ],
+  "rustflags": [],
+  "config": 8247474407144887393,
+  "compile_kind": 0
+}

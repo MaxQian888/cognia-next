@@ -1,0 +1,20 @@
+{
+  "rustc": 3674164131150989441,
+  "features": "[]",
+  "declared_features": "[\"const-generics\", \"i128\", \"scale-info\", \"scale_info\", \"strict\"]",
+  "target": 2349969882102649915,
+  "profile": 2241668132362809309,
+  "path": 12027763091382719923,
+  "deps": [],
+  "local": [
+    {
+      "CheckDepInfo": {
+        "dep_info": "debug\\.fingerprint\\typenum-8e471cb6b00b8608\\dep-lib-typenum",
+        "checksum": false
+      }
+    }
+  ],
+  "rustflags": [],
+  "config": 8247474407144887393,
+  "compile_kind": 0
+}

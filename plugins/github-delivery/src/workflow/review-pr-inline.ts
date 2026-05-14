@@ -22,6 +22,7 @@
  */
 
 import type { Octokit } from "@octokit/core"
+import { createLlmClient } from "@/lib/twin/distill/llm"
 
 export interface InlineReviewComment {
   path: string
@@ -102,7 +103,7 @@ export async function runPRReviewAgent(
   ].join("\n")
   const userPrompt = `${focusLine}${diffPayload}`
 
-  const factory = hooks.createLlmClient ?? (await import("@/lib/twin/distill/llm")).createLlmClient
+  const factory = hooks.createLlmClient ?? createLlmClient
   const client = factory({
     provider: params.provider as Parameters<typeof factory>[0]["provider"],
     model: params.model,

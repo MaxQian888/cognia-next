@@ -1,6 +1,7 @@
 import { render, waitFor } from "@testing-library/react"
 import { useSettingsStore } from "@/stores/settings"
 import { SettingsHydrator } from "./settings-hydrator"
+import { getSettings } from "@/lib/db/settings"
 
 jest.mock("@/lib/db/settings", () => ({
   getSettings: jest.fn().mockResolvedValue({
@@ -35,7 +36,6 @@ describe("SettingsHydrator", () => {
   })
 
   it("is idempotent — second mount does not re-call getSettings", async () => {
-    const { getSettings } = await import("@/lib/db/settings")
     render(<SettingsHydrator />)
     await waitFor(() => {
       expect(useSettingsStore.getState().loaded).toBe(true)

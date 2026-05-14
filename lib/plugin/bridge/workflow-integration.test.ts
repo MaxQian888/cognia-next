@@ -8,6 +8,7 @@ import {
   resetPluginWorkflowIntegration,
   usePluginWorkflowIntegration,
 } from "./workflow-integration"
+import { usePluginStore } from "@/stores/plugin"
 import type { PluginMessage } from "@/types/plugin"
 
 // Mock dependencies
@@ -115,7 +116,6 @@ describe("PluginWorkflowIntegration", () => {
       })
 
       it("should skip disabled plugins", async () => {
-        const { usePluginStore } = await import("@/stores/plugin")
         ;(usePluginStore.getState as jest.Mock).mockReturnValueOnce({
           plugins: {
             "disabled-plugin": {

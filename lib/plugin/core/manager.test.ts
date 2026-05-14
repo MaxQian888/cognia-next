@@ -72,6 +72,9 @@ describe("PluginManager", () => {
     registerPlugin: jest.fn(),
     unregisterPlugin: jest.fn(),
     revokeAll: jest.fn(),
+    grant: jest.fn(),
+    revoke: jest.fn(),
+    getPluginPermissions: jest.fn(() => [] as string[]),
   }
   const mockGetSlashCommand = getSlashCommand as jest.MockedFunction<typeof getSlashCommand>
   const mockRegisterSlashCommand = registerSlashCommand as jest.MockedFunction<
@@ -372,6 +375,121 @@ describe("PluginManager", () => {
           lastVerifiedAction: "install",
           lastSuccessfulAt: expect.any(String),
         })
+      )
+    })
+
+    it("installWasmPluginFromLocalFile preloads the component and clears grant on uninstall", async () => {
+      const store: {
+        plugins: Record<string, Plugin>
+        discoverPlugin: jest.Mock
+        installPlugin: jest.Mock
+        uninstallPlugin: jest.Mock
+        unloadPlugin: jest.Mock
+        setPluginError: jest.Mock
+        setPluginStatus: jest.Mock
+      } = {
+        plugins: {},
+        discoverPlugin: jest.fn((manifest: PluginManifest, source: string, path: string) => {
+          store.plugins[manifest.id] = {
+            manifest,
+            status: "discovered",
+            source: source as never,
+            path,
+            config: {},
+          }
+        }),
+        installPlugin: jest.fn(async (pluginId: string) => {
+          const p = store.plugins[pluginId]
+          if (p) {
+            store.plugins[pluginId] = {
+              ...p,
+              status: "installed",
+              installedAt: new Date(),
+            }
+          }
+        }),
+        uninstallPlugin: jest.fn(async (pluginId: string) => {
+          delete store.plugins[pluginId]
+        }),
+        unloadPlugin: jest.fn(async () => {}),
+        setPluginError: jest.fn(),
+        setPluginStatus: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+
+      const wasmManifest: PluginManifest = {
+        id: "demo.wasm",
+        name: "Demo WASM",
+        version: "0.1.0",
+        description: "x",
+        type: "wasm",
+        capabilities: [],
+        wasmMain: "main.wasm",
+        wasm: { apiVersion: "0.1.0" },
+        permissions: ["notification"],
+      }
+
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "plugin_install") {
+          return { manifest: wasmManifest, path: "/plugins/demo.wasm" }
+        }
+        if (cmd === "plugin_wasm_load") {
+          return { pluginApiVersion: "0.1.0" }
+        }
+        return undefined
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const plugin = await manager.installWasmPluginFromLocalFile("/tmp/demo.zip", {
+        pluginId: "demo.wasm",
+        grantedPermissions: ["notification"],
+        grantedPreopens: [],
+      })
+
+      expect(plugin?.manifest.id).toBe("demo.wasm")
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "plugin_install",
+        expect.objectContaining({ source: "/tmp/demo.zip", installType: "local" })
+      )
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "plugin_wasm_load",
+        expect.objectContaining({
+          pluginId: "demo.wasm",
+          pluginPath: "/plugins/demo.wasm",
+        })
+      )
+    })
+
+    it("installWasmPluginFromLocalFile rejects non-wasm bundles", async () => {
+      const store: {
+        plugins: Record<string, Plugin>
+        discoverPlugin: jest.Mock
+        installPlugin: jest.Mock
+      } = {
+        plugins: {},
+        discoverPlugin: jest.fn((manifest: PluginManifest, source: string, path: string) => {
+          store.plugins[manifest.id] = {
+            manifest,
+            status: "discovered",
+            source: source as never,
+            path,
+            config: {},
+          }
+        }),
+        installPlugin: jest.fn(async (pluginId: string) => {
+          const p = store.plugins[pluginId]
+          if (p) store.plugins[pluginId] = { ...p, status: "installed" }
+        }),
+      }
+      mockGetState.mockReturnValue(store)
+
+      mockInvoke.mockResolvedValueOnce({
+        manifest: createManifest("regular"),
+        path: "/plugins/regular",
+      })
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await expect(manager.installWasmPluginFromLocalFile("/tmp/regular.zip")).rejects.toThrow(
+        /did not declare type: "wasm"/
       )
     })
   })

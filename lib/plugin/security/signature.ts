@@ -470,3 +470,88 @@ export function getPluginSignatureVerifier(
 export function resetPluginSignatureVerifier(): void {
   signatureVerifierInstance = null
 }
+
+// =============================================================================
+// Detached signature path (WASM plugin bundles)
+// =============================================================================
+
+/**
+ * Result of an Ed25519 detached-signature verification against a WASM plugin
+ * bundle on disk. `valid === true` means the bundle bytes were signed by the
+ * holder of `publicKeyBase64`'s private key. Callers still need to check
+ * trust separately (is this key in `trustedPublishers`?).
+ */
+export interface DetachedSignatureCheck {
+  valid: boolean
+  fingerprint: string
+  publicKeyBase64: string
+  reason?: string
+}
+
+function isTauriRuntimeAvailable(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+}
+
+/**
+ * Verify an Ed25519 detached signature (`<bundle>.sig`) against a bundle on
+ * disk. Used by the WASM plugin install paths (HTTP / Git). Returns the
+ * SHA-256 fingerprint of the public key in lowercase hex so the install UI
+ * can render an identity chip before the user accepts.
+ *
+ * Browser-mode (non-Tauri) returns `valid: false, reason: "host-unavailable"`
+ * so callers can degrade rather than throw.
+ */
+export async function verifyDetachedBundleSignature(args: {
+  artifactPath: string
+  signatureBase64: string
+  publicKeyBase64: string
+}): Promise<DetachedSignatureCheck> {
+  if (!isTauriRuntimeAvailable()) {
+    return {
+      valid: false,
+      fingerprint: "",
+      publicKeyBase64: args.publicKeyBase64,
+      reason: "host-unavailable",
+    }
+  }
+  try {
+    const [valid, fingerprint] = await Promise.all([
+      invoke<boolean>("plugin_verify_detached_signature", {
+        artifactPath: args.artifactPath,
+        signatureBase64: args.signatureBase64,
+        publicKeyBase64: args.publicKeyBase64,
+      }),
+      invoke<string>("plugin_public_key_fingerprint", {
+        publicKeyBase64: args.publicKeyBase64,
+      }),
+    ])
+    return { valid, fingerprint, publicKeyBase64: args.publicKeyBase64 }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    recordSilentFailure(
+      "",
+      {
+        site: "plugin.security.verifyDetachedBundleSignature",
+        message,
+        expected: !isTauriRuntimeAvailable(),
+      },
+      error
+    )
+    return {
+      valid: false,
+      fingerprint: "",
+      publicKeyBase64: args.publicKeyBase64,
+      reason: message,
+    }
+  }
+}
+
+/**
+ * Human-friendly fingerprint slice for the install dialog: shows
+ * `ed25519:9f:3a:...` (the first 8 hex pairs of the sha256).
+ */
+export function shortFingerprint(fingerprint: string): string {
+  if (!fingerprint) return ""
+  const pairs = fingerprint.match(/.{2}/g)?.slice(0, 8) ?? []
+  return `ed25519:${pairs.join(":")}`
+}

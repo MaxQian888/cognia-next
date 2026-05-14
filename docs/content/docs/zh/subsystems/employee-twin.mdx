@@ -1,0 +1,434 @@
+---
+title: 员工数字孪生
+description: 把文档、聊天、代码蒸馏成可对话的孪生，发送时做 RAG + 风格少样本注入，PII 在任何外发前替换为占位符。
+---
+
+# 员工数字孪生
+
+<Status variant="beta">Beta · phase 8</Status>
+
+<TLDR>
+  把文档、聊天导出与代码蒸馏成一个可对话的孪生。发送时召回 top-K 相关 chunk
+  与风格少样本，让助手保持作者语气。 PII 在**任何** embed 或 LLM 调用之前被替换为占位符 ——
+  逆向映射加密落盘。Team chat 通过 `precomputedQueryEmbedding` 在多个孪生成员间共享一次 embed
+  调用。每个 distill agent 有 90 s 超时与降级路径，单 agent 卡死不会拖死整次蒸馏。
+</TLDR>
+
+<StatGrid>
+  <Stat label="流水线阶段" value="7" hint="ingest" />
+  <Stat label="蒸馏 agent" value="5" hint="同一编排器下" />
+  <Stat label="Dexie 表" value="5" hint="schema v14" />
+  <Stat label="工作台 tab" value="4" hint="Sources / Jobs / Drafts / Settings" />
+</StatGrid>
+
+**员工数字孪生** 是 Cognia 最深的定制化层。它把用户的文档、聊天导出与代码蒸馏成：
+
+- **知识索引（RAG）** —— 发送时检索相关片段。
+- **风格画像** —— 在少样本提示中复现用户的语气。
+- **Playbook 库** —— 重复的工作模式（由蒸馏 agent 抽取）。
+- **角色 + 技能草稿** —— 自动合成，进入待用户审核队列。
+
+本页概述实现，完整设计原由参见 [ADR-0003](../adr/0003-employee-digital-twin)。
+
+## 代码位置
+
+```
+lib/twin/
+  ingest/        # 7 阶段 ingest 流水线
+  distill/       # 5 个 agent 的 distill 流水线 + with-timeout 包装
+  runtime/       # 发送时 RAG + 风格少样本
+  job-worker.ts  # 消费 twinJobs 队列
+  importers/     # 第三方导出 → TwinSource
+
+types/twin/      # 共享类型
+components/twin/ # 工作台 UI
+app/twin/        # 工作台路由
+lib/db/twin-*.ts # 5 张 Dexie 表（schema v14 加入）
+```
+
+5 张 Dexie 表（schema v14）：
+
+- `twinSources` —— 用户原始素材（文本、格式提示、redaction map）
+- `twinChunks` —— 切分并嵌入后的片段（每行一个 chunk，含 `vectorDocId` 关联到远程向量）
+- `twinProfile` —— 蒸馏后的画像（风格样本、playbook、实体词典、voiceSummary）
+- `twinDrafts` —— 自动合成的角色/技能草稿，待审核
+- `twinJobs` —— ingest + distill 任务队列
+
+## 软绑定
+
+"孪生"只是一个字符串 id。角色通过 `Character.twinId` 启用，并通过 `Character.twinSettings` 调参：
+
+<TypeTable
+  type={{
+    enableRag: {
+      description: "发送时是否从绑定孪生召回 chunk。",
+      type: "boolean",
+      default: "true",
+    },
+    ragTopK: {
+      description: "每次发送从向量库取多少个 chunk。",
+      type: "number",
+      default: "5",
+    },
+    enableStyleFewShot: {
+      description: "是否在系统提示中加入风格少样本。",
+      type: "boolean",
+      default: "true",
+    },
+    styleSamplesK: {
+      description: "包含多少条风格样本（按主题相似度排序）。",
+      type: "number",
+      default: "3",
+    },
+  }}
+/>
+
+多个角色可以共享一个孪生（例如"个人"孪生与"工作"孪生都绑到同一个用户角色）。一个 Dexie 数据库里可同时存在多个孪生。
+`Character.embeddingProviderId` 可与 chat provider 独立选择 —— 例如用 OpenAI 做 embedding、用 Anthropic 聊天。
+
+## Ingest 流水线（7 阶段）
+
+实现：`lib/twin/ingest/`。编排器：`runIngestJob()`（`job-runner.ts`）。
+
+```mermaid
+flowchart LR
+  S([素材]) --> D[dispatch]
+  D --> P[parse]
+  P --> R[redact]
+  R --> C[chunk]
+  C --> E[embed]
+  E --> PS[persist]
+  PS --> F[finalize]
+  F --> END([就绪])
+
+  R -.PII 红线.-> X{{hasNoLeakingPii}}
+  X -.失败.-> ABORT([中止])
+  X -.通过.-> C
+
+  classDef stage fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
+  classDef terminal fill:#0f172a,stroke:#475569,color:#cbd5e1
+  classDef gate fill:#7c2d12,stroke:#fb923c,color:#fed7aa
+  class D,P,R,C,E,PS,F stage
+  class S,END,ABORT terminal
+  class X gate
+```
+
+<Callout type="warn" title="隐私红线">
+  第 3 阶段（`redact`）是隐私红线 —— `hasNoLeakingPii(text)` 是脱敏后的断言。
+  失败则流水线中止并报清晰错误。 任何 embedding 或 LLM 调用都看不到未脱敏文本。
+</Callout>
+
+### 1. dispatch
+
+根据 `TwinSource.format` 决定下游 parser。支持格式：`markdown`、`text`、`json`、`code`、`chat-export`、
+`html`、`pdf`、`office`。代码：`dispatch.ts`。详见 [document-processing](../data/document-processing)。
+
+### 2. parse
+
+委派给 `lib/document/document-processor`。输出标准化的文本 + 元数据：
+
+- Markdown：保留标题树。
+- 代码：按 AST（JS/TS 用 Babel，其他用 language server）切。
+- 聊天导出：保留每轮结构（messages 数组）。
+- Office 文档：DOCX 用 `mammoth`、PDF 用 `pdfjs-dist`。
+
+### 3. redact
+
+**这是隐私红线。** `lib/twin/ingest/redact.ts` 在**任何 embed 或 LLM 调用之前**把 PII 替换为 `<KIND_NNN>` 占位符：
+
+| 类别        | 检测                                              |
+| ----------- | ------------------------------------------------- |
+| `EMAIL`     | RFC 宽松正则                                      |
+| `PHONE`     | E.164 + 中国手机号                                |
+| `CN_ID`     | 中国身份证号（省份码 + 出生日期 + 类 Luhn 校验）  |
+| `BANK_CARD` | 通过 Luhn 的 13–19 位数字                         |
+| `NAME`      | 提示驱动（前面有 "name:"、"by"、"——"、"from" 等） |
+
+逆向映射用 AES-GCM 加密落盘（`twinSources.redactionMapEnc`），密钥派生自用户主密钥。Runtime 永不持久化未脱敏文本。
+
+`hasNoLeakingPii(text)` 是脱敏后的断言。失败则流水线终止并报清晰错误。
+
+### 4. chunk
+
+`chunk.ts` 中的格式感知策略：
+
+```mermaid
+flowchart LR
+  In([脱敏文本]) --> Sniff{格式？}
+  Sniff -->|markdown| MD[按标题切<br/>最大约 1000 token]
+  Sniff -->|代码| CODE[函数/类边界<br/>+ 重叠]
+  Sniff -->|聊天 / 段落| PARA[按段切<br/>溢出按句]
+  MD --> Hash[稳定内容哈希]
+  CODE --> Hash
+  PARA --> Hash
+  Hash --> Out([Chunk + hash])
+
+  classDef io fill:#0f172a,stroke:#475569,color:#cbd5e1
+  classDef gate fill:#312e81,stroke:#a78bfa,color:#ede9fe
+  classDef step fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
+  class In,Out io
+  class Sniff gate
+  class MD,CODE,PARA,Hash step
+```
+
+稳定哈希驱动重复 ingest 的去重 —— chunk 内容相同 → 哈希相同 → 不会产生重复行。
+chunker 与 distill 共享同一份 `lib/twin/ingest/chunk.ts:prepareChunks`（wiki 索引器也复用它）。
+
+### 5. embed
+
+`lib/ai/embedding/embedding.ts` 是嵌入客户端，按 `TwinRuntimeEmbeddingConfig` 调任意支持的供应商（openai /
+google / cohere / mistral / transformersjs）。批量 100 一组嵌入，限流时重试。
+
+### 6. persist
+
+双写：
+
+- 本地 —— `twinChunks` Dexie 表（chunk + 元数据 + `vectorDocId`）。
+- 远程 —— 当前向量后端（`lib/vector/`，详见 [vector-store](../data/vector-store)），collection 名 `cognia_twin_{twinId}`。
+
+每条 chunk 同时记录 `vectorBackend` 与 `vectorCollection`，便于将来 re-host：迭代表行即可重放向量，无需重 embed。
+远程写失败时，chunk 仍在本地存好，由 job worker 重试。
+
+### 7. finalize
+
+更新 source 行为 `status: "ready"`，并发完成事件供工作台订阅。
+
+整个流水线持续更新 `TwinJob.phase` 与 `progress`，Jobs tab 实时展示进度。
+
+## Distill 流水线（5 个 agent）
+
+实现：`lib/twin/distill/orchestrator.ts`。每个 agent 都通过 `LlmClient` 接口（`llm.ts`），生产环境绑
+`createAnthropicLlmClient`，测试用 mock。
+
+```mermaid
+flowchart TB
+  Chunks([twinChunks]) --> O((Orchestrator))
+  O --> KA[KnowledgeAgent<br/>实体抽取 · 100/批]
+  O --> SA[StyleAgent<br/>写作样本 · 60 chunk]
+  O --> PA[PlaybookAgent<br/>重复模式 · 80 chunk]
+
+  KA --> SY[Synthesizer<br/>角色 + 技能草稿]
+  SA --> SY
+  PA --> SY
+
+  SY --> EV[Evaluator<br/>qualityScore + concerns + suggestions]
+  EV --> P([twinProfile])
+  EV --> DR([twinDrafts<br/>status: pending])
+
+  classDef agent fill:#1e293b,stroke:#8b5cf6,color:#e2e8f0
+  classDef io fill:#0f172a,stroke:#475569,color:#cbd5e1
+  classDef orchestrator fill:#312e81,stroke:#a78bfa,color:#ede9fe
+  class KA,SA,PA,SY,EV agent
+  class Chunks,P,DR io
+  class O orchestrator
+```
+
+<Callout type="info" title="超时与降级">
+  每个 agent 都被 `withTimeoutOrFallback` 包裹（默认 `DEFAULT_AGENT_TIMEOUT_MS = 90s`）。
+  卡住的供应商 / 错误响应只把该 agent 的输出降级为空数组，其他 agent 继续。 例外：**Synthesizer
+  失败会中止整次 distill** —— 没有 synth 输出就没有 draft，把空 distill 标为 completed 会误导用户。
+</Callout>
+
+### KnowledgeAgent
+
+按 100 chunk 一批遍历，抽取实体（人物、项目、术语、决策）。输出：以规范名为键的实体词典 +
+`chunkId → entityName[]` 反向映射（写入 `twinChunks.entityTags`，供过滤搜索使用）。
+
+### StyleAgent
+
+单次调用，取 60 chunk 的代表性样本，抽取代表性写作样本——短、中、长形式——保留用户语气。输出：
+`StyleSample[]`，存入 `twinProfile.styleSamples`。
+
+### PlaybookAgent
+
+单次调用，取 80 chunk 样本，寻找重复的工作模式（"X 怎么处理 Y？"）。每个 playbook 有置信度评分，低于阈值的会被丢弃。
+
+### Synthesizer
+
+接收前三个 agent 的输出 + profile + 30 条近期 chunk，起草：
+
+- 一个或多个 **角色草稿** —— 系统提示采用用户人格。
+- 一个或多个 **技能草稿** —— 重复任务的能力包。
+
+草稿写入 `twinDrafts`，状态 `status: "pending"`。Synthesizer 是 distill 的必经路径 —— 它失败则整次 distill 中止。
+
+### Evaluator
+
+从"新人视角"审阅草稿 —— 一位同事是否能理解这个角色的意图与风格？输出 `qualityScore`，加上 `concerns` 与
+`suggestions` 数组，按 draft 的占位 id 索引。在 Drafts tab 展示。
+
+## Runtime（发送时）
+
+实现：`lib/twin/runtime/`。唯一入口：`applyTwinContext(input)`（`apply-twin-context.ts`）。
+
+<Steps>
+  <Step>
+    ### 嵌入用户消息
+
+    若调用方传入 `precomputedQueryEmbedding`（team chat 在多成员间共享），跳过 embed；否则
+    通过 `lib/ai/embedding/embedding.ts` 把最近一条用户消息嵌入一次。
+
+  </Step>
+  <Step>
+    ### 召回 top-K chunk
+
+    在当前向量库做 RAG（`store.searchByEmbedding(collection, embedding, { limit: ragTopK })`），
+    取 top `ragTopK`（默认 5）；再用 `getTwinChunksByVectorDocIds` 回查 chunk 全文与
+    `sourceTitle`。后端选择见 [vector-store](../data/vector-store)。
+
+  </Step>
+  <Step>
+    ### 选择风格样本
+
+    从 `twinProfile.styleSamples` 取 top `styleSamplesK`（默认 3），
+    `few-shot-selector.ts` 按主题相似度排序。
+
+  </Step>
+  <Step>
+    ### 装配四段式系统提示
+
+    | # | 段落 | 来源 |
+    | --- | --- | --- |
+    | 1 | 角色系统提示 | `character.systemPrompt` |
+    | 2 | 身份块 | 孪生 ID + `voiceSummary` + 实体摘要 |
+    | 3 | 召回片段 | 第 2 步 |
+    | 4 | 风格示例 | 第 3 步，少样本格式 |
+
+  </Step>
+  <Step>
+    ### 派发 plugin 事件
+
+    当 `enableRag` 且有命中时，调用 `getPluginEventHooks().dispatchRAGContextRetrieved(sessionId, hits)`，
+    让插件（例如"显示引用"插件）订阅。`sessionId` 落到 `input.sessionId ?? "twin:" + twinId`。
+
+  </Step>
+</Steps>
+
+<Callout type="info" title="优雅降级">
+  `applyTwinContext` **总是返回** —— 永不抛错。 - embed 失败 → `degraded: true`、`degradedReason:
+  "embed-failed: ..."` - 向量库故障 → `degraded: true`、`degradedReason: "retrieve-failed: ..."`
+  调用方仍可正常发送， 只是没有上下文段；UI 会把 `degraded` 反映到 banner。
+</Callout>
+
+```mermaid
+flowchart TB
+  subgraph Inputs[输入]
+    Msg[用户消息]
+    Char[Character.systemPrompt]
+    Profile[twinProfile<br/>风格样本 + voiceSummary]
+    Pre[precomputedQueryEmbedding<br/>可选 · team chat 共享]
+  end
+
+  Msg --> Embed{有预计算?}
+  Pre --> Embed
+  Embed -->|否| DoEmbed[generateEmbedding]
+  Embed -->|是| Use[直接复用]
+  DoEmbed --> Vec[查询向量]
+  Use --> Vec
+  Vec --> RAG[store.searchByEmbedding<br/>topK ragTopK]
+  Profile --> Pick[few-shot-selector<br/>topK styleSamplesK]
+  RAG --> DBFetch[getTwinChunksByVectorDocIds]
+  DBFetch --> Chunks[召回 chunk + sourceTitle]
+
+  Char --> Out[四段式<br/>系统提示]
+  Identity[身份块] --> Out
+  Chunks --> Out
+  Pick --> Out
+
+  Out --> Send[发送给 sidecar]
+  Chunks --> Hook[dispatchRAGContextRetrieved]
+
+  classDef input fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
+  classDef step fill:#064e3b,stroke:#10b981,color:#a7f3d0
+  classDef out fill:#312e81,stroke:#a78bfa,color:#ede9fe
+  classDef gate fill:#7c2d12,stroke:#fb923c,color:#fed7aa
+  class Msg,Char,Profile,Pre input
+  class DoEmbed,Use,Vec,RAG,DBFetch,Pick,Chunks step
+  class Out,Send,Hook out
+  class Embed gate
+```
+
+> **Phase 8 说明** —— 与 `lib/claude/build-options.ts:resolveSendOptions` 的集成留为**可选**。需要 runtime
+> 注入的调用点显式传入 `ctx.twinDeps` + `ctx.twinUserMessage`，而不是免费拿到。这是有意为之，让昂贵路径（embed
+>
+> - RAG）可被发现。
+
+### Team chat embedding 共享
+
+Team chat（多个孪生角色在同一轮回复）通过 `BuildOptionsContext.precomputedQueryEmbedding` 共享一次 embed
+调用 —— team runtime 在第一个 member 之前先嵌入一次，然后把向量传给后续所有 member 的
+`resolveSendOptions`，runtime 内部跳过 `generateEmbedding`。详见 [agent-teams](../chat/agent-teams)。
+
+少样本选择器（`few-shot-selector.ts`）按主题相似度排名，而非仅看语气，使提示更聚焦。
+
+## 工作台 UI
+
+路由：`app/twin/`。组件：`components/twin/`。四个 tab：
+
+| Tab          | 用途                                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------------------------ |
+| **Sources**  | 粘贴 / 拖入文本。格式选择、状态标记、ingest 按钮。列出已有 sources 与大小、状态。                      |
+| **Jobs**     | ingest 与 distill 任务的实时进度。展示 `twinJobs` 中的 `phase` 与 `progress`。手动入队 / 取消 / 重试。 |
+| **Drafts**   | 优先排序待审核草稿。Accept 流写入真实 `Character` / `Skill` 行 + 把 draft 标记为已接受。               |
+| **Settings** | 只读画像统计（chunk 数、风格样本数、上次蒸馏时间、向量后端、embedding provider）。                     |
+
+工作台是孪生生命周期的主入口，所有动作都从这里发起。
+
+## Job worker
+
+`lib/twin/job-worker.ts` 同时消费 `twinJobs` 队列里的 `ingest` 与 `distill` 任务。Phase 4（ADR-0003）默认**立即执行**：
+
+- 新任务一旦 worker 空闲就处理。
+- 失败任务以指数退避重试（3 次失败后置 `status: "failed"`）。
+- 并发度由 `maxConcurrentIngest` 与 `maxConcurrentDistill` 控制（默认各 1）。
+- Worker 是每浏览器 tab **单租户** —— `lib/scheduler/tab-lock.ts` 用 BroadcastChannel + visibilitychange
+  实现的"领导者"锁保证只有一个 tab 跑 worker。其他 tab 仍能看 Jobs UI 但不消费队列。
+
+通过调度器执行器实现 cron 触发的重试（如"每周重新 ingest"）是后续追加的能力。
+
+## 隐私要点
+
+| 风险           | 缓解                                                                     |
+| -------------- | ------------------------------------------------------------------------ |
+| chunk 中的 PII | `redact.ts` 在 embed/LLM 调用前替换为占位符                              |
+| 逆向映射       | 加密落盘（`twinSources.redactionMapEnc`）                                |
+| API key        | `keyring` crate；永不以明文落盘                                          |
+| 云端外发       | 默认 sqlite-vec；切换云端后端需用户主动选择                              |
+| 审计           | 每次 embed 调用都记录到 `lib/observability/`；可在日志面板查看           |
+| Plugin 钩子    | `onRAGContextRetrieved` 只收到 `vectorDocId` + 命中 score，不带 PII 原文 |
+
+## 测试
+
+<Callout type="error" title="安全关键：脱敏测试">
+  `lib/twin/ingest/redact.test.ts` 是整个仓库最安全关键的测试 —— 在合成 PII 串语料上断言
+  `hasNoLeakingPii`。改动它必须极为谨慎；只能加 fixture，绝不能删。
+</Callout>
+
+`lib/twin/runtime/apply-twin-context.test.ts` 断言"优雅降级"契约（向量库故障不能抛错）。
+`lib/twin/distill/with-timeout.test.ts` 覆盖每个 agent 的超时降级。
+
+## 在哪里入手
+
+| 目标                     | 文件                                                                              |
+| ------------------------ | --------------------------------------------------------------------------------- |
+| 加一种 ingest 格式       | `lib/twin/ingest/dispatch.ts`、`lib/document/document-processor.ts`、`parse.ts`   |
+| 加强脱敏                 | `lib/twin/ingest/redact.ts`（连同测试！）                                         |
+| 加新的蒸馏 agent         | `lib/twin/distill/agents/`，在 `orchestrator.ts` 注册并加 `withTimeoutOrFallback` |
+| 调整 runtime 上下文形态  | `lib/twin/runtime/system-prompt-template.ts`                                      |
+| 在新发送路径接入 runtime | 在你的 build-options helper 中调用 `applyTwinContext`                             |
+| 调 RAG context 钩子      | `lib/plugin/event-hooks.ts:onRAGContextRetrieved`                                 |
+
+## 相关
+
+<Cards>
+  <Card title="向量库" href="./vector-store" description="RAG 的真正执行层 + collection 设计" />
+  <Card
+    title="文档处理"
+    href="./document-processing"
+    description="parse 阶段委派的 document-processor"
+  />
+  <Card title="聊天 & 技能" href="./chat-and-skills" description="启用孪生的角色 / 技能绑定" />
+  <Card title="Agent Teams" href="./agent-teams" description="team chat embedding 共享路径" />
+  <Card title="备份 & 数据传输" href="./backup-and-data" description="孪生表是备份载荷的一部分" />
+  <Card title="存储" href="./storage" description="5 张 Dexie 孪生表细节" />
+</Cards>

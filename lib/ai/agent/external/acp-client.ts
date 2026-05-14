@@ -9,6 +9,9 @@
  */
 
 import { isTauri } from "@/lib/utils"
+import { invoke } from "@tauri-apps/api/core"
+import { listen } from "@tauri-apps/api/event"
+import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { loggers } from "@/lib/logger"
 import {
@@ -379,8 +382,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       throw new Error("Process configuration required for stdio transport")
     }
 
-    const { invoke } = await import("@tauri-apps/api/core")
-    const { listen } = await import("@tauri-apps/api/event")
+    // invoke and listen are statically imported from @tauri-apps/api
 
     const finalArgs = buildSpawnArgs(config.process)
 
@@ -789,7 +791,6 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     // Kill the process if using stdio
     if (this.processId && isTauri()) {
       try {
-        const { invoke } = await import("@tauri-apps/api/core")
         await invoke("kill_external_agent", { agentId: this.processId })
       } catch (error) {
         log.warn("Error killing process", { error })
@@ -1669,7 +1670,6 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    */
   private async sendMessage(message: string): Promise<void> {
     if (this._config?.transport === "stdio" && this.processId && isTauri()) {
-      const { invoke } = await import("@tauri-apps/api/core")
       await invoke("send_to_external_agent", {
         agentId: this.processId,
         message,
@@ -1883,7 +1883,6 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    */
   private async handleReadTextFile(params: AcpReadTextFileParams): Promise<{ content: string }> {
     if (isTauri()) {
-      const { readTextFile } = await import("@tauri-apps/plugin-fs")
       const fullContent = await readTextFile(params.path)
       const hasLineParams = typeof params.line === "number" || typeof params.limit === "number"
       if (!hasLineParams) {
@@ -1908,7 +1907,6 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    */
   private async handleWriteTextFile(params: { path: string; content: string }): Promise<void> {
     if (isTauri()) {
-      const { writeTextFile } = await import("@tauri-apps/plugin-fs")
       await writeTextFile(params.path, params.content)
     } else {
       throw new Error("File system access not available in browser")

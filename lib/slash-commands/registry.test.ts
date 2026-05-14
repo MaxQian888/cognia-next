@@ -9,6 +9,7 @@ import {
   seedBuiltinSlashCommands,
   __resetSlashCommandsForTesting,
 } from "./registry"
+import * as reExport from "@/lib/chat/slash-command-registry"
 
 afterEach(() => {
   __resetSlashCommandsForTesting()
@@ -150,11 +151,10 @@ describe("slash-command registry (lib/slash-commands/registry)", () => {
 describe("re-export from lib/chat/slash-command-registry", () => {
   it("uses the same registry instance as the canonical path", async () => {
     // Importing both side-by-side proves they target the same Map.
-    const canonical = await import("./registry")
-    const reExport = await import("@/lib/chat/slash-command-registry")
-    canonical.__resetSlashCommandsForTesting()
+    // canonical is the statically imported module
+    __resetSlashCommandsForTesting()
     canonical.registerSlashCommand({ id: "shared", name: "Shared", handler: () => ({}) })
     expect(reExport.getSlashCommand("shared")?.id).toBe("shared")
-    canonical.__resetSlashCommandsForTesting()
+    __resetSlashCommandsForTesting()
   })
 })

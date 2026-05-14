@@ -1,0 +1,94 @@
+---
+title: Devtools
+description: Plugin development tools — hot reload, message logging, permission inspection, and profiler.
+---
+
+# Devtools
+
+Cognia ships a built-in plugin developer toolkit under `lib/plugin/devtools/`. It is only visible in development mode and helps you build, debug, and profile plugins.
+
+## Enabling devtools
+
+Set the environment variable before starting the dev server:
+
+```bash
+# Windows PowerShell
+$env:NEXT_PUBLIC_PLUGIN_DEVTOOLS="1"
+pnpm tauri dev
+
+# macOS / Linux
+NEXT_PUBLIC_PLUGIN_DEVTOOLS=1 pnpm tauri dev
+```
+
+A new "Plugin DevTools" tab appears in Settings.
+
+## Features
+
+### Real-time message log
+
+Every `postMessage` between the host and each plugin worker is logged with:
+
+- Timestamp
+- Direction (host → worker or worker → host)
+- Message type (`api.call`, `hook.emit`, `extension.mount`, …)
+- Serialized payload (truncated at 4KB)
+
+### Permission inspector
+
+Shows for each plugin:
+
+- **Granted** — Permissions the user has approved.
+- **Denied** — Permissions the user declined.
+- **Missing** — Permissions the plugin declared but were never requested.
+
+Click any permission to toggle it (useful for testing denial paths).
+
+### Scheduled task monitor
+
+Lists all tasks registered by plugins:
+
+- Job ID and cron expression
+- Last run time and result
+- Next scheduled run
+- Manual trigger button
+
+### Profiler
+
+Records timing for every API call:
+
+| Metric | Description |
+|--------|-------------|
+| Call count | How many times the API was invoked |
+| Total time | Cumulative time spent in the API |
+| Average | Mean latency |
+| P99 | 99th percentile latency |
+
+Export to JSON for analysis in external tools.
+
+### Hot reload
+
+`dev-server.ts` watches the plugin source directory. On file change:
+
+1. The plugin worker is terminated.
+2. The new code is reloaded from disk.
+3. `onActivate()` is called on the fresh instance.
+4. The devtools log shows a "[hot-reload]" marker.
+
+This gives you sub-second feedback loops during development.
+
+### Loading an unpacked plugin
+
+In the devtools UI, click "Load unpacked plugin" and select a directory containing `cognia-plugin.json`. The plugin is loaded directly from source without packaging.
+
+## Best practices
+
+- **Always test permission denial** — Use the permission inspector to simulate users declining permissions.
+- **Profile before release** — Check the profiler for unexpectedly slow API calls.
+- **Watch the message log** — Excessive `postMessage` traffic indicates inefficient RPC patterns.
+
+## Related
+
+<Cards>
+  <Card title="Packaging" href="./packaging" description="Building the final .cognia-plugin archive." />
+  <Card title="Manifest" href="./manifest" description="Manifest validation and common errors." />
+</Cards>

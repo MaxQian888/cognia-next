@@ -1,0 +1,23 @@
+{
+  "title": "Architecture Decisions",
+  "pages": [
+    "0001-backup-schema-v3",
+    "0002-scheduler-full-agent-resolution",
+    "0003-employee-digital-twin",
+    "0004-vector-native-backend",
+    "0005-remote-control",
+    "0006-plugin-system",
+    "0007-theme-and-background-fix",
+    "0008-external-bridge",
+    "0009-platform-connectors",
+    "0010-claude-subscription-oauth",
+    "0011-workflows-subsystem",
+    "0012-transport-abstraction",
+    "0013-command-manifest",
+    "0014-capacitor-mobile-shell",
+    "0015-mobile-v2-completion",
+    "0016-plugin-system-completion",
+    "0017-workflow-plugin-extension-points",
+    "0018-github-delivery"
+  ]
+}

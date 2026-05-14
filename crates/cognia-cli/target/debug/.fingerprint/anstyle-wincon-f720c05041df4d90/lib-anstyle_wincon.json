@@ -1,0 +1,24 @@
+{
+  "rustc": 3674164131150989441,
+  "features": "[]",
+  "declared_features": "[]",
+  "target": 2212462823922218827,
+  "profile": 112744067883639982,
+  "path": 11119257126403748825,
+  "deps": [
+    [6568467691589961976, "windows_sys", false, 7173700735244292632],
+    [7098682853475662231, "anstyle", false, 3194266007521118475],
+    [10122175328121400386, "once_cell_polyfill", false, 15423466805797624486]
+  ],
+  "local": [
+    {
+      "CheckDepInfo": {
+        "dep_info": "debug\\.fingerprint\\anstyle-wincon-f720c05041df4d90\\dep-lib-anstyle_wincon",
+        "checksum": false
+      }
+    }
+  ],
+  "rustflags": [],
+  "config": 8247474407144887393,
+  "compile_kind": 0
+}

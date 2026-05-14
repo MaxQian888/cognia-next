@@ -1,5 +1,8 @@
 import { __TESTING__ } from "./standalone-entry"
 import { DEFAULT_EXTERNAL_BRIDGE_SETTINGS } from "@/types/wiki"
+import fs from "node:fs/promises"
+import path from "node:path"
+import os from "node:os"
 
 const { resolveSettingsGetter, bridgedSettingsGetter, standaloneSettingsGetter } = __TESTING__
 
@@ -59,9 +62,6 @@ describe("standaloneSettingsGetter", () => {
   })
 
   test("reads + parses external-bridge.json from COGNIA_DATA_DIR when present", async () => {
-    const fs = await import("node:fs/promises")
-    const path = await import("node:path")
-    const os = await import("node:os")
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cognia-bridge-"))
     const settings = { ...DEFAULT_EXTERNAL_BRIDGE_SETTINGS, bridgeEnabled: true }
     await fs.writeFile(path.join(dir, "external-bridge.json"), JSON.stringify(settings), "utf-8")

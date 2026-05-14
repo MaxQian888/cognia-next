@@ -8,7 +8,7 @@ import { skillsFetchRemoteMd, skillsLoadRegistry, type RegistrySkillEntry } from
 import type { FetchSkillContent, MarketplaceItem } from "./marketplace-types"
 import type { SkillCategory } from "@/lib/claude/types"
 
-import staticLockfile from "../../skills-lock.json"
+import staticLockfile from "@/skills-lock.json"
 
 interface LockfileShape {
   version: number

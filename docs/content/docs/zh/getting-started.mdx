@@ -70,7 +70,7 @@ Cognia 是 pnpm 多包仓库。`pnpm-workspace.yaml` 注册了两个子包，加
 | -------- | --------- | ---- | ------------------------------------------------------------------------------------- |
 | 根包     | `/`       | 3000 | Next.js 16 + Tauri 前端（`output: "export"`）                                         |
 | 文档站点 | `docs/`   | 3001 | Fumadocs（全功能 server 模式）                                                        |
-| 移动壳   | `mobile/` | -    | Capacitor 7 包装器，用 iOS/Android 项目配置（详见 [移动架构](./mobile-architecture)） |
+| 移动壳   | `mobile/` | -    | Capacitor 7 包装器，用 iOS/Android 项目配置（详见 [移动架构](./ui/mobile-architecture)） |
 
 根 `pnpm-lock.yaml` 是唯一锁文件——**所有 `pnpm install` 都从仓库根目录跑**。
 
@@ -117,7 +117,7 @@ Cognia 是 pnpm 多包仓库。`pnpm-workspace.yaml` 注册了两个子包，加
     cd ..
     ```
 
-    完整协议详见 [Sidecar & Claude SDK](./sidecar-and-claude-sdk)。
+    完整协议详见 [Sidecar & Claude SDK](./core/sidecar-and-claude-sdk)。
 
   </Step>
 </Steps>
@@ -137,8 +137,8 @@ pnpm dev
 Web 模式下，`invoke()` 调用都被 `isTauri()`（`lib/tauri.ts`）守护，会在浏览器中变成 no-op。多个子系统会优雅降级：
 
 - 原生向量库选项在 Twin 设置中会被隐藏（仅保留云端后端）。
-- 平台连接器、Companion API、远程控制、MCP HTTP 服务器、工作流 cron 守护进程、订阅 OAuth 都不可用。详见 [运行时 & Tauri](./runtime-and-tauri)。
-- 桌面同步源（[同步系统](./sync-system)）也被替换为浏览器内的 stub。
+- 平台连接器、Companion API、远程控制、MCP HTTP 服务器、工作流 cron 守护进程、订阅 OAuth 都不可用。详见 [运行时 & Tauri](./core/runtime-and-tauri)。
+- 桌面同步源（[同步系统](./data/sync-system)）也被替换为浏览器内的 stub。
 
 ## 在桌面模式下运行
 
@@ -162,7 +162,7 @@ pnpm mobile:open:ios      # 用 Xcode 打开 iOS 项目
 pnpm mobile:open:android  # 用 Android Studio 打开
 ```
 
-`mobile/` 包通过 Capacitor 把 Next.js 静态导出包到 iOS/Android。运行时通过 LAN 或 Tunnel 连回桌面的 Companion API。详见 [移动架构](./mobile-architecture)。
+`mobile/` 包通过 Capacitor 把 Next.js 静态导出包到 iOS/Android。运行时通过 LAN 或 Tunnel 连回桌面的 Companion API。详见 [移动架构](./ui/mobile-architecture)。
 
 ## 验证工具链
 
@@ -192,7 +192,7 @@ Sidecar 启动时需要至少一种 Anthropic 凭证。Cognia 支持两条互斥
     ANTHROPIC_BASE_URL=https://api.anthropic.com
     ```
 
-    UI 路径：**Settings → System → Providers** 也可以把 key 写进 OS keyring（推荐生产用），不落盘。详见 [提供商系统](./provider-system) 与 [CCSwitch](./ccswitch)。
+    UI 路径：**Settings → System → Providers** 也可以把 key 写进 OS keyring（推荐生产用），不落盘。详见 [提供商系统](./chat/provider-system) 与 [CCSwitch](./chat/ccswitch)。
 
   </Tab>
   <Tab value="Claude Pro/Max OAuth">
@@ -203,7 +203,7 @@ Sidecar 启动时需要至少一种 Anthropic 凭证。Cognia 支持两条互斥
     3. 把回调里的授权码粘贴回 UI，Cognia 用 PKCE 兑换成 access + refresh token，存进 OS keyring。
     4. Sidecar 重启时 Rust 侧把 `CLAUDE_CODE_OAUTH_TOKEN` 环境变量喂给子进程（同时主动 unset `ANTHROPIC_API_KEY`）；官方 SDK 自动加 Bearer + `oauth-2025-04-20` beta header。
 
-    完整流程、5h/7d 速率限制可视化、用量采样见 [Claude 订阅 OAuth](./claude-subscription-oauth)。
+    完整流程、5h/7d 速率限制可视化、用量采样见 [Claude 订阅 OAuth](./chat/claude-subscription-oauth)。
 
   </Tab>
 </Tabs>
@@ -233,7 +233,7 @@ Sidecar 启动时需要至少一种 Anthropic 凭证。Cognia 支持两条互斥
 
     - 在 `.env.local` 设置 `ANTHROPIC_API_KEY`，**或**
     - 在 Settings → Providers 中粘贴 API key，**或**
-    - 走 Settings → Claude Subscription 完成 OAuth 流（详见 [Claude 订阅 OAuth](./claude-subscription-oauth)）。
+    - 走 Settings → Claude Subscription 完成 OAuth 流（详见 [Claude 订阅 OAuth](./chat/claude-subscription-oauth)）。
 
   </Accordion>
   <Accordion title="端口 3000 已被占用" id="port-3000">
@@ -271,10 +271,10 @@ Sidecar 启动时需要至少一种 Anthropic 凭证。Cognia 支持两条互斥
   <Accordion title="`workflow webhook router start failed` 警告" id="workflow-webhook">
     Tauri 启动时会拉起一个 axum 监听器，把端口 0 让 OS 分配给工作流 webhook 路由。
     若端口分配失败或防火墙拦截，会在日志里看到这条警告——不影响 cron 触发器、手动运行、`chat.message` 触发器；但 Webhook 触发器会变成 no-op。
-    详见 [可视化工作流](./visual-workflows)。
+    详见 [可视化工作流](./subsystems/visual-workflows)。
   </Accordion>
   <Accordion title="`remote-control auto-start skipped`" id="remote-control">
-    `remote_control` 模块默认禁用。只有当 `inbound.enabled=true` **且** keyring 还有令牌时它才会启动监听器。fresh install 看到这条信息是正常的——参见 [远程控制](./remote-control)。
+    `remote_control` 模块默认禁用。只有当 `inbound.enabled=true` **且** keyring 还有令牌时它才会启动监听器。fresh install 看到这条信息是正常的——参见 [远程控制](./subsystems/remote-control)。
   </Accordion>
 </Accordions>
 
@@ -300,7 +300,7 @@ pnpm mobile:open:ios
 pnpm mobile:open:android
 ```
 
-完整脚本参考见 [开发](./development)。
+完整脚本参考见 [开发](./dev/development)。
 
 ## 下一步
 

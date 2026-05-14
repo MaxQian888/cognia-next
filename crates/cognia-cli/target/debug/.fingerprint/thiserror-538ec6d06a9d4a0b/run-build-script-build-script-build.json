@@ -1,0 +1,21 @@
+{
+  "rustc": 3674164131150989441,
+  "features": "",
+  "declared_features": "",
+  "target": 0,
+  "profile": 0,
+  "path": 0,
+  "deps": [[2448563160050429386, "build_script_build", false, 994348379093054576]],
+  "local": [
+    {
+      "RerunIfChanged": {
+        "output": "debug\\build\\thiserror-538ec6d06a9d4a0b\\output",
+        "paths": ["build/probe.rs"]
+      }
+    },
+    { "RerunIfEnvChanged": { "var": "RUSTC_BOOTSTRAP", "val": null } }
+  ],
+  "rustflags": [],
+  "config": 0,
+  "compile_kind": 0
+}

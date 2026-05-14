@@ -26,7 +26,7 @@ export type {
   UserProviderSettings,
 }
 import { addAlwaysAllow, getSettings, removeAlwaysAllow, saveSettings } from "@/lib/db/settings"
-import { restartSidecar, setApiKey } from "@/lib/claude/ipc"
+import { restartSidecar, setApiKey, setProviderEnv } from "@/lib/claude/ipc"
 import { isTauri } from "@/lib/tauri"
 import type {
   CustomSearchSource,
@@ -441,7 +441,6 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         // store doesn't cycle through this file.
         if (s.networkProxy) {
           try {
-            const { applyProxyToRust } = await import("@/stores/network-proxy")
             await applyProxyToRust(s.networkProxy)
           } catch (err) {
             console.warn("networkProxy.applyToRust failed", err)
@@ -469,7 +468,6 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       // outbound call. Other patches don't need this hop.
       if (patch.networkProxy !== undefined) {
         try {
-          const { applyProxyToRust } = await import("@/stores/network-proxy")
           await applyProxyToRust(next.networkProxy)
         } catch (err) {
           console.warn("networkProxy.applyToRust failed", err)
@@ -827,7 +825,6 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
           next.providerSettings?.[providerId] ??
           next.customProviders?.find((p) => p.id === providerId)
         try {
-          const { setProviderEnv } = await import("@/lib/claude/ipc")
           await setProviderEnv(cfg?.apiKey ?? null, cfg?.baseURL ?? null)
         } catch (err) {
           console.warn("setProviderEnv failed", err)
@@ -858,7 +855,6 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       ) {
         const cfg = map[providerId]
         try {
-          const { setProviderEnv } = await import("@/lib/claude/ipc")
           await setProviderEnv(cfg?.apiKey ?? null, cfg?.baseURL ?? null)
         } catch (err) {
           console.warn("setProviderEnv failed", err)

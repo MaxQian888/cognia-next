@@ -5,6 +5,7 @@
 
 import { isTauri } from "@/lib/tauri"
 import { defaultExportDir, readTextFile, writeTextFile } from "@/lib/claude/ipc"
+import { open, save } from "@tauri-apps/plugin-dialog"
 
 export interface PickedFile {
   /** Filename only (basename), for fallback name derivation. */
@@ -28,7 +29,6 @@ export interface PickFilesOptions {
  */
 export async function pickAndReadFiles(opts: PickFilesOptions = {}): Promise<PickedFile[]> {
   if (isTauri()) {
-    const { open } = await import("@tauri-apps/plugin-dialog")
     const picked = await open({
       multiple: !!opts.multiple,
       directory: false,
@@ -88,7 +88,6 @@ export interface SaveFileOptions {
  */
 export async function saveFileAs(opts: SaveFileOptions): Promise<boolean> {
   if (isTauri()) {
-    const { save } = await import("@tauri-apps/plugin-dialog")
     let defaultPath = opts.defaultName
     try {
       const dir = await defaultExportDir()
@@ -118,7 +117,6 @@ export async function saveFileAs(opts: SaveFileOptions): Promise<boolean> {
 /** Pick a directory (Tauri only). Returns null if the user cancels or web. */
 export async function pickDirectory(): Promise<string | null> {
   if (!isTauri()) return null
-  const { open } = await import("@tauri-apps/plugin-dialog")
   const picked = await open({ directory: true, multiple: false })
   if (!picked) return null
   return Array.isArray(picked) ? (picked[0] ?? null) : picked

@@ -1,0 +1,262 @@
+---
+title: WASM Component Plugins
+description: End-to-end guide for authoring Rust-compiled WebAssembly Component Model plugins against the cognia v0.1 WIT contract.
+---
+
+## When to choose WASM
+
+Use a `type: "wasm"` plugin when **any** of these apply:
+
+- you need real local capabilities (filesystem, processes, OS keyring) and
+  don't want to ship a Python runtime,
+- you want strong isolation from the rest of cognia (no shared heap with
+  the renderer, capability-gated host imports),
+- you want a stable ABI — your build artifact compiles once and works
+  across cognia patch releases.
+
+If you only need to react to chat messages or render a React surface,
+`type: "frontend"` is lighter — pick that. WASM plugins are Tauri-only:
+in browser mode the loader returns a stub with a warning.
+
+## Prerequisites
+
+```bash
+rustup target add wasm32-wasip2
+cargo install --locked cargo-component
+cargo install --locked --path crates/cognia-cli   # or from a release
+```
+
+You need Rust ≥ 1.82 (the MSRV for the `wasm32-wasip2` target) and
+`cargo-component` ≥ 0.21.
+
+## Scaffold a new plugin
+
+```bash
+cognia plugin new my-cool-plugin
+cd my-cool-plugin
+```
+
+You'll get:
+
+```
+my-cool-plugin/
+├── Cargo.toml          # cargo-component metadata, dependencies
+├── plugin.json         # cognia manifest (id, type, permissions, ...)
+├── src/lib.rs          # implements Guest
+├── wit/world.wit       # cognia v0.1 WIT contract (do not edit)
+├── README.md
+└── .gitignore
+```
+
+`src/lib.rs` defines a `Plugin` struct that implements the `Guest` trait
+generated from the WIT. You implement four methods:
+
+```rust
+impl Guest for Plugin {
+    fn init(config: Vec<u8>) -> Result<(), String> { ... }
+    fn on_event(kind: String, payload: Vec<u8>) -> Result<Vec<u8>, String> { ... }
+    fn tool_execute(name: String, args: Vec<u8>) -> Result<Vec<u8>, String> { ... }
+    fn workflow_node_execute(kind: String, inputs: Vec<u8>) -> Result<Vec<u8>, String> { ... }
+}
+```
+
+`init` runs once per activation. The other three are called by the host
+when an external trigger arrives (chat hook, agent tool, workflow node).
+All payloads are JSON-encoded `Vec<u8>` — the wire format never changes
+between WIT minor versions.
+
+## Declare capabilities
+
+Capabilities are declared in `plugin.json.permissions[]`. The user
+approves them once during install; per-call prompts are deliberately out
+of scope (see [Capability granter](#capability-granter)). Available
+capabilities:
+
+| Capability key | What the plugin can call |
+|---|---|
+| `notification` | `cognia:plugin/notification.notify` |
+| `filesystem:read` / `filesystem:write` | WASI filesystem on preopened dirs (plugin data dir is always preopened) |
+| `network:fetch` | `wasi:http/outgoing-handler` + `cognia:plugin/ai.generate-text` |
+| `process:spawn` / `shell:execute` | `cognia:plugin/process.exec` |
+| `clipboard:read` / `clipboard:write` | `cognia:plugin/clipboard.{read,write}-text` (stubbed in v0.1) |
+| `secrets:read` / `secrets:write` | `cognia:plugin/secrets.{get,set,delete}` (per-plugin keyring) |
+
+Declare them in the manifest:
+
+```json title="plugin.json"
+{
+  "type": "wasm",
+  "permissions": ["notification", "process:spawn", "filesystem:write"]
+}
+```
+
+The cognia host enforces these *inside the wasmtime store* — a plugin
+without `process:spawn` cannot call `process::exec` regardless of what
+its Rust code says. There is no API-boundary check to bypass.
+
+## Use a capability
+
+```rust
+use bindings::cognia::plugin::{logger, notification, process};
+
+logger::log(logger::LogLevel::Info, "scope", "hello");
+
+notification::notify(
+    "My plugin",
+    "Long task finished",
+    notification::NotificationKind::Success,
+);
+
+let result = process::exec(
+    "rustfmt".into(),
+    vec!["--emit".into(), "stdout".into(), "-".into()],
+    process::ExecOptions { cwd: None, env: vec![], timeout_ms: Some(5000) },
+)?;
+```
+
+If the user didn't grant the capability, the call traps with
+`capability X not granted to plugin Y`. Surface it through `?` — cognia
+shows the message to the user and offers a one-click "grant and retry".
+
+## Filesystem layout
+
+Every WASM plugin gets a sandboxed filesystem rooted at `/` from the
+guest's perspective. The host maps that to
+`<app_data>/cognia/plugins/<plugin-id>/data/`. So:
+
+```rust
+std::fs::write("/scratch/output.txt", b"...")?;   // ok
+std::fs::write("/etc/passwd", b"...")?;            // EACCES (not preopened)
+```
+
+To request extra preopens (e.g. a user-chosen output dir), declare them
+in the manifest:
+
+```json title="plugin.json"
+{
+  "wasm": {
+    "apiVersion": "0.1.0",
+    "fs": { "preopens": ["~/Documents/cognia-output"] }
+  }
+}
+```
+
+The user approves each path in the capability grant sheet. Approved
+preopens land under `/extra/<dir-name>/` in the guest's view.
+
+## Resource limits
+
+Every plugin instance runs under:
+
+- **64 MiB** linear memory cap (configurable via
+  `wasm.memoryLimitMb`, max 4096)
+- **10 000** table elements
+- **30 s** wall-clock per-call timeout (configurable via
+  `wasm.callTimeoutMs`, max 600 000)
+- **Epoch interruption** every 100 ms — runaway loops trap automatically
+
+Resource exhaustion surfaces as a wasm trap; the host returns the trap
+message to the call site, so well-behaved guests can `?` it up.
+
+## Build + sign
+
+```bash
+cognia plugin build
+# → target/cognia/my-cool-plugin-0.1.0.zip
+```
+
+This runs `cargo component build --release`, injects the
+`cognia:api-version = 0.1.0` custom section into the `.wasm`, and zips
+the artifact plus `plugin.json`.
+
+To sign:
+
+```bash
+cognia plugin keygen
+# → .cognia/plugin.private.b64 + .cognia/plugin.public.b64
+# Embed the public key in plugin.json under author.publicKey, then:
+cognia plugin sign target/cognia/my-cool-plugin-0.1.0.zip --key .cognia/plugin.private.b64
+# → target/cognia/my-cool-plugin-0.1.0.zip.sig
+cognia plugin verify target/cognia/my-cool-plugin-0.1.0.zip
+```
+
+The first time a user installs from a signed bundle, cognia shows the
+key fingerprint; subsequent updates from the same author auto-trust
+(see [ADR 0013](../adr/0013-wasm-plugins) for the trust ledger model).
+
+## Install in cognia
+
+Three sources, three buttons:
+
+1. **Local file** → Settings → Plugins → **Install local WASM plugin**.
+   Picks a `.wasm` or `.zip` bundle from disk. No signature required.
+2. **HTTP URL** → Settings → Plugins → **Install from URL**. Paste a
+   signed bundle URL + signature URL + public key. Requires the
+   manifest-pinned key match.
+3. **Git repository** → Settings → Plugins → **Install from Git**.
+   Cognia clones the repo, runs `cargo component build --release` for
+   you, and installs the artifact. Requires `cargo-component` on PATH.
+
+## Capability granter
+
+Plugins declare capabilities in the manifest; the user grants them once
+at install time via the **Review permissions for ...** sheet. Per-call
+runtime prompts are out — they're noisy and well-modeled by Zed's
+approach. The grant is stored in cognia's permission guard and reapplied
+on every plugin enable.
+
+To revoke a capability after the fact: Settings → Plugins → *Your plugin*
+→ Permissions → toggle off. The next call to that capability traps.
+
+## Dev loop
+
+```bash
+cognia plugin dev
+```
+
+Watches `src/`, `wit/`, `Cargo.toml`, `plugin.json`. On every save:
+debounces 250 ms, rebuilds, repackages the bundle. The `--reload-url`
+option (v0.2) will also POST to a running cognia so the plugin reloads
+in-place without a manual reinstall.
+
+## Versioning the contract
+
+The cognia v0.1 WIT contract is locked. Breaking changes ship as
+**v0.2** with a new linker — older v0.1 plugins keep loading because
+the host routes by the `cognia:api-version` custom section embedded in
+the `.wasm`. To check what version your bundle declares:
+
+```bash
+cognia plugin verify path/to/bundle.zip
+# (verifies signature and prints the embedded api-version)
+```
+
+To bump:
+
+```json title="plugin.json"
+{
+  "wasm": { "apiVersion": "0.2.0" }
+}
+```
+
+…and re-`cognia plugin build`.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `cargo-component not found` | `cargo install --locked cargo-component` |
+| `target wasm32-wasip2 not installed` | `rustup target add wasm32-wasip2` |
+| `signature verification failed` | The bundle bytes don't match the `.sig`. Re-run `cognia plugin sign` or re-download. |
+| `capability X not granted` | Add the permission to `plugin.json.permissions[]`, reinstall, and grant in the sheet — or grant it now in Settings → Plugins → Permissions. |
+| `no linker registered for v0.N.x` | Your plugin declares a contract version cognia doesn't know about. Either downgrade the plugin to v0.1 or upgrade cognia. |
+| Plugin call hangs and traps after 30 s | Your guest exceeded the call timeout. Set `wasm.callTimeoutMs` higher (or split the work into smaller calls). |
+| `MemoryOutOfBounds` trap | The plugin hit the 64 MiB linear-memory cap. Set `wasm.memoryLimitMb` higher (up to 4096). |
+
+## Reference
+
+- WIT contract source: `src-tauri/wit/cognia-plugin.wit` in the cognia-next repo
+- Architecture decision: [ADR 0013 — WASM Component Model Plugins](../adr/0013-wasm-plugins)
+- Example plugin: `plugins/wasm-example-formatter/` in the cognia-next repo
+- Template scaffold: `crates/cognia-plugin-template/`
+- CLI source: `crates/cognia-cli/`

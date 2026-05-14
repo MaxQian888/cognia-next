@@ -6,19 +6,7 @@
  */
 
 import type { Transport, StructuredLogEntry } from "../types"
-
-// Lazy import to avoid bundling issues in browser
-let otelApi: typeof import("@opentelemetry/api") | null = null
-
-async function loadOtelApi() {
-  if (otelApi) return otelApi
-  try {
-    otelApi = await import("@opentelemetry/api")
-    return otelApi
-  } catch {
-    return null
-  }
-}
+import * as otelApi from "@opentelemetry/api"
 
 export interface OtelTransportOptions {
   /** OTLP endpoint associated with this transport */
@@ -45,14 +33,11 @@ const LEVEL_PRIORITY: Record<string, number> = {
 /**
  * Get current OpenTelemetry trace context
  */
-export async function getOtelContext(): Promise<{
+export function getOtelContext(): {
   traceId?: string
   spanId?: string
-} | null> {
-  const api = await loadOtelApi()
-  if (!api) return null
-
-  const span = api.trace.getActiveSpan()
+} | null {
+  const span = otelApi.trace.getActiveSpan()
   if (!span) return null
 
   const context = span.spanContext()
@@ -79,26 +64,20 @@ export class OtelTransport implements Transport {
     }
   }
 
-  private async ensureInitialized() {
+  private ensureInitialized() {
     if (this.initialized) return
-    await loadOtelApi()
     this.initialized = true
   }
 
   log(entry: StructuredLogEntry): void {
-    // Fire and forget - don't block on async initialization
-    this.logAsync(entry).catch(() => {
-      // Silently ignore errors
-    })
+    // Synchronous log — errors are silently ignored
+    this.logAsync(entry)
   }
 
-  private async logAsync(entry: StructuredLogEntry): Promise<void> {
-    await this.ensureInitialized()
+  private logAsync(entry: StructuredLogEntry): void {
+    this.ensureInitialized()
 
-    const api = otelApi
-    if (!api) return
-
-    const span = api.trace.getActiveSpan()
+    const span = otelApi.trace.getActiveSpan()
     if (!span) return
 
     // Check if we should add this log level as a span event
@@ -145,7 +124,7 @@ export class OtelTransport implements Transport {
 
         // Set span status to error
         span.setStatus({
-          code: api.SpanStatusCode.ERROR,
+          code: otelApi.SpanStatusCode.ERROR,
           message: entry.message,
         })
       }
@@ -176,12 +155,7 @@ export async function withOtelSpan<T>(
   fn: () => Promise<T>,
   attributes?: Record<string, string | number | boolean>
 ): Promise<T> {
-  const api = await loadOtelApi()
-  if (!api) {
-    return fn()
-  }
-
-  const tracer = api.trace.getTracer("cognia-logger")
+  const tracer = otelApi.trace.getTracer("cognia-logger")
 
   return tracer.startActiveSpan(name, async (span) => {
     try {
@@ -189,11 +163,11 @@ export async function withOtelSpan<T>(
         span.setAttributes(attributes)
       }
       const result = await fn()
-      span.setStatus({ code: api.SpanStatusCode.OK })
+      span.setStatus({ code: otelApi.SpanStatusCode.OK })
       return result
     } catch (error) {
       span.setStatus({
-        code: api.SpanStatusCode.ERROR,
+        code: otelApi.SpanStatusCode.ERROR,
         message: error instanceof Error ? error.message : String(error),
       })
       if (error instanceof Error) {

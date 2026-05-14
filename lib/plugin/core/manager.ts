@@ -52,6 +52,11 @@ import { loggers } from "@/lib/plugin/core/logger"
 import { createPluginVerificationSnapshot } from "@/lib/plugin/core/verification"
 import { getPluginSignatureVerifier } from "@/lib/plugin/security/signature"
 import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
+import {
+  applyWasmCapabilityGrant,
+  clearWasmCapabilityGrant,
+  type WasmCapabilityGrantDecision,
+} from "@/lib/plugin/security/wasm-grant"
 import { canUseTauriInvoke } from "@/lib/native/utils"
 import {
   validateActivationEvent,
@@ -821,6 +826,10 @@ export class PluginManager {
 
       this.registerPluginPermissions(result.manifest.id, result.manifest.permissions || [])
 
+      if (result.manifest.type === "wasm") {
+        await this.preloadWasmComponent(result.manifest, result.path)
+      }
+
       return store.plugins[result.manifest.id]
     } catch (error) {
       const existingPluginId =
@@ -841,6 +850,51 @@ export class PluginManager {
         })
       }
       throw new Error(`Failed to install plugin: ${error}`)
+    }
+  }
+
+  /**
+   * Install a WASM plugin from a local bundle (either a single `.wasm` file
+   * or a `.zip` containing `plugin.json` + `.wasm`). Persists the user's
+   * capability grant decision via `applyWasmCapabilityGrant` before
+   * delegating to the canonical `installPlugin` path so manifest validation,
+   * compatibility checks, and store wiring stay shared with other types.
+   */
+  async installWasmPluginFromLocalFile(
+    bundlePath: string,
+    grantDecision?: WasmCapabilityGrantDecision
+  ): Promise<Plugin> {
+    if (grantDecision) {
+      applyWasmCapabilityGrant(grantDecision)
+    }
+    const plugin = await this.installPlugin(bundlePath, { type: "local" })
+    if (plugin.manifest.type !== "wasm") {
+      throw new Error(
+        `installWasmPluginFromLocalFile: bundle at ${bundlePath} did not declare type: "wasm"`
+      )
+    }
+    return plugin
+  }
+
+  /**
+   * Compile a WASM component on the Rust host immediately after install
+   * so the first `enablePlugin` call doesn't pay the wasmtime compile
+   * cost. Tauri-only — silently no-ops when the host is unavailable
+   * (browser mode is already in a degraded state at this point).
+   */
+  private async preloadWasmComponent(manifest: PluginManifest, pluginPath: string): Promise<void> {
+    if (!canUseTauriInvoke()) return
+    try {
+      await invoke("plugin_wasm_load", {
+        pluginId: manifest.id,
+        manifestJson: JSON.stringify(manifest),
+        pluginPath,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      loggers.manager.warn(`[plugin:${manifest.id}] WASM preload failed`, { error: message })
+      // Don't rethrow — install itself succeeded. Enable will surface the
+      // same error in a more actionable place if it persists.
     }
   }
 
@@ -1175,6 +1229,9 @@ export class PluginManager {
 
       await this.revokePluginPermissions(pluginId, plugin.manifest.permissions || [])
       getPermissionGuard().unregisterPlugin(pluginId)
+      if (plugin.manifest.type === "wasm") {
+        clearWasmCapabilityGrant(pluginId)
+      }
       this.registeredSlashCommandsByPlugin.delete(pluginId)
       this.activationInFlight.delete(pluginId)
       this.recordPluginVerification(pluginId, {

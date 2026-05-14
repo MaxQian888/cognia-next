@@ -12,6 +12,7 @@ import {
   connectorsWsSend,
   connectorsWsClose,
 } from "@/lib/connectors/tauri/commands"
+import { startGatewayClient } from "./gateway-client"
 
 const mockListen = listen as jest.Mock
 const mockWsOpen = connectorsWsOpen as jest.Mock
@@ -111,8 +112,6 @@ describe("startGatewayClient", () => {
     const session = createFakeWsSession()
     mockListen.mockImplementation(session.listenImpl)
 
-    const { startGatewayClient } = await import("./gateway-client")
-
     const ctrl = new AbortController()
     const dispatches: Array<{ t: string }> = []
 
@@ -169,8 +168,6 @@ describe("startGatewayClient", () => {
     const session = createFakeWsSession()
     mockListen.mockImplementation(session.listenImpl)
 
-    const { startGatewayClient } = await import("./gateway-client")
-
     const ctrl = new AbortController()
 
     const client = startGatewayClient({
@@ -216,8 +213,6 @@ describe("startGatewayClient", () => {
   it("stops immediately when signal is pre-aborted", async () => {
     mockListen.mockResolvedValue(jest.fn())
     mockWsOpen.mockImplementation(() => new Promise<string>(() => {})) // never resolves
-
-    const { startGatewayClient } = await import("./gateway-client")
 
     const ctrl = new AbortController()
     ctrl.abort()

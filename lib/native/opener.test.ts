@@ -10,23 +10,13 @@ jest.mock(
 
 import { isTauri } from "@/lib/tauri"
 import { openPath, openUrl } from "./opener"
+import { openUrl as pluginOpenUrl, openPath as pluginOpenPath } from "@tauri-apps/plugin-opener"
 
 const mockIsTauri = jest.mocked(isTauri)
 
-let pluginOpenUrl: jest.Mock
-let pluginOpenPath: jest.Mock
-
-beforeEach(async () => {
-  // The mocked module needs to be imported once per test so we can reset its
-  // mocks; the dynamic `await import(...)` inside opener.ts resolves to it.
-  const mod = (await import("@tauri-apps/plugin-opener")) as unknown as {
-    openUrl: jest.Mock
-    openPath: jest.Mock
-  }
-  pluginOpenUrl = mod.openUrl
-  pluginOpenPath = mod.openPath
-  pluginOpenUrl.mockReset().mockResolvedValue(undefined)
-  pluginOpenPath.mockReset().mockResolvedValue(undefined)
+beforeEach(() => {
+  jest.mocked(pluginOpenUrl).mockReset().mockResolvedValue(undefined)
+  jest.mocked(pluginOpenPath).mockReset().mockResolvedValue(undefined)
   mockIsTauri.mockReset()
 })
 

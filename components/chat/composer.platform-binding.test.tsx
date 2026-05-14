@@ -79,8 +79,13 @@ beforeEach(async () => {
 
 // We import the specific logic pieces rather than the full React component
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
-import { listPendingForConversation as listPendingDrafts } from "@/lib/db/connector-drafts"
-import { createDraft } from "@/lib/db/connector-drafts"
+import {
+  listPendingForConversation as listPendingDrafts,
+  createDraft,
+  approveDraft,
+  rejectDraft,
+} from "@/lib/db/connector-drafts"
+import { isTauri } from "@/lib/tauri"
 
 describe("Composer platform binding — manual mode", () => {
   it("enqueueOutbound is called with text segment on manual submit", async () => {
@@ -166,7 +171,6 @@ describe("Composer platform binding — draft mode", () => {
       },
     })
 
-    const { approveDraft } = await import("@/lib/db/connector-drafts")
     await approveDraft(draft.id)
 
     const updated = await getDb().connectorDrafts.get(draft.id)
@@ -188,7 +192,6 @@ describe("Composer platform binding — draft mode", () => {
       segments: [{ type: "text", text: "AI draft" }],
     })
 
-    const { rejectDraft } = await import("@/lib/db/connector-drafts")
     await rejectDraft(draft.id)
 
     const updated = await getDb().connectorDrafts.get(draft.id)
@@ -223,7 +226,6 @@ describe("Composer web-mode guard — Task 111", () => {
 
     // The disabled state is: (!isTauri() && !!session?.platformBinding)
     // Verify this evaluates to true
-    const { isTauri } = await import("@/lib/tauri")
     expect(isTauri()).toBe(false)
     expect(session.platformBinding).toBeTruthy()
     const sendButtonShouldBeDisabled = !isTauri() && !!session.platformBinding

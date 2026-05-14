@@ -1,0 +1,453 @@
+---
+title: shadcn/ui Setup
+description: shadcn/ui v3 (new-york style + RSC + Tailwind v4), 57 pre-installed components, component add workflow, theme token overrides, TooltipProvider global mount convention.
+---
+
+# shadcn/ui Setup
+
+All UI primitives in cognia-next (buttons, dialogs, inputs, tables, Sheet, Drawer, Sidebar, ...) come from [shadcn/ui](https://ui.shadcn.com/). This page is the single reference for **all conventions and configurations** of shadcn in this repository: style options, installed component inventory, commands for adding new components, theme tokens, and global Providers.
+
+## TL;DR
+
+<TLDR>
+
+- Config file: `components.json` — `style: "new-york"`, `rsc: true`, `baseColor: "neutral"`, `iconLibrary: "lucide"`.
+- Tailwind version = **v4** (PostCSS plugin, no `tailwind.config.{js,ts}`, all configuration lives in the `@theme inline` block in `app/globals.css`).
+- **57 components** are pre-installed in `components/ui/`; import directly, do not `shadcn add` again.
+- Theme tokens use **oklch color space** + CSS variables; light/dark mode toggled by the `.dark` class on `<html>`.
+- `TooltipProvider` is already mounted in `app/layout.tsx` — **do not** wrap another layer in components.
+- `components/ui/` **does not have tests** and **does not count toward coverage** (same as `components/ai-elements/`, both are vendored exceptions).
+
+</TLDR>
+
+## components.json
+
+```json title="components.json"
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": true,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "app/globals.css",
+    "baseColor": "neutral",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "iconLibrary": "lucide",
+  "aliases": {
+    "components": "@/components",
+    "utils": "@/lib/utils",
+    "ui": "@/components/ui",
+    "lib": "@/lib",
+    "hooks": "@/hooks"
+  },
+  "registries": {}
+}
+```
+
+Field-by-field breakdown:
+
+| Field | Value | Explanation |
+| ----------------------- | ----------------- | -------------------------------------------------------------------------- |
+| `style` | `new-york` | One of shadcn's two official styles (vs `default`), more compact and slightly squarer. |
+| `rsc` | `true` | Defaults to `"use server"` compatibility; components are RSC-first, add `"use client"` when interactivity is needed. |
+| `tsx` | `true` | TypeScript JSX. |
+| `tailwind.config` | `""` | Tailwind v4 has no JS config file — leave empty so the CLI skips this field. |
+| `tailwind.css` | `app/globals.css` | Main stylesheet; the CLI targets this when injecting `@theme`. |
+| `tailwind.baseColor` | `neutral` | Neutral gray palette (vs `slate` / `zinc` / `stone`). |
+| `tailwind.cssVariables` | `true` | Uses CSS variables instead of inline hex, enabling easy theming. |
+| `tailwind.prefix` | `""` | No prefix on Tailwind classes. |
+| `iconLibrary` | `lucide` | `lucide-react` — unified icon brand across the entire repository. |
+| `aliases.*` | `@/...` | Path aliases matching `tsconfig.json`. |
+| `registries` | `{}` | No third-party shadcn registries connected yet; add a key here to connect a custom registry. |
+
+## Pre-installed Component Inventory (57)
+
+The table below lists all files under `components/ui/`. **All are pre-installed** — import directly with `import { Component } from "@/components/ui/<file>"` and **do not** run `pnpm dlx shadcn@latest add <name>`.
+
+| File | shadcn Registry Name | Primary Use Case |
+| --------------------- | ------------------ | -------------------------------------------- |
+| `accordion.tsx` | `accordion` | Collapsible groups |
+| `alert.tsx` | `alert` | Inline alert banners |
+| `alert-dialog.tsx` | `alert-dialog` | Dangerous action confirmation (delete, irreversible actions) |
+| `aspect-ratio.tsx` | `aspect-ratio` | Aspect-ratio-locked image/video containers |
+| `avatar.tsx` | `avatar` | User/character avatars |
+| `badge.tsx` | `badge` | Status badges |
+| `breadcrumb.tsx` | `breadcrumb` | Breadcrumbs inside settings panels |
+| `button.tsx` | `button` | Most frequently used atomic component; includes `asChild` mode |
+| `button-group.tsx` | `button-group` | Horizontal button groups |
+| `calendar.tsx` | `calendar` | Date picking |
+| `card.tsx` | `card` | Surface containers (with Header / Content / Footer) |
+| `carousel.tsx` | `carousel` | Mobile featured carousels, welcome cards |
+| `chart.tsx` | `chart` | Recharts wrapper, used on stats pages |
+| `checkbox.tsx` | `checkbox` | Form checkboxes |
+| `collapsible.tsx` | `collapsible` | Single-section collapse (no title styling) |
+| `combobox.tsx` | `combobox` | Input-driven dropdown (upgrade from angular/select) |
+| `command.tsx` | `command` | cmdk command palette — `Ctrl+K` |
+| `context-menu.tsx` | `context-menu` | Right-click context menus |
+| `dialog.tsx` | `dialog` | General-purpose modals |
+| `direction.tsx` | `direction` | RTL/LTR container (Radix) |
+| `drawer.tsx` | `drawer` | Bottom drawer, commonly used on mobile |
+| `dropdown-menu.tsx` | `dropdown-menu` | Avatar menus, More menus |
+| `empty.tsx` | `empty` | Empty-state cards |
+| `field.tsx` | `field` | Form fields with label + validation message |
+| `form.tsx` | `form` | react-hook-form integration |
+| `hover-card.tsx` | `hover-card` | Hover cards (link previews) |
+| `input.tsx` | `input` | Text input |
+| `input-group.tsx` | `input-group` | Inputs with prefix/suffix icons |
+| `input-otp.tsx` | `input-otp` | OTP verification code input |
+| `item.tsx` | `item` | Generic list item layout |
+| `kbd.tsx` | `kbd` | Keyboard key styling |
+| `label.tsx` | `label` | `<label>` wrapper |
+| `menubar.tsx` | `menubar` | Desktop application menu bar |
+| `native-select.tsx` | `native-select` | Native `<select>`, preferred on mobile |
+| `navigation-menu.tsx` | `navigation-menu` | Top-level navigation (top bar menus) |
+| `pagination.tsx` | `pagination` | List pagination |
+| `popover.tsx` | `popover` | General-purpose popovers (settings popups, Composer triggers) |
+| `progress.tsx` | `progress` | Progress bars — backup, import, subscription quotas |
+| `radio-group.tsx` | `radio-group` | Radio groups |
+| `resizable.tsx` | `resizable` | Drag-to-resize split panels, workflow editor three-column layout |
+| `scroll-area.tsx` | `scroll-area` | Custom scrollbars |
+| `select.tsx` | `select` | Radix dropdown select |
+| `separator.tsx` | `separator` | Horizontal/vertical dividers |
+| `sheet.tsx` | `sheet` | Side-slide panels (mobile sidebar, desktop settings sheet) |
+| `sidebar.tsx` | `sidebar` | Application-level sidebar (settings, docs site) |
+| `skeleton.tsx` | `skeleton` | Skeleton placeholders |
+| `slider.tsx` | `slider` | Numeric sliders |
+| `sonner.tsx` | `sonner` | Global toast (already mounted in layout) |
+| `spinner.tsx` | `spinner` | Loading spinners |
+| `switch.tsx` | `switch` | Toggle switches |
+| `table.tsx` | `table` | Basic table + TanStack Table friendly |
+| `tabs.tsx` | `tabs` | Core of tabbed shells — used in almost every section |
+| `textarea.tsx` | `textarea` | Multi-line text + Composer |
+| `toggle.tsx` | `toggle` | State buttons |
+| `toggle-group.tsx` | `toggle-group` | Groups of mutually exclusive / non-exclusive toggles |
+| `tooltip.tsx` | `tooltip` | Hover tooltips (Provider already mounted globally) |
+
+Plus two **non-official shadcn** components that also live in `components/ui/`:
+
+| File | Purpose |
+| -------------------- | ------------------------------------------------ |
+| `loading-states.tsx` | cognia's own composite loading state (skeleton + msg) |
+| `combobox.tsx` | Third-party shadcn extension, included in the vendored set |
+
+## Tailwind v4 + oklch Theme
+
+The top three imports in `app/globals.css`:
+
+```css title="app/globals.css"
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "katex/dist/katex.min.css";
+
+@custom-variant dark (&:is(.dark *));
+```
+
+Tailwind v4 **has no JS config file** — all configuration is written directly in CSS. The `@theme inline` block maps Tailwind utilities to CSS variables:
+
+```css
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  /* … chart-2..5, sidebar-*, wf-* (workflow semantics), etc. */
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+```
+
+Light and dark token sets:
+
+```css
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  /* … */
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  /* … */
+}
+```
+
+Key points:
+
+1. **Single source of truth**: change `--background`, and all `bg-background` update with it.
+2. **oklch instead of HSL/RGB**: perceptually consistent across light and dark, avoiding dark-mode color washout.
+3. **`@custom-variant dark (&:is(.dark *))`**: makes `dark:bg-foo` active when an ancestor has `.dark`; this is class-based dark mode (not `prefers-color-scheme`).
+
+See the complete theme pipeline at [Theming & i18n](./theming-and-i18n).
+
+## RSC Mode and `"use client"`
+
+The `rsc: true` in `components.json` makes the shadcn CLI generate RSC by default. However, any component file under `components/ui/` that uses hooks, events, or useState has `"use client"` on its **first line**:
+
+```tsx title="components/ui/button.tsx (excerpt)"
+"use client"
+// ...
+```
+
+Practical rule: if a component you write imports `useState` / `useEffect` / `useContext`, add `"use client"`. Server Components are actually rare in `components/ui/` — they run inside a Tauri webview / browser, so they are essentially client components.
+
+## Global Providers Already Mounted
+
+The provider chain in `app/layout.tsx` already includes:
+
+- **`TooltipProvider`** (from `components/ui/tooltip.tsx`) — Radix Tooltip root; **do not** wrap another `<TooltipProvider>` in components, or you'll create nesting.
+- **`Sonner`** (from `components/ui/sonner.tsx`) — toast container; call `toast.success("...")` in business logic.
+- **`SidebarProvider`** — pages that use the sidebar (e.g. `/settings`) mount it themselves; not global.
+
+See the full provider list at [Architecture](../core/architecture#applayouttsx-provider-order).
+
+## Adding a New Component (Rare)
+
+The 57 pre-installed components cover almost every UI need. **Before adding a new component, confirm it is not already in the list** — most of the time the "new component" you need is actually a composition or style variant of an existing one.
+
+When you do need a new shadcn component:
+
+<Steps>
+
+<Step>
+
+### Run the CLI
+
+```bash
+pnpm dlx shadcn@latest add <component-name>
+```
+
+The CLI reads `components.json` and generates files in `components/ui/<component>.tsx` using the `new-york` style.
+
+</Step>
+
+<Step>
+
+### Review the diff
+
+Confirm:
+
+- The file lands in `components/ui/` (not elsewhere).
+- `components.json` was not modified (the CLI sometimes injects extra fields — revert unnecessary changes).
+- `package.json` only added the required Radix dependencies.
+- `app/globals.css` tokens were not changed — if they were, review separately.
+
+</Step>
+
+<Step>
+
+### Do not write tests
+
+CLAUDE.md is explicit: `components/ui/` is vendored — no tests, no coverage. Jest config's `coveragePathIgnorePatterns` already excludes it.
+
+</Step>
+
+<Step>
+
+### Update this page's inventory
+
+Add the new file to the pre-installed component table above with a brief description of its use case, so future maintainers can find it.
+
+</Step>
+
+</Steps>
+
+## Composition Pattern: `asChild`
+
+shadcn components heavily use `asChild` to delegate trigger behavior to the child element:
+
+```tsx
+<Button asChild>
+  <Link href="/settings">Open Settings</Link>
+</Button>
+
+<DialogTrigger asChild>
+  <Button variant="outline">Edit</Button>
+</DialogTrigger>
+```
+
+Under the hood this is Radix `Slot` — the child element inherits all props (including event handlers and `aria-*` attributes) without adding extra DOM nodes.
+
+## `cn()` — The Only Class Name Merge Function
+
+`lib/utils.ts` exports `cn(...inputs)`:
+
+```ts
+import { clsx, type ClassValue } from "clsx"
+import { twMerge } from "tailwind-merge"
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
+```
+
+`clsx` handles conditional classes (`condition && "class"`), `twMerge` resolves conflicts where two rules overlap (`p-2 px-4` — the `px-2` inside `p-2` is overridden by `px-4`).
+
+Convention: all components merge external `className` with `cn`:
+
+```tsx
+<Button className={cn("rounded-full", className)} />
+```
+
+**Do not** use template strings to concatenate classes — you lose `twMerge` conflict resolution.
+
+## variants: `class-variance-authority`
+
+shadcn uses [cva](https://cva.style/) to define variants:
+
+```tsx title="components/ui/button.tsx (excerpt)"
+const buttonVariants = cva(
+  "inline-flex items-center justify-center rounded-md text-sm font-medium ...",
+  {
+    variants: {
+      variant: {
+        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        destructive: "bg-destructive text-destructive-foreground ...",
+        outline: "border border-input bg-background hover:bg-accent ...",
+        secondary: "...",
+        ghost: "...",
+        link: "...",
+      },
+      size: {
+        default: "h-9 px-4 py-2",
+        sm: "h-8 rounded-md px-3 text-xs",
+        lg: "h-10 rounded-md px-8",
+        icon: "h-9 w-9",
+      },
+    },
+    defaultVariants: { variant: "default", size: "default" },
+  }
+)
+```
+
+To extend a variant, **edit `components/ui/<comp>.tsx`** — do not wrap it externally. The component is already a vendored copy; you have full ownership.
+
+## Icons: lucide-react
+
+The `iconLibrary: "lucide"` setting means all icons shadcn brings in come from `lucide-react`. Convention:
+
+```tsx
+import { CheckIcon, XIcon, AlertCircleIcon } from "lucide-react"
+// Names end with `Icon` — distinguishes them from local components
+```
+
+Each icon defaults to 24×24px stroke 1.5. Common sizes:
+
+```tsx
+<CheckIcon className="size-4" />   // 16px, inside buttons
+<CheckIcon className="size-5" />   // 20px, list items
+<AlertCircleIcon className="size-6" /> // 24px, large alerts
+```
+
+**Do not** use emoji icons — cross-platform rendering is inconsistent; CLAUDE.md's global rule also prohibits emoji.
+
+## Dark Mode in Practice
+
+```tsx
+"use client"
+import { useTheme } from "next-themes"
+import { Button } from "@/components/ui/button"
+import { MoonIcon, SunIcon } from "lucide-react"
+
+export function ThemeToggle() {
+  const { resolvedTheme, setTheme } = useTheme()
+  const isDark = resolvedTheme === "dark"
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={() => setTheme(isDark ? "light" : "dark")}
+      aria-label="Toggle theme"
+    >
+      {isDark ? <SunIcon className="size-4" /> : <MoonIcon className="size-4" />}
+    </Button>
+  )
+}
+```
+
+- Use `resolvedTheme` instead of `theme` — the latter can be `"system"`; you need the actual applied value.
+- **Do not** maintain your own dark state; `next-themes` already mounts `ThemeProvider` in `app/layout.tsx`.
+- Key tokens (`bg-background`, `text-foreground`, `border-border`) switch automatically across dark mode; no `dark:bg-...` needed.
+
+## Relationship with ai-elements
+
+`components/ai-elements/` is another set of vendored components (from [ai-elements](https://www.npmjs.com/package/ai-elements)), on equal footing with shadcn:
+
+| Library | Path | Tests | Coverage | Modification Strategy |
+| ----------- | ------------------------- | -------- | ------ | ---------------- |
+| shadcn/ui | `components/ui/` | None | Not counted | Edit files directly |
+| ai-elements | `components/ai-elements/` | None | Not counted | Edit files directly |
+| Business components | `components/<area>/` | **Required** | ≥90% | Standard development flow |
+
+ai-elements provides high-level chat components like `Message`, `Reasoning`, `Task`, `Tool`, `Conversation`, `Artifact`, `PromptInput`, `Context`, etc. **Under the hood** most of them are also shadcn primitives (Button, Card, Tabs, ...). See [Chat UI Architecture](./chat-ui-architecture) for details.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+| --------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------- |
+| `cn` did not merge conflicting classes | Template string concatenation bypassed `twMerge` | Change to `cn("base", className)` |
+| Tooltip console warning "TooltipProvider missing" | You wrapped another `<TooltipProvider>`, breaking context | Remove your wrapper; layout already has one |
+| Tailwind class not applied | Tailwind v4 scans `app/globals.css` for content; new file path not picked up | Check file extension and path — `.tsx` / `.ts` / `.mdx` are matched by default |
+| Dark mode not switching | No `.dark` class on `<html>` | Confirm `ThemeProvider` is mounted at the top of layout, and is not SSR-only |
+| New shadcn component styles broken | CLI modified `components.json` or `globals.css` | Revert changes to these two files; keep only `components/ui/<name>.tsx` |
+| `Button asChild` error "Children must be element" | Child is a string/Fragment, not a single React element | Wrap in `<span>` or use `<Button>{text}</Button>` |
+
+## Where to Start
+
+| Goal | File |
+| ----------------------- | ------------------------------------------------------------------- |
+| Change default theme palette | `:root` / `.dark` blocks in `app/globals.css` |
+| Add chart color palette | `--chart-*` in `app/globals.css` and corresponding mappings in `@theme inline` |
+| Modify `Button` variant | `cva()` block in `components/ui/button.tsx` |
+| Add custom toast default styles | `components/ui/sonner.tsx` |
+| Change Sidebar width | `<SidebarProvider style={{ "--sidebar-width": "..." }} />` at the call site |
+| Add new shadcn component | `pnpm dlx shadcn@latest add <name>`, then update the inventory on this page |
+
+## Related Pages
+
+<Cards>
+  <Card
+    title="Theming & i18n"
+    href="./theming-and-i18n"
+    description="oklch tokens, CSS variables, next-intl translations"
+  />
+  <Card
+    title="Chat UI Architecture"
+    href="./chat-ui-architecture"
+    description="Real-world composition of shadcn + ai-elements in chat"
+  />
+  <Card
+    title="Settings UI"
+    href="./settings-ui"
+    description="Core consumers of Tabs / Sheet / Sidebar / ScrollArea"
+  />
+</Cards>

@@ -15,6 +15,7 @@ mod hooks;
 mod logging;
 mod mcp_server;
 mod plugin_api;
+mod plugins;
 mod proxy_config;
 mod remote_control;
 mod scheduler;
@@ -244,6 +245,7 @@ pub fn run() {
                 .map(|d| d.join("cognia").join("plugins"))
                 .unwrap_or_else(|| std::path::PathBuf::from(".")),
         ))
+        .manage(plugin_api::wasm::WasmPluginState::default())
         .manage({
             // Automation subsystem state — spawn the worker thread once, build
             // the permission gate with disabled defaults (renderer enables via
@@ -471,6 +473,16 @@ pub fn run() {
             plugin_api::signature::plugin_generate_keypair,
             plugin_api::signature::plugin_create_signature,
             plugin_api::signature::plugin_verify_signature,
+            plugin_api::signature::plugin_verify_detached_signature,
+            plugin_api::signature::plugin_public_key_fingerprint,
+            plugin_api::wasm::commands::plugin_wasm_load,
+            plugin_api::wasm::commands::plugin_wasm_activate,
+            plugin_api::wasm::commands::plugin_wasm_deactivate,
+            plugin_api::wasm::commands::plugin_wasm_call,
+            plugin_api::wasm::commands::plugin_wasm_unload,
+            plugin_api::wasm::commands::plugin_wasm_list,
+            plugin_api::wasm::installer::plugin_wasm_install_from_url,
+            plugin_api::wasm::installer::plugin_wasm_install_from_git,
             plugin_api::backup::plugin_backup_create,
             plugin_api::backup::plugin_backup_restore,
             plugin_api::backup::plugin_backup_delete,
@@ -499,6 +511,9 @@ pub fn run() {
             automation::commands::automation_settings_get,
             automation::commands::automation_settings_set,
             automation::commands::automation_kill_switch,
+            plugins::computer_use::commands::plugin_computer_use_execute,
+            plugins::computer_use::commands::plugin_computer_use_bash,
+            plugins::computer_use::commands::plugin_computer_use_text_editor,
         ])
         .setup(|app| {
             // Bootstrap native logging in *all* builds. Installs tauri-plugin-log

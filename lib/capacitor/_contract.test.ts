@@ -14,6 +14,11 @@
  * neighbouring `.test.ts` files; this test only protects the contract.
  */
 import { withPlugin, detectNativePlatform } from "./_shared"
+import * as haptics from "./haptics"
+import * as toast from "./toast"
+import * as network from "./network"
+import * as dialog from "./dialog"
+import * as share from "./share"
 
 describe("Capacitor wrapper contract — web fallback", () => {
   beforeEach(() => {
@@ -62,13 +67,11 @@ describe("Wrapper smoke contract — web build resolves to unsupported / unknown
   })
 
   it("haptics.selectionFeedback resolves without throwing on web", async () => {
-    const { selectionFeedback } = await import("./haptics")
-    await expect(selectionFeedback()).resolves.toBeDefined()
+    await expect(haptics.selectionFeedback()).resolves.toBeDefined()
   })
 
   it("toast.showToast resolves without throwing on web", async () => {
-    const { showToast } = await import("./toast")
-    await expect(showToast({ text: "hello" })).resolves.toBeDefined()
+    await expect(toast.showToast({ text: "hello" })).resolves.toBeDefined()
   })
 
   it("network module exposes a callable getStatus on web", async () => {
@@ -77,19 +80,16 @@ describe("Wrapper smoke contract — web build resolves to unsupported / unknown
     // a structured outcome. The contract here is "doesn't crash the
     // import" — the runtime branch on web is never reached because
     // detectNativePlatform() === 'web' short-circuits in real code.
-    const mod = await import("./network")
-    expect(typeof mod.getStatus).toBe("function")
+    expect(typeof network.getStatus).toBe("function")
   })
 
   it("dialog.alert resolves without throwing on web", async () => {
-    const { alert } = await import("./dialog")
-    const out = await alert({ message: "hi" })
+    const out = await dialog.alert({ message: "hi" })
     expect(["ok", "unsupported", "error"]).toContain(out.kind)
   })
 
   it("share.share resolves to a documented outcome on web", async () => {
-    const { share } = await import("./share")
-    const out = await share({ text: "hi" })
+    const out = await share.share({ text: "hi" })
     expect(["shared", "cancelled", "unsupported", "error"]).toContain(out.kind)
   })
 })

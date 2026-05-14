@@ -1,0 +1,20 @@
+{
+  "rustc": 3674164131150989441,
+  "features": "[\"default\"]",
+  "declared_features": "[\"default\"]",
+  "target": 6980398278574073083,
+  "profile": 11679461194111479299,
+  "path": 8092518418203049638,
+  "deps": [],
+  "local": [
+    {
+      "CheckDepInfo": {
+        "dep_info": "debug\\.fingerprint\\once_cell_polyfill-f62d55c81b053e90\\dep-lib-once_cell_polyfill",
+        "checksum": false
+      }
+    }
+  ],
+  "rustflags": [],
+  "config": 8247474407144887393,
+  "compile_kind": 0
+}

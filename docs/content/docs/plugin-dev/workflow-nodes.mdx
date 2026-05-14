@@ -1,0 +1,92 @@
+---
+title: Workflow Nodes
+description: How to contribute custom executor nodes to the Visual Workflow editor from a plugin.
+---
+
+# Workflow Nodes
+
+Plugins can register custom `action.*` nodes that appear in the workflow editor's node palette and execute when a workflow run reaches them.
+
+## Declaration
+
+```json title="cognia-plugin.json"
+{
+  "workflowNodes": [
+    {
+      "kind": "action.custom.report",
+      "factory": "./workflow/report.js"
+    }
+  ]
+}
+```
+
+## Executor factory
+
+```ts title="workflow/report.js"
+export function createExecutor(ctx) {
+  return {
+    kind: "action.custom.report",
+    async run(step) {
+      const { repoFullName, format } = step.params
+
+      // Your logic here
+      const report = await generateReport(repoFullName, format)
+
+      // Return output that downstream nodes can reference
+      return {
+        output: {
+          reportUrl: report.url,
+          rowCount: report.rows,
+        },
+      }
+    },
+  }
+}
+```
+
+## Node kind naming
+
+- Use reverse-DNS prefix: `action.<your-plugin-id>.<verb>`.
+- Keep it descriptive: `action.com.example.report` not `action.com.example.n1`.
+- The `action.` prefix is required; the editor groups by it.
+
+## Params and output
+
+The orchestrator passes `step.params` (from the node's Inspector form) and expects an object with an `output` key:
+
+```ts
+interface StepResult {
+  output: Record<string, unknown>
+  error?: { message: string; code?: string }
+  skipped?: boolean
+}
+```
+
+## Inspector form
+
+If you want a custom Inspector form for your node, register it as a surface:
+
+```ts
+ctx.api.extension.mount("workflow-inspector", "action.custom.report", () => {
+  // Return a DOM node containing your form
+})
+```
+
+Without a custom inspector, the generic JSON editor is shown.
+
+## Error handling
+
+Throw from `run()` to mark the step as failed. The orchestrator applies the node's `retryPolicy` if configured:
+
+```ts
+if (!repoFullName) {
+  throw new Error("repoFullName is required")
+}
+```
+
+## Related
+
+<Cards>
+  <Card title="Visual Workflows" href="../visual-workflows" description="How the workflow runtime works." />
+  <Card title="Connector Adapters" href="./connector-adapters" description="Contributing platform connectors." />
+</Cards>

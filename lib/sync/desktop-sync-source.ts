@@ -17,6 +17,8 @@
 
 import type { Skill, StoredMessage, ChatSession, Character } from "@/lib/claude/types"
 import { getDb } from "@/lib/db/schema"
+import { listen } from "@tauri-apps/api/event"
+import { invoke } from "@tauri-apps/api/core"
 
 import type { SyncDelta, SyncableTable } from "./types"
 
@@ -53,13 +55,7 @@ export async function installDesktopSyncSource(opts: InstallOptions = {}): Promi
     bridge = opts.bridge
   } else {
     try {
-      const eventMod = (await import("@tauri-apps/api/event")) as {
-        listen: TauriBridge["listen"]
-      }
-      const coreMod = (await import("@tauri-apps/api/core")) as {
-        invoke: TauriBridge["invoke"]
-      }
-      bridge = { listen: eventMod.listen, invoke: coreMod.invoke }
+      bridge = { listen, invoke }
     } catch {
       installed = false
       return () => {}

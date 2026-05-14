@@ -1,0 +1,26 @@
+{
+  "rustc": 3674164131150989441,
+  "features": "[\"alloc\", \"default\", \"fast\", \"std\", \"zeroize\"]",
+  "declared_features": "[\"alloc\", \"asm\", \"batch\", \"default\", \"digest\", \"fast\", \"hazmat\", \"legacy_compatibility\", \"merlin\", \"pem\", \"pkcs8\", \"rand_core\", \"serde\", \"signature\", \"std\", \"zeroize\"]",
+  "target": 14975934594160758548,
+  "profile": 15657897354478470176,
+  "path": 1200613508040988050,
+  "deps": [
+    [9857275760291862238, "sha2", false, 12546301735741359545],
+    [12865141776541797048, "zeroize", false, 6958090675019230098],
+    [13595581133353633439, "curve25519_dalek", false, 13157235109186210284],
+    [14313198213031843936, "ed25519", false, 3647255720896080453],
+    [17003143334332120809, "subtle", false, 725513561038360796]
+  ],
+  "local": [
+    {
+      "CheckDepInfo": {
+        "dep_info": "debug\\.fingerprint\\ed25519-dalek-4fb49fe05c992b62\\dep-lib-ed25519_dalek",
+        "checksum": false
+      }
+    }
+  ],
+  "rustflags": [],
+  "config": 8247474407144887393,
+  "compile_kind": 0
+}

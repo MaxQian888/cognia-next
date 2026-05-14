@@ -8,6 +8,7 @@ import { usePluginStore } from "@/stores/plugin"
 import { getPluginMarketplace } from "../package/marketplace"
 import { loggers } from "../core/logger"
 import { getPluginBackupManager } from "./backup"
+import { getPluginManager } from "../core/manager"
 
 // =============================================================================
 // Types
@@ -479,7 +480,6 @@ export class PluginUpdater {
 
   private async refreshRuntimePlugins(): Promise<void> {
     try {
-      const { getPluginManager } = await import("../core/manager")
       await getPluginManager().scanPlugins()
       await getPluginManager().syncRuntimeState()
     } catch (error) {

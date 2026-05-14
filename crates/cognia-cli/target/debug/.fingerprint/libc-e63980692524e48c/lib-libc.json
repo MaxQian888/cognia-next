@@ -1,0 +1,20 @@
+{
+  "rustc": 3674164131150989441,
+  "features": "[\"default\", \"std\"]",
+  "declared_features": "[\"align\", \"const-extern-fn\", \"default\", \"extra_traits\", \"rustc-dep-of-std\", \"rustc-std-workspace-core\", \"std\", \"use_std\"]",
+  "target": 17682796336736096309,
+  "profile": 15222631470922254920,
+  "path": 10274228879288035395,
+  "deps": [[7098700569944897890, "build_script_build", false, 518410375365028716]],
+  "local": [
+    {
+      "CheckDepInfo": {
+        "dep_info": "debug\\.fingerprint\\libc-e63980692524e48c\\dep-lib-libc",
+        "checksum": false
+      }
+    }
+  ],
+  "rustflags": [],
+  "config": 8247474407144887393,
+  "compile_kind": 0
+}

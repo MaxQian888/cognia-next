@@ -1,0 +1,12 @@
+{
+  "title": "Connector Setup",
+  "pages": [
+    "slack-setup",
+    "discord-setup",
+    "lark-setup",
+    "onebot-setup",
+    "qq-via-onebot-faq",
+    "extending-with-plugins",
+    "phase-1-ship-gate"
+  ]
+}

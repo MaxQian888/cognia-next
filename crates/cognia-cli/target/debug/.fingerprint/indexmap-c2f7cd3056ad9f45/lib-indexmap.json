@@ -1,0 +1,24 @@
+{
+  "rustc": 3674164131150989441,
+  "features": "[\"default\", \"serde\", \"std\"]",
+  "declared_features": "[\"arbitrary\", \"borsh\", \"default\", \"quickcheck\", \"rayon\", \"serde\", \"std\", \"sval\", \"test_debug\"]",
+  "target": 15738714612577068147,
+  "profile": 17770749724986273341,
+  "path": 17921564052459112923,
+  "deps": [
+    [3067591776805002636, "hashbrown", false, 2086374137339387533],
+    [5230392855116717286, "equivalent", false, 8066273130712725147],
+    [11899261697793765154, "serde_core", false, 4614018562847800918]
+  ],
+  "local": [
+    {
+      "CheckDepInfo": {
+        "dep_info": "debug\\.fingerprint\\indexmap-c2f7cd3056ad9f45\\dep-lib-indexmap",
+        "checksum": false
+      }
+    }
+  ],
+  "rustflags": [],
+  "config": 8247474407144887393,
+  "compile_kind": 0
+}

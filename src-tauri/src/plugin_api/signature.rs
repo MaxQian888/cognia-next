@@ -83,6 +83,55 @@ pub async fn plugin_create_signature(
     })
 }
 
+/// SHA-256 fingerprint of a base64-encoded Ed25519 public key. Returned
+/// as a lowercase hex digest so the UI can show "ed25519:9f3a:...:" style
+/// identities to the user during first-install trust-on-first-use.
+#[tauri::command]
+pub async fn plugin_public_key_fingerprint(public_key_base64: String) -> Result<String> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(public_key_base64.as_bytes())
+        .map_err(|e| PluginError::Crypto(format!("public key base64 decode: {e}")))?;
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    Ok(hex::encode(hasher.finalize()))
+}
+
+/// Verify a detached Ed25519 signature over the raw bundle bytes. Used by
+/// the WASM plugin install flow when the bundle ships with `<bundle>.sig`
+/// and a manifest-pinned base64 public key. Unlike `plugin_verify_signature`
+/// (which signs the `<id>:<ver>:<bytes>` digest), this is a direct
+/// `verify_strict` over the bundle so the same `.sig` works regardless of
+/// whether the host knows the plugin id yet.
+#[tauri::command]
+pub async fn plugin_verify_detached_signature(
+    artifact_path: String,
+    signature_base64: String,
+    public_key_base64: String,
+) -> Result<bool> {
+    use base64::Engine as _;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let pk_bytes = b64
+        .decode(public_key_base64.as_bytes())
+        .map_err(|e| PluginError::Crypto(format!("public key base64 decode: {e}")))?;
+    let pk_arr: [u8; 32] = pk_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| PluginError::Crypto("public key must be 32 bytes".into()))?;
+    let verifying_key = VerifyingKey::from_bytes(&pk_arr)
+        .map_err(|e| PluginError::Crypto(format!("invalid public key: {e}")))?;
+    let sig_bytes = b64
+        .decode(signature_base64.as_bytes())
+        .map_err(|e| PluginError::Crypto(format!("signature base64 decode: {e}")))?;
+    let sig_arr: [u8; SIGNATURE_LENGTH] = sig_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| PluginError::Crypto(format!("signature must be {SIGNATURE_LENGTH} bytes")))?;
+    let signature = Signature::from_bytes(&sig_arr);
+    let bytes = fs::read(&artifact_path)?;
+    Ok(verifying_key.verify_strict(&bytes, &signature).is_ok())
+}
+
 #[tauri::command]
 pub async fn plugin_verify_signature(
     plugin_id: String,
@@ -195,6 +244,76 @@ mod tests {
         .await
         .unwrap();
         assert!(!ok);
+    }
+
+    #[tokio::test]
+    async fn detached_signature_round_trip() {
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD;
+
+        // Generate keypair (hex-encoded; convert to base64 for the new API).
+        let kp = plugin_generate_keypair().await.unwrap();
+        let sk_bytes = hex::decode(&kp.private_key).unwrap();
+        let sk_arr: [u8; 32] = sk_bytes.as_slice().try_into().unwrap();
+        let signing_key = SigningKey::from_bytes(&sk_arr);
+        let verifying_key: VerifyingKey = (&signing_key).into();
+        let pk_b64 = b64.encode(verifying_key.to_bytes());
+
+        // Write a fixture bundle and sign its raw bytes (detached, no prefix).
+        let bundle = write_artifact(b"--- fake wasm bundle ---");
+        let raw = std::fs::read(bundle.path()).unwrap();
+        let sig: Signature = signing_key.sign(&raw);
+        let sig_b64 = b64.encode(sig.to_bytes());
+
+        let ok = plugin_verify_detached_signature(
+            bundle.path().to_string_lossy().into_owned(),
+            sig_b64.clone(),
+            pk_b64.clone(),
+        )
+        .await
+        .unwrap();
+        assert!(ok);
+
+        // Tamper with bundle → verification must fail.
+        let tampered = write_artifact(b"--- fake wasm bundle (tampered) ---");
+        let bad = plugin_verify_detached_signature(
+            tampered.path().to_string_lossy().into_owned(),
+            sig_b64,
+            pk_b64,
+        )
+        .await
+        .unwrap();
+        assert!(!bad);
+    }
+
+    #[tokio::test]
+    async fn public_key_fingerprint_is_stable_per_key() {
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let pk_a = b64.encode([1u8; 32]);
+        let pk_b = b64.encode([2u8; 32]);
+        let fp_a1 = plugin_public_key_fingerprint(pk_a.clone()).await.unwrap();
+        let fp_a2 = plugin_public_key_fingerprint(pk_a).await.unwrap();
+        let fp_b = plugin_public_key_fingerprint(pk_b).await.unwrap();
+        assert_eq!(fp_a1, fp_a2);
+        assert_ne!(fp_a1, fp_b);
+        assert_eq!(fp_a1.len(), 64); // sha256 hex = 32 bytes × 2 chars
+    }
+
+    #[tokio::test]
+    async fn detached_signature_rejects_malformed_inputs() {
+        let bundle = write_artifact(b"x");
+        let path = bundle.path().to_string_lossy().into_owned();
+        let bad_pk = plugin_verify_detached_signature(
+            path.clone(),
+            "AA==".into(),
+            "not_base64!!!".into(),
+        )
+        .await;
+        assert!(bad_pk.is_err());
+        let wrong_len_pk =
+            plugin_verify_detached_signature(path, "AA==".into(), "QUE=".into()).await;
+        assert!(wrong_len_pk.is_err());
     }
 
     #[test]

@@ -7,11 +7,9 @@
  *
  * Was a no-op stub before the runtime landed; now `dispatchAgentTeam`
  * actually starts a team via `agentTeamManager.start()`.
- *
- * The dynamic `import()` inside `dispatchAgentTeam` is intentional — it
- * breaks the static cycle (compat <- store <- compat, for normalizers)
- * while keeping the public API synchronous-looking.
  */
+
+import { agentTeamManager } from "./agent-team"
 
 export interface AgentTeamCompatDispatchOptions {
   teamId: string
@@ -37,7 +35,6 @@ export async function dispatchAgentTeam(
     return { ok: false, reason: "teamId is required" }
   }
   try {
-    const { agentTeamManager } = await import("./agent-team")
     await agentTeamManager.start(options.teamId)
     return { ok: true }
   } catch (err) {

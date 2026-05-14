@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { Character, Team } from "@/lib/claude/types"
 
@@ -170,7 +170,6 @@ test("scratchpad textarea persists on a debounce", async () => {
   const ta = screen.getByPlaceholderText("notesPlaceholder") as HTMLTextAreaElement
   // Use fireEvent (rather than userEvent) since fake timers and userEvent
   // delays don't compose cleanly.
-  const { fireEvent } = await import("@testing-library/react")
   fireEvent.change(ta, { target: { value: "remember this" } })
   jest.advanceTimersByTime(600)
   await waitFor(() => {

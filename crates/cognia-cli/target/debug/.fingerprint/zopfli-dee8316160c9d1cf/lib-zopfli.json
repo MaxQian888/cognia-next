@@ -1,0 +1,25 @@
+{
+  "rustc": 3674164131150989441,
+  "features": "[\"default\", \"gzip\", \"std\", \"zlib\"]",
+  "declared_features": "[\"default\", \"gzip\", \"nightly\", \"std\", \"zlib\"]",
+  "target": 10788940031695432753,
+  "profile": 2241668132362809309,
+  "path": 1055667493375622175,
+  "deps": [
+    [1957296256905958124, "bumpalo", false, 15272021138777585631],
+    [3714697949143471456, "simd_adler32", false, 11138485352092279696],
+    [7312356825837975969, "crc32fast", false, 13629490569815903488],
+    [10630857666389190470, "log", false, 9072645540616880136]
+  ],
+  "local": [
+    {
+      "CheckDepInfo": {
+        "dep_info": "debug\\.fingerprint\\zopfli-dee8316160c9d1cf\\dep-lib-zopfli",
+        "checksum": false
+      }
+    }
+  ],
+  "rustflags": [],
+  "config": 8247474407144887393,
+  "compile_kind": 0
+}

@@ -24,6 +24,8 @@ import { messageRepository } from "@/lib/db"
 import { getDb } from "@/lib/db/schema"
 import type { ChatSession, StoredMessage } from "@/lib/claude/types"
 import type { UIMessage } from "@/types"
+import { listen } from "@tauri-apps/api/event"
+import { invoke } from "@tauri-apps/api/core"
 
 const UPDATE_EVENT = "companion://message-update-request"
 const DELETE_EVENT = "companion://message-delete-request"
@@ -95,13 +97,7 @@ export async function installDesktopMessageSource(opts: InstallOptions = {}): Pr
     bridge = opts.bridge
   } else {
     try {
-      const eventMod = (await import("@tauri-apps/api/event")) as {
-        listen: TauriBridge["listen"]
-      }
-      const coreMod = (await import("@tauri-apps/api/core")) as {
-        invoke: TauriBridge["invoke"]
-      }
-      bridge = { listen: eventMod.listen, invoke: coreMod.invoke }
+      bridge = { listen, invoke }
     } catch {
       installed = false
       return () => {}

@@ -13,6 +13,7 @@ import { CompanionSection } from "./companion-section"
 import { transport } from "@/lib/tauri"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { addPairedDevice, listPairedDevices } from "@/lib/db/paired-devices"
+import { decodePairPayload } from "@/lib/qr/pair-payload"
 
 // `qrcode.react` renders <canvas>; in jsdom that's stable but slow. We replace
 // it with a marker element so the table tests don't pull canvas imageData.
@@ -113,7 +114,6 @@ describe("CompanionSection", () => {
     const value = qr.getAttribute("data-value") || ""
     // Wave 1.7 v2 payload: `cgnp2|<base64url>`. Decode through the
     // canonical helper so the test is implementation-agnostic.
-    const { decodePairPayload } = await import("@/lib/qr/pair-payload")
     const decoded = decodePairPayload(value)
     expect(decoded.kind).toBe("ok")
     if (decoded.kind === "ok") {

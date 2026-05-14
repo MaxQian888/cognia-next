@@ -1,0 +1,84 @@
+---
+title: Permissions
+description: How Cognia's plugin permission model works — declaration, user consent, scoping, revocation, and audit.
+---
+
+# Permissions
+
+Cognia's plugin security model is built on five principles:
+
+1. **Pre-declaration** — Every API a plugin calls must be listed in `permissions[]`.
+2. **User consent** — The install dialog shows a human-readable permission summary; the user confirms each item.
+3. **Scoped limiting** — Filesystem, network, and resource permissions must specify scope (`fs.read:$DOWNLOADS`, not `fs.read:*`).
+4. **Revocable** — Users can disable any permission in **Settings → Plugins → `\<Plugin\>` → Permissions**.
+5. **Auditable** — Every API call writes to `plugin_bridge` (capped). The maintenance tab shows the log.
+
+## Permission string format
+
+```
+domain.action:scope
+```
+
+| Part | Example | Meaning |
+|------|---------|---------|
+| `domain` | `fs`, `chat`, `network` | The subsystem being accessed |
+| `action` | `read`, `write`, `send`, `fetch` | The operation |
+| `scope` | `$DOWNLOADS`, `api.example.com`, `*` | The scope of access (optional for some domains) |
+
+## Built-in permission domains
+
+| Domain | Actions | Scope syntax | Example |
+|--------|---------|--------------|---------|
+| `chat` | `read`, `send` | none | `chat.read`, `chat.send` |
+| `twin` | `read`, `ingest` | none | `twin.read` |
+| `fs` | `read`, `write` | Path or variable | `fs.read:$DOWNLOADS`, `fs.write:$TEMP` |
+| `network` | `fetch` | Origin (host only) | `network.fetch:api.example.com` |
+| `theme` | `read`, `write` | none | `theme.read`, `theme.write` |
+| `storage` | `read`, `write` | none | `storage.read`, `storage.write` |
+| `export` | `trigger` | none | `export.trigger` |
+| `notification` | `toast`, `native` | none | `notification.toast`, `notification.native` |
+| `ai` | `provider`, `prompt` | none | `ai.provider` |
+| `extension` | `mount` | none | `extension.mount` |
+| `scheduler` | `register` | none | `scheduler.register` |
+| `canvas` | `read`, `write` | none | `canvas.read`, `canvas.write` |
+| `artifact` | `register` | none | `artifact.register` |
+| `media` | `filter`, `effect` | none | `media.filter`, `media.effect` |
+| `crypto` | `digest`, `encrypt` | none | `crypto.digest` |
+| `permission` | `read`, `request` | none | `permission.read` (implicit, always granted) |
+
+## Scope variables
+
+| Variable | Resolves to |
+|----------|-------------|
+| `$HOME` | User home directory |
+| `$DOWNLOADS` | Downloads folder |
+| `$DOCUMENTS` | Documents folder |
+| `$TEMP` | System temp directory |
+| `$DESKTOP` | Desktop folder |
+| `$PLUGIN` | Plugin's own data directory |
+
+## Runtime behavior
+
+When a plugin calls an API:
+
+```
+Plugin Worker → postMessage → Bridge → Permission Guard → API Implementation
+                                      ↓
+                               Denied? → Log to plugin_bridge → Return error
+```
+
+Permission checks are synchronous and cached per call. Revoking a permission takes effect on the next API call — there's no need to restart the plugin.
+
+## Best practices
+
+- **Request the minimum** — Don't ask for `fs.write:*` if you only need `fs.write:$PLUGIN`.
+- **Explain why** — The `description` field in your manifest is shown next to permissions. Use it to explain what the permission enables.
+- **Handle denial gracefully** — Always wrap API calls in try/catch and show a helpful message if a permission is missing.
+- **Request at runtime for optional features** — Use `ctx.api.permission.request()` for features the user may not need immediately.
+
+## Related
+
+<Cards>
+  <Card title="Manifest" href="./manifest" description="Where permissions are declared." />
+  <Card title="API Overview" href="./api-overview" description="What each API namespace requires." />
+</Cards>

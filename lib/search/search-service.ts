@@ -14,6 +14,7 @@ import { getEnabledProviders, isProviderConfigured } from "@/lib/search/types"
 import { log } from "./log"
 
 import { routeSearch } from "./search-type-router"
+import { useSettingsStore } from "@/stores/settings"
 import { testTavilyConnection } from "./providers/tavily"
 import { testPerplexityConnection } from "./providers/perplexity"
 import { testExaConnection } from "./providers/exa"
@@ -95,18 +96,12 @@ export async function search(
 
 /**
  * Best-effort usage reporting: tries to call the settings store's
- * `incrementSearchUsage` action if it exists. Imported lazily to avoid a
- * cyclic dep at module-load time.
+ * `incrementSearchUsage` action if it exists.
  */
-async function recordUsage(
-  providerId: SearchProviderType,
-  responseTime: number,
-  success: boolean
-): Promise<void> {
+function recordUsage(providerId: SearchProviderType, responseTime: number, success: boolean): void {
   try {
-    const mod = await import("@/stores/settings")
     const fn = (
-      mod.useSettingsStore.getState() as {
+      useSettingsStore.getState() as {
         incrementSearchUsage?: (id: SearchProviderType, ms: number, ok: boolean) => void
       }
     ).incrementSearchUsage

@@ -1,0 +1,93 @@
+---
+title: Connector Adapters
+description: How to contribute platform connector adapters (Telegram, Discord, Slack, etc.) from a plugin.
+---
+
+# Connector Adapters
+
+Plugins can contribute new platform connectors by declaring them in `manifest.connectors[]`. The host registers each adapter with the [ConnectorBus](../platform-connectors) so the plugin can receive and send messages just like built-in adapters.
+
+## Declaration
+
+```json title="cognia-plugin.json"
+{
+  "permissions": ["connectors.register"],
+  "connectors": [
+    {
+      "type": "custom-im",
+      "factory": "./connectors/my-im.js"
+    }
+  ]
+}
+```
+
+## Adapter factory
+
+```ts title="connectors/my-im.js"
+export function createAdapter(ctx) {
+  return {
+    type: "custom-im",
+    displayName: "My Custom IM",
+    capabilities: ["text", "image"],
+
+    async connect(config) {
+      // config comes from the user's Settings → Connections form
+      this.ws = new WebSocket(config.wsUrl)
+      this.ws.onmessage = (msg) => {
+        ctx.api.connectors.inbound({
+          platform: "custom-im",
+          conversationKey: `custom-im:${config.accountId}:${msg.chatId}`,
+          sender: { id: msg.fromId, name: msg.fromName },
+          content: { kind: "text", text: msg.text },
+        })
+      }
+    },
+
+    async disconnect() {
+      this.ws?.close()
+    },
+
+    async send(conversationKey, content) {
+      const [, , chatId] = conversationKey.split(":")
+      this.ws.send(JSON.stringify({ chatId, text: content.text }))
+    },
+
+    async healthCheck() {
+      return this.ws?.readyState === WebSocket.OPEN
+    },
+  }
+}
+```
+
+## Lifecycle
+
+1. **Plugin activate** — `connectors-bridge.ts` calls `registerPluginAdapters(pluginId, manifest, exports)`.
+2. **User configures** — The adapter appears in Settings → Connections → Adapters.
+3. **User enables** — The host calls `adapter.connect(config)`.
+4. **Inbound messages** — The adapter calls `ctx.api.connectors.inbound(event)`; the bus routes it.
+5. **Outbound messages** — The bus calls `adapter.send(conversationKey, content)`.
+6. **Plugin disable / uninstall** — The host calls `adapter.disconnect()` and unregisters the adapter.
+
+## Capabilities
+
+Declare what your adapter supports:
+
+| Capability | Meaning |
+|------------|---------|
+| `text` | Plain text messages |
+| `image` | Image attachments |
+| `file` | File attachments |
+| `voice` | Voice messages |
+| `reaction` | Message reactions |
+| `reply` | Threaded replies |
+
+## Conversation keys
+
+Use a stable format: `platform:accountId:threadId`. This is how Cognia identifies conversations across inbound and outbound flows.
+
+## Related
+
+<Cards>
+  <Card title="Platform Connectors" href="../platform-connectors" description="How the ConnectorBus works." />
+  <Card title="Workflow Nodes" href="./workflow-nodes" description="Contributing workflow nodes." />
+</Cards>

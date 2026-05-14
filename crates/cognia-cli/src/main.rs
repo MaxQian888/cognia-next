@@ -1,0 +1,244 @@
+//! cognia — author-facing CLI for `type: "wasm"` plugins.
+//!
+//! Provides the five sub-commands the M3 plan calls out:
+//!
+//!   cognia plugin new <name>    — stamp a fresh template into a new dir
+//!   cognia plugin build         — run cargo-component + package zip
+//!   cognia plugin sign <bundle> — Ed25519 sign the bundle bytes
+//!   cognia plugin verify <bundle> — verify a `<bundle>.sig` against pubkey
+//!   cognia plugin dev           — watch + rebuild + notify a running cognia
+//!
+//! Plus a couple of utility commands that authors need at least once:
+//!
+//!   cognia plugin keygen        — produce a fresh Ed25519 keypair
+//!   cognia plugin embed-version — inject `cognia:api-version` custom section
+//!
+//! The CLI is deliberately small — the heavy lifting (cargo build, zip,
+//! signature math) is delegated to existing crates so it's a thin glue
+//! layer rather than its own build system.
+
+use anyhow::{anyhow, bail, Context, Result};
+use base64::Engine as _;
+use clap::{Parser, Subcommand};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+mod cmd_build;
+mod cmd_dev;
+mod cmd_keygen;
+mod cmd_new;
+mod cmd_sign;
+mod cmd_verify;
+mod packaging;
+mod signing;
+mod template;
+
+#[derive(Parser, Debug)]
+#[command(name = "cognia", version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: TopCommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum TopCommand {
+    /// Plugin-author subcommands.
+    Plugin {
+        #[command(subcommand)]
+        command: PluginCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum PluginCommand {
+    /// Scaffold a new plugin from the bundled template.
+    New {
+        /// Name of the plugin (becomes the crate name and plugin.json id).
+        name: String,
+        /// Directory to create. Defaults to ./<name>.
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
+    /// Build the plugin via `cargo component build --release` and package
+    /// the artifact into a `.zip` bundle.
+    Build {
+        /// Path to the plugin crate. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+        /// Output bundle path. Defaults to `target/cognia/<id>-<version>.zip`.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Skip the cargo-component build step (use an existing artifact).
+        #[arg(long)]
+        skip_build: bool,
+    },
+    /// Sign a bundle with an Ed25519 private key, producing `<bundle>.sig`.
+    Sign {
+        /// Bundle to sign.
+        bundle: PathBuf,
+        /// Path to the private key file (32 raw bytes, base64-encoded one
+        /// line). Use `cognia plugin keygen` to generate one.
+        #[arg(long)]
+        key: PathBuf,
+        /// Output signature path. Defaults to `<bundle>.sig`.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Verify a bundle's `<bundle>.sig` against the public key embedded in
+    /// the bundle's `plugin.json` (`author.publicKey`).
+    Verify {
+        bundle: PathBuf,
+        /// Override the public key (base64). Defaults to reading from the
+        /// bundle's `plugin.json` `author.publicKey`.
+        #[arg(long)]
+        public_key: Option<String>,
+        /// Optional explicit `.sig` path. Defaults to `<bundle>.sig`.
+        #[arg(long)]
+        signature: Option<PathBuf>,
+    },
+    /// Generate a fresh Ed25519 keypair. Saves the private key to `.cognia/`
+    /// and prints the public key (base64) for embedding in `plugin.json`.
+    Keygen {
+        /// Output directory for the keypair files. Defaults to `./.cognia`.
+        #[arg(long, default_value = ".cognia")]
+        out_dir: PathBuf,
+    },
+    /// Watch the plugin crate for changes, rebuild on save, and (when
+    /// passed `--reload-url`) ping a running cognia instance.
+    Dev {
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+        #[arg(long)]
+        reload_url: Option<String>,
+    },
+    /// Embed the contract version as a `cognia:api-version` custom section
+    /// in a built `.wasm`. Normally run automatically by `cognia plugin build`.
+    EmbedVersion {
+        /// `.wasm` file to patch.
+        wasm: PathBuf,
+        /// API version string (e.g. `0.1.0`).
+        version: String,
+        /// Output path. Defaults to overwriting `wasm` in place.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    match cli.command {
+        TopCommand::Plugin { command } => dispatch_plugin(command),
+    }
+}
+
+fn dispatch_plugin(command: PluginCommand) -> Result<()> {
+    match command {
+        PluginCommand::New { name, dir } => cmd_new::run(name, dir),
+        PluginCommand::Build { path, out, skip_build } => cmd_build::run(path, out, skip_build),
+        PluginCommand::Sign { bundle, key, out } => cmd_sign::run(bundle, key, out),
+        PluginCommand::Verify { bundle, public_key, signature } => {
+            cmd_verify::run(bundle, public_key, signature)
+        }
+        PluginCommand::Keygen { out_dir } => cmd_keygen::run(out_dir),
+        PluginCommand::Dev { path, reload_url } => cmd_dev::run(path, reload_url),
+        PluginCommand::EmbedVersion { wasm, version, out } => {
+            cmd_embed_version(wasm, version, out)
+        }
+    }
+}
+
+fn cmd_embed_version(wasm: PathBuf, version: String, out: Option<PathBuf>) -> Result<()> {
+    if !looks_like_semver(&version) {
+        bail!("--version must be MAJOR.MINOR.PATCH (got `{version}`)");
+    }
+    let bytes = std::fs::read(&wasm).with_context(|| format!("read {}", wasm.display()))?;
+    let patched = packaging::embed_api_version(&bytes, &version)?;
+    let dest = out.unwrap_or(wasm);
+    std::fs::write(&dest, patched).with_context(|| format!("write {}", dest.display()))?;
+    println!("embedded cognia:api-version = {version} into {}", dest.display());
+    Ok(())
+}
+
+pub(crate) fn looks_like_semver(s: &str) -> bool {
+    let mut parts = s.split('.');
+    let major = parts.next();
+    let minor = parts.next();
+    let patch = parts.next();
+    let rest = parts.next();
+    if rest.is_some() {
+        return false;
+    }
+    matches!(
+        (
+            major.and_then(|p| p.parse::<u32>().ok()),
+            minor.and_then(|p| p.parse::<u32>().ok()),
+            patch.and_then(|p| p.parse::<u32>().ok())
+        ),
+        (Some(_), Some(_), Some(_))
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn semver_predicate_accepts_well_formed() {
+        assert!(looks_like_semver("0.1.0"));
+        assert!(looks_like_semver("1.2.3"));
+        assert!(looks_like_semver("12.34.56"));
+    }
+
+    #[test]
+    fn semver_predicate_rejects_bad_inputs() {
+        assert!(!looks_like_semver("0.1"));
+        assert!(!looks_like_semver("0.1.0.0"));
+        assert!(!looks_like_semver("v0.1.0"));
+        assert!(!looks_like_semver("0.1.0-beta"));
+        assert!(!looks_like_semver(""));
+    }
+}
+
+/// Helper used across subcommands: read a plugin.json given a directory,
+/// returning the parsed value plus the absolute path that was opened.
+pub(crate) fn read_plugin_manifest(dir: &Path) -> Result<(serde_json::Value, PathBuf)> {
+    let mut path = dir.join("plugin.json");
+    if !path.exists() {
+        // Allow running from the crate root where plugin.json sits next to
+        // Cargo.toml; or from one level deeper if the user organized files.
+        let alt = dir.join("manifest").join("plugin.json");
+        if alt.exists() {
+            path = alt;
+        } else {
+            bail!("plugin.json not found in {}", dir.display());
+        }
+    }
+    let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
+    Ok((parsed, path))
+}
+
+/// Shell helper used by `build` + `dev` to run a subprocess and stream
+/// its stdout/stderr to the user.
+pub(crate) fn run_streaming(mut cmd: Command, label: &str) -> Result<()> {
+    let status = cmd
+        .status()
+        .with_context(|| format!("spawn `{label}` failed"))?;
+    if !status.success() {
+        return Err(anyhow!("`{label}` exited with status {:?}", status.code()));
+    }
+    Ok(())
+}
+
+/// Encode a base64 string. Centralized so swaps between standard / no-pad
+/// (e.g. for the public-key field in `plugin.json`) stay consistent.
+pub(crate) fn b64_encode(bytes: &[u8]) -> String {
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+pub(crate) fn b64_decode(s: &str) -> Result<Vec<u8>> {
+    base64::engine::general_purpose::STANDARD
+        .decode(s.trim().as_bytes())
+        .map_err(|e| anyhow!("invalid base64: {e}"))
+}

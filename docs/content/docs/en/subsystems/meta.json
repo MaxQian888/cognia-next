@@ -1,0 +1,21 @@
+{
+  "title": "Subsystems",
+  "pages": [
+    "scheduler",
+    "plugin-system",
+    "visual-workflows",
+    "platform-connectors",
+    "external-bridge",
+    "mcp-server-tauri",
+    "mcp-server-sidecar",
+    "wiki-generator",
+    "a2ui-system",
+    "canvas",
+    "artifacts-sandbox",
+    "remote-control",
+    "companion-api",
+    "observability",
+    "misc-subsystems",
+    "employee-twin"
+  ]
+}

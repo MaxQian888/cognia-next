@@ -9,6 +9,7 @@ import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
 import { listBackupHistory } from "@/lib/db/backup-history"
 import { decryptBackupPackage } from "@/lib/data/crypto"
 import { isEncryptedEnvelope } from "@/lib/data/migrate"
+import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 
 // jsdom doesn't expose URL.createObjectURL; mock it for the web download path.
 beforeAll(() => {
@@ -134,7 +135,6 @@ describe("useFullBackup", () => {
     expect(captured).toBeTruthy()
     const env = JSON.parse(captured!)
     expect(isEncryptedEnvelope(env)).toBe(true)
-    const { getDefaultBackupPassphrase } = await import("@/lib/data/backup-key")
     const key = await getDefaultBackupPassphrase()
     expect(key).toBeTruthy()
     const plaintext = await decryptBackupPackage(env, key!)

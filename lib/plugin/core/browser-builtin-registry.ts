@@ -4,13 +4,22 @@ import type {
   PluginManifest,
 } from "@/types/plugin"
 
-import clipboardHistoryManifest from "../../../plugins/clipboard-history/plugin.json"
-import clipboardToolsManifest from "../../../plugins/clipboard-tools/plugin.json"
-import githubDeliveryManifest from "../../../plugins/github-delivery/plugin.json"
-import promptTemplatesManifest from "../../../plugins/prompt-templates/plugin.json"
-import screenshotManifest from "../../../plugins/screenshot/plugin.json"
-import webToolsManifest from "../../../plugins/web-tools/plugin.json"
-import workspaceToolsManifest from "../../../plugins/workspace-tools/plugin.json"
+import clipboardHistoryManifest from "@/plugins/clipboard-history/plugin.json"
+import clipboardToolsManifest from "@/plugins/clipboard-tools/plugin.json"
+import githubDeliveryManifest from "@/plugins/github-delivery/plugin.json"
+import promptTemplatesManifest from "@/plugins/prompt-templates/plugin.json"
+import screenshotManifest from "@/plugins/screenshot/plugin.json"
+import webToolsManifest from "@/plugins/web-tools/plugin.json"
+import workspaceToolsManifest from "@/plugins/workspace-tools/plugin.json"
+
+// Static imports for built-in plugin modules
+import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
+import workspaceToolsModule from "@/plugins/workspace-tools/src/index"
+import webToolsModule from "@/plugins/web-tools/src/index"
+import screenshotModule from "@/plugins/screenshot/src/index"
+import promptTemplatesModule from "@/plugins/prompt-templates/src/index"
+import clipboardHistoryModule from "@/plugins/clipboard-history/src/index"
+import githubDeliveryModule from "@/plugins/github-delivery/src/index"
 
 export interface BrowserBuiltinRegistryEntry {
   manifest: PluginManifest
@@ -23,69 +32,52 @@ function asPluginManifest(manifest: unknown): PluginManifest {
   return manifest as PluginManifest
 }
 
+function resolvePluginModule(mod: unknown): PluginDefinition {
+  return (mod as { default?: PluginDefinition }).default || (mod as PluginDefinition)
+}
+
 const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
   {
     manifest: asPluginManifest(clipboardToolsManifest),
     path: "builtin://cognia-clipboard-tools",
     compatibilityDiagnostics: [],
-    load: async () => {
-      const mod = await import("../../../plugins/clipboard-tools/src/index")
-      return (mod.default || mod) as PluginDefinition
-    },
+    load: async () => resolvePluginModule(clipboardToolsModule),
   },
   {
     manifest: asPluginManifest(workspaceToolsManifest),
     path: "builtin://cognia-workspace-tools",
     compatibilityDiagnostics: [],
-    load: async () => {
-      const mod = await import("../../../plugins/workspace-tools/src/index")
-      return (mod.default || mod) as PluginDefinition
-    },
+    load: async () => resolvePluginModule(workspaceToolsModule),
   },
   {
     manifest: asPluginManifest(webToolsManifest),
     path: "builtin://cognia-web-tools",
     compatibilityDiagnostics: [],
-    load: async () => {
-      const mod = await import("../../../plugins/web-tools/src/index")
-      return (mod.default || mod) as PluginDefinition
-    },
+    load: async () => resolvePluginModule(webToolsModule),
   },
   {
     manifest: asPluginManifest(screenshotManifest),
     path: "builtin://cognia-screenshot",
     compatibilityDiagnostics: [],
-    load: async () => {
-      const mod = await import("../../../plugins/screenshot/src/index")
-      return (mod.default || mod) as PluginDefinition
-    },
+    load: async () => resolvePluginModule(screenshotModule),
   },
   {
     manifest: asPluginManifest(promptTemplatesManifest),
     path: "builtin://cognia-prompt-templates",
     compatibilityDiagnostics: [],
-    load: async () => {
-      const mod = await import("../../../plugins/prompt-templates/src/index")
-      return (mod.default || mod) as PluginDefinition
-    },
+    load: async () => resolvePluginModule(promptTemplatesModule),
   },
   {
     manifest: asPluginManifest(clipboardHistoryManifest),
     path: "builtin://cognia-clipboard-history",
     compatibilityDiagnostics: [],
-    load: async () => {
-      const mod = await import("../../../plugins/clipboard-history/src/index")
-      return (mod.default || mod) as PluginDefinition
-    },
+    load: async () => resolvePluginModule(clipboardHistoryModule),
   },
   {
     manifest: asPluginManifest(githubDeliveryManifest),
     path: "builtin://github-delivery",
     compatibilityDiagnostics: [],
-    load: async () => {
-      const mod = await import("../../../plugins/github-delivery/src/index")
-      return (mod.default || mod) as PluginDefinition
-    },
+    load: async () => resolvePluginModule(githubDeliveryModule),
   },
 ]
 

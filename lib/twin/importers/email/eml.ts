@@ -3,7 +3,7 @@
  * `mbox.ts:parseMbox` but for a one-off `.eml` file (no boundary splitter).
  */
 
-import type { RawSource } from "../../ingest/parse"
+import type { RawSource } from "@/lib/twin/ingest/parse"
 import { parseMbox } from "./mbox"
 
 export interface EmlImportOptions {

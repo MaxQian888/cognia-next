@@ -16,7 +16,7 @@
  * embedder still sees the conversation flow.
  */
 
-import type { RawSource } from "../../ingest/parse"
+import type { RawSource } from "@/lib/twin/ingest/parse"
 
 interface SlackUserProfile {
   real_name?: string

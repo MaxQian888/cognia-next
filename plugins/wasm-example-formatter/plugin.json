@@ -1,0 +1,58 @@
+{
+  "id": "wasm-example-formatter",
+  "name": "WASM Example: Rust Formatter",
+  "version": "0.1.0",
+  "description": "Reference plugin showing fs + process + workflow composition: invokes rustfmt on input source via the cognia WASM process capability.",
+  "type": "wasm",
+  "capabilities": ["tools", "workflow"],
+  "wasmMain": "wasm_example_formatter.wasm",
+  "wasm": {
+    "apiVersion": "0.1.0",
+    "memoryLimitMb": 32,
+    "callTimeoutMs": 15000
+  },
+  "permissions": ["notification", "filesystem:read", "filesystem:write", "process:spawn"],
+  "author": {
+    "name": "cognia-next",
+    "publicKey": ""
+  },
+  "license": "MIT",
+  "tools": [
+    {
+      "name": "format_rust",
+      "description": "Format a Rust source string with rustfmt. Returns the formatted source plus rustfmt's exit code and stderr.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "description": "Rust source to format" },
+          "args": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Extra rustfmt args (optional)"
+          }
+        },
+        "required": ["source"]
+      }
+    }
+  ],
+  "workflows": {
+    "nodes": [
+      {
+        "kind": "action.wasm-example-formatter.format",
+        "category": "action",
+        "name": "Format Rust",
+        "description": "Run rustfmt on a Rust source string",
+        "inputs": {
+          "type": "object",
+          "properties": {
+            "source": { "type": "string" }
+          },
+          "required": ["source"]
+        }
+      }
+    ]
+  },
+  "engines": {
+    "cognia": ">=0.4.0"
+  }
+}

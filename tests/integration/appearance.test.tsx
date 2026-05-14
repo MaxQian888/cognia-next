@@ -84,8 +84,12 @@ import { CustomThemeApplier } from "@/lib/appearance/custom-theme-applier"
 import { BackgroundApplier } from "@/lib/appearance"
 import { CSS_VAR_KEYS } from "@/lib/appearance/css-var"
 import { BUILT_IN_VSCODE_THEMES } from "@/lib/appearance/built-in-vscode-themes"
+import { importVscodeThemeJson } from "@/lib/appearance/vscode-theme/parse-json"
+import { deriveOppositeVariant } from "@/lib/appearance/derive-variant"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
+import fs from "node:fs"
+import path from "node:path"
 
 function renderApp(children: ReactNode = null) {
   return render(
@@ -206,13 +210,8 @@ describe("appearance integration: 8-step manual checklist", () => {
     renderApp()
     await waitForLoaded()
 
-    const { importVscodeThemeJson } = await import("@/lib/appearance/vscode-theme/parse-json")
-    const { deriveOppositeVariant } = await import("@/lib/appearance/derive-variant")
-
     // Read a fixture from disk — the same one the JSON-import dialog
     // uses for its own tests, so the round-trip stays load-bearing.
-    const fs = await import("node:fs")
-    const path = await import("node:path")
     const fixturePath = path.join(
       process.cwd(),
       "lib",

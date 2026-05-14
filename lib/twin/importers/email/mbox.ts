@@ -11,7 +11,7 @@
  * embedder still sees something useful.
  */
 
-import type { RawSource } from "../../ingest/parse"
+import type { RawSource } from "@/lib/twin/ingest/parse"
 
 const FROM_LINE_RE = /^From [^\n]*\n/m
 const HEADER_BODY_SPLIT_RE = /\n\r?\n/

@@ -1,0 +1,87 @@
+---
+title: Lifecycle Hooks
+description: Subscribing to host events — chat send, chat response, twin ingest, scheduler events, and connector inbound.
+---
+
+# Lifecycle Hooks
+
+Plugins subscribe to host lifecycle events inside `onActivate()`. The hooks system (`lib/plugin/messaging/hooks-system.ts`) dispatches events to all registered listeners.
+
+## Available hooks
+
+| Hook | When it fires | Payload | Can cancel? |
+|------|---------------|---------|-------------|
+| `chat.before-send` | Before a user message is sent to the AI | `{ sessionId, content, characterId }` | Yes — return `{ cancel: true, reason }` |
+| `chat.after-response` | After the AI finishes streaming a response | `{ sessionId, messageId, content }` | No |
+| `twin.ingest.completed` | When a TwinSource finishes ingest | `{ sourceId, jobId, chunkCount }` | No |
+| `scheduler.job.run` | When a scheduled task runs | `{ jobId, trigger, payload }` | No |
+| `connector.inbound` | When ConnectorBus receives an event | `{ platform, conversationKey, content }` | No |
+| `plugin.activated` | When any plugin is activated | `{ pluginId }` | No |
+| `plugin.deactivated` | When any plugin is deactivated | `{ pluginId }` | No |
+
+## Subscribing
+
+```ts title="main.js"
+export async function onActivate(ctx) {
+  // Chat before-send: prepend a system hint
+  ctx.hooks.on("chat.before-send", async (payload) => {
+    if (payload.characterId === "my-character") {
+      payload.content = `[Plugin hint] Consider using tool X.\n\n${payload.content}`
+    }
+  })
+
+  // Chat after-response: log to plugin storage
+  ctx.hooks.on("chat.after-response", async (payload) => {
+    await ctx.api.storage.set(`last-response-${payload.sessionId}`, payload.messageId)
+  })
+
+  // Twin ingest: trigger re-distill
+  ctx.hooks.on("twin.ingest.completed", async (payload) => {
+    if (payload.chunkCount > 100) {
+      await ctx.api.notification.toast(`Twin source ${payload.sourceId} ingested ${payload.chunkCount} chunks`)
+    }
+  })
+
+  // Scheduled job: handle plugin-registered cron tasks
+  ctx.hooks.on("scheduler.job.run", async (payload) => {
+    if (payload.jobId.startsWith("my-plugin:")) {
+      await runDailySync(ctx)
+    }
+  })
+}
+```
+
+## Cancelling events
+
+Only `chat.before-send` supports cancellation. Return a cancellation object:
+
+```ts
+ctx.hooks.on("chat.before-send", async (payload) => {
+  if (containsForbiddenWords(payload.content)) {
+    return { cancel: true, reason: "Content violates plugin policy" }
+  }
+})
+```
+
+The chat UI shows the reason to the user.
+
+## Cleanup on deactivate
+
+```ts
+export async function onDeactivate(ctx) {
+  // All hooks registered through ctx.hooks are auto-removed.
+  // Clean up any resources you allocated manually:
+  await ctx.api.storage.close()
+}
+```
+
+## Hook ordering
+
+Hooks run in registration order. If multiple plugins register the same hook, they execute sequentially. A cancellation in `chat.before-send` stops the chain.
+
+## Related
+
+<Cards>
+  <Card title="API Overview" href="./api-overview" description="APIs available inside hook handlers." />
+  <Card title="Surfaces" href="./surfaces" description="UI extension points." />
+</Cards>

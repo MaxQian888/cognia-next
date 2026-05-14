@@ -1,0 +1,53 @@
+# Cognia plugin template — minimal starter for a `type: "wasm"` plugin
+# compiled to a WebAssembly component against the cognia v0.1 WIT
+# contract. Authors typically run `cognia plugin new <name>` (CLI) which
+# stamps a copy of this directory into the working tree with the
+# requested name substituted into `id`, `name`, and the crate name.
+#
+# After scaffolding:
+#   rustup target add wasm32-wasip2
+#   cargo install --locked cargo-component
+#   cargo component build --release
+#
+# Then point cognia at the produced `.wasm` via the "Install local WASM
+# plugin" button.
+
+[package]
+name = "cognia-plugin-template"
+version = "0.1.0"
+edition = "2021"
+description = "Cognia WASM plugin template"
+license = "MIT OR Apache-2.0"
+
+# `cargo-component` consumes this section to discover the WIT contract
+# the crate is built against, where to write `bindings.rs`, and which
+# adapter (preview2 / preview1) to use. Authors normally don't touch
+# anything here except `package`, which maps the WIT package name in
+# `wit/world.wit` to its on-disk WIT directory.
+[package.metadata.component]
+package = "cognia:plugin"
+
+[package.metadata.component.target]
+path = "wit"
+world = "cognia-plugin"
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+# `wit-bindgen` is the guest-side runtime support shim that the
+# bindings module relies on. cargo-component manages the version
+# transitively; pinning here is defense-in-depth so a future
+# cargo-component release doesn't silently churn the API.
+wit-bindgen-rt = { version = "0.34", features = ["bitflags"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+# `opt-level = "s"` strikes the right balance for WASM components —
+# smaller binaries amortize host compile time + memory.
+opt-level = "s"
+lto = true
+strip = "debuginfo"
+codegen-units = 1

@@ -99,9 +99,6 @@ export {
 
 /** Initialize the scheduler — register executors, start the loop. */
 export async function initSchedulerSystem(): Promise<void> {
-  const { registerBuiltInExecutors } = await import("./executors")
-  const { initTaskScheduler } = await import("./task-scheduler")
-
   registerBuiltInExecutors()
   await initTaskScheduler()
   log.info("[Scheduler] Scheduler system initialized")
@@ -109,7 +106,6 @@ export async function initSchedulerSystem(): Promise<void> {
 
 /** Stop the scheduler. */
 export async function stopSchedulerSystem(): Promise<void> {
-  const { stopTaskScheduler } = await import("./task-scheduler")
   stopTaskScheduler()
   log.info("[Scheduler] Scheduler system stopped")
 }

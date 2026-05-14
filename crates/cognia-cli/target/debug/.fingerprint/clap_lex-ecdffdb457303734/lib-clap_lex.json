@@ -1,0 +1,20 @@
+{
+  "rustc": 3674164131150989441,
+  "features": "[]",
+  "declared_features": "[]",
+  "target": 8621696840636553848,
+  "profile": 7362931786170150860,
+  "path": 2515974298770023304,
+  "deps": [],
+  "local": [
+    {
+      "CheckDepInfo": {
+        "dep_info": "debug\\.fingerprint\\clap_lex-ecdffdb457303734\\dep-lib-clap_lex",
+        "checksum": false
+      }
+    }
+  ],
+  "rustflags": [],
+  "config": 8247474407144887393,
+  "compile_kind": 0
+}

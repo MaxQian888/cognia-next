@@ -77,9 +77,14 @@ const VALID_PERMISSIONS: PluginPermission[] = [
   "session:write",
   "agent:control",
   "python:execute",
+  "secrets:read",
+  "secrets:write",
 ]
 
-const VALID_PLUGIN_TYPES: PluginType[] = ["frontend", "python", "hybrid"]
+const VALID_PLUGIN_TYPES: PluginType[] = ["frontend", "python", "hybrid", "wasm"]
+
+const WASM_API_VERSION_PATTERN = /^\d+\.\d+\.\d+$/
+const WASM_PREOPEN_PATH_PATTERN = /^[^\0]+$/
 
 const ID_PATTERN = /^[a-z0-9]([a-z0-9-_.]*[a-z0-9])?$/
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(-[a-z0-9]+)?$/i
@@ -225,6 +230,80 @@ export function validatePluginManifest(
           'Python plugin must have a "pythonMain" entry point',
           "Add a valid relative Python entry file path in `pythonMain`."
         )
+      }
+    }
+  }
+
+  if (m.type === "wasm") {
+    if (!m.wasmMain || typeof m.wasmMain !== "string") {
+      pushError(
+        "wasmMain",
+        "manifest.wasmMain.required",
+        'WASM plugin must have a "wasmMain" entry point',
+        "Set `wasmMain` to the relative path of the compiled `.wasm` component."
+      )
+    } else if (!m.wasmMain.toLowerCase().endsWith(".wasm")) {
+      pushError(
+        "wasmMain",
+        "manifest.wasmMain.invalid_extension",
+        '"wasmMain" must point to a `.wasm` file'
+      )
+    }
+    const wasmBlock = m.wasm as Record<string, unknown> | undefined
+    if (!wasmBlock || typeof wasmBlock !== "object") {
+      pushError(
+        "wasm",
+        "manifest.wasm.required",
+        'WASM plugin must declare a "wasm" block with at least `apiVersion`',
+        'Example: `"wasm": { "apiVersion": "0.1.0" }`.'
+      )
+    } else {
+      if (
+        typeof wasmBlock.apiVersion !== "string" ||
+        !WASM_API_VERSION_PATTERN.test(wasmBlock.apiVersion)
+      ) {
+        pushError(
+          "wasm.apiVersion",
+          "manifest.wasm.apiVersion.invalid",
+          'WASM `apiVersion` must be semver MAJOR.MINOR.PATCH (e.g. "0.1.0")'
+        )
+      }
+      if (
+        wasmBlock.memoryLimitMb !== undefined &&
+        (typeof wasmBlock.memoryLimitMb !== "number" ||
+          wasmBlock.memoryLimitMb <= 0 ||
+          wasmBlock.memoryLimitMb > 4096)
+      ) {
+        pushError(
+          "wasm.memoryLimitMb",
+          "manifest.wasm.memoryLimitMb.invalid",
+          "WASM `memoryLimitMb` must be a positive number ≤ 4096"
+        )
+      }
+      if (
+        wasmBlock.callTimeoutMs !== undefined &&
+        (typeof wasmBlock.callTimeoutMs !== "number" ||
+          wasmBlock.callTimeoutMs <= 0 ||
+          wasmBlock.callTimeoutMs > 600_000)
+      ) {
+        pushError(
+          "wasm.callTimeoutMs",
+          "manifest.wasm.callTimeoutMs.invalid",
+          "WASM `callTimeoutMs` must be a positive number ≤ 600000 (10 min)"
+        )
+      }
+      const fsBlock = wasmBlock.fs as Record<string, unknown> | undefined
+      if (fsBlock && Array.isArray(fsBlock.preopens)) {
+        for (let i = 0; i < fsBlock.preopens.length; i++) {
+          const p = fsBlock.preopens[i]
+          if (typeof p !== "string" || !WASM_PREOPEN_PATH_PATTERN.test(p)) {
+            pushError(
+              `wasm.fs.preopens[${i}]`,
+              "manifest.wasm.preopens.invalid",
+              `WASM preopen path at index ${i} must be a non-empty string without NUL bytes`
+            )
+          }
+        }
       }
     }
   }

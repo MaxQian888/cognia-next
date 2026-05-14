@@ -1,0 +1,170 @@
+---
+title: Plugin Manifest
+description: Complete reference for the cognia-plugin.json manifest format — schema fields, validation, and examples.
+---
+
+# Plugin Manifest
+
+Every Cognia plugin ships with a `cognia-plugin.json` manifest. It is the single source of truth for the plugin's identity, permissions, surfaces, scheduled jobs, connectors, and workflow nodes. The host validates it with Zod before any code runs.
+
+## Minimal manifest
+
+```json title="cognia-plugin.json"
+{
+  "schemaVersion": 1,
+  "id": "com.example.my-plugin",
+  "name": "My Plugin",
+  "version": "0.1.0",
+  "entry": "main.js",
+  "permissions": ["storage.read"]
+}
+```
+
+## Full manifest example
+
+```json title="cognia-plugin.json"
+{
+  "schemaVersion": 1,
+  "id": "com.example.advanced-plugin",
+  "name": "Advanced Plugin",
+  "version": "1.2.0",
+  "description": "Demonstrates every manifest feature.",
+  "author": "Example Team <example@example.com>",
+  "icon": "icon.svg",
+  "entry": "main.js",
+  "permissions": [
+    "chat.read",
+    "chat.send",
+    "twin.read",
+    "scheduler.register",
+    "fs.read:$DOWNLOADS",
+    "network.fetch:api.example.com"
+  ],
+  "surfaces": [
+    { "kind": "panel", "id": "main", "title": "My Plugin" },
+    { "kind": "chat-action", "id": "summarize", "label": "Summarize" }
+  ],
+  "scheduledJobs": [
+    {
+      "id": "daily-sync",
+      "trigger": { "type": "cron", "expression": "0 9 * * *" }
+    }
+  ],
+  "connectors": [
+    { "type": "custom-im", "factory": "./connectors/my-im.js" }
+  ],
+  "workflowNodes": [
+    { "kind": "action.custom.report", "factory": "./workflow/report.js" }
+  ],
+  "mcpServerPresets": [
+    {
+      "id": "my-mcp",
+      "name": "My MCP Server",
+      "command": "npx",
+      "args": ["-y", "@example/mcp-server"]
+    }
+  ],
+  "skills": [
+    {
+      "id": "my-skill",
+      "name": "My Skill",
+      "description": "Does something useful."
+    }
+  ]
+}
+```
+
+## Field reference
+
+<TypeTable
+  type={{
+    schemaVersion: {
+      description: "Manifest format version. Currently `1`.",
+      type: "1",
+      required: true,
+    },
+    id: {
+      description: "Reverse-DNS identifier; must be unique among installed plugins. Max 64 chars. Regex: `^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$`.",
+      type: "string",
+      required: true,
+    },
+    name: {
+      description: "Display name in Settings and Marketplace.",
+      type: "string",
+      required: true,
+    },
+    version: {
+      description: "Semver string. Used for update detection.",
+      type: "string",
+      required: true,
+    },
+    description: {
+      description: "Short description shown in install dialog.",
+      type: "string",
+    },
+    author: {
+      description: "Free-form author label.",
+      type: "string",
+    },
+    icon: {
+      description: "Relative path to an SVG icon. Will be sanitized.",
+      type: "string",
+    },
+    entry: {
+      description: "ES module entry point; loaded into the Web Worker.",
+      type: "string",
+      required: true,
+    },
+    permissions: {
+      description: "Array of capability strings requested at install time.",
+      type: "string[]",
+      required: true,
+    },
+    surfaces: {
+      description: "UI surfaces contributed by the plugin.",
+      type: "SurfaceDef[]",
+    },
+    scheduledJobs: {
+      description: "Tasks to register with the scheduler on activation.",
+      type: "ScheduledJobDef[]",
+    },
+    connectors: {
+      description: "Connector adapter definitions for ConnectorBus.",
+      type: "PluginConnectorDef[]",
+    },
+    workflowNodes: {
+      description: "Custom workflow node executor definitions.",
+      type: "WorkflowNodeDef[]",
+    },
+    mcpServerPresets: {
+      description: "MCP server presets to add to the gallery.",
+      type: "PluginMcpServerPresetDef[]",
+    },
+    skills: {
+      description: "Skills contributed by the plugin.",
+      type: "PluginSkillDef[]",
+    },
+  }}
+/>
+
+## Validation
+
+`lib/plugin/core/validation.ts:validatePluginManifest` runs a Zod schema. Any missing required field or type mismatch causes immediate install failure with a descriptive error.
+
+Common validation errors:
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `id too long` | `id` > 64 chars | Shorten the reverse-DNS id |
+| `invalid id format` | Contains uppercase or special chars | Use lowercase, digits, dots, hyphens, underscores only |
+| `entry not found` | `entry` path does not exist in the zip | Check the file is at the root of the archive |
+| `unsupported schemaVersion` | `schemaVersion` is not `1` | Use `1` |
+| `permission format invalid` | Permission string doesn't match `domain.action:scope` | Follow the permission format documented in [Permissions](./permissions) |
+
+## Related
+
+<Cards>
+  <Card title="Permissions" href="./permissions" description="Permission string format and scope syntax." />
+  <Card title="API Overview" href="./api-overview" description="15 API namespaces available to plugins." />
+  <Card title="Packaging" href="./packaging" description="How to build and publish a .cognia-plugin archive." />
+</Cards>

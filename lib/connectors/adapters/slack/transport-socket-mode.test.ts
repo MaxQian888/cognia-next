@@ -15,6 +15,7 @@ import {
   connectorsWsClose,
   connectorsHttpRequest,
 } from "@/lib/connectors/tauri/commands"
+import { startSocketMode } from "./transport-socket-mode"
 
 const mockListen = listen as jest.Mock
 const mockWsOpen = connectorsWsOpen as jest.Mock
@@ -89,8 +90,6 @@ describe("startSocketMode", () => {
   it("yields events from events_api frames and ACKs with envelope_id", async () => {
     const session = createFakeWsSession()
     mockListen.mockImplementation(session.listenImpl)
-
-    const { startSocketMode } = await import("./transport-socket-mode")
 
     const ctrl = new AbortController()
     const yielded: Array<{ type: string }> = []
@@ -182,8 +181,6 @@ describe("startSocketMode", () => {
     const session = createFakeWsSession()
     mockListen.mockImplementation(session.listenImpl)
 
-    const { startSocketMode } = await import("./transport-socket-mode")
-
     const ctrl = new AbortController()
     const yielded: unknown[] = []
 
@@ -235,8 +232,6 @@ describe("startSocketMode", () => {
 
   it("stops immediately when signal is pre-aborted", async () => {
     mockListen.mockResolvedValue(jest.fn())
-
-    const { startSocketMode } = await import("./transport-socket-mode")
 
     const ctrl = new AbortController()
     ctrl.abort()

@@ -10,7 +10,7 @@
  * tests / web-mode previews fail cleanly.
  */
 
-import type { RawSource } from "../../ingest/parse"
+import type { RawSource } from "@/lib/twin/ingest/parse"
 
 export interface GitRepoImportOptions {
   twinId: string

@@ -26,6 +26,8 @@ jest.mock("@/hooks/agent-trace", () => ({
   }),
 }))
 
+import { toast } from "@/components/ui/sonner"
+
 jest.mock("@/components/ui/sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn() },
 }))
@@ -611,7 +613,6 @@ describe("ExternalAgentManager", () => {
   })
 
   it("toasts an error when the add-agent name is empty", async () => {
-    const { toast } = await import("@/components/ui/sonner")
     mockUseExternalAgent.mockReturnValue(baseHookValue())
     render(wrap(<ExternalAgentManager />))
     fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
@@ -634,7 +635,6 @@ describe("ExternalAgentManager", () => {
   })
 
   it("toasts a connection-failed message when connect rejects", async () => {
-    const { toast } = await import("@/components/ui/sonner")
     ;(toast.error as jest.Mock).mockClear()
     const connect = jest.fn().mockRejectedValue(new Error("nope"))
     const agent = makeAgent({
@@ -737,7 +737,6 @@ describe("ExternalAgentManager", () => {
   })
 
   it("toasts a validation error when the endpoint field is empty for HTTP transport", async () => {
-    const { toast } = await import("@/components/ui/sonner")
     ;(toast.error as jest.Mock).mockClear()
     mockUseExternalAgent.mockReturnValue(baseHookValue())
     render(wrap(<ExternalAgentManager />))

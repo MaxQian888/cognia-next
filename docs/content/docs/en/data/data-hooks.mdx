@@ -1,0 +1,249 @@
+---
+title: Data Hooks
+description: The DataAdapter abstraction — letting chat components run the same code against Dexie (desktop) or a WebSocket bridge (mobile PWA).
+---
+
+# Data Hooks
+
+`lib/data-hooks/` is the "slot" between the chat UI and the persistence layer. It extracts the pattern of components directly calling Dexie (`useLiveQuery(() => listCharacters())`) behind an interface called `DataAdapter`, injected via `<DataAdapterProvider adapter={...}>`. The desktop gets a Dexie implementation; the mobile PWA will later get a WebSocket bridge implementation — the same component code runs in both forms.
+
+<TLDR>
+  `types.ts` defines the `DataAdapter` interface (4 reactive `use*` reads + 4 one-off mutations). `context.tsx` is a
+  React Context plus a set of convenience hooks (`useCharacters / useCharacter / useSkillsByIds / usePresets`
+  etc.); consumers only need these hooks and are unaware of what sits underneath. `dexie-adapter.tsx` is the desktop
+  production implementation, directly reusing existing functions from `lib/db/*`; reactive reads use `useLiveQuery` from
+  `dexie-react-hooks`. All hooks include an SSR guard (`typeof window !== "undefined"`), making them safe to use under
+  `output: "export"`.
+</TLDR>
+
+## Design Motivation
+
+The cognia-next desktop app stores data in Dexie (IndexedDB), and chat components read it directly via `useLiveQuery(() => listCharacters())`. But the mobile PWA cannot replicate Dexie — data stays on the desktop machine, and the phone fetches it over LAN/tunnel via WebSocket. The same `ChatHeader / Composer / MessageRenderer` should not have two copies of the code.
+
+DataAdapter unifies "reactive data fetching + submitting changes" into an interface; the desktop injects a Dexie implementation, the mobile injects a WS implementation, and components neither know nor need to know.
+
+## Interface
+
+```ts title="lib/data-hooks/types.ts"
+export type SessionPatch = Partial<Omit<ChatSession, "id" | "createdAt">>
+
+export interface DataAdapter {
+  // === Reactive reads (React hooks; must be called at component / hook top level) ===
+  useCharacters(): Character[] | undefined
+  useCharacter(id: string | null | undefined): Character | undefined
+  useSkillsByIds(ids: readonly string[] | null | undefined): Skill[] | undefined
+  usePresets(): SystemPromptPreset[] | undefined
+
+  // === Mutations (plain Promise) ===
+  clearMessages(sessionId: string): Promise<void>
+  updateSession(id: string, patch: SessionPatch): Promise<void>
+  recordPresetUsage(id: string): Promise<void>
+  trustWorkspace(path: string, note?: string): Promise<void>
+}
+```
+
+Key constraints:
+
+- **The `use*` methods are real React hooks** — implementations must trigger the same hooks in the same order on every call (`useLiveQuery`, etc.). The WS implementation must guarantee this itself.
+- **Returning `undefined` means loading** — every implementation returns `undefined` when data is not yet ready; components uniformly render a "loading" state.
+- **Empty collections return `[]`**, not `undefined` (avoids ambiguity between loading and "empty list").
+- **Mutations do not require awaiting** — `void adapter.recordPresetUsage(id)` is valid usage; the UI uses optimistic updates.
+
+## React Context and Convenience Hooks
+
+`context.tsx` provides a Provider plus a set of read / write convenience hooks:
+
+```tsx title="lib/data-hooks/context.tsx"
+const DataAdapterContext = createContext<DataAdapter | null>(null)
+
+export function DataAdapterProvider({ adapter, children }: ProviderProps) {
+  return <DataAdapterContext.Provider value={adapter}>{children}</DataAdapterContext.Provider>
+}
+
+export function useDataAdapter(): DataAdapter {
+  const adapter = useContext(DataAdapterContext)
+  if (!adapter) {
+    throw new Error(
+      "useDataAdapter() called outside of <DataAdapterProvider>. " +
+        "Mount it once near the root of your app (see app/layout.tsx)."
+    )
+  }
+  return adapter
+}
+
+// Convenience hooks — component code only imports these
+export function useCharacters() {
+  return useDataAdapter().useCharacters()
+}
+export function useCharacter(id) {
+  return useDataAdapter().useCharacter(id)
+}
+export function useSkillsByIds(ids) {
+  return useDataAdapter().useSkillsByIds(ids)
+}
+export function usePresets() {
+  return useDataAdapter().usePresets()
+}
+
+export function useClearMessages() {
+  const adapter = useDataAdapter()
+  return (sessionId: string) => adapter.clearMessages(sessionId)
+}
+// ... remaining mutations follow the same pattern
+```
+
+From the component's perspective, `import { useCharacters } from "@/lib/data-hooks/context"` means "give me the character list regardless of who is underneath."
+
+The Provider must be mounted at the top of the tree — `app/layout.tsx` places `DataAdapterProvider` at the end of the provider chain. Calling convenience hooks from anywhere outside this tree throws an error. The error message explicitly points to "mount the Provider," avoiding silent failures when the Provider is missing in tests or subtrees.
+
+## Dexie Adapter
+
+Desktop production implementation:
+
+```tsx title="lib/data-hooks/dexie-adapter.tsx"
+const isClient = (): boolean => typeof window !== "undefined"
+
+export const dexieAdapter: DataAdapter = {
+  useCharacters() {
+    return useLiveQuery(() => (isClient() ? listCharacters() : Promise.resolve([])), [])
+  },
+
+  useCharacter(id) {
+    return useLiveQuery(
+      () => (isClient() && id ? getCharacter(id) : Promise.resolve(undefined)),
+      [id ?? ""]
+    )
+  },
+
+  useSkillsByIds(ids) {
+    const key = ids?.join(",") ?? "" // stable key to avoid array ref jitter
+    return useLiveQuery(
+      () => (isClient() && ids && ids.length > 0 ? listSkillsByIds([...ids]) : Promise.resolve([])),
+      [key]
+    )
+  },
+
+  usePresets() {
+    return useLiveQuery(() => (isClient() ? listPresets() : Promise.resolve([])), [])
+  },
+
+  async clearMessages(sessionId) {
+    await clearMessages(sessionId)
+  },
+  async updateSession(id, patch) {
+    await updateSession(id, patch)
+  },
+  async recordPresetUsage(id) {
+    await recordPresetUsage(id)
+  },
+  async trustWorkspace(path, note) {
+    await trustWorkspace(path, note)
+  },
+}
+```
+
+Implementation highlights:
+
+- **SSR guard** — all reads first check `typeof window !== "undefined"`. Next.js static export executes the component tree at build time, and IndexedDB does not exist in Node; the guard prevents the build from crashing. Mutations do not need a guard, since they are only triggered after user interactions.
+- **Stable dependency key** — `useSkillsByIds` accepts an array `ids`, but the parent component may pass a new ref on every render. `ids.join(",")` ensures `useLiveQuery` only re-runs when the members change, avoiding unnecessary IndexedDB round-trips.
+- **Promise.resolve fallback** — `useLiveQuery` expects the function to return a Promise; during SSR / with empty input, a resolved Promise is returned so the type contract stays intact.
+
+## Mounting Location
+
+Provider chain tail in `app/layout.tsx`:
+
+```tsx title="app/layout.tsx (excerpt)"
+<ThemeProvider>
+  <LocaleGate>
+    <SettingsSyncProvider>
+      <TauriProvider>
+        <TooltipProvider>
+          <LoggerProvider>
+            {/* ...more providers... */}
+            <DataAdapterProvider adapter={dexieAdapter}>{children}</DataAdapterProvider>
+          </LoggerProvider>
+        </TooltipProvider>
+      </TauriProvider>
+    </SettingsSyncProvider>
+  </LocaleGate>
+</ThemeProvider>
+```
+
+`DataAdapterProvider` must sit above all components that consume data, so it is placed at the end of the chain. For the detailed provider ordering and rationale, see [Architecture](../core/architecture#layer-1--browser--react).
+
+## Consumer Example
+
+```tsx title="components/chat/chat-header.tsx (illustrative)"
+import { useCharacters, useUpdateSession } from "@/lib/data-hooks/context"
+
+export function ChatHeader({ sessionId }: { sessionId: string }) {
+  const characters = useCharacters() // undefined → loading; Character[] → ready
+  const updateSession = useUpdateSession()
+
+  if (!characters) return <Skeleton />
+
+  return (
+    <CharacterPicker
+      options={characters}
+      onChange={(id) => updateSession(sessionId, { characterId: id })}
+    />
+  )
+}
+```
+
+Component code does not reference `@/lib/db/*` or `dexie-react-hooks`. If a `wsAdapter` is implemented for mobile in the future, swapping it into the Provider is all that is needed — components require no changes.
+
+## Testing
+
+`dexie-adapter.test.tsx` uses React Testing Library + a fake Dexie (`fake-indexeddb`) to verify:
+
+- Read hooks receive current data after mounting.
+- Hooks re-render when the database changes.
+- SSR simulation (`window === undefined`) does not throw and returns `undefined`.
+- Mutation calls actually modify Dexie.
+
+Any new `DataAdapter` implementation should reuse the same set of test cases (testing against the "behavioral contract," not implementation details), ensuring the desktop and mobile paths behave identically.
+
+## Evolution Path
+
+The current interface only covers chat / character / skill / preset / trusted-workspace. Other data (message lists, agent teams, whiteboards) still reads Dexie directly. In principle, whenever a data type needs to be "remotely consumed," it is added to DataAdapter:
+
+1. Add a method to the interface (`useMessages(sessionId): ChatMessage[] | undefined`).
+2. Add the Dexie implementation in `dexie-adapter.tsx`.
+3. Update the component to `import { useMessages } from "@/lib/data-hooks/context"`.
+4. Implement the same method in the WS adapter when it arrives.
+
+Do not reserve adapter methods for data that does not yet need remote access — directly consuming `lib/db/*` is cheaper.
+
+## Integration with Callers
+
+| Caller | Purpose |
+| ----------------------- | -------------------------------------------------- |
+| `components/chat/*` | Reactive reads of characters / skills / presets + session state mutations |
+| `components/settings/*` | Reactive reads of the "current list" outside the editor, writing back after edits |
+| `components/skills/*` | `useSkillsByIds` for batch reads inside skill selectors |
+| `app/layout.tsx` | Mounts `<DataAdapterProvider>` |
+
+Locations outside the Provider tree (such as `lib/twin/*` background workers and scheduler executors) continue to call `lib/db/*` directly — DataAdapter is a UI abstraction, not a data-layer abstraction.
+
+## Related Documentation
+
+<Cards>
+  <Card title="Storage" href="./storage" description="Dexie schema and where each business table lives" />
+  <Card
+    title="Backup and Data Migration"
+    href="./backup-and-data"
+    description="DataAdapter does not affect the backup layer — backups read Dexie directly"
+  />
+  <Card title="Architecture" href="./architecture" description="Where DataAdapter sits in the Provider chain" />
+  <Card title="Chat and Skills" href="./chat-and-skills" description="The main consumers of DataAdapter" />
+</Cards>
+
+## Where to Start
+
+| Goal | File |
+| -------------------------------- | ------------------------------------------------------------------------------------ |
+| Add a new method to DataAdapter | Extend interface in `types.ts` → implement in `dexie-adapter.tsx` → add convenience hook in `context.tsx` |
+| Write a new adapter implementation (mobile WS) | New file `<name>-adapter.tsx` implementing `DataAdapter`; swap the Provider injection at the mobile entry point |
+| Mock in tests | Construct a partial `DataAdapter` object directly and inject it via `<DataAdapterProvider adapter={mock}>` |
+| Tune SSR fallback behavior | `isClient` guard in `dexie-adapter.tsx` |

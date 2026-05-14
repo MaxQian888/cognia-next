@@ -4,6 +4,7 @@
 import "fake-indexeddb/auto"
 
 import { enqueue, listByStatus, listAll } from "@/lib/db/mobile-outbound-queue"
+import { getDb } from "@/lib/db/schema"
 import { createOutboundRunner } from "./outbound-queue"
 
 // Stub the network subscriber so the runner doesn't try to reach Capacitor.
@@ -20,7 +21,6 @@ describe("createOutboundRunner", () => {
   beforeEach(async () => {
     // fake-indexeddb resets between test files but not test cases — clear by hand.
     const all = await listAll()
-    const { getDb } = await import("@/lib/db/schema")
     await Promise.all(all.map((r) => getDb().mobileOutboundQueue.delete(r.id)))
   })
 
@@ -81,7 +81,6 @@ describe("createOutboundRunner", () => {
       enforceMobile: false,
       now: () => 1_000,
     })
-    const { getDb } = await import("@/lib/db/schema")
     await getDb().mobileOutboundQueue.put({
       id: "future",
       command: "rpc_generic",

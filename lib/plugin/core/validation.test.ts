@@ -273,6 +273,105 @@ describe("Plugin Validation", () => {
       expect(result.warnings.length).toBeGreaterThanOrEqual(0)
     })
 
+    it("should validate a well-formed wasm plugin manifest", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "wasm"
+      delete manifest.main
+      manifest.wasmMain = "main.wasm"
+      manifest.wasm = { apiVersion: "0.1.0" }
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(true)
+    })
+
+    it("should reject wasm plugins missing wasmMain", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "wasm"
+      delete manifest.main
+      manifest.wasm = { apiVersion: "0.1.0" }
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(result.errors.some((e) => e.includes("wasmMain"))).toBe(true)
+    })
+
+    it("should reject wasm plugins with non-.wasm wasmMain", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "wasm"
+      delete manifest.main
+      manifest.wasmMain = "main.js"
+      manifest.wasm = { apiVersion: "0.1.0" }
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(result.errors.some((e) => e.includes(".wasm"))).toBe(true)
+    })
+
+    it("should reject wasm plugins missing the wasm block", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "wasm"
+      delete manifest.main
+      manifest.wasmMain = "main.wasm"
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(result.errors.some((e) => e.toLowerCase().includes("wasm"))).toBe(true)
+    })
+
+    it("should reject wasm plugins with a malformed apiVersion", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "wasm"
+      delete manifest.main
+      manifest.wasmMain = "main.wasm"
+      manifest.wasm = { apiVersion: "0.1" }
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(result.errors.some((e) => e.includes("apiVersion"))).toBe(true)
+    })
+
+    it("should reject wasm plugins with absurd memoryLimitMb", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "wasm"
+      delete manifest.main
+      manifest.wasmMain = "main.wasm"
+      manifest.wasm = { apiVersion: "0.1.0", memoryLimitMb: 9999 }
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(result.errors.some((e) => e.includes("memoryLimitMb"))).toBe(true)
+    })
+
+    it("should reject wasm plugins with negative callTimeoutMs", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "wasm"
+      delete manifest.main
+      manifest.wasmMain = "main.wasm"
+      manifest.wasm = { apiVersion: "0.1.0", callTimeoutMs: -1 }
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(result.errors.some((e) => e.includes("callTimeoutMs"))).toBe(true)
+    })
+
+    it("should reject wasm plugins with NUL-byte preopens", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "wasm"
+      delete manifest.main
+      manifest.wasmMain = "main.wasm"
+      manifest.wasm = {
+        apiVersion: "0.1.0",
+        fs: { preopens: ["~/Documents", "bad\0path"] },
+      }
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(result.errors.some((e) => e.includes("preopen"))).toBe(true)
+    })
+
+    it("should reject wasm plugins with empty-string preopens", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "wasm"
+      delete manifest.main
+      manifest.wasmMain = "main.wasm"
+      manifest.wasm = { apiVersion: "0.1.0", fs: { preopens: ["", "~/ok"] } }
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(result.errors.some((e) => e.includes("preopen"))).toBe(true)
+    })
+
     it("should return actionable diagnostics for missing pythonMain", () => {
       const manifest = createValidManifest()
       manifest.type = "python"

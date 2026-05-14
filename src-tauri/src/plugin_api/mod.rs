@@ -38,6 +38,7 @@ pub mod permissions;
 pub mod process_ops;
 pub mod shortcut_ops;
 pub mod signature;
+pub mod wasm;
 pub mod window_ops;
 
 use std::collections::HashMap;

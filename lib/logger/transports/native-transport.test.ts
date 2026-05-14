@@ -3,6 +3,7 @@
  */
 
 import type { StructuredLogEntry } from "../types"
+import { NativeTransport, createNativeTransport } from "./native-transport"
 
 // Mock isTauri to control whether the transport short-circuits or runs.
 const mockIsTauri = jest.fn(() => true)
@@ -42,7 +43,7 @@ function makeEntry(overrides: Partial<StructuredLogEntry> = {}): StructuredLogEn
 
 describe("NativeTransport in Tauri runtime", () => {
   it("buffers + auto-flushes when batchSize hit", async () => {
-    const { NativeTransport } = await import("./native-transport")
+    // NativeTransport imported statically
     const t = new NativeTransport({ batchSize: 2, flushInterval: 60_000 })
     t.log(makeEntry({ id: "a" }))
     t.log(makeEntry({ id: "b" })) // triggers auto flush
@@ -56,7 +57,7 @@ describe("NativeTransport in Tauri runtime", () => {
   })
 
   it("filters logs below minLevel", async () => {
-    const { NativeTransport } = await import("./native-transport")
+    // NativeTransport imported statically
     const t = new NativeTransport({ batchSize: 1, minLevel: "error", flushInterval: 60_000 })
     t.log(makeEntry({ level: "warn" }))
     await Promise.resolve()
@@ -65,7 +66,7 @@ describe("NativeTransport in Tauri runtime", () => {
   })
 
   it("flush returns early when buffer is empty", async () => {
-    const { NativeTransport } = await import("./native-transport")
+    // NativeTransport imported statically
     const t = new NativeTransport({ batchSize: 99, flushInterval: 60_000 })
     await t.flush()
     expect(mockForward).not.toHaveBeenCalled()
@@ -73,7 +74,7 @@ describe("NativeTransport in Tauri runtime", () => {
   })
 
   it("normalizes data + tags + runtime + origin into the forwarded payload", async () => {
-    const { NativeTransport } = await import("./native-transport")
+    // NativeTransport imported statically
     const t = new NativeTransport({ batchSize: 1, flushInterval: 60_000 })
     t.log(
       makeEntry({
@@ -102,7 +103,7 @@ describe("NativeTransport in Tauri runtime", () => {
   })
 
   it("getPendingCount + getHealth reflect buffered state", async () => {
-    const { NativeTransport } = await import("./native-transport")
+    // NativeTransport imported statically
     const t = new NativeTransport({ batchSize: 99, flushInterval: 60_000 })
     t.log(makeEntry())
     t.log(makeEntry({ id: "b" }))
@@ -115,7 +116,7 @@ describe("NativeTransport in Tauri runtime", () => {
 
   it("re-queues entries and marks degraded when forward fails", async () => {
     mockForward.mockResolvedValueOnce(false)
-    const { NativeTransport } = await import("./native-transport")
+    // NativeTransport imported statically
     const t = new NativeTransport({ batchSize: 1, flushInterval: 60_000 })
     t.log(makeEntry())
     await Promise.resolve()
@@ -127,7 +128,7 @@ describe("NativeTransport in Tauri runtime", () => {
 
   it("returns to healthy after a successful forward", async () => {
     mockForward.mockResolvedValueOnce(false)
-    const { NativeTransport } = await import("./native-transport")
+    // NativeTransport imported statically
     const t = new NativeTransport({ batchSize: 1, flushInterval: 60_000 })
     t.log(makeEntry())
     await Promise.resolve()
@@ -140,7 +141,7 @@ describe("NativeTransport in Tauri runtime", () => {
   })
 
   it("flush timer fires periodically and drains the buffer", async () => {
-    const { NativeTransport } = await import("./native-transport")
+    // NativeTransport imported statically
     const t = new NativeTransport({ batchSize: 99, flushInterval: 500 })
     t.log(makeEntry())
     jest.advanceTimersByTime(600)
@@ -151,7 +152,7 @@ describe("NativeTransport in Tauri runtime", () => {
   })
 
   it("close() stops the flush timer and runs a final flush", async () => {
-    const { NativeTransport } = await import("./native-transport")
+    // NativeTransport imported statically
     const t = new NativeTransport({ batchSize: 99, flushInterval: 60_000 })
     t.log(makeEntry())
     await t.close()
@@ -162,7 +163,7 @@ describe("NativeTransport in Tauri runtime", () => {
 describe("NativeTransport outside Tauri runtime", () => {
   it("log() is a no-op when not in Tauri", async () => {
     mockIsTauri.mockReturnValue(false)
-    const { NativeTransport } = await import("./native-transport")
+    // NativeTransport imported statically
     const t = new NativeTransport({ batchSize: 1, flushInterval: 60_000 })
     t.log(makeEntry())
     expect(mockForward).not.toHaveBeenCalled()
@@ -172,7 +173,7 @@ describe("NativeTransport outside Tauri runtime", () => {
 
   it("flush() is a no-op when not in Tauri", async () => {
     mockIsTauri.mockReturnValue(false)
-    const { NativeTransport } = await import("./native-transport")
+    // NativeTransport imported statically
     const t = new NativeTransport({ batchSize: 99, flushInterval: 60_000 })
     await t.flush()
     expect(mockForward).not.toHaveBeenCalled()
@@ -182,14 +183,14 @@ describe("NativeTransport outside Tauri runtime", () => {
 
 describe("createNativeTransport factory", () => {
   it("returns a NativeTransport instance with given options", async () => {
-    const { createNativeTransport, NativeTransport } = await import("./native-transport")
+    // createNativeTransport and NativeTransport imported statically
     const t = createNativeTransport({ batchSize: 5 })
     expect(t).toBeInstanceOf(NativeTransport)
     await t.close()
   })
 
   it("supports default options", async () => {
-    const { createNativeTransport } = await import("./native-transport")
+    // createNativeTransport imported statically
     const t = createNativeTransport()
     expect(t.name).toBe("native")
     await t.close()

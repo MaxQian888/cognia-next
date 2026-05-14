@@ -1,0 +1,23 @@
+{
+  "rustc": 3674164131150989441,
+  "features": "[\"alloc\", \"block-buffer\", \"core-api\", \"default\", \"std\"]",
+  "declared_features": "[\"alloc\", \"blobby\", \"block-buffer\", \"const-oid\", \"core-api\", \"default\", \"dev\", \"mac\", \"oid\", \"rand_core\", \"std\", \"subtle\"]",
+  "target": 7510122432137863311,
+  "profile": 2241668132362809309,
+  "path": 16123553534549005834,
+  "deps": [
+    [6039282458970808711, "crypto_common", false, 16026579329865415055],
+    [10626340395483396037, "block_buffer", false, 801673206180718408]
+  ],
+  "local": [
+    {
+      "CheckDepInfo": {
+        "dep_info": "debug\\.fingerprint\\digest-2ae85818026191f1\\dep-lib-digest",
+        "checksum": false
+      }
+    }
+  ],
+  "rustflags": [],
+  "config": 8247474407144887393,
+  "compile_kind": 0
+}

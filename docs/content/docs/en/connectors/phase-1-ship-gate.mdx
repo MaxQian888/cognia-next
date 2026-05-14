@@ -1,0 +1,200 @@
+---
+title: "Phase 1 Ship Gate"
+description: "Manual verification checklist for the Platform Connectors Phase 1 release. All items must be checked before merging feat/platform-connectors-phase1 to master."
+---
+
+# Platform Connectors — Phase 1 Ship Gate
+
+**Branch:** `feat/platform-connectors-phase1`  
+**ADR:** [0009 — Platform Connectors](../adr/0009-platform-connectors)  
+**Date:** 2026-05-05
+
+---
+
+## Automated gates (CI must pass)
+
+Before proceeding to manual checks, confirm all automated gates are green:
+
+- [ ] `pnpm typecheck` — zero TS errors
+- [ ] `pnpm lint` — zero ESLint errors (warnings acceptable)
+- [ ] `pnpm test` — all Jest suites pass (987 suites, 12 772+ tests)
+- [ ] `pnpm build` — Next.js static export completes without errors (exit 0)
+- [ ] `pnpm tauri build --debug` — Rust compiles, `.msi` and `.exe` bundles produced
+
+---
+
+## §1 — Telegram adapter smoke test
+
+> Prerequisites: create a bot via @BotFather, set `TELEGRAM_BOT_TOKEN`.  
+> Start the desktop app in dev mode: `pnpm tauri dev`.
+
+- [ ] Open Settings → Connections → Adapters tab.
+- [ ] Click **+ Add Adapter** → select **Telegram**.
+- [ ] Enter bot token; save. Verify row appears in the list with status `idle`.
+- [ ] Click **Enable**. Status transitions to `polling`.
+- [ ] Send "hello" from a Telegram client to the bot.
+- [ ] Verify the message appears in the Inbox (navigate to `/inbox` or `?section=connections` → Inbox tab).
+- [ ] In **manual** mode, type a reply in the Composer and hit Send.
+- [ ] Verify the reply appears in the Telegram chat.
+- [ ] Disable the adapter. Status transitions back to `idle`. No further polling.
+
+---
+
+## §2 — Discord adapter smoke test
+
+> Prerequisites: Discord bot token with `bot` + `applications.commands` scopes,
+> at least `Guilds` and `Message Content` intents enabled in the Developer Portal.
+
+- [ ] Add a Discord adapter in Settings → Connections → Adapters.
+- [ ] Enter bot token; save and enable. Status transitions to `connected` (Gateway WS).
+- [ ] Send a message in a channel the bot can see.
+- [ ] Message appears in the Inbox within 5 s.
+- [ ] Reply in manual mode; reply appears in Discord within 10 s.
+
+---
+
+## §3 — Slack adapter smoke test
+
+> Prerequisites: Slack app with `app_mentions:read`, `chat:write`, `channels:history` scopes.  
+> Slash-command / event URL must be publicly routable (use `ngrok` or the
+> Tauri HTTP proxy wired in Tasks 94/95).
+
+- [ ] Add a Slack adapter. Enter Bot User OAuth Token and Signing Secret.
+- [ ] Trigger an event from Slack (mention the bot in a channel).
+- [ ] Event appears in the Inbox.
+- [ ] Reply in manual mode; reply appears in Slack within 10 s.
+
+---
+
+## §4 — Lark / Feishu adapter smoke test
+
+> Prerequisites: Lark Custom Bot with Encrypt Key and Verification Token.
+
+- [ ] Add a Lark adapter. Enter App ID, App Secret, Encrypt Key, and Verification Token.
+- [ ] Send a message from Lark to the bot.
+- [ ] Message appears in the Inbox.
+- [ ] Reply in manual mode; reply appears in Lark within 10 s.
+
+---
+
+## §5 — OneBot v11 (NapCat / LLOneBot) smoke test
+
+> Prerequisites: NapCat or LLOneBot running locally with reverse-WS transport configured.
+
+- [ ] Add a OneBot adapter. Enter the access token (if configured) and confirm the
+      reverse-WS URL (`ws://127.0.0.1:<port>/api/onebot`) matches the NapCat config.
+- [ ] NapCat connects. Adapter status transitions to `connected`.
+- [ ] Send a QQ message to the bot.
+- [ ] Message appears in the Inbox.
+- [ ] Reply in manual mode; reply appears in QQ within 10 s.
+
+---
+
+## §6 — Outbound queue and circuit breaker
+
+- [ ] Enable any adapter and set it to **manual** mode.
+- [ ] Disconnect from the internet / revoke the bot token to force delivery failures.
+- [ ] Send a message via the Composer. The Outbound tab in Settings should show the
+      job in `pending` → `retrying` state with increasing `attempts`.
+- [ ] After 5 failed attempts the row transitions to `deadlettered`.
+- [ ] Restore connectivity / fix the token. Jobs do NOT auto-retry from dead-letter
+      (Phase 1 behaviour — manual re-queue from the Outbound tab).
+
+---
+
+## §7 — Quiet hours
+
+- [ ] Open Settings → Connections → Adapters → edit an adapter.
+- [ ] Set quiet hours from `00:00` to `23:59` (today's date) and save.
+- [ ] Trigger a reply; the Outbound tab shows the job deferred (status `pending`,
+      `nextAttemptAt` set to the quiet-window end time).
+- [ ] Remove quiet hours; job processes immediately.
+
+---
+
+## §8 — Draft mode
+
+> Phase 1 note: the AI pipeline in auto mode is stubbed (records a placeholder job).  
+> Draft mode only produces a draft row — verify that flow end-to-end.
+
+- [ ] Set an adapter conversation to **draft** mode via the ConversationHeader switcher.
+- [ ] Send an inbound message.
+- [ ] Open the Inbox → conversation detail. Verify the DraftBanner appears with the
+      placeholder draft text.
+- [ ] Click **Approve**. Verify the draft transitions to an outbound job in the Outbound tab.
+- [ ] Click **Reject**. Verify the draft is removed.
+
+---
+
+## §9 — Web-mode degradation
+
+- [ ] Open cognia-next in a browser (not Tauri): `pnpm dev` → `http://localhost:3000`.
+- [ ] Navigate to Settings → Connections. Verify the web-mode banner is visible with
+      role `status` and aria-label `"Web mode banner"`.
+- [ ] Open `/inbox` → navigate to any platform-bound conversation.
+- [ ] Verify the ConversationHeader mode switcher is wrapped in a disabled span
+      (`pointer-events-none`, `aria-disabled="true"`).
+- [ ] Open any chat session that has a `platformBinding`. Verify the Composer Send
+      button is disabled.
+
+---
+
+## §10 — Plugin connector extension API
+
+- [ ] Build or obtain a plugin that declares `manifest.connectors[]` with a valid
+      `PluginConnectorDef` (see [Extending with Plugins](.\/extending-with-plugins)).
+- [ ] Install the plugin via Settings → Plugins.
+- [ ] Verify the plugin adapter appears in the Adapters list.
+- [ ] Disable the plugin. Verify the adapter is removed from the list.
+
+---
+
+## §11 — Audit log
+
+- [ ] Perform several inbound/outbound flows across different adapters.
+- [ ] Open Settings → Connections → Audit tab.
+- [ ] Verify each event has a timestamp, `adapterId`, `kind` (`inbound.received`,
+      `outbound.enqueued`, `outbound.delivered`, `outbound.failed`), and message.
+- [ ] Verify the table is capped at 5 000 rows (add a script to insert 5 001 rows and
+      confirm the oldest is pruned on the next write).
+
+---
+
+## §12 — Scheduled outbound via scheduler
+
+- [ ] Open the Scheduler UI. Create a task with type `connection:outbound:send`
+      and payload:
+  ```json
+  {
+    "adapterId": "<your_adapter_id>",
+    "conversationKey": "<conversation_key>",
+    "segments": [{ "type": "text", "text": "Scheduled greeting" }]
+  }
+  ```
+- [ ] Trigger the task (Run Now).
+- [ ] Verify the message is delivered to the platform within 30 s.
+- [ ] Verify an `outbound.enqueued` audit entry is written.
+
+---
+
+## Deferred (Phase 1+ only)
+
+The following items are explicitly deferred and must **not** block this release:
+
+| Deferred item                                                       | Tracking                                        |
+| ------------------------------------------------------------------- | ----------------------------------------------- |
+| Auto mode real AI round-trip (`sendPrompt` → reply → `sendMessage`) | Task 40+                                        |
+| Attachment caching (`connectorAttachments` fetch pipeline)          | Phase 2                                         |
+| Slack / Lark OAuth hosted redirect URL                              | Phase 2                                         |
+| Full Playwright E2E (`pnpx playwright test`)                        | Requires `pnpm add -D @playwright/test express` |
+| `connection:scheduled:digest` real AI call                          | Task 40+                                        |
+
+---
+
+## Sign-off
+
+| Role        | Name | Date | Status |
+| ----------- | ---- | ---- | ------ |
+| Implementer |      |      |        |
+| Reviewer    |      |      |        |
+| QA          |      |      |        |

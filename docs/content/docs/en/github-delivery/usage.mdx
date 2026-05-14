@@ -1,0 +1,109 @@
+---
+title: "GitHub Delivery — Usage & Quotas"
+description: GitHub API rate-limiting strategy, Octokit throttling/retry plugin configuration, current state and roadmap of the Usage Tab.
+---
+
+# Usage & Quotas
+
+<TLDR>
+GitHub App grants **5K calls/hour per installation**; PAT is **5K/hour per token**.
+cognia attaches `@octokit/plugin-throttling` and `@octokit/plugin-retry` to all Octokit instances.
+When the primary rate limit is hit, it retries up to 3 times; when the secondary rate limit is hit, it observes but does not block. The Usage Tab is a placeholder in the M4 phase;
+real-time quota history (periodic sampling of `GET /rate_limit`) is an open question in ADR-0018.
+</TLDR>
+
+## GitHub Rate-Limit Baseline
+
+| Credential | Quota | Notes |
+| ---------- | ----- | ----- |
+| GitHub App | 5000 calls / hour / installation | Per-installation independent bucket; suitable for running across multiple repos/teams simultaneously; Enterprise edition may be higher |
+| PAT (classic) | 5000 calls / hour / token | All apps of the token creator share the same bucket |
+| PAT (fine-grained) | 5000 calls / hour / token | Same as above |
+| Search API | 30 calls / minute | cognia does not currently call search endpoints directly; watch out if PR search is added later |
+| Secondary rate limit | Not publicly disclosed; triggered by "high concurrency on the same resource in a short time" | Octokit plugin consumes `retry-after` without retrying |
+
+The `GET /rate_limit` endpoint itself **does not count against quota**, so it can be polled safely.
+
+## Unified Octokit Factory Configuration
+
+Source: `lib/github/octokit-factory.ts`. Every Octokit instance is built as follows:
+
+```ts title="lib/github/octokit-factory.ts (excerpt)"
+const ThrottledRetriedOctokit = Octokit.plugin(retry, throttling)
+
+return new ThrottledRetriedOctokit({
+  auth: <token>,
+  authStrategy: createTokenAuth,
+  userAgent: "cognia-github-delivery/1.0",
+  throttle: _throttleHandlers(opts.onWarning),
+})
+```
+
+`_throttleHandlers` returns two callbacks:
+
+| Callback | When it fires | cognia strategy |
+| -------- | ------------- | --------------- |
+| `onRateLimit` | Primary rate limit (remaining 0 / reset) | Logs a warning via `ctx.logger.warn`, returns `retryCount < 3` — retries up to 3 times |
+| `onSecondaryRateLimit` | Secondary limit (`retry-after` header) | Logs a warning, **does not** auto-retry — Octokit retry plugin waits for `retry-after` as recommended by GitHub |
+
+`@octokit/plugin-retry` retries **idempotent verbs** (GET / HEAD / PUT / DELETE) up to 3 times with exponential backoff. POST / PATCH are **not** retried automatically — this is exactly what cognia wants: `mergePr` / `createRelease` and similar are non-idempotent; re-running them on failure would repeat side effects. `guardedExecutor` surfaces their failures as audit entries + step errors instead of silently retrying.
+
+## How Throttling Events Surface to Users
+
+| Channel | Output |
+| ------- | ------ |
+| `ctx.logger.warn` | Desktop / Web console + real-time log panel at Settings → Diagnostics |
+| Audit row | Throttling itself is not audited (audit only records policy decisions); rate-limit failures retried or thrown by Octokit appear as step errors |
+| Run detail page | Step error shows the full HTTP status + body |
+
+## Current Usage Tab Implementation
+
+`components/settings/github-delivery/tabs/usage-tab.tsx` (M4 phase) only displays static cards:
+
+- "API Quota Sampling Chart (M4 Placeholder)" — a roadmap card pointing users to the [open questions in ADR-0018](/en/adr/0018-github-delivery#open-questions).
+- "Today's Octokit Call Count (Estimate)" — pulls all rows from the audit table keyed by `[repoFullName+at]` starting from `today`; each non-read-only row counts as one call (rough estimate).
+
+Full implementation (planned):
+
+<Steps>
+<Step>
+**Periodic sampling of `GET /rate_limit`.** Run a `github-rate-limit` task via the existing scheduler (every 5 minutes), writing `limit / remaining / reset` for the `core / search / graphql` buckets into a new table `github-delivery:rateLimitSamples`.
+</Step>
+<Step>
+**Usage Tab 30-day chart.** Render the last 30 days of `remaining` as a sparkline; draw vertical lines at reset points.
+</Step>
+<Step>
+**Depletion time prediction.** Estimate using a "calls per minute" window over the last 60 minutes and display an ETA.
+</Step>
+</Steps>
+
+## Recommended Rate-Limiting Strategy
+
+For workflow scenarios, treat 5K/h as ~80/min:
+
+| Node | Call count (typical) | Recommended trigger frequency |
+| ---- | -------------------- | ----------------------------- |
+| `action.github.reviewPr` / `reviewPrInline` | 1 GET files + 1 POST review | On PR opened/synced; add debounce for high-frequency repos |
+| `action.github.generateChangelog` | 1 GET compare (single page; paginates if > 250 commits) | On each release only; do not run on every push |
+| `action.github.runIssueLoop` | 1 GET issue + 1 POST PR + 1 POST labels | Trigger via `cognia:claim` label, keeping trigger frequency human-controlled |
+| webhook | 0 (pushed by GitHub) | n/a |
+| polling | 1 GET events / repo / 5 min (304 on conditional GET) | Quota is not a concern |
+
+## Multi-Repo Deployment Trade-offs
+
+| Your situation | Recommended credential |
+| -------------- | ---------------------- |
+| 1 personal repo, light automation | PAT |
+| Multiple personal repos sharing one token | PAT; note that the quota is shared |
+| One organization, ~10 repos | GitHub App; each repo gets an independent 5K/h bucket |
+| Multi-organization / SaaS multi-tenant | One independent App + installation per tenant; audit granularity down to installation |
+
+## Source Index
+
+| File | Purpose |
+| ---- | ------- |
+| `lib/github/octokit-factory.ts` | throttling / retry plugin configuration |
+| `lib/github/auth-app.ts` | App token cache (auto-refreshes 5 min before expiry, saving a 401) |
+| `plugins/github-delivery/src/github-poll.ts` | ETag conditional GET; 304 does not count as "real work" |
+| `components/settings/github-delivery/tabs/usage-tab.tsx` | Usage Tab UI |
+| `components/settings/diagnostics/` | Real-time logs (displays throttle warnings) |

@@ -22,6 +22,8 @@ import { buildMcpServer, type SettingsGetter } from "./server"
 import { createStdioTransport } from "./transport-stdio"
 import { DEFAULT_EXTERNAL_BRIDGE_SETTINGS } from "@/types/wiki"
 import type { ExternalBridgeSettings } from "@/types/wiki"
+import * as fs from "node:fs/promises"
+import * as path from "node:path"
 
 /** Resolve the settings getter for the current runtime mode. */
 export function resolveSettingsGetter(): SettingsGetter {
@@ -59,8 +61,6 @@ function standaloneSettingsGetter(): SettingsGetter {
     const dir = process.env.COGNIA_DATA_DIR
     if (!dir) return DEFAULT_EXTERNAL_BRIDGE_SETTINGS
     try {
-      const fs = await import("node:fs/promises")
-      const path = await import("node:path")
       const filePath = path.join(dir, "external-bridge.json")
       const text = await fs.readFile(filePath, "utf-8")
       return JSON.parse(text) as ExternalBridgeSettings

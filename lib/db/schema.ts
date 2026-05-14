@@ -151,6 +151,12 @@ export class CogniaDB extends Dexie {
   // `surface` so the Settings → Automation → Audit tab can filter, and
   // `decision` for the deny-only view.
   automationAuditLog!: Table<AutomationAuditLogRow, string>
+  // v29 — WASM plugin author keys the user has trusted (Ed25519 public keys
+  // from manifest.author.publicKey, base64). First install of a signed
+  // plugin from HTTP/Git prompts the user with the key fingerprint; on
+  // accept a row is inserted here so future updates from the same author
+  // auto-trust. Pure additive table.
+  trustedPublishers!: Table<TrustedPublisherRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -902,6 +908,15 @@ export class CogniaDB extends Dexie {
     this.version(28).stores({
       automationAuditLog: "&id, ts, surface, decision, command",
     })
+
+    // v29 — Trusted publisher ledger for WASM plugin signed installs.
+    //   • `&publicKey`  — base64-encoded Ed25519 public key (primary key
+    //                     guarantees one row per author key).
+    //   • `fingerprint` — SHA-256 hex of the key for fast lookup in the UI.
+    //   • `firstTrustedAt` — epoch ms of first install accept.
+    this.version(29).stores({
+      trustedPublishers: "&publicKey, fingerprint, firstTrustedAt",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -953,6 +968,30 @@ export interface PluginDexieMeta {
   /** The Dexie db version at which these tables were last registered. */
   dexieVersion: number
   appliedAt: number
+}
+
+/**
+ * Trusted plugin publisher ledger — one row per Ed25519 public key the user
+ * accepted during a signed-plugin install. Drives "auto-trust subsequent
+ * updates from the same author" semantics across HTTP/Git install paths.
+ */
+export interface TrustedPublisherRow {
+  /** Base64-encoded Ed25519 public key (primary key). */
+  publicKey: string
+  /** SHA-256 hex digest of the public key, for the install-dialog UI. */
+  fingerprint: string
+  /** Display name from `manifest.author.name` at first-trust time. */
+  authorName?: string
+  /** Optional contact email captured from `manifest.author.email`. */
+  authorEmail?: string
+  /** Optional homepage / repository URL captured at first-trust time. */
+  homepage?: string
+  /** Epoch ms of first accept. */
+  firstTrustedAt: number
+  /** Epoch ms of the most-recent install/update by this author. */
+  lastSeenAt: number
+  /** Counter — number of distinct plugins installed by this author. */
+  installCount: number
 }
 
 let _db: CogniaDB | null = null

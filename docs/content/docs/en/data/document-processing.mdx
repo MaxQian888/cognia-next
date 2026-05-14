@@ -1,0 +1,308 @@
+---
+title: Document Processing
+description: A unified parsing layer that converts user files into embeddable text across eleven formats — PDF, Word, Excel, Presentations, EPUB, Markdown, code, and more.
+---
+
+# Document Processing
+
+`lib/document/` is Cognia's "read file" layer. It folds eleven mainstream formats into a single `ProcessedDocument`: raw text + embeddable text + structured metadata + parse diagnostics. Twin ingest, knowledge bases, and canvas "import document" operations all flow through this layer; upstream callers don't need to write their own parser for each format.
+
+<TLDR>
+  Unified entry points: `processDocument()` (synchronous, text-only formats) and
+  `processDocumentAsync()` (asynchronous, covers PDF / DOCX / XLSX / PPTX / EPUB /
+  RTF). Type detection uses filename extensions (`support-matrix.ts`); the async
+  path dynamically `import`s the specific parser by type (PDF via pdfjs-dist;
+  Word via mammoth; Excel via xlsx; others via their respective libraries), then
+  normalizes the result into a `ProcessedDocument`. Optionally generates chunks
+  for the vector store; optionally exports a `parseSummary` for breadcrumb / TOC
+  display.
+</TLDR>
+
+## Overview
+
+```mermaid
+flowchart TB
+  In[/Filename + content (string or ArrayBuffer)/]
+  In --> Detect["detectDocumentType<br/>support-matrix.ts"]
+  Detect --> Branch{Binary?}
+  Branch -- "Yes" --> Async["processDocumentAsync"]
+  Branch -- "No" --> Sync["processDocument"]
+  Async --> P1["parsePDF (pdfjs-dist)"]
+  Async --> P2["parseWord (mammoth)"]
+  Async --> P3["parseExcel (xlsx)"]
+  Async --> P4["parsePresentation"]
+  Async --> P5["parseEPUB"]
+  Async --> P6["parseRTF"]
+  Sync --> S1["parseMarkdown"]
+  Sync --> S2["parseCode"]
+  Sync --> S3["parseHTML / CSV / JSON / Text"]
+  P1 --> Norm["normalize<X>Summary<br/>parse-summary.ts"]
+  P2 --> Norm
+  P3 --> Norm
+  P4 --> Norm
+  P5 --> Norm
+  P6 --> Norm
+  S1 --> Norm
+  S2 --> Norm
+  S3 --> Norm
+  Norm --> Out[/ProcessedDocument/]
+  Out --> Chunk["Optional chunkDocument<br/>lib/ai/embedding/chunking"]
+  Chunk --> Vector["Vector store / Twin ingest"]
+
+  classDef step fill:#1e293b,stroke:#475569,color:#e2e8f0
+  class Detect,Async,Sync,Norm,Chunk step
+```
+
+## Type Detection
+
+`lib/document/support-matrix.ts` maintains a filename-extension-to-`DocumentType` lookup table:
+
+```ts title="lib/document/support-matrix.ts"
+const DOCUMENT_TYPE_EXTENSIONS: Record<Exclude<DocumentType, "unknown">, string[]> = {
+  markdown: ["md", "markdown", "mdx"],
+  code: ["js", "ts", "tsx", "py", "go", "rs", "cpp" /* ...30+ */],
+  text: ["txt"],
+  json: ["json"],
+  pdf: ["pdf"],
+  word: ["docx", "doc", "docm", "odt"],
+  excel: ["xlsx", "xls", "xlsm", "ods"],
+  csv: ["csv", "tsv"],
+  html: ["html", "htm", "xhtml"],
+  rtf: ["rtf"],
+  epub: ["epub"],
+  presentation: ["pptx", "ppt", "pptm", "odp"],
+}
+
+const BINARY_EXTENSIONS = new Set([
+  "pdf",
+  "docx",
+  "doc",
+  "docm",
+  "odt",
+  "xlsx",
+  "xls",
+  "xlsm",
+  "ods",
+  "pptx",
+  "ppt",
+  "pptm",
+  "odp",
+  "epub",
+])
+```
+
+`detectDocumentType(filename)` is the only utility upstream callers need. `DocumentSupportSurface` distinguishes three usage surfaces:
+
+- `vector` — formats eligible for the vector store (most document types).
+- `knowledge-base` — knowledge base imports (text / markdown / json / code).
+- `ppt-material` — PPT workflow material whitelist.
+
+Each surface has its own allowed-extension list; UI file pickers filter accordingly.
+
+## Synchronous Path: Plain-Text Formats
+
+```ts title="lib/document/document-processor.ts"
+export function processDocument(
+  id: string,
+  filename: string,
+  content: string,
+  options: ProcessingOptions = {}
+): ProcessedDocument
+```
+
+Accepts only `string`; handles:
+
+- **markdown** — `parseMarkdown` extracts headings, frontmatter (including tags); `extractEmbeddableContent` strips code blocks / link metadata to produce clean embeddable text.
+- **code** — `parseCode` uses `code-parser.ts` language detection to count functions / imports; `extractCodeEmbeddableContent` preserves comments and signatures while stripping high-frequency boilerplate.
+- **json** — `JSON.parse` determines array / object, counts keys; parse failures fall back to the text path.
+- **text** (including unknown) — line / word counts + language detection only.
+
+Returned `ProcessedDocument`:
+
+```ts
+{
+  id, filename, type, content,
+  embeddableContent,       // version fed to the embedder
+  metadata: { size, lineCount, wordCount, title?, language?, ... },
+  parseSummary,            // for breadcrumbs
+  parseDiagnostics: [],    // warnings / errors
+  chunks?,                 // only when options.generateChunks === true
+}
+```
+
+## Asynchronous Path: Binary + Rich Formats
+
+`processDocumentAsync` is required for PDF / Word / Excel / Presentation / EPUB / RTF, and also supports other types when the caller has an `ArrayBuffer`. It dynamically `import`s the specific parser by type to control initial bundle size.
+
+```ts title="lib/document/document-processor.ts"
+case "pdf": {
+  const { parsePDF, extractPDFEmbeddableContent } = await import("./parsers/pdf-parser")
+  const buffer = typeof data === "string" ? stringToArrayBuffer(data) : data
+  const parsed = await parsePDF(buffer)
+  content = parsed.text
+  embeddableContent = opts.extractEmbeddable ? extractPDFEmbeddableContent(parsed) : content
+  metadata = { ...metadata, title, pageCount, author }
+  parseResult = parsed
+  parseSummary = normalizePDFSummary(parsed)
+  break
+}
+```
+
+### PDF (`parsers/pdf-parser.ts`)
+
+Built on pdfjs-dist. `PDFParseResult` outputs:
+
+- `text` — full text (page-by-page concatenation, layout-aware).
+- `pages: PDFPage[]` — each page with `pageNumber / text / width / height`.
+- `metadata` — title / author / subject / keywords / creator / dates.
+- Optional `outline` — table-of-contents tree.
+- Optional `annotations` — comments + highlights.
+- Supports `password` option; `startPage / endPage` for range extraction.
+
+### Word (`parsers/office-parser.ts` + `parsers/open-document-parser.ts`)
+
+- `.docx / .docm` — `mammoth`, yielding `text` / `html` / `messages` (warnings + errors) / `images` / `metadata` / `headings`. Messages are converted by `mapWordMessages` into `ParseDiagnostic`, so the UI can show hints like "image missing alt text".
+- `.odt` — `parseOpenDocumentText`, our own ODF parser.
+- Very old `.doc` files are still categorized as word; mammoth emits a "convert to .docx" diagnostic.
+
+### Excel / CSV (`parsers/office-parser.ts` + `parsers/csv-parser.ts`)
+
+xlsx splits into sheets → rows / columns + formulas + date types + merged cells per sheet. `csv-parser` handles TSV and various quote-escaping flavors. Results normalize into `ExcelParseResult` / `CSVParseResult`; `parseSummary` segments by sheet.
+
+### Presentation (`parsers/presentation-parser.ts`)
+
+PPTX splits into slides → title + text + notes per slide. `parseSummary` segments by slide index; PPT workflows can use this to display "page 3".
+
+### EPUB / RTF
+
+`parsers/epub-parser.ts`: EPUB splits into chapters + metadata + cover. `parsers/rtf-parser.ts`: strips RTF control characters to extract clean text.
+
+### HTML / Markdown (including frontmatter)
+
+Although HTML is text, it has its own parser: strips `<script>` / `<style>`, preserves paragraph semantics, extracts og: metadata. Markdown is already handled on the sync path, but ArrayBuffer-encoded markdown also flows through the async decode path.
+
+## Parse Diagnostics
+
+`parse-diagnostics.ts` defines `ParseDiagnostic`:
+
+```ts
+{
+  code: "parse_failed" | "image_no_alt" | "encoding_guess" | ...,
+  severity: "info" | "warning" | "error",
+  message: string,
+}
+```
+
+`attachDiagnosticToError(err, diagnostic)` attaches the diagnostic to an Error object so callers can access `err.diagnostic` when catching. This lets the upstream UI decide whether to show "password-protected file, please re-upload" or "unrecognized encoding, please select one."
+
+`normalizeDocumentParseError(label, error)` centrally recognizes known error categories — password / corruption / old PPT — and attaches the corresponding diagnostic.
+
+## Parse Summary
+
+`parse-summary.ts` normalizes each parser's output into `ParseSummary`:
+
+```ts
+{
+  parser: "pdf" | "word" | "excel" | ...,
+  segments: ParseSummarySegment[],   // by page / sheet / slide / chapter / heading
+  warnings?: string[],
+  // ... per-parser fields
+}
+```
+
+The UI uses `parseSummary` to render the left-hand outline / paginator; when exporting to the vector store, chunking by segment is also more stable.
+
+## Table Extraction
+
+`table-extractor.ts` is a standalone utility: recognizes tables inside Markdown / HTML / plain text → `ExtractedTable[]`:
+
+```ts
+{
+  headers: string[],
+  rows: string[][],
+  title?: string,
+  sourceType: "markdown" | "html" | "text",
+  startIndex, endIndex,
+}
+```
+
+`extractedTableToTableData` converts to `TableData` for the canvas / export layer. When the AI outputs a Markdown table in chat, this layer treats it as a structured object, making subsequent "export to Excel" straightforward.
+
+## Chunk Generation
+
+When `ProcessingOptions.generateChunks === true`, `processDocument` calls `chunkDocument` (from `lib/ai/embedding/chunking`):
+
+- Default `strategy = "semantic"` — splits by paragraph / heading / semantic boundary.
+- Supports `chunkingOptions` passthrough for chunk size / overlap / strategy.
+- Outputs `chunks: DocumentChunk[]` ready for the vector store.
+
+Twin ingest does not call `processDocument` directly for chunk generation — it has its own `prepareChunks` flow (using markdown / code / chat chunkers); but the underlying parser is fully reused from `lib/document/`. See [Employee Digital Twin](../subsystems/employee-twin) for details.
+
+## Knowledge-RAG Placeholder
+
+`lib/document/knowledge-rag.ts` is the Project knowledge-base RAG interface from the original Cognia project; cognia-next has not yet implemented it. A stub is left so code calling `retrieveKnowledge / searchKnowledgeBaseAdvanced` (from Cognia's original build-options tests) still compiles.
+
+```ts title="lib/document/knowledge-rag.ts"
+export async function retrieveKnowledge(_options): Promise<KnowledgeChunk[]> {
+  return [] // awaiting real RAG layer integration
+}
+```
+
+The actually active RAG path is the Twin runtime (see [Employee Digital Twin](../subsystems/employee-twin)).
+
+## File Validation
+
+`validateFile()` (in `document-processor.ts`) supports:
+
+- `maxFileSize` — hard size ceiling.
+- `allowedTypes` — whitelist-only type filtering.
+- Returns `{ valid, errors[], warnings[] }`; UI upload components use this for early rejection.
+
+## Document Diff
+
+`document-processor.ts` also exports `DocumentDiff`:
+
+```ts
+{
+  added: string[],      // lines only present in after
+  removed: string[],    // lines only present in before
+  modified: { line, before, after }[],
+  similarity: number,   // 0..1
+}
+```
+
+Powers the canvas / editor "compare with previous version" feature.
+
+## Upstream Integration
+
+The document processing layer is primarily consumed by:
+
+- **Twin ingest** — `lib/twin/ingest/parse.ts` calls `processDocumentAsync` to convert uploaded files into plain text, then runs its own redact → chunk → embed pipeline.
+- **Canvas import** — when users drag files into the canvas, the type determines the drop target (editor / presentation / table view).
+- **Knowledge base UI** — parses on upload, previewing the first paragraph + metadata.
+- **Skill / plugin** — consumes via the public exports in `lib/document/index.ts`.
+
+UI entry: `components/document/document-format-toolbar.tsx` is the markdown editing toolbar, bound to the active editor on the canvas (see [Canvas](../subsystems/canvas), if available).
+
+## Related Documentation
+
+<Cards>
+  <Card
+    title="Employee Digital Twin"
+    href="./employee-twin"
+    description="Twin ingest reuses the parse stage from this module"
+  />
+  <Card title="Artifacts Sandbox" href="./artifacts-sandbox" description="Where generated documents land" />
+  <Card title="Vector Store" href="./vector-store" description="Next stop for chunks" />
+  <Card title="Storage" href="./storage" description="How files land in Dexie / the file system" />
+</Cards>
+
+## Where to Start
+
+| Goal | File |
+| ---- | ---- |
+| Add a new file format | Add extension in `support-matrix.ts` → write parser in `parsers/<name>-parser.ts` → add normalize in `parse-summary.ts` → add case in `document-processor.ts` async switch |
+| Change PDF pagination strategy | `extractPDFEmbeddableContent` in `parsers/pdf-parser.ts` |
+| Adjust default chunking strategy | `ProcessingOptions.chunkingOptions` defaults + `lib/ai/embedding/chunking.ts` |
+| Add a new diagnostic type | Extend `parse-diagnostics.ts:ParseDiagnostic.code` union + i18n strings |
+| Table recognition rules | `table-extractor.ts` |

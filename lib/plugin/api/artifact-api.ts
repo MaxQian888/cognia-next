@@ -20,12 +20,15 @@ import type {
 } from "@/types/plugin/plugin-extended"
 import type { Artifact } from "@/types/artifact"
 import { createPluginSystemLogger } from "../core/logger"
-
-// React-component imports are deferred to the helper functions below.
-// `artifact-renderers` and `artifact-preview` pull in shiki / react-
-// markdown / mermaid — all ESM-only packages that Jest's default
-// transform list rejects. Loading them lazily keeps the plugin API
-// importable in test environments that don't render markdown.
+import {
+  MermaidRenderer,
+  ChartRenderer,
+  MathRenderer,
+  MarkdownRenderer,
+  CodeRenderer,
+  ArtifactRenderer as ArtifactRendererComponent,
+} from "@/components/artifacts/artifact-renderers"
+import { ArtifactPreview } from "@/components/artifacts/artifact-preview"
 
 /**
  * Create the Artifact API for a plugin
@@ -191,18 +194,15 @@ export function clearArtifactRenderers(): void {
 /**
  * Get the built-in artifact renderers provided by the platform.
  * Plugins can use these to render standard artifact types without
- * implementing their own rendering logic. The renderer module is
- * loaded lazily so the plugin API stays importable in test
- * environments that don't ship the markdown / shiki transforms.
+ * implementing their own rendering logic.
  */
-export async function getBuiltinRenderers() {
-  const renderers = await import("@/components/artifacts/artifact-renderers")
+export function getBuiltinRenderers() {
   return {
-    MermaidRenderer: renderers.MermaidRenderer,
-    ChartRenderer: renderers.ChartRenderer,
-    MathRenderer: renderers.MathRenderer,
-    MarkdownRenderer: renderers.MarkdownRenderer,
-    CodeRenderer: renderers.CodeRenderer,
+    MermaidRenderer,
+    ChartRenderer,
+    MathRenderer,
+    MarkdownRenderer,
+    CodeRenderer,
   }
 }
 
@@ -210,16 +210,14 @@ export async function getBuiltinRenderers() {
  * Get the default ArtifactRenderer component that routes to the
  * appropriate renderer based on artifact type.
  */
-export async function getDefaultArtifactRenderer() {
-  const renderers = await import("@/components/artifacts/artifact-renderers")
-  return renderers.ArtifactRenderer
+export function getDefaultArtifactRenderer() {
+  return ArtifactRendererComponent
 }
 
 /**
  * Get the ArtifactPreview component for full artifact preview
  * including iframe-based rendering for HTML, SVG, and React types.
  */
-export async function getArtifactPreviewComponent() {
-  const mod = await import("@/components/artifacts/artifact-preview")
-  return mod.ArtifactPreview
+export function getArtifactPreviewComponent() {
+  return ArtifactPreview
 }

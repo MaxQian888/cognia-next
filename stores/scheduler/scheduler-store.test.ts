@@ -3,7 +3,23 @@
  */
 
 import { act, renderHook } from "@testing-library/react"
-import { useSchedulerStore } from "./scheduler-store"
+import {
+  useSchedulerStore,
+  selectSelectedTask,
+  selectActiveTasks,
+  selectPausedTasks,
+  selectUpcomingTasks,
+  selectRecentExecutions,
+  selectSchedulerStatus,
+  selectTasks,
+  selectExecutions,
+  selectStatistics,
+  selectSelectedTaskId,
+  selectFilter,
+  selectIsLoading,
+  selectError,
+  selectIsInitialized,
+} from "./scheduler-store"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 
 // Mock the scheduler modules. Variables prefixed with `mock` are allowed in
@@ -1548,7 +1564,7 @@ describe("Scheduler selectors", () => {
   })
 
   it("selectSelectedTask returns the matching task object", async () => {
-    const { selectSelectedTask } = await import("./scheduler-store")
+    // selectSelectedTask imported statically
     const task = sampleTask({ id: "a" })
     act(() => {
       useSchedulerStore.setState({ tasks: [task], selectedTaskId: "a" })
@@ -1557,21 +1573,7 @@ describe("Scheduler selectors", () => {
   })
 
   it("selectActiveTasks / selectPausedTasks / selectUpcomingTasks derive correctly", async () => {
-    const {
-      selectActiveTasks,
-      selectPausedTasks,
-      selectUpcomingTasks,
-      selectRecentExecutions,
-      selectSchedulerStatus,
-      selectTasks,
-      selectExecutions,
-      selectStatistics,
-      selectSelectedTaskId,
-      selectFilter,
-      selectIsLoading,
-      selectError,
-      selectIsInitialized,
-    } = await import("./scheduler-store")
+    // selectors imported statically
     const future = new Date(Date.now() + 60_000)
     const past = new Date(Date.now() - 60_000)
     const tasks: ScheduledTask[] = [
@@ -1615,7 +1617,7 @@ describe("Scheduler selectors", () => {
 
 describe("stores/scheduler index barrel", () => {
   it("re-exports the scheduler store and selectors", async () => {
-    const barrel = await import("./index")
+    const barrel = jest.requireMock("./index")
     expect(typeof barrel.useSchedulerStore).toBe("function")
     expect(typeof barrel.selectTasks).toBe("function")
     expect(typeof barrel.selectActiveTasks).toBe("function")

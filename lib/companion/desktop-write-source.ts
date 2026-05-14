@@ -22,6 +22,8 @@ import type { CharacterDraft } from "@/lib/db/characters"
 import { getDb } from "@/lib/db/schema"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import type { AppSettings } from "@/lib/claude/types"
+import { listen } from "@tauri-apps/api/event"
+import { invoke } from "@tauri-apps/api/core"
 
 const REQUEST_EVENT = "companion://desktop-write-request"
 const RESPONSE_COMMAND = "companion_desktop_write_response"
@@ -54,13 +56,7 @@ export async function installDesktopWriteSource(opts: InstallOptions = {}): Prom
     bridge = opts.bridge
   } else {
     try {
-      const eventMod = (await import("@tauri-apps/api/event")) as {
-        listen: TauriBridge["listen"]
-      }
-      const coreMod = (await import("@tauri-apps/api/core")) as {
-        invoke: TauriBridge["invoke"]
-      }
-      bridge = { listen: eventMod.listen, invoke: coreMod.invoke }
+      bridge = { listen, invoke }
     } catch {
       installed = false
       return () => {}

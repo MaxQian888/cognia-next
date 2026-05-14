@@ -37,8 +37,6 @@ export class NoApiKeyError extends Error {
 }
 
 async function buildTauriFileSystem(rootDir: string): Promise<FileSystem> {
-  const { readDir, readTextFile } = await import("@tauri-apps/plugin-fs")
-
   async function walk(dir: string): Promise<string[]> {
     const entries = await readDir(dir)
     const results: string[] = []
@@ -96,7 +94,6 @@ async function buildLlmClient(): Promise<LlmClient> {
             ? "mistral-large"
             : "command-r-plus"
 
-  const { createLlmClient } = await import("@/lib/twin/distill/llm")
   const config: LlmConfig = {
     provider,
     model,

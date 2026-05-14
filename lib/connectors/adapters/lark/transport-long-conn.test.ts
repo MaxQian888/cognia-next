@@ -15,6 +15,7 @@ import {
   connectorsWsClose,
   connectorsHttpRequest,
 } from "@/lib/connectors/tauri/commands"
+import { startLarkLongConn } from "./transport-long-conn"
 
 const mockListen = listen as jest.Mock
 const mockWsOpen = connectorsWsOpen as jest.Mock
@@ -99,8 +100,6 @@ describe("startLarkLongConn", () => {
     const session = createFakeWsSession()
     mockListen.mockImplementation(session.listenImpl)
 
-    const { startLarkLongConn } = await import("./transport-long-conn")
-
     const ctrl = new AbortController()
     const yielded: string[] = []
 
@@ -133,8 +132,6 @@ describe("startLarkLongConn", () => {
   it("replies heartbeat_rsp to heartbeat_req", async () => {
     const session = createFakeWsSession()
     mockListen.mockImplementation(session.listenImpl)
-
-    const { startLarkLongConn } = await import("./transport-long-conn")
 
     const ctrl = new AbortController()
     const yielded: string[] = []
@@ -179,8 +176,6 @@ describe("startLarkLongConn", () => {
 
   it("stops immediately when signal is pre-aborted", async () => {
     mockListen.mockResolvedValue(jest.fn())
-
-    const { startLarkLongConn } = await import("./transport-long-conn")
 
     const ctrl = new AbortController()
     ctrl.abort()

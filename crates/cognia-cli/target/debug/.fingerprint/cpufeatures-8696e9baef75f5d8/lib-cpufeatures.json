@@ -1,0 +1,20 @@
+{
+  "rustc": 3674164131150989441,
+  "features": "[]",
+  "declared_features": "[]",
+  "target": 2330704043955282025,
+  "profile": 2241668132362809309,
+  "path": 16557640531458654689,
+  "deps": [],
+  "local": [
+    {
+      "CheckDepInfo": {
+        "dep_info": "debug\\.fingerprint\\cpufeatures-8696e9baef75f5d8\\dep-lib-cpufeatures",
+        "checksum": false
+      }
+    }
+  ],
+  "rustflags": [],
+  "config": 8247474407144887393,
+  "compile_kind": 0
+}

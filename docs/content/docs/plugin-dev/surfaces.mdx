@@ -1,0 +1,84 @@
+---
+title: Surfaces
+description: UI extension points — how to mount plugin components into chat header, sidebar, toolbar, canvas, panel, and settings.
+---
+
+# Surfaces
+
+Surfaces are UI slots where plugins can inject React components. Declare them in `cognia-plugin.json` under `surfaces[]`, then use `ctx.api.extension.mount()` in `onActivate()` to render content.
+
+## Surface kinds
+
+| Kind | ID pattern | Where it appears |
+|------|------------|------------------|
+| `panel` | Any string | A dedicated tab in the left/right panel area |
+| `chat-action` | Any string | A button in the message action bar (hover a message to see it) |
+| `chat-header` | Any string | A button group in the ChatHeader toolbar |
+| `sidebar` | `left.top`, `left.bottom`, `right.top`, `right.bottom` | Sections within the main sidebar |
+| `toolbar` | `left`, `right`, `center` | The top application toolbar |
+| `statusbar` | `left`, `center`, `right` | The bottom status bar |
+| `canvas-toolbar` | Any string | Buttons in the canvas editor toolbar |
+| `settings` | `general`, `appearance`, `data`, … | A section inside Settings |
+
+## Declaring surfaces
+
+```json title="cognia-plugin.json"
+{
+  "surfaces": [
+    { "kind": "panel", "id": "my-panel", "title": "My Plugin" },
+    { "kind": "chat-action", "id": "summarize", "label": "Summarize" },
+    { "kind": "chat-header", "id": "export-btn", "label": "Export" },
+    { "kind": "settings", "id": "my-settings", "label": "My Plugin", "section": "general" }
+  ]
+}
+```
+
+## Mounting a surface
+
+```ts title="main.js"
+export async function onActivate(ctx) {
+  // Mount a panel
+  ctx.api.extension.mount("panel", "my-panel", () => {
+    const root = document.createElement("div")
+    root.textContent = "Hello from my plugin!"
+    return root
+  })
+
+  // Mount a chat action
+  ctx.api.extension.mount("chat-action", "summarize", (message) => {
+    return {
+      label: "Summarize",
+      icon: "✨",
+      onClick: async () => {
+        const summary = await summarize(message.content)
+        await ctx.api.session.sendMessage(message.sessionId, { content: summary })
+      },
+    }
+  })
+}
+```
+
+## Surface lifecycle
+
+- **Mount** — Called when the UI slot becomes visible. Return a DOM node or React component descriptor.
+- **Update** — The host may call your factory again with new props; clean up the previous rendering.
+- **Unmount** — When the plugin is disabled or the user navigates away, the host removes your DOM tree.
+
+## Styling
+
+Plugin surfaces inherit the host's CSS variables (`--color-background`, `--color-foreground`, etc.). Use these variables for theming instead of hard-coded colors. The host switches between light and dark mode automatically.
+
+```css
+.my-plugin-root {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  padding: var(--spacing-4);
+}
+```
+
+## Related
+
+<Cards>
+  <Card title="API Overview" href="./api-overview" description="The extension.* namespace in detail." />
+  <Card title="Lifecycle Hooks" href="./lifecycle-hooks" description="Responding to host events." />
+</Cards>

@@ -1,0 +1,16 @@
+{
+  "title": "Plugin Development",
+  "pages": [
+    "dexie-tables",
+    "wasm-plugins",
+    "manifest",
+    "api-overview",
+    "permissions",
+    "surfaces",
+    "workflow-nodes",
+    "connector-adapters",
+    "lifecycle-hooks",
+    "devtools",
+    "packaging"
+  ]
+}

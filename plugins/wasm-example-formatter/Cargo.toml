@@ -1,0 +1,28 @@
+[package]
+name = "wasm-example-formatter"
+version = "0.1.0"
+edition = "2021"
+description = "Cognia WASM example plugin: runs `rustfmt` over input source code, demonstrating fs + process + workflow capabilities."
+license = "MIT OR Apache-2.0"
+
+[package.metadata.component]
+package = "cognia:plugin"
+
+[package.metadata.component.target]
+path = "wit"
+world = "cognia-plugin"
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+wit-bindgen-rt = { version = "0.34", features = ["bitflags"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = "debuginfo"
+codegen-units = 1

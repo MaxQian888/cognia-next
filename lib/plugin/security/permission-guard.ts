@@ -97,6 +97,8 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "agent:control": "Control agent execution",
   "python:execute": "Execute Python code",
   "sandbox:web-execute": "Execute code inside the browser sandbox",
+  "secrets:read": "Read secrets from the OS keyring",
+  "secrets:write": "Store secrets in the OS keyring",
 }
 
 export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
@@ -104,6 +106,7 @@ export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
   "process:spawn",
   "python:execute",
   "filesystem:write",
+  "secrets:write",
 ]
 
 // =============================================================================

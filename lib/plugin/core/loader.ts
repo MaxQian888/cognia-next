@@ -5,6 +5,7 @@
 import { loggers } from "@/lib/logger"
 import type { Plugin, PluginDefinition, PluginManifest } from "@/types/plugin"
 import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
+import { loadWasmDefinition } from "./wasm-loader"
 
 const pluginLoaderLogger = loggers.plugin.child("loader")
 
@@ -66,9 +67,27 @@ export class PluginLoader {
         return this.loadPythonModule(manifest, path)
       case "hybrid":
         return this.loadHybridModule(manifest, path)
+      case "wasm":
+        return this.loadWasmModule(manifest, path)
       default:
         throw new Error(`Unknown plugin type: ${manifest.type}`)
     }
+  }
+
+  /**
+   * Load a WASM Component Model plugin. The actual wasmtime engine lives in
+   * `src-tauri/src/plugin_api/wasm/`; this loader thin-wraps the IPC client.
+   */
+  private async loadWasmModule(
+    manifest: PluginManifest,
+    pluginPath: string
+  ): Promise<PluginDefinition> {
+    const definition = await loadWasmDefinition(manifest, pluginPath)
+    this.loadedModules.set(manifest.id, {
+      definition,
+      exports: { default: definition },
+    })
+    return definition
   }
 
   /**
@@ -502,6 +521,12 @@ export class PluginLoader {
    * Unload a plugin module
    */
   unload(pluginId: string): void {
+    const entry = this.loadedModules.get(pluginId)
+    if (entry?.definition.manifest.type === "wasm") {
+      void import("./wasm-loader").then(({ unloadWasmPlugin }) =>
+        unloadWasmPlugin(pluginId).catch(() => {})
+      )
+    }
     this.loadedModules.delete(pluginId)
     this.loadingPromises.delete(pluginId)
   }

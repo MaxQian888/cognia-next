@@ -6,7 +6,7 @@ authors = ["AstroAir <astro_air@126.com>"]
 license = "MIT"
 repository = "https://github.com/AstroAir/cognia-next"
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.82"
 default-run = "cognia-next"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -141,6 +141,26 @@ mdns-sd = "0.13"
 notify = "6"
 flate2 = "1"
 tar = "0.4"
+# Temp-dir staging for WASM plugin installs (M2.2/M2.3). Used by
+# `src-tauri/src/plugin_api/wasm/installer.rs` to extract zip bundles and
+# clone git repos into auto-cleanup directories before they're moved into
+# place. Also remains in `[dev-dependencies]` for tests that don't depend
+# on the runtime install path.
+tempfile = "3"
+# WASM plugin bundle extraction (M2.2) — .zip is the canonical bundle format
+# the `cognia plugin build` CLI emits. Pure-Rust, no system zlib dep.
+zip = { version = "2", default-features = false, features = ["deflate", "bzip2"] }
+
+# WASM plugin runtime (ADR 0013) — wasmtime 26 with the component-model
+# feature on by default. `wasmtime-wasi` provides the WASI Preview 2
+# interfaces we host (clocks/random/io/cli/filesystem). `wasmparser` is used
+# to scan for the embedded `cognia:api-version` custom section before the
+# component is compiled. wasmtime 26 is the last release before the major
+# version churn around the Pulley interpreter; pinning to 26 keeps us on a
+# stable wit-bindgen surface (0.34) until we revisit ABI in v0.2.
+wasmtime = { version = "26", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
+wasmtime-wasi = "26"
+wasmparser = "0.221"
 
 # CLI argument parsing for the cognia-server binary (Phase D follow-up).
 # `derive` gives us the `#[derive(Parser)]` macro; `std` keeps default
@@ -152,6 +172,7 @@ clap = { version = "=4.6.0", features = ["derive"] }
 # Windows UIA bindings (`uiautomation`) and macOS/Linux a11y crates are
 # target-gated below.
 xcap = "0.0.12"
+dial9-tokio-telemetry = "0.3"
 
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-window-state = "2"

@@ -505,13 +505,20 @@ export function validateManifestStrict(manifest: PluginManifest): {
   }
 
   // Type validation
-  if (manifest.type && !["frontend", "python", "hybrid"].includes(manifest.type)) {
-    errors.push(`Invalid type: ${manifest.type}. Must be frontend, python, or hybrid`)
+  if (manifest.type && !["frontend", "python", "hybrid", "wasm"].includes(manifest.type)) {
+    errors.push(`Invalid type: ${manifest.type}. Must be frontend, python, hybrid, or wasm`)
   }
 
   // Main entry point
   if (manifest.type === "frontend" && !manifest.main) {
     errors.push("Frontend plugins must specify a main entry point")
+  }
+
+  if (manifest.type === "wasm" && !manifest.wasmMain) {
+    errors.push("WASM plugins must specify a wasmMain entry point")
+  }
+  if (manifest.type === "wasm" && !manifest.wasm?.apiVersion) {
+    errors.push("WASM plugins must declare wasm.apiVersion (semver)")
   }
 
   // Capabilities validation

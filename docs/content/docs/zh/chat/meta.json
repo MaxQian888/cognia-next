@@ -1,0 +1,12 @@
+{
+  "title": "聊天与智能体",
+  "pages": [
+    "chat-and-skills",
+    "skills-system",
+    "agent-teams",
+    "slash-commands",
+    "provider-system",
+    "claude-subscription-oauth",
+    "ccswitch"
+  ]
+}
