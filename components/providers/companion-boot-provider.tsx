@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useRef } from "react"
+import { useTranslations } from "next-intl"
 import { useTheme } from "next-themes"
 import { toast } from "sonner"
 
@@ -10,6 +11,7 @@ import { subscribe as subscribeDeeplink } from "@/lib/capacitor/deeplink"
 import { dispatchRoute, makeRouterNavigators } from "@/lib/capacitor/deeplink-router"
 import { hide as hideSplash } from "@/lib/capacitor/splash-screen"
 import { syncWithTheme as syncStatusBar } from "@/lib/capacitor/status-bar"
+import { syncWithTheme as syncNavBar } from "@/lib/capacitor/navigation-bar"
 import { ensureChannel as ensureNotifChannel } from "@/lib/capacitor/local-notifications"
 import {
   registerPushNotifications,
@@ -51,14 +53,17 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
   const router = useRouter()
   const pathname = usePathname()
   const { resolvedTheme } = useTheme()
+  const t = useTranslations("mobile.companion")
   const ranRef = useRef(false)
 
-  // Status bar tracks the resolved theme on every change. Decoupled from
-  // the boot effect because theme can flip after boot (system preference
-  // change, manual toggle).
+  // Status bar + Android nav bar track the resolved theme on every change.
+  // Decoupled from the boot effect because theme can flip after boot
+  // (system preference change, manual toggle). The nav-bar wrapper is a
+  // no-op on iOS and on devices without the @capgo plugin installed.
   useEffect(() => {
     if (platform !== "mobile") return
     void syncStatusBar(resolvedTheme)
+    void syncNavBar(resolvedTheme)
   }, [platform, resolvedTheme])
 
   useEffect(() => {
@@ -122,6 +127,7 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
         const sent = await reportPushTokenToDesktop(push.token, push.platform)
         if (!sent.ok) {
           log.warn("companion: failed to report push token", { reason: sent.reason })
+          toast.error(t("pushTokenFailed", { reason: sent.reason }))
         } else {
           log.info("companion: push token reported", { platform: push.platform })
         }
@@ -162,7 +168,7 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
         }
       }
     }
-  }, [platform, pathname, router])
+  }, [platform, pathname, router, t])
 
   return <>{children}</>
 }

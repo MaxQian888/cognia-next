@@ -30,6 +30,10 @@ export type ScheduledTaskType =
   | "im-push"
   | "skill"
   | "external-agent"
+  // Twin subsystem registers `"twin"` via `registerTaskExecutor` in
+  // `lib/scheduler/executors/twin-executor.ts`. Surfaced here so cron-
+  // driven Twin ingest/distill rows are typed properly across the codebase.
+  | "twin"
   // Connector subsystem registers two task-types via `registerTaskExecutor`
   // in `lib/connectors/scheduled-outbound.ts`. Listed here so connector rows
   // in the same `tasks` Dexie store are typed properly across the codebase.

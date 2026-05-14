@@ -10,6 +10,7 @@
  * `ExpressionField` component for syntax + autocomplete.
  */
 
+import { useTranslations } from "next-intl"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
@@ -56,19 +57,14 @@ function readStringList(params: Params, key: string): string[] {
 // ── Reusable: repo full-name input ───────────────────────────────────────
 
 function RepoFullNameField({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.github.repoFullName")
   return (
-    <Field
-      label="Repository"
-      htmlFor="gh-repo"
-      hint="Format: owner/name. Supports {{ }} expressions."
-      name="repoFullName"
-      required
-    >
+    <Field label={t("label")} htmlFor="gh-repo" hint={t("hint")} name="repoFullName" required>
       <ExpressionField
         id="gh-repo"
         value={readString(params, "repoFullName")}
         onChange={(v) => onChange(patchParam(params, "repoFullName", v))}
-        placeholder="octocat/hello-world"
+        placeholder={t("placeholder")}
       />
     </Field>
   )
@@ -77,6 +73,7 @@ function RepoFullNameField({ params, onChange }: ConfigProps) {
 // ── trigger.github.webhook ───────────────────────────────────────────────
 
 export function GithubWebhookTriggerConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.github.webhookTrigger")
   const events = readStringList(params, "events")
   const toggle = (evt: string) => {
     const next = events.includes(evt) ? events.filter((e) => e !== evt) : [...events, evt]
@@ -84,12 +81,7 @@ export function GithubWebhookTriggerConfig({ params, onChange }: ConfigProps) {
   }
   return (
     <FieldGroup>
-      <Field
-        label="Events to listen for"
-        hint="Pick one or more. The Rust receiver verifies the x-hub-signature-256 header."
-        name="events"
-        required
-      >
+      <Field label={t("events.label")} hint={t("events.hint")} name="events" required>
         <div className="grid grid-cols-1 gap-1.5">
           {SUPPORTED_GH_EVENTS.map((evt) => (
             <label key={evt} className="flex items-center gap-2 text-sm">
@@ -111,37 +103,38 @@ export function GithubWebhookTriggerConfig({ params, onChange }: ConfigProps) {
 // ── action.github.openPr ─────────────────────────────────────────────────
 
 export function GithubOpenPrConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.github.openPr")
   return (
     <FieldGroup>
       <RepoFullNameField params={params} onChange={onChange} />
-      <Field label="Head branch" name="head" required hint="The branch with your changes.">
+      <Field label={t("head.label")} name="head" required hint={t("head.hint")}>
         <ExpressionField
           value={readString(params, "head")}
           onChange={(v) => onChange(patchParam(params, "head", v))}
-          placeholder="feat/x"
+          placeholder={t("head.placeholder")}
         />
       </Field>
-      <Field label="Base branch" name="base" required hint="The branch to merge into.">
+      <Field label={t("base.label")} name="base" required hint={t("base.hint")}>
         <ExpressionField
           value={readString(params, "base", "main")}
           onChange={(v) => onChange(patchParam(params, "base", v))}
-          placeholder="main"
+          placeholder={t("base.placeholder")}
         />
       </Field>
-      <Field label="Title" name="title" required>
+      <Field label={t("title.label")} name="title" required>
         <ExpressionField
           value={readString(params, "title")}
           onChange={(v) => onChange(patchParam(params, "title", v))}
         />
       </Field>
-      <Field label="Body" name="body" hint="Markdown supported.">
+      <Field label={t("body.label")} name="body" hint={t("body.hint")}>
         <Textarea
           rows={4}
           value={readString(params, "body")}
           onChange={(e) => onChange(patchParam(params, "body", e.target.value))}
         />
       </Field>
-      <Field label="Draft" name="draft" hint="Open as draft PR.">
+      <Field label={t("draft.label")} name="draft" hint={t("draft.hint")}>
         <Switch
           checked={readBoolean(params, "draft", false)}
           onCheckedChange={(b) => onChange(patchParam(params, "draft", b))}
@@ -154,10 +147,11 @@ export function GithubOpenPrConfig({ params, onChange }: ConfigProps) {
 // ── action.github.closePr ────────────────────────────────────────────────
 
 export function GithubClosePrConfig({ params, onChange }: ConfigProps) {
+  const tShared = useTranslations("workflows.forms.github")
   return (
     <FieldGroup>
       <RepoFullNameField params={params} onChange={onChange} />
-      <Field label="PR number" name="prNumber" required>
+      <Field label={tShared("prNumber.label")} name="prNumber" required>
         <Input
           type="number"
           value={readNumber(params, "prNumber", 0) || ""}
@@ -173,11 +167,13 @@ export function GithubClosePrConfig({ params, onChange }: ConfigProps) {
 // ── action.github.mergePr ────────────────────────────────────────────────
 
 export function GithubMergePrConfig({ params, onChange }: ConfigProps) {
+  const tShared = useTranslations("workflows.forms.github")
+  const t = useTranslations("workflows.forms.github.mergePr")
   const method = readString(params, "mergeMethod", "merge")
   return (
     <FieldGroup>
       <RepoFullNameField params={params} onChange={onChange} />
-      <Field label="PR number" name="prNumber" required>
+      <Field label={tShared("prNumber.label")} name="prNumber" required>
         <Input
           type="number"
           value={readNumber(params, "prNumber", 0) || ""}
@@ -186,7 +182,7 @@ export function GithubMergePrConfig({ params, onChange }: ConfigProps) {
           }
         />
       </Field>
-      <Field label="Merge method" name="mergeMethod" required>
+      <Field label={t("mergeMethod.label")} name="mergeMethod" required>
         <Select
           value={method}
           onValueChange={(v) => onChange(patchParam(params, "mergeMethod", v))}
@@ -195,13 +191,13 @@ export function GithubMergePrConfig({ params, onChange }: ConfigProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="merge">Merge commit</SelectItem>
-            <SelectItem value="squash">Squash and merge</SelectItem>
-            <SelectItem value="rebase">Rebase and merge</SelectItem>
+            <SelectItem value="merge">{t("mergeMethod.options.merge")}</SelectItem>
+            <SelectItem value="squash">{t("mergeMethod.options.squash")}</SelectItem>
+            <SelectItem value="rebase">{t("mergeMethod.options.rebase")}</SelectItem>
           </SelectContent>
         </Select>
       </Field>
-      <Field label="Commit title (optional)" name="commitTitle">
+      <Field label={t("commitTitle.label")} name="commitTitle">
         <ExpressionField
           value={readString(params, "commitTitle")}
           onChange={(v) => onChange(patchParam(params, "commitTitle", v))}
@@ -214,11 +210,13 @@ export function GithubMergePrConfig({ params, onChange }: ConfigProps) {
 // ── action.github.reviewPr ──────────────────────────────────────────────
 
 export function GithubReviewPrConfig({ params, onChange }: ConfigProps) {
+  const tShared = useTranslations("workflows.forms.github")
+  const t = useTranslations("workflows.forms.github.reviewPr")
   const event = readString(params, "event", "COMMENT")
   return (
     <FieldGroup>
       <RepoFullNameField params={params} onChange={onChange} />
-      <Field label="PR number" name="prNumber" required>
+      <Field label={tShared("prNumber.label")} name="prNumber" required>
         <Input
           type="number"
           value={readNumber(params, "prNumber", 0) || ""}
@@ -227,7 +225,7 @@ export function GithubReviewPrConfig({ params, onChange }: ConfigProps) {
           }
         />
       </Field>
-      <Field label="Review verdict" name="event" required>
+      <Field label={t("event.label")} name="event" required>
         <Select value={event} onValueChange={(v) => onChange(patchParam(params, "event", v))}>
           <SelectTrigger>
             <SelectValue />
@@ -239,7 +237,7 @@ export function GithubReviewPrConfig({ params, onChange }: ConfigProps) {
           </SelectContent>
         </Select>
       </Field>
-      <Field label="Review body" name="body" required hint="Supports {{ }} expressions.">
+      <Field label={t("body.label")} name="body" required hint={t("body.hint")}>
         <ExpressionField
           value={readString(params, "body")}
           onChange={(v) => onChange(patchParam(params, "body", v))}
@@ -253,10 +251,12 @@ export function GithubReviewPrConfig({ params, onChange }: ConfigProps) {
 // ── action.github.reviewPrInline (LLM-driven inline review) ─────────────
 
 export function GithubReviewPrInlineConfig({ params, onChange }: ConfigProps) {
+  const tShared = useTranslations("workflows.forms.github")
+  const t = useTranslations("workflows.forms.github.reviewPrInline")
   return (
     <FieldGroup>
       <RepoFullNameField params={params} onChange={onChange} />
-      <Field label="PR number" name="prNumber" required>
+      <Field label={tShared("prNumber.label")} name="prNumber" required>
         <Input
           type="number"
           value={readNumber(params, "prNumber", 0) || ""}
@@ -265,49 +265,35 @@ export function GithubReviewPrInlineConfig({ params, onChange }: ConfigProps) {
           }
         />
       </Field>
-      <Field
-        label="LLM provider"
-        name="provider"
-        required
-        hint="Must match a configured provider id (e.g. anthropic, openai)."
-      >
+      <Field label={t("provider.label")} name="provider" required hint={t("provider.hint")}>
         <Input
           value={readString(params, "provider")}
           onChange={(e) => onChange(patchParam(params, "provider", e.target.value))}
-          placeholder="anthropic"
+          placeholder={t("provider.placeholder")}
         />
       </Field>
-      <Field label="Model" name="model" required>
+      <Field label={t("model.label")} name="model" required>
         <Input
           value={readString(params, "model")}
           onChange={(e) => onChange(patchParam(params, "model", e.target.value))}
-          placeholder="claude-sonnet-4-6"
+          placeholder={t("model.placeholder")}
         />
       </Field>
-      <Field
-        label="API key"
-        name="apiKey"
-        required
-        hint="Secret. Stored in the workflow definition — consider a credential ref instead."
-      >
+      <Field label={t("apiKey.label")} name="apiKey" required hint={t("apiKey.hint")}>
         <Input
           type="password"
           value={readString(params, "apiKey")}
           onChange={(e) => onChange(patchParam(params, "apiKey", e.target.value))}
         />
       </Field>
-      <Field label="Base URL" name="baseURL" hint="Optional. For self-hosted or proxied providers.">
+      <Field label={t("baseURL.label")} name="baseURL" hint={t("baseURL.hint")}>
         <Input
           value={readString(params, "baseURL")}
           onChange={(e) => onChange(patchParam(params, "baseURL", e.target.value))}
-          placeholder="https://api.anthropic.com"
+          placeholder={t("baseURL.placeholder")}
         />
       </Field>
-      <Field
-        label="Max files"
-        name="maxFiles"
-        hint="How many changed files to inspect (1–30). Default 5."
-      >
+      <Field label={t("maxFiles.label")} name="maxFiles" hint={t("maxFiles.hint")}>
         <Input
           type="number"
           min={1}
@@ -318,11 +304,7 @@ export function GithubReviewPrInlineConfig({ params, onChange }: ConfigProps) {
           }
         />
       </Field>
-      <Field
-        label="Focus"
-        name="focus"
-        hint="Optional review angle, e.g. 'security' or 'performance'. Supports {{ }} expressions."
-      >
+      <Field label={t("focus.label")} name="focus" hint={t("focus.hint")}>
         <ExpressionField
           value={readString(params, "focus")}
           onChange={(v) => onChange(patchParam(params, "focus", v))}
@@ -337,11 +319,17 @@ export function GithubReviewPrInlineConfig({ params, onChange }: ConfigProps) {
 
 function buildCommentConfig(target: "pr" | "issue") {
   const Component = ({ params, onChange }: ConfigProps) => {
+    const tShared = useTranslations("workflows.forms.github")
+    const tComment = useTranslations("workflows.forms.github.comment")
     const numField = target === "pr" ? "prNumber" : "issueNumber"
     return (
       <FieldGroup>
         <RepoFullNameField params={params} onChange={onChange} />
-        <Field label={target === "pr" ? "PR number" : "Issue number"} name={numField} required>
+        <Field
+          label={target === "pr" ? tShared("prNumber.label") : tShared("issueNumber.label")}
+          name={numField}
+          required
+        >
           <Input
             type="number"
             value={readNumber(params, numField, 0) || ""}
@@ -350,7 +338,7 @@ function buildCommentConfig(target: "pr" | "issue") {
             }
           />
         </Field>
-        <Field label="Comment body" name="body" required hint="Supports {{ }} expressions.">
+        <Field label={tComment("body.label")} name="body" required hint={tComment("body.hint")}>
           <ExpressionField
             value={readString(params, "body")}
             onChange={(v) => onChange(patchParam(params, "body", v))}
@@ -378,6 +366,7 @@ function LabelListEditor({
   onChange: (next: string[]) => void
   placeholder: string
 }) {
+  const tShared = useTranslations("workflows.forms.github")
   return (
     <div className="space-y-1">
       {list.map((label, idx) => (
@@ -402,19 +391,21 @@ function LabelListEditor({
         </div>
       ))}
       <Button type="button" variant="outline" size="sm" onClick={() => onChange([...list, ""])}>
-        <Plus className="h-4 w-4 mr-1" /> Add label
+        <Plus className="h-4 w-4 mr-1" /> {tShared("addLabel")}
       </Button>
     </div>
   )
 }
 
 export function GithubLabelIssueConfig({ params, onChange }: ConfigProps) {
+  const tShared = useTranslations("workflows.forms.github")
+  const t = useTranslations("workflows.forms.github.labelIssue")
   const add = readStringList(params, "add")
   const remove = readStringList(params, "remove")
   return (
     <FieldGroup>
       <RepoFullNameField params={params} onChange={onChange} />
-      <Field label="Issue/PR number" name="issueNumber" required>
+      <Field label={tShared("issuePrNumber.label")} name="issueNumber" required>
         <Input
           type="number"
           value={readNumber(params, "issueNumber", 0) || ""}
@@ -423,18 +414,18 @@ export function GithubLabelIssueConfig({ params, onChange }: ConfigProps) {
           }
         />
       </Field>
-      <Field label="Labels to add" name="add">
+      <Field label={t("add.label")} name="add">
         <LabelListEditor
           list={add}
           onChange={(next) => onChange(patchParam(params, "add", next))}
-          placeholder="cognia:claim"
+          placeholder={t("add.placeholder")}
         />
       </Field>
-      <Field label="Labels to remove" name="remove">
+      <Field label={t("remove.label")} name="remove">
         <LabelListEditor
           list={remove}
           onChange={(next) => onChange(patchParam(params, "remove", next))}
-          placeholder="wontfix"
+          placeholder={t("remove.placeholder")}
         />
       </Field>
     </FieldGroup>
@@ -444,11 +435,13 @@ export function GithubLabelIssueConfig({ params, onChange }: ConfigProps) {
 // ── action.github.closeIssue ────────────────────────────────────────────
 
 export function GithubCloseIssueConfig({ params, onChange }: ConfigProps) {
+  const tShared = useTranslations("workflows.forms.github")
+  const t = useTranslations("workflows.forms.github.closeIssue")
   const reason = readString(params, "reason", "")
   return (
     <FieldGroup>
       <RepoFullNameField params={params} onChange={onChange} />
-      <Field label="Issue number" name="issueNumber" required>
+      <Field label={tShared("issueNumber.label")} name="issueNumber" required>
         <Input
           type="number"
           value={readNumber(params, "issueNumber", 0) || ""}
@@ -457,7 +450,7 @@ export function GithubCloseIssueConfig({ params, onChange }: ConfigProps) {
           }
         />
       </Field>
-      <Field label="Close reason" name="reason">
+      <Field label={t("reason.label")} name="reason">
         <Select
           value={reason || "completed"}
           onValueChange={(v) => onChange(patchParam(params, "reason", v))}
@@ -466,8 +459,8 @@ export function GithubCloseIssueConfig({ params, onChange }: ConfigProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="completed">Completed</SelectItem>
-            <SelectItem value="not_planned">Not planned</SelectItem>
+            <SelectItem value="completed">{t("reason.options.completed")}</SelectItem>
+            <SelectItem value="not_planned">{t("reason.options.not_planned")}</SelectItem>
           </SelectContent>
         </Select>
       </Field>
@@ -478,36 +471,37 @@ export function GithubCloseIssueConfig({ params, onChange }: ConfigProps) {
 // ── action.github.createRelease ─────────────────────────────────────────
 
 export function GithubCreateReleaseConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.github.createRelease")
   return (
     <FieldGroup>
       <RepoFullNameField params={params} onChange={onChange} />
-      <Field label="Tag" name="tag" required>
+      <Field label={t("tag.label")} name="tag" required>
         <ExpressionField
           value={readString(params, "tag")}
           onChange={(v) => onChange(patchParam(params, "tag", v))}
-          placeholder="v1.0.0"
+          placeholder={t("tag.placeholder")}
         />
       </Field>
-      <Field label="Release name" name="name">
+      <Field label={t("name.label")} name="name">
         <ExpressionField
           value={readString(params, "name")}
           onChange={(v) => onChange(patchParam(params, "name", v))}
         />
       </Field>
-      <Field label="Body" name="body" hint="Supports {{ }} expressions and Markdown.">
+      <Field label={t("body.label")} name="body" hint={t("body.hint")}>
         <ExpressionField
           value={readString(params, "body")}
           onChange={(v) => onChange(patchParam(params, "body", v))}
           multiline
         />
       </Field>
-      <Field label="Draft" name="draft">
+      <Field label={t("draft.label")} name="draft">
         <Switch
           checked={readBoolean(params, "draft", true)}
           onCheckedChange={(b) => onChange(patchParam(params, "draft", b))}
         />
       </Field>
-      <Field label="Prerelease" name="prerelease">
+      <Field label={t("prerelease.label")} name="prerelease">
         <Switch
           checked={readBoolean(params, "prerelease", false)}
           onCheckedChange={(b) => onChange(patchParam(params, "prerelease", b))}
@@ -520,20 +514,21 @@ export function GithubCreateReleaseConfig({ params, onChange }: ConfigProps) {
 // ── action.github.generateChangelog ─────────────────────────────────────
 
 export function GithubGenerateChangelogConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.github.generateChangelog")
   return (
     <FieldGroup>
       <RepoFullNameField params={params} onChange={onChange} />
-      <Field label="Since (tag or SHA)" name="since" required>
+      <Field label={t("since.label")} name="since" required>
         <ExpressionField
           value={readString(params, "since")}
           onChange={(v) => onChange(patchParam(params, "since", v))}
-          placeholder="v1.0.0"
+          placeholder={t("since.placeholder")}
         />
       </Field>
       <Field
-        label="Current version"
+        label={t("currentVersion.label")}
         name="currentVersion"
-        hint="Starting version for the bump calc. Defaults to 0.0.0."
+        hint={t("currentVersion.hint")}
       >
         <ExpressionField
           value={readString(params, "currentVersion", "0.0.0")}
@@ -547,17 +542,18 @@ export function GithubGenerateChangelogConfig({ params, onChange }: ConfigProps)
 // ── action.github.pushTag ───────────────────────────────────────────────
 
 export function GithubPushTagConfig({ params, onChange }: ConfigProps) {
+  const t = useTranslations("workflows.forms.github.pushTag")
   return (
     <FieldGroup>
       <RepoFullNameField params={params} onChange={onChange} />
-      <Field label="Tag name" name="tag" required>
+      <Field label={t("tag.label")} name="tag" required>
         <ExpressionField
           value={readString(params, "tag")}
           onChange={(v) => onChange(patchParam(params, "tag", v))}
-          placeholder="v1.0.0"
+          placeholder={t("tag.placeholder")}
         />
       </Field>
-      <Field label="Commit SHA" name="sha" required hint="Full 40-char SHA recommended.">
+      <Field label={t("sha.label")} name="sha" required hint={t("sha.hint")}>
         <ExpressionField
           value={readString(params, "sha")}
           onChange={(v) => onChange(patchParam(params, "sha", v))}
@@ -570,11 +566,13 @@ export function GithubPushTagConfig({ params, onChange }: ConfigProps) {
 // ── action.github.runIssueLoop ──────────────────────────────────────────
 
 export function GithubRunIssueLoopConfig({ params, onChange }: ConfigProps) {
+  const tShared = useTranslations("workflows.forms.github")
+  const t = useTranslations("workflows.forms.github.runIssueLoop")
   const mode = readString(params, "worktreeMode", "local")
   return (
     <FieldGroup>
       <RepoFullNameField params={params} onChange={onChange} />
-      <Field label="Issue number" name="issueNumber" required>
+      <Field label={tShared("issueNumber.label")} name="issueNumber" required>
         <Input
           type="number"
           value={readNumber(params, "issueNumber", 0) || ""}
@@ -583,21 +581,21 @@ export function GithubRunIssueLoopConfig({ params, onChange }: ConfigProps) {
           }
         />
       </Field>
-      <Field label="Worktree backend" name="worktreeMode">
+      <Field label={t("worktreeMode.label")} name="worktreeMode">
         <Select value={mode} onValueChange={(v) => onChange(patchParam(params, "worktreeMode", v))}>
           <SelectTrigger>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="local">Local git worktree</SelectItem>
-            <SelectItem value="e2b">E2B sandbox (requires e2b-sandbox plugin)</SelectItem>
+            <SelectItem value="local">{t("worktreeMode.options.local")}</SelectItem>
+            <SelectItem value="e2b">{t("worktreeMode.options.e2b")}</SelectItem>
           </SelectContent>
         </Select>
       </Field>
       <Field
-        label="Branch template"
+        label={t("branchTemplate.label")}
         name="branchTemplate"
-        hint="`{n}` is replaced by the issue number."
+        hint={t("branchTemplate.hint")}
       >
         <Input
           value={readString(params, "branchTemplate", "cognia/issue-{n}")}

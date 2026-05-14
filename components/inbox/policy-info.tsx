@@ -7,6 +7,7 @@
  * rules and rate-limit blockers are rendered in human-readable form.
  */
 
+import { useTranslations } from "next-intl"
 import { InfoIcon } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { TriggerPolicy, TriggerRule, TriggerBlocker } from "@/types/connectors/policy"
@@ -54,6 +55,7 @@ function describeBlocker(blocker: TriggerBlocker): string {
 }
 
 export function PolicyInfo({ policy }: PolicyInfoProps) {
+  const t = useTranslations("inbox.policyInfo")
   const ruleParts = policy.rules.map(describeRule)
   const blockerParts = policy.blockers.map(describeBlocker)
 
@@ -66,10 +68,10 @@ export function PolicyInfo({ policy }: PolicyInfoProps) {
           type="button"
           className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
           data-testid="policy-info-trigger"
-          aria-label="Policy info"
+          aria-label={t("aria")}
         >
           <InfoIcon className="h-3.5 w-3.5" />
-          <span>Policy</span>
+          <span>{t("title")}</span>
         </button>
       </TooltipTrigger>
       <TooltipContent side="bottom" className="max-w-xs text-xs" data-testid="policy-info-tooltip">

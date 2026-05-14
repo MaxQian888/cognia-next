@@ -115,25 +115,100 @@ export async function parseSource(raw: RawSource): Promise<ParsedSource> {
     }
   }
 
-  // Importer family — Phase 4 ships parsers for the document family only;
-  // chat / email / code-repo importers land in Phase 4.5 / v1.5. The fallback
-  // below keeps the pipeline functional: it treats the input as preformatted
-  // plain text so a hand-pasted Slack export still produces chunks.
+  // Importer family — chat / email / code-repo. Each importer returns
+  // `RawSource[]` because some bundles fan out (one ChatGPT export ≠ N
+  // conversations). When parseSource encounters a TwinSource row already
+  // stamped with an importer-family format (typical paste-mode path) we
+  // run the importer in-place and concatenate the fan-out into a single
+  // `ParsedSource` so downstream chunk/embed see one document.
   const text = raw.text ?? (raw.binary ? bytesToString(raw.binary) : "")
   if (!text) {
     throw new Error(
-      `parseSource: importer "${dispatch.importerKey}" not yet wired in cognia-next; ` +
-        `pass pre-extracted text via raw.text to fall back to plain-text ingest.`
+      `parseSource: importer "${dispatch.importerKey}" requires raw.text for in-pipeline parse`
     )
   }
+
+  const importerOpts = { twinId: raw.id, source: raw.filename }
+  let produced: { title: string; markdown: string } | null = null
+
+  try {
+    if (raw.format === "chatgpt-export") {
+      const mod = await import("@/lib/twin/importers/chat-export/chatgpt")
+      produced = collectImporterText(mod.parseChatgptExport(text, importerOpts), raw.filename)
+    } else if (raw.format === "claude-export") {
+      const mod = await import("@/lib/twin/importers/chat-export/claude")
+      produced = collectImporterText(mod.parseClaudeExport(text, importerOpts), raw.filename)
+    } else if (raw.format === "gemini-export") {
+      const mod = await import("@/lib/twin/importers/chat-export/gemini")
+      produced = collectImporterText(mod.parseGeminiExport(text, importerOpts), raw.filename)
+    } else if (raw.format === "slack-export") {
+      const mod = await import("@/lib/twin/importers/chat-export/slack")
+      produced = collectImporterText(mod.parseSlackExport(text, importerOpts), raw.filename)
+    } else if (raw.format === "lark-export") {
+      const mod = await import("@/lib/twin/importers/chat-export/lark")
+      produced = collectImporterText(mod.parseLarkExport(text, importerOpts), raw.filename)
+    } else if (raw.format === "dingtalk-export") {
+      const mod = await import("@/lib/twin/importers/chat-export/dingtalk")
+      produced = collectImporterText(mod.parseDingtalkExport(text, importerOpts), raw.filename)
+    } else if (raw.format === "wechat-export") {
+      const mod = await import("@/lib/twin/importers/chat-export/wechat")
+      produced = collectImporterText(mod.parseWechatExport(text, importerOpts), raw.filename)
+    } else if (raw.format === "mbox") {
+      const mod = await import("@/lib/twin/importers/email/mbox")
+      produced = collectImporterText(mod.parseMbox(text, importerOpts), raw.filename)
+    } else if (raw.format === "eml") {
+      const mod = await import("@/lib/twin/importers/email/eml")
+      produced = collectImporterText(mod.parseEml(text, importerOpts), raw.filename)
+    } else if (raw.format === "git-repo") {
+      // git-repo runs at uploader time (needs filesystem). If we still
+      // see a row with this format at parse time, treat the raw text as
+      // already-rendered commit markdown (the uploader produces this
+      // shape via `parseGitRepo`).
+      produced = { title: raw.filename, markdown: text }
+    }
+  } catch (err) {
+    // Importer threw (eg. malformed JSON) — surface the error so the job
+    // runner marks the source as failed with a clear message.
+    throw new Error(
+      `parseSource: importer "${dispatch.importerKey}" failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    )
+  }
+
+  if (!produced || !produced.markdown.trim()) {
+    // Importer produced nothing usable — fall back to the raw text so the
+    // chunker still has something to embed (better than throwing).
+    produced = { title: raw.filename, markdown: text }
+  }
+
   return {
     id: raw.id,
     kind: dispatch.kind,
     format: raw.format,
-    title: raw.filename,
-    originalText: text,
-    embeddableText: text,
+    title: produced.title,
+    originalText: produced.markdown,
+    embeddableText: produced.markdown,
     baseMetadata: raw.baseMetadata ?? {},
-    bytes: text.length,
+    bytes: produced.markdown.length,
   }
+}
+
+/**
+ * Reduce an importer's `RawSource[]` fan-out down to a single combined
+ * markdown blob. Uses the first source's filename as the document title
+ * and concatenates the remaining bodies with a horizontal-rule separator
+ * so the heading-aware chunker can still slice on `###` headers.
+ */
+function collectImporterText(
+  produced: RawSource[] | undefined,
+  fallbackTitle: string
+): { title: string; markdown: string } {
+  if (!produced || produced.length === 0) {
+    return { title: fallbackTitle, markdown: "" }
+  }
+  const first = produced[0]
+  const title = first.filename.replace(/\.md$/i, "") || fallbackTitle
+  const parts = produced.map((src) => src.text ?? "").filter((s) => s.trim().length > 0)
+  return { title, markdown: parts.join("\n\n---\n\n") }
 }

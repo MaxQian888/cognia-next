@@ -156,6 +156,10 @@ export async function processJob(jobId: string, config: JobWorkerConfig): Promis
         job,
         llm: config.llm,
         maxChunks: config.distillMaxChunks,
+        // Forward the worker's embedding config so distill can populate
+        // `StyleSample.embedding` inline — runtime few-shot then scores
+        // by cosine instead of the token-overlap fallback.
+        embedding: config.embedding,
       })
       await completeJob(job.id, {
         outputDraftIds: result.draftIds,

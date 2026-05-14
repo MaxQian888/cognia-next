@@ -21,6 +21,10 @@ const eslintConfig = defineConfig([
     ".claude/**",
     "sidecar/**",
     "node_modules/**",
+    // VS Code extension fixture under sidecars/vscode-ext-host — simulates
+    // a real CJS extension on purpose (require("vscode")), and the .js file
+    // is a pre-built artifact checked in to skip a build step in tests.
+    "sidecars/vscode-ext-host/tests/fixtures/**",
     // Bundled Monaco assets copied from node_modules by
     // scripts/copy-monaco-assets.mjs — minified vendor JS, never authored here.
     "public/monaco/**",
@@ -70,10 +74,17 @@ const eslintConfig = defineConfig([
       "@typescript-eslint/no-require-imports": "off",
     },
   },
-  // Canvas-store re-export test relies on Jest's `require()` to compare
-  // module identity — that's the right idiom for this exact assertion.
+  // Test files where `require()` is the right idiom — either to re-read the
+  // module after a Jest mock has been registered, or to dodge a TDZ on a
+  // helper export that runs at import time. Narrow per-file overrides keep
+  // the rule on everywhere else.
   {
-    files: ["stores/canvas/index.test.ts"],
+    files: [
+      "stores/canvas/index.test.ts",
+      "stores/chat/chat-store.test.ts",
+      "lib/claude/ipc.test.ts",
+      "components/chat/message-renderer.test.tsx",
+    ],
     rules: {
       "@typescript-eslint/no-require-imports": "off",
     },

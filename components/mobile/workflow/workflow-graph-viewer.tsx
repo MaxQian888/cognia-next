@@ -13,6 +13,7 @@
  */
 
 import { useMemo } from "react"
+import { useTranslations } from "next-intl"
 import { ArrowDownIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -44,12 +45,13 @@ export interface WorkflowGraphViewerProps {
 }
 
 export function WorkflowGraphViewer({ graph, className }: WorkflowGraphViewerProps) {
+  const t = useTranslations("mobile.workflow")
   const ordered = useMemo(() => topoSort(graph), [graph])
 
   if (ordered.length === 0) {
     return (
       <div className={cn("rounded-md border border-dashed p-6 text-center", className)}>
-        <p className="text-sm text-muted-foreground">No nodes in this workflow.</p>
+        <p className="text-sm text-muted-foreground">{t("graphViewerEmpty")}</p>
       </div>
     )
   }

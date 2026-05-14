@@ -1,0 +1,215 @@
+/**
+ * VS Code extension loader (TS side).
+ *
+ * VS Code extensions execute in a Node.js sidecar (`sidecars/vscode-ext-host/`)
+ * managed by Tauri. This module is a thin IPC client: the heavy work
+ * (subprocess lifecycle, capability gating, JSON-RPC plumbing) lives in Rust
+ * under `src-tauri/src/plugin_api/vscode/`. We expose just enough to
+ * integrate with `PluginLoader` so the host can activate / deactivate /
+ * invoke VS Code extensions symmetrically with `frontend`, `python`, and
+ * `wasm` types.
+ *
+ * Mirrors `lib/plugin/core/wasm-loader.ts` line-for-line where applicable.
+ *
+ * Phase M0: the Rust commands are not yet implemented. In dev / test the
+ * loader returns a stub `PluginDefinition` that logs and exits — same
+ * pattern WASM uses for browser fallback. The full sidecar wiring lands
+ * in later phases of the plan (~/.claude/plans/vscode-snug-squid.md).
+ */
+
+import type { PluginDefinition, PluginManifest } from "@/types/plugin"
+import { loggers } from "@/lib/logger"
+
+const vscodeLoaderLogger = loggers.plugin.child("vscode-loader")
+
+export interface VscodeInvokeArgs {
+  pluginId: string
+  manifestJson: string
+  pluginPath: string
+}
+
+export interface VscodeActivateResult {
+  /** Names of commands the extension registered during activate(). */
+  registeredCommands: string[]
+  /** Names of webview view providers the extension registered. */
+  registeredWebviewViews: string[]
+  /** Names of language providers (completion / hover / formatting / …). */
+  registeredLanguageProviders: string[]
+  /** Sidecar PID for the runtime telemetry table. */
+  sidecarPid: number
+}
+
+type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>
+
+let cachedInvoke: InvokeFn | undefined
+
+async function getInvoke(): Promise<InvokeFn> {
+  if (cachedInvoke) return cachedInvoke
+  const mod = await import("@tauri-apps/api/core")
+  cachedInvoke = mod.invoke as InvokeFn
+  return cachedInvoke
+}
+
+/**
+ * True when the current runtime can host VS Code extensions (Tauri webview
+ * only). Browser-mode users see a "desktop required" stub instead.
+ */
+export function isVscodeHostAvailable(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+}
+
+/**
+ * Build a `PluginDefinition` for a `type === "vscode-extension"` manifest.
+ * The returned `activate` / `deactivate` hooks delegate to Tauri commands;
+ * the Rust host then spawns / signals the Node sidecar.
+ *
+ * Browser-mode (non-Tauri) returns a stub that warns at activate time, the
+ * same pattern as `loadWasmDefinition` and `loadPythonModule` use.
+ */
+export async function loadVscodeDefinition(
+  manifest: PluginManifest,
+  pluginPath: string
+): Promise<PluginDefinition> {
+  if (!manifest.vscodeMain && !hasThemeOnlyContributions(manifest)) {
+    throw new Error(
+      `VS Code extension ${manifest.id} has no 'vscodeMain' entry point and no theme-only contributions`
+    )
+  }
+  if (!manifest.vscodeExtension?.identifier) {
+    throw new Error(
+      `VS Code extension ${manifest.id} is missing the vscodeExtension.identifier block — manifest adapter must populate this at install`
+    )
+  }
+
+  if (!isVscodeHostAvailable()) {
+    return {
+      manifest,
+      activate: async (context) => {
+        context.logger.warn(
+          `VS Code extension ${manifest.id} requires the Tauri desktop runtime. Running in stub mode.`
+        )
+        return {}
+      },
+      deactivate: async () => {},
+    }
+  }
+
+  // Theme-only extensions never need the Node sidecar — themes register
+  // through the existing themes-bridge at enable time. We still return a
+  // PluginDefinition so the plugin manager treats the package uniformly.
+  if (!manifest.vscodeMain) {
+    return {
+      manifest,
+      activate: async (context) => {
+        context.logger.info(
+          `VS Code theme-only extension ${manifest.id} activated (sidecar not needed)`
+        )
+        return {}
+      },
+      deactivate: async () => {},
+    }
+  }
+
+  const invoke = await getInvoke()
+  const args: VscodeInvokeArgs = {
+    pluginId: manifest.id,
+    manifestJson: JSON.stringify(manifest),
+    pluginPath,
+  }
+
+  try {
+    await invoke("plugin_load_vscode", { ...args })
+  } catch (error) {
+    throw new Error(
+      `Failed to load VS Code extension ${manifest.id}: ${error instanceof Error ? error.message : String(error)}`
+    )
+  }
+
+  return {
+    manifest,
+    activate: async (context) => {
+      context.logger.info(`Activating VS Code extension ${manifest.id}`)
+      try {
+        const result = await invoke<VscodeActivateResult>("plugin_activate_vscode", {
+          pluginId: manifest.id,
+          configJson: JSON.stringify(context.config ?? {}),
+        })
+        context.logger.debug("VS Code extension activated", {
+          pluginId: manifest.id,
+          registeredCommands: result?.registeredCommands ?? [],
+          registeredWebviewViews: result?.registeredWebviewViews ?? [],
+          registeredLanguageProviders: result?.registeredLanguageProviders ?? [],
+          sidecarPid: result?.sidecarPid,
+        })
+      } catch (error) {
+        vscodeLoaderLogger.error("VS Code activate failed", error, {
+          pluginId: manifest.id,
+        })
+        throw error
+      }
+      return {}
+    },
+    deactivate: async () => {
+      try {
+        await invoke("plugin_deactivate_vscode", { pluginId: manifest.id })
+      } catch (error) {
+        vscodeLoaderLogger.warn("VS Code deactivate failed", {
+          pluginId: manifest.id,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    },
+  }
+}
+
+/**
+ * Invoke a sidecar RPC by name on a loaded VS Code extension. Used by the
+ * vscode-shim to proxy `vscode.*` calls back into the renderer's `ctx.*`
+ * surface (and vice versa).
+ */
+export async function invokeVscodeRpc<T = unknown>(
+  pluginId: string,
+  method: string,
+  payload: unknown
+): Promise<T> {
+  if (!isVscodeHostAvailable()) {
+    throw new Error("VS Code extension host unavailable (browser mode)")
+  }
+  const invoke = await getInvoke()
+  const result = await invoke<string>("plugin_invoke_vscode_rpc", {
+    pluginId,
+    method,
+    payloadJson: JSON.stringify(payload ?? null),
+  })
+  if (typeof result === "string" && result.length > 0) {
+    return JSON.parse(result) as T
+  }
+  return result as T
+}
+
+/**
+ * Permanently remove a loaded VS Code extension from the host. Called by
+ * `PluginManager.uninstall` after lifecycle cleanup. Idempotent.
+ */
+export async function unloadVscodeExtension(pluginId: string): Promise<void> {
+  if (!isVscodeHostAvailable()) return
+  const invoke = await getInvoke()
+  try {
+    await invoke("plugin_unload_vscode", { pluginId })
+  } catch (error) {
+    vscodeLoaderLogger.warn("VS Code unload failed", {
+      pluginId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+/**
+ * Whether the manifest contributes only themes / grammars / iconThemes —
+ * those run in the renderer through the existing bridges and don't need
+ * the Node sidecar.
+ */
+function hasThemeOnlyContributions(manifest: PluginManifest): boolean {
+  const themesCount = (manifest.themes ?? []).length
+  return themesCount > 0
+}

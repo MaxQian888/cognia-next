@@ -18,7 +18,9 @@ import {
   setVoiceSummary,
   upsertEntities,
 } from "@/lib/db/twin-profile"
+import { generateEmbedding } from "@/lib/ai/embedding/embedding"
 import type { TwinDraft, TwinJob } from "@/types/twin"
+import type { EmbeddingConfig } from "@/lib/twin/ingest/embed"
 import type { LlmClient } from "./llm"
 import { runOrchestrator } from "./orchestrator"
 
@@ -28,6 +30,14 @@ export interface RunDistillInput {
   /** Maximum chunks pulled from the pool. Defaults to 200 — bigger pools
    *  are dropped down to the most-recent N to keep the prompt tractable. */
   maxChunks?: number
+  /**
+   * Optional embedding config. When supplied, the distill run computes a
+   * cosine-space embedding for each new StyleSample's `summary` and
+   * persists it onto the sample — runtime `selectFewShotSamples` then
+   * scores by cosine instead of falling back to the token-overlap
+   * heuristic. When omitted, samples are persisted without embeddings.
+   */
+  embedding?: EmbeddingConfig
 }
 
 export interface RunDistillResult {
@@ -79,7 +89,16 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
 
   // ───── Persist profile updates ─────
   await updateJobProgress(job.id, { phase: "persisting-profile", progress: 87 })
-  await appendStyleSamples(job.twinId, result.styleSamples)
+  // Wrap `generateEmbedding` so `appendStyleSamples` can populate
+  // `StyleSample.embedding` inline. Failures are swallowed per-sample —
+  // the runtime falls back to token-overlap when the field is absent.
+  const embeddingFn = input.embedding
+    ? async (summary: string): Promise<number[]> => {
+        const result = await generateEmbedding(summary, input.embedding!)
+        return result.embedding
+      }
+    : undefined
+  await appendStyleSamples(job.twinId, result.styleSamples, { embeddingFn })
   await appendPlaybooks(job.twinId, result.playbooks)
   if (result.entities.length > 0) {
     await upsertEntities(job.twinId, result.entities)

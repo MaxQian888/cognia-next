@@ -21,7 +21,9 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { getTwin, updateTwin } from "@/lib/db/twins"
 import { describeCronExpression, validateCronExpression } from "@/lib/scheduler/cron-parser"
+import { schedulerDb } from "@/lib/scheduler/scheduler-db"
 import { syncTwinCronToScheduler, CRON_PRESETS } from "@/lib/twin/cron/cron-bridge"
+import type { ScheduledTask } from "@/types/scheduler"
 import type { TwinCronSettings } from "@/types/twin"
 
 const DEFAULTS: TwinCronSettings = {
@@ -38,6 +40,10 @@ export function TwinCronCard({ twinId }: { twinId: string }) {
   const dirtyRef = useRef(false)
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<number | null>(null)
+  // Track last- and next-trigger times for each side by reading the
+  // scheduler row liveQuery — keeps the card in sync without polling.
+  const ingestTask = useLiveQuery(() => schedulerDb.getTask(`twin::${twinId}::ingest`), [twinId])
+  const distillTask = useLiveQuery(() => schedulerDb.getTask(`twin::${twinId}::distill`), [twinId])
 
   useEffect(() => {
     if (dirtyRef.current) return
@@ -107,6 +113,7 @@ export function TwinCronCard({ twinId }: { twinId: string }) {
         disabled={!draft.enabled}
         testid="twin-cron-ingest"
       />
+      <CronTriggerInfo task={ingestTask} testid="twin-cron-ingest-info" />
       <CronField
         label={t("distillLabel")}
         value={draft.distillSchedule}
@@ -115,6 +122,7 @@ export function TwinCronCard({ twinId }: { twinId: string }) {
         disabled={!draft.enabled}
         testid="twin-cron-distill"
       />
+      <CronTriggerInfo task={distillTask} testid="twin-cron-distill-info" />
 
       <div className="flex justify-end">
         <Button
@@ -186,4 +194,33 @@ function describeOrFallback(expression: string): string {
   if (!trimmed) return "(disabled)"
   if (!validateCronExpression(trimmed).valid) return `⚠ ${trimmed} — invalid`
   return describeCronExpression(trimmed)
+}
+
+interface CronTriggerInfoProps {
+  task: ScheduledTask | null | undefined
+  testid: string
+}
+
+/**
+ * One-line trigger status — surfaces `lastRunAt` / `nextRunAt` from the
+ * scheduler row so users can confirm their cron is actually firing.
+ * Renders nothing when no task row exists (the schedule was deleted /
+ * never created).
+ */
+function CronTriggerInfo({ task, testid }: CronTriggerInfoProps) {
+  const t = useTranslations("twin.cron")
+  if (!task) return null
+  const fmt = (date: Date | undefined | null): string => {
+    if (!date) return t("never")
+    const d = date instanceof Date ? date : new Date(date)
+    if (!Number.isFinite(d.getTime())) return t("never")
+    return d.toLocaleString()
+  }
+  return (
+    <p className="text-muted-foreground text-xs" data-testid={testid}>
+      {t("lastTriggered", { when: fmt(task.lastRunAt) })}
+      {" · "}
+      {t("nextTrigger", { when: fmt(task.nextRunAt) })}
+    </p>
+  )
 }

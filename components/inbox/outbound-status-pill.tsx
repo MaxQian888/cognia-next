@@ -8,6 +8,7 @@
  * States: queued / sending / sent / failed (with retry button) / deadlettered.
  */
 
+import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   ClockIcon,
@@ -40,6 +41,7 @@ const STATUS_CONFIG: Record<
 }
 
 export function OutboundStatusPill({ jobId, className }: OutboundStatusPillProps) {
+  const t = useTranslations("inbox.outboundStatus")
   const job = useLiveQuery<OutboundJobRow | undefined>(
     () =>
       typeof window === "undefined" ? Promise.resolve(undefined) : getDb().outboundQueue.get(jobId),
@@ -77,7 +79,7 @@ export function OutboundStatusPill({ jobId, className }: OutboundStatusPillProps
               data-testid={`outbound-retry-btn-${jobId}`}
             >
               <RefreshCwIcon className="h-3 w-3" />
-              <span className="sr-only">Retry</span>
+              <span className="sr-only">{t("retry")}</span>
             </Button>
           )}
         </span>

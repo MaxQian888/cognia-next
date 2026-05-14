@@ -18,6 +18,7 @@ import type { SettingsSectionId } from "@/components/settings/settings-nav-confi
 import { handleContext, handleCost, handleDoctor, handleStatus } from "./actions/diagnostics"
 import { seedBuiltinSlashCommands } from "./registry"
 import { handleReset, handleResume, handleSessions } from "./actions/sessions"
+import { dispatchGoalSubcommand } from "./actions/goal"
 
 /**
  * Names of the sections in the Settings page (URL `?section=` values).
@@ -290,6 +291,28 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
         "Opened Settings → Data. Use the **Download** icon in the chat header for a per-session export."
       )
       ctx.openSettings("data")
+    },
+  },
+  {
+    name: "goal",
+    description:
+      "Set a standing goal — the agent auto-continues toward it until done or stopped (ADR-0013).",
+    scope: "builtin",
+    argumentHint: "<objective | status | pause | resume | stop | update <text> | show>",
+    handler: async (ctx) => {
+      const result = await dispatchGoalSubcommand(ctx)
+      if (!result) return
+      if (result.system) ctx.pushSystemMessage(result.system)
+      if (result.openGoalsSettings) ctx.openSettings("goals")
+      if (result.dispatchPrompt) {
+        // Phase 1: surface the would-be prompt as an additional system note
+        // so the user knows the model will see the objective change on the
+        // next turn. Phase 2 will wire this directly into the chat hook's
+        // silent-send path.
+        ctx.pushSystemMessage(
+          `_Objective change prompt staged — the model will be told on the next turn._`
+        )
+      }
     },
   },
 ]

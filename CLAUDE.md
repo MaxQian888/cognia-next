@@ -597,6 +597,52 @@ See `docs/content/docs/adr/0012-github-delivery.md` for the full ADR.
   - `components/ui/` — vendored shadcn/ui
   - `components/ai-elements/` — vendored ai-elements components
 
+## /goal Command
+
+cognia-next ships a `/goal <objective>` chat command (ADR-0019) that turns
+any chat into a self-driving loop until the objective is met. Lives under
+`lib/goal/` + `components/goal/` + `components/settings/goals/`, with two
+Dexie tables added at schema **v30** (`chatGoals` / `chatGoalEvents`).
+
+- **Slash surface**: 7 subcommands (`create` / `status` / `pause` /
+  `resume` / `stop` / `update` / `show`) routed through
+  `lib/slash-commands/actions/goal.ts`. Aliases: `cancel` / `clear`
+  → `stop`. Wired into `BUILTIN_SLASH_COMMANDS` in `lib/slash-commands/builtin.ts`.
+- **Runtime** (`lib/goal/runtime.ts`): `GoalRuntime` singleton owns the
+  per-session active-goal lifecycle. `turn-driver.ts:handleTurnComplete`
+  listens to the chat hook's `result` event, runs the seven exit
+  conditions, calls the judge LLM (reuses the main chat model — no extra
+  provider dep), and returns a `{ kind: "continue", userMessage } |
+{ kind: "exit", … } | …` outcome the hook acts on.
+- **Prompt template** (`lib/goal/prompts.ts`): Codex-style `<objective>`
+  XML wrap + "user-provided data" header + `<untrusted_objective>` on
+  update. PII is redacted via `lib/twin/ingest/redact.ts` reuse before
+  any LLM call — the encrypted map shares the existing twin master key
+  (`lib/twin/ingest/redaction-key.ts`).
+- **Exit conditions** (`lib/goal/exit-conditions.ts`): seven layers in
+  priority order — `user_stopped` > `preempted` > `turn_limited` >
+  `budget_limited` > `timed_out` > `judge_failed_too_many` (fail-OPEN at
+  3 consecutive parse failures, lands as `paused`) > `judge_done`.
+- **Generation guard**: every `Goal` row carries a `generationId` that
+  rotates on pause / resume / stop / update. The turn driver captures
+  it at evaluation start and refuses to commit if it changed —
+  in-flight judges from a previous generation can't poison a new one.
+- **Goal Tracker character** (`char_builtin_goal_tracker`): a sixth
+  built-in character preset for goal-driven work; `acceptEdits` mode by
+  default to keep the loop hands-free.
+- **UI**: composer-mounted `<GoalStatusPill>` (active or paused goal
+  only) + right-side `<GoalDetailSheet>` (4 tabs: Overview / Subgoals /
+  Activity / Settings) + Settings → Goals tab (`?section=goals` →
+  History / Tracker / Defaults sub-tabs).
+- **Build-options integration**: `BuildOptionsContext.activeGoal` is
+  picked up in `lib/claude/build-options.ts:resolveSendOptions` and
+  appended to `opts.appendSystemPrompt` — same convention as A2UI and
+  brief mode. Inactive / terminal goals are skipped.
+
+See `docs/content/docs/{en,zh}/adr/0019-goal-command.md` for the full ADR
+and `docs/content/docs/{en,zh}/chat/goal-command.mdx` for the user-facing
+guide.
+
 ## Critical Notes
 
 - **Always use pnpm** (lockfile present); run `pnpm install` from repo root to install all workspaces

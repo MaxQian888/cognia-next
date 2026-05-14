@@ -102,6 +102,15 @@ export interface BuildOptionsContext {
    * and ids already on the character are de-duped at resolve time.
    */
   ephemeralSkillIds?: string[]
+  /**
+   * Active `/goal` for this session (ADR-0013). When set AND
+   * `activeGoal.status === "active"`, the resolver appends a
+   * `renderGoalSystemSection(activeGoal)` block to `opts.appendSystemPrompt`
+   * — keeping `baseSystem` / character / skill / mode sections untouched.
+   * The chat-send hook pulls this from Dexie via `useActiveGoal()`; team
+   * chat passes `null` to opt out.
+   */
+  activeGoal?: import("@/types/goal").Goal | null
 }
 
 /**
@@ -565,6 +574,19 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     opts.appendSystemPrompt = existing
       ? `${existing}\n\n${BRIEF_OUTPUT_SNIPPET}`
       : BRIEF_OUTPUT_SNIPPET
+  }
+
+  // --- Active /goal context (ADR-0013) -------------------------------------
+  // When the resolving session has an active goal, append the goal's system
+  // section (Codex-style <objective> wrap + injection warning) to
+  // `appendSystemPrompt`. Inactive / paused / terminal goals are skipped so
+  // the model only sees goal context while it's actually being driven.
+  if (ctx.activeGoal && ctx.activeGoal.status === "active") {
+    const { appendGoalContext } = await import("@/lib/goal/context-injector")
+    opts.appendSystemPrompt = appendGoalContext({
+      appendSystemPrompt: opts.appendSystemPrompt,
+      activeGoal: ctx.activeGoal,
+    })
   }
 
   // --- Extended thinking budget --------------------------------------------

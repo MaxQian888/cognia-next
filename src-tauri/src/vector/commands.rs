@@ -11,6 +11,7 @@
 use log::{debug, error, info};
 use tauri::State;
 
+use super::db::{CollectionStats, ImportStats, ScrollPage};
 use super::types::{Collection, Filter, FilterMode, Point, SearchResponse};
 use super::VectorState;
 
@@ -247,6 +248,131 @@ pub async fn vector_reset_store(state: State<'_, VectorState>) -> Result<(), Str
     })?;
     info!("vector_reset_store ok");
     Ok(())
+}
+
+#[tauri::command]
+pub async fn vector_count_points(
+    state: State<'_, VectorState>,
+    collection: String,
+) -> Result<usize, String> {
+    debug!("vector_count_points: collection={}", collection);
+    let store = state.store().map_err(|e| e.to_string())?;
+    let count = store.count_points(&collection).map_err(|e| {
+        error!("vector_count_points failed: {}", e);
+        e.to_string()
+    })?;
+    info!(
+        "vector_count_points ok: collection={}, count={}",
+        collection, count
+    );
+    Ok(count)
+}
+
+#[tauri::command]
+pub async fn vector_get_stats(
+    state: State<'_, VectorState>,
+    collection: String,
+) -> Result<CollectionStats, String> {
+    debug!("vector_get_stats: collection={}", collection);
+    let store = state.store().map_err(|e| e.to_string())?;
+    let stats = store.collection_stats(&collection).map_err(|e| {
+        error!("vector_get_stats failed: {}", e);
+        e.to_string()
+    })?;
+    info!(
+        "vector_get_stats ok: collection={}, count={}, dim={}, size_bytes={}",
+        collection, stats.count, stats.dim, stats.size_bytes
+    );
+    Ok(stats)
+}
+
+#[tauri::command]
+pub async fn vector_scroll_points(
+    state: State<'_, VectorState>,
+    collection: String,
+    cursor: Option<String>,
+    limit: usize,
+) -> Result<ScrollPage, String> {
+    debug!(
+        "vector_scroll_points: collection={}, cursor={:?}, limit={}",
+        collection, cursor, limit
+    );
+    let store = state.store().map_err(|e| e.to_string())?;
+    let page = store
+        .scroll_points(&collection, cursor.as_deref(), limit)
+        .map_err(|e| {
+            error!("vector_scroll_points failed: {}", e);
+            e.to_string()
+        })?;
+    info!(
+        "vector_scroll_points ok: collection={}, returned={}, has_more={}",
+        collection,
+        page.points.len(),
+        page.has_more
+    );
+    Ok(page)
+}
+
+#[tauri::command]
+pub async fn vector_rename_collection(
+    state: State<'_, VectorState>,
+    from: String,
+    to: String,
+) -> Result<(), String> {
+    debug!("vector_rename_collection: from={}, to={}", from, to);
+    let store = state.store().map_err(|e| e.to_string())?;
+    store.rename_collection(&from, &to).map_err(|e| {
+        error!("vector_rename_collection failed: {}", e);
+        e.to_string()
+    })?;
+    info!("vector_rename_collection ok: {} → {}", from, to);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn vector_export_collection(
+    state: State<'_, VectorState>,
+    collection: String,
+) -> Result<String, String> {
+    debug!("vector_export_collection: collection={}", collection);
+    let store = state.store().map_err(|e| e.to_string())?;
+    let jsonl = store.export_collection_to_jsonl(&collection).map_err(|e| {
+        error!("vector_export_collection failed: {}", e);
+        e.to_string()
+    })?;
+    info!(
+        "vector_export_collection ok: collection={}, bytes={}",
+        collection,
+        jsonl.len()
+    );
+    Ok(jsonl)
+}
+
+#[tauri::command]
+pub async fn vector_import_collection(
+    state: State<'_, VectorState>,
+    collection: String,
+    jsonl: String,
+    overwrite: Option<bool>,
+) -> Result<ImportStats, String> {
+    debug!(
+        "vector_import_collection: collection={}, bytes={}, overwrite={:?}",
+        collection,
+        jsonl.len(),
+        overwrite
+    );
+    let store = state.store().map_err(|e| e.to_string())?;
+    let stats = store
+        .import_collection_from_jsonl(&collection, &jsonl, overwrite.unwrap_or(false))
+        .map_err(|e| {
+            error!("vector_import_collection failed: {}", e);
+            e.to_string()
+        })?;
+    info!(
+        "vector_import_collection ok: collection={}, imported={}",
+        collection, stats.imported
+    );
+    Ok(stats)
 }
 
 #[tauri::command]

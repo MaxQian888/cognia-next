@@ -71,6 +71,9 @@ jobs:
       - name: Plugin extension slot audit
         run: pnpm audit:slots
 
+      - name: i18n lint (key parity + hardcoded-string baseline)
+        run: pnpm lint:i18n
+
       - name: Security audit
         run: pnpm audit --audit-level=moderate
         continue-on-error: true

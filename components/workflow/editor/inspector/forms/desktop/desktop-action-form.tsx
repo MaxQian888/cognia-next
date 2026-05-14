@@ -16,6 +16,7 @@
  */
 
 import type { ReactNode } from "react"
+import { useTranslations } from "next-intl"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Field, FieldGroup, patchParam, readNumber, readString } from "../shared"
@@ -40,28 +41,28 @@ export function DesktopActionForm({
   selectorHint,
   showSelector = true,
   extraFields,
-  selectorPlaceholder = 'role="Button" name~="Submit"',
+  selectorPlaceholder,
 }: DesktopActionFormProps) {
+  const t = useTranslations("workflows.forms.desktopShared")
   const selector = readString(params, "selector")
   const timeoutMs = readNumber(params, "timeoutMs", 5000)
   const retries = readNumber(params, "retries", 0)
+  const resolvedSelectorHint = selectorHint ?? t("selector.defaultHint")
+  const resolvedSelectorPlaceholder = selectorPlaceholder ?? t("selector.defaultPlaceholder")
 
   return (
     <FieldGroup>
       {showSelector && (
         <Field
-          label="Selector"
+          label={t("selector.label")}
           htmlFor="desktop-selector"
-          hint={
-            selectorHint ??
-            "UIA selector (role / name / automationId). Leave blank to act on the foreground window."
-          }
+          hint={resolvedSelectorHint}
           name="selector"
         >
           <Textarea
             id="desktop-selector"
             rows={2}
-            placeholder={selectorPlaceholder}
+            placeholder={resolvedSelectorPlaceholder}
             value={selector}
             onChange={(e) => onChange(patchParam(params, "selector", e.target.value))}
             className="font-mono text-xs"
@@ -69,7 +70,7 @@ export function DesktopActionForm({
         </Field>
       )}
       <div className="grid grid-cols-2 gap-2">
-        <Field label="Timeout (ms)" htmlFor="desktop-timeout" name="timeoutMs">
+        <Field label={t("timeout.label")} htmlFor="desktop-timeout" name="timeoutMs">
           <Input
             id="desktop-timeout"
             type="number"
@@ -80,7 +81,7 @@ export function DesktopActionForm({
             }
           />
         </Field>
-        <Field label="Retries" htmlFor="desktop-retries" name="retries">
+        <Field label={t("retries.label")} htmlFor="desktop-retries" name="retries">
           <Input
             id="desktop-retries"
             type="number"

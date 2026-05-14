@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Night-mode color overrides.
+         Tracks the cognia design tokens documented in `app/globals.css`
+         (oklch dark theme `--background ≈ #0a0a0a`). -->
+    <color name="colorPrimary">#60a5fa</color>
+    <color name="colorPrimaryDark">#3b82f6</color>
+    <color name="colorAccent">#60a5fa</color>
+    <color name="splash_background">#0a0a0a</color>
+</resources>

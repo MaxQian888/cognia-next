@@ -100,6 +100,7 @@ import {
   createMediaAPI,
   createStorageAPI,
 } from "../api"
+import { createMessagePartAPI } from "../api/message-part-api"
 import { createDexieAPI } from "../api/dexie-api"
 import { getDb } from "@/lib/db/schema"
 import { createIPCAPI } from "../messaging/ipc"
@@ -202,6 +203,7 @@ export function createFullPluginContext(
       hasPermission: (permission) => permissionsAPI.hasPermission(permission as never),
     }),
     permissions: permissionsAPI,
+    messagePart: createMessagePartAPI(pluginId),
   }
 
   // Add new communication and utility APIs to base context

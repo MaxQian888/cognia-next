@@ -127,7 +127,7 @@ export default function MePage() {
         <MobileBackupSection />
         <SectionLink
           href="/settings?section=data&dataTab=maintenance"
-          label="Dexie maintenance"
+          label={t("dexieMaintenance")}
           icon={DatabaseIcon}
           testId="me-maintenance"
         />
@@ -136,8 +136,8 @@ export default function MePage() {
           {t("sectionAppearance")}
         </h2>
         <SectionLink
-          href="/settings?section=appearance"
-          label="Appearance"
+          href="/me/appearance"
+          label={t("appearanceLink")}
           icon={PaletteIcon}
           testId="me-appearance"
         />

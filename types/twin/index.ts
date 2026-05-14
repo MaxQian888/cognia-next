@@ -416,6 +416,48 @@ export const DEFAULT_TWIN_SETTINGS: TwinSettings = {
   styleSamplesK: 3,
 }
 
+/**
+ * Per-twin cron settings. The cron-card stores this on the twin row and
+ * `lib/twin/cron/cron-bridge.ts:syncTwinCronToScheduler` reconciles it
+ * with the scheduler's task table on every save. Both schedules support
+ * a 5-field cron expression; an empty string disables that side.
+ */
+export interface TwinCronSettings {
+  /** Master toggle — when false, both sides are deleted from the scheduler. */
+  enabled: boolean
+  /** 5-field cron expression that fires `enqueueIngestJob`. */
+  ingestSchedule: string
+  /** 5-field cron expression that fires `enqueueDistillJob`. */
+  distillSchedule: string
+  /** Optional IANA timezone (e.g. "Asia/Shanghai"); defaults to host TZ. */
+  timezone?: string
+}
+
+/**
+ * Twin registry row. Decouples the multi-twin container from the
+ * Character record so the same twin can power several characters and
+ * the user can rename / archive / delete a twin from a single place.
+ *
+ * Cascading delete (see `lib/db/twins.ts:deleteTwin`) wipes every
+ * twin-scoped row (sources / chunks / profile / drafts / jobs) and
+ * detaches any Character that still references the id.
+ */
+export interface Twin {
+  id: string
+  /** Display name shown in the Twin selector dropdown. */
+  name: string
+  /** Optional hex / oklch color for avatar / badge tinting. */
+  color?: string
+  /** Optional free-form description. */
+  description?: string
+  /** Cron schedule for auto-ingest / auto-distill, if configured. */
+  cron?: TwinCronSettings
+  /** Hidden from the default list but rows remain reachable by id. */
+  archived?: boolean
+  createdAt: number
+  updatedAt: number
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Runtime settings — vector store + embedding + distill LLM configuration.
 // Stored as a single Dexie row under id "twin-runtime"; see

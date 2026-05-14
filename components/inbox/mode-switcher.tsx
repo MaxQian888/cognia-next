@@ -14,6 +14,7 @@
  */
 
 import { useState } from "react"
+import { useTranslations } from "next-intl"
 import { invoke } from "@tauri-apps/api/core"
 import {
   DropdownMenu,
@@ -46,6 +47,7 @@ export function ModeSwitcher({
   currentMode,
   onModeChange,
 }: ModeSwitcherProps) {
+  const t = useTranslations("inbox.modeSwitcher")
   const [pending, setPending] = useState(false)
 
   const handleSelect = async (mode: ConnectorMode) => {
@@ -84,7 +86,7 @@ export function ModeSwitcher({
           type="button"
           disabled={pending}
           data-testid="mode-switcher-trigger"
-          aria-label="Switch mode"
+          aria-label={t("aria")}
         >
           <Badge variant="secondary" className="cursor-pointer select-none">
             {MODE_LABELS[currentMode]}

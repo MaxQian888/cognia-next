@@ -184,6 +184,52 @@ export async function resumeJob(id: string): Promise<void> {
   })
 }
 
+/** Sentinel embedded in `errorMessage` when a user cancels a job. */
+export const USER_CANCEL_SENTINEL = "[USER_CANCELLED]"
+
+/**
+ * User-initiated cancellation. Marks the row failed with a sentinel
+ * prefix so the workbench can render it distinctly from a transient
+ * error. Optional `reason` (e.g. "fingerprint mismatch") is appended to
+ * the sentinel for the audit trail.
+ */
+export async function cancelJob(id: string, reason?: string): Promise<void> {
+  const message = reason ? `${USER_CANCEL_SENTINEL} ${reason}` : USER_CANCEL_SENTINEL
+  await getDb().twinJobs.update(id, {
+    status: "failed",
+    phase: "cancelled",
+    errorMessage: message,
+    completedAt: Date.now(),
+  })
+}
+
+/**
+ * User-initiated retry of a failed / dead-lettered job. Unlike
+ * `requeueJob` (which the worker calls for transient failures with
+ * backoff + incremented retryCount), this resets `retryCount` to zero
+ * so the budget is fresh again. Clears the error message and any phase
+ * / progress / attempt state so the row reads as "freshly queued" in
+ * the UI; the worker will pick it up on the next tick.
+ */
+export async function retryDeadLetterJob(id: string): Promise<void> {
+  await getDb().twinJobs.update(id, {
+    status: "queued",
+    phase: "queued",
+    progress: 0,
+    errorMessage: undefined,
+    startedAt: undefined,
+    completedAt: undefined,
+    retryCount: 0,
+    nextAttemptAt: undefined,
+  })
+}
+
+/**
+ * @deprecated Use `retryDeadLetterJob` — same behaviour, the name
+ * matches both the dead-letter and transient-failure retry paths.
+ */
+export const retryFailedJob = retryDeadLetterJob
+
 export async function deleteTwinJob(id: string): Promise<void> {
   await getDb().twinJobs.delete(id)
 }

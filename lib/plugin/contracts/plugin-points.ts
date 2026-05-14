@@ -102,6 +102,14 @@ export const CANONICAL_EXTENSION_POINTS = [
   "settings.ai",
   "settings.plugins",
   "command-palette",
+  // VS Code extension reuse layer (see ~/.claude/plans/vscode-snug-squid.md).
+  // These slots host UI contributed by VS Code extensions running in the Node
+  // sidecar — distinct from cognia-native sidebar/toolbar slots so plugin-vs-
+  // extension UI never silently clobbers each other.
+  "vscode.sidebar.view",
+  "vscode.webview.panel",
+  "vscode.activity-bar",
+  "vscode.terminal.output",
 ] as const
 
 export type CanonicalExtensionPoint = (typeof CANONICAL_EXTENSION_POINTS)[number]
@@ -131,6 +139,10 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "settings.appearance",
   "settings.plugins",
   "command-palette",
+  "vscode.sidebar.view",
+  "vscode.webview.panel",
+  "vscode.activity-bar",
+  "vscode.terminal.output",
 ])
 
 const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoint, string>> = {
@@ -158,6 +170,10 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "settings.appearance": "components/settings/appearance/appearance-section.tsx",
   "settings.plugins": "components/plugins/plugin-panel.tsx",
   "command-palette": "components/desktop/command-palette.tsx",
+  "vscode.sidebar.view": "components/extensions/vscode-extension-panel.tsx",
+  "vscode.webview.panel": "components/extensions/vscode-extension-panel.tsx",
+  "vscode.activity-bar": "components/extensions/vscode-extension-panel.tsx",
+  "vscode.terminal.output": "components/extensions/vscode-terminal-panel.tsx",
 }
 
 const EXTENSION_POINT_ALIASES: Record<string, CanonicalExtensionPoint> = {
@@ -334,6 +350,30 @@ export const CANONICAL_ACTIVATION_PATTERNS = [
   "onA2UI:surface",
   "onLanguage:*",
   "onFile:*",
+  // VS Code extension reuse — activation events from `package.json` of
+  // a VS Code extension flow through the manifest adapter and land here.
+  // `onCommand:*` and `onLanguage:*` are already covered above; new
+  // patterns below mirror the official VS Code activation-event docs:
+  // https://code.visualstudio.com/api/references/activation-events
+  "onView:*",
+  "onWebviewPanel:*",
+  "onCustomEditor:*",
+  "onAuthenticationRequest",
+  "onTaskType:*",
+  "onFileSystem:*",
+  // onDebug* patterns: the manifest adapter normalises VS Code's onDebug*
+  // family to a single `onDebugResolve:*` here. Runtime stays Tier 4
+  // (throw NotSupportedError) because cognia has no DAP viewport.
+  "onDebugResolve:*",
+  "onStartupFinished",
+  "onUri",
+  "onTerminal",
+  "onTerminalProfile:*",
+  "onNotebook:*",
+  "onWalkthrough:*",
+  "onChatParticipant:*",
+  "onLanguageModelTool:*",
+  "workspaceContains:*",
 ] as const
 
 export type CanonicalActivationPattern = (typeof CANONICAL_ACTIVATION_PATTERNS)[number]
@@ -352,6 +392,35 @@ export type ActivationEventDeclaration =
   | "onA2UI:surface"
   | `onLanguage:${string}`
   | `onFile:${string}`
+  // VS Code-flavoured activation events. Patterns ending in `:*` may
+  // appear without suffix (e.g. literal `onView:*`) or with one (`onView:foo`).
+  | "onView:*"
+  | `onView:${string}`
+  | "onWebviewPanel:*"
+  | `onWebviewPanel:${string}`
+  | "onCustomEditor:*"
+  | `onCustomEditor:${string}`
+  | "onAuthenticationRequest"
+  | "onTaskType:*"
+  | `onTaskType:${string}`
+  | "onFileSystem:*"
+  | `onFileSystem:${string}`
+  | "onDebugResolve:*"
+  | `onDebugResolve:${string}`
+  | "onStartupFinished"
+  | "onUri"
+  | "onTerminal"
+  | "onTerminalProfile:*"
+  | `onTerminalProfile:${string}`
+  | "onNotebook:*"
+  | `onNotebook:${string}`
+  | "onWalkthrough:*"
+  | `onWalkthrough:${string}`
+  | "onChatParticipant:*"
+  | `onChatParticipant:${string}`
+  | "onLanguageModelTool:*"
+  | `onLanguageModelTool:${string}`
+  | `workspaceContains:${string}`
 
 interface UiSlotOverride {
   status: PluginPointStatus
@@ -657,6 +726,46 @@ const activationPatternContracts: Record<CanonicalActivationPattern, PluginPoint
     retirementNote:
       "No file-open runtime dispatch in Cognia; declare startup activation and filter inside the plugin.",
   },
+  // VS Code activation patterns — handled by
+  // sidecars/vscode-ext-host (M0) and surfaced through the cognia plugin
+  // manager. Bindings reference the activation pump in the sidecar to make
+  // the contract registry honest about where dispatch happens.
+  "onView:*": vscodeActivationContract("onView:*"),
+  "onWebviewPanel:*": vscodeActivationContract("onWebviewPanel:*"),
+  "onCustomEditor:*": vscodeActivationContract("onCustomEditor:*"),
+  onAuthenticationRequest: vscodeActivationContract("onAuthenticationRequest"),
+  "onTaskType:*": vscodeActivationContract("onTaskType:*"),
+  "onFileSystem:*": vscodeActivationContract("onFileSystem:*"),
+  "onDebugResolve:*": vscodeActivationContract("onDebugResolve:*", {
+    note: "Validated as a known pattern but the sidecar's vscode-shim raises NotSupportedError at runtime — Cognia has no DAP viewport.",
+  }),
+  onStartupFinished: vscodeActivationContract("onStartupFinished"),
+  onUri: vscodeActivationContract("onUri"),
+  onTerminal: vscodeActivationContract("onTerminal"),
+  "onTerminalProfile:*": vscodeActivationContract("onTerminalProfile:*"),
+  "onNotebook:*": vscodeActivationContract("onNotebook:*"),
+  "onWalkthrough:*": vscodeActivationContract("onWalkthrough:*"),
+  "onChatParticipant:*": vscodeActivationContract("onChatParticipant:*"),
+  "onLanguageModelTool:*": vscodeActivationContract("onLanguageModelTool:*"),
+  "workspaceContains:*": vscodeActivationContract("workspaceContains:*"),
+}
+
+function vscodeActivationContract(
+  id: CanonicalActivationPattern,
+  opts: { note?: string } = {}
+): PluginPointContract {
+  return {
+    id,
+    kind: "activation",
+    stability: "stable",
+    status: "implemented",
+    owner: "plugin-platform",
+    binding: "sidecars/vscode-ext-host/src/host.ts:handleActivationEvent",
+    docs: ACTIVATION_POINT_DOCS,
+    requiredTests: ACTIVATION_POINT_TESTS,
+    introducedIn: "0.5.0",
+    ...(opts.note ? { retirementNote: opts.note } : {}),
+  }
 }
 
 export const PLUGIN_POINT_CONTRACTS: readonly PluginPointContract[] = [
@@ -733,33 +842,44 @@ export function resolveActivationPattern(event: string): CanonicalActivationPatt
     event === "startup" ||
     event === "onStartup" ||
     event === "onAgent:start" ||
-    event === "onA2UI:surface"
+    event === "onA2UI:surface" ||
+    // VS Code bare events
+    event === "onAuthenticationRequest" ||
+    event === "onStartupFinished" ||
+    event === "onUri" ||
+    event === "onTerminal"
   ) {
-    return event
+    return event as CanonicalActivationPattern
   }
 
-  if (event.startsWith("onCommand:") && event.length > "onCommand:".length) {
-    return "onCommand:*"
-  }
+  // Patterns of shape `<prefix>:*` resolve to themselves (literal canonical
+  // form) and patterns with a concrete suffix resolve to the wildcard.
+  const wildcardPrefixes: ReadonlyArray<[string, CanonicalActivationPattern]> = [
+    ["onCommand:", "onCommand:*"],
+    ["onTool:", "onTool:*"],
+    ["onAgentTool:", "onAgentTool:*"],
+    ["onChat:", "onChat:*"],
+    ["onLanguage:", "onLanguage:*"],
+    ["onFile:", "onFile:*"],
+    // VS Code prefixes (see types/plugin/plugin-vscode.ts:VsCodeActivationEvent).
+    ["onView:", "onView:*"],
+    ["onWebviewPanel:", "onWebviewPanel:*"],
+    ["onCustomEditor:", "onCustomEditor:*"],
+    ["onTaskType:", "onTaskType:*"],
+    ["onFileSystem:", "onFileSystem:*"],
+    ["onDebugResolve:", "onDebugResolve:*"],
+    ["onTerminalProfile:", "onTerminalProfile:*"],
+    ["onNotebook:", "onNotebook:*"],
+    ["onWalkthrough:", "onWalkthrough:*"],
+    ["onChatParticipant:", "onChatParticipant:*"],
+    ["onLanguageModelTool:", "onLanguageModelTool:*"],
+    ["workspaceContains:", "workspaceContains:*"],
+  ]
 
-  if (event.startsWith("onTool:") && event.length > "onTool:".length) {
-    return "onTool:*"
-  }
-
-  if (event.startsWith("onAgentTool:") && event.length > "onAgentTool:".length) {
-    return "onAgentTool:*"
-  }
-
-  if (event.startsWith("onChat:") && event.length > "onChat:".length) {
-    return "onChat:*"
-  }
-
-  if (event.startsWith("onLanguage:") && event.length > "onLanguage:".length) {
-    return "onLanguage:*"
-  }
-
-  if (event.startsWith("onFile:") && event.length > "onFile:".length) {
-    return "onFile:*"
+  for (const [prefix, wildcard] of wildcardPrefixes) {
+    if (event.startsWith(prefix) && event.length > prefix.length) {
+      return wildcard
+    }
   }
 
   return undefined

@@ -9,6 +9,7 @@
  */
 
 import { useRouter, useSearchParams } from "next/navigation"
+import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CircleIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react"
 import {
@@ -44,6 +45,7 @@ interface InboxSidebarProps {
 }
 
 export function InboxSidebar({ view, activeAdapterId, activePlatformKind }: InboxSidebarProps) {
+  const t = useTranslations("inbox.sidebar")
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -70,9 +72,9 @@ export function InboxSidebar({ view, activeAdapterId, activePlatformKind }: Inbo
   return (
     <Sidebar>
       <SidebarHeader className="px-3 py-2 space-y-2">
-        <h2 className="text-sm font-semibold">Inbox</h2>
+        <h2 className="text-sm font-semibold">{t("title")}</h2>
         {/* View-mode chips */}
-        <div className="flex flex-wrap gap-1" role="group" aria-label="View mode">
+        <div className="flex flex-wrap gap-1" role="group" aria-label={t("viewModeAria")}>
           {ALL_VIEW_MODES.map((mode) => (
             <Button
               key={mode}
@@ -90,13 +92,11 @@ export function InboxSidebar({ view, activeAdapterId, activePlatformKind }: Inbo
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Adapters</SidebarGroupLabel>
+          <SidebarGroupLabel>{t("adapters")}</SidebarGroupLabel>
           <SidebarMenu>
             {!adapterInstances || adapterInstances.length === 0 ? (
               <SidebarMenuItem>
-                <span className="px-3 py-2 text-xs text-muted-foreground">
-                  No adapters configured
-                </span>
+                <span className="px-3 py-2 text-xs text-muted-foreground">{t("noAdapters")}</span>
               </SidebarMenuItem>
             ) : (
               adapterInstances.map((adapter) => (

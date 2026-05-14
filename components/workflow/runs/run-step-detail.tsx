@@ -26,6 +26,7 @@ import {
   type WorkflowRunEventRow,
 } from "@/types/workflow/visual"
 import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
+import { tNode } from "@/lib/workflow/i18n/node-translate"
 import { formatDurationMs } from "./format"
 
 const CATEGORY_BADGE = {
@@ -49,6 +50,7 @@ export function RunStepDetail({
 }) {
   const t = useTranslations("workflows.runs.step")
   const tLogs = useTranslations("workflows.runs.logs")
+  const tNodes = useTranslations("workflows.nodes")
   const [logQuery, setLogQuery] = useState("")
   const [logLevels, setLogLevels] = useState<string[]>(LOG_LEVELS)
   const [stackOpen, setStackOpen] = useState(false)
@@ -132,7 +134,9 @@ export function RunStepDetail({
             {entry.kind}
           </Badge>
           <h3 className="text-base font-semibold leading-tight">{node.data.label}</h3>
-          <p className="text-xs text-muted-foreground">{entry.description}</p>
+          <p className="text-xs text-muted-foreground">
+            {tNode(tNodes, `${entry.kind}.description`, entry.description)}
+          </p>
         </div>
 
         {summary ? (

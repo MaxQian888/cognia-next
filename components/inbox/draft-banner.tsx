@@ -8,6 +8,7 @@
  */
 
 import { useState } from "react"
+import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { PenLineIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -21,6 +22,7 @@ interface DraftBannerProps {
 }
 
 export function DraftBanner({ conversationKey }: DraftBannerProps) {
+  const t = useTranslations("inbox.draftBanner")
   const [open, setOpen] = useState(false)
 
   // Subscribe to pending drafts for this conversation.
@@ -47,23 +49,21 @@ export function DraftBanner({ conversationKey }: DraftBannerProps) {
         data-testid="draft-banner"
       >
         <PenLineIcon className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
-        <p className="flex-1 text-sm text-amber-800 dark:text-amber-300">
-          A draft reply is waiting for your review.
-        </p>
+        <p className="flex-1 text-sm text-amber-800 dark:text-amber-300">{t("pending")}</p>
         <Button
           size="sm"
           variant="outline"
           onClick={() => setOpen(true)}
           data-testid="draft-review-btn"
         >
-          Review
+          {t("review")}
         </Button>
       </div>
 
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent side="bottom" className="max-h-[80vh] overflow-y-auto">
           <SheetHeader>
-            <SheetTitle>Review draft reply</SheetTitle>
+            <SheetTitle>{t("reviewAria")}</SheetTitle>
           </SheetHeader>
           <div className="mt-4">
             <DraftEditor draft={firstDraft} onClose={() => setOpen(false)} />

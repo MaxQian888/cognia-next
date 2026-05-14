@@ -95,6 +95,51 @@ export async function appendStyleSamples(
   return merged
 }
 
+/**
+ * Backfill `StyleSample.embedding` for any sample that doesn't yet have
+ * one. Distill writes embeddings inline starting in M4, but profiles
+ * distilled earlier (or with `embeddingFn` omitted) carry samples whose
+ * `embedding` field is absent — the runtime degrades to a token-overlap
+ * heuristic in that case. Calling this once over the profile lifts every
+ * eligible sample into the cosine-similarity fast path.
+ *
+ * Failures are swallowed per-sample (the field stays `undefined` and the
+ * next backfill attempt can retry).
+ */
+export async function backfillStyleSampleEmbeddings(
+  twinId: string,
+  embeddingFn: (summary: string) => Promise<number[]>
+): Promise<{ filled: number; skipped: number; failed: number }> {
+  const profile = await ensureTwinProfile(twinId)
+  let filled = 0
+  let skipped = 0
+  let failed = 0
+  const next: StyleSample[] = []
+  for (const sample of profile.styleSamples) {
+    if (Array.isArray(sample.embedding) && sample.embedding.length > 0) {
+      next.push(sample)
+      skipped += 1
+      continue
+    }
+    try {
+      const embedding = await embeddingFn(sample.summary)
+      next.push({ ...sample, embedding })
+      filled += 1
+    } catch {
+      next.push(sample)
+      failed += 1
+    }
+  }
+  if (filled === 0) return { filled, skipped, failed }
+  const merged: TwinProfile = {
+    ...profile,
+    styleSamples: next,
+    updatedAt: Date.now(),
+  }
+  await getDb().twinProfile.put(merged)
+  return { filled, skipped, failed }
+}
+
 export async function appendPlaybooks(twinId: string, playbooks: Playbook[]): Promise<TwinProfile> {
   const profile = await ensureTwinProfile(twinId)
   const merged: TwinProfile = {

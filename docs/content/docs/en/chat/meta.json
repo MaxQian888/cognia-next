@@ -5,6 +5,7 @@
     "skills-system",
     "agent-teams",
     "slash-commands",
+    "goal-command",
     "provider-system",
     "claude-subscription-oauth",
     "ccswitch"

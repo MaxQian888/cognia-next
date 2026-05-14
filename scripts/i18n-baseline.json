@@ -1,0 +1,259 @@
+{
+  "count": 954,
+  "samples": [
+    {
+      "file": "components/a2ui/a2ui-error-boundary.tsx",
+      "context": "jsx-text",
+      "text": "render error"
+    },
+    {
+      "file": "components/a2ui/a2ui-error-boundary.tsx",
+      "context": "jsx-text",
+      "text": "Retry"
+    },
+    {
+      "file": "components/a2ui/a2ui-surface.tsx",
+      "context": "jsx-text",
+      "text": "Error loading surface"
+    },
+    {
+      "file": "components/a2ui/a2ui-surface.tsx",
+      "context": "jsx-text",
+      "text": "No content to display"
+    },
+    {
+      "file": "components/a2ui/a2ui-surface.tsx",
+      "context": "jsx-text",
+      "text": "Rendering..."
+    },
+    {
+      "file": "components/a2ui/a2ui-tool-output.tsx",
+      "context": "jsx-text",
+      "text": "output"
+    },
+    {
+      "file": "components/a2ui/academic/academic-paper-card.tsx",
+      "context": "jsx-text",
+      "text": "Open Access"
+    },
+    {
+      "file": "components/a2ui/academic/academic-paper-card.tsx",
+      "context": "jsx-text",
+      "text": "Details"
+    },
+    {
+      "file": "components/a2ui/academic/academic-paper-card.tsx",
+      "context": "jsx-text",
+      "text": "Add"
+    },
+    {
+      "file": "components/a2ui/academic/academic-paper-card.tsx",
+      "context": "jsx-text",
+      "text": "PDF"
+    },
+    {
+      "file": "components/a2ui/academic/academic-paper-card.tsx",
+      "context": "jsx-text",
+      "text": "Analyze"
+    },
+    {
+      "file": "components/a2ui/academic/academic-search-results.tsx",
+      "context": "jsx-text",
+      "text": "Results for &ldquo;"
+    },
+    {
+      "file": "components/a2ui/academic/academic-search-results.tsx",
+      "context": "jsx-text",
+      "text": "&rdquo;"
+    },
+    {
+      "file": "components/a2ui/academic/academic-search-results.tsx",
+      "context": "jsx-text",
+      "text": "papers"
+    },
+    {
+      "file": "components/a2ui/academic/academic-search-results.tsx",
+      "context": "placeholder",
+      "text": "All Sources"
+    },
+    {
+      "file": "components/a2ui/academic/academic-search-results.tsx",
+      "context": "jsx-text",
+      "text": "All Sources"
+    },
+    {
+      "file": "components/a2ui/academic/academic-search-results.tsx",
+      "context": "jsx-text",
+      "text": "arXiv"
+    },
+    {
+      "file": "components/a2ui/academic/academic-search-results.tsx",
+      "context": "jsx-text",
+      "text": "Semantic Scholar"
+    },
+    {
+      "file": "components/a2ui/academic/academic-search-results.tsx",
+      "context": "jsx-text",
+      "text": "OpenAlex"
+    },
+    {
+      "file": "components/a2ui/academic/academic-search-results.tsx",
+      "context": "jsx-text",
+      "text": "HuggingFace"
+    },
+    {
+      "file": "components/a2ui/academic/academic-search-results.tsx",
+      "context": "placeholder",
+      "text": "Sort by"
+    },
+    {
+      "file": "components/a2ui/academic/academic-search-results.tsx",
+      "context": "jsx-text",
+      "text": "Relevance"
+    },
+    {
+      "file": "components/a2ui/academic/academic-search-results.tsx",
+      "context": "jsx-text",
+      "text": "Newest"
+    },
+    {
+      "file": "components/a2ui/academic/academic-search-results.tsx",
+      "context": "jsx-text",
+      "text": "Citations"
+    },
+    {
+      "file": "components/a2ui/academic/academic-search-results.tsx",
+      "context": "jsx-text",
+      "text": "Open Access"
+    },
+    {
+      "file": "components/a2ui/academic/academic-search-results.tsx",
+      "context": "jsx-text",
+      "text": "Searching papers..."
+    },
+    {
+      "file": "components/a2ui/academic/academic-search-results.tsx",
+      "context": "jsx-text",
+      "text": "No papers found"
+    },
+    {
+      "file": "components/a2ui/academic/academic-search-results.tsx",
+      "context": "jsx-text",
+      "text": "Try different search terms or adjust filters"
+    },
+    {
+      "file": "components/a2ui/academic/academic-search-results.tsx",
+      "context": "jsx-text",
+      "text": "Loading..."
+    },
+    {
+      "file": "components/a2ui/app-detail-dialog.tsx",
+      "context": "placeholder",
+      "text": "email@example.com"
+    },
+    {
+      "file": "components/a2ui/app-gallery.tsx",
+      "context": "jsx-text",
+      "text": "Sort:"
+    },
+    {
+      "file": "components/a2ui/display/a2ui-interactive-guide.tsx",
+      "context": "jsx-text",
+      "text": "No steps defined"
+    },
+    {
+      "file": "components/a2ui/display/a2ui-interactive-guide.tsx",
+      "context": "jsx-text",
+      "text": "Optional"
+    },
+    {
+      "file": "components/a2ui/display/a2ui-rich-output.tsx",
+      "context": "jsx-text",
+      "text": "Loading rich runtime..."
+    },
+    {
+      "file": "components/a2ui/display/a2ui-skeleton.tsx",
+      "context": "aria-label",
+      "text": "Loading"
+    },
+    {
+      "file": "components/a2ui/display/a2ui-skeleton.tsx",
+      "context": "aria-label",
+      "text": "Loading"
+    },
+    {
+      "file": "components/a2ui/layout/a2ui-fallback.tsx",
+      "context": "jsx-text",
+      "text": "Unknown component:"
+    },
+    {
+      "file": "components/a2ui/layout/a2ui-stepper-shell.tsx",
+      "context": "jsx-text",
+      "text": "No steps are available yet."
+    },
+    {
+      "file": "components/a2ui/quick-app-builder/template-card.tsx",
+      "context": "jsx-text",
+      "text": "Create"
+    },
+    {
+      "file": "components/a2ui/quick-app-builder.tsx",
+      "context": "jsx-text",
+      "text": "fields)"
+    },
+    {
+      "file": "components/a2ui/rich-output/tone-synth-rich-output.tsx",
+      "context": "jsx-text",
+      "text": "Play Synth"
+    },
+    {
+      "file": "components/a2ui/workspace/component-tree-panel.tsx",
+      "context": "jsx-text",
+      "text": "No surface loaded"
+    },
+    {
+      "file": "components/a2ui/workspace/data-model-panel.tsx",
+      "context": "jsx-text",
+      "text": "No surface loaded"
+    },
+    {
+      "file": "components/a2ui/workspace/data-model-panel.tsx",
+      "context": "jsx-text",
+      "text": "keys"
+    },
+    {
+      "file": "components/a2ui/workspace/data-model-panel.tsx",
+      "context": "jsx-text",
+      "text": "Empty data model"
+    },
+    {
+      "file": "components/a2ui/workspace/property-inspector-panel.tsx",
+      "context": "jsx-text",
+      "text": "Properties"
+    },
+    {
+      "file": "components/a2ui/workspace/property-inspector-panel.tsx",
+      "context": "jsx-text",
+      "text": "Layout"
+    },
+    {
+      "file": "components/a2ui/workspace/property-inspector-panel.tsx",
+      "context": "placeholder",
+      "text": "Select..."
+    },
+    {
+      "file": "components/a2ui/workspace/version-history-panel.tsx",
+      "context": "jsx-text",
+      "text": "Latest"
+    },
+    {
+      "file": "components/agent/a2ui-template-preview.tsx",
+      "context": "jsx-text",
+      "text": "A2UI Template Preview"
+    }
+  ],
+  "knownParityDrift": {
+    "onlyInEn": [],
+    "onlyInZh": []
+  }
+}

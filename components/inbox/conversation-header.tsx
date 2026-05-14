@@ -8,6 +8,7 @@
  * Right: policy info chip (PolicyInfo).
  */
 
+import { useTranslations } from "next-intl"
 import { ModeSwitcher } from "./mode-switcher"
 import { PolicyInfo } from "./policy-info"
 import { PlatformBadge } from "./platform-badge"
@@ -35,6 +36,7 @@ export function ConversationHeader({
   policy,
   onModeChange,
 }: ConversationHeaderProps) {
+  const t = useTranslations("inbox.conversationHeader")
   const desktop = isTauri()
 
   return (
@@ -71,7 +73,7 @@ export function ConversationHeader({
               />
             </span>
           </TooltipTrigger>
-          <TooltipContent>Mode switching requires the desktop app</TooltipContent>
+          <TooltipContent>{t("modeSwitchDesktopOnly")}</TooltipContent>
         </Tooltip>
       )}
 

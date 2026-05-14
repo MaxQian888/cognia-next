@@ -66,6 +66,49 @@ fn vector_to_blob(vec: &[f32]) -> Vec<u8> {
     out
 }
 
+/// Inverse of `vector_to_blob` — sqlite-vec stores embeddings as raw LE
+/// f32 bytes; this turns them back into the `Vec<f32>` the rest of the
+/// pipeline expects. Trailing partial floats are ignored (shouldn't
+/// happen on a well-formed row).
+fn blob_to_vector(blob: &[u8]) -> Vec<f32> {
+    let mut out = Vec::with_capacity(blob.len() / 4);
+    for chunk in blob.chunks_exact(4) {
+        let bytes: [u8; 4] = [chunk[0], chunk[1], chunk[2], chunk[3]];
+        out.push(f32::from_le_bytes(bytes));
+    }
+    out
+}
+
+fn map_sql_err_serde(err: serde_json::Error) -> VectorError {
+    VectorError::Serialization(err.to_string())
+}
+
+/// Stats snapshot for one collection. Wire-mirror in
+/// `lib/vector/store.ts:VectorStats`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CollectionStats {
+    pub count: usize,
+    pub dim: usize,
+    pub size_bytes: u64,
+}
+
+/// One page of `scroll_points`. `next_cursor` is the id of the last point
+/// returned — pass it back to scroll the next page. `has_more` is `false`
+/// when the page is short (fewer than `limit` rows).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScrollPage {
+    pub points: Vec<Point>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    pub has_more: bool,
+}
+
+/// Result of `import_collection_from_jsonl`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ImportStats {
+    pub imported: usize,
+}
+
 pub struct VectorStore {
     conn: Mutex<Connection>,
     path: PathBuf,
@@ -509,6 +552,404 @@ impl VectorStore {
         // `IVectorStore.truncateCollection` signature.
         self.delete_all_points(name)?;
         Ok(())
+    }
+
+    // -----------------------------------------------------------------
+    // Count + stats + scroll + rename + export/import
+    // -----------------------------------------------------------------
+
+    /// Number of points stored in a collection. Returns 0 for unknown
+    /// collection names (caller can still distinguish via list_collections
+    /// → membership check when strictness is required).
+    pub fn count_points(&self, collection: &str) -> Result<usize> {
+        let conn = self.conn.lock();
+        let collection_id = match Self::lookup_collection_id(&conn, collection) {
+            Ok(id) => id,
+            Err(VectorError::CollectionNotFound(_)) => return Ok(0),
+            Err(e) => return Err(e),
+        };
+        let total: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM points WHERE collection_id = ?1",
+                params![collection_id],
+                |r| r.get(0),
+            )
+            .map_err(map_sql_err)?;
+        Ok(total.max(0) as usize)
+    }
+
+    /// Snapshot stats for one collection: point count, dimensionality,
+    /// and a best-effort size in bytes (computed from the parent sqlite
+    /// file — sqlite-vec doesn't expose per-table page counts).
+    pub fn collection_stats(&self, collection: &str) -> Result<CollectionStats> {
+        let conn = self.conn.lock();
+        let (collection_id, dim) = Self::lookup_collection_id_and_dim(&conn, collection)?;
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM points WHERE collection_id = ?1",
+                params![collection_id],
+                |r| r.get(0),
+            )
+            .map_err(map_sql_err)?;
+        // sqlite_dbstat is only compiled on some builds — fall back to
+        // the file-system size of the sqlite file, scaled by the
+        // collection's share of total rows. Cheap, monotonic, good
+        // enough for the "how big is this twin?" widget.
+        drop(conn);
+        let total_bytes: u64 = std::fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0);
+        let conn = self.conn.lock();
+        let total_rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM points", [], |r| r.get(0))
+            .map_err(map_sql_err)?;
+        let size_bytes = if total_rows > 0 {
+            (total_bytes as f64 * (count as f64 / total_rows as f64)) as u64
+        } else {
+            0
+        };
+        Ok(CollectionStats {
+            count: count.max(0) as usize,
+            dim,
+            size_bytes,
+        })
+    }
+
+    /// Cursor-paged scroll over points. `cursor` is the last id returned
+    /// by the previous page (pass empty / `None` for the first page).
+    /// Returns up to `limit` points sorted by `id` ascending; the caller
+    /// drives the next page by passing the last id back in.
+    pub fn scroll_points(
+        &self,
+        collection: &str,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<ScrollPage> {
+        if limit == 0 {
+            return Err(VectorError::InvalidArgument(
+                "scroll limit must be > 0".into(),
+            ));
+        }
+        let conn = self.conn.lock();
+        let collection_id = Self::lookup_collection_id(&conn, collection)?;
+        let table = vec_table_name(collection_id);
+        let (sql, params_vec) = match cursor {
+            Some(c) if !c.is_empty() => {
+                let sql = format!(
+                    "SELECT p.id, p.content, p.payload_json, v.embedding \
+                     FROM points p JOIN {table} v ON v.rowid = p.rowid \
+                     WHERE p.collection_id = ? AND p.id > ? \
+                     ORDER BY p.id ASC LIMIT ?"
+                );
+                (
+                    sql,
+                    vec![
+                        Value::Integer(collection_id),
+                        Value::Text(c.to_string()),
+                        Value::Integer(limit as i64),
+                    ],
+                )
+            }
+            _ => {
+                let sql = format!(
+                    "SELECT p.id, p.content, p.payload_json, v.embedding \
+                     FROM points p JOIN {table} v ON v.rowid = p.rowid \
+                     WHERE p.collection_id = ? \
+                     ORDER BY p.id ASC LIMIT ?"
+                );
+                (
+                    sql,
+                    vec![Value::Integer(collection_id), Value::Integer(limit as i64)],
+                )
+            }
+        };
+
+        let mut stmt = conn.prepare(&sql).map_err(map_sql_err)?;
+        let rows = stmt
+            .query_map(params_from_iter(params_vec), |row| {
+                let id: String = row.get(0)?;
+                let content: Option<String> = row.get(1)?;
+                let payload_json: Option<String> = row.get(2)?;
+                let embedding_blob: Vec<u8> = row.get(3)?;
+                let mut payload = payload_json
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+                if let Some(c) = content.as_deref() {
+                    match &mut payload {
+                        Some(serde_json::Value::Object(map)) => {
+                            map.entry("content".to_string())
+                                .or_insert(serde_json::Value::String(c.to_string()));
+                        }
+                        None => {
+                            let mut m = serde_json::Map::new();
+                            m.insert(
+                                "content".to_string(),
+                                serde_json::Value::String(c.to_string()),
+                            );
+                            payload = Some(serde_json::Value::Object(m));
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Point {
+                    id,
+                    vector: blob_to_vector(&embedding_blob),
+                    payload,
+                })
+            })
+            .map_err(map_sql_err)?;
+
+        let mut points: Vec<Point> = Vec::new();
+        for r in rows {
+            points.push(r.map_err(map_sql_err)?);
+        }
+        let next_cursor = points.last().map(|p| p.id.clone());
+        let has_more = points.len() == limit;
+        Ok(ScrollPage {
+            points,
+            next_cursor,
+            has_more,
+        })
+    }
+
+    /// Atomically rename a collection. The underlying vec_<id> virtual
+    /// table is keyed by numeric id, so only the `collections.name`
+    /// column changes; data is untouched.
+    pub fn rename_collection(&self, from: &str, to: &str) -> Result<()> {
+        if to.trim().is_empty() {
+            return Err(VectorError::InvalidArgument(
+                "new collection name cannot be empty".into(),
+            ));
+        }
+        let conn = self.conn.lock();
+        let collection_id = Self::lookup_collection_id(&conn, from)?;
+        let existing: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM collections WHERE name = ?1",
+                params![to],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?;
+        if existing.is_some() {
+            return Err(VectorError::CollectionAlreadyExists(to.to_string()));
+        }
+        let now = now_iso();
+        conn.execute(
+            "UPDATE collections SET name = ?1, updated_at = ?2 WHERE id = ?3",
+            params![to, now, collection_id],
+        )
+        .map_err(map_sql_err)?;
+        Ok(())
+    }
+
+    /// Serialize a collection's metadata + all points into a JSONL-style
+    /// snapshot. The first line is the collection descriptor; subsequent
+    /// lines are one point each. Caller decides what to do with the
+    /// bytes (write to disk, hand to TS, etc.).
+    pub fn export_collection_to_jsonl(&self, collection: &str) -> Result<String> {
+        let conn = self.conn.lock();
+        let (collection_id, dim) = Self::lookup_collection_id_and_dim(&conn, collection)?;
+        let header_row: (
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            String,
+            String,
+            i64,
+        ) = conn
+            .query_row(
+                "SELECT name, description, embedding_model, embedding_provider, \
+                        metadata_json, created_at, updated_at, point_count \
+                 FROM collections WHERE id = ?1",
+                params![collection_id],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                        r.get(7)?,
+                    ))
+                },
+            )
+            .map_err(map_sql_err)?;
+        let metadata_value: Option<serde_json::Value> = header_row
+            .4
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+        let header = serde_json::json!({
+            "kind": "collection",
+            "name": header_row.0,
+            "dim": dim,
+            "description": header_row.1,
+            "embedding_model": header_row.2,
+            "embedding_provider": header_row.3,
+            "metadata": metadata_value,
+            "created_at": header_row.5,
+            "updated_at": header_row.6,
+            "point_count": header_row.7.max(0) as usize,
+        });
+        let mut buf = serde_json::to_string(&header).map_err(map_sql_err_serde)?;
+        buf.push('\n');
+
+        let table = vec_table_name(collection_id);
+        let sql = format!(
+            "SELECT p.id, p.content, p.payload_json, v.embedding \
+             FROM points p JOIN {table} v ON v.rowid = p.rowid \
+             WHERE p.collection_id = ? ORDER BY p.id ASC"
+        );
+        let mut stmt = conn.prepare(&sql).map_err(map_sql_err)?;
+        let rows = stmt
+            .query_map(params![collection_id], |row| {
+                let id: String = row.get(0)?;
+                let content: Option<String> = row.get(1)?;
+                let payload_json: Option<String> = row.get(2)?;
+                let embedding_blob: Vec<u8> = row.get(3)?;
+                Ok((id, content, payload_json, embedding_blob))
+            })
+            .map_err(map_sql_err)?;
+        for row in rows {
+            let (id, content, payload_json, embedding_blob) = row.map_err(map_sql_err)?;
+            let payload: Option<serde_json::Value> = payload_json
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+            let body = serde_json::json!({
+                "kind": "point",
+                "id": id,
+                "content": content,
+                "payload": payload,
+                "vector": blob_to_vector(&embedding_blob),
+            });
+            buf.push_str(&serde_json::to_string(&body).map_err(map_sql_err_serde)?);
+            buf.push('\n');
+        }
+        Ok(buf)
+    }
+
+    /// Replay a `export_collection_to_jsonl` snapshot. When the named
+    /// collection already exists, `overwrite` decides whether to clear
+    /// it first (true) or fail (false).
+    pub fn import_collection_from_jsonl(
+        &self,
+        collection: &str,
+        jsonl: &str,
+        overwrite: bool,
+    ) -> Result<ImportStats> {
+        let mut lines = jsonl.lines().filter(|l| !l.trim().is_empty());
+        let header_raw = lines.next().ok_or_else(|| {
+            VectorError::InvalidArgument("empty import payload — no header line".into())
+        })?;
+        let header: serde_json::Value = serde_json::from_str(header_raw)
+            .map_err(|e| VectorError::InvalidArgument(format!("malformed header: {e}")))?;
+        if header.get("kind").and_then(|k| k.as_str()) != Some("collection") {
+            return Err(VectorError::InvalidArgument(
+                "first line must be a `kind:collection` header".into(),
+            ));
+        }
+        let dim = header
+            .get("dim")
+            .and_then(|d| d.as_u64())
+            .ok_or_else(|| VectorError::InvalidArgument("header missing `dim`".into()))?
+            as usize;
+        if dim == 0 {
+            return Err(VectorError::InvalidArgument(
+                "imported collection dim must be > 0".into(),
+            ));
+        }
+
+        // Ensure the target collection exists with the matching dim.
+        let exists = {
+            let conn = self.conn.lock();
+            let row: Option<(i64, i64)> = conn
+                .query_row(
+                    "SELECT id, dim FROM collections WHERE name = ?1",
+                    params![collection],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()
+                .map_err(map_sql_err)?;
+            row
+        };
+        match exists {
+            Some((_, existing_dim)) if existing_dim as usize != dim => {
+                return Err(VectorError::DimensionMismatch {
+                    collection: collection.to_string(),
+                    expected: existing_dim as usize,
+                    actual: dim,
+                });
+            }
+            Some(_) => {
+                if overwrite {
+                    self.delete_all_points(collection)?;
+                }
+            }
+            None => {
+                let description = header
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let embedding_model = header
+                    .get("embedding_model")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let embedding_provider = header
+                    .get("embedding_provider")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let metadata = header.get("metadata").cloned();
+                self.create_collection(
+                    collection,
+                    dim,
+                    description.as_deref(),
+                    embedding_model.as_deref(),
+                    embedding_provider.as_deref(),
+                    metadata.as_ref(),
+                )?;
+            }
+        }
+
+        let mut points: Vec<Point> = Vec::new();
+        for line in lines {
+            let row: serde_json::Value = serde_json::from_str(line)
+                .map_err(|e| VectorError::InvalidArgument(format!("malformed row: {e}")))?;
+            if row.get("kind").and_then(|k| k.as_str()) != Some("point") {
+                continue;
+            }
+            let id = row
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| VectorError::InvalidArgument("point missing `id`".into()))?
+                .to_string();
+            let vector_arr = row.get("vector").and_then(|v| v.as_array()).ok_or_else(|| {
+                VectorError::InvalidArgument(format!("point {id} missing `vector` array"))
+            })?;
+            let vector: Vec<f32> = vector_arr
+                .iter()
+                .filter_map(|n| n.as_f64().map(|f| f as f32))
+                .collect();
+            if vector.len() != dim {
+                return Err(VectorError::DimensionMismatch {
+                    collection: collection.to_string(),
+                    expected: dim,
+                    actual: vector.len(),
+                });
+            }
+            let payload = row.get("payload").cloned();
+            points.push(Point {
+                id,
+                vector,
+                payload,
+            });
+        }
+        let count = points.len();
+        if !points.is_empty() {
+            self.upsert_points(collection, &points)?;
+        }
+        Ok(ImportStats { imported: count })
     }
 
     // -----------------------------------------------------------------

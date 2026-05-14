@@ -10,10 +10,13 @@ import {
   listTwinDraftsByTwin,
   markTwinDraftAccepted,
   markTwinDraftRejected,
+  updateTwinDraftPayload,
 } from "@/lib/db/twin-drafts"
 import { createCharacter } from "@/lib/db/characters"
 import { createSkill } from "@/lib/db/skills"
-import type { TwinDraft } from "@/types/twin"
+import { DraftEditorDialog } from "./draft-editor-dialog"
+import { assertDraftBodyClean, DraftPiiError } from "@/lib/twin/distill/draft-pii-guard"
+import type { TwinDraft, TwinDraftPayload } from "@/types/twin"
 
 const STATUS_VARIANT: Record<
   TwinDraft["status"],
@@ -36,6 +39,8 @@ function qualityKey(score?: number): QualityKey {
 
 export function TwinDraftsTab({ twinId }: { twinId: string }) {
   const t = useTranslations("twin.drafts")
+  const tStatus = useTranslations("twin.status")
+  const tKind = useTranslations("twin.kind")
   const drafts = useLiveQuery(() => listTwinDraftsByTwin(twinId), [twinId], [])
   const sorted = [...drafts].sort((a, b) => {
     // Pending first; among pending, lowest qualityScore first.
@@ -55,7 +60,7 @@ export function TwinDraftsTab({ twinId }: { twinId: string }) {
       ) : (
         <ul className="flex flex-col gap-2">
           {sorted.map((draft) => (
-            <DraftRow key={draft.id} draft={draft} t={t} />
+            <DraftRow key={draft.id} draft={draft} t={t} tStatus={tStatus} tKind={tKind} />
           ))}
         </ul>
       )}
@@ -63,9 +68,20 @@ export function TwinDraftsTab({ twinId }: { twinId: string }) {
   )
 }
 
-function DraftRow({ draft, t }: { draft: TwinDraft; t: ReturnType<typeof useTranslations> }) {
+function DraftRow({
+  draft,
+  t,
+  tStatus,
+  tKind,
+}: {
+  draft: TwinDraft
+  t: ReturnType<typeof useTranslations>
+  tStatus: ReturnType<typeof useTranslations>
+  tKind: ReturnType<typeof useTranslations>
+}) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [editorOpen, setEditorOpen] = useState(false)
   const data = draft.payload.data as Record<string, unknown>
   const name = typeof data.name === "string" ? data.name : t("untitled")
   const description = typeof data.description === "string" ? data.description : undefined
@@ -75,6 +91,21 @@ function DraftRow({ draft, t }: { draft: TwinDraft; t: ReturnType<typeof useTran
       : typeof data.content === "string"
         ? data.content
         : ""
+
+  const handleEditSave = async (next: TwinDraftPayload) => {
+    setError(null)
+    try {
+      assertDraftBodyClean(next)
+    } catch (err) {
+      if (err instanceof DraftPiiError) {
+        const fields = err.violations.map((v) => v.field).join(", ")
+        throw new Error(t("piiInDraft", { fields }))
+      }
+      throw err
+    }
+    await updateTwinDraftPayload(draft.id, next)
+    setEditorOpen(false)
+  }
 
   const qKey = qualityKey(draft.evaluation?.qualityScore)
   const qualityText = t(qKey)
@@ -125,12 +156,8 @@ function DraftRow({ draft, t }: { draft: TwinDraft; t: ReturnType<typeof useTran
     <Card className="flex flex-col gap-3 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="outline" className="capitalize">
-            {draft.payload.kind}
-          </Badge>
-          <Badge variant={STATUS_VARIANT[draft.status]} className="capitalize">
-            {draft.status}
-          </Badge>
+          <Badge variant="outline">{tKind(draft.payload.kind)}</Badge>
+          <Badge variant={STATUS_VARIANT[draft.status]}>{tStatus(draft.status)}</Badge>
           <Badge variant="outline">{t("qualityLabel", { label: qualityText })}</Badge>
           <span className="font-medium">{name}</span>
         </div>
@@ -164,6 +191,15 @@ function DraftRow({ draft, t }: { draft: TwinDraft; t: ReturnType<typeof useTran
       ) : null}
       {draft.status === "pending" ? (
         <div className="flex justify-end gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setEditorOpen(true)}
+            disabled={busy}
+            data-testid={`twin-draft-edit-${draft.id}`}
+          >
+            {t("edit")}
+          </Button>
           <Button size="sm" variant="outline" onClick={() => void reject()} disabled={busy}>
             {t("reject")}
           </Button>
@@ -172,6 +208,13 @@ function DraftRow({ draft, t }: { draft: TwinDraft; t: ReturnType<typeof useTran
           </Button>
         </div>
       ) : null}
+      <DraftEditorDialog
+        open={editorOpen}
+        onOpenChange={setEditorOpen}
+        draft={draft}
+        onSave={handleEditSave}
+        busy={busy}
+      />
     </Card>
   )
 }

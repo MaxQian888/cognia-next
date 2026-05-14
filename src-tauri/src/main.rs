@@ -24,10 +24,12 @@ fn main() {
     // spawned task (commands, sidecars, connectors, workflows) is instrumented.
     tauri::async_runtime::set(rt.runtime().handle().clone());
 
-    // Run the Tauri app inside the traced runtime.  The wry event loop
-    // (GUI thread) runs on the caller thread; tokio async work runs on
-    // dial9-instrumented worker threads.
-    rt.block_on(async {
-        app_lib::run();
-    });
+    // The tao/wry event loop MUST be created on the main thread on Windows,
+    // so run Tauri directly here — not inside `rt.block_on`, which would hop
+    // to a tokio worker thread and panic. `rt` stays alive for the whole
+    // process via this binding; Tauri's async work hops to it via the handle
+    // registered above.
+    app_lib::run();
+
+    drop(rt);
 }

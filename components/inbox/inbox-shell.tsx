@@ -8,6 +8,7 @@
  * the collapse affordance works consistently with the rest of the app.
  */
 
+import { useTranslations } from "next-intl"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { InboxSidebar } from "./inbox-sidebar"
 import { ConversationList } from "./conversation-list"
@@ -34,6 +35,7 @@ export function InboxShell({
   conversationKey,
   children,
 }: InboxShellProps) {
+  const t = useTranslations("inbox.shell")
   return (
     <SidebarProvider
       defaultOpen
@@ -64,7 +66,7 @@ export function InboxShell({
       >
         {children ?? (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            Select a conversation to start
+            {t("selectPrompt")}
           </div>
         )}
       </SidebarInset>

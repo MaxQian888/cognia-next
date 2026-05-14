@@ -6,6 +6,7 @@
 // activates the wallpaper.
 
 import { useEffect, useState } from "react"
+import { useTranslations } from "next-intl"
 import { CheckIcon, Trash2Icon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -28,6 +29,7 @@ export function WallpaperCard({
   onDelete,
   ariaLabel,
 }: WallpaperCardProps) {
+  const tAria = useTranslations("settings.appearance.wallpaper.aria")
   const [css, setCss] = useState<string | null>(null)
   const [error, setError] = useState(false)
 
@@ -104,7 +106,8 @@ export function WallpaperCard({
               e.stopPropagation()
               onDelete?.()
             }}
-            aria-label={`Delete ${wallpaper.name}`}
+            aria-label={tAria("delete", { name: wallpaper.name })}
+            data-testid="wallpaper-delete-button"
           >
             <Trash2Icon className="size-3" />
           </Button>

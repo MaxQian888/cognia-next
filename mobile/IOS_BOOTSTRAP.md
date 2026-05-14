@@ -83,6 +83,36 @@ them into project-properties view):
 </array>
 ```
 
+## Required LaunchScreen dark variant
+
+The Android side ships a dark splash via `values-night/colors.xml` +
+`drawable/splash_themed.xml` (see the Phase 3 mobile theme parity work).
+iOS requires a sibling change inside the storyboard so the launch surface
+honors `userInterfaceStyle = .dark` instead of flashing white.
+
+After `cap add ios` generates `mobile/ios/App/App/Base.lproj/LaunchScreen.storyboard`:
+
+1. Open the storyboard in Xcode → select the root view.
+2. In the **Attributes inspector** → **Background** field, click the
+   color swatch → **Other…** → switch to the **+** menu → **Add Color**
+   to add a **Trait Variation**:
+   - **Any** → `#FFFFFF` (current behavior)
+   - **Dark** → `#0A0A0A` (matches cognia's `--background` dark token)
+3. Repeat for any subviews that have an explicit background color.
+4. In `Info.plist`, ensure `UIUserInterfaceStyle` is **not** set to
+   `Light` or `Dark` — leave it absent so iOS picks the system value.
+5. If launch images are configured in `Assets.xcassets/Splash.imageset/`,
+   add a separate `Dark` slot (Inspector → Appearances → **Any, Dark**)
+   pointing at a darkmode-tinted PNG.
+
+Verification (Simulator):
+
+```bash
+pnpm --filter mobile exec cap run ios
+# In the Simulator: Settings → Developer → Dark Appearance → ON
+# Then re-launch cognia — splash should appear with the dark background.
+```
+
 ## Apple Developer (one-time)
 
 Required to ship to TestFlight / App Store:

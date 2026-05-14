@@ -1,8 +1,15 @@
 /**
  * StyleAgent — extract representative writing samples from a chunk pool.
+ *
+ * When the input pool is larger than `maxChunks`, the agent runs the MMR
+ * (Maximum Marginal Relevance) prefilter first to shrink the pool down
+ * to `prefilterTarget` chunks that balance informativeness and
+ * source-diversity. This both cuts prompt cost and prevents the LLM from
+ * seeing dozens of near-duplicates from the same long document.
  */
 
 import { extractJson, type LlmClient } from "../llm"
+import { selectStyleCandidates } from "../heuristics/style-prefilter"
 import { applyTemplate, STYLE_AGENT_PROMPT } from "../prompts"
 import type { StyleSample, TwinChunk } from "@/types/twin"
 
@@ -10,6 +17,11 @@ export interface StyleAgentInput {
   chunks: TwinChunk[]
   /** Cap the prompt size to ~N chunks. Defaults to 60. */
   maxChunks?: number
+  /**
+   * When the input pool exceeds `maxChunks`, MMR-select down to this size
+   * instead of using the first `maxChunks` chunks in order. Defaults to 30.
+   */
+  prefilterTarget?: number
 }
 
 export interface StyleAgentResult {
@@ -36,7 +48,18 @@ export async function runStyleAgent(
   input: StyleAgentInput
 ): Promise<StyleAgentResult> {
   const cap = input.maxChunks ?? 60
-  const chunks = input.chunks.slice(0, cap)
+  const prefilterTarget = input.prefilterTarget ?? 30
+  // When the pool exceeds the prompt cap, run MMR to pick a diverse
+  // sub-pool of `prefilterTarget` chunks before formatting. If MMR
+  // returns fewer chunks than the cap (the prefilter drops short /
+  // low-signal chunks), fall back to the original head slice so the
+  // agent still sees a meaningful pool.
+  let filtered: TwinChunk[] = input.chunks
+  if (input.chunks.length > cap) {
+    const candidates = selectStyleCandidates(input.chunks, { target: prefilterTarget })
+    filtered = candidates.length >= Math.min(cap, prefilterTarget) ? candidates : input.chunks
+  }
+  const chunks = filtered.slice(0, cap)
   if (chunks.length === 0) return { samples: [] }
 
   const prompt = applyTemplate(STYLE_AGENT_PROMPT, {

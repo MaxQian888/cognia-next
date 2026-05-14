@@ -65,7 +65,7 @@ describe("WallpaperCard", () => {
         />
       )
     })
-    expect(screen.queryByLabelText(/Delete/)).toBeNull()
+    expect(screen.queryByTestId("wallpaper-delete-button")).toBeNull()
   })
 
   it("invokes onDelete when the trash button is clicked, and stops propagation", async () => {
@@ -81,7 +81,7 @@ describe("WallpaperCard", () => {
         />
       )
     })
-    fireEvent.click(screen.getByLabelText("Delete Sunset"))
+    fireEvent.click(screen.getByTestId("wallpaper-delete-button"))
     expect(onDelete).toHaveBeenCalledTimes(1)
     expect(onActivate).not.toHaveBeenCalled()
   })

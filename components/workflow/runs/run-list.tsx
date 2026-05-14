@@ -9,6 +9,7 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import Link from "next/link"
 import { ArrowLeftIcon, ChevronRightIcon, PlayCircleIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
 import { getDb } from "@/lib/db/schema"
 import { Button } from "@/components/ui/button"
 import {
@@ -25,6 +26,7 @@ import { RunStatusPill } from "./run-status-pill"
 import { formatRunDuration, formatRunStartedAt } from "./format"
 
 export function RunList({ workflowId }: { workflowId: string }) {
+  const t = useTranslations("workflows.runs.list")
   const runs = useLiveQuery(
     async () =>
       getDb()
@@ -38,16 +40,14 @@ export function RunList({ workflowId }: { workflowId: string }) {
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center gap-3 border-b px-6 py-4">
-        <Button asChild size="icon" variant="ghost" aria-label="Back to editor">
+        <Button asChild size="icon" variant="ghost" aria-label={t("backToEditor")}>
           <Link href={`/workflows/${workflowId}`}>
             <ArrowLeftIcon className="size-4" />
           </Link>
         </Button>
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-semibold leading-tight">Runs</h1>
-          <p className="text-sm text-muted-foreground">
-            Every execution of this workflow, newest first.
-          </p>
+          <h1 className="text-xl font-semibold leading-tight">{t("title")}</h1>
+          <p className="text-sm text-muted-foreground">{t("description")}</p>
         </div>
       </header>
       <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -64,10 +64,11 @@ export function RunList({ workflowId }: { workflowId: string }) {
                 <PlayCircleIcon className="size-8" aria-hidden="true" />
               </EmptyMedia>
             </EmptyHeader>
-            <EmptyTitle>No runs yet</EmptyTitle>
+            <EmptyTitle>{t("empty.title")}</EmptyTitle>
             <EmptyDescription>
-              Click <strong>Run</strong> in the editor toolbar, or attach a trigger that fires
-              automatically.
+              {t.rich("empty.description", {
+                strong: (chunks) => <strong>{chunks}</strong>,
+              })}
             </EmptyDescription>
           </Empty>
         ) : (
@@ -75,11 +76,11 @@ export function RunList({ workflowId }: { workflowId: string }) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Trigger</TableHead>
-                  <TableHead>Started</TableHead>
-                  <TableHead>Duration</TableHead>
-                  <TableHead className="w-12" aria-label="Open" />
+                  <TableHead>{t("columns.status")}</TableHead>
+                  <TableHead>{t("columns.trigger")}</TableHead>
+                  <TableHead>{t("columns.started")}</TableHead>
+                  <TableHead>{t("columns.duration")}</TableHead>
+                  <TableHead className="w-12" aria-label={t("columns.open")} />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -101,7 +102,7 @@ export function RunList({ workflowId }: { workflowId: string }) {
                       <Button asChild variant="ghost" size="icon" className="size-8">
                         <Link
                           href={`/workflows/${workflowId}/runs/${run.id}`}
-                          aria-label={`Open run ${run.id}`}
+                          aria-label={t("openRun", { id: run.id })}
                         >
                           <ChevronRightIcon className="size-4" />
                         </Link>

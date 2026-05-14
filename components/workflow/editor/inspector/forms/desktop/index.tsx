@@ -10,6 +10,7 @@
  * automation client.
  */
 
+import { useTranslations } from "next-intl"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
@@ -27,6 +28,7 @@ type Params = Record<string, unknown>
 type Props = { params: Params; onChange: (next: Params) => void }
 
 export function DesktopScreenshotConfig({ params, onChange }: Props) {
+  const t = useTranslations("workflows.forms.desktopScreenshot")
   const format = readString(params, "format") || "png"
   const fullScreen = readBoolean(params, "fullScreen", false)
   const outputPath = readString(params, "outputPath")
@@ -34,10 +36,10 @@ export function DesktopScreenshotConfig({ params, onChange }: Props) {
     <DesktopActionForm
       params={params}
       onChange={onChange}
-      selectorHint="Optional. When set, the screenshot is cropped to the element bounds; otherwise the whole window (or whole screen with `fullScreen`) is captured."
+      selectorHint={t("selector.hint")}
       extraFields={
         <>
-          <Field label="Format" htmlFor="ss-format" name="format">
+          <Field label={t("format.label")} htmlFor="ss-format" name="format">
             <Select value={format} onValueChange={(v) => onChange(patchParam(params, "format", v))}>
               <SelectTrigger id="ss-format">
                 <SelectValue />
@@ -48,7 +50,7 @@ export function DesktopScreenshotConfig({ params, onChange }: Props) {
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Full screen" htmlFor="ss-full" name="fullScreen">
+          <Field label={t("fullScreen.label")} htmlFor="ss-full" name="fullScreen">
             <Switch
               id="ss-full"
               checked={fullScreen}
@@ -56,14 +58,14 @@ export function DesktopScreenshotConfig({ params, onChange }: Props) {
             />
           </Field>
           <Field
-            label="Output path"
+            label={t("outputPath.label")}
             htmlFor="ss-out"
-            hint="Optional. When set, the screenshot is also written to disk at this path."
+            hint={t("outputPath.hint")}
             name="outputPath"
           >
             <Input
               id="ss-out"
-              placeholder="C:/temp/cap.png"
+              placeholder={t("outputPath.placeholder")}
               value={outputPath}
               onChange={(e) => onChange(patchParam(params, "outputPath", e.target.value))}
             />
@@ -75,27 +77,23 @@ export function DesktopScreenshotConfig({ params, onChange }: Props) {
 }
 
 export function DesktopFindElementConfig({ params, onChange }: Props) {
-  return (
-    <DesktopActionForm
-      params={params}
-      onChange={onChange}
-      selectorHint="UIA selector. Required — the node returns the element's bounds + handle for downstream nodes."
-    />
-  )
+  const t = useTranslations("workflows.forms.desktopFindElement")
+  return <DesktopActionForm params={params} onChange={onChange} selectorHint={t("selector.hint")} />
 }
 
 export function DesktopReadTreeConfig({ params, onChange }: Props) {
+  const t = useTranslations("workflows.forms.desktopReadTree")
   const maxDepth = readNumber(params, "maxDepth", 5)
   return (
     <DesktopActionForm
       params={params}
       onChange={onChange}
-      selectorHint="Optional. When set, the tree is rooted at the matched element; otherwise it starts at the foreground window."
+      selectorHint={t("selector.hint")}
       extraFields={
         <Field
-          label="Max depth"
+          label={t("maxDepth.label")}
           htmlFor="rt-depth"
-          hint="How many levels to traverse. Larger values are slow; the default keeps response under a second on a typical desktop."
+          hint={t("maxDepth.hint")}
           name="maxDepth"
         >
           <Input
@@ -114,16 +112,17 @@ export function DesktopReadTreeConfig({ params, onChange }: Props) {
 }
 
 export function DesktopClickConfig({ params, onChange }: Props) {
+  const t = useTranslations("workflows.forms.desktopClick")
   const button = readString(params, "button") || "left"
   const clickCount = readNumber(params, "clickCount", 1)
   return (
     <DesktopActionForm
       params={params}
       onChange={onChange}
-      selectorHint="UIA selector for the target. Required."
+      selectorHint={t("selector.hint")}
       extraFields={
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Button" htmlFor="click-btn" name="button">
+          <Field label={t("button.label")} htmlFor="click-btn" name="button">
             <Select value={button} onValueChange={(v) => onChange(patchParam(params, "button", v))}>
               <SelectTrigger id="click-btn">
                 <SelectValue />
@@ -135,7 +134,7 @@ export function DesktopClickConfig({ params, onChange }: Props) {
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Click count" htmlFor="click-count" name="clickCount">
+          <Field label={t("clickCount.label")} htmlFor="click-count" name="clickCount">
             <Input
               id="click-count"
               type="number"
@@ -154,28 +153,29 @@ export function DesktopClickConfig({ params, onChange }: Props) {
 }
 
 export function DesktopTypeConfig({ params, onChange }: Props) {
+  const t = useTranslations("workflows.forms.desktopType")
   const text = readString(params, "text")
   const delayMs = readNumber(params, "delayMs", 0)
   return (
     <DesktopActionForm
       params={params}
       onChange={onChange}
-      selectorHint="UIA selector for the target input. Optional — defaults to the focused element."
+      selectorHint={t("selector.hint")}
       extraFields={
         <>
-          <Field label="Text" htmlFor="type-text" name="text" required>
+          <Field label={t("text.label")} htmlFor="type-text" name="text" required>
             <Textarea
               id="type-text"
               rows={3}
               value={text}
               onChange={(e) => onChange(patchParam(params, "text", e.target.value))}
-              placeholder="Hello, world!"
+              placeholder={t("text.placeholder")}
             />
           </Field>
           <Field
-            label="Per-key delay (ms)"
+            label={t("delayMs.label")}
             htmlFor="type-delay"
-            hint="Small delay between keys, useful for apps that miss keystrokes when typed too quickly."
+            hint={t("delayMs.hint")}
             name="delayMs"
           >
             <Input
@@ -195,6 +195,7 @@ export function DesktopTypeConfig({ params, onChange }: Props) {
 }
 
 export function DesktopKeysConfig({ params, onChange }: Props) {
+  const t = useTranslations("workflows.forms.desktopKeys")
   const chord = readString(params, "chord")
   return (
     <DesktopActionForm
@@ -203,15 +204,15 @@ export function DesktopKeysConfig({ params, onChange }: Props) {
       showSelector={false}
       extraFields={
         <Field
-          label="Key chord"
+          label={t("chord.label")}
           htmlFor="keys-chord"
-          hint='Use "+" between modifiers, e.g. `ctrl+shift+t`. The chord is dispatched against the focused window.'
+          hint={t("chord.hint")}
           name="chord"
           required
         >
           <Input
             id="keys-chord"
-            placeholder="ctrl+shift+p"
+            placeholder={t("chord.placeholder")}
             value={chord}
             onChange={(e) => onChange(patchParam(params, "chord", e.target.value))}
           />
@@ -232,16 +233,17 @@ const INVOKE_PATTERNS = [
 ] as const
 
 export function DesktopInvokePatternConfig({ params, onChange }: Props) {
+  const t = useTranslations("workflows.forms.desktopInvokePattern")
   const pattern = readString(params, "pattern") || "Invoke"
   const value = readString(params, "value")
   return (
     <DesktopActionForm
       params={params}
       onChange={onChange}
-      selectorHint="UIA selector for the element supporting the chosen pattern."
+      selectorHint={t("selector.hint")}
       extraFields={
         <>
-          <Field label="Pattern" htmlFor="ip-pattern" name="pattern" required>
+          <Field label={t("pattern.label")} htmlFor="ip-pattern" name="pattern" required>
             <Select
               value={pattern}
               onValueChange={(v) => onChange(patchParam(params, "pattern", v))}
@@ -258,12 +260,7 @@ export function DesktopInvokePatternConfig({ params, onChange }: Props) {
               </SelectContent>
             </Select>
           </Field>
-          <Field
-            label="Value"
-            htmlFor="ip-value"
-            hint="Required for `Value`, `RangeValue`; optional for the rest."
-            name="value"
-          >
+          <Field label={t("value.label")} htmlFor="ip-value" hint={t("value.hint")} name="value">
             <Input
               id="ip-value"
               value={value}
@@ -277,36 +274,27 @@ export function DesktopInvokePatternConfig({ params, onChange }: Props) {
 }
 
 export function DesktopWindowFocusConfig({ params, onChange }: Props) {
-  return (
-    <DesktopActionForm
-      params={params}
-      onChange={onChange}
-      selectorHint="UIA window selector (e.g. `name~='Notepad'`). When omitted, the foreground window is used."
-    />
-  )
+  const t = useTranslations("workflows.forms.desktopWindowFocus")
+  return <DesktopActionForm params={params} onChange={onChange} selectorHint={t("selector.hint")} />
 }
 
 export function DesktopWindowCloseConfig({ params, onChange }: Props) {
-  return (
-    <DesktopActionForm
-      params={params}
-      onChange={onChange}
-      selectorHint="UIA window selector. When omitted, the foreground window is closed."
-    />
-  )
+  const t = useTranslations("workflows.forms.desktopWindowClose")
+  return <DesktopActionForm params={params} onChange={onChange} selectorHint={t("selector.hint")} />
 }
 
 export function DesktopWindowResizeConfig({ params, onChange }: Props) {
+  const t = useTranslations("workflows.forms.desktopWindowResize")
   const width = readNumber(params, "width", 1280)
   const height = readNumber(params, "height", 720)
   return (
     <DesktopActionForm
       params={params}
       onChange={onChange}
-      selectorHint="UIA window selector. Falls back to the foreground window."
+      selectorHint={t("selector.hint")}
       extraFields={
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Width (px)" htmlFor="wr-w" name="width">
+          <Field label={t("width.label")} htmlFor="wr-w" name="width">
             <Input
               id="wr-w"
               type="number"
@@ -317,7 +305,7 @@ export function DesktopWindowResizeConfig({ params, onChange }: Props) {
               }
             />
           </Field>
-          <Field label="Height (px)" htmlFor="wr-h" name="height">
+          <Field label={t("height.label")} htmlFor="wr-h" name="height">
             <Input
               id="wr-h"
               type="number"
@@ -335,17 +323,18 @@ export function DesktopWindowResizeConfig({ params, onChange }: Props) {
 }
 
 export function DesktopWaitConfig({ params, onChange }: Props) {
+  const t = useTranslations("workflows.forms.desktopWait")
   const eventKind = readString(params, "eventKind") || "elementVisible"
   return (
     <DesktopActionForm
       params={params}
       onChange={onChange}
-      selectorHint="UIA selector for the element / pattern to wait on."
+      selectorHint={t("selector.hint")}
       extraFields={
         <Field
-          label="Event"
+          label={t("eventKind.label")}
           htmlFor="wait-kind"
-          hint="What state change ends the wait."
+          hint={t("eventKind.hint")}
           name="eventKind"
         >
           <Select
@@ -356,10 +345,14 @@ export function DesktopWaitConfig({ params, onChange }: Props) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="elementVisible">element visible</SelectItem>
-              <SelectItem value="elementHidden">element hidden</SelectItem>
-              <SelectItem value="windowReady">window ready</SelectItem>
-              <SelectItem value="propertyChanged">property changed</SelectItem>
+              <SelectItem value="elementVisible">
+                {t("eventKind.options.elementVisible")}
+              </SelectItem>
+              <SelectItem value="elementHidden">{t("eventKind.options.elementHidden")}</SelectItem>
+              <SelectItem value="windowReady">{t("eventKind.options.windowReady")}</SelectItem>
+              <SelectItem value="propertyChanged">
+                {t("eventKind.options.propertyChanged")}
+              </SelectItem>
             </SelectContent>
           </Select>
         </Field>

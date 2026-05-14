@@ -36,6 +36,7 @@ export function buildGradientCss({ start, end, angle }: GradientStops): string {
 
 export function GradientBuilder({ initial, onCreate }: GradientBuilderProps) {
   const t = useTranslations("settings.appearance.wallpaper.gradient")
+  const tAria = useTranslations("settings.appearance.customTheme.tokens.aria")
   // `initial` seeds the first render only — to remix a preset the caller
   // remounts via a `key` prop. This avoids the setState-in-effect dance
   // and matches React 19's recommended state-from-prop pattern.
@@ -69,12 +70,16 @@ export function GradientBuilder({ initial, onCreate }: GradientBuilderProps) {
         label={t("start")}
         value={stops.start}
         onChange={(start) => setStops((s) => ({ ...s, start }))}
+        swatchAriaLabel={tAria("swatch", { label: t("start") })}
+        hexAriaLabel={tAria("hex", { label: t("start") })}
       />
       <ColorTokenRow
         tokenKey="gradient-end"
         label={t("end")}
         value={stops.end}
         onChange={(end) => setStops((s) => ({ ...s, end }))}
+        swatchAriaLabel={tAria("swatch", { label: t("end") })}
+        hexAriaLabel={tAria("hex", { label: t("end") })}
       />
 
       <div className="space-y-1">

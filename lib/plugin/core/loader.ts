@@ -6,6 +6,7 @@ import { loggers } from "@/lib/logger"
 import type { Plugin, PluginDefinition, PluginManifest } from "@/types/plugin"
 import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
 import { loadWasmDefinition } from "./wasm-loader"
+import { loadVscodeDefinition } from "./vscode-loader"
 
 const pluginLoaderLogger = loggers.plugin.child("loader")
 
@@ -69,9 +70,29 @@ export class PluginLoader {
         return this.loadHybridModule(manifest, path)
       case "wasm":
         return this.loadWasmModule(manifest, path)
+      case "vscode-extension":
+        return this.loadVscodeModule(manifest, path)
       default:
         throw new Error(`Unknown plugin type: ${manifest.type}`)
     }
+  }
+
+  /**
+   * Load a VS Code extension. The Node sidecar lives in
+   * `sidecars/vscode-ext-host/` and is managed by Tauri; this loader is
+   * a thin IPC client mirror of `loadWasmModule`. See
+   * `lib/plugin/core/vscode-loader.ts` for the IPC contract.
+   */
+  private async loadVscodeModule(
+    manifest: PluginManifest,
+    pluginPath: string
+  ): Promise<PluginDefinition> {
+    const definition = await loadVscodeDefinition(manifest, pluginPath)
+    this.loadedModules.set(manifest.id, {
+      definition,
+      exports: { default: definition },
+    })
+    return definition
   }
 
   /**
@@ -522,9 +543,14 @@ export class PluginLoader {
    */
   unload(pluginId: string): void {
     const entry = this.loadedModules.get(pluginId)
-    if (entry?.definition.manifest.type === "wasm") {
+    const manifestType = entry?.definition?.manifest?.type
+    if (manifestType === "wasm") {
       void import("./wasm-loader").then(({ unloadWasmPlugin }) =>
         unloadWasmPlugin(pluginId).catch(() => {})
+      )
+    } else if (manifestType === "vscode-extension") {
+      void import("./vscode-loader").then(({ unloadVscodeExtension }) =>
+        unloadVscodeExtension(pluginId).catch(() => {})
       )
     }
     this.loadedModules.delete(pluginId)

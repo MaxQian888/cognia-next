@@ -53,6 +53,7 @@ import type {
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
 import type { SessionUsageRow } from "./session-usage"
 import type { ChatDraftRow } from "./chat-drafts"
+import type { Goal, GoalEvent } from "@/types/goal"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -157,6 +158,12 @@ export class CogniaDB extends Dexie {
   // accept a row is inserted here so future updates from the same author
   // auto-trust. Pure additive table.
   trustedPublishers!: Table<TrustedPublisherRow, string>
+  // v30 — `/goal` command subsystem (ADR-0013). `chatGoals` is one row per
+  // goal, session-scoped (one active per session enforced by writer); status
+  // transitions are append-only and immutable past terminal. `chatGoalEvents`
+  // is the lifecycle audit trail driving the Activity tab + History view.
+  chatGoals!: Table<Goal, string>
+  chatGoalEvents!: Table<GoalEvent, string>
 
   constructor() {
     super("cognia-claude")
@@ -917,10 +924,45 @@ export class CogniaDB extends Dexie {
     this.version(29).stores({
       trustedPublishers: "&publicKey, fingerprint, firstTrustedAt",
     })
+
+    // v30 — `/goal` command (ADR-0013). Pure additive; no upgrade hook.
+    //   • `chatGoals`      — `&id` primary; `sessionId` for "active goal of
+    //                         this session" lookups by the composer pill;
+    //                         `[sessionId+status]` so the "find the one
+    //                         active goal in this session" query is
+    //                         index-driven (writer enforces the unique
+    //                         constraint, not the index); `status` standalone
+    //                         for the global History tab; `characterId` for
+    //                         per-character filters; `createdAt` for
+    //                         newest-first listing; `updatedAt` for
+    //                         live-query refreshes.
+    //   • `chatGoalEvents` — `&id` primary; `goalId` for cascade-delete;
+    //                         `[goalId+ts]` for in-order Activity render;
+    //                         `kind` for kind-filtered audit views;
+    //                         `ts` for global newest-first when needed.
+    this.version(30).stores({
+      chatGoals: "&id, sessionId, [sessionId+status], status, characterId, createdAt, updatedAt",
+      chatGoalEvents: "&id, goalId, [goalId+ts], kind, ts",
+    })
+
+    // v31 — VS Code extension reuse layer
+    // (see ~/.claude/plans/vscode-snug-squid.md).
+    //   • `openVsxCache` — 24h TTL metadata cache for Open VSX marketplace
+    //     entries. `&extensionId` is the canonical `publisher.name` string,
+    //     `fetchedAt` drives the staleness check.
+    //   • `vscodeExtensionRuntime` — per-extension runtime telemetry. Cap is
+    //     enforced lazily by the row writer (one row per installed extension;
+    //     no listing query, just lookups), so no compound index needed.
+    this.version(31).stores({
+      openVsxCache: "&extensionId, fetchedAt",
+      vscodeExtensionRuntime: "&extensionId, lastActivatedAt, lastError, sidecarPid",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
   tts_provider_keys!: Table<TtsProviderKeyRow, string>
+  openVsxCache!: Table<OpenVsxCacheRow, string>
+  vscodeExtensionRuntime!: Table<VscodeExtensionRuntimeRow, string>
 }
 
 /** Web-mode fallback row for TTS provider API keys. */
@@ -928,6 +970,57 @@ export interface TtsProviderKeyRow {
   /** "tts.providerKey.<provider>" */
   id: string
   value: string
+}
+
+/**
+ * Open VSX marketplace metadata cache entry (v31, 24h TTL).
+ * Keyed by canonical `publisher.name` identifier.
+ */
+export interface OpenVsxCacheRow {
+  /** Canonical identifier — e.g. `"esbenp.prettier-vscode"`. */
+  extensionId: string
+  /** Epoch milliseconds when this entry was written. Stale after 24h. */
+  fetchedAt: number
+  /** Display name from the Open VSX response. */
+  displayName: string
+  /** Latest available version on Open VSX. */
+  latestVersion: string
+  /** Marketplace icon URL (CDN-backed). */
+  iconUrl?: string
+  /** Tags / categories from Open VSX, for filtered browse. */
+  categories: string[]
+  /** Download count, for sort-by-popular. */
+  downloadCount: number
+  /** Star rating, for sort-by-rating. */
+  averageRating?: number
+  /** Whether Open VSX has verified the publisher. */
+  verified: boolean
+  /**
+   * Raw response payload (JSON-serialised) so the UI can render details
+   * without a second round trip. Kept compact; full README / changelog
+   * are fetched on-demand.
+   */
+  payload: unknown
+}
+
+/**
+ * Per-extension runtime telemetry written by the VS Code sidecar.
+ * Used by the Plugins → Extensions → VS Code surface to surface
+ * "Last activated", "Last error", "Sidecar process id".
+ */
+export interface VscodeExtensionRuntimeRow {
+  /** Canonical `publisher.name`. */
+  extensionId: string
+  /** Epoch ms of the most recent successful activate(). */
+  lastActivatedAt: number | null
+  /** Last sidecar-reported error message, or null if no error since last reset. */
+  lastError: string | null
+  /** PID of the Node sidecar hosting this extension when active; 0 when not running. */
+  sidecarPid: number
+  /** Sum of permission grants prompted during this extension's lifetime. */
+  runtimePermissionGrants: number
+  /** Sum of permission denials prompted during this extension's lifetime. */
+  runtimePermissionDenials: number
 }
 
 /**

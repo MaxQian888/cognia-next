@@ -20,6 +20,8 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "audit:slots": "ts-node --project scripts/tsconfig.audit.json scripts/audit-plugin-slots.ts",
+    "lint:i18n": "ts-node --project scripts/tsconfig.audit.json scripts/lint-i18n.ts",
+    "lint:i18n:baseline": "ts-node --project scripts/tsconfig.audit.json scripts/lint-i18n.ts --write-baseline",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",

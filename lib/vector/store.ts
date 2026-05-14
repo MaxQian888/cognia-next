@@ -740,10 +740,45 @@ export class NativeVectorStore implements IVectorStore {
   }
 
   async scrollDocuments(
-    _collectionName: string,
-    _options: ScrollOptions = {}
+    collectionName: string,
+    options: ScrollOptions = {}
   ): Promise<ScrollResponse> {
-    throw new Error("scrollDocuments is not yet supported on the native backend")
+    // Rust scroll_points is cursor-paged (id-ordered). The TS interface
+    // requires offset/limit semantics — we accept `offset === 0` only
+    // and document the limitation in the error message. Callers that
+    // need deep pagination should iterate via `cursor` directly through
+    // the Tauri command instead.
+    const limit = Math.max(1, options.limit ?? 100)
+    const offset = options.offset ?? 0
+    if (offset !== 0) {
+      throw new Error(
+        "NativeVectorStore.scrollDocuments: only offset=0 is supported (use cursor pagination via the Tauri command for deep paging)"
+      )
+    }
+    const page = await this.invoke<{
+      points: Array<{ id: string; vector: number[]; payload?: Record<string, unknown> }>
+      next_cursor?: string
+      has_more: boolean
+    }>("vector_scroll_points", {
+      collection: collectionName,
+      cursor: undefined,
+      limit,
+    })
+    const total = await this.invoke<number>("vector_count_points", {
+      collection: collectionName,
+    })
+    return {
+      documents: (page.points || []).map((p) => ({
+        id: p.id,
+        content: (p.payload?.content as string) || "",
+        metadata: p.payload,
+        embedding: p.vector,
+      })),
+      total,
+      offset,
+      limit,
+      hasMore: page.has_more,
+    }
   }
 
   async getDocuments(collectionName: string, ids: string[]): Promise<VectorDocument[]> {
@@ -783,8 +818,8 @@ export class NativeVectorStore implements IVectorStore {
     await this.invoke("vector_delete_collection", { name })
   }
 
-  async renameCollection(_oldName: string, _newName: string): Promise<void> {
-    throw new Error("renameCollection is not yet supported on the native backend")
+  async renameCollection(oldName: string, newName: string): Promise<void> {
+    await this.invoke("vector_rename_collection", { from: oldName, to: newName })
   }
 
   async truncateCollection(name: string): Promise<void> {
@@ -796,12 +831,93 @@ export class NativeVectorStore implements IVectorStore {
     return await this.invoke<number>("vector_get_store_size", {})
   }
 
-  async exportCollection(_name: string): Promise<CollectionExport> {
-    throw new Error("exportCollection is not yet supported on the native backend")
+  async exportCollection(name: string): Promise<CollectionExport> {
+    // Rust returns a JSONL string — line 1 is the collection header,
+    // subsequent lines are points. Re-pack into the structured
+    // `CollectionExport` shape the TS interface promises.
+    const jsonl = await this.invoke<string>("vector_export_collection", { collection: name })
+    const lines = jsonl.split("\n").filter((l) => l.trim().length > 0)
+    if (lines.length === 0) {
+      throw new Error(`NativeVectorStore.exportCollection: empty export for "${name}"`)
+    }
+    const header = JSON.parse(lines[0]) as {
+      kind: string
+      name: string
+      dim: number
+      description?: string
+      embedding_model?: string
+      embedding_provider?: string
+      metadata?: Record<string, unknown>
+      created_at?: string
+      updated_at?: string
+      point_count?: number
+    }
+    if (header.kind !== "collection") {
+      throw new Error(
+        `NativeVectorStore.exportCollection: expected header kind="collection", got "${header.kind}"`
+      )
+    }
+    const parseTimestamp = (s: string | undefined): number | undefined =>
+      s ? Date.parse(s) || undefined : undefined
+    const meta: VectorCollectionInfo = {
+      name: header.name,
+      dimension: header.dim,
+      documentCount: header.point_count ?? 0,
+      description: header.description,
+      embeddingModel: header.embedding_model,
+      embeddingProvider: header.embedding_provider,
+      metadata: header.metadata,
+      createdAt: parseTimestamp(header.created_at),
+      updatedAt: parseTimestamp(header.updated_at),
+    }
+    const points = lines.slice(1).map((line) => {
+      const row = JSON.parse(line) as {
+        kind?: string
+        id?: string
+        vector?: number[]
+        payload?: Record<string, unknown>
+      }
+      return {
+        id: row.id ?? "",
+        vector: row.vector ?? [],
+        payload: row.payload,
+      }
+    })
+    return { meta, points }
   }
 
-  async importCollection(_data: CollectionImport, _overwrite?: boolean): Promise<void> {
-    throw new Error("importCollection is not yet supported on the native backend")
+  async importCollection(data: CollectionImport, overwrite?: boolean): Promise<void> {
+    // Inverse of `exportCollection` — pack the structured payload into
+    // the JSONL shape Rust expects and forward.
+    const header = {
+      kind: "collection",
+      name: data.meta.name,
+      dim: data.meta.dimension,
+      description: data.meta.description,
+      embedding_model: data.meta.embeddingModel,
+      embedding_provider: data.meta.embeddingProvider,
+      metadata: data.meta.metadata,
+      created_at: data.meta.createdAt ? new Date(data.meta.createdAt).toISOString() : undefined,
+      updated_at: data.meta.updatedAt ? new Date(data.meta.updatedAt).toISOString() : undefined,
+      point_count: data.meta.documentCount,
+    }
+    const lines = [JSON.stringify(header)]
+    for (const point of data.points) {
+      lines.push(
+        JSON.stringify({
+          kind: "point",
+          id: point.id,
+          content: (point.payload?.content as string) ?? null,
+          payload: point.payload,
+          vector: point.vector,
+        })
+      )
+    }
+    await this.invoke("vector_import_collection", {
+      collection: data.meta.name,
+      jsonl: lines.join("\n"),
+      overwrite: overwrite ?? false,
+    })
   }
 
   async listCollections(): Promise<VectorCollectionInfo[]> {
@@ -861,19 +977,63 @@ export class NativeVectorStore implements IVectorStore {
   }
 
   async countDocuments(
-    _collectionName: string,
-    _options?: {
+    collectionName: string,
+    options?: {
       filter?: Record<string, unknown>
       filters?: PayloadFilter[]
       filterMode?: "and" | "or"
     }
   ): Promise<number> {
-    // TODO(commit-3+): implement via vector_search_points with top_k=1 reading the total field
-    throw new Error("countDocuments is not yet supported on the native backend")
+    // When the caller passes payload filters we route through the
+    // search command (which already supports them) and read its
+    // `total` field. The plain `vector_count_points` path is hot — used
+    // by every "how many sources are indexed?" UI — so we keep it
+    // filterless for max throughput.
+    if (
+      (options?.filters && options.filters.length > 0) ||
+      (options?.filter && Object.keys(options.filter).length > 0)
+    ) {
+      // Filter-aware count via the search command's pagination total.
+      // We don't actually need results; top_k=1 + offset=0 + limit=1
+      // is the cheapest invocation that still reads `total`.
+      const probeVector = new Array(this.config.embeddingConfig.dimensions ?? 1536).fill(0)
+      const resp = await this.invoke<{ total: number }>("vector_search_points", {
+        collection: collectionName,
+        vector: probeVector,
+        top_k: 1,
+        offset: 0,
+        limit: 1,
+        filters: options.filters,
+        filter_mode: options.filterMode,
+      })
+      return resp.total ?? 0
+    }
+    return await this.invoke<number>("vector_count_points", { collection: collectionName })
   }
 
   async getStats(): Promise<VectorStats> {
-    throw new Error("getStats is not yet supported on the native backend")
+    // No global stats command — sum per-collection stats over the
+    // collection list. `getStoreSize` is authoritative for on-disk
+    // bytes so we use that and only roll up the count fields here.
+    const collections = await this.listCollections()
+    let totalPoints = 0
+    for (const c of collections) {
+      try {
+        const stats = await this.invoke<{ count: number }>("vector_get_stats", {
+          collection: c.name,
+        })
+        totalPoints += stats.count ?? 0
+      } catch {
+        // A collection that vanished mid-iteration just contributes 0.
+      }
+    }
+    const storageSizeBytes = await this.getStoreSize()
+    return {
+      collectionCount: collections.length,
+      totalPoints,
+      storagePath: "(native sqlite-vec)",
+      storageSizeBytes,
+    }
   }
 }
 

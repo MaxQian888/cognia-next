@@ -1,0 +1,37 @@
+{
+  "name": "hello-extension",
+  "publisher": "cognia",
+  "displayName": "Hello Extension",
+  "description": "Minimal VS Code extension fixture used by the cognia VS Code reuse layer tests. One command, one configuration property, onCommand activation.",
+  "version": "1.0.0",
+  "license": "MIT",
+  "engines": {
+    "vscode": ">=1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onCommand:hello.world"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "hello.world",
+        "title": "Hello World"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Hello",
+      "properties": {
+        "hello.greeting": {
+          "type": "string",
+          "default": "Hello",
+          "description": "Greeting prefix used by the hello.world command."
+        }
+      }
+    }
+  }
+}

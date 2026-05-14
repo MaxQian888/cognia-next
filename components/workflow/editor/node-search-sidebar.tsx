@@ -25,6 +25,7 @@ import {
   getPluginCatalogSnapshot,
   type NodeCatalogEntry,
 } from "@/lib/workflow/nodes/catalog"
+import { tNode } from "@/lib/workflow/i18n/node-translate"
 
 export const NODE_DRAG_MIME = "application/x-workflow-kind"
 
@@ -161,6 +162,9 @@ function NodeChip({
   onAddNodeAtCenter?: (entry: NodeCatalogEntry) => void
 }) {
   const t = useTranslations("workflows.sidebar")
+  const tNodes = useTranslations("workflows.nodes")
+  const label = tNode(tNodes, `${entry.kind}.label`, entry.label)
+  const description = tNode(tNodes, `${entry.kind}.description`, entry.description)
   const Icon =
     (LucideIcons as unknown as Record<string, LucideIcon>)[entry.iconName] ?? LucideIcons.Box
   const handleDragStart = (e: React.DragEvent<HTMLButtonElement>) => {
@@ -181,7 +185,7 @@ function NodeChip({
           data-kind={entry.kind}
         >
           <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <span className="flex-1 min-w-0 truncate">{entry.label}</span>
+          <span className="flex-1 min-w-0 truncate">{label}</span>
           {entry.desktopOnly ? (
             <span className="text-[9px] uppercase tracking-wide text-wf-status-running">
               {t("desktopOnly")}
@@ -190,8 +194,8 @@ function NodeChip({
         </button>
       </TooltipTrigger>
       <TooltipContent side="right" className="max-w-xs">
-        <p className="font-medium">{entry.label}</p>
-        <p className="text-xs text-muted-foreground mt-0.5">{entry.description}</p>
+        <p className="font-medium">{label}</p>
+        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
       </TooltipContent>
     </Tooltip>
   )

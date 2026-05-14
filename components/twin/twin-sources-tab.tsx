@@ -30,6 +30,7 @@ function formatBytes(n: number): string {
 export function TwinSourcesTab({ twinId }: { twinId: string }) {
   const t = useTranslations("twin.sources")
   const tCharts = useTranslations("twin.charts.status")
+  const tFormat = useTranslations("twin.format")
   const [showUploader, setShowUploader] = useState(false)
   const sources = useLiveQuery(() => listTwinSourcesByTwin(twinId), [twinId], [])
 
@@ -58,6 +59,7 @@ export function TwinSourcesTab({ twinId }: { twinId: string }) {
               source={source}
               t={t}
               statusLabel={(s) => tCharts(s as Exclude<TwinSourceStatus, never>)}
+              formatLabel={(f) => tFormat(f)}
             />
           ))}
         </ul>
@@ -70,10 +72,12 @@ function SourceRow({
   source,
   t,
   statusLabel,
+  formatLabel,
 }: {
   source: TwinSource
   t: ReturnType<typeof useTranslations>
   statusLabel: (s: TwinSourceStatus) => string
+  formatLabel: (f: TwinSource["format"]) => string
 }) {
   return (
     <Card className="flex items-center justify-between gap-3 p-3">
@@ -83,8 +87,8 @@ function SourceRow({
           <Badge variant={STATUS_VARIANT[source.status]} className="shrink-0">
             {statusLabel(source.status)}
           </Badge>
-          <Badge variant="outline" className="shrink-0 uppercase">
-            {source.format}
+          <Badge variant="outline" className="shrink-0">
+            {formatLabel(source.format)}
           </Badge>
         </div>
         <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">

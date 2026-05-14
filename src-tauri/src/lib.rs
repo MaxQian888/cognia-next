@@ -246,6 +246,11 @@ pub fn run() {
                 .unwrap_or_else(|| std::path::PathBuf::from(".")),
         ))
         .manage(plugin_api::wasm::WasmPluginState::default())
+        .manage(plugin_api::vscode::VscodeExtensionState::new(
+            dirs::data_dir()
+                .map(|d| d.join("cognia").join("vscode-extensions"))
+                .unwrap_or_else(|| std::path::PathBuf::from(".")),
+        ))
         .manage({
             // Automation subsystem state — spawn the worker thread once, build
             // the permission gate with disabled defaults (renderer enables via
@@ -376,6 +381,12 @@ pub fn run() {
             vector::commands::vector_truncate_collection,
             vector::commands::vector_reset_store,
             vector::commands::vector_get_store_size,
+            vector::commands::vector_count_points,
+            vector::commands::vector_get_stats,
+            vector::commands::vector_scroll_points,
+            vector::commands::vector_rename_collection,
+            vector::commands::vector_export_collection,
+            vector::commands::vector_import_collection,
             a2ui_bridge::commands::a2ui_bridge_runtime_paths,
             wallpaper::commands::wallpaper_save,
             wallpaper::commands::wallpaper_list,
@@ -483,6 +494,12 @@ pub fn run() {
             plugin_api::wasm::commands::plugin_wasm_list,
             plugin_api::wasm::installer::plugin_wasm_install_from_url,
             plugin_api::wasm::installer::plugin_wasm_install_from_git,
+            plugin_api::vscode::commands::plugin_vscode_install_vsix,
+            plugin_api::vscode::commands::plugin_load_vscode,
+            plugin_api::vscode::commands::plugin_activate_vscode,
+            plugin_api::vscode::commands::plugin_deactivate_vscode,
+            plugin_api::vscode::commands::plugin_unload_vscode,
+            plugin_api::vscode::commands::plugin_invoke_vscode_rpc,
             plugin_api::backup::plugin_backup_create,
             plugin_api::backup::plugin_backup_restore,
             plugin_api::backup::plugin_backup_delete,

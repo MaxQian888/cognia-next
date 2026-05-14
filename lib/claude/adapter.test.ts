@@ -1,6 +1,11 @@
 import type { UIMessage } from "ai"
 
-import { applySdkEvent, contentPreview, makeUserMessage } from "./adapter"
+import {
+  applySdkEvent,
+  contentPreview,
+  extractArtifactPartFromToolUse,
+  makeUserMessage,
+} from "./adapter"
 import type {
   BetaMessage,
   SDKAssistantMessage,
@@ -52,6 +57,36 @@ describe("applySdkEvent — assistant", () => {
     expect(part.toolCallId).toBe("t1")
     expect(part.state).toBe("input-available")
     expect(part.input).toEqual({ path: "/x" })
+  })
+
+  it("converts artifact_create tool_use into an ArtifactPart", () => {
+    const evt = asAssistant({
+      id: "asst-art-1",
+      content: [
+        {
+          type: "tool_use",
+          id: "art-tool-1",
+          name: "artifact_create",
+          input: {
+            id: "art-1",
+            title: "demo.md",
+            type: "document",
+            content: "# Hello",
+          },
+        },
+      ],
+    } as unknown as BetaMessage)
+    const { messages } = applySdkEvent([], evt)
+    const part = messages[0].parts[0] as {
+      type: string
+      artifactId: string
+      title: string
+      kind: string
+    }
+    expect(part.type).toBe("artifact")
+    expect(part.artifactId).toBe("art-1")
+    expect(part.title).toBe("demo.md")
+    expect(part.kind).toBe("document")
   })
 
   it("falls back to evt.uuid when message.id is missing", () => {

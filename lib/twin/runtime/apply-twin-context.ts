@@ -23,6 +23,7 @@ import { getPluginEventHooks } from "@/lib/plugin"
 import { vectorCollectionName } from "../ingest/persist"
 import { applySystemPromptTemplate, type AppliedTemplate } from "./system-prompt-template"
 import { selectFewShotSamples } from "./few-shot-selector"
+import { rerank, type RerankCandidate, type RerankerOptions } from "./reranker"
 
 export interface TwinRuntimeEmbeddingConfig {
   provider: "openai" | "google" | "cohere" | "mistral" | "transformersjs"
@@ -40,6 +41,16 @@ export interface ApplyTwinContextDeps {
   vectorBackend?: VectorBackend
   /** Override the collection name. Defaults to `cognia_twin_{twinId}`. */
   vectorCollection?: string
+  /**
+   * Optional reranker config. When omitted, no rerank pass runs and the
+   * cosine top-K is used as-is. When supplied, the runtime fetches
+   * `topK * overFetch` candidates, hands them to `rerank`, and keeps the
+   * top-K of the reranker's output.
+   */
+  reranker?: Omit<RerankerOptions, "topK"> & {
+    /** Multiplier applied to topK before fetching candidates. Default 3. */
+    overFetch?: number
+  }
 }
 
 export interface ApplyTwinContextInput {
@@ -61,6 +72,17 @@ export interface ApplyTwinContextInput {
   deps: ApplyTwinContextDeps
 }
 
+/**
+ * Retrieved-chunk envelope surfaced to the chat UI so it can emit a Twin-RAG
+ * SourcesPart alongside the assistant message. Mirrors the internal shape
+ * used by `applySystemPromptTemplate`.
+ */
+export interface ApplyTwinContextRetrievedChunk {
+  chunk: { vectorDocId: string; content: string; sourceId: string }
+  score: number
+  sourceTitle?: string
+}
+
 export interface ApplyTwinContextResult {
   /** The applied template + metadata. `null` when the character is not
    *  twin-bound and no work was done. */
@@ -71,6 +93,12 @@ export interface ApplyTwinContextResult {
   degraded: boolean
   /** Reason for degradation, if any. */
   degradedReason?: string
+  /**
+   * RAG chunks used to build the system prompt. Empty when RAG is disabled
+   * or the retrieval pass degraded. Exposed for the chat layer so it can
+   * emit a Twin-RAG SourcesPart alongside the assistant message.
+   */
+  retrievedChunks: ApplyTwinContextRetrievedChunk[]
 }
 
 function settingsFor(character: Character): TwinSettings {
@@ -104,7 +132,7 @@ export async function applyTwinContext(
 ): Promise<ApplyTwinContextResult> {
   const { character, userMessage, deps } = input
   if (!character.twinId) {
-    return { applied: null, degraded: false }
+    return { applied: null, degraded: false, retrievedChunks: [] }
   }
 
   const settings = settingsFor(character)
@@ -135,8 +163,15 @@ export async function applyTwinContext(
     : never = []
   if (settings.enableRag && queryEmbedding && deps.store.searchByEmbedding) {
     try {
+      // Over-fetch when a reranker is configured so we have a wider pool to
+      // re-score; default fetch size is the user-configured topK.
+      const overFetch = deps.reranker?.overFetch ?? 3
+      const fetchLimit = deps.reranker
+        ? Math.max(settings.ragTopK * overFetch, settings.ragTopK)
+        : settings.ragTopK
+
       const hits = await deps.store.searchByEmbedding(collection, queryEmbedding, {
-        limit: settings.ragTopK,
+        limit: fetchLimit,
       })
       const docIds = hits.map((h) => h.id)
       const dbChunks = await getTwinChunksByVectorDocIds(docIds)
@@ -149,7 +184,31 @@ export async function applyTwinContext(
         const sourceTitle = await loadSourceTitle(chunk.sourceId, sourceTitleCache)
         enriched.push({ chunk, score: hit.score, sourceTitle })
       }
-      retrievedChunks = enriched
+
+      // Optional rerank pass — never throws (falls back to identity on
+      // scorer / timeout failures).
+      if (deps.reranker && enriched.length > settings.ragTopK) {
+        const candidates: RerankCandidate[] = enriched.map((rc) => ({
+          id: rc.chunk.vectorDocId,
+          content: rc.chunk.content,
+          score: rc.score,
+          sourceTitle: rc.sourceTitle,
+        }))
+        const reranked = await rerank(userMessage, candidates, {
+          ...deps.reranker,
+          topK: settings.ragTopK,
+        })
+        const byId = new Map(enriched.map((rc) => [rc.chunk.vectorDocId, rc]))
+        retrievedChunks = reranked.candidates
+          .map((c) => {
+            const original = byId.get(c.id)
+            if (!original) return null
+            return { ...original, score: c.score }
+          })
+          .filter((x): x is (typeof enriched)[number] => x !== null)
+      } else {
+        retrievedChunks = enriched.slice(0, settings.ragTopK)
+      }
     } catch (err) {
       degraded = true
       degradedReason =
@@ -157,12 +216,21 @@ export async function applyTwinContext(
     }
   }
 
-  // Style few-shot — pure in-memory pass over the profile.
+  // Style few-shot — pure in-memory pass over the profile. When every
+  // StyleSample on the profile has an `embedding` (distill backfilled
+  // them during the last run), pass them to the selector for cosine
+  // ranking. Otherwise the selector falls back to a token-overlap
+  // heuristic on `summary`.
   const styleSamples =
     settings.enableStyleFewShot && profile && queryEmbedding
       ? selectFewShotSamples({
           queryEmbedding,
           samples: profile.styleSamples,
+          sampleEmbeddings: profile.styleSamples.every(
+            (s) => Array.isArray(s.embedding) && s.embedding.length > 0
+          )
+            ? profile.styleSamples.map((s) => s.embedding as number[])
+            : undefined,
           topK: settings.styleSamplesK,
         }).map((s) => s.sample)
       : []
@@ -195,5 +263,14 @@ export async function applyTwinContext(
     applied,
     degraded,
     degradedReason,
+    retrievedChunks: retrievedChunks.map((rc) => ({
+      chunk: {
+        vectorDocId: rc.chunk.vectorDocId,
+        content: rc.chunk.content,
+        sourceId: rc.chunk.sourceId,
+      },
+      score: rc.score,
+      sourceTitle: rc.sourceTitle,
+    })),
   }
 }

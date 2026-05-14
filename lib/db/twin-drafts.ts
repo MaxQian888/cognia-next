@@ -8,7 +8,7 @@
  * itself is then marked `accepted` and retains its provenance for audit.
  */
 
-import type { TwinDraft, TwinDraftKind, TwinDraftStatus } from "@/types/twin"
+import type { TwinDraft, TwinDraftKind, TwinDraftPayload, TwinDraftStatus } from "@/types/twin"
 import { getDb } from "./schema"
 
 function newId(): string {
@@ -118,6 +118,38 @@ export async function markTwinDraftRejected(
 ): Promise<TwinDraft | undefined> {
   return updateTwinDraft(id, {
     status: "rejected",
+    reviewerNote,
+    reviewedAt: Date.now(),
+  })
+}
+
+/**
+ * Overwrite the draft's payload (Character / Skill body) and flip the
+ * row to `status="edited"`. The workbench calls this after the reviewer
+ * tweaks a pending draft in the DraftEditorDialog — they're saving the
+ * edits separately from accepting the draft, so we keep the row in a
+ * reviewable state.
+ */
+export async function updateTwinDraftPayload(
+  id: string,
+  payload: TwinDraftPayload,
+  reviewerNote?: string
+): Promise<TwinDraft | undefined> {
+  return updateTwinDraft(id, {
+    payload,
+    status: "edited",
+    reviewerNote,
+    reviewedAt: Date.now(),
+  })
+}
+
+/** Flip a draft to `status="edited"` without touching the payload. */
+export async function markTwinDraftEdited(
+  id: string,
+  reviewerNote?: string
+): Promise<TwinDraft | undefined> {
+  return updateTwinDraft(id, {
+    status: "edited",
     reviewerNote,
     reviewedAt: Date.now(),
   })

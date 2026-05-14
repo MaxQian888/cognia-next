@@ -240,7 +240,28 @@ const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
     "defaultModel",
     "defaultCharacterId",
     "biometricRequiredFor",
+    // Appearance — mobile `/me/appearance` route writes these through the
+    // same allowlist. The matching field types live in
+    // `lib/claude/types.ts` (`colorTheme`, `customThemes`,
+    // `activeCustomThemeId`, `wallpapers`, `customCss`, `customCssEnabled`,
+    // `importedVscodeThemes`).
+    "colorTheme",
+    "customThemes",
+    "activeCustomThemeId",
+    "wallpapers",
+    "customCss",
+    "customCssEnabled",
+    "importedVscodeThemes",
 ];
+
+/// Public read-only accessor for the mobile-side `app_settings_update`
+/// allowlist. Used by the OpenAPI `spec_parity` test (Wave 3.6) and by the
+/// in-file tests below to assert the allowlist stays in lockstep with
+/// what the phone UI actually writes.
+#[allow(dead_code)] // referenced from tests / spec_parity only.
+pub fn mobile_allowed_keys() -> &'static [&'static str] {
+    APP_SETTINGS_MOBILE_ALLOWED_KEYS
+}
 
 // ---------------------------------------------------------------------------
 // Axum handler
@@ -1445,5 +1466,185 @@ mod tests {
         assert!(KNOWN_COMMANDS.contains(&"message_update"));
         assert!(KNOWN_COMMANDS.contains(&"message_delete"));
         assert!(KNOWN_COMMANDS.contains(&"session_list"));
+    }
+
+    // ── app_settings_update allowlist coverage (Phase 1 of the mobile theme
+    //    parity work — see plan i18n-partitioned-teapot.md). The phone's
+    //    /me/appearance route writes these keys through `app_settings_update`,
+    //    so a regression here would 400 on every save. The accessor mirror
+    //    keeps the OpenAPI spec_parity check honest.
+
+    #[test]
+    fn mobile_allowed_keys_accessor_mirrors_const() {
+        // The accessor must return exactly the const slice — no copying,
+        // no filtering. spec_parity downstream depends on this identity.
+        let from_accessor = mobile_allowed_keys();
+        assert_eq!(
+            from_accessor.len(),
+            APP_SETTINGS_MOBILE_ALLOWED_KEYS.len(),
+            "accessor length drift"
+        );
+        for (a, b) in from_accessor.iter().zip(APP_SETTINGS_MOBILE_ALLOWED_KEYS.iter()) {
+            assert_eq!(a, b);
+        }
+    }
+
+    #[test]
+    fn mobile_allowlist_includes_appearance_keys() {
+        // Every key surfaced by the mobile appearance route must be here.
+        // Adding a new tab / setting on the phone side without updating
+        // this list will 400 on save.
+        for key in [
+            "colorTheme",
+            "customThemes",
+            "activeCustomThemeId",
+            "wallpapers",
+            "customCss",
+            "customCssEnabled",
+            "importedVscodeThemes",
+        ] {
+            assert!(
+                APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
+                "appearance key '{key}' missing from APP_SETTINGS_MOBILE_ALLOWED_KEYS"
+            );
+        }
+    }
+
+    #[test]
+    fn mobile_allowlist_keeps_baseline_keys() {
+        // Don't accidentally drop a baseline key while editing this list.
+        for key in [
+            "theme",
+            "fontScale",
+            "language",
+            "reduceMotion",
+            "defaultModel",
+            "defaultCharacterId",
+            "biometricRequiredFor",
+        ] {
+            assert!(
+                APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
+                "baseline key '{key}' must stay in the mobile allowlist"
+            );
+        }
+    }
+
+    #[test]
+    fn mobile_allowlist_rejects_transport_and_sidecar_keys() {
+        // Sentinel keys that the phone must never be allowed to write —
+        // protects the desktop-only configuration plane.
+        for key in [
+            "apiBaseUrl",
+            "anthropicApiKey",
+            "claudeOauthBearer",
+            "mcpServers",
+            "providerConfigs",
+            "sidecarPath",
+        ] {
+            assert!(
+                !APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),
+                "key '{key}' must NOT be writable from the mobile client"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn app_settings_update_rejects_unknown_key() {
+        // End-to-end: a patch carrying an unknown key returns 400 with
+        // `validation_failed` rather than reaching the desktop_writes_bridge.
+        let cache = Arc::new(IdempotencyCache::with_capacity(
+            100,
+            std::time::Duration::from_secs(60),
+        ));
+        let state = Arc::new(CompanionState {
+            secret: RwLock::new(SECRET.to_vec()),
+            redemption_lru: RedemptionLru::new(),
+            deny_list: Arc::new(DenyList::new()),
+            app_handle: None,
+            idempotency: Arc::clone(&cache),
+            event_bus: crate::companion_api::event_bus::EventBus::new(),
+            sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
+            desktop_messages_bridge:
+                crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            desktop_writes_bridge:
+                crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
+            sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
+        });
+
+        let router = build_router(state);
+        let jwt = device_jwt("dev-allowlist");
+        let resp = rpc_post(
+            router,
+            "app_settings_update",
+            json!({ "patch": { "apiBaseUrl": "https://attacker.example" } }),
+            &jwt,
+            None,
+        )
+        .await;
+
+        assert_eq!(
+            resp.status().as_u16(),
+            400,
+            "unknown key must be rejected as 400"
+        );
+        let body = body_json(resp).await;
+        assert_eq!(body["code"], "validation_failed");
+        assert!(
+            body["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("apiBaseUrl"),
+            "error message should name the rejected key"
+        );
+    }
+
+    #[tokio::test]
+    async fn app_settings_update_accepts_color_theme_key() {
+        // End-to-end: a patch carrying only allowlisted keys passes the
+        // validation gate. The bridge will return service_unavailable
+        // here (no app_handle in test state) — that's distinct from a
+        // 400, which is what we're guarding against.
+        let cache = Arc::new(IdempotencyCache::with_capacity(
+            100,
+            std::time::Duration::from_secs(60),
+        ));
+        let state = Arc::new(CompanionState {
+            secret: RwLock::new(SECRET.to_vec()),
+            redemption_lru: RedemptionLru::new(),
+            deny_list: Arc::new(DenyList::new()),
+            app_handle: None,
+            idempotency: Arc::clone(&cache),
+            event_bus: crate::companion_api::event_bus::EventBus::new(),
+            sync_bridge: crate::companion_api::sync_bridge::SyncBridge::new(),
+            desktop_messages_bridge:
+                crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
+            desktop_writes_bridge:
+                crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
+            sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
+        });
+
+        let router = build_router(state);
+        let jwt = device_jwt("dev-allowlist-ok");
+        let resp = rpc_post(
+            router,
+            "app_settings_update",
+            json!({ "patch": { "colorTheme": "ocean" } }),
+            &jwt,
+            None,
+        )
+        .await;
+
+        // The patch is valid — must NOT be a 400 validation_failed.
+        // (The bridge layer below returns 500/503 in unit-test mode
+        // without a real app_handle, which is fine for this assertion.)
+        assert_ne!(
+            resp.status().as_u16(),
+            400,
+            "allowlisted colorTheme patch must not be rejected as 400"
+        );
     }
 }

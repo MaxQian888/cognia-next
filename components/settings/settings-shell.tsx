@@ -173,6 +173,10 @@ const WorkflowsSection = dynamic(
   () => import("./workflows/workflows-section").then((m) => m.WorkflowsSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
+const GoalsSection = dynamic(() => import("./goals/goals-section").then((m) => m.GoalsSection), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
 
 interface Props {
   /** Renders an actions menu (e.g., Reset/Export/Import) in the header. */
@@ -339,6 +343,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <WorkflowsSection />
     case "scheduled-tasks":
       return <ScheduledTasksSection />
+    case "goals":
+      return <GoalsSection />
     case "remote-control":
       return <RemoteControlSection />
     case "external-bridge":

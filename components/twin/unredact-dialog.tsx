@@ -67,6 +67,7 @@ export function UnredactDialog({
   confirmLabel,
 }: UnredactDialogProps) {
   const t = useTranslations("twin.unredact")
+  const tPiiKind = useTranslations("twin.piiKind")
   // Local mutable selection — reset every time the dialog opens with new
   // placeholders so the user always starts from the "restore all" default.
   const [selection, setSelection] = useState<UnredactPlaceholder[]>(() =>
@@ -133,7 +134,7 @@ export function UnredactDialog({
                     aria-label={t("checkboxAria", { placeholder: p.placeholder })}
                   />
                   <Badge variant={KIND_TONE[p.kind] ?? "secondary"} className="font-mono">
-                    {p.kind}
+                    {tPiiKind(p.kind)}
                   </Badge>
                   <code className="text-muted-foreground text-xs">{p.placeholder}</code>
                   <span className="text-muted-foreground">→</span>

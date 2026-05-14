@@ -174,6 +174,23 @@ export async function seedBuiltInCharacters(): Promise<void> {
       createdAt: now,
       updatedAt: now,
     },
+    {
+      id: "char_builtin_goal_tracker",
+      name: "Goal Tracker",
+      description:
+        "Outcome-driven agent. Pairs with `/goal` to break a fuzzy intent into concrete next steps and self-continues until done.",
+      avatarColor: "oklch(0.72 0.16 200)",
+      avatarEmoji: "🎯",
+      systemPrompt:
+        "You are an outcome-driven agent. When the user sets a goal via `/goal`, your default mode is to take concrete steps toward it without asking permission for every decision. Be proactive: pick a first step, do it, report what happened, and decide the next step. Never restate the goal — act on it. When you genuinely cannot proceed without the user, ask one specific question and stop. The judge will treat a clear blocked-with-ask as 'done', so you can pause the loop cleanly when you need input.",
+      // `acceptEdits` keeps the auto-continuation loop hands-free —
+      // a /goal session that asked for permission every turn would
+      // defeat the entire feature.
+      permissionMode: "acceptEdits",
+      isBuiltIn: true,
+      createdAt: now,
+      updatedAt: now,
+    },
   ]
   await db.characters.bulkPut(builtIns)
 }

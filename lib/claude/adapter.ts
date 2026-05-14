@@ -14,8 +14,37 @@ import type {
   SendContent,
   SendContentBlock,
 } from "./types"
-import type { A2UIPart } from "./parts-extensions"
+import type { A2UIPart, ArtifactPart, SourcesPart } from "./parts-extensions"
 import { extractA2UIFromResponse } from "@/lib/a2ui/parser"
+import { extractAnthropicCitations, extractFootnoteSources, mergeSources } from "./citations"
+
+/**
+ * Map a `tool_use` block's name + input to an ArtifactPart when the call
+ * matches the `artifact_create` / `artifact_update` contract. Pure function —
+ * does not write to `useArtifactStore`; callers that need the row created
+ * (Tauri sidecar bridge, plugin API) handle the store side themselves.
+ */
+export function extractArtifactPartFromToolUse(block: BetaToolUseBlock): ArtifactPart | null {
+  if (block.name !== "artifact_create" && block.name !== "artifact_update") return null
+  const input = (block.input ?? {}) as Record<string, unknown>
+  const artifactId =
+    typeof input.id === "string"
+      ? input.id
+      : typeof input.artifactId === "string"
+        ? input.artifactId
+        : null
+  const title = typeof input.title === "string" ? input.title : null
+  if (!artifactId || !title) return null
+  const kindRaw =
+    typeof input.type === "string"
+      ? input.type
+      : typeof input.kind === "string"
+        ? input.kind
+        : "code"
+  const allowed = new Set(["code", "react", "html", "svg", "mermaid", "document", "chart", "math"])
+  const kind = (allowed.has(kindRaw) ? kindRaw : "code") as ArtifactPart["kind"]
+  return { type: "artifact", artifactId, title, kind }
+}
 
 type Parts = UIMessage["parts"]
 type Part = Parts[number]
@@ -35,7 +64,32 @@ function buildAssistantParts(message: BetaMessage): Parts {
     const expanded = blockToParts(block)
     for (const part of expanded) parts.push(part)
   }
+  const sources = collectSourcesFromMessage(message)
+  if (sources) parts.push(sources as unknown as Part)
   return parts
+}
+
+/**
+ * Walk every text block of the assistant message and combine
+ *  - Anthropic Citations API entries
+ *  - markdown footnote definitions
+ * into a single SourcesPart appended at the tail. Twin-RAG sources are
+ * injected by the chat hook (which holds the runtime context) rather than
+ * the adapter, so this function does not see them.
+ */
+function collectSourcesFromMessage(message: BetaMessage): SourcesPart | null {
+  const anthropic = extractAnthropicCitations(message.content as unknown as BetaContentBlock[])
+  let footnotes: ReturnType<typeof extractFootnoteSources> = []
+  for (const block of message.content) {
+    if (block.type !== "text") continue
+    const text = (block as Extract<BetaContentBlock, { type: "text" }>).text ?? ""
+    if (!text) continue
+    const found = extractFootnoteSources(text)
+    if (found.length) footnotes = footnotes.concat(found)
+  }
+  const merged = mergeSources(anthropic, footnotes)
+  if (merged.length === 0) return null
+  return { type: "sources", sources: merged }
 }
 
 /**
@@ -116,6 +170,10 @@ function blockToPart(block: BetaContentBlock): Part | null {
     }
     case "tool_use": {
       const b = block as BetaToolUseBlock
+      const artifactPart = extractArtifactPartFromToolUse(b)
+      if (artifactPart) {
+        return artifactPart as unknown as Part
+      }
       return {
         type: `tool-${b.name}`,
         toolCallId: b.id,

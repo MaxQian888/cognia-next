@@ -7,6 +7,7 @@
  */
 
 import { Suspense, use } from "react"
+import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { notFound } from "next/navigation"
 import { getDb } from "@/lib/db/schema"
@@ -34,6 +35,7 @@ export function ConversationPageClient({ params }: PageProps) {
 }
 
 function ConversationPageInner({ conversationKey }: { conversationKey: string }) {
+  const t = useTranslations("inbox.conversation")
   const session = useLiveQuery<ChatSession | undefined>(
     () =>
       typeof window === "undefined"
@@ -49,7 +51,7 @@ function ConversationPageInner({ conversationKey }: { conversationKey: string })
     return (
       <InboxShell view="conversation" conversationKey={conversationKey}>
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-          Loading…
+          {t("loading")}
         </div>
       </InboxShell>
     )
@@ -79,8 +81,8 @@ function ConversationPageInner({ conversationKey }: { conversationKey: string })
         <div className="flex-1 overflow-auto p-4 text-sm text-muted-foreground">
           {/* The full ChatPane integration requires DesktopChatWorkspace's hook wiring. */}
           {/* Phase 1: render the session id as a placeholder; Phase 2 wires ChatPane. */}
-          <p>Session: {session.id}</p>
-          <p>Conversation: {conversationKey}</p>
+          <p>{t("sessionLabel", { id: session.id })}</p>
+          <p>{t("conversationKeyLabel", { key: conversationKey })}</p>
         </div>
       </div>
     </InboxShell>

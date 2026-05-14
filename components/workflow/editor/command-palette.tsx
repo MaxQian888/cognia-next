@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useTranslations } from "next-intl"
 import {
   CommandDialog,
   CommandEmpty,
@@ -38,6 +39,7 @@ import {
 } from "lucide-react"
 import { listWorkflows } from "@/lib/db/workflows"
 import { groupedCatalog } from "@/lib/workflow/nodes/catalog"
+import { tNode } from "@/lib/workflow/i18n/node-translate"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
 
 export interface CommandPaletteProps {
@@ -68,6 +70,8 @@ export function CommandPalette({
   onImportJsonRequest,
 }: CommandPaletteProps) {
   const router = useRouter()
+  const t = useTranslations("workflows.commandPalette")
+  const tNodes = useTranslations("workflows.nodes")
   const workflows = useLiveQuery(() => listWorkflows(), [])
   const [query, setQuery] = useState("")
 
@@ -96,15 +100,11 @@ export function CommandPalette({
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
-      <CommandInput
-        value={query}
-        onValueChange={setQuery}
-        placeholder="Type a command, search nodes, jump to a workflow…"
-      />
+      <CommandInput value={query} onValueChange={setQuery} placeholder={t("searchPlaceholder")} />
       <CommandList>
-        <CommandEmpty>No results found.</CommandEmpty>
+        <CommandEmpty>{t("empty")}</CommandEmpty>
 
-        <CommandGroup heading="Editor actions">
+        <CommandGroup heading={t("headings.editorActions")}>
           <CommandItem
             onSelect={() => {
               onSave()
@@ -112,7 +112,7 @@ export function CommandPalette({
             }}
           >
             <SaveIcon className="size-4 mr-2" />
-            Save workflow
+            {t("commands.save")}
             <CommandShortcut>Ctrl+S</CommandShortcut>
           </CommandItem>
           {onRun ? (
@@ -123,7 +123,7 @@ export function CommandPalette({
               }}
             >
               <PlayIcon className="size-4 mr-2" />
-              Run workflow
+              {t("commands.run")}
             </CommandItem>
           ) : null}
           {onUndo ? (
@@ -134,7 +134,7 @@ export function CommandPalette({
               }}
             >
               <UndoIcon className="size-4 mr-2" />
-              Undo
+              {t("commands.undo")}
               <CommandShortcut>Ctrl+Z</CommandShortcut>
             </CommandItem>
           ) : null}
@@ -146,7 +146,7 @@ export function CommandPalette({
               }}
             >
               <RedoIcon className="size-4 mr-2" />
-              Redo
+              {t("commands.redo")}
               <CommandShortcut>Ctrl+Shift+Z</CommandShortcut>
             </CommandItem>
           ) : null}
@@ -158,7 +158,7 @@ export function CommandPalette({
               }}
             >
               <LayoutIcon className="size-4 mr-2" />
-              Auto-layout
+              {t("commands.autoLayout")}
             </CommandItem>
           ) : null}
           {onExportJson ? (
@@ -169,7 +169,7 @@ export function CommandPalette({
               }}
             >
               <ExportIcon className="size-4 mr-2" />
-              Export workflow JSON
+              {t("commands.exportJson")}
             </CommandItem>
           ) : null}
           {onImportJsonRequest ? (
@@ -180,7 +180,7 @@ export function CommandPalette({
               }}
             >
               <ImportIcon className="size-4 mr-2" />
-              Import workflow JSON
+              {t("commands.importJson")}
             </CommandItem>
           ) : null}
           <CommandItem
@@ -190,37 +190,43 @@ export function CommandPalette({
             }}
           >
             <LibraryIcon className="size-4 mr-2" />
-            Back to library
+            {t("commands.backToLibrary")}
           </CommandItem>
         </CommandGroup>
 
         <CommandSeparator />
 
         {groups.map((g) => (
-          <CommandGroup key={g.category} heading={`Add ${g.category} node`}>
-            {g.entries.map((e) => (
-              <CommandItem
-                key={e.kind}
-                value={`add-${e.kind}-${e.label}-${e.keywords.join(" ")}`}
-                onSelect={() => {
-                  onAddNode(e.kind)
-                  close()
-                }}
-              >
-                <AddIcon className="size-4 mr-2 shrink-0" />
-                <span className="flex-1">{e.label}</span>
-                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  {e.kind}
-                </span>
-              </CommandItem>
-            ))}
+          <CommandGroup
+            key={g.category}
+            heading={t("headings.addCategory", { category: t(`categories.${g.category}`) })}
+          >
+            {g.entries.map((e) => {
+              const label = tNode(tNodes, `${e.kind}.label`, e.label)
+              return (
+                <CommandItem
+                  key={e.kind}
+                  value={`add-${e.kind}-${label}-${e.keywords.join(" ")}`}
+                  onSelect={() => {
+                    onAddNode(e.kind)
+                    close()
+                  }}
+                >
+                  <AddIcon className="size-4 mr-2 shrink-0" />
+                  <span className="flex-1">{label}</span>
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    {e.kind}
+                  </span>
+                </CommandItem>
+              )
+            })}
           </CommandGroup>
         ))}
 
         {recentWorkflows.length > 0 ? (
           <>
             <CommandSeparator />
-            <CommandGroup heading="Switch to recent workflow">
+            <CommandGroup heading={t("headings.recent")}>
               {recentWorkflows.map((wf) => (
                 <CommandItem
                   key={wf.id}

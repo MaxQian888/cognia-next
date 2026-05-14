@@ -52,7 +52,7 @@ describe("GradientBuilder", () => {
   it("updates the preview style when start color changes", async () => {
     render(<GradientBuilder onCreate={() => {}} />)
     const preview = screen.getByTestId("gradient-preview")
-    const startSwatch = screen.getByLabelText("start swatch") as HTMLInputElement
+    const startSwatch = screen.getByTestId("color-token-gradient-start-swatch") as HTMLInputElement
     fireEvent.change(startSwatch, { target: { value: "#ff0000" } })
     await waitFor(() => {
       expect(preview.style.backgroundImage).toContain("#ff0000")

@@ -38,6 +38,7 @@ import {
   WorkflowIcon,
   SmartphoneIcon,
   MousePointerClickIcon,
+  TargetIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
@@ -72,6 +73,7 @@ export type SettingsSectionId =
   | "data"
   | "workflows"
   | "scheduled-tasks"
+  | "goals"
   | "remote-control"
   | "external-bridge"
   | "companion"
@@ -309,6 +311,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "scheduledTasks",
     group: "data",
     icon: ClockIcon,
+  },
+  {
+    id: "goals",
+    labelKey: "goals",
+    descriptionKey: "goals",
+    group: "data",
+    icon: TargetIcon,
   },
 
   // === Observability ===
@@ -659,6 +668,21 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "调度",
     "任务",
     "自动化",
+  ],
+  goals: [
+    "goal",
+    "goals",
+    "objective",
+    "objectives",
+    "loop",
+    "continuation",
+    "autonomous",
+    "judge",
+    "目标",
+    "目的",
+    "循环",
+    "持续",
+    "判官",
   ],
   logs: [
     "log",

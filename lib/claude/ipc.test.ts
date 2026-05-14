@@ -426,3 +426,53 @@ describe("listSessions", () => {
     expect(callSpy).toHaveBeenCalledWith("session_list", { limit: 10, offset: 0 })
   })
 })
+
+describe("getMessagesBySession", () => {
+  it("forwards session_id and the optional pagination args", async () => {
+    callSpy.mockResolvedValueOnce({ rows: [], total: 0 })
+    const { getMessagesBySession } = require("./ipc") as typeof import("./ipc")
+    const page = await getMessagesBySession("s1", 50, 100)
+    expect(page).toEqual({ rows: [], total: 0 })
+    expect(callSpy).toHaveBeenCalledWith("message_get_by_session", {
+      session_id: "s1",
+      limit: 50,
+      offset: 100,
+    })
+  })
+
+  it("works without pagination args", async () => {
+    callSpy.mockResolvedValueOnce({ rows: [], total: 0 })
+    const { getMessagesBySession } = require("./ipc") as typeof import("./ipc")
+    await getMessagesBySession("s1")
+    expect(callSpy).toHaveBeenCalledWith("message_get_by_session", {
+      session_id: "s1",
+      limit: undefined,
+      offset: undefined,
+    })
+  })
+})
+
+describe("sendMessageFromMobile", () => {
+  it("forwards session_id / content / role and returns the result", async () => {
+    callSpy.mockResolvedValueOnce({ ok: true, messageId: "m-new" })
+    const { sendMessageFromMobile } = require("./ipc") as typeof import("./ipc")
+    const result = await sendMessageFromMobile("s1", "hello", "user")
+    expect(result).toEqual({ ok: true, messageId: "m-new" })
+    expect(callSpy).toHaveBeenCalledWith("message_send", {
+      session_id: "s1",
+      content: "hello",
+      role: "user",
+    })
+  })
+
+  it("omits role when caller doesn't pass it", async () => {
+    callSpy.mockResolvedValueOnce({ ok: true })
+    const { sendMessageFromMobile } = require("./ipc") as typeof import("./ipc")
+    await sendMessageFromMobile("s1", "hello")
+    expect(callSpy).toHaveBeenCalledWith("message_send", {
+      session_id: "s1",
+      content: "hello",
+      role: undefined,
+    })
+  })
+})

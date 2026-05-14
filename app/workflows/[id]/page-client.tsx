@@ -18,6 +18,8 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { WorkflowEditorCanvas } from "@/components/workflow/editor/canvas"
+import { WorkflowGraphViewer } from "@/components/mobile/workflow/workflow-graph-viewer"
+import { usePlatform } from "@/hooks/use-platform"
 import { getWorkflow } from "@/lib/db/workflows"
 import type { WorkflowRow } from "@/types/workflow/visual"
 
@@ -27,6 +29,7 @@ interface PageProps {
 
 export function WorkflowEditorPageClient({ params }: PageProps) {
   const router = useRouter()
+  const platform = usePlatform()
   const { id } = use(params)
   const [workflow, setWorkflow] = useState<WorkflowRow | null | undefined>(undefined)
 
@@ -67,6 +70,23 @@ export function WorkflowEditorPageClient({ params }: PageProps) {
           Back to library
         </Button>
       </Empty>
+    )
+  }
+
+  if (platform === "mobile") {
+    const graph = {
+      nodes: workflow.nodes.map((n) => ({
+        id: n.id,
+        kind: n.type,
+        label: n.data?.label,
+        description: n.data?.notes,
+      })),
+      edges: workflow.edges.map((e) => ({ from: e.source, to: e.target })),
+    }
+    return (
+      <div className="h-full w-full overflow-y-auto p-3">
+        <WorkflowGraphViewer graph={graph} />
+      </div>
     )
   }
 

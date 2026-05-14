@@ -86,6 +86,15 @@ interface ChatState {
    * session_ended and on session change. See `lib/claude/routing-fallback.ts`.
    */
   lastSendBySession: Record<string, LastSendCacheEntry>
+  /**
+   * Map from `branchGroupId` → active `messageId` for the assistant-branches
+   * subsystem. When the user regenerates a reply, the previous assistant
+   * message is retained and a new one is appended; both rows share a
+   * `metadata.branchGroupId`. This map tracks which sibling is currently
+   * shown by the chat list. Cleared on session change; persisted to Dexie
+   * by the caller (so the choice survives a reload).
+   */
+  activeBranchByGroup: Record<string, string>
 
   setActiveSession: (id: string | null) => void
   setMessages: (msgs: UIMessage[]) => void
@@ -108,6 +117,10 @@ interface ChatState {
   setLastSend: (sessionId: string, entry: LastSendCacheEntry) => void
   bumpLastSendAttempt: (sessionId: string) => void
   clearLastSend: (sessionId: string) => void
+  /** Mark `messageId` as the visible branch within `branchGroupId`. */
+  setActiveBranch: (branchGroupId: string, messageId: string) => void
+  /** Replace the full active-branch map (used on Dexie hydration). */
+  hydrateActiveBranches: (map: Record<string, string>) => void
   clear: () => void
 }
 
@@ -124,6 +137,7 @@ export const useChatStore = create<ChatState>((set) => ({
   webSearchOnForNextSend: false,
   ephemeralSkillIds: [],
   lastSendBySession: {},
+  activeBranchByGroup: {},
 
   setActiveSession: (id) =>
     set({
@@ -139,6 +153,7 @@ export const useChatStore = create<ChatState>((set) => ({
       webSearchOnForNextSend: false,
       ephemeralSkillIds: [],
       lastSendBySession: {},
+      activeBranchByGroup: {},
     }),
   setMessages: (msgs) => set({ messages: msgs }),
   appendMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
@@ -211,6 +226,18 @@ export const useChatStore = create<ChatState>((set) => ({
       delete next[sessionId]
       return { lastSendBySession: next }
     }),
+  setActiveBranch: (branchGroupId, messageId) =>
+    set((s) =>
+      s.activeBranchByGroup[branchGroupId] === messageId
+        ? s
+        : {
+            activeBranchByGroup: {
+              ...s.activeBranchByGroup,
+              [branchGroupId]: messageId,
+            },
+          }
+    ),
+  hydrateActiveBranches: (map) => set({ activeBranchByGroup: { ...map } }),
   clear: () =>
     set({
       activeSessionId: null,
@@ -225,5 +252,64 @@ export const useChatStore = create<ChatState>((set) => ({
       webSearchOnForNextSend: false,
       ephemeralSkillIds: [],
       lastSendBySession: {},
+      activeBranchByGroup: {},
     }),
 }))
+
+/**
+ * Filter messages so only the active branch within each `branchGroupId`
+ * survives. Messages without a `branchGroupId` are passed through unchanged.
+ * Pure function — safe to call from selectors and tests.
+ */
+export function selectVisibleMessages(
+  messages: UIMessage[],
+  activeBranchByGroup: Record<string, string>
+): UIMessage[] {
+  const out: UIMessage[] = []
+  const lastSeenByGroup = new Map<string, UIMessage>()
+
+  for (const m of messages) {
+    const groupId = (m.metadata as { branchGroupId?: string } | undefined)?.branchGroupId
+    if (!groupId) {
+      out.push(m)
+      continue
+    }
+    const activeId = activeBranchByGroup[groupId]
+    if (activeId) {
+      if (m.id === activeId) out.push(m)
+      // Drop the non-active siblings.
+      continue
+    }
+    // No explicit choice yet — show the highest branchIndex (or last seen).
+    const prev = lastSeenByGroup.get(groupId)
+    const prevIdx = (prev?.metadata as { branchIndex?: number } | undefined)?.branchIndex ?? -1
+    const curIdx = (m.metadata as { branchIndex?: number } | undefined)?.branchIndex ?? 0
+    if (!prev || curIdx > prevIdx) {
+      // Replace the placeholder for this group.
+      if (prev) {
+        const idx = out.indexOf(prev)
+        if (idx >= 0) out.splice(idx, 1, m)
+      } else {
+        out.push(m)
+      }
+      lastSeenByGroup.set(groupId, m)
+    }
+  }
+  return out
+}
+
+/**
+ * Collect all messages in `messages` that belong to `branchGroupId`, sorted
+ * by `branchIndex` ascending. Used by the branch navigator to enumerate
+ * prev/next siblings.
+ */
+export function selectBranchSiblings(messages: UIMessage[], branchGroupId: string): UIMessage[] {
+  const matches = messages.filter(
+    (m) => (m.metadata as { branchGroupId?: string } | undefined)?.branchGroupId === branchGroupId
+  )
+  return [...matches].sort((a, b) => {
+    const ai = (a.metadata as { branchIndex?: number } | undefined)?.branchIndex ?? 0
+    const bi = (b.metadata as { branchIndex?: number } | undefined)?.branchIndex ?? 0
+    return ai - bi
+  })
+}

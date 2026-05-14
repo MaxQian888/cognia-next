@@ -62,6 +62,7 @@ import { SingleExportTrigger } from "@/components/chat/dialogs/single-export-tri
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { TwinHeaderBadge } from "@/components/chat/twin-header-badge"
 import { SessionCostBadge } from "@/components/chat/session-cost-badge"
+import { ContextGauge } from "@/components/chat/context-gauge"
 import { forkSessionFromParent } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
 import { toast } from "sonner"
@@ -372,6 +373,8 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
           tokensLabel={(input, output) => t("tokensLabel", { input, output })}
         />
       )}
+
+      <ContextGauge modelId={session.model} />
 
       <SingleExportTrigger session={session} />
 

@@ -12,6 +12,7 @@
  */
 
 import { useState } from "react"
+import { useTranslations } from "next-intl"
 import { ArrowRightIcon, UserIcon } from "lucide-react"
 import {
   Dialog,
@@ -39,6 +40,7 @@ export function IdentityMergeDialog({
   identities,
   onMerged,
 }: IdentityMergeDialogProps) {
+  const t = useTranslations("connectors.identityMerge")
   const [primaryId, setPrimaryId] = useState<string>(identities[0].id)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -64,11 +66,8 @@ export function IdentityMergeDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[480px]">
         <DialogHeader>
-          <DialogTitle>Merge platform identities</DialogTitle>
-          <DialogDescription>
-            Select which identity to keep as primary. The secondary identity&apos;s id will be
-            recorded in the primary&apos;s merge history.
-          </DialogDescription>
+          <DialogTitle>{t("title")}</DialogTitle>
+          <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
         <div className="flex items-center gap-3 mt-4">
@@ -85,10 +84,12 @@ export function IdentityMergeDialog({
         {/* Merge direction arrow */}
         <div className="flex items-center justify-center gap-2 mt-2 text-xs text-muted-foreground">
           <Badge variant="outline">
-            Secondary: {secondary.displayName ?? secondary.remoteUserId}
+            {t("secondary")} {secondary.displayName ?? secondary.remoteUserId}
           </Badge>
           <ArrowRightIcon className="h-4 w-4" />
-          <Badge variant="default">Primary: {primary.displayName ?? primary.remoteUserId}</Badge>
+          <Badge variant="default">
+            {t("primary")} {primary.displayName ?? primary.remoteUserId}
+          </Badge>
         </div>
 
         {error && (
@@ -99,7 +100,7 @@ export function IdentityMergeDialog({
 
         <div className="flex gap-2 mt-4">
           <Button onClick={() => void handleMerge()} disabled={busy} data-testid="merge-btn">
-            Merge
+            {t("merge")}
           </Button>
           <Button
             variant="ghost"
@@ -107,7 +108,7 @@ export function IdentityMergeDialog({
             disabled={busy}
             data-testid="merge-cancel-btn"
           >
-            Cancel
+            {t("cancel")}
           </Button>
         </div>
       </DialogContent>
@@ -124,6 +125,7 @@ function IdentityCard({
   isPrimary: boolean
   onClick: () => void
 }) {
+  const t = useTranslations("connectors.identityMerge")
   return (
     <button
       type="button"
@@ -149,7 +151,7 @@ function IdentityCard({
           variant="default"
           data-testid={`primary-badge-${identity.id}`}
         >
-          Primary
+          {t("primaryBadge")}
         </Badge>
       )}
     </button>

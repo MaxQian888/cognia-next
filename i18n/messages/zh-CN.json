@@ -1293,7 +1293,8 @@
       "connections": "平台连接",
       "subscription": "Claude 订阅",
       "network": "网络代理",
-      "workflows": "工作流"
+      "workflows": "工作流",
+      "goals": "目标"
     },
     "descriptions": {
       "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",
@@ -1333,7 +1334,8 @@
       "connections": "配置消息平台适配器（Telegram、Discord、Slack 等）并管理出站队列。",
       "subscription": "用 Claude Pro/Max 订阅登录，监控 5 小时 / 7 天速率限制窗口，OAuth 凭据保存在系统钥匙串。",
       "network": "为所有出站请求配置 HTTP / HTTPS / SOCKS5 代理，并支持自动检测 Clash Verge、Mihomo、V2Ray 等本地代理工具。",
-      "workflows": "面向角色、团队、技能、孪生与连接器的 n8n 风格可视化编排。可通过定时、Webhook、平台消息或手动触发。"
+      "workflows": "面向角色、团队、技能、孪生与连接器的 n8n 风格可视化编排。可通过定时、Webhook、平台消息或手动触发。",
+      "goals": "持久化的聊天目标(ADR-0019)。用 /goal 设定目标后,agent 自动续 turn,直到 judge 模型确认达成,或预算 / 超时触发退出。"
     },
     "externalBridge": {
       "wikiIndex": "Wiki 索引",
@@ -1637,6 +1639,9 @@
         "noActive": "未选择壁纸。",
         "galleryTitle": "图库",
         "addCustom": "自定义",
+        "aria": {
+          "delete": "删除 {name}"
+        },
         "gradient": {
           "title": "构建渐变",
           "start": "起始色",
@@ -1733,7 +1738,11 @@
           "sidebarPrimaryForeground": "侧栏主色文字",
           "sidebarAccent": "侧栏强调色",
           "sidebarAccentForeground": "侧栏强调色文字",
-          "sidebarRing": "侧栏聚焦环"
+          "sidebarRing": "侧栏聚焦环",
+          "aria": {
+            "swatch": "{label} 色块",
+            "hex": "{label} 十六进制值"
+          }
         }
       },
       "vscode": {
@@ -4034,15 +4043,11 @@
       "configureSkillsmp": "在 设置 → API 配置 SkillsMP 基础地址以启用此来源。"
     },
     "analytics": {
-      "title": "统计",
-      "totalSkills": "技能总数",
-      "totalEnabled": "已启用",
-      "totalUsage": "使用次数",
-      "tokensEstimated": "预估注入的 Token",
-      "mostUsedTitle": "使用最多",
-      "neverUsedTitle": "从未使用",
-      "recentUsageTitle": "最近活动",
-      "neverUsedEmpty": "所有技能都至少使用过一次。"
+      "trend": {
+        "title": "使用趋势",
+        "window7": "7天",
+        "window30": "30天"
+      }
     },
     "discovery": {
       "title": "发现技能",
@@ -4099,15 +4104,16 @@
       "removedToast": "已删除 {name}。"
     },
     "sync": {
-      "title": "本地同步",
-      "pushAll": "推送全部到磁盘",
-      "pullAll": "从磁盘拉取",
-      "lastSynced": "最近同步：{when}",
-      "neverSynced": "从未同步",
-      "successPush": "已推送 {count} 个技能到 ~/.claude/skills/",
-      "successPull": "已从磁盘拉取 {count} 个技能",
-      "errorDesktopOnly": "同步需要桌面端。",
-      "errorGeneric": "同步失败：{error}"
+      "status": {
+        "synced": "已同步",
+        "outOfSync": "未同步",
+        "error": "同步错误",
+        "never": "从未同步"
+      },
+      "syncNow": "立即同步",
+      "retry": "重试",
+      "lastAt": "上次：{when}",
+      "desktopOnly": "同步仅在桌面端可用。"
     },
     "panel": {
       "headerTitle": "技能",
@@ -4164,25 +4170,6 @@
       "title": "市场未配置",
       "subtitle": "在设置里配置 SkillsMP 端点即可浏览和安装社区技能。下面是部分可用示例：",
       "configure": "去设置配置"
-    },
-    "analytics": {
-      "trend": {
-        "title": "使用趋势",
-        "window7": "7天",
-        "window30": "30天"
-      }
-    },
-    "sync": {
-      "status": {
-        "synced": "已同步",
-        "outOfSync": "未同步",
-        "error": "同步错误",
-        "never": "从未同步"
-      },
-      "syncNow": "立即同步",
-      "retry": "重试",
-      "lastAt": "上次：{when}",
-      "desktopOnly": "同步仅在桌面端可用。"
     },
     "back": "返回"
   },
@@ -8144,7 +8131,11 @@
       "emptyHint": "还没有任务。先添加数据源，再排队摄取；切片建立索引后即可排队蒸馏。",
       "queuedAt": "入队于 {when}",
       "errorPrefix": "⚠",
-      "draftsProduced": "已生成 {count} 个草稿"
+      "draftsProduced": "已生成 {count} 个草稿",
+      "retry": "重试",
+      "retryBusy": "重试中…",
+      "attempt": "第 {n} 次尝试",
+      "deadLetter": "死信"
     },
     "drafts": {
       "headerCount": "草稿（{count}）",
@@ -8157,7 +8148,216 @@
       "untitled": "（未命名）",
       "emptyBody": "（空内容）",
       "accept": "接受",
-      "reject": "拒绝"
+      "reject": "拒绝",
+      "edit": "编辑",
+      "piiInDraft": "保存被拦截 — 在以下字段中检测到 PII：{fields}。请改用占位符或删除原文。"
+    },
+    "cron": {
+      "title": "自动摄取 & 自动蒸馏",
+      "description": "按计划自动执行摄取 + 蒸馏。Cron 表达式遵循标准 5 段格式。调度器在本应用内触发——桌面在后台最小化时也能运行。",
+      "enabledLabel": "启用计划",
+      "ingestLabel": "摄取计划",
+      "distillLabel": "蒸馏计划",
+      "save": "保存",
+      "busy": "保存中…",
+      "saved": "计划已保存。",
+      "savedAt": "保存于 {when}",
+      "invalidExpressions": "部分计划无效：{items}",
+      "placeholder": "例如 0 */6 * * *",
+      "presetAria": "{label} 预设",
+      "presetHint": "选择预设…",
+      "lastTriggered": "上次触发：{when}",
+      "nextTrigger": "下次触发：{when}",
+      "never": "（从未）"
+    },
+    "draftEditor": {
+      "titleCharacter": "编辑角色草稿",
+      "titleSkill": "编辑技能草稿",
+      "descriptionCharacter": "接受前微调角色。保存时会再次执行 PII 红线校验。",
+      "descriptionSkill": "接受前微调技能。保存时会再次执行 PII 红线校验。",
+      "nameLabel": "名称",
+      "descriptionLabel": "描述",
+      "systemPromptLabel": "系统提示词",
+      "contentLabel": "技能内容",
+      "voiceSummaryLabel": "语气概览",
+      "cancel": "取消",
+      "save": "保存修改",
+      "busy": "保存中…",
+      "nameRequired": "名称不能为空。",
+      "bodyRequired": "正文不能为空。"
+    },
+    "sourceUploader": {
+      "filesTitle": "从文件导入",
+      "filesDescription": "文本格式（Markdown / CSV / HTML / JSON / 源代码 / .eml / .mbox）按原样存储。二进制格式（PDF / DOCX / PPTX / EPUB / ODT / ODP）在浏览器解析，仅提取出的文本会落入 Dexie。聊天导出（ChatGPT / Claude / Gemini / Slack / 飞书 / 微信 / 钉钉）和 mbox 文件会按会话拆分为多个源。",
+      "pickFilesAria": "选择文本文件",
+      "gitRepoTitle": "从本地 Git 仓库导入",
+      "gitRepoDescription": "使用 simple-git 遍历近期提交，为每条提交创建一个源（标题 + 正文 + diff）。仅桌面端可用 —— 使用你的 Tauri 文件系统权限。",
+      "maxCommits": "最大提交数",
+      "authorFilter": "作者过滤（可选）",
+      "authorPlaceholder": "例如 alice 或 alice@example.com",
+      "walking": "遍历中…",
+      "pickRepoFolder": "选择仓库目录",
+      "pasteTitle": "或粘贴文本",
+      "titleLabel": "标题（可选）",
+      "titlePlaceholder": "例如 onboarding-notes.md",
+      "formatLabel": "格式",
+      "contentLabel": "内容",
+      "contentPlaceholder": "在此粘贴 markdown、代码或导出的聊天内容…",
+      "saving": "保存中…",
+      "savePastedSource": "保存粘贴的源",
+      "importedSummarySingular": "已导入 1 条源。",
+      "importedSummaryPlural": "已导入 {count} 条源。",
+      "perFileSrcSingular": "1 条",
+      "perFileSrcPlural": "{count} 条",
+      "repoImportedSingular": "已从下列仓库导入 1 条提交：",
+      "repoImportedPlural": "已从下列仓库导入 {count} 条提交："
+    },
+    "selector": {
+      "activeTwinAria": "当前孪生：{name}",
+      "noActive": "未选择孪生",
+      "switchTo": "切换到",
+      "noTwinsHint": "暂无可用孪生",
+      "archivedHeader": "已归档",
+      "newTwin": "新建孪生",
+      "rename": "重命名",
+      "clone": "克隆",
+      "archive": "归档",
+      "unarchive": "取消归档",
+      "delete": "删除",
+      "createTitle": "新建孪生",
+      "renameTitle": "重命名孪生",
+      "cloneTitle": "克隆孪生",
+      "createDescription": "为新孪生取个名字。颜色和运行时参数采用默认值，之后都可以再修改。",
+      "renameDescription": "重命名孪生。ID 与已绑定的角色保持不变。",
+      "cloneDescription": "复制一个孪生（保留颜色和运行时参数；不复制数据源）。",
+      "nameLabel": "孪生名称",
+      "nameRequired": "名称不能为空",
+      "cancel": "取消",
+      "create": "创建",
+      "save": "保存",
+      "busy": "处理中…",
+      "deleteTitle": "删除孪生？",
+      "deleteDescription": "删除「{name}」并级联清除所有相关的数据源、切片、草稿和任务。此操作不可撤销。"
+    },
+    "unredact": {
+      "title": "恢复敏感信息？",
+      "description": "将恢复 {restored} 个占位符（共 {total} 个）。",
+      "noPlaceholders": "没有可恢复的占位符。",
+      "restoreAll": "全部恢复",
+      "keepAll": "全部保留",
+      "checkboxAria": "恢复 {placeholder}",
+      "cancel": "取消",
+      "confirm": "接受（已恢复 {restored} 个）",
+      "busy": "处理中…"
+    },
+    "injectLog": {
+      "title": "运行时注入日志",
+      "description": "本孪生最近 50 次 RAG / 风格少样本注入记录。仅保存在内存中——刷新页面后清空。",
+      "count": "共 {count} 条",
+      "emptyHint": "尚无注入记录——给已绑定本孪生的角色发一条消息即可填充日志。",
+      "applied": "已注入",
+      "skipped": "已跳过",
+      "degraded": "降级",
+      "counts": "{chunks} 切片 · {samples} 样本 · 约 {tokens} token"
+    },
+    "settings": {
+      "title": "设置",
+      "ragDefaultsTitle": "RAG 默认值",
+      "ragDefaultsBody": "每个角色可以在角色记录上单独覆盖（twinSettings.ragTopK、twinSettings.styleSamplesK）。未设置时，运行时回落到 topK = 6、styleSamplesK = 3，并默认启用 RAG 与风格少样本。",
+      "runtimeTitle": "运行时配置",
+      "savedAt": "已保存于 {when}",
+      "statsTwinId": "孪生 ID",
+      "statsSources": "数据源",
+      "statsChunks": "已索引切片",
+      "statsStyleSamples": "风格样本",
+      "statsPlaybooks": "操作脚本",
+      "statsEntities": "实体",
+      "statsVoiceSummary": "语气概览",
+      "statsProfileUpdated": "画像更新于",
+      "voiceEmpty": "（空）",
+      "never": "（从未）",
+      "workerToggleLabel": "为本孪生自动启动后台任务工作器",
+      "embedding": "向量嵌入",
+      "distillLlm": "蒸馏 LLM",
+      "vectorStore": "向量库",
+      "provider": "提供方",
+      "model": "模型",
+      "apiKey": "API key",
+      "backend": "后端",
+      "url": "URL",
+      "apiKeyOptional": "API key（可选）",
+      "indexName": "索引名",
+      "namespace": "命名空间",
+      "address": "地址",
+      "tokenOptional": "Token（可选）",
+      "mode": "模式",
+      "serverUrl": "服务器 URL",
+      "backendNativeDisplay": "原生（Tauri 本地）",
+      "nativeDescription": "把向量保存在应用数据目录里的本地 SQLite 文件，无需外部服务。",
+      "openDataFolder": "打开数据目录",
+      "testConnection": "测试连接",
+      "testing": "测试中…",
+      "resetButton": "重置向量库",
+      "resetDialogTitle": "重置向量库？",
+      "resetDialogBody": "将删除本地的 vectors.sqlite 文件，此操作不可撤销。",
+      "cancel": "取消",
+      "confirmReset": "确认重置",
+      "resetSuccess": "向量库已重置。刷新页面以重新初始化。",
+      "resetFailed": "重置失败：{msg}",
+      "saving": "保存中…",
+      "save": "保存运行时设置"
+    },
+    "status": {
+      "queued": "等待中",
+      "running": "运行中",
+      "paused": "已暂停",
+      "completed": "已完成",
+      "failed": "失败",
+      "pending": "待处理",
+      "accepted": "已接受",
+      "rejected": "已拒绝",
+      "edited": "已编辑"
+    },
+    "kind": {
+      "ingest": "摄取",
+      "distill": "蒸馏",
+      "re-distill": "重蒸馏",
+      "character": "角色",
+      "skill": "技能"
+    },
+    "format": {
+      "markdown": "Markdown",
+      "pdf": "PDF",
+      "docx": "DOCX",
+      "pptx": "PPTX",
+      "odt": "ODT",
+      "odp": "ODP",
+      "html": "HTML",
+      "csv": "CSV",
+      "epub": "EPUB",
+      "rtf": "RTF",
+      "code": "源代码",
+      "chatgpt-export": "ChatGPT 导出",
+      "claude-export": "Claude 导出",
+      "gemini-export": "Gemini 导出",
+      "slack-export": "Slack 导出",
+      "lark-export": "飞书导出",
+      "dingtalk-export": "钉钉导出",
+      "wechat-export": "微信导出",
+      "mbox": "mbox",
+      "eml": "eml",
+      "git-repo": "Git 仓库"
+    },
+    "piiKind": {
+      "EMAIL": "邮箱",
+      "PHONE": "手机",
+      "CN_ID": "身份证",
+      "BANK_CARD": "银行卡",
+      "NAME": "姓名",
+      "IP_ADDR": "IP 地址",
+      "API_KEY": "API 密钥",
+      "PASSPORT": "护照",
+      "DRIVER_LICENSE": "驾照"
     }
   },
   "mobile": {
@@ -8302,6 +8502,7 @@
       "sectionAdvanced": "高级",
       "settingsLink": "应用设置",
       "backupLink": "备份与同步",
+      "dexieMaintenance": "Dexie 维护",
       "appSecurity": "应用安全",
       "biometricToggle": "启用生物识别解锁",
       "biometricUnavailable": "本设备未注册生物识别。",
@@ -8323,7 +8524,9 @@
         "drafts": "草稿",
         "backup": "上次备份",
         "backupNever": "从未"
-      }
+      },
+      "appearanceLink": "主题与壁纸",
+      "appearanceBackAria": "返回个人"
     },
     "companion": {
       "tunnel": {
@@ -8350,7 +8553,8 @@
         "description": "解除后此设备将立即失去访问权限。",
         "blocked": "解除配对未完成（{reason}）。",
         "successToast": "已解除该设备的配对。"
-      }
+      },
+      "pushTokenFailed": "未能向桌面端上报本机推送 token（{reason}）。"
     },
     "twinDraft": {
       "kindCharacter": "角色",
@@ -8402,7 +8606,8 @@
       "all": "全部",
       "pinned": "置顶",
       "pinned_added": "已置顶。",
-      "pinned_removed": "已取消置顶。"
+      "pinned_removed": "已取消置顶。",
+      "graphViewerEmpty": "工作流中没有节点。"
     },
     "twinSources": {
       "title": "孪生数据源",
@@ -8458,7 +8663,8 @@
       "exportBiometricTitle": "确认导出",
       "exportBiometricReason": "通过生物识别验证后导出加密备份。",
       "biometricBlocked": "生物识别失败，已取消导出。",
-      "passphraseRequiredHint": "需要密码短语才能在以后解开加密备份。"
+      "passphraseRequiredHint": "需要密码短语才能在以后解开加密备份。",
+      "webModeNote": "Web 模式：备份会以普通文件下载。"
     },
     "shareTarget": {
       "title": "通过 cognia 分享",
@@ -8528,6 +8734,29 @@
       "language": "语言",
       "defaultModel": "默认模型",
       "queueLabel": "已排队——桌面上线后会自动同步。"
+    },
+    "connectionState": {
+      "live": "在线",
+      "reconnecting": "正在重连",
+      "offline": "离线",
+      "repairNeeded": "需重新配对",
+      "aria": "连接：{label}"
+    },
+    "security": {
+      "title": "生物识别保护",
+      "description": "在敏感操作前要求 Face ID 或指纹。",
+      "deletePairing": {
+        "label": "退出登录 / 解除配对",
+        "help": "清除本机配对前先验证生物识别。"
+      },
+      "exportBackup": {
+        "label": "导出加密备份",
+        "help": "写入备份文件前先验证生物识别。"
+      },
+      "revealSecrets": {
+        "label": "显示已存密钥",
+        "help": "显示 API 密钥或令牌前先验证生物识别。"
+      }
     },
     "characterEdit": {
       "createTitle": "新建角色",
@@ -8648,7 +8877,29 @@
     },
     "sidebar": {
       "searchPlaceholder": "搜索节点…",
-      "noMatches": "无匹配节点。"
+      "noMatches": "无匹配节点。",
+      "desktopOnly": "仅桌面端",
+      "dragHint": "把任意节点拖到画布上，或点击放置到视图中心。",
+      "category": {
+        "trigger": "触发器",
+        "action": "动作",
+        "ai": "AI",
+        "flow": "流程",
+        "data": "数据",
+        "io": "I/O",
+        "annotation": "注释",
+        "plugin": "插件节点"
+      },
+      "hint": {
+        "trigger": "工作流的启动方式。",
+        "action": "副作用：发送、保存、调用。",
+        "ai": "调用 LLM。",
+        "flow": "分支、循环、等待、分组。",
+        "data": "重塑、模板、代码。",
+        "io": "与外部世界通信。",
+        "annotation": "画布上的说明 — 不参与执行。",
+        "plugin": "由启用的插件贡献的节点。"
+      }
     },
     "inspector": {
       "empty": "在画布上选择一个节点以配置。",
@@ -8724,6 +8975,1343 @@
       "summary": "{count} 个校验问题",
       "blockedRunTitle": "请先修复校验问题再运行",
       "blockedSaveTitle": "工作流已保存，但仍有 {count} 个未解决的问题"
+    },
+    "nodes": {
+      "trigger.manual": {
+        "label": "手动运行",
+        "description": "在编辑器中点击「运行」按钮时触发。"
+      },
+      "trigger.cron": {
+        "label": "按计划执行",
+        "description": "按 cron 计划触发。运行时由 Tauri 调度器驱动。"
+      },
+      "trigger.connector.inbound": {
+        "label": "收到消息",
+        "description": "当外部平台（Telegram、Slack 等）收到消息时触发。"
+      },
+      "trigger.chat.message": {
+        "label": "聊天消息触发",
+        "description": "当用户在绑定角色的会话中发送消息时触发。"
+      },
+      "trigger.webhook": {
+        "label": "Webhook 触发",
+        "description": "当 HTTP 请求命中工作流的 Webhook 路径时触发。"
+      },
+      "trigger.github.webhook": {
+        "label": "GitHub 事件触发",
+        "description": "当 GitHub 推送 Webhook（PR 打开、Issue 标签、推送等）时触发，会校验 x-hub-signature-256。"
+      },
+      "action.character.send": {
+        "label": "以角色身份发送",
+        "description": "以选定的角色身份向会话发送消息。"
+      },
+      "action.character.create": {
+        "label": "创建角色",
+        "description": "新建一个角色（员工）。"
+      },
+      "action.character.update": {
+        "label": "更新角色",
+        "description": "更新现有角色的字段。"
+      },
+      "action.team.run": {
+        "label": "运行团队",
+        "description": "启动智能体团队的生命周期并等待执行完成。"
+      },
+      "action.team.create": {
+        "label": "创建团队",
+        "description": "新建一个智能体团队。"
+      },
+      "action.team.update": {
+        "label": "更新团队",
+        "description": "更新现有团队的成员或编排模式。"
+      },
+      "action.skill.invoke": {
+        "label": "调用技能",
+        "description": "把技能注入到下一个 AI 节点的提示词中。"
+      },
+      "action.skill.upsert": {
+        "label": "新增或更新技能",
+        "description": "用给定的 Markdown 内容新建或更新技能。"
+      },
+      "action.twin.rag": {
+        "label": "数字分身 RAG",
+        "description": "在数字分身的向量库上执行 RAG，返回 top-K 片段。"
+      },
+      "action.twin.ingest": {
+        "label": "数字分身导入",
+        "description": "为数字分身的导入流水线排队新的数据源。"
+      },
+      "action.connector.send": {
+        "label": "通过连接器发送",
+        "description": "通过连接器适配器的出站队列发送消息。"
+      },
+      "action.connector.draft": {
+        "label": "保存为草稿",
+        "description": "把建议的回复保存为草稿，供人工在收件箱中审核。"
+      },
+      "action.mcp.invokeTool": {
+        "label": "调用 MCP 工具",
+        "description": "调用已配置的 MCP 服务器上的工具。"
+      },
+      "action.plugin.invoke": {
+        "label": "调用插件",
+        "description": "调用插件运行时中注册的任务处理器。"
+      },
+      "action.github.openPr": {
+        "label": "打开 GitHub PR",
+        "description": "通过 GitHub Delivery 插件打开 PR（受策略约束）。"
+      },
+      "action.github.closePr": {
+        "label": "关闭 GitHub PR",
+        "description": "关闭打开的 PR 而不合并。"
+      },
+      "action.github.mergePr": {
+        "label": "合并 GitHub PR",
+        "description": "合并 PR。按策略需要 CI 通过 + 人工批准。"
+      },
+      "action.github.reviewPr": {
+        "label": "审查 GitHub PR",
+        "description": "在 PR 上提交审查意见（APPROVE / REQUEST_CHANGES / COMMENT）。"
+      },
+      "action.github.reviewPrInline": {
+        "label": "AI 行内审查",
+        "description": "用 LLM 为 PR 生成结构化审查（整体评语 + 行级行内评论）。"
+      },
+      "action.github.commentPr": {
+        "label": "在 PR 上评论",
+        "description": "在 PR 上发布评论。"
+      },
+      "action.github.commentIssue": {
+        "label": "在 Issue 上评论",
+        "description": "在 Issue 上发布评论。"
+      },
+      "action.github.labelIssue": {
+        "label": "为 Issue/PR 打标签",
+        "description": "在 Issue 或 PR 上添加或移除标签。"
+      },
+      "action.github.closeIssue": {
+        "label": "关闭 Issue",
+        "description": "关闭 Issue，可选关闭原因（completed / not_planned）。"
+      },
+      "action.github.createRelease": {
+        "label": "创建 Release",
+        "description": "创建 Release。草稿始终允许，发布的 Release 受策略约束。"
+      },
+      "action.github.generateChangelog": {
+        "label": "生成变更日志",
+        "description": "基于 Conventional Commits 计算语义化版本号增量并生成 Markdown 发布说明。"
+      },
+      "action.github.pushTag": {
+        "label": "推送标签",
+        "description": "推送 git 标签到仓库。"
+      },
+      "action.github.runIssueLoop": {
+        "label": "Issue → PR 循环",
+        "description": "端到端的 Issue → AI 工作树 → PR 闭环：克隆仓库、驱动 AI、打开 PR。"
+      },
+      "action.desktop.screenshot": {
+        "label": "屏幕截图",
+        "description": "截取主显示器或指定区域，返回 PNG 字节和尺寸。"
+      },
+      "action.desktop.findElement": {
+        "label": "查找元素",
+        "description": "按名称 / automation id / 控件类型定位 UI 元素。"
+      },
+      "action.desktop.readTree": {
+        "label": "读取控件树",
+        "description": "把无障碍子树快照为 JSON，供下游节点使用。"
+      },
+      "action.desktop.click": {
+        "label": "点击",
+        "description": "点击某个元素或屏幕绝对坐标。"
+      },
+      "action.desktop.type": {
+        "label": "输入文本",
+        "description": "通过 SendInput 把字符串键入到焦点元素。"
+      },
+      "action.desktop.keys": {
+        "label": "发送按键",
+        "description": "发送键盘组合键，例如 ctrl+shift+t。"
+      },
+      "action.desktop.invokePattern": {
+        "label": "调用 UIA 模式",
+        "description": "派发 UIA 模式（Invoke / Toggle / Value / Transform 等）。"
+      },
+      "action.desktop.windowFocus": {
+        "label": "聚焦窗口",
+        "description": "把指定窗口切到前台。"
+      },
+      "action.desktop.windowClose": {
+        "label": "关闭窗口",
+        "description": "通过 UIA Window 模式关闭窗口。"
+      },
+      "action.desktop.windowResize": {
+        "label": "调整窗口大小",
+        "description": "通过 UIA Transform 模式移动或调整窗口大小。"
+      },
+      "action.desktop.wait": {
+        "label": "等待元素",
+        "description": "阻塞直到元素出现、消失或属性满足条件。"
+      },
+      "trigger.desktop.event": {
+        "label": "UIA 事件触发",
+        "description": "当 UIA 焦点 / 结构 / 属性事件匹配时触发。"
+      },
+      "ai.prompt": {
+        "label": "AI 提示",
+        "description": "直接调用 LLM，使用已配置的提供方路由。"
+      },
+      "ai.classify": {
+        "label": "分类",
+        "description": "基于 LLM 把输入分到 N 个标签之一。"
+      },
+      "ai.extract": {
+        "label": "结构化抽取",
+        "description": "按 JSON Schema 从自由文本抽取结构化数据。"
+      },
+      "ai.embed": {
+        "label": "生成嵌入向量",
+        "description": "为语义相似度计算生成嵌入向量。"
+      },
+      "flow.branch": {
+        "label": "If / Else 分支",
+        "description": "根据条件把执行分到两条分支之一。"
+      },
+      "flow.switch": {
+        "label": "Switch 多分支",
+        "description": "根据表达式的值做多路分支。"
+      },
+      "flow.split": {
+        "label": "并行分发",
+        "description": "把执行扇出到多个并行分支。"
+      },
+      "flow.join": {
+        "label": "汇聚",
+        "description": "按 all / any / race 语义汇聚并行分支。"
+      },
+      "flow.loop": {
+        "label": "循环",
+        "description": "以 for-each / while / 固定次数重复子图。"
+      },
+      "flow.wait": {
+        "label": "等待",
+        "description": "暂停固定时长，或等待唤醒事件到达。"
+      },
+      "flow.set": {
+        "label": "设置变量",
+        "description": "为工作流作用域的变量赋值。"
+      },
+      "flow.subworkflow": {
+        "label": "调用子工作流",
+        "description": "把另一个工作流作为一个步骤来调用。"
+      },
+      "data.transform": {
+        "label": "数据转换",
+        "description": "对输入数组或对象执行 map / filter / reduce / sort。"
+      },
+      "data.code": {
+        "label": "自定义代码",
+        "description": "自定义 JS 表达式，超时 5 秒。"
+      },
+      "data.template": {
+        "label": "模板",
+        "description": "用 mustache 风格模板对上游数据进行渲染。"
+      },
+      "io.http": {
+        "label": "HTTP 请求",
+        "description": "调用外部 HTTP API，支持重试和超时。"
+      },
+      "io.webhook.respond": {
+        "label": "Webhook 响应",
+        "description": "向触发本次执行的入站 Webhook 返回响应负载。"
+      },
+      "annotation.note": {
+        "label": "便签",
+        "description": "画布上的自由文本便签，不参与执行。"
+      },
+      "annotation.group": {
+        "label": "分组框",
+        "description": "围绕多个节点的视觉分组框，不参与执行。"
+      }
+    },
+    "runs": {
+      "detail": {
+        "notFound": {
+          "title": "未找到运行记录",
+          "description": "该运行可能已被删除，或链接不正确。"
+        },
+        "backToRuns": "返回运行列表",
+        "running": "运行中…",
+        "rerunning": "正在重跑…",
+        "rerun": "重跑",
+        "sparkline": {
+          "title": "时长趋势"
+        }
+      },
+      "step": {
+        "selectPrompt": "在时间线中选择一个步骤来查看详情。",
+        "notInSnapshot": "步骤 {stepId} 不在工作流快照中。",
+        "duration": "时长",
+        "statusLabel": "状态",
+        "started": "开始",
+        "ended": "结束",
+        "error": "错误",
+        "nonRetryable": "该错误被标记为不可重试；已跳过重试。",
+        "skipReason": "跳过原因",
+        "resolvedParams": "解析后的参数",
+        "output": "输出",
+        "noValue": "（无）",
+        "logs": "日志",
+        "stepIdLabel": "步骤 ID："
+      },
+      "logs": {
+        "stackToggleHide": "隐藏调用栈",
+        "stackToggleShow": "显示调用栈",
+        "searchPlaceholder": "搜索日志…",
+        "levelFilter": "筛选日志级别",
+        "noResults": "没有匹配的日志。",
+        "levels": {
+          "debug": "调试",
+          "info": "信息",
+          "warn": "警告",
+          "error": "错误"
+        }
+      },
+      "timeline": {
+        "waiting": "等待事件…",
+        "retried": "已重试 {count} 次"
+      },
+      "status": {
+        "pending": "待运行",
+        "running": "运行中",
+        "waiting": "等待中",
+        "paused": "已暂停",
+        "succeeded": "已完成",
+        "failed": "已失败",
+        "cancelled": "已取消"
+      },
+      "list": {
+        "backToEditor": "返回编辑器",
+        "title": "运行记录",
+        "description": "本工作流的每次执行，最新优先。",
+        "columns": {
+          "status": "状态",
+          "trigger": "触发",
+          "started": "开始时间",
+          "duration": "时长",
+          "open": "打开"
+        },
+        "empty": {
+          "title": "暂无运行记录",
+          "description": "在编辑器工具栏中点击<strong>运行</strong>，或绑定一个自动触发的触发器。"
+        },
+        "openRun": "打开运行 {id}"
+      }
+    },
+    "commandPalette": {
+      "searchPlaceholder": "输入命令、搜索节点、跳转到工作流…",
+      "empty": "没有匹配结果。",
+      "headings": {
+        "editorActions": "编辑器操作",
+        "addCategory": "添加{category}节点",
+        "recent": "切换到最近的工作流"
+      },
+      "categories": {
+        "trigger": "触发器",
+        "action": "动作",
+        "ai": "AI",
+        "flow": "流程",
+        "data": "数据",
+        "io": "I/O",
+        "annotation": "注释",
+        "plugin": "插件"
+      },
+      "commands": {
+        "save": "保存工作流",
+        "run": "运行工作流",
+        "undo": "撤销",
+        "redo": "重做",
+        "autoLayout": "自动布局",
+        "exportJson": "导出工作流 JSON",
+        "importJson": "导入工作流 JSON",
+        "backToLibrary": "返回工作流库"
+      }
+    },
+    "forms": {
+      "desktopShared": {
+        "selector": {
+          "label": "选择器",
+          "defaultHint": "UIA 选择器（role / name / automationId）。留空时作用于前台窗口。",
+          "defaultPlaceholder": "role=\"Button\" name~=\"Submit\""
+        },
+        "timeout": {
+          "label": "超时（毫秒）"
+        },
+        "retries": {
+          "label": "重试次数"
+        }
+      },
+      "desktopScreenshot": {
+        "selector": {
+          "hint": "可选。设置后会截取到元素边界；否则截取整个窗口（开启 fullScreen 时截取整个屏幕）。"
+        },
+        "format": {
+          "label": "格式"
+        },
+        "fullScreen": {
+          "label": "全屏"
+        },
+        "outputPath": {
+          "label": "输出路径",
+          "hint": "可选。设置后会同时把截图写入磁盘的此路径。",
+          "placeholder": "C:/temp/cap.png"
+        }
+      },
+      "desktopFindElement": {
+        "selector": {
+          "hint": "UIA 选择器，必填 — 节点会返回元素的边界与句柄供下游节点使用。"
+        }
+      },
+      "desktopReadTree": {
+        "selector": {
+          "hint": "可选。设置后控件树以匹配元素为根；否则从前台窗口开始。"
+        },
+        "maxDepth": {
+          "label": "最大深度",
+          "hint": "遍历多少层。值越大越慢；默认值能让典型桌面在 1 秒内响应。"
+        }
+      },
+      "desktopClick": {
+        "selector": {
+          "hint": "目标元素的 UIA 选择器，必填。"
+        },
+        "button": {
+          "label": "按钮"
+        },
+        "clickCount": {
+          "label": "点击次数"
+        }
+      },
+      "desktopType": {
+        "selector": {
+          "hint": "目标输入框的 UIA 选择器。可选 — 默认作用于焦点元素。"
+        },
+        "text": {
+          "label": "文本",
+          "placeholder": "Hello, world!"
+        },
+        "delayMs": {
+          "label": "按键间延迟（毫秒）",
+          "hint": "按键之间的小延迟，适用于在快速输入时会漏键的应用。"
+        }
+      },
+      "desktopKeys": {
+        "chord": {
+          "label": "组合键",
+          "hint": "修饰键之间用「+」分隔，例如 `ctrl+shift+t`。组合键会派发到焦点窗口。",
+          "placeholder": "ctrl+shift+p"
+        }
+      },
+      "desktopInvokePattern": {
+        "selector": {
+          "hint": "支持所选模式的元素的 UIA 选择器。"
+        },
+        "pattern": {
+          "label": "模式"
+        },
+        "value": {
+          "label": "值",
+          "hint": "`Value` / `RangeValue` 必填；其余模式可选。"
+        }
+      },
+      "desktopWindowFocus": {
+        "selector": {
+          "hint": "UIA 窗口选择器（例如 `name~='记事本'`）。留空时使用前台窗口。"
+        }
+      },
+      "desktopWindowClose": {
+        "selector": {
+          "hint": "UIA 窗口选择器。留空时关闭前台窗口。"
+        }
+      },
+      "desktopWindowResize": {
+        "selector": {
+          "hint": "UIA 窗口选择器。留空时回退到前台窗口。"
+        },
+        "width": {
+          "label": "宽度（像素）"
+        },
+        "height": {
+          "label": "高度（像素）"
+        }
+      },
+      "desktopWait": {
+        "selector": {
+          "hint": "要等待的元素 / 模式的 UIA 选择器。"
+        },
+        "eventKind": {
+          "label": "事件",
+          "hint": "什么状态变化结束等待。",
+          "options": {
+            "elementVisible": "元素可见",
+            "elementHidden": "元素隐藏",
+            "windowReady": "窗口就绪",
+            "propertyChanged": "属性变化"
+          }
+        }
+      },
+      "github": {
+        "repoFullName": {
+          "label": "仓库",
+          "hint": "格式：owner/name。支持 {{ }} 表达式。",
+          "placeholder": "octocat/hello-world"
+        },
+        "addLabel": "添加标签",
+        "webhookTrigger": {
+          "events": {
+            "label": "监听的事件",
+            "hint": "选择一个或多个。Rust 接收器会校验 x-hub-signature-256 头。"
+          }
+        },
+        "openPr": {
+          "head": {
+            "label": "源分支（head）",
+            "hint": "包含改动的分支。",
+            "placeholder": "feat/x"
+          },
+          "base": {
+            "label": "目标分支（base）",
+            "hint": "合并目标分支。",
+            "placeholder": "main"
+          },
+          "title": {
+            "label": "标题"
+          },
+          "body": {
+            "label": "正文",
+            "hint": "支持 Markdown。"
+          },
+          "draft": {
+            "label": "草稿",
+            "hint": "以草稿状态打开 PR。"
+          }
+        },
+        "prNumber": {
+          "label": "PR 编号"
+        },
+        "issueNumber": {
+          "label": "Issue 编号"
+        },
+        "issuePrNumber": {
+          "label": "Issue / PR 编号"
+        },
+        "mergePr": {
+          "mergeMethod": {
+            "label": "合并方式",
+            "options": {
+              "merge": "合并提交",
+              "squash": "Squash 后合并",
+              "rebase": "Rebase 后合并"
+            }
+          },
+          "commitTitle": {
+            "label": "提交标题（可选）"
+          }
+        },
+        "reviewPr": {
+          "event": {
+            "label": "审查结论"
+          },
+          "body": {
+            "label": "审查正文",
+            "hint": "支持 {{ }} 表达式。"
+          }
+        },
+        "reviewPrInline": {
+          "provider": {
+            "label": "LLM 提供方",
+            "hint": "必须匹配已配置的 provider id（例如 anthropic、openai）。",
+            "placeholder": "anthropic"
+          },
+          "model": {
+            "label": "模型",
+            "placeholder": "claude-sonnet-4-6"
+          },
+          "apiKey": {
+            "label": "API Key",
+            "hint": "敏感信息。会写入工作流定义 — 推荐改用凭证引用。"
+          },
+          "baseURL": {
+            "label": "Base URL",
+            "hint": "可选。用于自建或代理的提供方。",
+            "placeholder": "https://api.anthropic.com"
+          },
+          "maxFiles": {
+            "label": "最多审查文件数",
+            "hint": "需要检查的改动文件数量（1-30）。默认 5。"
+          },
+          "focus": {
+            "label": "审查重点",
+            "hint": "可选的审查角度，例如「安全」或「性能」。支持 {{ }} 表达式。"
+          }
+        },
+        "comment": {
+          "body": {
+            "label": "评论正文",
+            "hint": "支持 {{ }} 表达式。"
+          }
+        },
+        "labelIssue": {
+          "add": {
+            "label": "添加的标签",
+            "placeholder": "cognia:claim"
+          },
+          "remove": {
+            "label": "移除的标签",
+            "placeholder": "wontfix"
+          }
+        },
+        "closeIssue": {
+          "reason": {
+            "label": "关闭原因",
+            "options": {
+              "completed": "已完成",
+              "not_planned": "不再计划"
+            }
+          }
+        },
+        "createRelease": {
+          "tag": {
+            "label": "标签",
+            "placeholder": "v1.0.0"
+          },
+          "name": {
+            "label": "发布名称"
+          },
+          "body": {
+            "label": "正文",
+            "hint": "支持 {{ }} 表达式和 Markdown。"
+          },
+          "draft": {
+            "label": "草稿"
+          },
+          "prerelease": {
+            "label": "预发布版本"
+          }
+        },
+        "generateChangelog": {
+          "since": {
+            "label": "起点（标签或 SHA）",
+            "placeholder": "v1.0.0"
+          },
+          "currentVersion": {
+            "label": "当前版本号",
+            "hint": "用于计算版本号增量的起始版本。默认 0.0.0。"
+          }
+        },
+        "pushTag": {
+          "tag": {
+            "label": "标签名",
+            "placeholder": "v1.0.0"
+          },
+          "sha": {
+            "label": "提交 SHA",
+            "hint": "推荐使用完整 40 位 SHA。"
+          }
+        },
+        "runIssueLoop": {
+          "worktreeMode": {
+            "label": "工作树后端",
+            "options": {
+              "local": "本地 git worktree",
+              "e2b": "E2B 沙箱（需要 e2b-sandbox 插件）"
+            }
+          },
+          "branchTemplate": {
+            "label": "分支模板",
+            "hint": "`{n}` 会被替换为 issue 编号。"
+          }
+        }
+      },
+      "pickers": {
+        "character": "选择角色",
+        "team": "选择团队",
+        "skill": "选择技能",
+        "skillNew": "新建",
+        "skillNoneItem": "— 新建 —",
+        "mcpServer": "选择 MCP 服务器",
+        "plugin": "选择插件",
+        "subworkflow": "选择工作流"
+      },
+      "manualTrigger": {
+        "intro": "在编辑器中点击「运行」按钮时触发，无需额外配置。"
+      },
+      "cron": {
+        "cronExpression": {
+          "label": "Cron 表达式",
+          "hint": "五字段：分钟 小时 日 月 周。* 表示任意值。",
+          "placeholder": "0 9 * * 1-5"
+        },
+        "timezone": {
+          "label": "时区",
+          "hint": "可选。默认使用工作流的时区设置。",
+          "placeholder": "Asia/Shanghai"
+        }
+      },
+      "connectorInbound": {
+        "adapter": {
+          "label": "适配器",
+          "hint": "适配器实例 id，例如某个 Telegram 机器人。",
+          "placeholder": "telegram_main"
+        },
+        "conversationKey": {
+          "label": "会话标识",
+          "hint": "可选。限定特定会话；留空时任意会话都会触发。"
+        },
+        "characterId": {
+          "label": "角色（可选）"
+        }
+      },
+      "chatMessageTrigger": {
+        "character": {
+          "label": "角色"
+        },
+        "sessionId": {
+          "label": "会话 ID（可选）",
+          "hint": "限定单个聊天会话。留空时该角色的任意会话都会触发。"
+        }
+      },
+      "characterSend": {
+        "character": {
+          "label": "角色"
+        },
+        "content": {
+          "label": "消息内容",
+          "hint": "支持 {{ $node['id'].out.field }} 表达式。",
+          "placeholder": "Hello, {{ $trigger.payload.userName }}"
+        },
+        "sessionId": {
+          "label": "目标会话 ID（可选）"
+        }
+      },
+      "teamRun": {
+        "teamId": {
+          "label": "团队 ID",
+          "placeholder": "team_..."
+        },
+        "goal": {
+          "label": "目标 / 简介",
+          "hint": "希望团队完成什么。会转交到 Lead 的规划阶段。"
+        }
+      },
+      "skillInvoke": {
+        "skillIds": {
+          "label": "技能 ID（逗号分隔）",
+          "hint": "所选技能会追加到下游 AI 节点的提示词中。",
+          "placeholder": "skill_writing, skill_research"
+        }
+      },
+      "twinRag": {
+        "twinId": {
+          "label": "数字分身 ID",
+          "placeholder": "twin_alex"
+        },
+        "query": {
+          "label": "查询",
+          "hint": "用于向量检索的文本，支持表达式。",
+          "placeholder": "{{ $trigger.payload.text }}"
+        },
+        "topK": {
+          "label": "Top K",
+          "hint": "返回的片段数量，默认 6。"
+        }
+      },
+      "connectorSend": {
+        "adapter": {
+          "label": "适配器",
+          "placeholder": "telegram_main"
+        },
+        "conversationKey": {
+          "label": "会话标识"
+        },
+        "content": {
+          "label": "消息内容"
+        }
+      },
+      "aiPrompt": {
+        "provider": {
+          "label": "提供方",
+          "placeholder": "（占位）"
+        },
+        "model": {
+          "label": "模型",
+          "hint": "提供方专属的模型 ID。",
+          "placeholder": "claude-sonnet-4-6"
+        },
+        "apiKey": {
+          "label": "API Key",
+          "hint": "明文存入工作流。分享给他人时建议使用凭证引用。"
+        },
+        "baseURL": {
+          "label": "Base URL（可选）",
+          "hint": "用于代理或自建 OpenAI 兼容端点。",
+          "placeholder": "https://api.openai.com/v1"
+        },
+        "systemPrompt": {
+          "label": "系统提示词"
+        },
+        "userPrompt": {
+          "label": "用户提示词"
+        },
+        "temperature": {
+          "label": "Temperature",
+          "hint": "0 = 确定性。值越大输出越多样。"
+        }
+      },
+      "branch": {
+        "condition": {
+          "label": "条件",
+          "hint": "表达式，求值为真值则走真分支。支持 {{ }} 表达式。",
+          "placeholder": "{{ $node['n_classify'].out.label }} === 'urgent'"
+        },
+        "truthyLabel": {
+          "label": "真分支标签"
+        },
+        "falsyLabel": {
+          "label": "假分支标签"
+        }
+      },
+      "setVariable": {
+        "variable": {
+          "label": "变量名",
+          "placeholder": "counter"
+        },
+        "value": {
+          "label": "值",
+          "hint": "表达式。结果会写入运行的静态数据。"
+        }
+      },
+      "wait": {
+        "mode": {
+          "label": "等待方式",
+          "options": {
+            "duration": "固定时长",
+            "event": "等待事件（Phase 4+）"
+          }
+        },
+        "durationMs": {
+          "label": "时长（毫秒）",
+          "hint": "编排器会把运行暂停这么长后继续。"
+        }
+      },
+      "httpRequest": {
+        "method": {
+          "label": "方法"
+        },
+        "url": {
+          "label": "URL",
+          "hint": "支持 {{ }} 表达式。",
+          "placeholder": "https://api.example.com/v1/things"
+        },
+        "body": {
+          "label": "请求体",
+          "hint": "以 application/json 发送。"
+        },
+        "followRedirects": {
+          "label": "跟随重定向",
+          "hint": "关闭后只返回重定向状态码，不会跳转。"
+        }
+      },
+      "code": {
+        "code": {
+          "label": "JS 代码",
+          "hint": "在沙箱 Function() 中运行，超时 5 秒。可用变量：upstream、params、trigger。"
+        }
+      },
+      "template": {
+        "template": {
+          "label": "模板",
+          "hint": "类 Mustache 的 {{ }} 表达式，会对上游 / 触发 / 静态数据求值。"
+        }
+      },
+      "transform": {
+        "operation": {
+          "label": "操作",
+          "options": {
+            "map": "Map（映射）",
+            "filter": "Filter（筛选）",
+            "reduce": "Reduce（归约）",
+            "sort": "Sort（排序）",
+            "flatten": "Flatten（扁平化）"
+          }
+        },
+        "expression": {
+          "label": "表达式",
+          "hint": "按操作类型不同。例如 map: 'x.field'；filter: 'x.value > 0'。"
+        }
+      },
+      "note": {
+        "text": {
+          "label": "便签文本"
+        },
+        "color": {
+          "label": "颜色",
+          "ariaGroup": "便签颜色",
+          "options": {
+            "yellow": "黄色",
+            "green": "绿色",
+            "blue": "蓝色",
+            "pink": "粉色",
+            "violet": "紫色"
+          }
+        }
+      },
+      "genericJson": {
+        "params": {
+          "label": "参数（JSON）",
+          "hint": "编辑原始 params 对象。无效 JSON 不会保存。"
+        },
+        "errorTopLevelObject": "顶层必须是 JSON 对象",
+        "errorInvalidJson": "无效的 JSON"
+      },
+      "webhookBanner": {
+        "desktopOnly": "仅桌面端。Webhook 接收器运行在 Tauri sidecar 中。",
+        "urlLabel": "URL：",
+        "loading": "正在加载 Webhook URL…",
+        "saveFirst": "保存工作流以注册 Webhook 并显示其 URL。"
+      },
+      "webhookTrigger": {
+        "method": {
+          "label": "方法",
+          "options": {
+            "any": "任意"
+          }
+        },
+        "path": {
+          "label": "路径",
+          "hint": "挂载在 /webhook/<path>",
+          "placeholder": "incoming-events"
+        },
+        "hmacSecret": {
+          "label": "HMAC 密钥（可选）",
+          "hint": "校验 X-Signature-256 头部。留空跳过校验。"
+        },
+        "responseStatus": {
+          "label": "响应状态码"
+        },
+        "responseTemplate": {
+          "label": "响应正文模板",
+          "hint": "可选。默认为工作流运行 ID。",
+          "placeholder": "{ \"ok\": true, \"runId\": \"{{ $run.id }}\" }"
+        }
+      },
+      "characterCreate": {
+        "name": {
+          "label": "名称",
+          "placeholder": "研究助手"
+        },
+        "systemPrompt": {
+          "label": "系统提示词",
+          "hint": "支持 {{ }} 表达式以注入动态内容。"
+        },
+        "description": {
+          "label": "描述（可选）"
+        },
+        "avatarColor": {
+          "label": "头像颜色",
+          "placeholder": "#6d28d9"
+        },
+        "avatarEmoji": {
+          "label": "头像 emoji",
+          "placeholder": "🤖"
+        },
+        "model": {
+          "label": "默认模型（可选）",
+          "placeholder": "claude-sonnet-4-6"
+        }
+      },
+      "characterUpdate": {
+        "characterId": {
+          "label": "角色"
+        },
+        "patchJson": {
+          "label": "Patch（JSON）",
+          "hint": "要更新的字段。例如：{ \"systemPrompt\": \"{{ $node.n_extract.out.text }}\" }"
+        }
+      },
+      "teamCreate": {
+        "name": {
+          "label": "团队名称"
+        },
+        "description": {
+          "label": "描述"
+        },
+        "orchestration": {
+          "label": "编排方式",
+          "options": {
+            "round_robin": "轮询",
+            "supervisor": "Supervisor",
+            "mention_round_robin": "提及轮询"
+          }
+        },
+        "supervisor": {
+          "label": "Supervisor 角色"
+        },
+        "members": {
+          "label": "成员（JSON 数组）",
+          "hint": "[{ \"characterId\": \"...\", \"role\": \"researcher\" }]"
+        }
+      },
+      "teamUpdate": {
+        "teamId": {
+          "label": "团队"
+        },
+        "patchJson": {
+          "label": "Patch（JSON）",
+          "hint": "例如：{ \"orchestration\": \"supervisor\" }"
+        }
+      },
+      "skillUpsert": {
+        "skillId": {
+          "label": "技能 ID（可选）",
+          "hint": "已设置则更新该技能；否则新建。"
+        },
+        "name": {
+          "label": "名称",
+          "placeholder": "研究框架"
+        },
+        "description": {
+          "label": "描述"
+        },
+        "content": {
+          "label": "Markdown 正文",
+          "hint": "技能正文。支持表达式；被调用时渲染进 AI 提示词。"
+        },
+        "tagsRaw": {
+          "label": "标签",
+          "hint": "用逗号分隔",
+          "placeholder": "research, planning"
+        }
+      },
+      "twinIngest": {
+        "twinId": {
+          "label": "数字分身 ID",
+          "placeholder": "twin_alex"
+        },
+        "sourceMode": {
+          "label": "来源方式",
+          "options": {
+            "paste": "粘贴内容",
+            "fetch": "拉取 URL"
+          }
+        },
+        "format": {
+          "label": "格式",
+          "options": {
+            "markdown": "Markdown",
+            "text": "纯文本",
+            "code": "代码",
+            "chat": "聊天导出"
+          }
+        },
+        "title": {
+          "label": "标题（可选）"
+        },
+        "url": {
+          "label": "URL",
+          "hint": "支持 {{ }} 表达式。",
+          "placeholder": "https://..."
+        },
+        "content": {
+          "label": "内容",
+          "hint": "支持 {{ }} 表达式。"
+        }
+      },
+      "mcpInvokeTool": {
+        "serverId": {
+          "label": "MCP 服务器"
+        },
+        "toolName": {
+          "label": "工具名",
+          "placeholder": "search_repos"
+        },
+        "argsJson": {
+          "label": "参数（JSON）",
+          "hint": "作为工具调用的 arguments 转发。支持表达式。"
+        }
+      },
+      "pluginInvoke": {
+        "pluginId": {
+          "label": "插件"
+        },
+        "taskId": {
+          "label": "任务 ID",
+          "placeholder": "generate-report"
+        },
+        "argsJson": {
+          "label": "参数（JSON）",
+          "hint": "转发给插件的任务处理器。"
+        }
+      },
+      "connectorDraft": {
+        "conversationKey": {
+          "label": "会话标识"
+        },
+        "sessionId": {
+          "label": "会话 ID"
+        },
+        "content": {
+          "label": "草稿内容"
+        },
+        "sourceMessageId": {
+          "label": "源消息 ID（可选）"
+        },
+        "ttlMs": {
+          "label": "TTL（毫秒，可选）",
+          "hint": "0 = 永不过期"
+        }
+      },
+      "aiClassify": {
+        "provider": {
+          "label": "提供方",
+          "placeholder": "提供方"
+        },
+        "model": {
+          "label": "模型",
+          "placeholder": "claude-haiku-4-5-20251001"
+        },
+        "apiKey": {
+          "label": "API Key"
+        },
+        "baseURL": {
+          "label": "Base URL（可选）"
+        },
+        "labelsRaw": {
+          "label": "标签（逗号分隔）",
+          "hint": "分类器从中选一个。顺序决定确定性回退。",
+          "placeholder": "urgent, normal, spam"
+        },
+        "input": {
+          "label": "输入",
+          "hint": "支持 {{ }} 表达式。"
+        },
+        "hint": {
+          "label": "辅助说明（可选）"
+        }
+      },
+      "aiExtract": {
+        "provider": {
+          "label": "提供方",
+          "placeholder": "提供方"
+        },
+        "model": {
+          "label": "模型"
+        },
+        "apiKey": {
+          "label": "API Key"
+        },
+        "baseURL": {
+          "label": "Base URL（可选）"
+        },
+        "schemaJson": {
+          "label": "Schema（JSON）",
+          "hint": "字段 → 期望类型。例如：{ \"name\": \"string\", \"amount\": \"number\" }"
+        },
+        "input": {
+          "label": "输入"
+        },
+        "hint": {
+          "label": "辅助说明（可选）"
+        }
+      },
+      "aiEmbed": {
+        "input": {
+          "label": "输入",
+          "hint": "支持 {{ }} 表达式。"
+        },
+        "dimension": {
+          "label": "维度",
+          "hint": "Phase 4 内置基于哈希的确定性 embedder；真正的语义嵌入晚些上线。"
+        }
+      },
+      "switch": {
+        "subject": {
+          "label": "Subject",
+          "hint": "求值后与各 case 进行匹配的表达式。",
+          "placeholder": "{{ $node['n_classify'].out.label }}"
+        },
+        "cases": {
+          "label": "Cases",
+          "hint": "先匹配先生效，严格等值。",
+          "valuePlaceholder": "值",
+          "labelPlaceholder": "标签",
+          "addCase": "添加 case",
+          "removeCase": "移除 case"
+        },
+        "defaultLabel": {
+          "label": "默认标签"
+        }
+      },
+      "split": {
+        "branchLabels": {
+          "label": "分支标签",
+          "hint": "每个标签对应一条从该 Split 出发的边。",
+          "branchPlaceholder": "分支 {n}",
+          "addBranch": "添加分支",
+          "removeBranch": "移除分支"
+        }
+      },
+      "join": {
+        "joinPolicy": {
+          "label": "汇聚策略",
+          "options": {
+            "all": "All — 等待全部父节点",
+            "any": "Any — 任一父节点成功即可",
+            "race": "Race — 先完成的父节点胜出"
+          }
+        },
+        "timeoutMs": {
+          "label": "超时（毫秒，可选）",
+          "hint": "0 = 无限等待；否则到时中止汇聚。"
+        }
+      },
+      "loop": {
+        "mode": {
+          "label": "模式",
+          "options": {
+            "forEach": "对数组逐项",
+            "times": "重复 N 次",
+            "while": "当条件为真"
+          }
+        },
+        "times": {
+          "label": "次数"
+        },
+        "inputExpression": {
+          "label": "输入表达式",
+          "hint": "求值后得到要迭代的数组。留空时使用第一条上游输出。",
+          "placeholder": "{{ $node['n_search'].out.results }}"
+        },
+        "whileCondition": {
+          "label": "While 条件",
+          "hint": "每轮迭代都会重新求值。为假或达到 maxIterations 时退出。"
+        },
+        "bodyExpression": {
+          "label": "Body 表达式",
+          "hint": "每轮迭代的值。$item 是 forEach 模式下的当前元素。",
+          "placeholder": "$item.name"
+        },
+        "maxIterations": {
+          "label": "最大迭代次数",
+          "hint": "硬性上限。达到后强制退出循环。"
+        }
+      },
+      "subworkflow": {
+        "workflowId": {
+          "label": "子工作流"
+        },
+        "inputJson": {
+          "label": "输入（JSON）",
+          "hint": "作为子工作流的触发负载转发。"
+        }
+      },
+      "webhookRespond": {
+        "desktopOnly": "仅桌面端。响应通过 Tauri Webhook 路由发送。",
+        "status": {
+          "label": "状态码"
+        },
+        "headersJson": {
+          "label": "Header（JSON）",
+          "hint": "例如：{ \"Content-Type\": \"application/json\" }",
+          "placeholder": "{ \"Content-Type\": \"application/json\" }"
+        },
+        "body": {
+          "label": "正文",
+          "hint": "支持 {{ }} 表达式。"
+        }
+      },
+      "groupAnnotation": {
+        "title": {
+          "label": "标题",
+          "placeholder": "校验流水线"
+        },
+        "color": {
+          "label": "颜色",
+          "options": {
+            "zinc": "石墨",
+            "emerald": "翠绿",
+            "sky": "天蓝",
+            "violet": "紫罗兰",
+            "amber": "琥珀",
+            "rose": "玫红",
+            "cyan": "青色"
+          }
+        },
+        "width": {
+          "label": "宽度（像素）"
+        },
+        "height": {
+          "label": "高度（像素）"
+        }
+      }
+    }
+  },
+  "inbox": {
+    "conversationList": {
+      "header": "会话",
+      "empty": "暂无会话",
+      "hideArchived": "隐藏已归档",
+      "showArchived": "显示 {count} 条已归档"
+    },
+    "draftEditor": {
+      "textPlaceholder": "草稿文本…",
+      "markdownPlaceholder": "草稿 Markdown…",
+      "approveAndSend": "批准并发送",
+      "reject": "拒绝",
+      "cancel": "取消"
+    },
+    "conversationHeader": {
+      "modeSwitchDesktopOnly": "切换模式需要桌面端"
+    },
+    "draftBanner": {
+      "pending": "有一条草稿回复待你审核。",
+      "review": "审核",
+      "reviewAria": "审核草稿回复"
+    },
+    "shell": {
+      "selectPrompt": "选择一个会话开始"
+    },
+    "sidebar": {
+      "title": "收件箱",
+      "viewModeAria": "视图模式",
+      "adapters": "适配器",
+      "noAdapters": "未配置适配器"
+    },
+    "modeSwitcher": {
+      "aria": "切换模式"
+    },
+    "outboundStatus": {
+      "retry": "重试"
+    },
+    "policyInfo": {
+      "aria": "策略信息",
+      "title": "策略"
+    },
+    "conversation": {
+      "loading": "加载中…",
+      "sessionLabel": "会话：{id}",
+      "conversationKeyLabel": "对话：{key}"
+    }
+  },
+  "connectors": {
+    "identityMerge": {
+      "title": "合并平台身份",
+      "description": "选择保留哪一个作为主身份。次身份的 ID 会被记录在主身份的合并历史中。",
+      "secondary": "次身份：",
+      "primary": "主身份：",
+      "primaryBadge": "主",
+      "merge": "合并",
+      "cancel": "取消"
     }
   }
 }

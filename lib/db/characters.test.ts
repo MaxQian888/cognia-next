@@ -131,13 +131,23 @@ describe("duplicateCharacter", () => {
 })
 
 describe("seedBuiltInCharacters", () => {
-  it("inserts the canonical 5 built-ins idempotently", async () => {
+  it("inserts the canonical 6 built-ins idempotently", async () => {
     await seedBuiltInCharacters()
     const first = await listCharacters()
-    expect(first.filter((c) => c.isBuiltIn).length).toBe(5)
-    // re-seed: count should remain 5
+    expect(first.filter((c) => c.isBuiltIn).length).toBe(6)
+    // re-seed: count should remain 6
     await seedBuiltInCharacters()
     const second = await listCharacters()
-    expect(second.filter((c) => c.isBuiltIn).length).toBe(5)
+    expect(second.filter((c) => c.isBuiltIn).length).toBe(6)
+  })
+
+  it("includes the Goal Tracker character with acceptEdits permission mode", async () => {
+    await seedBuiltInCharacters()
+    const goalTracker = await getCharacter("char_builtin_goal_tracker")
+    expect(goalTracker).toBeDefined()
+    expect(goalTracker?.name).toBe("Goal Tracker")
+    expect(goalTracker?.isBuiltIn).toBe(true)
+    expect(goalTracker?.permissionMode).toBe("acceptEdits")
+    expect(goalTracker?.systemPrompt).toMatch(/outcome-driven agent/i)
   })
 })

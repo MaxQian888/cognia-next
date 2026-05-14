@@ -42,6 +42,7 @@ import { validatePluginManifest } from "@/lib/plugin/core/validation"
 import { applyPluginTables, removePluginTables } from "@/lib/plugin/dexie-bridge"
 import { getDb } from "@/lib/db/schema"
 import { clearPluginExtensions } from "@/lib/plugin/api/extension-api"
+import { purgeMessagePartRenderersForPlugin } from "@/lib/plugin/api/message-part-api"
 import { getPluginExtensions, restorePluginExtensions } from "@/lib/plugin/api/extension-api"
 import {
   evaluatePluginCompatibility,
@@ -1893,6 +1894,7 @@ export class PluginManager {
     this.a2uiBridge?.unregisterPluginTemplates(pluginId)
     this.themesBridge?.unregisterPluginThemes(pluginId)
     clearPluginExtensions(pluginId)
+    purgeMessagePartRenderersForPlugin(pluginId)
 
     // Unregister all tools
     if (plugin.tools) {

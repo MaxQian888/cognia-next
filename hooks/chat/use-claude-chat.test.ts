@@ -431,7 +431,7 @@ describe("useClaudeChat — actions", () => {
     expect(truncateAfterMock).not.toHaveBeenCalled()
   })
 
-  it("regenerate uses the last user turn when present", async () => {
+  it("regenerate tags the existing assistant siblings and re-sends without re-appending the user turn", async () => {
     chatState.messages = [
       { id: "u-1", role: "user", parts: [{ type: "text", text: "hello" }] },
       { id: "a-1", role: "assistant", parts: [{ type: "text", text: "hi" }] },
@@ -441,7 +441,31 @@ describe("useClaudeChat — actions", () => {
     await act(async () => {
       await result.current.regenerate()
     })
-    expect(truncateAfterMock).toHaveBeenCalledWith("sess-1", "u-1", { inclusive: true })
+
+    // Branch-aware regenerate no longer truncates — siblings are preserved
+    // and stamped with branchGroupId / branchIndex via persistMessages.
+    expect(truncateAfterMock).not.toHaveBeenCalled()
+    expect(persistMessagesMock).toHaveBeenCalled()
+    // Find the persist call that wrote the branch-tagged snapshot. send()
+    // and applySdkEvent may also persist, so we scan rather than peek
+    // at the last call.
+    const taggingCall = persistMessagesMock.mock.calls.find((args) => {
+      const list = args[1] as Array<{ id: string; metadata?: { branchGroupId?: string } }>
+      return Array.isArray(list) && list.some((m) => m.id === "a-1" && m.metadata?.branchGroupId)
+    })
+    expect(taggingCall).toBeTruthy()
+    expect(taggingCall?.[0]).toBe("sess-1")
+    const merged = taggingCall?.[1] as Array<{
+      id: string
+      metadata?: { branchGroupId?: string; branchIndex?: number }
+    }>
+    const tagged = merged.find((m) => m.id === "a-1")
+    expect(tagged?.metadata?.branchGroupId).toBe("u-1")
+    expect(tagged?.metadata?.branchIndex).toBe(0)
+
+    // sendPrompt fires for the new assistant turn — sendPromptMock has been
+    // called (via `send()`), which means we did re-issue the request.
+    expect(sendPromptMock).toHaveBeenCalled()
   })
 
   it("non-Tauri: skips the message subscription", async () => {

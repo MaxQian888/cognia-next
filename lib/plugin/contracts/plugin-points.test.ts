@@ -170,4 +170,108 @@ describe("plugin point contracts", () => {
     expect(diag).toBeDefined()
     expect(diag?.hint).toContain("onA2UISurfaceCreate")
   })
+
+  describe("VS Code extension reuse — extension points", () => {
+    it("registers the four VS Code-specific UI slots", () => {
+      expect(CANONICAL_EXTENSION_POINTS).toEqual(
+        expect.arrayContaining([
+          "vscode.sidebar.view",
+          "vscode.webview.panel",
+          "vscode.activity-bar",
+          "vscode.terminal.output",
+        ])
+      )
+    })
+
+    it("treats each VS Code UI slot as implemented (not deprecated)", () => {
+      const slots = [
+        "vscode.sidebar.view",
+        "vscode.webview.panel",
+        "vscode.activity-bar",
+        "vscode.terminal.output",
+      ] as const
+      for (const slot of slots) {
+        const result = validateExtensionPoint(slot, {
+          governanceMode: "block",
+          hasPermission: () => true,
+        })
+        expect({ slot, allowed: result.allowed, diagnostics: result.diagnostics }).toEqual({
+          slot,
+          allowed: true,
+          diagnostics: [],
+        })
+      }
+    })
+
+    it("emits a contract for every VS Code UI slot with an implementation binding", () => {
+      const contracts = PLUGIN_POINT_CONTRACTS.filter((c) => c.id.startsWith("vscode."))
+      expect(contracts).toHaveLength(4)
+      for (const contract of contracts) {
+        expect(contract.kind).toBe("ui-slot")
+        expect(contract.status).toBe("implemented")
+        expect(contract.binding).toMatch(/components\/extensions\/vscode-/)
+      }
+    })
+  })
+
+  describe("VS Code extension reuse — activation patterns", () => {
+    const vscodePatterns = [
+      "onView:*",
+      "onWebviewPanel:*",
+      "onCustomEditor:*",
+      "onAuthenticationRequest",
+      "onTaskType:*",
+      "onFileSystem:*",
+      "onDebugResolve:*",
+      "onStartupFinished",
+      "onUri",
+      "onTerminal",
+      "onTerminalProfile:*",
+      "onNotebook:*",
+      "onWalkthrough:*",
+      "onChatParticipant:*",
+      "onLanguageModelTool:*",
+      "workspaceContains:*",
+    ] as const
+
+    it("registers every documented VS Code activation pattern", () => {
+      for (const pattern of vscodePatterns) {
+        expect(CANONICAL_ACTIVATION_PATTERNS).toContain(pattern)
+      }
+    })
+
+    it("validates each VS Code activation pattern in block mode", () => {
+      for (const pattern of vscodePatterns) {
+        const result = validateActivationEvent(pattern, { governanceMode: "block" })
+        expect({ pattern, allowed: result.allowed }).toEqual({ pattern, allowed: true })
+      }
+    })
+
+    it("resolves concrete VS Code activation events to their canonical wildcard", () => {
+      expect(resolveActivationPattern("onView:gitlens.views.repositories")).toBe("onView:*")
+      expect(resolveActivationPattern("onWebviewPanel:catCoding")).toBe("onWebviewPanel:*")
+      expect(resolveActivationPattern("workspaceContains:**/package.json")).toBe(
+        "workspaceContains:*"
+      )
+      expect(resolveActivationPattern("onTaskType:npm")).toBe("onTaskType:*")
+    })
+
+    it("flags onDebugResolve:* with the runtime-not-supported note", () => {
+      const contract = PLUGIN_POINT_CONTRACTS.find((c) => c.id === "onDebugResolve:*")
+      expect(contract).toBeDefined()
+      expect(contract?.retirementNote).toMatch(/NotSupportedError/i)
+    })
+
+    it("binds VS Code activation dispatch to the sidecar host", () => {
+      const vscodeContracts = PLUGIN_POINT_CONTRACTS.filter(
+        (c) =>
+          c.kind === "activation" &&
+          (vscodePatterns as readonly string[]).includes(c.id as (typeof vscodePatterns)[number])
+      )
+      expect(vscodeContracts).toHaveLength(vscodePatterns.length)
+      for (const contract of vscodeContracts) {
+        expect(contract.binding).toBe("sidecars/vscode-ext-host/src/host.ts:handleActivationEvent")
+      }
+    })
+  })
 })

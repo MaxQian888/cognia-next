@@ -77,6 +77,57 @@ export async function listSessions(opts: {
   return transport.call<SessionListPage>("session_list", opts)
 }
 
+/**
+ * Paginated read of one session's messages. Used by the mobile companion to
+ * hydrate a chat history without taking ownership of the desktop's Dexie
+ * snapshot. Round-trips through `_rpc/message_get_by_session` → desktop
+ * Tauri command → `messageRepository.list`.
+ *
+ * Returns rows sorted by `createdAt` ascending so the mobile client can
+ * append them to its scrollback in order.
+ */
+export interface MobileMessagesPage {
+  rows: UIMessage[]
+  total: number
+  next_offset?: number
+}
+
+export async function getMessagesBySession(
+  sessionId: string,
+  limit?: number,
+  offset?: number
+): Promise<MobileMessagesPage> {
+  return transport.call<MobileMessagesPage>("message_get_by_session", {
+    session_id: sessionId,
+    limit,
+    offset,
+  })
+}
+
+/**
+ * Initiate a mobile-originated send. The desktop side is authoritative —
+ * this RPC enqueues the prompt against the existing session and returns the
+ * id of the user message that was appended. The downstream assistant
+ * response streams back via the standard `claude://message` Tauri event,
+ * which the desktop bridges to the mobile websocket / push channel.
+ */
+export interface MobileMessageSendResult {
+  messageId?: string
+  ok: boolean
+}
+
+export async function sendMessageFromMobile(
+  sessionId: string,
+  content: string,
+  role?: "user" | "assistant" | "system"
+): Promise<MobileMessageSendResult> {
+  return transport.call<MobileMessageSendResult>("message_send", {
+    session_id: sessionId,
+    content,
+    role,
+  })
+}
+
 export async function approveTool(
   sessionId: string,
   requestId: string,

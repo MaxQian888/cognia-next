@@ -413,4 +413,121 @@ describe("useChatStore", () => {
       expect(result.current.lastSendBySession).toEqual({})
     })
   })
+
+  describe("activeBranchByGroup", () => {
+    it("starts empty", () => {
+      const { result } = renderHook(() => useChatStore())
+      expect(result.current.activeBranchByGroup).toEqual({})
+    })
+
+    it("setActiveBranch writes the active id for a group", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setActiveBranch("g1", "m2"))
+      expect(result.current.activeBranchByGroup).toEqual({ g1: "m2" })
+    })
+
+    it("setActiveBranch is a no-op when the active id is unchanged", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setActiveBranch("g1", "m2"))
+      const snapshotMap = result.current.activeBranchByGroup
+      act(() => result.current.setActiveBranch("g1", "m2"))
+      expect(result.current.activeBranchByGroup).toBe(snapshotMap)
+    })
+
+    it("setActiveBranch keeps other groups intact when switching", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => {
+        result.current.setActiveBranch("g1", "m1")
+        result.current.setActiveBranch("g2", "n1")
+      })
+      act(() => result.current.setActiveBranch("g1", "m2"))
+      expect(result.current.activeBranchByGroup).toEqual({ g1: "m2", g2: "n1" })
+    })
+
+    it("hydrateActiveBranches replaces the whole map", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setActiveBranch("g1", "m1"))
+      act(() => result.current.hydrateActiveBranches({ g2: "x", g3: "y" }))
+      expect(result.current.activeBranchByGroup).toEqual({ g2: "x", g3: "y" })
+    })
+
+    it("clear() resets active branches", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setActiveBranch("g1", "m1"))
+      act(() => result.current.clear())
+      expect(result.current.activeBranchByGroup).toEqual({})
+    })
+
+    it("setActiveSession resets active branches", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setActiveBranch("g1", "m1"))
+      act(() => result.current.setActiveSession("session-2"))
+      expect(result.current.activeBranchByGroup).toEqual({})
+    })
+  })
+})
+
+describe("selectVisibleMessages", () => {
+  // Importing via require here to avoid a TDZ on the helper export.
+  const { selectVisibleMessages } = require("./chat-store") as typeof import("./chat-store")
+
+  const withBranch = (id: string, groupId?: string, branchIndex?: number, text = ""): UIMessage =>
+    ({
+      id,
+      role: "assistant",
+      parts: [{ type: "text", text }],
+      metadata: groupId ? { branchGroupId: groupId, branchIndex: branchIndex ?? 0 } : undefined,
+    }) as unknown as UIMessage
+
+  it("passes through messages without a branchGroupId", () => {
+    const a = withBranch("a")
+    const b = withBranch("b")
+    expect(selectVisibleMessages([a, b], {})).toEqual([a, b])
+  })
+
+  it("filters siblings down to the active id within a group", () => {
+    const a = withBranch("a", "g1", 0)
+    const b = withBranch("b", "g1", 1)
+    const c = withBranch("c") // ungrouped follow-up
+    const result = selectVisibleMessages([a, b, c], { g1: "b" })
+    expect(result.map((m) => m.id)).toEqual(["b", "c"])
+  })
+
+  it("falls back to the highest branchIndex when no active id is recorded", () => {
+    const a = withBranch("a", "g1", 0)
+    const b = withBranch("b", "g1", 2)
+    const c = withBranch("c", "g1", 1)
+    const result = selectVisibleMessages([a, b, c], {})
+    expect(result.map((m) => m.id)).toEqual(["b"])
+  })
+
+  it("preserves placement order across mixed branch and standalone messages", () => {
+    const u = { id: "u", role: "user", parts: [] } as unknown as UIMessage
+    const a = withBranch("a", "g1", 0)
+    const b = withBranch("b", "g1", 1)
+    const tail = withBranch("tail")
+    const result = selectVisibleMessages([u, a, b, tail], { g1: "a" })
+    expect(result.map((m) => m.id)).toEqual(["u", "a", "tail"])
+  })
+})
+
+describe("selectBranchSiblings", () => {
+  const { selectBranchSiblings } = require("./chat-store") as typeof import("./chat-store")
+
+  const m = (id: string, branchGroupId: string, branchIndex: number): UIMessage =>
+    ({
+      id,
+      role: "assistant",
+      parts: [],
+      metadata: { branchGroupId, branchIndex },
+    }) as unknown as UIMessage
+
+  it("returns siblings sorted by branchIndex", () => {
+    const ms = [m("a", "g1", 2), m("b", "g1", 0), m("c", "g2", 0), m("d", "g1", 1)]
+    expect(selectBranchSiblings(ms, "g1").map((x) => x.id)).toEqual(["b", "d", "a"])
+  })
+
+  it("returns [] for unknown group", () => {
+    expect(selectBranchSiblings([m("a", "g1", 0)], "g2")).toEqual([])
+  })
 })

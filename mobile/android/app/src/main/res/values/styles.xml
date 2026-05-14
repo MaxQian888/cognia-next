@@ -16,7 +16,10 @@
     </style>
 
 
+    <!-- Launch theme: paints @color/splash_background underneath the existing
+         splash bitmap so the launch window honors dark mode automatically
+         (the same drawable + a values-night/colors.xml swap). -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <item name="android:background">@drawable/splash</item>
+        <item name="android:background">@drawable/splash_themed</item>
     </style>
 </resources>

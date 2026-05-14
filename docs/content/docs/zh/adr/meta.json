@@ -18,6 +18,7 @@
     "0015-mobile-v2-completion",
     "0016-plugin-system-completion",
     "0017-workflow-plugin-extension-points",
-    "0018-github-delivery"
+    "0018-github-delivery",
+    "0019-goal-command"
   ]
 }

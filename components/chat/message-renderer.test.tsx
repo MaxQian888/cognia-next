@@ -51,6 +51,17 @@ jest.mock("@/components/ai-elements/tool", () => ({
   ToolHeader: () => null,
   ToolContent: ({ children }: { children: ReactForMocks.ReactNode }) =>
     ReactForMocks.createElement("div", null, children),
+  ToolInput: ({ input }: { input: unknown }) =>
+    ReactForMocks.createElement("div", { "data-test": "tool-input" }, JSON.stringify(input)),
+}))
+
+jest.mock("@/components/ai-elements/error-trace", () => ({
+  ErrorTraceDetails: ({ error, title }: { error: { message: string } | null; title?: string }) =>
+    ReactForMocks.createElement(
+      "div",
+      { "data-test": "error-trace", "data-title": title },
+      error?.message ?? ""
+    ),
 }))
 
 jest.mock("./markdown-renderer", () => ({
@@ -68,6 +79,22 @@ jest.mock("@/components/chat/message-parts/subagent-part", () => ({
 
 jest.mock("@/components/chat/message-parts/agent-team-dispatch-part", () => ({
   AgentTeamDispatchPart: () => ReactForMocks.createElement("div", { "data-test": "dispatch-part" }),
+}))
+
+jest.mock("@/components/chat/message-parts/artifact-part", () => ({
+  ArtifactPart: () => ReactForMocks.createElement("div", { "data-test": "artifact-part" }),
+}))
+
+jest.mock("@/components/chat/message-parts/sources-part", () => ({
+  SourcesPart: () => ReactForMocks.createElement("div", { "data-test": "sources-part" }),
+}))
+
+jest.mock("@/components/chat/message-parts/terminal-tool-part", () => ({
+  TerminalToolPart: () => ReactForMocks.createElement("div", { "data-test": "terminal-tool-part" }),
+}))
+
+jest.mock("@/components/chat/branch-navigator", () => ({
+  BranchNavigator: () => null,
 }))
 
 jest.mock("next-intl", () => {
@@ -247,6 +274,49 @@ describe("tool parts", () => {
     expect(document.querySelector("[data-test='tool']")).toBeTruthy()
   })
 
+  it("renders ErrorTraceDetails when the tool part is in output-error state", () => {
+    const msg: UIMessage = {
+      id: "terr",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-Bash",
+          toolCallId: "call_e",
+          toolName: "Bash",
+          state: "output-error",
+          input: { command: "exit 1" },
+          errorText: "Command failed with exit code 1",
+        } as unknown as UIMessage["parts"][number],
+      ],
+    }
+    render(<MessageRenderer message={msg} />)
+    const trace = document.querySelector("[data-test='error-trace']")
+    expect(trace).toBeTruthy()
+    expect(trace?.textContent).toBe("Command failed with exit code 1")
+    expect(trace?.getAttribute("data-title")).toBe("Tool call failed")
+    // The input section is preserved so users still see the failing call.
+    expect(document.querySelector("[data-test='tool-input']")).toBeTruthy()
+  })
+
+  it("falls back to a generic message when errorText is missing", () => {
+    const msg: UIMessage = {
+      id: "terr2",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-Edit",
+          toolCallId: "call_e2",
+          toolName: "Edit",
+          state: "output-error",
+          input: { path: "a.ts" },
+        } as unknown as UIMessage["parts"][number],
+      ],
+    }
+    render(<MessageRenderer message={msg} />)
+    const trace = document.querySelector("[data-test='error-trace']")
+    expect(trace?.textContent).toBe("Tool call failed")
+  })
+
   it("renders TodoWrite as task list when todos are valid", () => {
     const msg: UIMessage = {
       id: "t2",
@@ -271,6 +341,86 @@ describe("tool parts", () => {
     render(<MessageRenderer message={msg} />)
     expect(document.querySelector("[data-test='task']")).toBeTruthy()
     expect(screen.getByText("Do A")).toBeInTheDocument()
+  })
+})
+
+// ── plugin part renderer fallback ─────────────────────────────────────────────
+
+describe("plugin message-part renderer", () => {
+  const { registerMessagePartRenderer, clearAllMessagePartRenderers } =
+    require("@/lib/plugin/api/message-part-renderers") as typeof import("@/lib/plugin/api/message-part-renderers")
+
+  beforeEach(() => {
+    clearAllMessagePartRenderers()
+  })
+
+  it("delegates an unknown part type to the registered plugin renderer", () => {
+    registerMessagePartRenderer(
+      "weather-plugin",
+      "weather",
+      ({ part }: { part: { type: string; city?: string } }) =>
+        ReactForMocks.createElement("div", { "data-test": "weather-card" }, part.city ?? "no-city")
+    )
+    const msg: UIMessage = {
+      id: "p1",
+      role: "assistant",
+      parts: [
+        {
+          type: "weather",
+          city: "Beijing",
+        } as unknown as UIMessage["parts"][number],
+      ],
+    }
+    render(<MessageRenderer message={msg} />)
+    const card = document.querySelector("[data-test='weather-card']")
+    expect(card).toBeTruthy()
+    expect(card?.textContent).toBe("Beijing")
+  })
+
+  it("renders an error placeholder when the plugin renderer throws", () => {
+    const Boom = () => {
+      throw new Error("plugin crashed")
+    }
+    registerMessagePartRenderer("bad-plugin", "broken", Boom)
+    const msg: UIMessage = {
+      id: "p2",
+      role: "assistant",
+      parts: [{ type: "broken" } as unknown as UIMessage["parts"][number]],
+    }
+    // Silence the boundary's console output.
+    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    render(<MessageRenderer message={msg} />)
+    const errNode = document.querySelector("[data-testid='plugin-part-error']")
+    expect(errNode).toBeTruthy()
+    expect(errNode?.getAttribute("data-plugin-id")).toBe("bad-plugin")
+    expect(errNode?.getAttribute("data-part-type")).toBe("broken")
+    errSpy.mockRestore()
+  })
+
+  it("does NOT delegate `tool-` types or host-owned parts to plugins", () => {
+    const HostStub = ({ part }: { part: { type: string } }) =>
+      ReactForMocks.createElement("div", { "data-test": "host-stub" }, part.type)
+    registerMessagePartRenderer("malicious-plugin", "tool-Bash", HostStub)
+    // The reserved-prefix gate runs in the plugin API; here we exercise the
+    // renderer-side gate directly by registering then asserting the host
+    // path takes over instead.
+    const msg: UIMessage = {
+      id: "p3",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-Bash",
+          state: "output-available",
+          input: {},
+          output: "ok",
+        } as unknown as UIMessage["parts"][number],
+      ],
+    }
+    render(<MessageRenderer message={msg} />)
+    // The host renders tool-Bash via the Terminal-tool component (mocked in
+    // this file as the generic `tool` wrapper). The plugin renderer must
+    // NOT be selected.
+    expect(document.querySelector("[data-test='host-stub']")).toBeNull()
   })
 })
 

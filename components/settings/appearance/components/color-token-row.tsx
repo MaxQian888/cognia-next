@@ -23,6 +23,10 @@ export interface ColorTokenRowProps {
   /** Disable both inputs. */
   disabled?: boolean
   className?: string
+  /** Pre-translated aria-label for the color swatch input. Falls back to "<label> swatch" if omitted. */
+  swatchAriaLabel?: string
+  /** Pre-translated aria-label for the hex input. Falls back to "<label> hex" if omitted. */
+  hexAriaLabel?: string
 }
 
 export function ColorTokenRow({
@@ -33,6 +37,8 @@ export function ColorTokenRow({
   hint,
   disabled,
   className,
+  swatchAriaLabel,
+  hexAriaLabel,
 }: ColorTokenRowProps) {
   const hexValid = isHexColor(value)
   // The native `<input type="color">` only accepts 6-digit hex; if the
@@ -58,7 +64,8 @@ export function ColorTokenRow({
             "h-8 w-10 shrink-0 cursor-pointer rounded border border-border bg-transparent",
             disabled && "opacity-50"
           )}
-          aria-label={`${label ?? tokenKey} swatch`}
+          aria-label={swatchAriaLabel ?? `${label ?? tokenKey} swatch`}
+          data-testid={`color-token-${tokenKey}-swatch`}
         />
         <Input
           value={value}
@@ -68,8 +75,9 @@ export function ColorTokenRow({
             "h-8 flex-1 font-mono text-[11px] sm:max-w-32",
             !hexValid && "border-destructive text-destructive"
           )}
-          aria-label={`${label ?? tokenKey} hex`}
+          aria-label={hexAriaLabel ?? `${label ?? tokenKey} hex`}
           aria-invalid={!hexValid}
+          data-testid={`color-token-${tokenKey}-hex`}
         />
       </div>
       {hint && <p className="text-[11px] text-muted-foreground sm:ml-32">{hint}</p>}

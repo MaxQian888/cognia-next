@@ -9,14 +9,24 @@ import {
 } from "@/components/ai-elements/message"
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning"
 import { Task, TaskContent, TaskItem, TaskTrigger } from "@/components/ai-elements/task"
-import { Tool, ToolBody, ToolHeader, ToolContent } from "@/components/ai-elements/tool"
+import { Tool, ToolBody, ToolHeader, ToolContent, ToolInput } from "@/components/ai-elements/tool"
+import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { A2UIPart } from "@/components/chat/message-parts/a2ui-part"
 import { SubagentPart } from "@/components/chat/message-parts/subagent-part"
 import { AgentTeamDispatchPart } from "@/components/chat/message-parts/agent-team-dispatch-part"
+import { ArtifactPart } from "@/components/chat/message-parts/artifact-part"
+import { SourcesPart } from "@/components/chat/message-parts/sources-part"
+import { TerminalToolPart } from "@/components/chat/message-parts/terminal-tool-part"
+import { MCPToolCard, isStructuredMcpToolType } from "@/components/chat/message-parts/mcp-tool-card"
+import { CanvasInlinePart } from "@/components/chat/message-parts/canvas-inline-part"
+import { BranchNavigator } from "@/components/chat/branch-navigator"
 import type {
   A2UIPart as A2UIPartType,
   AgentTeamDispatchPart as AgentTeamDispatchPartType,
+  ArtifactPart as ArtifactPartType,
+  CanvasInlinePart as CanvasInlinePartType,
+  SourcesPart as SourcesPartType,
   SubagentPart as SubagentPartType,
 } from "@/lib/claude/parts-extensions"
 import { Button } from "@/components/ui/button"
@@ -36,7 +46,7 @@ import {
 import type { ToolUIPart, UIMessage } from "ai"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import type { Character } from "@/lib/claude/types"
-import { memo, useCallback, useMemo, useState, type KeyboardEvent } from "react"
+import React, { memo, useCallback, useMemo, useState, type KeyboardEvent } from "react"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
@@ -44,6 +54,12 @@ import { useChatStore } from "@/stores/chat"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { loggers } from "@/lib/logger"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import {
+  getMessagePartRenderer,
+  subscribeMessagePartRenderers,
+  getMessagePartRenderersRevision,
+} from "@/lib/plugin/api/message-part-renderers"
+import { useSyncExternalStore } from "react"
 
 interface Props {
   message: UIMessage
@@ -58,6 +74,51 @@ interface Props {
   onEditResend?: (messageId: string, newText: string) => void | Promise<void>
 }
 
+function usePluginPartRegistryRevision(): number {
+  return useSyncExternalStore(
+    subscribeMessagePartRenderers,
+    getMessagePartRenderersRevision,
+    getMessagePartRenderersRevision
+  )
+}
+
+class PluginPartErrorBoundary extends React.Component<
+  {
+    type: string
+    pluginId: string
+    children: React.ReactNode
+  },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null }
+  static getDerivedStateFromError(error: Error) {
+    return { error }
+  }
+  componentDidCatch(error: Error): void {
+    loggers.chat.warn("plugin message-part renderer threw", {
+      pluginId: this.props.pluginId,
+      partType: this.props.type,
+      err: error.message,
+    })
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div
+          data-testid="plugin-part-error"
+          data-plugin-id={this.props.pluginId}
+          data-part-type={this.props.type}
+          className="my-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+          role="alert"
+        >
+          Plugin renderer for &quot;{this.props.type}&quot; crashed: {this.state.error.message}
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 function MessageRendererInner({
   message,
   isStreaming = false,
@@ -67,6 +128,8 @@ function MessageRendererInner({
   onRegenerate,
   onEditResend,
 }: Props) {
+  // Re-render when a plugin registers / unregisters a message-part renderer.
+  usePluginPartRegistryRevision()
   const t = useTranslations("chat.message")
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState("")
@@ -272,6 +335,8 @@ function MessageRendererInner({
             </MessageAction>
           )}
 
+          {message.role === "assistant" && <BranchNavigator message={message} className="mx-1" />}
+
           {message.role === "assistant" && isLastAssistant && onRegenerate && (
             <MessageAction
               tooltip={t("regenerateTooltip")}
@@ -417,6 +482,18 @@ function renderPart(
   const type = (part as { type?: string }).type
   if (!type) return null
 
+  if (type === "artifact") {
+    return <ArtifactPart key={key} part={part as unknown as ArtifactPartType} />
+  }
+
+  if (type === "sources") {
+    return <SourcesPart key={key} part={part as unknown as SourcesPartType} />
+  }
+
+  if (type === "canvas") {
+    return <CanvasInlinePart key={key} part={part as unknown as CanvasInlinePartType} />
+  }
+
   if (type === "a2ui") {
     return <A2UIPart key={key} part={part as unknown as A2UIPartType} _messageId={messageId} />
   }
@@ -537,8 +614,62 @@ function renderPart(
     // Falls through to generic Tool rendering below.
   }
 
+  // Plugin-contributed part types — checked before the generic tool fallback
+  // so a plugin can override custom types it owns, but AFTER the host's own
+  // hard-coded parts so plugins cannot shadow `artifact` / `a2ui` / etc.
+  const pluginEntry =
+    typeof type === "string" && !type.startsWith("tool-") ? getMessagePartRenderer(type) : undefined
+  if (pluginEntry) {
+    const PluginRenderer = pluginEntry.component
+    return (
+      <PluginPartErrorBoundary key={key} type={pluginEntry.type} pluginId={pluginEntry.pluginId}>
+        <PluginRenderer part={part} messageId={messageId} isStreaming={isStreaming} />
+      </PluginPartErrorBoundary>
+    )
+  }
+
   if (typeof type === "string" && type.startsWith("tool-")) {
     const tp = part as ToolUIPart
+    // Route tool-Bash to the Terminal-style renderer (which falls back to the
+    // generic ToolBody once the call completes).
+    if (type === "tool-Bash" && tp.state !== "output-error") {
+      return <TerminalToolPart key={key} part={tp} />
+    }
+    // Structured cognia MCP / Claude-builtin tools — display the call shell
+    // (header + status) plus the structured card body. MCPToolCard internally
+    // falls back to ToolBody when the payload can't be parsed.
+    if (isStructuredMcpToolType(type) && tp.state !== "output-error") {
+      return (
+        <Tool key={key} defaultOpen={tp.state === "input-available"}>
+          <ToolHeader type={tp.type} state={tp.state} />
+          <ToolContent>
+            <MCPToolCard part={tp} />
+          </ToolContent>
+        </Tool>
+      )
+    }
+    // Error path: surface a structured ErrorTraceDetails alert instead of the
+    // plain `<pre>` ToolOutput renders for `errorText`. We keep the input
+    // section so the user can still see what was called.
+    if (tp.state === "output-error") {
+      const errorText =
+        typeof (tp as { errorText?: unknown }).errorText === "string"
+          ? ((tp as { errorText?: string }).errorText as string)
+          : "Tool call failed"
+      return (
+        <Tool key={key} defaultOpen>
+          <ToolHeader type={tp.type} state={tp.state} />
+          <ToolContent>
+            {tp.input !== undefined && tp.input !== null && <ToolInput input={tp.input} />}
+            <ErrorTraceDetails
+              error={{ message: errorText }}
+              title="Tool call failed"
+              className="mt-2"
+            />
+          </ToolContent>
+        </Tool>
+      )
+    }
     return (
       <Tool key={key} defaultOpen={tp.state === "input-available"}>
         <ToolHeader type={tp.type} state={tp.state} />

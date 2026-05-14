@@ -1,0 +1,38 @@
+{
+  "name": "cline-mock",
+  "publisher": "cognia-test",
+  "displayName": "Cline-style Mock Extension",
+  "description": "Synthetic minified VS Code extension simulating an AI-assistant pattern (sidebar webview + child_process spawning + secrets storage). Used to verify the cognia sidecar's runtime permission gate catches the things the static analyser cannot.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "engines": {
+    "vscode": ">=1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onView:cline-mock.sidebar"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cline-mock-bar",
+          "title": "Cline Mock",
+          "icon": "$(beaker)"
+        }
+      ]
+    },
+    "views": {
+      "cline-mock-bar": [
+        {
+          "id": "cline-mock.sidebar",
+          "name": "Cline Mock",
+          "type": "webview"
+        }
+      ]
+    }
+  }
+}

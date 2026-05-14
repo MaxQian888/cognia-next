@@ -16,19 +16,46 @@
  *      notes, etc.).
  */
 
-import { useRef, useState } from "react"
+import { useRef, useState, useSyncExternalStore } from "react"
+import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { createTwinSource } from "@/lib/db/twin-sources"
+import { isTauri } from "@/lib/tauri"
+import { parseGitRepo } from "@/lib/twin/importers"
 import { detectSourceFormat, listSupportedFormats } from "@/lib/twin/ingest"
-import { parseMbox, parseEml, parseSlackExport } from "@/lib/twin/importers"
+import {
+  parseMbox,
+  parseEml,
+  parseSlackExport,
+  parseChatgptExport,
+  isChatgptExportShape,
+  parseClaudeExport,
+  isClaudeExportShape,
+  parseGeminiExport,
+  isGeminiExportShape,
+  parseLarkExport,
+  isLarkExportShape,
+  parseDingtalkExport,
+  isDingtalkTextShape,
+  isDingtalkJsonShape,
+  parseWechatExport,
+  isWechatExportShape,
+} from "@/lib/twin/importers"
 import type { RawSource } from "@/lib/twin/ingest"
 import type { TwinSourceFormat, TwinSourceKind } from "@/types/twin"
 
 const FORMATS: TwinSourceFormat[] = listSupportedFormats() as TwinSourceFormat[]
+
+// `isTauri()` reads `window.__TAURI_INTERNALS__`. Use `useSyncExternalStore`
+// so SSR returns `false` and the client reads the real value on first paint
+// without triggering a cascading effect-driven re-render.
+const subscribeTauri = (): (() => void) => () => {}
+const getTauriSnapshot = (): boolean => isTauri()
+const getServerTauriSnapshot = (): boolean => false
 
 /**
  * Extensions accepted by the file picker. Binary formats are parsed in the
@@ -117,6 +144,67 @@ function isSlackShape(jsonText: string): boolean {
   if (/"type"\s*:\s*"message"/.test(head)) return true
   if (/"messages"\s*:/.test(head) && /"text"\s*:/.test(head)) return true
   return false
+}
+
+type ChatJsonImporterKey =
+  | "chatgpt-export"
+  | "claude-export"
+  | "gemini-export"
+  | "slack-export"
+  | "lark-export"
+  | "wechat-export"
+  | "dingtalk-export"
+
+/**
+ * Detect which chat-export importer a parsed JSON value matches. The
+ * order matters — more specific shapes (ChatGPT mapping tree, Claude
+ * `chat_messages`) are checked before generic `messages` shapes. Returns
+ * `undefined` when no importer recognises the shape.
+ */
+function detectChatJsonImporter(parsed: unknown, raw: string): ChatJsonImporterKey | undefined {
+  if (isChatgptExportShape(parsed)) return "chatgpt-export"
+  if (isClaudeExportShape(parsed)) return "claude-export"
+  if (isGeminiExportShape(parsed)) return "gemini-export"
+  if (isSlackShape(raw)) return "slack-export"
+  if (isLarkExportShape(parsed)) return "lark-export"
+  if (isWechatExportShape(parsed)) return "wechat-export"
+  if (isDingtalkJsonShape(parsed)) return "dingtalk-export"
+  return undefined
+}
+
+const CHAT_IMPORTER_TAGS: Record<ChatJsonImporterKey, string> = {
+  "chatgpt-export": "chatgpt-export",
+  "claude-export": "claude-export",
+  "gemini-export": "gemini-export",
+  "slack-export": "slack-export",
+  "lark-export": "lark-export",
+  "wechat-export": "wechat-export",
+  "dingtalk-export": "dingtalk-export",
+}
+
+function runChatJsonImporter(
+  key: ChatJsonImporterKey,
+  text: string,
+  twinId: string,
+  source: string
+): RawSource[] {
+  const opts = { twinId, source }
+  switch (key) {
+    case "chatgpt-export":
+      return parseChatgptExport(text, opts)
+    case "claude-export":
+      return parseClaudeExport(text, opts)
+    case "gemini-export":
+      return parseGeminiExport(text, opts)
+    case "slack-export":
+      return parseSlackExport(text, opts)
+    case "lark-export":
+      return parseLarkExport(text, opts)
+    case "wechat-export":
+      return parseWechatExport(text, opts)
+    case "dingtalk-export":
+      return parseDingtalkExport(text, opts)
+  }
 }
 
 async function sha256(text: string): Promise<string> {
@@ -218,40 +306,93 @@ async function ingestFile(
     return { sources: 0, error: "File is empty." }
   }
 
-  // JSON files: try Slack export shape first (`messages` array of
-  // `{type:"message", user, text, ts, …}`). Falls through to plain JSON
-  // ingest if the shape doesn't match.
-  if (file.name.toLowerCase().endsWith(".json") && isSlackShape(text)) {
+  // JSON files: detect chat-export shape and dispatch to the right
+  // importer. Order: ChatGPT (mapping tree) → Claude (chat_messages) →
+  // Gemini (Takeout activity) → Slack (regex heuristic) → Lark → WeChat
+  // → DingTalk-JSON. Falls through to plain-text ingest if no shape matches.
+  if (file.name.toLowerCase().endsWith(".json")) {
+    let parsedJson: unknown = null
     try {
-      const raws = parseSlackExport(text, {
+      parsedJson = JSON.parse(text)
+    } catch {
+      // Malformed JSON — drop to plain-text fallback below.
+    }
+    const importerKey = parsedJson !== null ? detectChatJsonImporter(parsedJson, text) : undefined
+    if (importerKey) {
+      const sourceLabel = file.name.replace(/\.json$/i, "")
+      try {
+        const raws = runChatJsonImporter(importerKey, text, twinId, sourceLabel)
+        if (raws.length === 0) {
+          return {
+            sources: 0,
+            error: `Detected ${importerKey} shape but no usable messages.`,
+          }
+        }
+        let count = 0
+        for (const raw of raws) {
+          const fingerprint = await sha256(raw.text ?? "")
+          await createTwinSource({
+            twinId,
+            kind: "chat",
+            format: "markdown",
+            source: raw.text ?? "",
+            title: raw.filename,
+            bytes: (raw.text ?? "").length,
+            fingerprint,
+            redacted: false,
+            status: "pending",
+            tags: [CHAT_IMPORTER_TAGS[importerKey]],
+          })
+          count += 1
+        }
+        return { sources: count }
+      } catch (err) {
+        return {
+          sources: 0,
+          error:
+            err instanceof Error
+              ? `Failed to parse ${importerKey}: ${err.message}`
+              : `${importerKey} parse failed`,
+        }
+      }
+    }
+  }
+
+  // Plain-text DingTalk export — `[YYYY-MM-DD HH:mm:ss] Name\nbody` lines.
+  if (isDingtalkTextShape(text)) {
+    try {
+      const raws = parseDingtalkExport(text, {
         twinId,
-        source: file.name.replace(/\.json$/i, ""),
+        source: file.name.replace(/\.[^./]+$/i, ""),
       })
       if (raws.length === 0) {
-        return { sources: 0, error: "Slack-shaped JSON had no usable messages." }
+        return { sources: 0, error: "DingTalk-shaped text had no usable messages." }
       }
-      const raw = raws[0]
-      const fingerprint = await sha256(raw.text ?? "")
-      await createTwinSource({
-        twinId,
-        kind: "chat",
-        format: "markdown",
-        source: raw.text ?? "",
-        title: raw.filename,
-        bytes: (raw.text ?? "").length,
-        fingerprint,
-        redacted: false,
-        status: "pending",
-        tags: ["slack-export"],
-      })
-      return { sources: 1 }
+      let count = 0
+      for (const raw of raws) {
+        const fingerprint = await sha256(raw.text ?? "")
+        await createTwinSource({
+          twinId,
+          kind: "chat",
+          format: "markdown",
+          source: raw.text ?? "",
+          title: raw.filename,
+          bytes: (raw.text ?? "").length,
+          fingerprint,
+          redacted: false,
+          status: "pending",
+          tags: ["dingtalk-export"],
+        })
+        count += 1
+      }
+      return { sources: count }
     } catch (err) {
       return {
         sources: 0,
         error:
           err instanceof Error
-            ? `Failed to parse Slack JSON: ${err.message}`
-            : "Slack parse failed",
+            ? `Failed to parse DingTalk text: ${err.message}`
+            : "DingTalk parse failed",
       }
     }
   }
@@ -305,6 +446,7 @@ export interface TwinSourceUploaderProps {
 }
 
 export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderProps) {
+  const t = useTranslations("twin.sourceUploader")
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [title, setTitle] = useState("")
   const [content, setContent] = useState("")
@@ -312,6 +454,63 @@ export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderPro
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [batchSummary, setBatchSummary] = useState<IngestedFromFile | null>(null)
+  const tauriAvailable = useSyncExternalStore(
+    subscribeTauri,
+    getTauriSnapshot,
+    getServerTauriSnapshot
+  )
+  const [repoMaxCommits, setRepoMaxCommits] = useState(200)
+  const [repoAuthor, setRepoAuthor] = useState("")
+  const [repoSummary, setRepoSummary] = useState<{ path: string; commits: number } | null>(null)
+
+  const handleGitRepoPick = async () => {
+    setSubmitting(true)
+    setError(null)
+    setRepoSummary(null)
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog")
+      const picked = await open({ directory: true, multiple: false })
+      if (!picked || typeof picked !== "string") {
+        return
+      }
+      const raws = await parseGitRepo({
+        twinId,
+        repoPath: picked,
+        maxCommits: repoMaxCommits > 0 ? repoMaxCommits : 200,
+        author: repoAuthor.trim() || undefined,
+      })
+      if (raws.length === 0) {
+        setError("No commits found at that path (empty repo, or simple-git failed to load).")
+        return
+      }
+      let count = 0
+      for (const raw of raws) {
+        const fingerprint = await sha256(raw.text ?? "")
+        await createTwinSource({
+          twinId,
+          kind: "code",
+          // git-repo importer emits markdown-with-fenced-diff bodies; keep the
+          // tag for downstream filtering but store as markdown so the
+          // existing parse/chunk path handles it.
+          format: "markdown",
+          source: raw.text ?? "",
+          title: raw.filename,
+          bytes: (raw.text ?? "").length,
+          fingerprint,
+          redacted: false,
+          status: "pending",
+          tags: ["git-repo"],
+        })
+        count += 1
+      }
+      setRepoSummary({ path: picked, commits: count })
+      onUploaded?.()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   const handlePasteSubmit = async () => {
     if (!content.trim()) {
@@ -379,12 +578,8 @@ export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderPro
   return (
     <Card className="flex flex-col gap-4 p-4">
       <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium">From file(s)</h3>
-        <p className="text-muted-foreground text-xs">
-          Text formats (Markdown / CSV / HTML / JSON / source code / .eml / .mbox) are stored as-is.
-          Binary formats (PDF / DOCX / PPTX / EPUB / ODT / ODP) are parsed in the browser; only the
-          extracted text lands in Dexie. mbox files produce one source per message.
-        </p>
+        <h3 className="text-sm font-medium">{t("filesTitle")}</h3>
+        <p className="text-muted-foreground text-xs">{t("filesDescription")}</p>
         <div className="flex items-center gap-2">
           <input
             ref={fileInputRef}
@@ -394,19 +589,23 @@ export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderPro
             disabled={submitting}
             onChange={(e) => void handleFiles(e.target.files)}
             className="text-sm"
-            aria-label="Pick text files"
+            aria-label={t("pickFilesAria")}
           />
         </div>
         {batchSummary ? (
           <div className="text-xs">
             <p className="font-medium">
-              Imported {batchSummary.sources} source
-              {batchSummary.sources === 1 ? "" : "s"}.
+              {batchSummary.sources === 1
+                ? t("importedSummarySingular")
+                : t("importedSummaryPlural", { count: batchSummary.sources })}
             </p>
             <ul className="mt-1 list-disc pl-5">
               {batchSummary.perFile.map((entry) => (
                 <li key={entry.filename}>
-                  <span className="font-mono">{entry.filename}</span> — {entry.sources} src
+                  <span className="font-mono">{entry.filename}</span> —{" "}
+                  {entry.sources === 1
+                    ? t("perFileSrcSingular")
+                    : t("perFileSrcPlural", { count: entry.sources })}
                   {entry.error ? <span className="text-destructive"> ({entry.error})</span> : null}
                 </li>
               ))}
@@ -417,20 +616,69 @@ export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderPro
 
       <hr className="border-border" />
 
+      {tauriAvailable ? (
+        <>
+          <section className="flex flex-col gap-3" data-testid="twin-source-uploader-gitrepo">
+            <h3 className="text-sm font-medium">{t("gitRepoTitle")}</h3>
+            <p className="text-muted-foreground text-xs">{t("gitRepoDescription")}</p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="twin-source-repo-max-commits">{t("maxCommits")}</Label>
+                <Input
+                  id="twin-source-repo-max-commits"
+                  type="number"
+                  min={1}
+                  max={2000}
+                  value={repoMaxCommits}
+                  onChange={(e) => setRepoMaxCommits(Number.parseInt(e.target.value, 10) || 200)}
+                  className="w-32"
+                />
+              </div>
+              <div className="flex flex-1 flex-col gap-1">
+                <Label htmlFor="twin-source-repo-author">{t("authorFilter")}</Label>
+                <Input
+                  id="twin-source-repo-author"
+                  value={repoAuthor}
+                  onChange={(e) => setRepoAuthor(e.target.value)}
+                  placeholder={t("authorPlaceholder")}
+                />
+              </div>
+              <Button
+                onClick={() => void handleGitRepoPick()}
+                disabled={submitting}
+                data-testid="twin-source-uploader-gitrepo-pick"
+              >
+                {submitting ? t("walking") : t("pickRepoFolder")}
+              </Button>
+            </div>
+            {repoSummary ? (
+              <p className="text-xs">
+                {repoSummary.commits === 1
+                  ? t("repoImportedSingular")
+                  : t("repoImportedPlural", { count: repoSummary.commits })}{" "}
+                <span className="font-mono">{repoSummary.path}</span>.
+              </p>
+            ) : null}
+          </section>
+
+          <hr className="border-border" />
+        </>
+      ) : null}
+
       <section className="flex flex-col gap-3">
-        <h3 className="text-sm font-medium">Or paste text</h3>
+        <h3 className="text-sm font-medium">{t("pasteTitle")}</h3>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <div className="flex flex-1 flex-col gap-1">
-            <Label htmlFor="twin-source-title">Title (optional)</Label>
+            <Label htmlFor="twin-source-title">{t("titleLabel")}</Label>
             <Input
               id="twin-source-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. onboarding-notes.md"
+              placeholder={t("titlePlaceholder")}
             />
           </div>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="twin-source-format">Format</Label>
+            <Label htmlFor="twin-source-format">{t("formatLabel")}</Label>
             <select
               id="twin-source-format"
               className="border-border bg-background h-9 rounded border px-2 text-sm"
@@ -447,19 +695,19 @@ export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderPro
         </div>
 
         <div className="flex flex-col gap-1">
-          <Label htmlFor="twin-source-content">Content</Label>
+          <Label htmlFor="twin-source-content">{t("contentLabel")}</Label>
           <Textarea
             id="twin-source-content"
             rows={8}
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            placeholder="Paste markdown, code, or exported chat content here…"
+            placeholder={t("contentPlaceholder")}
           />
         </div>
 
         <div className="flex justify-end">
           <Button onClick={() => void handlePasteSubmit()} disabled={submitting}>
-            {submitting ? "Saving…" : "Save pasted source"}
+            {submitting ? t("saving") : t("savePastedSource")}
           </Button>
         </div>
       </section>

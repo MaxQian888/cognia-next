@@ -1,0 +1,16 @@
+# i18n lint ignore — paths or path substrings whose hardcoded JSX strings
+# are intentionally exempt. One entry per line. Lines starting with '#' are
+# comments. Entries are simple substring matches against the relative path
+# (forward slashes).
+#
+# Add a path here ONLY when:
+#  - the file is vendored / outside cognia's authorship, OR
+#  - the strings are deliberately non-translatable (e.g. brand names,
+#    code identifiers, technical keys exposed in the UI).
+#
+# The lint already auto-excludes:
+#  - components/ui/                  (shadcn vendored)
+#  - components/ai-elements/         (vendored)
+#  - *.test.tsx / *.stories.tsx
+#
+# Add cognia-specific exemptions below this line.

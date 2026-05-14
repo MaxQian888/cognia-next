@@ -24,6 +24,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { workflowNodeCategory, type WorkflowNodeKind } from "@/types/workflow/visual"
 import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
+import { tNode } from "@/lib/workflow/i18n/node-translate"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import { Field, FieldErrorProvider } from "./inspector/forms/shared"
 import { InspectorExpressionProvider } from "./inspector/forms/shared/inspector-context"
@@ -70,6 +71,7 @@ export function InspectorPanel({
   className?: string
 }) {
   const t = useTranslations("workflows.inspector")
+  const tNodes = useTranslations("workflows.nodes")
   const { node, validation, updateNodeData, removeNodes, clearSelection, revalidateNode } =
     useStore(
       useShallow((s: EditorState) => {
@@ -143,8 +145,12 @@ export function InspectorPanel({
               </Badge>
             ) : null}
           </div>
-          <h3 className="mt-1.5 text-sm font-semibold leading-tight">{entry.label}</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">{entry.description}</p>
+          <h3 className="mt-1.5 text-sm font-semibold leading-tight">
+            {tNode(tNodes, `${node.data.kind}.label`, entry.label)}
+          </h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {tNode(tNodes, `${node.data.kind}.description`, entry.description)}
+          </p>
         </div>
         <Button
           variant="ghost"

@@ -88,6 +88,12 @@ export function useClaudeChat() {
   // re-deriving from message parts (which lose the original SendContent shape
   // when they include attachments).
   const lastUserContentRef = useRef<Map<string, SendContent>>(new Map())
+  /**
+   * Pending branch tag set by `regenerate` and consumed by the first
+   * assistant message that arrives afterward. Keyed by sessionId so a regen
+   * fired from another session doesn't taint the active turn.
+   */
+  const pendingBranchTagRef = useRef<Map<string, { groupId: string; index: number }>>(new Map())
 
   // Subscribe to sidecar events once.
   useEffect(() => {
@@ -121,7 +127,15 @@ export function useClaudeChat() {
    * multimodal content blocks (text + image), to support attachments.
    */
   const send = useCallback(
-    async (content: SendContent, opts?: SendOptions) => {
+    async (
+      content: SendContent,
+      opts?: SendOptions,
+      callOptions?: {
+        /** Skip the optimistic user-message append. Used by `regenerate` so we
+         *  don't duplicate the user turn when re-issuing the SDK request. */
+        skipUserAppend?: boolean
+      }
+    ) => {
       const sessionId = useChatStore.getState().activeSessionId
       if (!sessionId) {
         useChatStore.getState().setError("No session selected")
@@ -224,11 +238,14 @@ export function useClaudeChat() {
           : ((effectiveContent.find((b) => b.type === "text") as { text?: string } | undefined)
               ?.text ?? "")
 
-      // Optimistic user-message append.
+      // Optimistic user-message append. Skipped during regenerate so the
+      // existing user anchor stays the single source of truth for that turn.
       const previousMessages = useChatStore.getState().messages
       const userMsg = makeUserMessage(effectiveContent)
-      const next = [...previousMessages, userMsg]
-      store.getState().replaceMessages(next)
+      const next = callOptions?.skipUserAppend ? previousMessages : [...previousMessages, userMsg]
+      if (!callOptions?.skipUserAppend) {
+        store.getState().replaceMessages(next)
+      }
       store.getState().setStatus("streaming")
       store.getState().setError(null)
       lastUserContentRef.current.set(sessionId, effectiveContent)
@@ -258,7 +275,35 @@ export function useClaudeChat() {
           }
 
           const { executeOnExternalAgent } = await import("@/lib/ai/agent/external/manager")
-          const result = await executeOnExternalAgent(effectiveText, { agentId: extAgentId })
+          const { applyExternalAgentEventToParts } =
+            await import("@/lib/ai/agent/external/event-to-parts")
+
+          // Pre-allocate the assistant message so partial deltas land in it
+          // without flickering the chat list. Parts start empty and grow as
+          // ExternalAgentEvents arrive via the onEvent callback below.
+          const assistantId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+          let assistantParts: UIMessage["parts"] = [] as unknown as UIMessage["parts"]
+          const baseList = useChatStore.getState().messages
+
+          const writeAssistant = () => {
+            const assistantMsg: UIMessage = {
+              id: assistantId,
+              role: "assistant",
+              parts: assistantParts,
+            }
+            store.getState().replaceMessages([...baseList, assistantMsg])
+          }
+
+          const result = await executeOnExternalAgent(effectiveText, {
+            agentId: extAgentId,
+            onEvent: (event) => {
+              const nextParts = applyExternalAgentEventToParts(assistantParts, event)
+              if (nextParts !== assistantParts) {
+                assistantParts = nextParts as UIMessage["parts"]
+                writeAssistant()
+              }
+            },
+          })
 
           if (!result) {
             store.getState().replaceMessages(previousMessages)
@@ -274,14 +319,23 @@ export function useClaudeChat() {
             return
           }
 
-          // Append assistant message from the external agent result.
-          const assistantMsg: UIMessage = {
-            id: `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            role: "assistant",
-            parts: [{ type: "text", text: result.finalResponse }] as unknown as UIMessage["parts"],
+          // When the event stream never produced a text track (some agents
+          // only emit a single final response), fall back to the assembled
+          // finalResponse to make sure the user always sees something.
+          if (
+            assistantParts.length === 0 ||
+            !assistantParts.some(
+              (p) => (p as { type?: string }).type === "text" && (p as { text?: string }).text
+            )
+          ) {
+            assistantParts = [
+              ...(assistantParts as unknown as Array<Record<string, unknown>>),
+              { type: "text", text: result.finalResponse, state: "done" },
+            ] as unknown as UIMessage["parts"]
+            writeAssistant()
           }
-          const finalMessages = [...useChatStore.getState().messages, assistantMsg]
-          store.getState().replaceMessages(finalMessages)
+
+          const finalMessages = useChatStore.getState().messages
           await persistMessages(sessionId, finalMessages)
           store.getState().setStatus("idle")
         } catch (err) {
@@ -408,13 +462,33 @@ export function useClaudeChat() {
     if (lastUserIdx < 0) return
 
     const anchor = messages[lastUserIdx]
-    if (detectPlatform() === "mobile") {
-      await mirrorTruncateToDesktop(sessionId, anchor.id)
-    }
-    // Remove the user message AND everything after it; we'll re-add it in send().
-    await truncateAfter(sessionId, anchor.id, { inclusive: true })
-    const remaining = await listMessages(sessionId)
-    store.getState().replaceMessages(remaining)
+    // Existing assistant siblings — every assistant message after the anchor
+    // belongs to the same branch group. We retain them with branchGroupId
+    // metadata so the user can switch back via the BranchNavigator.
+    const groupId = anchor.id
+    const existingSiblings = messages.slice(lastUserIdx + 1).filter((m) => m.role === "assistant")
+    const taggedSiblings = existingSiblings.map((m, i) => {
+      const meta = (m as { metadata?: Record<string, unknown> }).metadata ?? {}
+      // Preserve any prior branchGroupId — only stamp if missing.
+      const stampedGroup =
+        typeof meta.branchGroupId === "string" ? (meta.branchGroupId as string) : groupId
+      const stampedIndex = typeof meta.branchIndex === "number" ? (meta.branchIndex as number) : i
+      return {
+        ...m,
+        metadata: { ...meta, branchGroupId: stampedGroup, branchIndex: stampedIndex },
+      } as typeof m
+    })
+
+    // Persist the tagged siblings (and untouched prefix) before the new send.
+    const prefix = messages.slice(0, lastUserIdx + 1)
+    const merged = [...prefix, ...taggedSiblings]
+    store.getState().replaceMessages(merged)
+    await persistMessages(sessionId, merged)
+
+    // Stash the next-branch tag in a ref so handleEvent can stamp the
+    // freshly-arrived assistant message with branchGroupId + the next index.
+    const nextIndex = existingSiblings.length
+    pendingBranchTagRef.current.set(sessionId, { groupId, index: nextIndex })
 
     // Prefer the original SendContent if we have it (preserves attachments);
     // fall back to reconstructing from text parts.
@@ -428,7 +502,7 @@ export function useClaudeChat() {
         })
         .map((p) => p.text)
         .join("")
-    await send(content)
+    await send(content, undefined, { skipUserAppend: true })
   }, [send, store])
 
   return {
@@ -609,10 +683,36 @@ async function handleEvent(
       const current = isActive ? useChatStore.getState().messages : await listMessages(sessionId)
 
       const {
-        messages: nextMessages,
+        messages: appliedMessages,
         turnComplete,
         result: sdkResult,
       } = applySdkEvent(current, env.event)
+
+      // If `regenerate` queued a branch tag for this session, stamp it onto
+      // the freshly-appended assistant message. The tag is one-shot — once
+      // consumed we drop it so subsequent assistant turns are untouched.
+      let nextMessages = appliedMessages
+      const pendingTag = pendingBranchTagRef.current.get(sessionId)
+      if (pendingTag && appliedMessages !== current && appliedMessages.length > current.length) {
+        const lastIdx = appliedMessages.length - 1
+        const last = appliedMessages[lastIdx]
+        if (last?.role === "assistant") {
+          const meta = (last as { metadata?: Record<string, unknown> }).metadata ?? {}
+          const stamped = {
+            ...last,
+            metadata: {
+              ...meta,
+              branchGroupId: pendingTag.groupId,
+              branchIndex: pendingTag.index,
+            },
+          }
+          nextMessages = [...appliedMessages.slice(0, lastIdx), stamped]
+          pendingBranchTagRef.current.delete(sessionId)
+          if (isActive) {
+            useChatStore.getState().setActiveBranch(pendingTag.groupId, stamped.id)
+          }
+        }
+      }
 
       // Plan-mode → tasks bridge: forward TodoWrite / TaskCreate / TaskUpdate
       // / TaskList / ExitPlanMode tool_use blocks to the agent-team store so

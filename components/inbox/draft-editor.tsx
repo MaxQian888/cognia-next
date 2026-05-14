@@ -12,6 +12,7 @@
  *  - Cancel          → onClose()
  */
 
+import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
@@ -25,6 +26,7 @@ interface DraftEditorProps {
 }
 
 export function DraftEditor({ draft, onClose }: DraftEditorProps) {
+  const t = useTranslations("inbox.draftEditor")
   const { segments, setSegment, busy, approve, reject } = useDraftApproval(draft, {
     beforeApprove: async ({ segments: edited }) => {
       if (!draft.outboundPreview) return
@@ -48,7 +50,7 @@ export function DraftEditor({ draft, onClose }: DraftEditorProps) {
                 value={seg.text}
                 onChange={(e) => setSegment(i, e.target.value)}
                 className="min-h-[80px] text-sm"
-                placeholder="Draft text…"
+                placeholder={t("textPlaceholder")}
                 data-testid={`draft-segment-text-${i}`}
               />
             )
@@ -60,7 +62,7 @@ export function DraftEditor({ draft, onClose }: DraftEditorProps) {
                 value={seg.md}
                 onChange={(e) => setSegment(i, e.target.value)}
                 className="min-h-[80px] font-mono text-sm"
-                placeholder="Draft markdown…"
+                placeholder={t("markdownPlaceholder")}
                 data-testid={`draft-segment-markdown-${i}`}
               />
             )
@@ -91,7 +93,7 @@ export function DraftEditor({ draft, onClose }: DraftEditorProps) {
           disabled={busy}
           data-testid="draft-approve-btn"
         >
-          Approve &amp; Send
+          {t("approveAndSend")}
         </Button>
         <Button
           size="sm"
@@ -100,7 +102,7 @@ export function DraftEditor({ draft, onClose }: DraftEditorProps) {
           disabled={busy}
           data-testid="draft-reject-btn"
         >
-          Reject
+          {t("reject")}
         </Button>
         <Button
           size="sm"
@@ -109,7 +111,7 @@ export function DraftEditor({ draft, onClose }: DraftEditorProps) {
           disabled={busy}
           data-testid="draft-cancel-btn"
         >
-          Cancel
+          {t("cancel")}
         </Button>
       </div>
     </div>

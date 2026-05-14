@@ -18,6 +18,7 @@
  */
 
 import type {
+  EntityRole,
   Playbook,
   ProfileEntity,
   StyleSample,
@@ -30,6 +31,7 @@ import type {
 import { runStyleAgent } from "./agents/style-agent"
 import { runPlaybookAgent } from "./agents/playbook-agent"
 import { runKnowledgeAgent } from "./agents/knowledge-agent"
+import { runEntityMergeAgent } from "./agents/entity-merge-agent"
 import { runSynthesizer, type SynthDraft } from "./agents/synthesizer"
 import { runEvaluator } from "./agents/evaluator"
 import type { LlmClient } from "./llm"
@@ -101,6 +103,46 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   }
   await onProgress?.("knowledge-agent", 0.2)
 
+  // ───── Stage 1.5: EntityMergeAgent (cross-batch alias folding) ─────
+  // Knowledge batches see different name variants in different windows
+  // ("Alice" vs "Alice Wang" vs "alice"). The merge agent buckets the
+  // entities by role, asks the LLM "which of these are the same?", and
+  // returns a canonical-name → aliases mapping. Falls back to
+  // `dedupeEntitiesByName` (lowercased-name match) on timeout or error.
+  const lowercaseDeduped = dedupeEntitiesByName(allEntities)
+  const mergeResult = await withTimeoutOrFallback(
+    () => runEntityMergeAgent(llm, { entities: lowercaseDeduped }),
+    "entity-merge-agent",
+    {
+      timeoutMs: agentTimeoutMs,
+      fallback: {
+        merged: lowercaseDeduped,
+        collapsed: {} as Partial<Record<EntityRole, number>>,
+      },
+      onError: recordFailure,
+    }
+  )
+  const mergedEntities = mergeResult.value.merged
+  // Build a name → canonical-name map (lowercased keys) so we can remap
+  // chunkEntityTags. Every alias on the merged entity points back to its
+  // canonical name.
+  const canonicalOf = new Map<string, string>()
+  for (const entity of mergedEntities) {
+    canonicalOf.set(entity.name.toLowerCase(), entity.name)
+    for (const alias of entity.aliases) {
+      canonicalOf.set(alias.toLowerCase(), entity.name)
+    }
+  }
+  const mergedTags: Record<string, string[]> = {}
+  for (const [chunkId, names] of Object.entries(chunkEntityTags)) {
+    const remapped = new Set<string>()
+    for (const name of names) {
+      remapped.add(canonicalOf.get(name.toLowerCase()) ?? name)
+    }
+    mergedTags[chunkId] = Array.from(remapped)
+  }
+  await onProgress?.("entity-merge-agent", 0.3)
+
   // ───── Stage 2: StyleAgent ─────
   const styleResult = await withTimeoutOrFallback(
     () => runStyleAgent(llm, { chunks }),
@@ -133,7 +175,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     ...profile,
     styleSamples: [...profile.styleSamples, ...styleResult.value.samples],
     playbooks: [...profile.playbooks, ...playbookResult.value.playbooks],
-    entities: dedupeEntitiesByName([...profile.entities, ...allEntities]),
+    entities: dedupeEntitiesByName([...profile.entities, ...mergedEntities]),
     updatedAt: Date.now(),
   }
   const recent = chunks.slice(-30)
@@ -170,8 +212,8 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   return {
     styleSamples: styleResult.value.samples,
     playbooks: playbookResult.value.playbooks,
-    entities: dedupeEntitiesByName(allEntities),
-    chunkEntityTags,
+    entities: mergedEntities,
+    chunkEntityTags: mergedTags,
     voiceSummary: synthResult.voiceSummary,
     synthesizedDrafts: synthResult.drafts,
     evaluations: evalResult.value.evaluations,

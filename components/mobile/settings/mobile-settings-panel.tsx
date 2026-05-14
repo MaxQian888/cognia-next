@@ -25,12 +25,16 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
-import type { AppLanguage, AppTheme } from "@/lib/claude/types"
+import type { AppLanguage, AppTheme, BiometricGuardPolicy } from "@/lib/claude/types"
+import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
+import { localeNames, locales } from "@/lib/i18n/config"
 import { useSettingsStore } from "@/stores/settings"
 
 export function MobileSettingsPanel() {
   const t = useTranslations("mobile.settingsPanel")
+  const tSec = useTranslations("mobile.security")
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
 
@@ -38,6 +42,7 @@ export function MobileSettingsPanel() {
   const language = (settings?.language ?? "en") as AppLanguage
   const fontScale = settings?.fontScale ?? "md"
   const defaultModel = settings?.defaultModel ?? ""
+  const policy: BiometricGuardPolicy = settings?.biometricRequiredFor ?? DEFAULT_BIOMETRIC_GUARD
 
   const update = async (patch: Partial<NonNullable<typeof settings>>) => {
     await save(patch as never)
@@ -48,6 +53,9 @@ export function MobileSettingsPanel() {
       label: t("queueLabel", { keys }),
     })
   }
+
+  const updateBiometric = (patch: Partial<BiometricGuardPolicy>) =>
+    update({ biometricRequiredFor: { ...policy, ...patch } })
 
   return (
     <div className="space-y-4" data-testid="mobile-settings-panel">
@@ -69,8 +77,11 @@ export function MobileSettingsPanel() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="en">English</SelectItem>
-            <SelectItem value="zh-CN">中文</SelectItem>
+            {locales.map((loc) => (
+              <SelectItem key={loc} value={loc}>
+                {localeNames[loc]}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </Row>
@@ -94,6 +105,34 @@ export function MobileSettingsPanel() {
           data-testid="settings-default-model"
         />
       </Row>
+
+      <section className="space-y-3 pt-2" data-testid="mobile-settings-biometric">
+        <div className="space-y-0.5">
+          <h3 className="text-xs font-semibold">{tSec("title")}</h3>
+          <p className="text-[11px] text-muted-foreground">{tSec("description")}</p>
+        </div>
+        <BiometricRow
+          label={tSec("deletePairing.label")}
+          help={tSec("deletePairing.help")}
+          checked={policy.deletePairing}
+          onChange={(v) => void updateBiometric({ deletePairing: v })}
+          testid="biometric-delete-pairing"
+        />
+        <BiometricRow
+          label={tSec("exportBackup.label")}
+          help={tSec("exportBackup.help")}
+          checked={policy.exportBackup}
+          onChange={(v) => void updateBiometric({ exportBackup: v })}
+          testid="biometric-export-backup"
+        />
+        <BiometricRow
+          label={tSec("revealSecrets.label")}
+          help={tSec("revealSecrets.help")}
+          checked={policy.revealSecrets}
+          onChange={(v) => void updateBiometric({ revealSecrets: v })}
+          testid="biometric-reveal-secrets"
+        />
+      </section>
     </div>
   )
 }
@@ -104,5 +143,34 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
       <span>{label}</span>
       {children}
     </Label>
+  )
+}
+
+function BiometricRow({
+  label,
+  help,
+  checked,
+  onChange,
+  testid,
+}: {
+  label: string
+  help: string
+  checked: boolean
+  onChange: (next: boolean) => void
+  testid: string
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-col gap-0.5">
+        <span className="text-xs font-medium">{label}</span>
+        <span className="text-[11px] text-muted-foreground">{help}</span>
+      </div>
+      <Switch
+        checked={checked}
+        onCheckedChange={onChange}
+        data-testid={testid}
+        aria-label={label}
+      />
+    </div>
   )
 }

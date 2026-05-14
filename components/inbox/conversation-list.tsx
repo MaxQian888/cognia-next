@@ -12,6 +12,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { PinIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -42,6 +43,7 @@ export function ConversationList({
   activeConversationKey,
 }: ConversationListProps) {
   const router = useRouter()
+  const t = useTranslations("inbox.conversationList")
   const [showArchived, setShowArchived] = useState(false)
 
   // Load all platform-bound sessions + their overrides.
@@ -116,16 +118,14 @@ export function ConversationList({
     <div className="flex flex-col h-full">
       <div className="shrink-0 border-b px-3 py-2">
         <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Conversations
+          {t("header")}
         </h3>
       </div>
 
       <ScrollArea className="flex-1">
         <div className="py-1">
           {visibleRows.length === 0 ? (
-            <p className="px-3 py-4 text-xs text-muted-foreground text-center">
-              No conversations yet
-            </p>
+            <p className="px-3 py-4 text-xs text-muted-foreground text-center">{t("empty")}</p>
           ) : (
             visibleRows.map((item) => (
               <ConversationRow
@@ -147,7 +147,7 @@ export function ConversationList({
             className="w-full text-xs"
             onClick={() => setShowArchived((v) => !v)}
           >
-            {showArchived ? "Hide archived" : `Show ${archived.length} archived`}
+            {showArchived ? t("hideArchived") : t("showArchived", { count: archived.length })}
           </Button>
         </div>
       )}

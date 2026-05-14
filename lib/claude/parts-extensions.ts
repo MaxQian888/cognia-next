@@ -114,3 +114,91 @@ export function isAgentTeamDispatchPart(part: unknown): part is AgentTeamDispatc
     typeof p.task === "string"
   )
 }
+
+// ---- Artifact / Sources / Canvas inline parts (Agent rendering completion) ----
+
+/**
+ * ArtifactPart — emitted when a tool call or codeblock results in an artifact
+ * being created (or updated) via `useArtifactStore.createArtifact`. The
+ * renderer reads the live artifact from the store; the part carries only a
+ * pointer + title snapshot so cold reload doesn't show an empty card.
+ */
+export interface ArtifactPart {
+  type: "artifact"
+  /** Matches `Artifact.id` in `useArtifactStore.artifacts`. */
+  artifactId: string
+  /** Snapshot of the title at part-creation time (store may diverge). */
+  title: string
+  /** Snapshot of the kind for icon/badge selection. */
+  kind: "code" | "react" | "html" | "svg" | "mermaid" | "document" | "chart" | "math"
+  /** Whether the inline panel should default to expanded. Defaults to true. */
+  defaultOpen?: boolean
+}
+
+export function isArtifactPart(part: unknown): part is ArtifactPart {
+  const p = part as { type?: unknown; artifactId?: unknown; title?: unknown }
+  return (
+    typeof part === "object" &&
+    part !== null &&
+    p.type === "artifact" &&
+    typeof p.artifactId === "string" &&
+    typeof p.title === "string"
+  )
+}
+
+/**
+ * SourcesPart — citations / retrieval-source list rendered under the visible
+ * assistant text. Origin lets the UI badge each source so a Twin-RAG chunk is
+ * distinguishable from an Anthropic web citation or a markdown footnote.
+ */
+export interface SourcesPartItem {
+  /** Stable id (chunk id, citation slot, or footnote ref). */
+  id: string
+  title: string
+  /** Optional URL — present for web citations and rarely for RAG hits. */
+  url?: string
+  /** ≤200-char snippet of the cited content. */
+  snippet?: string
+  origin: "anthropic" | "twin-rag" | "footnote"
+  /** Optional similarity / confidence score (0..1). */
+  score?: number
+}
+
+export interface SourcesPart {
+  type: "sources"
+  sources: SourcesPartItem[]
+}
+
+export function isSourcesPart(part: unknown): part is SourcesPart {
+  const p = part as { type?: unknown; sources?: unknown }
+  return (
+    typeof part === "object" && part !== null && p.type === "sources" && Array.isArray(p.sources)
+  )
+}
+
+/**
+ * CanvasInlinePart — embeds a low-height Canvas document directly in the
+ * chat thread. The Canvas itself lives in `useCanvasStore.documents`; the
+ * part only carries the pointer + display hints.
+ */
+export interface CanvasInlinePart {
+  type: "canvas"
+  /** Matches `CanvasDocument.id` in `useCanvasStore.documents`. */
+  canvasId: string
+  title: string
+  /** When true the embedded editor is locked. Defaults to false. */
+  readonly?: boolean
+  /** Max body height in px. Defaults to 320. */
+  maxHeight?: number
+}
+
+export function isCanvasInlinePart(part: unknown): part is CanvasInlinePart {
+  const p = part as { type?: unknown; canvasId?: unknown; title?: unknown }
+  return (
+    typeof part === "object" &&
+    part !== null &&
+    p.type === "canvas" &&
+    typeof p.canvasId === "string" &&
+    typeof p.title === "string"
+  )
+}

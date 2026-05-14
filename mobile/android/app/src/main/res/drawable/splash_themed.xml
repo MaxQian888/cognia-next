@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Theme-aware launch background.
+
+  Stacks a solid color (which day/night-swaps through @color/splash_background)
+  underneath the existing splash bitmap so the launch surface never flashes
+  white in dark mode. The bitmap retains its current aspect via
+  android:gravity="center".
+
+  When the splash bitmap is regenerated for dark mode (proper fix: produce
+  separate drawable-night-*/splash.png assets), this drawable can be retired
+  in favor of plain @drawable/splash with night qualifiers.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <color android:color="@color/splash_background" />
+    </item>
+    <item>
+        <bitmap
+            android:src="@drawable/splash"
+            android:gravity="center" />
+    </item>
+</layer-list>

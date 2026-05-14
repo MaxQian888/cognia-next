@@ -279,9 +279,7 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
             {exporting ? <span>{t("exporting")}</span> : <span>{t("exportNow")}</span>}
           </Button>
           {!isMobile ? (
-            <p className="text-[11px] text-muted-foreground">
-              Web mode: backup downloads as a regular file.
-            </p>
+            <p className="text-[11px] text-muted-foreground">{t("webModeNote")}</p>
           ) : null}
         </CardContent>
       </Card>

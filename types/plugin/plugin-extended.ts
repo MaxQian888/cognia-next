@@ -1264,6 +1264,14 @@ export interface PluginContextAPI {
 
   /** Permission management API */
   permissions: PluginPermissionAPI
+
+  /**
+   * Message-part renderer API — register a React component for a custom
+   * `UIMessage.parts[].type` value. Optional so older plugin builds keep
+   * compiling; new code should use it instead of trying to monkey-patch
+   * the chat renderer.
+   */
+  messagePart?: import("@/lib/plugin/api/message-part-api").PluginMessagePartAPI
 }
 
 // =============================================================================

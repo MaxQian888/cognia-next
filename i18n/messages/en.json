@@ -1293,7 +1293,8 @@
       "connections": "Connections",
       "subscription": "Claude Subscription",
       "network": "Network Proxy",
-      "workflows": "Workflows"
+      "workflows": "Workflows",
+      "goals": "Goals"
     },
     "descriptions": {
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
@@ -1333,7 +1334,8 @@
       "connections": "Configure messaging platform adapters (Telegram, Discord, Slack, ...) and manage the outbound delivery queue.",
       "subscription": "Sign in with your Claude Pro/Max subscription, monitor 5h/7d rate-limit windows, and manage OAuth credentials in your OS keychain.",
       "network": "HTTP / HTTPS / SOCKS5 proxy for all outbound network traffic. Auto-detect Clash Verge, Mihomo, V2Ray and other local proxy tools.",
-      "workflows": "Visual n8n-style orchestration over characters, teams, skills, twins, and connectors. Trigger via cron, webhook, platform message, or manual run."
+      "workflows": "Visual n8n-style orchestration over characters, teams, skills, twins, and connectors. Trigger via cron, webhook, platform message, or manual run.",
+      "goals": "Persistent chat goals (ADR-0019). Set an objective with /goal and the agent auto-continues until a judge confirms it's done, or budgets / timeouts kick in."
     },
     "externalBridge": {
       "wikiIndex": "Wiki Index",
@@ -1658,6 +1660,9 @@
         "noActive": "No wallpaper selected.",
         "galleryTitle": "Gallery",
         "addCustom": "Custom",
+        "aria": {
+          "delete": "Delete {name}"
+        },
         "gradient": {
           "title": "Build a gradient",
           "start": "Start",
@@ -1754,7 +1759,11 @@
           "sidebarPrimaryForeground": "Sidebar primary text",
           "sidebarAccent": "Sidebar accent",
           "sidebarAccentForeground": "Sidebar accent text",
-          "sidebarRing": "Sidebar ring"
+          "sidebarRing": "Sidebar ring",
+          "aria": {
+            "swatch": "{label} swatch",
+            "hex": "{label} hex value"
+          }
         }
       },
       "vscode": {
@@ -4034,15 +4043,11 @@
       "configureSkillsmp": "Configure the SkillsMP base URL in Settings → API to enable this source."
     },
     "analytics": {
-      "title": "Analytics",
-      "totalSkills": "Total skills",
-      "totalEnabled": "Enabled",
-      "totalUsage": "Total uses",
-      "tokensEstimated": "Estimated tokens injected",
-      "mostUsedTitle": "Most used",
-      "neverUsedTitle": "Never used",
-      "recentUsageTitle": "Recent activity",
-      "neverUsedEmpty": "All skills have been used at least once."
+      "trend": {
+        "title": "Usage trend",
+        "window7": "7d",
+        "window30": "30d"
+      }
     },
     "discovery": {
       "title": "Find skills",
@@ -4099,15 +4104,16 @@
       "removedToast": "Removed {name}."
     },
     "sync": {
-      "title": "Native sync",
-      "pushAll": "Push all to disk",
-      "pullAll": "Pull from disk",
-      "lastSynced": "Last synced {when}",
-      "neverSynced": "Never synced",
-      "successPush": "Pushed {count} skill(s) to ~/.claude/skills/",
-      "successPull": "Pulled {count} skill(s) from disk",
-      "errorDesktopOnly": "Sync requires desktop mode.",
-      "errorGeneric": "Sync failed: {error}"
+      "status": {
+        "synced": "Synced",
+        "outOfSync": "Out of sync",
+        "error": "Sync error",
+        "never": "Never synced"
+      },
+      "syncNow": "Sync now",
+      "retry": "Retry",
+      "lastAt": "Last: {when}",
+      "desktopOnly": "Sync is only available in the desktop app."
     },
     "panel": {
       "headerTitle": "Skills",
@@ -4164,25 +4170,6 @@
       "title": "Marketplace not configured",
       "subtitle": "Configure a SkillsMP endpoint in settings to browse and install community skills. A few examples of what's available:",
       "configure": "Configure in settings"
-    },
-    "analytics": {
-      "trend": {
-        "title": "Usage trend",
-        "window7": "7d",
-        "window30": "30d"
-      }
-    },
-    "sync": {
-      "status": {
-        "synced": "Synced",
-        "outOfSync": "Out of sync",
-        "error": "Sync error",
-        "never": "Never synced"
-      },
-      "syncNow": "Sync now",
-      "retry": "Retry",
-      "lastAt": "Last: {when}",
-      "desktopOnly": "Sync is only available in the desktop app."
     },
     "back": "Back"
   },
@@ -7863,7 +7850,49 @@
       "autoRoutingNote": "Preset-based auto-routing is on the roadmap. For now, manually switch providers for different use cases.",
       "currentConfig": "Current Configuration",
       "usingProvider": "Currently using {provider} as the sole chat provider."
-    }
+    },
+    "installed": "Installed",
+    "supported": "Supported",
+    "notSupported": "Not supported",
+    "unlimited": "Unlimited",
+    "free": "Free",
+    "freeTier": "Free (local)",
+    "back": "Back",
+    "next": "Next",
+    "done": "Done",
+    "skip": "Skip",
+    "skipForNow": "Skip for now",
+    "refresh": "Refresh",
+    "scan": "Scan",
+    "detect": "Detect",
+    "verify": "Verify",
+    "verifying": "Verifying…",
+    "download": "Download",
+    "downloading": "Downloading…",
+    "delete": "Delete",
+    "enable": "Enable",
+    "disable": "Disable",
+    "reset": "Reset",
+    "resetToDefault": "Reset to default",
+    "copy": "Copy",
+    "copied": "Copied!",
+    "copyApiUrl": "Copy API URL",
+    "getStarted": "Get started",
+    "viewDocumentation": "View documentation",
+    "learnMore": "Learn more",
+    "name": "Name",
+    "usage": "Usage",
+    "limit": "Limit",
+    "verifyApiKey": "Verify {provider} API key",
+    "testConnectionToProvider": "Verify {provider} API key",
+    "testOllamaConnection": "Test Ollama server connection",
+    "testConnectionToOllama": "Test Ollama server connection",
+    "serverStatus": "Server status",
+    "serverConfiguration": "Server configuration",
+    "endpoint": "Endpoint",
+    "host": "Host",
+    "port": "Port",
+    "configuration": "Configuration"
   },
   "providerParams": {
     "tabTitle": "Parameters",
@@ -8102,7 +8131,11 @@
       "emptyHint": "No jobs yet. Add sources, then queue an ingest run; queue a distill once the chunks are indexed.",
       "queuedAt": "queued {when}",
       "errorPrefix": "⚠",
-      "draftsProduced": "{count, plural, =0 {No drafts produced} =1 {1 draft produced} other {# drafts produced}}"
+      "draftsProduced": "{count, plural, =0 {No drafts produced} =1 {1 draft produced} other {# drafts produced}}",
+      "retry": "Retry",
+      "retryBusy": "Retrying…",
+      "attempt": "attempt {n}",
+      "deadLetter": "dead-letter"
     },
     "drafts": {
       "headerCount": "Drafts ({count})",
@@ -8115,7 +8148,216 @@
       "untitled": "(untitled)",
       "emptyBody": "(empty body)",
       "accept": "Accept",
-      "reject": "Reject"
+      "reject": "Reject",
+      "edit": "Edit",
+      "piiInDraft": "Edit blocked — PII detected in: {fields}. Replace with placeholders or remove."
+    },
+    "cron": {
+      "title": "Auto-ingest & auto-distill",
+      "description": "Run ingest + distill on a schedule. Cron expressions follow the standard 5-field format. The scheduler fires inside this app — desktop keeps running while minimised.",
+      "enabledLabel": "Enable scheduled runs",
+      "ingestLabel": "Ingest schedule",
+      "distillLabel": "Distill schedule",
+      "save": "Save",
+      "busy": "Saving…",
+      "saved": "Cron schedule saved.",
+      "savedAt": "Saved at {when}",
+      "invalidExpressions": "Cron save partial — invalid: {items}",
+      "placeholder": "e.g. 0 */6 * * *",
+      "presetAria": "{label} preset",
+      "presetHint": "Pick a preset…",
+      "lastTriggered": "Last fired: {when}",
+      "nextTrigger": "Next fire: {when}",
+      "never": "(never)"
+    },
+    "draftEditor": {
+      "titleCharacter": "Edit character draft",
+      "titleSkill": "Edit skill draft",
+      "descriptionCharacter": "Refine the character before accepting. A second PII red-line check runs on save.",
+      "descriptionSkill": "Refine the skill before accepting. A second PII red-line check runs on save.",
+      "nameLabel": "Name",
+      "descriptionLabel": "Description",
+      "systemPromptLabel": "System prompt",
+      "contentLabel": "Skill content",
+      "voiceSummaryLabel": "Voice summary",
+      "cancel": "Cancel",
+      "save": "Save edits",
+      "busy": "Saving…",
+      "nameRequired": "Name is required.",
+      "bodyRequired": "Body cannot be empty."
+    },
+    "sourceUploader": {
+      "filesTitle": "From file(s)",
+      "filesDescription": "Text formats (Markdown / CSV / HTML / JSON / source code / .eml / .mbox) are stored as-is. Binary formats (PDF / DOCX / PPTX / EPUB / ODT / ODP) are parsed in the browser; only the extracted text lands in Dexie. Chat exports (ChatGPT / Claude / Gemini / Slack / Lark / WeChat / DingTalk) and mbox files fan out into one source per conversation.",
+      "pickFilesAria": "Pick text files",
+      "gitRepoTitle": "From a local Git repository",
+      "gitRepoDescription": "Walks recent commits with simple-git and creates one source per commit (subject + body + diff). Desktop only — uses your Tauri filesystem permissions.",
+      "maxCommits": "Max commits",
+      "authorFilter": "Author filter (optional)",
+      "authorPlaceholder": "e.g. alice or alice@example.com",
+      "walking": "Walking…",
+      "pickRepoFolder": "Pick repo folder",
+      "pasteTitle": "Or paste text",
+      "titleLabel": "Title (optional)",
+      "titlePlaceholder": "e.g. onboarding-notes.md",
+      "formatLabel": "Format",
+      "contentLabel": "Content",
+      "contentPlaceholder": "Paste markdown, code, or exported chat content here…",
+      "saving": "Saving…",
+      "savePastedSource": "Save pasted source",
+      "importedSummarySingular": "Imported 1 source.",
+      "importedSummaryPlural": "Imported {count} sources.",
+      "perFileSrcSingular": "1 src",
+      "perFileSrcPlural": "{count} srcs",
+      "repoImportedSingular": "Imported 1 commit from",
+      "repoImportedPlural": "Imported {count} commits from"
+    },
+    "selector": {
+      "activeTwinAria": "Active twin: {name}",
+      "noActive": "No twin selected",
+      "switchTo": "Switch to",
+      "noTwinsHint": "No twins available",
+      "archivedHeader": "Archived",
+      "newTwin": "New twin",
+      "rename": "Rename",
+      "clone": "Clone",
+      "archive": "Archive",
+      "unarchive": "Unarchive",
+      "delete": "Delete",
+      "createTitle": "Create new twin",
+      "renameTitle": "Rename twin",
+      "cloneTitle": "Clone twin",
+      "createDescription": "Pick a name for the new twin. Color and runtime knobs default to sensible values; you can change everything later.",
+      "renameDescription": "Rename the twin. The id and bound characters stay the same.",
+      "cloneDescription": "Create a copy of the twin (color and runtime knobs are preserved; sources are not duplicated).",
+      "nameLabel": "Twin name",
+      "nameRequired": "Name is required",
+      "cancel": "Cancel",
+      "create": "Create",
+      "save": "Save",
+      "busy": "Working…",
+      "deleteTitle": "Delete twin?",
+      "deleteDescription": "Delete \"{name}\" and cascade-remove every source, chunk, draft, and job that belongs to it. This cannot be undone."
+    },
+    "unredact": {
+      "title": "Restore sensitive details?",
+      "description": "{restored} of {total} placeholders will be restored.",
+      "noPlaceholders": "No placeholders to restore.",
+      "restoreAll": "Restore all",
+      "keepAll": "Keep all",
+      "checkboxAria": "Restore {placeholder}",
+      "cancel": "Cancel",
+      "confirm": "Accept ({restored} restored)",
+      "busy": "Working…"
+    },
+    "injectLog": {
+      "title": "Runtime injection log",
+      "description": "The last 50 RAG / style-few-shot injections that ran on top of this twin. In-memory only — clears on reload.",
+      "count": "{count, plural, =0 {0 entries} =1 {1 entry} other {# entries}}",
+      "emptyHint": "No injections yet — send a message to a character bound to this twin to populate the log.",
+      "applied": "applied",
+      "skipped": "skipped",
+      "degraded": "degraded",
+      "counts": "{chunks} chunks · {samples} samples · ~{tokens} tok"
+    },
+    "settings": {
+      "title": "Settings",
+      "ragDefaultsTitle": "RAG defaults",
+      "ragDefaultsBody": "Per-character overrides live on the character record (twinSettings.ragTopK, twinSettings.styleSamplesK). When unset, the runtime falls back to topK = 6, styleSamplesK = 3, with both RAG and style few-shot enabled.",
+      "runtimeTitle": "Runtime configuration",
+      "savedAt": "saved {when}",
+      "statsTwinId": "Twin id",
+      "statsSources": "Sources",
+      "statsChunks": "Indexed chunks",
+      "statsStyleSamples": "Style samples",
+      "statsPlaybooks": "Playbooks",
+      "statsEntities": "Entities",
+      "statsVoiceSummary": "Voice summary",
+      "statsProfileUpdated": "Profile updated",
+      "voiceEmpty": "(empty)",
+      "never": "(never)",
+      "workerToggleLabel": "Auto-start the job worker for this twin",
+      "embedding": "Embedding",
+      "distillLlm": "Distill LLM",
+      "vectorStore": "Vector store",
+      "provider": "Provider",
+      "model": "Model",
+      "apiKey": "API key",
+      "backend": "Backend",
+      "url": "URL",
+      "apiKeyOptional": "API key (optional)",
+      "indexName": "Index name",
+      "namespace": "Namespace",
+      "address": "Address",
+      "tokenOptional": "Token (optional)",
+      "mode": "Mode",
+      "serverUrl": "Server URL",
+      "backendNativeDisplay": "Native (Tauri local)",
+      "nativeDescription": "Stores vectors locally in a SQLite file inside your app data folder. No external service required.",
+      "openDataFolder": "Open data folder",
+      "testConnection": "Test connection",
+      "testing": "Testing…",
+      "resetButton": "Reset vector store",
+      "resetDialogTitle": "Reset vector store?",
+      "resetDialogBody": "This deletes the local vectors.sqlite file. This cannot be undone.",
+      "cancel": "Cancel",
+      "confirmReset": "Confirm reset",
+      "resetSuccess": "Vector store reset. Reload the page to reinitialise the store.",
+      "resetFailed": "Reset failed: {msg}",
+      "saving": "Saving…",
+      "save": "Save runtime settings"
+    },
+    "status": {
+      "queued": "Queued",
+      "running": "Running",
+      "paused": "Paused",
+      "completed": "Completed",
+      "failed": "Failed",
+      "pending": "Pending",
+      "accepted": "Accepted",
+      "rejected": "Rejected",
+      "edited": "Edited"
+    },
+    "kind": {
+      "ingest": "Ingest",
+      "distill": "Distill",
+      "re-distill": "Re-distill",
+      "character": "Character",
+      "skill": "Skill"
+    },
+    "format": {
+      "markdown": "Markdown",
+      "pdf": "PDF",
+      "docx": "DOCX",
+      "pptx": "PPTX",
+      "odt": "ODT",
+      "odp": "ODP",
+      "html": "HTML",
+      "csv": "CSV",
+      "epub": "EPUB",
+      "rtf": "RTF",
+      "code": "Code",
+      "chatgpt-export": "ChatGPT export",
+      "claude-export": "Claude export",
+      "gemini-export": "Gemini export",
+      "slack-export": "Slack export",
+      "lark-export": "Lark export",
+      "dingtalk-export": "DingTalk export",
+      "wechat-export": "WeChat export",
+      "mbox": "mbox",
+      "eml": "eml",
+      "git-repo": "Git repo"
+    },
+    "piiKind": {
+      "EMAIL": "EMAIL",
+      "PHONE": "PHONE",
+      "CN_ID": "CN_ID",
+      "BANK_CARD": "BANK_CARD",
+      "NAME": "NAME",
+      "IP_ADDR": "IP_ADDR",
+      "API_KEY": "API_KEY",
+      "PASSPORT": "PASSPORT",
+      "DRIVER_LICENSE": "DRIVER_LICENSE"
     }
   },
   "mobile": {
@@ -8260,6 +8502,7 @@
       "sectionAdvanced": "Advanced",
       "settingsLink": "App settings",
       "backupLink": "Backup & sync",
+      "dexieMaintenance": "Dexie maintenance",
       "appSecurity": "App security",
       "biometricToggle": "Require biometric to unlock",
       "biometricUnavailable": "This device has no biometric enrolled.",
@@ -8281,7 +8524,9 @@
         "drafts": "Drafts",
         "backup": "Last backup",
         "backupNever": "Never"
-      }
+      },
+      "appearanceLink": "Theme & wallpaper",
+      "appearanceBackAria": "Back to Me"
     },
     "companion": {
       "tunnel": {
@@ -8308,7 +8553,8 @@
         "description": "The device loses access immediately.",
         "blocked": "Revoke not completed ({reason}).",
         "successToast": "Device revoked."
-      }
+      },
+      "pushTokenFailed": "Couldn't tell the desktop about this phone's push token ({reason})."
     },
     "twinDraft": {
       "kindCharacter": "Character",
@@ -8360,7 +8606,8 @@
       "all": "All",
       "pinned": "Pinned",
       "pinned_added": "Pinned.",
-      "pinned_removed": "Unpinned."
+      "pinned_removed": "Unpinned.",
+      "graphViewerEmpty": "No nodes in this workflow."
     },
     "twinSources": {
       "title": "Twin sources",
@@ -8416,7 +8663,8 @@
       "exportBiometricTitle": "Confirm export",
       "exportBiometricReason": "Authenticate to export an encrypted backup.",
       "biometricBlocked": "Biometric check failed. Export cancelled.",
-      "passphraseRequiredHint": "Required so the encrypted archive can be opened later."
+      "passphraseRequiredHint": "Required so the encrypted archive can be opened later.",
+      "webModeNote": "Web mode: backup downloads as a regular file."
     },
     "shareTarget": {
       "title": "Share via cognia",
@@ -8486,6 +8734,29 @@
       "language": "Language",
       "defaultModel": "Default model",
       "queueLabel": "Queued — desktop will apply this when online."
+    },
+    "connectionState": {
+      "live": "Live",
+      "reconnecting": "Reconnecting",
+      "offline": "Offline",
+      "repairNeeded": "Re-pair needed",
+      "aria": "Connection: {label}"
+    },
+    "security": {
+      "title": "Biometric protection",
+      "description": "Require Face ID / fingerprint before sensitive actions.",
+      "deletePairing": {
+        "label": "Sign out / un-pair",
+        "help": "Ask for biometric before clearing the pairing on this phone."
+      },
+      "exportBackup": {
+        "label": "Export encrypted backup",
+        "help": "Ask for biometric before writing a backup file."
+      },
+      "revealSecrets": {
+        "label": "Reveal stored secrets",
+        "help": "Ask for biometric before showing API keys or tokens."
+      }
     },
     "characterEdit": {
       "createTitle": "New character",
@@ -8606,7 +8877,29 @@
     },
     "sidebar": {
       "searchPlaceholder": "Search nodes…",
-      "noMatches": "No nodes match."
+      "noMatches": "No nodes match.",
+      "desktopOnly": "Desktop only",
+      "dragHint": "Drag any node onto the canvas, or click to drop at the viewport center.",
+      "category": {
+        "trigger": "Triggers",
+        "action": "Actions",
+        "ai": "AI",
+        "flow": "Flow",
+        "data": "Data",
+        "io": "I/O",
+        "annotation": "Annotations",
+        "plugin": "Plugin nodes"
+      },
+      "hint": {
+        "trigger": "How the workflow starts.",
+        "action": "Side effects: send, save, invoke.",
+        "ai": "LLM calls.",
+        "flow": "Branch, loop, wait, group.",
+        "data": "Reshape, template, code.",
+        "io": "Talk to the outside world.",
+        "annotation": "Documentation on the canvas — no execution.",
+        "plugin": "Nodes contributed by enabled plugins."
+      }
     },
     "inspector": {
       "empty": "Select a node on the canvas to configure it.",
@@ -8682,6 +8975,1343 @@
       "summary": "{count, plural, one {# validation issue} other {# validation issues}}",
       "blockedRunTitle": "Fix validation issues before running",
       "blockedSaveTitle": "Workflow saved with {count, plural, one {# unresolved issue} other {# unresolved issues}}"
+    },
+    "nodes": {
+      "trigger.manual": {
+        "label": "Run manually",
+        "description": "Fires when you click Run in the editor."
+      },
+      "trigger.cron": {
+        "label": "On schedule",
+        "description": "Fires on a cron schedule. Backed by the Tauri scheduler when running."
+      },
+      "trigger.connector.inbound": {
+        "label": "Incoming message",
+        "description": "Fires when a message arrives on a connected platform (Telegram, Slack, ...)."
+      },
+      "trigger.chat.message": {
+        "label": "On chat message",
+        "description": "Fires when a user sends a message in a bound character session."
+      },
+      "trigger.webhook": {
+        "label": "On webhook",
+        "description": "Fires when an HTTP request hits the workflow's webhook path."
+      },
+      "trigger.github.webhook": {
+        "label": "On GitHub event",
+        "description": "Fires when GitHub posts a webhook (PR opened, Issue labeled, push, …). Verifies x-hub-signature-256."
+      },
+      "action.character.send": {
+        "label": "Send as character",
+        "description": "Sends a message as a chosen character into a session."
+      },
+      "action.character.create": {
+        "label": "Create character",
+        "description": "Creates a new character (employee) row."
+      },
+      "action.character.update": {
+        "label": "Update character",
+        "description": "Patches fields on an existing character."
+      },
+      "action.team.run": {
+        "label": "Run team",
+        "description": "Starts an agent team's lifecycle and waits for completion."
+      },
+      "action.team.create": {
+        "label": "Create team",
+        "description": "Creates a new agent team row."
+      },
+      "action.team.update": {
+        "label": "Update team",
+        "description": "Patches an existing team's roster or orchestration mode."
+      },
+      "action.skill.invoke": {
+        "label": "Invoke skill",
+        "description": "Renders a skill into the prompt of the next AI step."
+      },
+      "action.skill.upsert": {
+        "label": "Upsert skill",
+        "description": "Creates or updates a skill with the given markdown body."
+      },
+      "action.twin.rag": {
+        "label": "Twin RAG",
+        "description": "Runs RAG over a twin's vector store and returns the top-K chunks."
+      },
+      "action.twin.ingest": {
+        "label": "Twin ingest",
+        "description": "Queues a new source for the twin's ingest pipeline."
+      },
+      "action.connector.send": {
+        "label": "Send via connector",
+        "description": "Pushes a message through the outbound queue of a connected adapter."
+      },
+      "action.connector.draft": {
+        "label": "Save as draft",
+        "description": "Stores the proposed reply for human review in the Inbox."
+      },
+      "action.mcp.invokeTool": {
+        "label": "Invoke MCP tool",
+        "description": "Calls a tool on a configured MCP server."
+      },
+      "action.plugin.invoke": {
+        "label": "Invoke plugin",
+        "description": "Calls a plugin task handler registered in the plugin runtime."
+      },
+      "action.github.openPr": {
+        "label": "Open GitHub PR",
+        "description": "Opens a pull request via the GitHub Delivery plugin (policy-gated)."
+      },
+      "action.github.closePr": {
+        "label": "Close GitHub PR",
+        "description": "Closes an open pull request without merging."
+      },
+      "action.github.mergePr": {
+        "label": "Merge GitHub PR",
+        "description": "Merges a pull request. Requires CI green + human approval per policy."
+      },
+      "action.github.reviewPr": {
+        "label": "Review GitHub PR",
+        "description": "Submits a review (APPROVE / REQUEST_CHANGES / COMMENT) on a PR."
+      },
+      "action.github.reviewPrInline": {
+        "label": "Inline review with AI",
+        "description": "Uses an LLM to produce a structured review (overall body + line-anchored inline comments) for a PR."
+      },
+      "action.github.commentPr": {
+        "label": "Comment on PR",
+        "description": "Posts a comment on a pull request."
+      },
+      "action.github.commentIssue": {
+        "label": "Comment on Issue",
+        "description": "Posts a comment on an issue."
+      },
+      "action.github.labelIssue": {
+        "label": "Label Issue/PR",
+        "description": "Adds or removes labels on an issue or pull request."
+      },
+      "action.github.closeIssue": {
+        "label": "Close Issue",
+        "description": "Closes an issue with optional reason (completed / not_planned)."
+      },
+      "action.github.createRelease": {
+        "label": "Create Release",
+        "description": "Creates a Release. Drafts always allowed; published releases gated."
+      },
+      "action.github.generateChangelog": {
+        "label": "Generate changelog",
+        "description": "Computes Conventional-Commit semver bump + Markdown release notes."
+      },
+      "action.github.pushTag": {
+        "label": "Push tag",
+        "description": "Pushes a git tag to the repo."
+      },
+      "action.github.runIssueLoop": {
+        "label": "Issue → PR loop",
+        "description": "End-to-end Issue → AI worktree → PR loop. Clones, drives the AI, opens a PR."
+      },
+      "action.desktop.screenshot": {
+        "label": "Screenshot",
+        "description": "Capture the primary monitor or a region. Returns PNG bytes + dims."
+      },
+      "action.desktop.findElement": {
+        "label": "Find element",
+        "description": "Locate a UI element by name / automation id / control type."
+      },
+      "action.desktop.readTree": {
+        "label": "Read tree",
+        "description": "Snapshot the accessibility subtree as JSON for downstream nodes."
+      },
+      "action.desktop.click": {
+        "label": "Click",
+        "description": "Click an element or absolute screen coordinate."
+      },
+      "action.desktop.type": {
+        "label": "Type text",
+        "description": "Type a string into the focused element via SendInput."
+      },
+      "action.desktop.keys": {
+        "label": "Send keys",
+        "description": "Send a keyboard chord like ctrl+shift+t."
+      },
+      "action.desktop.invokePattern": {
+        "label": "Invoke pattern",
+        "description": "Dispatch a UIA pattern (Invoke / Toggle / Value / Transform / …)."
+      },
+      "action.desktop.windowFocus": {
+        "label": "Focus window",
+        "description": "Bring a window to the foreground."
+      },
+      "action.desktop.windowClose": {
+        "label": "Close window",
+        "description": "Close a window via the UIA Window pattern."
+      },
+      "action.desktop.windowResize": {
+        "label": "Resize window",
+        "description": "Move/resize a window via the UIA Transform pattern."
+      },
+      "action.desktop.wait": {
+        "label": "Wait for element",
+        "description": "Block until an element appears, disappears, or matches a property."
+      },
+      "trigger.desktop.event": {
+        "label": "On UIA event",
+        "description": "Fire when a UIA focus / structure / property event matches."
+      },
+      "ai.prompt": {
+        "label": "AI prompt",
+        "description": "Direct LLM call. Uses the configured provider routing."
+      },
+      "ai.classify": {
+        "label": "Classify",
+        "description": "LLM-based classification into one of N labels."
+      },
+      "ai.extract": {
+        "label": "Extract data",
+        "description": "Structured extraction (JSON schema) from free-form text."
+      },
+      "ai.embed": {
+        "label": "Embed text",
+        "description": "Generate an embedding vector for semantic similarity."
+      },
+      "flow.branch": {
+        "label": "If / else",
+        "description": "Routes execution down one of two branches based on a condition."
+      },
+      "flow.switch": {
+        "label": "Switch",
+        "description": "Multi-way branch on the value of an expression."
+      },
+      "flow.split": {
+        "label": "Split (parallel)",
+        "description": "Fans out to multiple branches that run concurrently."
+      },
+      "flow.join": {
+        "label": "Join",
+        "description": "Joins parallel branches with all/any/race semantics."
+      },
+      "flow.loop": {
+        "label": "Loop",
+        "description": "Repeats a sub-graph for-each / while / N times."
+      },
+      "flow.wait": {
+        "label": "Wait",
+        "description": "Pauses for a fixed duration or until a wake-up event arrives."
+      },
+      "flow.set": {
+        "label": "Set variable",
+        "description": "Assigns a value to a workflow-scoped variable."
+      },
+      "flow.subworkflow": {
+        "label": "Run subworkflow",
+        "description": "Invokes another workflow as a step."
+      },
+      "data.transform": {
+        "label": "Transform",
+        "description": "Map / filter / reduce / sort over an input array or object."
+      },
+      "data.code": {
+        "label": "Code",
+        "description": "Custom JS expression with a 5s timeout."
+      },
+      "data.template": {
+        "label": "Template",
+        "description": "Render a mustache-style template string against the upstream data."
+      },
+      "io.http": {
+        "label": "HTTP request",
+        "description": "Call an external HTTP API with retries and timeout."
+      },
+      "io.webhook.respond": {
+        "label": "Webhook respond",
+        "description": "Respond to the inbound webhook trigger with a payload."
+      },
+      "annotation.note": {
+        "label": "Sticky note",
+        "description": "Free-text note placed on the canvas. Has no execution."
+      },
+      "annotation.group": {
+        "label": "Group frame",
+        "description": "Visual group around several nodes. Has no execution."
+      }
+    },
+    "runs": {
+      "detail": {
+        "notFound": {
+          "title": "Run not found",
+          "description": "This run may have been deleted, or the URL is incorrect."
+        },
+        "backToRuns": "Back to runs",
+        "running": "Running…",
+        "rerunning": "Re-running…",
+        "rerun": "Re-run",
+        "sparkline": {
+          "title": "Duration trend"
+        }
+      },
+      "step": {
+        "selectPrompt": "Select a step in the timeline to inspect.",
+        "notInSnapshot": "Step {stepId} is not in the workflow snapshot.",
+        "duration": "Duration",
+        "statusLabel": "Status",
+        "started": "Started",
+        "ended": "Ended",
+        "error": "Error",
+        "nonRetryable": "This error is marked non-retryable; retries were skipped.",
+        "skipReason": "Skip reason",
+        "resolvedParams": "Resolved params",
+        "output": "Output",
+        "noValue": "(no value)",
+        "logs": "Logs",
+        "stepIdLabel": "Step id:"
+      },
+      "logs": {
+        "stackToggleHide": "Hide stack trace",
+        "stackToggleShow": "Show stack trace",
+        "searchPlaceholder": "Search logs…",
+        "levelFilter": "Filter log levels",
+        "noResults": "No log entries match.",
+        "levels": {
+          "debug": "debug",
+          "info": "info",
+          "warn": "warn",
+          "error": "error"
+        }
+      },
+      "timeline": {
+        "waiting": "Waiting for events…",
+        "retried": "{count, plural, one {Retried # time} other {Retried # times}}"
+      },
+      "status": {
+        "pending": "Pending",
+        "running": "Running",
+        "waiting": "Waiting",
+        "paused": "Paused",
+        "succeeded": "Succeeded",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      },
+      "list": {
+        "backToEditor": "Back to editor",
+        "title": "Runs",
+        "description": "Every execution of this workflow, newest first.",
+        "columns": {
+          "status": "Status",
+          "trigger": "Trigger",
+          "started": "Started",
+          "duration": "Duration",
+          "open": "Open"
+        },
+        "empty": {
+          "title": "No runs yet",
+          "description": "Click <strong>Run</strong> in the editor toolbar, or attach a trigger that fires automatically."
+        },
+        "openRun": "Open run {id}"
+      }
+    },
+    "commandPalette": {
+      "searchPlaceholder": "Type a command, search nodes, jump to a workflow…",
+      "empty": "No results found.",
+      "headings": {
+        "editorActions": "Editor actions",
+        "addCategory": "Add {category} node",
+        "recent": "Switch to recent workflow"
+      },
+      "categories": {
+        "trigger": "trigger",
+        "action": "action",
+        "ai": "AI",
+        "flow": "flow",
+        "data": "data",
+        "io": "I/O",
+        "annotation": "annotation",
+        "plugin": "plugin"
+      },
+      "commands": {
+        "save": "Save workflow",
+        "run": "Run workflow",
+        "undo": "Undo",
+        "redo": "Redo",
+        "autoLayout": "Auto-layout",
+        "exportJson": "Export workflow JSON",
+        "importJson": "Import workflow JSON",
+        "backToLibrary": "Back to library"
+      }
+    },
+    "forms": {
+      "desktopShared": {
+        "selector": {
+          "label": "Selector",
+          "defaultHint": "UIA selector (role / name / automationId). Leave blank to act on the foreground window.",
+          "defaultPlaceholder": "role=\"Button\" name~=\"Submit\""
+        },
+        "timeout": {
+          "label": "Timeout (ms)"
+        },
+        "retries": {
+          "label": "Retries"
+        }
+      },
+      "desktopScreenshot": {
+        "selector": {
+          "hint": "Optional. When set, the screenshot is cropped to the element bounds; otherwise the whole window (or whole screen with `fullScreen`) is captured."
+        },
+        "format": {
+          "label": "Format"
+        },
+        "fullScreen": {
+          "label": "Full screen"
+        },
+        "outputPath": {
+          "label": "Output path",
+          "hint": "Optional. When set, the screenshot is also written to disk at this path.",
+          "placeholder": "C:/temp/cap.png"
+        }
+      },
+      "desktopFindElement": {
+        "selector": {
+          "hint": "UIA selector. Required — the node returns the element's bounds + handle for downstream nodes."
+        }
+      },
+      "desktopReadTree": {
+        "selector": {
+          "hint": "Optional. When set, the tree is rooted at the matched element; otherwise it starts at the foreground window."
+        },
+        "maxDepth": {
+          "label": "Max depth",
+          "hint": "How many levels to traverse. Larger values are slow; the default keeps response under a second on a typical desktop."
+        }
+      },
+      "desktopClick": {
+        "selector": {
+          "hint": "UIA selector for the target. Required."
+        },
+        "button": {
+          "label": "Button"
+        },
+        "clickCount": {
+          "label": "Click count"
+        }
+      },
+      "desktopType": {
+        "selector": {
+          "hint": "UIA selector for the target input. Optional — defaults to the focused element."
+        },
+        "text": {
+          "label": "Text",
+          "placeholder": "Hello, world!"
+        },
+        "delayMs": {
+          "label": "Per-key delay (ms)",
+          "hint": "Small delay between keys, useful for apps that miss keystrokes when typed too quickly."
+        }
+      },
+      "desktopKeys": {
+        "chord": {
+          "label": "Key chord",
+          "hint": "Use \"+\" between modifiers, e.g. `ctrl+shift+t`. The chord is dispatched against the focused window.",
+          "placeholder": "ctrl+shift+p"
+        }
+      },
+      "desktopInvokePattern": {
+        "selector": {
+          "hint": "UIA selector for the element supporting the chosen pattern."
+        },
+        "pattern": {
+          "label": "Pattern"
+        },
+        "value": {
+          "label": "Value",
+          "hint": "Required for `Value`, `RangeValue`; optional for the rest."
+        }
+      },
+      "desktopWindowFocus": {
+        "selector": {
+          "hint": "UIA window selector (e.g. `name~='Notepad'`). When omitted, the foreground window is used."
+        }
+      },
+      "desktopWindowClose": {
+        "selector": {
+          "hint": "UIA window selector. When omitted, the foreground window is closed."
+        }
+      },
+      "desktopWindowResize": {
+        "selector": {
+          "hint": "UIA window selector. Falls back to the foreground window."
+        },
+        "width": {
+          "label": "Width (px)"
+        },
+        "height": {
+          "label": "Height (px)"
+        }
+      },
+      "desktopWait": {
+        "selector": {
+          "hint": "UIA selector for the element / pattern to wait on."
+        },
+        "eventKind": {
+          "label": "Event",
+          "hint": "What state change ends the wait.",
+          "options": {
+            "elementVisible": "element visible",
+            "elementHidden": "element hidden",
+            "windowReady": "window ready",
+            "propertyChanged": "property changed"
+          }
+        }
+      },
+      "github": {
+        "repoFullName": {
+          "label": "Repository",
+          "hint": "Format: owner/name. Supports {{ }} expressions.",
+          "placeholder": "octocat/hello-world"
+        },
+        "addLabel": "Add label",
+        "webhookTrigger": {
+          "events": {
+            "label": "Events to listen for",
+            "hint": "Pick one or more. The Rust receiver verifies the x-hub-signature-256 header."
+          }
+        },
+        "openPr": {
+          "head": {
+            "label": "Head branch",
+            "hint": "The branch with your changes.",
+            "placeholder": "feat/x"
+          },
+          "base": {
+            "label": "Base branch",
+            "hint": "The branch to merge into.",
+            "placeholder": "main"
+          },
+          "title": {
+            "label": "Title"
+          },
+          "body": {
+            "label": "Body",
+            "hint": "Markdown supported."
+          },
+          "draft": {
+            "label": "Draft",
+            "hint": "Open as draft PR."
+          }
+        },
+        "prNumber": {
+          "label": "PR number"
+        },
+        "issueNumber": {
+          "label": "Issue number"
+        },
+        "issuePrNumber": {
+          "label": "Issue/PR number"
+        },
+        "mergePr": {
+          "mergeMethod": {
+            "label": "Merge method",
+            "options": {
+              "merge": "Merge commit",
+              "squash": "Squash and merge",
+              "rebase": "Rebase and merge"
+            }
+          },
+          "commitTitle": {
+            "label": "Commit title (optional)"
+          }
+        },
+        "reviewPr": {
+          "event": {
+            "label": "Review verdict"
+          },
+          "body": {
+            "label": "Review body",
+            "hint": "Supports {{ }} expressions."
+          }
+        },
+        "reviewPrInline": {
+          "provider": {
+            "label": "LLM provider",
+            "hint": "Must match a configured provider id (e.g. anthropic, openai).",
+            "placeholder": "anthropic"
+          },
+          "model": {
+            "label": "Model",
+            "placeholder": "claude-sonnet-4-6"
+          },
+          "apiKey": {
+            "label": "API key",
+            "hint": "Secret. Stored in the workflow definition — consider a credential ref instead."
+          },
+          "baseURL": {
+            "label": "Base URL",
+            "hint": "Optional. For self-hosted or proxied providers.",
+            "placeholder": "https://api.anthropic.com"
+          },
+          "maxFiles": {
+            "label": "Max files",
+            "hint": "How many changed files to inspect (1–30). Default 5."
+          },
+          "focus": {
+            "label": "Focus",
+            "hint": "Optional review angle, e.g. 'security' or 'performance'. Supports {{ }} expressions."
+          }
+        },
+        "comment": {
+          "body": {
+            "label": "Comment body",
+            "hint": "Supports {{ }} expressions."
+          }
+        },
+        "labelIssue": {
+          "add": {
+            "label": "Labels to add",
+            "placeholder": "cognia:claim"
+          },
+          "remove": {
+            "label": "Labels to remove",
+            "placeholder": "wontfix"
+          }
+        },
+        "closeIssue": {
+          "reason": {
+            "label": "Close reason",
+            "options": {
+              "completed": "Completed",
+              "not_planned": "Not planned"
+            }
+          }
+        },
+        "createRelease": {
+          "tag": {
+            "label": "Tag",
+            "placeholder": "v1.0.0"
+          },
+          "name": {
+            "label": "Release name"
+          },
+          "body": {
+            "label": "Body",
+            "hint": "Supports {{ }} expressions and Markdown."
+          },
+          "draft": {
+            "label": "Draft"
+          },
+          "prerelease": {
+            "label": "Prerelease"
+          }
+        },
+        "generateChangelog": {
+          "since": {
+            "label": "Since (tag or SHA)",
+            "placeholder": "v1.0.0"
+          },
+          "currentVersion": {
+            "label": "Current version",
+            "hint": "Starting version for the bump calc. Defaults to 0.0.0."
+          }
+        },
+        "pushTag": {
+          "tag": {
+            "label": "Tag name",
+            "placeholder": "v1.0.0"
+          },
+          "sha": {
+            "label": "Commit SHA",
+            "hint": "Full 40-char SHA recommended."
+          }
+        },
+        "runIssueLoop": {
+          "worktreeMode": {
+            "label": "Worktree backend",
+            "options": {
+              "local": "Local git worktree",
+              "e2b": "E2B sandbox (requires e2b-sandbox plugin)"
+            }
+          },
+          "branchTemplate": {
+            "label": "Branch template",
+            "hint": "`{n}` is replaced by the issue number."
+          }
+        }
+      },
+      "pickers": {
+        "character": "Select a character",
+        "team": "Select a team",
+        "skill": "Select a skill",
+        "skillNew": "Create new",
+        "skillNoneItem": "— create new —",
+        "mcpServer": "Select an MCP server",
+        "plugin": "Select a plugin",
+        "subworkflow": "Select a workflow"
+      },
+      "manualTrigger": {
+        "intro": "Fires when you click the Run button in the editor. No additional configuration."
+      },
+      "cron": {
+        "cronExpression": {
+          "label": "Cron expression",
+          "hint": "Five fields: minute hour day month weekday. Use *  for any value.",
+          "placeholder": "0 9 * * 1-5"
+        },
+        "timezone": {
+          "label": "Timezone",
+          "hint": "Optional. Defaults to the workflow's timezone setting.",
+          "placeholder": "Asia/Shanghai"
+        }
+      },
+      "connectorInbound": {
+        "adapter": {
+          "label": "Adapter",
+          "hint": "Adapter instance id, e.g., a Telegram bot.",
+          "placeholder": "telegram_main"
+        },
+        "conversationKey": {
+          "label": "Conversation key",
+          "hint": "Optional. Limit to a specific conversation; empty fires on any."
+        },
+        "characterId": {
+          "label": "Character (optional)"
+        }
+      },
+      "chatMessageTrigger": {
+        "character": {
+          "label": "Character"
+        },
+        "sessionId": {
+          "label": "Session id (optional)",
+          "hint": "Limit to a single chat session. Empty fires on any session for the character."
+        }
+      },
+      "characterSend": {
+        "character": {
+          "label": "Character"
+        },
+        "content": {
+          "label": "Message content",
+          "hint": "Supports {{ $node['id'].out.field }} expressions.",
+          "placeholder": "Hello, {{ $trigger.payload.userName }}"
+        },
+        "sessionId": {
+          "label": "Target session id (optional)"
+        }
+      },
+      "teamRun": {
+        "teamId": {
+          "label": "Team id",
+          "placeholder": "team_..."
+        },
+        "goal": {
+          "label": "Goal / brief",
+          "hint": "What you want the team to accomplish. Forwarded to the lead's planning phase."
+        }
+      },
+      "skillInvoke": {
+        "skillIds": {
+          "label": "Skill ids (comma-separated)",
+          "hint": "The selected skills are appended to the next downstream AI prompt.",
+          "placeholder": "skill_writing, skill_research"
+        }
+      },
+      "twinRag": {
+        "twinId": {
+          "label": "Twin id",
+          "placeholder": "twin_alex"
+        },
+        "query": {
+          "label": "Query",
+          "hint": "The text used for vector search. Supports expressions.",
+          "placeholder": "{{ $trigger.payload.text }}"
+        },
+        "topK": {
+          "label": "Top K",
+          "hint": "Number of chunks to return. Default 6."
+        }
+      },
+      "connectorSend": {
+        "adapter": {
+          "label": "Adapter",
+          "placeholder": "telegram_main"
+        },
+        "conversationKey": {
+          "label": "Conversation key"
+        },
+        "content": {
+          "label": "Message content"
+        }
+      },
+      "aiPrompt": {
+        "provider": {
+          "label": "Provider",
+          "placeholder": "(stub)"
+        },
+        "model": {
+          "label": "Model",
+          "hint": "Provider-specific model id.",
+          "placeholder": "claude-sonnet-4-6"
+        },
+        "apiKey": {
+          "label": "API key",
+          "hint": "Embedded inline. For shared workflows, use a credential ref instead."
+        },
+        "baseURL": {
+          "label": "Base URL (optional)",
+          "hint": "Override for proxies / custom OpenAI-compatible endpoints.",
+          "placeholder": "https://api.openai.com/v1"
+        },
+        "systemPrompt": {
+          "label": "System prompt"
+        },
+        "userPrompt": {
+          "label": "User prompt"
+        },
+        "temperature": {
+          "label": "Temperature",
+          "hint": "0 = deterministic. Higher values = more variety."
+        }
+      },
+      "branch": {
+        "condition": {
+          "label": "Condition",
+          "hint": "Expression that resolves to a truthy value. Supports {{ }} expressions.",
+          "placeholder": "{{ $node['n_classify'].out.label }} === 'urgent'"
+        },
+        "truthyLabel": {
+          "label": "Truthy label"
+        },
+        "falsyLabel": {
+          "label": "Falsy label"
+        }
+      },
+      "setVariable": {
+        "variable": {
+          "label": "Variable name",
+          "placeholder": "counter"
+        },
+        "value": {
+          "label": "Value",
+          "hint": "Expression. Stored on the run's static data."
+        }
+      },
+      "wait": {
+        "mode": {
+          "label": "Wait mode",
+          "options": {
+            "duration": "Fixed duration",
+            "event": "Wait for event (Phase 4+)"
+          }
+        },
+        "durationMs": {
+          "label": "Duration (ms)",
+          "hint": "The orchestrator pauses the run for this long before continuing."
+        }
+      },
+      "httpRequest": {
+        "method": {
+          "label": "Method"
+        },
+        "url": {
+          "label": "URL",
+          "hint": "Supports {{ }} expressions.",
+          "placeholder": "https://api.example.com/v1/things"
+        },
+        "body": {
+          "label": "Body",
+          "hint": "Sent as application/json."
+        },
+        "followRedirects": {
+          "label": "Follow redirects",
+          "hint": "If off, returns the redirect status without following."
+        }
+      },
+      "code": {
+        "code": {
+          "label": "JS body",
+          "hint": "Runs in a sandboxed Function() with a 5 s timeout. Available: upstream, params, trigger."
+        }
+      },
+      "template": {
+        "template": {
+          "label": "Template",
+          "hint": "Mustache-like {{ }} expressions are evaluated against upstream / trigger / static data."
+        }
+      },
+      "transform": {
+        "operation": {
+          "label": "Operation",
+          "options": {
+            "map": "Map",
+            "filter": "Filter",
+            "reduce": "Reduce",
+            "sort": "Sort",
+            "flatten": "Flatten"
+          }
+        },
+        "expression": {
+          "label": "Expression",
+          "hint": "Per-operation expression. For map: 'x.field'. For filter: 'x.value > 0'."
+        }
+      },
+      "note": {
+        "text": {
+          "label": "Note text"
+        },
+        "color": {
+          "label": "Color",
+          "ariaGroup": "Note color",
+          "options": {
+            "yellow": "Yellow",
+            "green": "Green",
+            "blue": "Blue",
+            "pink": "Pink",
+            "violet": "Violet"
+          }
+        }
+      },
+      "genericJson": {
+        "params": {
+          "label": "Params (JSON)",
+          "hint": "Edit the raw params object. Invalid JSON is not saved."
+        },
+        "errorTopLevelObject": "Top-level must be a JSON object",
+        "errorInvalidJson": "Invalid JSON"
+      },
+      "webhookBanner": {
+        "desktopOnly": "Desktop only. The webhook receiver runs inside the Tauri sidecar.",
+        "urlLabel": "URL: ",
+        "loading": "Loading webhook URL…",
+        "saveFirst": "Save the workflow to register the webhook and reveal its URL."
+      },
+      "webhookTrigger": {
+        "method": {
+          "label": "Method",
+          "options": {
+            "any": "Any"
+          }
+        },
+        "path": {
+          "label": "Path",
+          "hint": "Mounted at /webhook/<path>",
+          "placeholder": "incoming-events"
+        },
+        "hmacSecret": {
+          "label": "HMAC secret (optional)",
+          "hint": "Verifies the X-Signature-256 header. Leave blank to skip verification."
+        },
+        "responseStatus": {
+          "label": "Response status"
+        },
+        "responseTemplate": {
+          "label": "Response body template",
+          "hint": "Optional. Defaults to the workflow run id.",
+          "placeholder": "{ \"ok\": true, \"runId\": \"{{ $run.id }}\" }"
+        }
+      },
+      "characterCreate": {
+        "name": {
+          "label": "Name",
+          "placeholder": "Research assistant"
+        },
+        "systemPrompt": {
+          "label": "System prompt",
+          "hint": "Supports {{ }} expressions for dynamic content."
+        },
+        "description": {
+          "label": "Description (optional)"
+        },
+        "avatarColor": {
+          "label": "Avatar color",
+          "placeholder": "#6d28d9"
+        },
+        "avatarEmoji": {
+          "label": "Avatar emoji",
+          "placeholder": "🤖"
+        },
+        "model": {
+          "label": "Default model (optional)",
+          "placeholder": "claude-sonnet-4-6"
+        }
+      },
+      "characterUpdate": {
+        "characterId": {
+          "label": "Character"
+        },
+        "patchJson": {
+          "label": "Patch (JSON)",
+          "hint": "Fields to update. Example: { \"systemPrompt\": \"{{ $node.n_extract.out.text }}\" }"
+        }
+      },
+      "teamCreate": {
+        "name": {
+          "label": "Team name"
+        },
+        "description": {
+          "label": "Description"
+        },
+        "orchestration": {
+          "label": "Orchestration",
+          "options": {
+            "round_robin": "Round robin",
+            "supervisor": "Supervisor",
+            "mention_round_robin": "Mention round robin"
+          }
+        },
+        "supervisor": {
+          "label": "Supervisor character"
+        },
+        "members": {
+          "label": "Members (JSON array)",
+          "hint": "[{ \"characterId\": \"...\", \"role\": \"researcher\" }]"
+        }
+      },
+      "teamUpdate": {
+        "teamId": {
+          "label": "Team"
+        },
+        "patchJson": {
+          "label": "Patch (JSON)",
+          "hint": "Example: { \"orchestration\": \"supervisor\" }"
+        }
+      },
+      "skillUpsert": {
+        "skillId": {
+          "label": "Skill id (optional)",
+          "hint": "If set, updates that skill. Otherwise creates a new one."
+        },
+        "name": {
+          "label": "Name",
+          "placeholder": "Research framework"
+        },
+        "description": {
+          "label": "Description"
+        },
+        "content": {
+          "label": "Markdown body",
+          "hint": "The skill body. Supports expressions; rendered into AI prompts when invoked."
+        },
+        "tagsRaw": {
+          "label": "Tags",
+          "hint": "Comma separated",
+          "placeholder": "research, planning"
+        }
+      },
+      "twinIngest": {
+        "twinId": {
+          "label": "Twin id",
+          "placeholder": "twin_alex"
+        },
+        "sourceMode": {
+          "label": "Source mode",
+          "options": {
+            "paste": "Paste content",
+            "fetch": "Fetch URL"
+          }
+        },
+        "format": {
+          "label": "Format",
+          "options": {
+            "markdown": "Markdown",
+            "text": "Plain text",
+            "code": "Code",
+            "chat": "Chat export"
+          }
+        },
+        "title": {
+          "label": "Title (optional)"
+        },
+        "url": {
+          "label": "URL",
+          "hint": "Supports {{ }} expressions.",
+          "placeholder": "https://..."
+        },
+        "content": {
+          "label": "Content",
+          "hint": "Supports {{ }} expressions."
+        }
+      },
+      "mcpInvokeTool": {
+        "serverId": {
+          "label": "MCP server"
+        },
+        "toolName": {
+          "label": "Tool name",
+          "placeholder": "search_repos"
+        },
+        "argsJson": {
+          "label": "Arguments (JSON)",
+          "hint": "Forwarded as the tool call's arguments. Supports expressions."
+        }
+      },
+      "pluginInvoke": {
+        "pluginId": {
+          "label": "Plugin"
+        },
+        "taskId": {
+          "label": "Task id",
+          "placeholder": "generate-report"
+        },
+        "argsJson": {
+          "label": "Arguments (JSON)",
+          "hint": "Forwarded to the plugin task handler."
+        }
+      },
+      "connectorDraft": {
+        "conversationKey": {
+          "label": "Conversation key"
+        },
+        "sessionId": {
+          "label": "Session id"
+        },
+        "content": {
+          "label": "Draft content"
+        },
+        "sourceMessageId": {
+          "label": "Source message id (optional)"
+        },
+        "ttlMs": {
+          "label": "TTL (ms, optional)",
+          "hint": "0 = no expiry"
+        }
+      },
+      "aiClassify": {
+        "provider": {
+          "label": "Provider",
+          "placeholder": "Provider"
+        },
+        "model": {
+          "label": "Model",
+          "placeholder": "claude-haiku-4-5-20251001"
+        },
+        "apiKey": {
+          "label": "API key"
+        },
+        "baseURL": {
+          "label": "Base URL (optional)"
+        },
+        "labelsRaw": {
+          "label": "Labels (comma-separated)",
+          "hint": "The classifier picks one of these. Order is the deterministic fallback.",
+          "placeholder": "urgent, normal, spam"
+        },
+        "input": {
+          "label": "Input",
+          "hint": "Supports {{ }} expressions."
+        },
+        "hint": {
+          "label": "Guidance (optional)"
+        }
+      },
+      "aiExtract": {
+        "provider": {
+          "label": "Provider",
+          "placeholder": "Provider"
+        },
+        "model": {
+          "label": "Model"
+        },
+        "apiKey": {
+          "label": "API key"
+        },
+        "baseURL": {
+          "label": "Base URL (optional)"
+        },
+        "schemaJson": {
+          "label": "Schema (JSON)",
+          "hint": "Field → expected type. Example: { \"name\": \"string\", \"amount\": \"number\" }"
+        },
+        "input": {
+          "label": "Input"
+        },
+        "hint": {
+          "label": "Guidance (optional)"
+        }
+      },
+      "aiEmbed": {
+        "input": {
+          "label": "Input",
+          "hint": "Supports {{ }} expressions."
+        },
+        "dimension": {
+          "label": "Dimension",
+          "hint": "Phase 4 ships a deterministic hash-based embedder; real semantic embeddings land later."
+        }
+      },
+      "switch": {
+        "subject": {
+          "label": "Subject",
+          "hint": "Expression evaluated and matched against cases.",
+          "placeholder": "{{ $node['n_classify'].out.label }}"
+        },
+        "cases": {
+          "label": "Cases",
+          "hint": "First match wins. Strict equality.",
+          "valuePlaceholder": "value",
+          "labelPlaceholder": "label",
+          "addCase": "Add case",
+          "removeCase": "Remove case"
+        },
+        "defaultLabel": {
+          "label": "Default label"
+        }
+      },
+      "split": {
+        "branchLabels": {
+          "label": "Branch labels",
+          "hint": "Each label corresponds to one outgoing edge from this split.",
+          "branchPlaceholder": "Branch {n}",
+          "addBranch": "Add branch",
+          "removeBranch": "Remove branch"
+        }
+      },
+      "join": {
+        "joinPolicy": {
+          "label": "Join policy",
+          "options": {
+            "all": "All — wait for every parent",
+            "any": "Any — proceed when any parent succeeds",
+            "race": "Race — first parent's output wins"
+          }
+        },
+        "timeoutMs": {
+          "label": "Timeout (ms, optional)",
+          "hint": "0 = wait forever. Otherwise abort the join after this long."
+        }
+      },
+      "loop": {
+        "mode": {
+          "label": "Mode",
+          "options": {
+            "forEach": "For each item in array",
+            "times": "Repeat N times",
+            "while": "While condition is truthy"
+          }
+        },
+        "times": {
+          "label": "Times"
+        },
+        "inputExpression": {
+          "label": "Input expression",
+          "hint": "Resolves to the array to iterate. If empty, the first upstream output is used.",
+          "placeholder": "{{ $node['n_search'].out.results }}"
+        },
+        "whileCondition": {
+          "label": "While condition",
+          "hint": "Re-evaluated each iteration. Loop ends when this is falsy or maxIterations is reached."
+        },
+        "bodyExpression": {
+          "label": "Body expression",
+          "hint": "Per-iteration value. $item is the current array element (forEach mode).",
+          "placeholder": "$item.name"
+        },
+        "maxIterations": {
+          "label": "Max iterations",
+          "hint": "Hard cap. Loop breaks early at this count."
+        }
+      },
+      "subworkflow": {
+        "workflowId": {
+          "label": "Sub workflow"
+        },
+        "inputJson": {
+          "label": "Input (JSON)",
+          "hint": "Forwarded as the subworkflow's trigger payload."
+        }
+      },
+      "webhookRespond": {
+        "desktopOnly": "Desktop only. Respond is delivered via the Tauri webhook router.",
+        "status": {
+          "label": "Status code"
+        },
+        "headersJson": {
+          "label": "Headers (JSON)",
+          "hint": "Example: { \"Content-Type\": \"application/json\" }",
+          "placeholder": "{ \"Content-Type\": \"application/json\" }"
+        },
+        "body": {
+          "label": "Body",
+          "hint": "Supports {{ }} expressions."
+        }
+      },
+      "groupAnnotation": {
+        "title": {
+          "label": "Title",
+          "placeholder": "Validation pipeline"
+        },
+        "color": {
+          "label": "Color token",
+          "options": {
+            "zinc": "Zinc",
+            "emerald": "Emerald",
+            "sky": "Sky",
+            "violet": "Violet",
+            "amber": "Amber",
+            "rose": "Rose",
+            "cyan": "Cyan"
+          }
+        },
+        "width": {
+          "label": "Width (px)"
+        },
+        "height": {
+          "label": "Height (px)"
+        }
+      }
+    }
+  },
+  "inbox": {
+    "conversationList": {
+      "header": "Conversations",
+      "empty": "No conversations yet",
+      "hideArchived": "Hide archived",
+      "showArchived": "Show {count} archived"
+    },
+    "draftEditor": {
+      "textPlaceholder": "Draft text…",
+      "markdownPlaceholder": "Draft markdown…",
+      "approveAndSend": "Approve & Send",
+      "reject": "Reject",
+      "cancel": "Cancel"
+    },
+    "conversationHeader": {
+      "modeSwitchDesktopOnly": "Mode switching requires the desktop app"
+    },
+    "draftBanner": {
+      "pending": "A draft reply is waiting for your review.",
+      "review": "Review",
+      "reviewAria": "Review draft reply"
+    },
+    "shell": {
+      "selectPrompt": "Select a conversation to start"
+    },
+    "sidebar": {
+      "title": "Inbox",
+      "viewModeAria": "View mode",
+      "adapters": "Adapters",
+      "noAdapters": "No adapters configured"
+    },
+    "modeSwitcher": {
+      "aria": "Switch mode"
+    },
+    "outboundStatus": {
+      "retry": "Retry"
+    },
+    "policyInfo": {
+      "aria": "Policy info",
+      "title": "Policy"
+    },
+    "conversation": {
+      "loading": "Loading…",
+      "sessionLabel": "Session: {id}",
+      "conversationKeyLabel": "Conversation: {key}"
+    }
+  },
+  "connectors": {
+    "identityMerge": {
+      "title": "Merge platform identities",
+      "description": "Select which identity to keep as primary. The secondary identity's id will be recorded in the primary's merge history.",
+      "secondary": "Secondary:",
+      "primary": "Primary:",
+      "primaryBadge": "Primary",
+      "merge": "Merge",
+      "cancel": "Cancel"
     }
   }
 }

@@ -335,6 +335,8 @@ export function CustomThemeTab() {
                   setDraft({ ...draft, colors: { ...draft.colors, [key]: next } })
                 }
                 className="flex-1"
+                swatchAriaLabel={tokenT("aria.swatch", { label: tokenT(key) })}
+                hexAriaLabel={tokenT("aria.hex", { label: tokenT(key) })}
               />
               {isFlaggedPair(audit, key) && (
                 <Badge

@@ -26,6 +26,7 @@ import type { PluginVerificationSnapshot } from "./plugin-verification"
 // avoid a dep cycle, but the contracts module has no upward imports so the
 // real type is safe to bring in here.
 import type { ActivationEventDeclaration } from "@/lib/plugin/contracts/plugin-points"
+import type { VsCodeExtensionBlock } from "./plugin-vscode"
 
 // =============================================================================
 // Core Plugin Types
@@ -39,6 +40,7 @@ export type PluginType =
   | "python" // Python plugin running via PyO3
   | "hybrid" // Combination of frontend and Python components
   | "wasm" // WASM Component Model plugin (wasmtime host, Tauri-only — ADR 0013)
+  | "vscode-extension" // VS Code extension running in Node sidecar (Tauri-only — see ~/.claude/plans/vscode-snug-squid.md)
 
 /**
  * Plugin capabilities - what the plugin can provide
@@ -192,6 +194,7 @@ export interface ExtensionDescriptor {
     main?: string
     pythonMain?: string
     wasmMain?: string
+    vscodeMain?: string
     styles?: string
   }
   declaredCapabilities: PluginCapability[]
@@ -358,6 +361,23 @@ export interface PluginManifest {
       preopens?: string[]
     }
   }
+
+  /**
+   * Entry point for a VS Code extension (relative path to the bundle inside
+   * the unpacked `.vsix`, e.g. `extension/out/extension.js`). Required when
+   * `type === "vscode-extension"`. The Node sidecar
+   * (`sidecars/vscode-ext-host/`) loads this via a `vm.createContext`
+   * sandbox after the `require("vscode")` hook is installed.
+   */
+  vscodeMain?: string
+
+  /**
+   * VS Code-extension-only block. Carries the originating VS Code metadata
+   * so the host can re-derive contribution details without re-parsing the
+   * `.vsix`. Populated by `lib/plugin/vscode-shim/manifest-adapter.ts` at
+   * install time. See `types/plugin/plugin-vscode.ts:VsCodeExtensionBlock`.
+   */
+  vscodeExtension?: VsCodeExtensionBlock
 
   /** Style entry point (CSS) */
   styles?: string
