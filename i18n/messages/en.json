@@ -8692,6 +8692,7 @@
       "autoBackupInterval": "Interval (days)",
       "historyHeader": "History",
       "historyEmpty": "No history yet.",
+      "historyFailedLabel": "Failed",
       "passphraseLabel": "Optional passphrase (blank uses auto key)",
       "exportBiometricTitle": "Confirm export",
       "exportBiometricReason": "Authenticate to export an encrypted backup.",

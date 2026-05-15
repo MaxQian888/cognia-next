@@ -306,24 +306,19 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
               </SelectContent>
             </Select>
           </Label>
-          <label className="block">
-            <input
-              type="file"
-              accept=".bak,.json,.cog,application/octet-stream,application/json"
-              className="sr-only"
-              onChange={onImportFile}
-              data-testid="backup-import-input"
-            />
-            <span
-              className={cn(
-                "touch-target inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border border-input px-3 text-sm",
-                importing && "opacity-60"
-              )}
-            >
-              <DownloadIcon className="size-4" />
+          <Button asChild variant="outline" className={cn(importing && "opacity-60")}>
+            <label className="touch-target cursor-pointer">
+              <DownloadIcon />
               {importing ? t("importing") : t("importPick")}
-            </span>
-          </label>
+              <input
+                type="file"
+                accept=".bak,.json,.cog,application/octet-stream,application/json"
+                className="sr-only"
+                onChange={onImportFile}
+                data-testid="backup-import-input"
+              />
+            </label>
+          </Button>
         </CardContent>
       </Card>
 
@@ -385,7 +380,7 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
                   </span>
                   {!row.success ? (
                     <Badge variant="outline" className="text-[10px]">
-                      {row.errorMessage ?? "failed"}
+                      {row.errorMessage ?? t("historyFailedLabel")}
                     </Badge>
                   ) : null}
                 </li>

@@ -8692,6 +8692,7 @@
       "autoBackupInterval": "间隔（天）",
       "historyHeader": "历史",
       "historyEmpty": "尚无历史记录。",
+      "historyFailedLabel": "失败",
       "passphraseLabel": "可选密码（留空则使用自动密钥）",
       "exportBiometricTitle": "确认导出",
       "exportBiometricReason": "通过生物识别验证后导出加密备份。",
