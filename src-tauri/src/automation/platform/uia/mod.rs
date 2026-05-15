@@ -14,8 +14,9 @@ use crate::automation::types::*;
 mod element;
 mod find;
 mod input;
-mod screenshot;
+mod pattern;
 
+use crate::automation::platform::shared::screenshot;
 use element::{element_info, ElementCache};
 
 pub struct UiaBackend {
@@ -97,11 +98,33 @@ impl AutomationBackend for UiaBackend {
                     .cache
                     .get(&element_ref)
                     .ok_or(AutomationError::StaleElement)?;
-                elt.click().map_err(|e| AutomationError::BackendError {
-                    message: format!("element click: {e}"),
-                })?;
-                let _ = opts; // ClickOpts.button/double/modifier ignored for element-target clicks.
-                Ok(())
+
+                // UIA Pattern-first click strategy. `useNative` defaults to
+                // true: try Invoke → Toggle → SelectionItem; on miss, fall
+                // back to a coordinate click at the bounding-rect center.
+                let use_native = opts.use_native.unwrap_or(true);
+                if use_native {
+                    if let Ok(true) = pattern::try_pattern_click(&elt) {
+                        return Ok(());
+                    }
+                }
+
+                // Fallback path 1: try the element's native `click()` method
+                // (uiautomation crate's helper that synthesizes input at the
+                // element's clickable point).
+                if elt.click().is_ok() {
+                    return Ok(());
+                }
+
+                // Fallback path 2: bounding-rect center coordinate click.
+                let rect =
+                    elt.get_bounding_rectangle()
+                        .map_err(|e| AutomationError::BackendError {
+                            message: format!("bounding_rect for fallback click: {e}"),
+                        })?;
+                let cx = (rect.get_left() + rect.get_right()) / 2;
+                let cy = (rect.get_top() + rect.get_bottom()) / 2;
+                input::click_point(cx, cy)
             }
             ClickTarget::Point { x, y } => input::click_point(x, y),
         }
@@ -124,29 +147,17 @@ impl AutomationBackend for UiaBackend {
 
     fn invoke_pattern(
         &self,
-        _target: ElementRef,
-        _pattern: PatternKind,
-        _args: serde_json::Value,
+        target: ElementRef,
+        kind: PatternKind,
+        args: serde_json::Value,
     ) -> Result<serde_json::Value> {
-        // Generic pattern dispatch is broad surface — M2 ships InvokePattern
-        // / TogglePattern / ValuePattern / WindowPattern / TransformPattern.
-        Err(AutomationError::BackendError {
-            message: "invoke_pattern pending M2".into(),
-        })
+        let elt = self.cache.get(&target).ok_or(AutomationError::StaleElement)?;
+        pattern::dispatch_pattern(&elt, kind, args)
     }
 
     fn window_op(&self, target: ElementRef, op: WindowOp) -> Result<()> {
         let elt = self.cache.get(&target).ok_or(AutomationError::StaleElement)?;
-        match op {
-            WindowOp::Focus => elt
-                .set_focus()
-                .map_err(|e| AutomationError::BackendError {
-                    message: format!("focus: {e}"),
-                }),
-            _ => Err(AutomationError::BackendError {
-                message: "window_op variant pending M2".into(),
-            }),
-        }
+        pattern::dispatch_window_op(&elt, op)
     }
 
     fn subscribe_events(&self, _filter: EventFilter) -> Result<SubscriptionId> {
@@ -160,6 +171,70 @@ impl AutomationBackend for UiaBackend {
         Err(AutomationError::BackendError {
             message: "unsubscribe pending M2".into(),
         })
+    }
+
+    // ── M5 completion primitives ─────────────────────────────────────────
+
+    fn mouse_move(&self, point: Point) -> Result<()> {
+        input::move_to(point.x, point.y)
+    }
+
+    fn drag(&self, from: Point, to: Point, opts: DragOpts) -> Result<()> {
+        input::drag(from, to, opts)
+    }
+
+    fn scroll(&self, target: ScrollTarget, opts: ScrollOpts) -> Result<()> {
+        match target {
+            ScrollTarget::Element { element_ref } => {
+                let elt = self
+                    .cache
+                    .get(&element_ref)
+                    .ok_or(AutomationError::StaleElement)?;
+
+                // Pattern-first: ScrollPattern → ScrollItemPattern → wheel.
+                if let Ok(p) = elt.get_pattern::<uiautomation::patterns::UIScrollPattern>() {
+                    let (h, v) = pattern::scroll_amounts(opts);
+                    p.scroll(h, v)
+                        .map_err(|e| AutomationError::BackendError {
+                            message: format!("ScrollPattern.scroll: {e}"),
+                        })?;
+                    return Ok(());
+                }
+                if opts.dy != 0 {
+                    if let Ok(p) = elt
+                        .get_pattern::<uiautomation::patterns::UIScrollItemPattern>()
+                    {
+                        p.scroll_into_view()
+                            .map_err(|e| AutomationError::BackendError {
+                                message: format!("ScrollItem.scroll_into_view: {e}"),
+                            })?;
+                        return Ok(());
+                    }
+                }
+                // Fallback to wheel at the element's bounding center.
+                let rect =
+                    elt.get_bounding_rectangle()
+                        .map_err(|e| AutomationError::BackendError {
+                            message: format!("bounding_rect for wheel scroll: {e}"),
+                        })?;
+                let cx = (rect.get_left() + rect.get_right()) / 2;
+                let cy = (rect.get_top() + rect.get_bottom()) / 2;
+                input::scroll_at(Point { x: cx, y: cy }, opts)
+            }
+            ScrollTarget::Point { x, y } => input::scroll_at(Point { x, y }, opts),
+        }
+    }
+
+    fn hold_key(&self, chord: &KeyChord, duration_ms: u32) -> Result<()> {
+        input::hold_key(chord, duration_ms)
+    }
+
+    fn mouse_button(
+        &self,
+        button: MouseButton,
+        transition: ButtonTransition,
+    ) -> Result<()> {
+        input::button(button, transition)
     }
 }
 

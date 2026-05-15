@@ -29,6 +29,7 @@ function makeClient(
     getFeaturedPlugins: over.featured ?? jest.fn(async () => SAMPLE.slice(0, 1)),
     getPopularPlugins: over.popular ?? jest.fn(async () => SAMPLE),
     getRecentPlugins: over.recent ?? jest.fn(async () => SAMPLE.slice(1)),
+    getPlugin: jest.fn(async () => null),
     installPlugin: over.install ?? jest.fn(async () => ({ ok: true })),
     uninstallPlugin: over.uninstall ?? jest.fn(async () => ({ ok: true })),
   }

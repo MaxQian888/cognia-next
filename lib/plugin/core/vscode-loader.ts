@@ -19,8 +19,54 @@
 
 import type { PluginDefinition, PluginManifest } from "@/types/plugin"
 import { loggers } from "@/lib/logger"
+import {
+  configureRpcDispatcher,
+  subscribeToVscodeEvents,
+} from "@/lib/plugin/vscode-shim/rpc-dispatcher"
+import { installVscodeRpcHandlers } from "@/lib/plugin/vscode-shim/setup-handlers"
+import { configureLmHandler } from "@/lib/plugin/vscode-shim/lm-handler"
 
 const vscodeLoaderLogger = loggers.plugin.child("vscode-loader")
+
+let dispatcherConfigured = false
+
+/**
+ * One-time wiring of the renderer-side RPC dispatcher to its Tauri
+ * transport. Re-entrant: subsequent calls no-op. Called at the top of
+ * `loadVscodeDefinition` so plain `import("..vscode-loader")` doesn't
+ * trigger the Tauri shim outside of the desktop runtime.
+ */
+async function ensureDispatcherConfigured(): Promise<void> {
+  if (dispatcherConfigured) return
+  if (!isVscodeHostAvailable()) return
+  const [{ invoke }, { listen }] = await Promise.all([
+    import("@tauri-apps/api/core"),
+    import("@tauri-apps/api/event"),
+  ])
+  configureRpcDispatcher({
+    sendResponse: async (pluginId, responseJson) => {
+      await invoke("plugin_vscode_send_response", {
+        pluginId,
+        responseJson,
+      })
+    },
+    listen: (event, cb) =>
+      listen<string>(event, (e) => cb({ payload: e.payload })) as Promise<() => void>,
+  })
+  // Resolve cognia's currently configured Claude model for lm.selectChatModels.
+  configureLmHandler({
+    resolveDefaultModel: async () => {
+      try {
+        const settings = await invoke<{ model?: string } | null>("read_claude_user_settings")
+        return settings?.model
+      } catch {
+        return undefined
+      }
+    },
+  })
+  installVscodeRpcHandlers()
+  dispatcherConfigured = true
+}
 
 export interface VscodeInvokeArgs {
   pluginId: string
@@ -111,6 +157,7 @@ export async function loadVscodeDefinition(
   }
 
   const invoke = await getInvoke()
+  await ensureDispatcherConfigured()
   const args: VscodeInvokeArgs = {
     pluginId: manifest.id,
     manifestJson: JSON.stringify(manifest),
@@ -123,6 +170,16 @@ export async function loadVscodeDefinition(
     throw new Error(
       `Failed to load VS Code extension ${manifest.id}: ${error instanceof Error ? error.message : String(error)}`
     )
+  }
+
+  let unsubscribe: (() => void) | undefined
+  try {
+    unsubscribe = await subscribeToVscodeEvents(manifest.id)
+  } catch (error) {
+    vscodeLoaderLogger.warn("subscribe failed; sidecar→renderer notifications will not arrive", {
+      pluginId: manifest.id,
+      error: error instanceof Error ? error.message : String(error),
+    })
   }
 
   return {
@@ -157,6 +214,15 @@ export async function loadVscodeDefinition(
           pluginId: manifest.id,
           error: error instanceof Error ? error.message : String(error),
         })
+      } finally {
+        try {
+          unsubscribe?.()
+        } catch (error) {
+          vscodeLoaderLogger.warn("VS Code event unsubscribe failed", {
+            pluginId: manifest.id,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
       }
     },
   }

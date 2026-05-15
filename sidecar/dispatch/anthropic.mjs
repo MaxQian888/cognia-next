@@ -123,6 +123,27 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       : skillsHeader
   }
 
+  // M5 Computer Use — merge `sendOptions.appendHeaders` into
+  // ANTHROPIC_DEFAULT_HEADERS. The renderer's `resolveSendOptions` populates
+  // `appendHeaders["anthropic-beta"]` (typically `computer-use-2025-11-24`)
+  // when the active character has `enableComputerUse === true` and at least
+  // one native Anthropic tool is registered. The merging is comma-joined and
+  // the per-key prefix matches the existing skills-header pattern.
+  if (sendOptions.appendHeaders && typeof sendOptions.appendHeaders === "object") {
+    const additions = []
+    for (const [key, value] of Object.entries(sendOptions.appendHeaders)) {
+      if (typeof key !== "string" || typeof value !== "string") continue
+      if (!key || !value) continue
+      additions.push(`${key}=${value}`)
+    }
+    if (additions.length > 0) {
+      const existing = baseEnv.ANTHROPIC_DEFAULT_HEADERS
+      baseEnv.ANTHROPIC_DEFAULT_HEADERS = existing
+        ? `${existing},${additions.join(",")}`
+        : additions.join(",")
+    }
+  }
+
   // Allowlist construction — only fields listed below reach the SDK. This is
   // intentional: cognia-next sends a few sidecar-protocol-only fields
   // (`builtinTools`, `bareMode`, `debugMode`, `briefMode`, `aliasResolution`,

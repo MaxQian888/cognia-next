@@ -11,7 +11,16 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { usePluginMarketplace } from "@/hooks/plugins"
 
-export function PluginDiscovery() {
+interface Props {
+  /**
+   * Optional install handler. When provided, the discovery cards delegate
+   * to it (used by the marketplace panel to route through the pre-install
+   * chain). When omitted, fall back to the legacy fire-and-forget path.
+   */
+  onInstall?: (id: string, version?: string) => void
+}
+
+export function PluginDiscovery({ onInstall }: Props = {}) {
   const t = useTranslations("plugins.discovery")
   const market = usePluginMarketplace()
 
@@ -52,7 +61,10 @@ export function PluginDiscovery() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => void market.install(entry.id, entry.version)}
+                onClick={() => {
+                  if (onInstall) onInstall(entry.id, entry.version)
+                  else void market.install(entry.id, entry.version)
+                }}
                 disabled={market.installingId === entry.id}
               >
                 {market.installingId === entry.id ? t("installing") : t("install")}

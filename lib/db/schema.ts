@@ -957,6 +957,13 @@ export class CogniaDB extends Dexie {
       openVsxCache: "&extensionId, fetchedAt",
       vscodeExtensionRuntime: "&extensionId, lastActivatedAt, lastError, sidecarPid",
     })
+
+    // v32 — Character.enableComputerUse + Character.computerUseSettings (ADR-0020).
+    //   No store-shape changes: every new field on `Character` is optional, so
+    //   existing rows round-trip unchanged. We still bump the version to give
+    //   the next contributor a clean anchor — and to surface in the migration
+    //   audit trail that v32 corresponds to the Computer Use completion work.
+    this.version(32).stores({})
   }
 
   sessionState!: Table<SessionStateRow, string>

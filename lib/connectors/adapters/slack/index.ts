@@ -23,8 +23,12 @@ import {
   serializeUpdate,
   serializeDeleteMessage,
   serializeReaction,
+  serializeAssistantStatus,
+  serializeAssistantSuggestedPrompts,
 } from "./serialize"
 import { startSocketMode } from "./transport-socket-mode"
+import { parseConversationKey } from "@/types/connectors/event"
+import type { NormalizedInboundEvent } from "@/types/connectors/event"
 
 export interface SlackAdapterOptions {
   id: string
@@ -38,6 +42,21 @@ export interface SlackAdapterOptions {
   /** Bot's own user id (from auth.test). */
   selfId: string
   transport: "socket-mode" | "events-api-webhook"
+  /**
+   * Opt-in to the Slack assistant-app surface. When true, `setTyping`
+   * issues `assistant.threads.setStatus` and the optional
+   * `setSuggestedPrompts` adapter method calls
+   * `assistant.threads.setSuggestedPrompts`. Off by default so a regular
+   * bot adapter never hits Slack's "not_supported" path.
+   */
+  assistantAppEnabled?: boolean
+  /**
+   * Cap on `conversations.history` pages walked per `fetchHistory` call.
+   * Each page is up to 200 messages; default 10 pages = 2 000 messages,
+   * which matches the standard inbox-hydration ceiling. Pass `Infinity`
+   * to walk until the API returns `next_cursor === ""`.
+   */
+  historyMaxPages?: number
 }
 
 const SLACK_API_BASE = "https://slack.com/api"
@@ -198,16 +217,119 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
     }
   }
 
+  /**
+   * Walk `conversations.history` (and `conversations.replies` when the
+   * conversationKey carries a thread_ts) with cursor pagination. Each
+   * raw Slack message is projected through the regular event parser so
+   * the consumer sees the same NormalizedInboundEvent shape as a live
+   * websocket delivery.
+   *
+   * Bounds:
+   *   - per-page size = 200 (Slack's `conversations.history` cap)
+   *   - max pages    = `opts.historyMaxPages` ?? 10
+   *   - `opts.before` is forwarded as `latest`; `opts.after` as `oldest`.
+   *   - `opts.max` further caps total messages yielded.
+   */
   async function* fetchHistory(
-    _conversationKey: string,
-    _opts: { before?: string; after?: string; max?: number }
-  ): AsyncIterable<import("@/types/connectors").NormalizedInboundEvent> {
-    // TODO Phase 2: implement conversations.history with cursor pagination
+    conversationKey: string,
+    historyOpts: { before?: string; after?: string; max?: number }
+  ): AsyncIterable<NormalizedInboundEvent> {
+    const parsed = parseConversationKey(conversationKey)
+    const channel = parsed.remoteChatId
+    const threadTs = parsed.threadId
+    const maxPages = opts.historyMaxPages ?? 10
+    const overallCap = historyOpts.max ?? Number.POSITIVE_INFINITY
+
+    let cursor: string | undefined = undefined
+    let yielded = 0
+
+    for (let page = 0; page < maxPages; page++) {
+      const params: Record<string, string> = { channel, limit: "200" }
+      if (cursor) params["cursor"] = cursor
+      if (historyOpts.before) params["latest"] = historyOpts.before
+      if (historyOpts.after) params["oldest"] = historyOpts.after
+      if (threadTs) params["ts"] = threadTs
+
+      const search = new URLSearchParams(params).toString()
+      const apiPath = threadTs
+        ? `conversations.replies?${search}`
+        : `conversations.history?${search}`
+
+      const response = (await doRequest("GET", apiPath)) as {
+        messages?: Array<Record<string, unknown>>
+        response_metadata?: { next_cursor?: string }
+      } | null
+
+      const messages = response?.messages ?? []
+      for (const msg of messages) {
+        if (yielded >= overallCap) return
+        // Project a Slack message into the SlackEventEnvelope shape the
+        // parser already understands. Synthesising channel + type lets us
+        // share the live + history paths without a second parser.
+        const envelope: SlackEventEnvelope = {
+          type: "event_callback",
+          event: {
+            type: "message",
+            channel,
+            ...(threadTs ? { thread_ts: threadTs } : {}),
+            ...(msg as Record<string, unknown>),
+          } as SlackEventEnvelope["event"],
+        } as SlackEventEnvelope
+        const event = parseSlackEventCallback(opts.id, opts.selfId, envelope)
+        if (event) {
+          yielded++
+          yield event
+        }
+      }
+
+      const nextCursor = response?.response_metadata?.next_cursor
+      if (!nextCursor || nextCursor.length === 0) return
+      cursor = nextCursor
+    }
   }
 
-  async function setTyping(_conversationKey: string, _on: boolean): Promise<void> {
-    // Slack assistant.threads.setStatus is gated to assistant apps;
-    // no-op for standard bot adapters in Phase 1.
+  /**
+   * Typing indicator. When `assistantAppEnabled` is false, this stays a
+   * no-op (matches Phase 1 behaviour for regular bot installs). When
+   * enabled and the conversationKey carries a thread, we issue
+   * `assistant.threads.setStatus` with "is typing…" / "" depending on
+   * `on`. Conversations without a thread_ts can't set assistant status —
+   * Slack returns `not_supported` — so we silently skip those.
+   */
+  async function setTyping(conversationKey: string, on: boolean): Promise<void> {
+    if (!opts.assistantAppEnabled) return
+    const parsed = parseConversationKey(conversationKey)
+    if (!parsed.threadId) return
+    const call = serializeAssistantStatus(
+      parsed.remoteChatId,
+      parsed.threadId,
+      on ? "is typing…" : ""
+    )
+    await doRequest("POST", "assistant.threads.setStatus", call.payload)
+  }
+
+  /**
+   * Optional Slack-only escape hatch for surfacing assistant-thread
+   * suggested prompts. Cognia's chat surface does not yet expose this —
+   * the method is here so plugins / workflows can drive it directly via
+   * `bus.listAdapters().find(...).setSuggestedPrompts(...)`. No-op when
+   * `assistantAppEnabled` is false.
+   */
+  async function setSuggestedPrompts(
+    conversationKey: string,
+    prompts: Array<{ title: string; message: string }>,
+    title?: string
+  ): Promise<void> {
+    if (!opts.assistantAppEnabled) return
+    const parsed = parseConversationKey(conversationKey)
+    if (!parsed.threadId) return
+    const call = serializeAssistantSuggestedPrompts(
+      parsed.remoteChatId,
+      parsed.threadId,
+      prompts,
+      title
+    )
+    await doRequest("POST", "assistant.threads.setSuggestedPrompts", call.payload)
   }
 
   async function refreshCredentials(): Promise<void> {
@@ -219,7 +341,10 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
     await doRequest("POST", "reactions.add", call.payload)
   }
 
-  const adapter: PlatformAdapter & { addReaction?: typeof addReaction } = {
+  const adapter: PlatformAdapter & {
+    addReaction?: typeof addReaction
+    setSuggestedPrompts?: typeof setSuggestedPrompts
+  } = {
     get meta() {
       return {
         type: "slack" as const,
@@ -241,6 +366,7 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
     setTyping,
     refreshCredentials,
     addReaction,
+    setSuggestedPrompts,
   }
 
   return adapter

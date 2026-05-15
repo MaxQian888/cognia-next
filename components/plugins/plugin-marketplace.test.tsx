@@ -45,6 +45,7 @@ beforeEach(() => {
     getFeaturedPlugins: jest.fn(async () => ENTRIES.slice(0, 1)),
     getPopularPlugins: jest.fn(async () => ENTRIES),
     getRecentPlugins: jest.fn(async () => ENTRIES),
+    getPlugin: jest.fn(async () => null),
     installPlugin: jest.fn(async () => undefined),
     uninstallPlugin: jest.fn(async () => undefined),
   })
@@ -72,6 +73,16 @@ describe("PluginMarketplace", () => {
       getFeaturedPlugins: jest.fn(async () => ENTRIES),
       getPopularPlugins: jest.fn(async () => ENTRIES),
       getRecentPlugins: jest.fn(async () => ENTRIES),
+      getPlugin: jest.fn(async () => ({
+        manifest: {
+          id: "alpha",
+          name: "Alpha",
+          version: "1.0.0",
+          type: "frontend" as const,
+          capabilities: [] as never[],
+        } as never,
+        name: "Alpha",
+      })),
       installPlugin: install,
       uninstallPlugin: jest.fn(async () => undefined),
     })

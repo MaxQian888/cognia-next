@@ -3218,71 +3218,45 @@
     },
     "plugins": {
       "title": "Plugins",
-      "description": "Browse, install, configure, and govern plugins. Review their permissions, scheduled jobs, devtools, and contract audits.",
+      "description": "Govern plugins: counts and health, scheduled jobs, contract audit, and global policy. The full workspace lives at /plugins.",
       "subTabs": {
         "overview": "Overview",
-        "installed": "Installed",
-        "marketplace": "Marketplace",
-        "permissions": "Permissions",
         "scheduled": "Scheduled",
-        "devtools": "Devtools",
         "audit": "Audit",
-        "settings": "Settings"
-      },
-      "statusBadge": {
-        "enabled": "Enabled",
-        "disabled": "Disabled",
-        "error": "Error"
+        "policy": "Policy"
       },
       "overview": {
         "badgeTotal": "{count} total",
         "badgeEnabled": "{count} enabled",
         "badgeLoading": "{count} loading",
         "badgeError": "{count} errored",
-        "hint": "Manage your installed plugins, browse the marketplace, and review which extensions are running.",
-        "manageButton": "Open plugins"
-      },
-      "installed": {
-        "loading": "Loading installed plugins…",
-        "empty": "No plugins installed yet.",
-        "browseMarketplace": "Browse marketplace",
-        "colName": "Name",
-        "colVersion": "Version",
-        "colSource": "Source",
-        "colStatus": "Status",
-        "colCapabilities": "Capabilities",
-        "openFullManagement": "Open full management"
-      },
-      "marketplace": {
-        "title": "Marketplace",
-        "hint": "Search and install plugins from the unified marketplace. Skill and plugin entries share one storefront — installs are routed by entry type.",
-        "openButton": "Open marketplace"
-      },
-      "permissions": {
-        "hint": "Permissions declared in a plugin's manifest are granted silently at install. Optional permissions and runtime requests prompt you for confirmation. Dangerous permissions are highlighted.",
-        "dangerousLabel": "Dangerous",
-        "grantedTo": "{count} plugins",
-        "groups": {
-          "filesystem": "Filesystem",
-          "network": "Network",
-          "clipboard": "Clipboard",
-          "media": "Media",
-          "database": "Database",
-          "settings": "Settings",
-          "session": "Session",
-          "dangerous": "Dangerous"
+        "hint": "Plugin counts and health are surfaced below. Deep-link into the workspace for management, marketplace, permissions, and devtools.",
+        "manageButton": "Open plugin workspace",
+        "installedCard": {
+          "title": "Installed",
+          "hint": "Enable, disable, configure, or uninstall plugins.",
+          "cta": "Open installed"
+        },
+        "marketplaceCard": {
+          "title": "Marketplace",
+          "hint": "Search and install plugins from the unified marketplace.",
+          "cta": "Open marketplace"
+        },
+        "permissionsCard": {
+          "title": "Permissions",
+          "hint": "Review which plugins hold which permissions and audit dangerous grants.",
+          "cta": "Open permissions"
+        },
+        "devtoolsCard": {
+          "title": "Devtools",
+          "hint": "Inspect message bus, hook history, sandbox state, and trigger hot reload (dev-only).",
+          "cta": "Open devtools"
         }
       },
       "scheduled": {
         "title": "Scheduled jobs",
         "hint": "Plugin-contributed scheduled jobs share the same governance surface as other scheduled tasks. Open the scheduler to manage cron, intervals, and confirmation policies.",
         "openSchedulerButton": "Open scheduler"
-      },
-      "devtools": {
-        "title": "Plugin devtools",
-        "hint": "Inspect the live message bus, hook history, sandbox state, and trigger hot reload for plugins under development.",
-        "gateHint": "Plugin devtools are only available in development builds. Run `pnpm dev` or set developer mode to access.",
-        "openButton": "Open devtools"
       },
       "audit": {
         "title": "Contract audit",
@@ -3320,6 +3294,17 @@
         "autoUpdate": "Auto-update plugins",
         "autoUpdateHint": "Apply marketplace updates automatically when available.",
         "rateLimitsNote": "Rate limits and sandbox defaults are configured globally and visible per-plugin in /plugins."
+      },
+      "dataManagement": {
+        "emptyForAll": "No plugins have declared custom data tables.",
+        "emptyForPlugin": "This plugin has not declared any custom data tables.",
+        "deleteButton": "Delete data",
+        "deleteDialog": {
+          "title": "Delete plugin data?",
+          "description": "This will permanently delete all IndexedDB data for {pluginId}. The plugin itself will not be uninstalled, but all stored records will be erased and cannot be recovered.",
+          "cancel": "Cancel",
+          "confirm": "Delete"
+        }
       }
     },
     "remoteControl": {
@@ -4319,6 +4304,9 @@
       "confirm": "Uninstall"
     },
     "detail": {
+      "tabGeneral": "General",
+      "tabContributed": "Contributed",
+      "tabData": "Data",
       "tabOverview": "Overview",
       "tabManifest": "Manifest",
       "tabCapabilities": "Capabilities",
@@ -4349,7 +4337,24 @@
       "optional": "Optional permissions",
       "optionalEmpty": "No optional permissions.",
       "dependencies": "Dependencies",
-      "notFound": "Plugin not found."
+      "notFound": "Plugin not found.",
+      "contributed": {
+        "empty": "This plugin has not registered any runtime contributions.",
+        "countBadge": "{count}",
+        "tools": "Agent tools",
+        "modes": "Agent modes",
+        "commands": "Commands",
+        "a2uiComponents": "A2UI components",
+        "a2uiTemplates": "A2UI templates",
+        "themes": "Themes",
+        "mcpServerPresets": "MCP server presets",
+        "skills": "Skills",
+        "nativeAnthropicTools": "Native Anthropic tools",
+        "externalAgentPresets": "External agent presets",
+        "connectors": "Connector adapters",
+        "workflowNodes": "Workflow nodes",
+        "workflowTriggers": "Workflow triggers"
+      }
     },
     "permissionReview": {
       "description": "Review what this plugin declared, what's currently granted, and adjust at runtime. Dangerous permissions are highlighted.",
@@ -4469,7 +4474,34 @@
         "degradedHint": "Showing cached entries from your last successful sync. Install and update actions are disabled until the connection recovers.",
         "demoTitle": "Demo marketplace",
         "demoHint": "You're browsing a sample catalog. Installs in this mode are simulated and won't run real plugin code."
-      }
+      },
+      "installCancelled": {
+        "conflict": "Install cancelled at the conflict-review step.",
+        "permission": "Install cancelled at the permission-review step.",
+        "config": "Install cancelled at the configuration step."
+      },
+      "installFailed": "Install failed: {message}",
+      "installSucceeded": "{name} installed."
+    },
+    "preInstall": {
+      "title": "Review before installing {name}",
+      "description": "Review conflicts, permissions, and required configuration before {name} is written to your library.",
+      "stepConflict": "Conflicts",
+      "stepPermission": "Permissions",
+      "stepConfig": "Configuration",
+      "stepBadge": "Step {current} of {total}",
+      "conflictHint": "This install will overwrite or interact with the following items. Continue only if you understand the impact.",
+      "conflictAlreadyInstalled": "Version {version} of this plugin is already installed.",
+      "permissionsHint": "This plugin declares the permissions below. Optional permissions can still be revoked later from the Permissions tab.",
+      "permissionsDeclared": "Manifest-declared",
+      "permissionsOptional": "Optional",
+      "permissionsNone": "No permissions declared.",
+      "configHint": "Fill in any required configuration before the plugin is enabled.",
+      "configNone": "This plugin has no configurable fields.",
+      "back": "Back",
+      "next": "Next",
+      "confirm": "Install",
+      "cancel": "Cancel"
     },
     "batchActions": {
       "ariaLabel": "Batch actions",
@@ -10285,22 +10317,67 @@
       "title": "Inbox",
       "viewModeAria": "View mode",
       "adapters": "Adapters",
-      "noAdapters": "No adapters configured"
+      "noAdapters": "No adapters configured",
+      "viewModes": {
+        "by-adapter": "By adapter",
+        "by-platform": "By platform",
+        "unified": "Unified"
+      },
+      "recentEmpty": "No conversations yet"
     },
     "modeSwitcher": {
-      "aria": "Switch mode"
+      "aria": "Switch mode",
+      "modes": {
+        "auto": "Auto",
+        "manual": "Manual",
+        "draft": "Draft"
+      }
     },
     "outboundStatus": {
-      "retry": "Retry"
+      "retry": "Retry",
+      "status": {
+        "pending": "Queued",
+        "sending": "Sending",
+        "sent": "Sent",
+        "failed": "Failed",
+        "deadlettered": "Dead-lettered"
+      },
+      "unknownError": "Unknown error"
     },
     "policyInfo": {
       "aria": "Policy info",
-      "title": "Policy"
+      "title": "Policy",
+      "rules": {
+        "private-default": "All private messages",
+        "self-mention": "@mention",
+        "reply-to-bot": "Reply-to-bot",
+        "slash-command": "Commands: {names}",
+        "keyword": "Keywords: {names}",
+        "user-allowlist": "Users: {names}",
+        "channel-allowlist": "Channels: {names}",
+        "unknown": "Unknown rule"
+      },
+      "blockers": {
+        "rate-limit": "Rate-limited to {perUserPerMin}/min per user",
+        "cooldown-after-bot-reply": "{secs}s cooldown after bot reply",
+        "user-blocklist": "Blocked users: {names}",
+        "channel-blocklist": "Blocked channels: {names}",
+        "keyword-blocklist": "Blocked keywords: {names}",
+        "unknown": "Unknown blocker"
+      },
+      "noRules": "No trigger rules configured."
     },
     "conversation": {
-      "loading": "Loading…",
-      "sessionLabel": "Session: {id}",
-      "conversationKeyLabel": "Conversation: {key}"
+      "loading": "Loading…"
+    },
+    "unreadPill": {
+      "aria": "{count} unread"
+    },
+    "extensionPoints": {
+      "sidebarSection": "Inbox sidebar section",
+      "conversationActions": "Conversation row actions",
+      "composerActions": "Inbox composer actions",
+      "draftActions": "Draft review actions"
     }
   },
   "connectors": {
@@ -10312,6 +10389,36 @@
       "primaryBadge": "Primary",
       "merge": "Merge",
       "cancel": "Cancel"
+    },
+    "audit": {
+      "kind": {
+        "delivery.success": "Delivered",
+        "delivery.error": "Delivery error",
+        "delivery.deadlettered": "Delivery dead-lettered",
+        "delivery.downgraded": "Delivery downgraded",
+        "inbound.received": "Inbound received",
+        "inbound.deduped": "Inbound deduped",
+        "inbound.policy_blocked": "Blocked by policy",
+        "inbound.signature_failed": "Signature mismatch",
+        "inbound.edited": "Inbound edited",
+        "inbound.deleted": "Inbound deleted",
+        "inbound.read_indicator": "Read indicator",
+        "inbound.member_added": "Member joined",
+        "inbound.member_removed": "Member left",
+        "inbound.deferred_quiet_hours": "Deferred (quiet hours)",
+        "inbound.deferred_muted": "Deferred (muted)",
+        "inbound.deferred_manual_mode": "Deferred (manual mode)",
+        "outbound.enqueued": "Outbound queued",
+        "outbound.ai_run_enqueued": "AI reply queued",
+        "circuit.opened": "Circuit opened",
+        "circuit.half_opened": "Circuit half-opened",
+        "circuit.closed": "Circuit closed",
+        "rate_limit.tripped": "Rate limit tripped",
+        "credential.refreshed": "Credentials refreshed",
+        "adapter.started": "Adapter started",
+        "adapter.stopped": "Adapter stopped",
+        "adapter.error": "Adapter error"
+      }
     }
   }
 }

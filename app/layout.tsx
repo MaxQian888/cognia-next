@@ -26,11 +26,13 @@ import { CanvasBridgeProvider } from "@/components/providers/canvas-bridge-provi
 import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provider"
 import { ConnectorBusProvider } from "@/components/connectors/connector-bus-provider"
 import { ConnectorDeepLinkRouter } from "@/components/connectors/connector-deep-link-router"
+import { ConsentOverlay } from "@/components/automation/consent-overlay"
 import { SubscriptionUsageProvider } from "@/components/providers/subscription-usage-provider"
 import { BackgroundApplier } from "@/lib/appearance"
 import { CustomThemeApplier } from "@/lib/appearance/custom-theme-applier"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import { dexieAdapter } from "@/lib/data-hooks/dexie-adapter"
+import { ExposeTestGlobals } from "@/lib/dev/expose-test-globals"
 import "./globals.css"
 
 const geistSans = Geist({
@@ -115,6 +117,8 @@ export default async function RootLayout({
                         </CanvasBridgeProvider>
                       </CompanionEventBridgeProvider>
                     </BackupSchedulerProvider>
+                    <ConsentOverlay />
+                    <ExposeTestGlobals />
                     <Toaster />
                   </LoggerProvider>
                 </TooltipProvider>

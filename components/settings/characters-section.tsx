@@ -165,6 +165,8 @@ export function CharactersSection() {
             briefMode: false,
             twinId: undefined,
             twinSettings: undefined,
+            enableComputerUse: false,
+            computerUseSettings: undefined,
           }}
           skillsCatalog={skills}
           mcpCatalog={mcpServers}
@@ -235,6 +237,8 @@ function CharacterRow({
           briefMode: Boolean(character.briefMode),
           twinId: character.twinId,
           twinSettings: character.twinSettings,
+          enableComputerUse: Boolean(character.enableComputerUse),
+          computerUseSettings: character.computerUseSettings,
         }}
         skillsCatalog={skillsCatalog}
         mcpCatalog={mcpCatalog}
@@ -362,6 +366,8 @@ type EditorState = {
   briefMode: boolean
   twinId?: string
   twinSettings?: Character["twinSettings"]
+  enableComputerUse: boolean
+  computerUseSettings?: Character["computerUseSettings"]
 }
 
 type EditorOutput = {
@@ -382,6 +388,8 @@ type EditorOutput = {
   briefMode?: boolean
   twinId?: string
   twinSettings?: Character["twinSettings"]
+  enableComputerUse?: boolean
+  computerUseSettings?: Character["computerUseSettings"]
 }
 
 interface EditorProps {
@@ -452,6 +460,8 @@ function CharacterEditor({
         briefMode: s.briefMode || undefined,
         twinId: s.twinId,
         twinSettings: s.twinSettings,
+        enableComputerUse: s.enableComputerUse || undefined,
+        computerUseSettings: s.computerUseSettings,
       })
     } finally {
       setSaving(false)
@@ -635,6 +645,20 @@ function CharacterEditor({
             checked={s.briefMode}
             onCheckedChange={(v) => setS({ ...s, briefMode: v })}
             aria-label={tGeneral("briefMode")}
+          />
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="space-y-0.5">
+            <Label className="cursor-pointer text-xs">Enable Computer Use</Label>
+            <p className="text-[10px] text-muted-foreground">
+              Attaches the registered Anthropic native tools (computer / bash / text_editor) to
+              every send. Honours Settings → Automation → Permissions.
+            </p>
+          </div>
+          <Switch
+            checked={s.enableComputerUse}
+            onCheckedChange={(v) => setS({ ...s, enableComputerUse: v })}
+            aria-label="Enable Computer Use"
           />
         </div>
       </div>

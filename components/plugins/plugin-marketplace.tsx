@@ -5,20 +5,27 @@
 // detail sheet driven by `selectedEntry` state. Install path goes through
 // the unified hook so both the storefront card and detail CTA share state.
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { AlertTriangleIcon } from "lucide-react"
+import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { listPlugins } from "@/lib/db/plugins"
 import { usePluginMarketplace } from "@/hooks/plugins"
-import type { PluginMarketplaceEntry } from "@/hooks/plugins/use-plugin-marketplace"
+import type {
+  MarketplaceClient,
+  PluginMarketplaceEntry,
+} from "@/hooks/plugins/use-plugin-marketplace"
+import { loadPluginMarketplaceClient } from "@/hooks/plugins/use-plugin-marketplace"
+import { usePluginPreInstall } from "@/hooks/plugins/use-plugin-pre-install"
 import { PluginMarketplaceCard } from "./plugin-marketplace-card"
 import { PluginMarketplaceDetail } from "./plugin-marketplace-detail"
 import { PluginDiscovery } from "./plugin-discovery"
+import { PluginPreInstallDialog } from "./plugin-pre-install-dialog"
 import { ScrollShadowRow } from "./scroll-shadow-row"
 import { PluginMarketplaceModeBanner } from "./plugin-marketplace-mode-banner"
 import { PluginComparisonSheet, PluginComparisonTrigger } from "./plugin-comparison-sheet"
@@ -36,6 +43,31 @@ export function PluginMarketplace() {
     () => new Set((installedRows ?? []).map((r) => r.id)),
     [installedRows]
   )
+
+  // Lazy-loaded client wraps the marketplace singleton; passed to the
+  // pre-install hook so the orchestrator can pull manifests + call
+  // installPlugin directly without going back through `market.install`
+  // (which would skip the chain).
+  const [client, setClient] = useState<MarketplaceClient | null>(null)
+  useEffect(() => {
+    void loadPluginMarketplaceClient().then(setClient)
+  }, [])
+
+  const preInstall = usePluginPreInstall(client ?? STUB_CLIENT)
+
+  const runInstall = (entry: PluginMarketplaceEntry, version?: string) => {
+    if (!client) return
+    void preInstall.install(entry.id, version, entry.name).then((result) => {
+      if (result.status === "installed") {
+        toast.success(t("installSucceeded", { name: entry.name }))
+        void market.refresh()
+      } else if (result.status === "cancelled") {
+        toast.message(t(`installCancelled.${result.stage}` as never))
+      } else if (result.status === "failed") {
+        toast.error(t("installFailed", { message: result.message }))
+      }
+    })
+  }
 
   if (market.state.kind === "loading") {
     return <p className="text-sm text-muted-foreground">{t("loading")}</p>
@@ -82,7 +114,7 @@ export function PluginMarketplace() {
   return (
     <div className="space-y-4">
       <PluginMarketplaceModeBanner />
-      {showDiscovery && <PluginDiscovery />}
+      {showDiscovery && <PluginDiscovery onInstall={(id, version) => onInstallById(id, version)} />}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Input
           placeholder={t("searchPlaceholder")}
@@ -124,9 +156,9 @@ export function PluginMarketplace() {
               key={entry.id}
               entry={entry}
               installed={installedIds.has(entry.id)}
-              installing={market.installingId === entry.id}
+              installing={market.installingId === entry.id || preInstall.busy}
               onView={() => setSelectedEntry(entry)}
-              onInstall={(id, version) => void market.install(id, version)}
+              onInstall={(id, version) => onInstallById(id, version)}
               onUninstall={(id) => void market.uninstall(id)}
             />
           ))}
@@ -137,17 +169,45 @@ export function PluginMarketplace() {
         open={selectedEntry !== null}
         entry={selectedEntry}
         installed={selectedEntry ? installedIds.has(selectedEntry.id) : false}
-        installing={selectedEntry !== null && market.installingId === selectedEntry.id}
+        installing={
+          selectedEntry !== null && (market.installingId === selectedEntry.id || preInstall.busy)
+        }
         onClose={() => setSelectedEntry(null)}
-        onInstall={(id, version) => void market.install(id, version)}
+        onInstall={(id, version) => onInstallById(id, version)}
         onUninstall={(id) => void market.uninstall(id)}
       />
 
       <PluginComparisonSheet
         entries={[...allResults, ...market.featured, ...market.popular, ...market.recent]}
         installedIds={installedIds}
-        onInstall={(id, version) => void market.install(id, version)}
+        onInstall={(id, version) => onInstallById(id, version)}
+      />
+
+      <PluginPreInstallDialog
+        target={preInstall.target}
+        onContinue={preInstall.resolveContinue}
+        onCancel={preInstall.resolveCancel}
       />
     </div>
   )
+
+  function onInstallById(id: string, version?: string) {
+    const entry = [...allResults, ...market.featured, ...market.popular, ...market.recent].find(
+      (e) => e.id === id
+    )
+    if (entry) runInstall(entry, version)
+  }
+}
+
+/**
+ * Placeholder client used until `loadPluginMarketplaceClient` resolves. The
+ * marketplace UI is gated by `if (!client) return`, so this stub is
+ * effectively unreachable — it exists only to satisfy the
+ * `usePluginPreInstall` parameter type without an additional null branch.
+ */
+const STUB_CLIENT: MarketplaceClient = {
+  searchPlugins: () => Promise.resolve({ entries: [] }),
+  getPlugin: () => Promise.resolve(null),
+  installPlugin: () => Promise.resolve(),
+  uninstallPlugin: () => Promise.resolve(),
 }

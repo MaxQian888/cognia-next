@@ -1,22 +1,42 @@
 /**
- * Wave 3.7 — Mobile pair flow smoke spec.
+ * Wave 3.7 — Mobile pair flow.
  *
- * Drives the `/pair` page on a phone-shaped viewport and walks through the
- * three-step wizard: Discover → Pair (manual paste fallback) → error path
- * for invalid baseUrl. Does not actually pair against a live desktop server;
- * the assertions check the page shape, the stepper state machine, and the
- * accessibility tree.
+ * Smoke checks (existing) verify the three-step state machine renders. The
+ * round-trip suite below drives the form against an Express mock V2 server
+ * that simulates the real desktop response shape, exercises happy + error
+ * paths, and verifies that `companionStorage` retains the device JWT.
  *
- * Run:
- *   pnpx playwright test --project=mobile-pixel-7 tests/e2e/mobile/pair-flow.spec.ts
- *
- * Fixture: a real desktop server is *not* required for this spec; the page
- * renders the discover step when no companion config exists in storage.
+ * Runs against both `mobile-pixel-7` (Chromium) and `mobile-iphone-13`
+ * (WebKit) projects. The latter is opt-in — install with
+ * `pnpx playwright install webkit`.
  */
 
 import { expect, test } from "@playwright/test"
+import { createMockV2Server, type MockV2Server } from "./mock-v2-server"
+import { injectCapacitor } from "../helpers/inject-capacitor"
+import { resetCogniaDb } from "../helpers/db-reset"
 
-test.describe("mobile pair flow", () => {
+let server: MockV2Server
+
+test.beforeAll(async () => {
+  server = createMockV2Server()
+  await server.start(0)
+})
+
+test.afterAll(async () => {
+  await server.stop()
+})
+
+test.beforeEach(async ({ page }) => {
+  server.reset()
+  // Inject Capacitor before any navigation so platform-detection picks the
+  // mobile branch and SecureStorage backs companionStorage.
+  await injectCapacitor(page, { platform: "android" })
+  await page.goto("/")
+  await resetCogniaDb(page)
+})
+
+test.describe("mobile pair flow — UI state machine (existing smoke)", () => {
   test("lands on the discover step with a stepper visible", async ({ page }) => {
     await page.goto("/pair")
     await expect(page.getByTestId("pair-onboarding")).toBeVisible()
@@ -51,5 +71,111 @@ test.describe("mobile pair flow", () => {
     await page.getByTestId("pair-back-to-discover").click()
     await expect(page.getByTestId("pair-discover-step")).toBeVisible()
     await expect(page.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "discover")
+  })
+})
+
+test.describe("mobile pair flow — V2 server round-trip", () => {
+  const validJwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0Iiwic2NwIjoicGFpciJ9.signature"
+
+  test("happy path: server returns deviceJwt, paired step renders, config persisted", async ({
+    page,
+  }) => {
+    server.setPairScenario({ kind: "ok", body: { server_version: "9.9.9" } })
+    server.setWhoamiFingerprint(null) // fingerprint attestation off
+
+    await page.goto("/pair")
+    await page.getByTestId("pair-discover-skip").click()
+    await page.getByTestId("pair-baseurl").fill(server.baseUrl)
+    await page.getByTestId("pair-jwt").fill(validJwt)
+
+    const pairPromise = server.waitForPair()
+    await page.getByTestId("pair-submit").click()
+
+    const payload = await pairPromise
+    expect(payload.pair_jwt).toBe(validJwt)
+    expect(payload.device_label.length).toBeGreaterThan(0)
+
+    // PairedStep replaces PairStep when onPaired is called.
+    await expect(page.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "paired", {
+      timeout: 10_000,
+    })
+
+    // companionStorage retained the config — localStorage backend stores it
+    // under "cognia.companion.config.v1".
+    const persisted = await page.evaluate(() =>
+      window.localStorage.getItem("cognia.companion.config.v1")
+    )
+    expect(persisted).not.toBeNull()
+    const cfg = JSON.parse(persisted!)
+    expect(cfg.baseUrl).toBe(server.baseUrl)
+    expect(cfg.serverVersion).toBe("9.9.9")
+  })
+
+  test("expired pair JWT: server returns 401, error surfaces, no config written", async ({
+    page,
+  }) => {
+    server.setPairScenario({
+      kind: "expired",
+      status: 401,
+      message: "Pair JWT has expired.",
+    })
+
+    await page.goto("/pair")
+    await page.getByTestId("pair-discover-skip").click()
+    await page.getByTestId("pair-baseurl").fill(server.baseUrl)
+    await page.getByTestId("pair-jwt").fill(validJwt)
+    await page.getByTestId("pair-submit").click()
+
+    await expect(page.getByTestId("pair-error")).toBeVisible({ timeout: 5_000 })
+    await expect(page.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "pair")
+
+    const persisted = await page.evaluate(() =>
+      window.localStorage.getItem("cognia.companion.config.v1")
+    )
+    expect(persisted).toBeNull()
+  })
+
+  test("fingerprint mismatch: pair succeeds but attestation rejects, error surfaces", async ({
+    page,
+  }) => {
+    const pinned = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    const reported = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    server.setPairScenario({
+      kind: "fingerprint-mismatch",
+      pinnedFingerprint: pinned,
+      bodyFingerprint: reported,
+    })
+    server.setWhoamiFingerprint(reported)
+
+    await page.goto("/pair")
+    await page.getByTestId("pair-discover-skip").click()
+    await page.getByTestId("pair-baseurl").fill(server.baseUrl)
+    await page.getByTestId("pair-jwt").fill(validJwt)
+
+    // Inject a fingerprint into the form: there is no input for it, the UI
+    // sets it via QR scan. Drive it via the Capacitor mock instead.
+    await page.evaluate((fp) => {
+      ;(
+        window as { __cogniaCapMock: { setBarcodeResult: (s: string) => void } }
+      ).__cogniaCapMock.setBarcodeResult(
+        JSON.stringify({ b: window.location.origin, j: "aaa", f: fp })
+      )
+    }, pinned)
+
+    await page.getByTestId("pair-submit").click()
+    await expect(page.getByTestId("pair-error")).toBeVisible({ timeout: 5_000 })
+  })
+
+  test("server unreachable: connection drops, recoverable error appears", async ({ page }) => {
+    server.setPairScenario({ kind: "unreachable" })
+
+    await page.goto("/pair")
+    await page.getByTestId("pair-discover-skip").click()
+    await page.getByTestId("pair-baseurl").fill(server.baseUrl)
+    await page.getByTestId("pair-jwt").fill(validJwt)
+    await page.getByTestId("pair-submit").click()
+
+    await expect(page.getByTestId("pair-error")).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "pair")
   })
 })

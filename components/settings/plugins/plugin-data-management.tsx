@@ -7,12 +7,16 @@
  * in pluginDexieMeta). For each one shows the namespaced table list and a
  * "Delete data" button that calls uninstallPlugin({purgeData: true}).
  *
- * Intended to be embedded in the plugins settings section (e.g. the
- * "installed" tab) as a collapsible card.
+ * Two modes:
+ *   - List mode (no `pluginId` prop): renders every plugin with a
+ *     `pluginDexieMeta` row. Used as a global maintenance surface.
+ *   - Single mode (`pluginId` prop): renders only the matching plugin's
+ *     row, used inside the per-plugin detail Sheet (Data tab).
  */
 
 import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useTranslations } from "next-intl"
 import { Trash2Icon, DatabaseIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -31,36 +35,50 @@ import { Badge } from "@/components/ui/badge"
 import { getDb } from "@/lib/db/schema"
 import { getPluginManager } from "@/lib/plugin/core/manager"
 
-export function PluginDataManagement() {
+interface Props {
+  /** When provided, only render the row for this plugin (used inside the
+   * per-plugin detail Sheet). When omitted, render every plugin with a
+   * `pluginDexieMeta` row (global maintenance surface). */
+  pluginId?: string
+}
+
+export function PluginDataManagement({ pluginId }: Props = {}) {
+  const t = useTranslations("settings.plugins.dataManagement")
   const [pending, setPending] = useState<string | null>(null)
 
-  const registrations = useLiveQuery(() => getDb().pluginDexieMeta.toArray())
+  const registrations = useLiveQuery(() => {
+    const table = getDb().pluginDexieMeta
+    return pluginId ? table.where("pluginId").equals(pluginId).toArray() : table.toArray()
+  }, [pluginId])
 
   if (!registrations || registrations.length === 0) {
     return (
       <Card className="p-4">
         <div className="flex items-center gap-2 text-muted-foreground">
           <DatabaseIcon className="h-4 w-4" />
-          <span className="text-sm">No plugins have declared custom data tables.</span>
+          <span className="text-sm">{pluginId ? t("emptyForPlugin") : t("emptyForAll")}</span>
         </div>
       </Card>
     )
   }
 
-  const handlePurge = async (pluginId: string) => {
-    setPending(pluginId)
+  const handlePurge = async (id: string) => {
+    setPending(id)
     try {
       const manager = getPluginManager()
-      await manager.uninstallPlugin(pluginId, { purgeData: true })
+      await manager.uninstallPlugin(id, { purgeData: true })
     } catch (err) {
-      console.error(`Failed to purge data for plugin "${pluginId}"`, err)
+      console.error(`Failed to purge data for plugin "${id}"`, err)
     } finally {
       setPending(null)
     }
   }
 
   return (
-    <div className="space-y-3" data-testid="plugin-data-management">
+    <div
+      className="space-y-3"
+      data-testid={pluginId ? "plugin-data-management-single" : "plugin-data-management-list"}
+    >
       {registrations.map((meta) => (
         <Card key={meta.pluginId} className="p-4">
           <div className="flex items-start justify-between gap-4">
@@ -84,22 +102,20 @@ export function PluginDataManagement() {
                   data-testid={`delete-data-${meta.pluginId}`}
                 >
                   <Trash2Icon className="h-4 w-4 mr-1.5" />
-                  Delete data
+                  {t("deleteButton")}
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Delete plugin data?</AlertDialogTitle>
+                  <AlertDialogTitle>{t("deleteDialog.title")}</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This will permanently delete all IndexedDB data for{" "}
-                    <strong>{meta.pluginId}</strong>. The plugin itself will not be uninstalled, but
-                    all stored records will be erased and cannot be recovered.
+                    {t("deleteDialog.description", { pluginId: meta.pluginId })}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogCancel>{t("deleteDialog.cancel")}</AlertDialogCancel>
                   <AlertDialogAction onClick={() => handlePurge(meta.pluginId)}>
-                    Delete
+                    {t("deleteDialog.confirm")}
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>

@@ -215,7 +215,19 @@ pub struct Call<'a> {
 impl<'a> Call<'a> {
     pub fn kind(&self) -> CallKind {
         match self.command {
-            "click" | "type" | "keys" | "invoke_pattern" | "window_op" => CallKind::Driving,
+            "click"
+            | "type"
+            | "keys"
+            | "invoke_pattern"
+            | "window_op"
+            | "mouse_move"
+            | "drag"
+            | "scroll"
+            | "hold_key"
+            | "mouse_button"
+            | "computer_use"
+            | "bash"
+            | "text_editor" => CallKind::Driving,
             _ => CallKind::ReadOnly,
         }
     }

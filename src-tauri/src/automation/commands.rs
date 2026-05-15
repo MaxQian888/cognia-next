@@ -19,6 +19,7 @@ use serde::Deserialize;
 use tauri::{Emitter, State};
 
 use super::audit::{AuditEntry, AuditRing, Decision as AuditDecision};
+use super::consent::ConsentBroker;
 use super::permission::{Call, Decision, PermissionGate, Surface, TargetMeta};
 use super::types::*;
 use super::worker::AutomationHandle;
@@ -28,11 +29,27 @@ pub struct AutomationState {
     pub handle: AutomationHandle,
     pub gate: PermissionGate,
     pub audit: AuditRing,
+    /// Per-call HITL consent broker — used when the active tier resolves to
+    /// `PerCall` and the action is a driving call. The broker emits Tauri
+    /// events that the renderer-side overlay listens to, and resolves the
+    /// pending `oneshot::Receiver` via the `automation_consent_respond`
+    /// command.
+    pub consent: ConsentBroker,
 }
 
 impl AutomationState {
-    pub fn new(handle: AutomationHandle, gate: PermissionGate, audit: AuditRing) -> Self {
-        Self { handle, gate, audit }
+    pub fn new(
+        handle: AutomationHandle,
+        gate: PermissionGate,
+        audit: AuditRing,
+        consent: ConsentBroker,
+    ) -> Self {
+        Self {
+            handle,
+            gate,
+            audit,
+            consent,
+        }
     }
 }
 
@@ -169,27 +186,54 @@ macro_rules! command_body {
                 Err(err_to_string(&err))
             }
             Decision::RequireConsent { prompt } => {
-                // M2 lands the renderer-side HITL handshake. For M1 we emit a
-                // consent-request event for visibility and treat the call as
-                // declined so it always lands deterministically.
-                let _ = $app.emit("automation:consent-request", &prompt);
-                let err = AutomationError::UserDeclined;
-                let entry = AuditEntry {
-                    id: String::new(),
-                    ts: now_ms(),
-                    surface,
-                    plugin_id: plugin_id.clone(),
-                    command: $cmd_name.to_string(),
-                    process_name: target.process_name.clone(),
-                    window_title: target.window_title.clone(),
-                    decision: AuditDecision::Consent,
-                    reason: Some("M1 stub — consent UI not yet wired".into()),
-                    duration_ms: started.elapsed().as_millis() as u64,
-                    error: Some(err_to_string(&err)),
-                };
-                let recorded = $state.audit.record(entry);
-                emit_audit(&$app, &recorded);
-                Err(err_to_string(&err))
+                // Renderer-side HITL handshake. The broker:
+                //  - returns true immediately if the user previously chose
+                //    "Always allow this session" for the same tuple;
+                //  - else emits `automation:consent-request` and awaits the
+                //    overlay's `automation_consent_respond` call (with a
+                //    30s timeout, after which we treat as decline).
+                let app_clone = $app.clone();
+                let allow = $state.consent.request(app_clone, prompt.clone()).await;
+                if allow {
+                    let result = $do_call;
+                    let entry = AuditEntry {
+                        id: String::new(),
+                        ts: now_ms(),
+                        surface,
+                        plugin_id: plugin_id.clone(),
+                        command: $cmd_name.to_string(),
+                        process_name: target.process_name.clone(),
+                        window_title: target.window_title.clone(),
+                        decision: AuditDecision::Consent,
+                        reason: Some("user consented".into()),
+                        duration_ms: started.elapsed().as_millis() as u64,
+                        error: result
+                            .as_ref()
+                            .err()
+                            .map(|e: &AutomationError| err_to_string(e)),
+                    };
+                    let recorded = $state.audit.record(entry);
+                    emit_audit(&$app, &recorded);
+                    result.map_err(|e| err_to_string(&e))
+                } else {
+                    let err = AutomationError::UserDeclined;
+                    let entry = AuditEntry {
+                        id: String::new(),
+                        ts: now_ms(),
+                        surface,
+                        plugin_id: plugin_id.clone(),
+                        command: $cmd_name.to_string(),
+                        process_name: target.process_name.clone(),
+                        window_title: target.window_title.clone(),
+                        decision: AuditDecision::Deny,
+                        reason: Some("user declined or timed out".into()),
+                        duration_ms: started.elapsed().as_millis() as u64,
+                        error: Some(err_to_string(&err)),
+                    };
+                    let recorded = $state.audit.record(entry);
+                    emit_audit(&$app, &recorded);
+                    Err(err_to_string(&err))
+                }
             }
             Decision::Allow => {
                 let result = $do_call;
@@ -442,5 +486,206 @@ pub async fn automation_kill_switch(
     state: State<'_, AutomationState>,
 ) -> std::result::Result<(), String> {
     state.gate.engage_kill_switch();
+    // The kill switch also clears any "Always allow this session" grants —
+    // engaging the switch should drop ALL trust, not just freeze the engine.
+    state.consent.clear_session_grants();
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M5 completion: new desktop_* commands. Each goes through the same
+// `command_body!` macro so permission/consent/audit are uniform.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MouseMoveArgs {
+    pub point: Point,
+    #[serde(default)]
+    pub ctx: CallContext,
+}
+
+#[tauri::command]
+pub async fn desktop_mouse_move(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    args: MouseMoveArgs,
+) -> std::result::Result<(), String> {
+    let ctx = args.ctx;
+    let point = args.point;
+    command_body!(
+        app,
+        state,
+        ctx,
+        "mouse_move",
+        state.handle.mouse_move(point).await
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DragArgs {
+    pub from: Point,
+    pub to: Point,
+    #[serde(default)]
+    pub opts: DragOpts,
+    #[serde(default)]
+    pub ctx: CallContext,
+}
+
+#[tauri::command]
+pub async fn desktop_drag(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    args: DragArgs,
+) -> std::result::Result<(), String> {
+    let ctx = args.ctx;
+    let from = args.from;
+    let to = args.to;
+    let opts = args.opts;
+    command_body!(
+        app,
+        state,
+        ctx,
+        "drag",
+        state.handle.drag(from, to, opts.clone()).await
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScrollArgs {
+    pub target: ScrollTarget,
+    #[serde(default)]
+    pub opts: ScrollOpts,
+    #[serde(default)]
+    pub ctx: CallContext,
+}
+
+#[tauri::command]
+pub async fn desktop_scroll(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    args: ScrollArgs,
+) -> std::result::Result<(), String> {
+    let ctx = args.ctx;
+    let target = args.target;
+    let opts = args.opts;
+    command_body!(
+        app,
+        state,
+        ctx,
+        "scroll",
+        state.handle.scroll(target.clone(), opts).await
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HoldKeyArgs {
+    pub chord: KeyChord,
+    pub duration_ms: u32,
+    #[serde(default)]
+    pub ctx: CallContext,
+}
+
+#[tauri::command]
+pub async fn desktop_hold_key(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    args: HoldKeyArgs,
+) -> std::result::Result<(), String> {
+    let ctx = args.ctx;
+    let chord = args.chord;
+    let duration_ms = args.duration_ms;
+    command_body!(
+        app,
+        state,
+        ctx,
+        "hold_key",
+        state.handle.hold_key(chord.clone(), duration_ms).await
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MouseButtonArgs {
+    pub button: MouseButton,
+    pub transition: ButtonTransition,
+    #[serde(default)]
+    pub ctx: CallContext,
+}
+
+#[tauri::command]
+pub async fn desktop_mouse_button(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    args: MouseButtonArgs,
+) -> std::result::Result<(), String> {
+    let ctx = args.ctx;
+    let button = args.button;
+    let transition = args.transition;
+    command_body!(
+        app,
+        state,
+        ctx,
+        "mouse_button",
+        state.handle.mouse_button(button, transition).await
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowOpArgs {
+    pub target: ElementRef,
+    pub op: WindowOp,
+    #[serde(default)]
+    pub ctx: CallContext,
+}
+
+#[tauri::command]
+pub async fn desktop_window_op(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    args: WindowOpArgs,
+) -> std::result::Result<(), String> {
+    let ctx = args.ctx;
+    let target = args.target;
+    let op = args.op;
+    command_body!(
+        app,
+        state,
+        ctx,
+        "window_op",
+        state.handle.window_op(target.clone(), op.clone()).await
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Consent response. The renderer-side overlay invokes this when the user
+// clicks Allow once / Always allow this session / Reject. `prompt` is
+// optional — only used when `allow && persist` so the broker can register
+// the session grant against the same tuple as the original request.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConsentRespondArgs {
+    pub id: String,
+    pub allow: bool,
+    #[serde(default)]
+    pub persist: bool,
+    #[serde(default)]
+    pub prompt: Option<super::permission::ConsentPrompt>,
+}
+
+#[tauri::command]
+pub async fn automation_consent_respond(
+    state: State<'_, AutomationState>,
+    args: ConsentRespondArgs,
+) -> std::result::Result<(), String> {
+    state
+        .consent
+        .resolve(&args.id, args.allow, args.persist, args.prompt.as_ref());
     Ok(())
 }

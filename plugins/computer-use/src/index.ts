@@ -3,25 +3,18 @@
  * definitions (computer_20251124 + bash_20250124 + text_editor_20250728)
  * along with their per-tool Tauri IPC dispatch targets.
  *
- * Scope of this commit (M5 scaffold):
- * - Plugin manifest + activate() that wires the 3 native tool defs into
- *   the native-anthropic-tool-registry overlay (M1·T3)
- * - Slash commands /cu pause / /cu resume / /cu status for session-level
- *   kill-switch (renderer state only — actual gating ships when the
- *   sidecar agent loop lands)
- *
- * DEFERRED to a follow-up:
- * - Rust enigo+xcap implementations (src-tauri/src/plugin_computer_use/*)
- * - Sidecar tools[] passthrough + anthropic-beta header injection
- *   (sidecar/dispatch/anthropic.mjs + native-tool-loop.mjs)
- * - native-tool-bridge.mjs IPC round-trip in sidecar
- * - lib/claude/native-tool-ipc.ts renderer-side dispatcher
- *
- * Until the follow-up lands, attaching this plugin to a character will
- * surface the tool definitions to the model but execution will fail
- * gracefully because the executeIpc.invoke commands don't exist yet —
- * the per-call canUseTool gate in sidecar/dispatch/anthropic.mjs will
- * deny the action and prompt the user.
+ * What ships now (ADR-0020):
+ * - Plugin manifest + activate() registers the 3 native tool defs into
+ *   the native-anthropic-tool-registry overlay.
+ * - Rust automation backend (`src-tauri/src/automation/`) implements all
+ *   10 actions required by `computer_20251124` via UIA Pattern-first +
+ *   `windows::SendInput` fallback. macOS / Linux ship a minimum-viable
+ *   subset (screenshot / click / type / keys).
+ * - Permission gate routes `PerCall` driving calls through the
+ *   `ConsentBroker`. The renderer-side `<ConsentOverlay />` listens for
+ *   `automation:consent-request` and resolves the broker channel.
+ * - build-options.ts attaches the tools + `anthropic-beta` header on
+ *   every send when `character.enableComputerUse === true`.
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
@@ -76,10 +69,10 @@ const definition: PluginDefinition = {
     registerSlashCommand({
       id: "cu.status",
       name: "/cu",
-      description: "Show Computer Use plugin status (scaffold — Rust backend pending).",
+      description: "Show Computer Use plugin status.",
       handler: () => ({
         message:
-          "Computer Use plugin is in scaffold mode. The 3 native tool definitions are registered, but the Rust enigo/xcap backend hasn't shipped yet. Attaching to a character will surface tool definitions to the model but execution will deny via canUseTool until the follow-up commit lands.",
+          "Computer Use plugin is active. computer / bash / text_editor are registered as native Anthropic tools. Characters with `enableComputerUse: true` (Settings → Characters → Edit) will receive the tools on every send. Tier + consent live under Settings → Automation.",
       }),
       source: "plugin",
       pluginId: ctx.pluginId,

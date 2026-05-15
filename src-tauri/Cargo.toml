@@ -188,13 +188,31 @@ eventlog = "0.3"
 # duplicates with Tauri's `windows` dep, run `cargo tree -d` and either pin
 # down or accept the duplication (it's at most a few hundred kB).
 uiautomation = { version = "0.25", features = ["process"] }
+# Direct windows-rs dep for SendInput/MOUSEEVENTF_WHEEL/GetSystemMetrics calls
+# that aren't exposed publicly through `uiautomation::inputs`. Version pinned
+# to match uiautomation's own transitive `windows = 0.62.2` to avoid duplicate
+# trees. Feature set is the minimum needed for the input + window-metrics work
+# in `automation/platform/uia/input.rs`.
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [target."cfg(target_os = \"macos\")".dependencies]
 oslog = "0.2"
+# Cross-platform input simulation for the macOS automation backend
+# (`automation/platform/ax/mod.rs`). Pinned to a major version that's known to
+# build cleanly against Core Graphics on Apple Silicon + Intel Macs.
+enigo = "0.6"
 
 [target."cfg(target_os = \"linux\")".dependencies]
 libsystemd = "0.7"
 syslog = "7"
+# Cross-platform input simulation for the Linux automation backend
+# (`automation/platform/atspi/mod.rs`). Requires X11 / libxdo at runtime; on
+# headless systems the backend's `capabilities()` reports `hasInputSim: false`.
+enigo = "0.6"
 
 [dev-dependencies]
 # Unit tests for the scheduler + vector subsystems create temp sqlite DBs.

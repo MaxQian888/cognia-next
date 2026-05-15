@@ -82,6 +82,7 @@ import {
   registerPreset as registerExternalAgentPresetOverlay,
   unregisterPresetsByPlugin as unregisterExternalAgentPresetsByPlugin,
 } from "@/lib/ai/agent/external/presets"
+import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 
 // =============================================================================
 // Governance mode resolution
@@ -1039,6 +1040,24 @@ export class PluginManager {
         )
       }
 
+      // Register plugin-provided i18n strings so the next render of any
+      // useTranslations() consumer sees the new `plugin.<id>.<key>` entries.
+      // Done before activate() so plugin code that itself calls into the
+      // host UI (rare but possible via hooks) can resolve its own keys.
+      const i18nLocales = plugin.manifest.i18n?.locales
+      if (i18nLocales) {
+        const prefixed: Partial<Record<string, Record<string, string>>> = {}
+        for (const [locale, dict] of Object.entries(i18nLocales)) {
+          if (!dict) continue
+          const entries: Record<string, string> = {}
+          for (const [key, value] of Object.entries(dict)) {
+            entries[`plugin.${pluginId}.${key}`] = value
+          }
+          prefixed[locale] = entries
+        }
+        registerPluginI18n({ pluginId, messages: prefixed })
+      }
+
       // Enable the plugin
       await store.enablePlugin(pluginId, { viaManager: false })
 
@@ -1094,6 +1113,10 @@ export class PluginManager {
 
       // Unregister contributions after runtime deactivation.
       await this.unregisterPluginContributions(pluginId)
+
+      // Drop plugin-provided i18n bundles so the merged messages object no
+      // longer surfaces `plugin.<id>.*` keys after disable.
+      unregisterPluginI18n(pluginId)
 
       // Disable in store
       await store.disablePlugin(pluginId, { viaManager: false })
@@ -1210,6 +1233,10 @@ export class PluginManager {
       if (["loaded", "enabled", "disabled"].includes(plugin.status)) {
         await this.unloadPlugin(pluginId)
       }
+
+      // Drop plugin-provided i18n bundles in case disable didn't run (e.g.,
+      // direct uninstall from "installed" state). Idempotent.
+      unregisterPluginI18n(pluginId)
 
       // Remove files via Tauri
       await invoke("plugin_uninstall", {
@@ -1938,6 +1965,20 @@ export class PluginManager {
     unregisterNativeAnthropicToolsByPlugin(pluginId)
     unregisterSkillsByPlugin(pluginId)
     unregisterExternalAgentPresetsByPlugin(pluginId)
+
+    // VS Code shim cleanup — lm provider registrations + chat participants.
+    // For non-vscode-extension plugins these are no-ops (the maps will be
+    // empty); for VS Code extensions they tear down every recorded handle.
+    try {
+      const lmModule = await import("@/lib/plugin/vscode-shim/lm-handler")
+      lmModule.unregisterAllLmFor(pluginId)
+      const chatModule = await import("@/lib/plugin/vscode-shim/chat-participant-registry")
+      await chatModule.disposeAllParticipantsFor(pluginId)
+      const monacoModule = await import("@/lib/plugin/vscode-shim/monaco-bridge")
+      monacoModule.unregisterByExtension(pluginId)
+    } catch {
+      // VS Code shim modules are optional; ignore when not present in tests.
+    }
 
     this.registry.unregisterAll(pluginId)
   }

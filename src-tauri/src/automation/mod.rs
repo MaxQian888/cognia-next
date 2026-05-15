@@ -17,6 +17,7 @@
 pub mod audit;
 pub mod backend;
 pub mod commands;
+pub mod consent;
 pub mod permission;
 pub mod platform;
 pub mod types;
@@ -27,6 +28,7 @@ pub mod worker;
 // `automation::permission::AutomationSettings`) to keep this surface tight.
 pub use audit::AuditRing;
 pub use backend::AutomationBackend;
+pub use consent::ConsentBroker;
 pub use permission::PermissionGate;
 pub use types::Platform;
 pub use worker::Worker;
@@ -54,15 +56,27 @@ pub fn make_default_backend() -> Box<dyn AutomationBackend> {
     }
     #[cfg(target_os = "macos")]
     {
-        Box::new(backend::StubBackend {
-            platform: Platform::Macos,
-        })
+        match platform::ax::AxBackend::new() {
+            Ok(b) => Box::new(b),
+            Err(err) => {
+                log::warn!("ax backend init failed ({err}); falling back to stub backend");
+                Box::new(backend::StubBackend {
+                    platform: Platform::Macos,
+                })
+            }
+        }
     }
     #[cfg(target_os = "linux")]
     {
-        Box::new(backend::StubBackend {
-            platform: Platform::Linux,
-        })
+        match platform::atspi::AtspiBackend::new() {
+            Ok(b) => Box::new(b),
+            Err(err) => {
+                log::warn!("atspi backend init failed ({err}); falling back to stub backend");
+                Box::new(backend::StubBackend {
+                    platform: Platform::Linux,
+                })
+            }
+        }
     }
     #[cfg(not(any(
         target_os = "windows",

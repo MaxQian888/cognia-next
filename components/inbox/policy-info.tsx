@@ -16,48 +16,51 @@ interface PolicyInfoProps {
   policy: TriggerPolicy
 }
 
-function describeRule(rule: TriggerRule): string {
+type Translator = (key: string, values?: Record<string, string | number>) => string
+
+function describeRule(rule: TriggerRule, t: Translator): string {
   switch (rule.kind) {
     case "private-default":
-      return "All private messages"
+      return t("rules.private-default")
     case "self-mention":
-      return "@mention"
+      return t("rules.self-mention")
     case "reply-to-bot":
-      return "Reply-to-bot"
+      return t("rules.reply-to-bot")
     case "slash-command":
-      return `Commands: ${rule.prefixes.join(", ")}`
+      return t("rules.slash-command", { names: rule.prefixes.join(", ") })
     case "keyword":
-      return `Keywords: ${rule.words.join(", ")}`
+      return t("rules.keyword", { names: rule.words.join(", ") })
     case "user-allowlist":
-      return `Users: ${rule.userIds.join(", ")}`
+      return t("rules.user-allowlist", { names: rule.userIds.join(", ") })
     case "channel-allowlist":
-      return `Channels: ${rule.channelIds.join(", ")}`
+      return t("rules.channel-allowlist", { names: rule.channelIds.join(", ") })
     default:
-      return "Unknown rule"
+      return t("rules.unknown")
   }
 }
 
-function describeBlocker(blocker: TriggerBlocker): string {
+function describeBlocker(blocker: TriggerBlocker, t: Translator): string {
   switch (blocker.kind) {
     case "rate-limit":
-      return `Rate-limited to ${blocker.perUserPerMin}/min per user`
+      return t("blockers.rate-limit", { perUserPerMin: blocker.perUserPerMin })
     case "cooldown-after-bot-reply":
-      return `${blocker.secs}s cooldown after bot reply`
+      return t("blockers.cooldown-after-bot-reply", { secs: blocker.secs })
     case "user-blocklist":
-      return `Blocked users: ${blocker.userIds.join(", ")}`
+      return t("blockers.user-blocklist", { names: blocker.userIds.join(", ") })
     case "channel-blocklist":
-      return `Blocked channels: ${blocker.channelIds.join(", ")}`
+      return t("blockers.channel-blocklist", { names: blocker.channelIds.join(", ") })
     case "keyword-blocklist":
-      return `Blocked keywords: ${blocker.words.join(", ")}`
+      return t("blockers.keyword-blocklist", { names: blocker.words.join(", ") })
     default:
-      return "Unknown blocker"
+      return t("blockers.unknown")
   }
 }
 
 export function PolicyInfo({ policy }: PolicyInfoProps) {
   const t = useTranslations("inbox.policyInfo")
-  const ruleParts = policy.rules.map(describeRule)
-  const blockerParts = policy.blockers.map(describeBlocker)
+  const tFn: Translator = (key, values) => t(key, values)
+  const ruleParts = policy.rules.map((r) => describeRule(r, tFn))
+  const blockerParts = policy.blockers.map((b) => describeBlocker(b, tFn))
 
   const summary = [...ruleParts, ...blockerParts].join(". ")
 
@@ -75,7 +78,7 @@ export function PolicyInfo({ policy }: PolicyInfoProps) {
         </button>
       </TooltipTrigger>
       <TooltipContent side="bottom" className="max-w-xs text-xs" data-testid="policy-info-tooltip">
-        {summary || "No trigger rules configured."}
+        {summary || t("noRules")}
       </TooltipContent>
     </Tooltip>
   )

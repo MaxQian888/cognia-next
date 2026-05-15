@@ -1,5 +1,15 @@
 # Repository Guidelines
 
+## Working Rules (hard requirements)
+
+These project rules override any default behavior to the contrary.
+
+1. **Research before implementing.** Before writing new code, grep `lib/`, `components/`, `hooks/`, `src-tauri/`, and the relevant ADR for an existing implementation. Reuse — don't reimplement. New files require justification that no existing module can be extended.
+2. **No simplifications.** Implement the full behavior the task requires. No stubs, `// TODO later`, abbreviated happy paths, or stripped error handling/validation/edge cases. If you genuinely can't finish, stop and surface the blocker instead of silently shipping less.
+3. **Every component ships with a unit test.** New or edited files under `components/**`, `hooks/**`, `lib/**`, `src-tauri/src/**` (excluding `components/ui/` and `components/ai-elements/`) need co-located `*.test.ts(x)` or in-file `#[cfg(test)]` tests in the same change. Coverage stays ≥90% — verify with `pnpm test:coverage` before claiming done.
+4. **Every frontend component is i18n-wired.** No hard-coded user-facing strings in `.tsx`. Use `next-intl` (`useTranslations` / `getTranslations`), add keys to **both** `i18n/messages/en.json` and `i18n/messages/zh-CN.json`, then run `pnpm lint:i18n` to confirm parity. Aria labels, placeholders, toasts, and error messages count.
+5. **Language convention.** Internal narration (status updates, commit messages, code comments, plans) is in **English**. Clarifying questions to the user are in **Chinese** — identifiers, paths, and Conventional Commit prefixes stay English even inside Chinese sentences.
+
 ## Project Structure & Module Organization
 
 This is a **pnpm monorepo** (`pnpm-workspace.yaml`) with two packages:

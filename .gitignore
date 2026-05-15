@@ -18,6 +18,11 @@ junit.xml
 *.test.ts.snap
 *.test.tsx.snap
 
+# Playwright E2E artifacts
+/playwright-report/
+/test-results/
+/playwright/.cache/
+
 # next.js
 /.next/
 /out/

@@ -35,6 +35,7 @@ export const TOOL_TO_SCOPE: Record<string, BridgeScope> = {
   wiki_search: "wiki:cognia",
   wiki_read: "wiki:cognia",
   rag_search: "rag:cognia",
+  computer_use: "mcp:computer-use",
   // runtime_query takes an entityType arg — handler resolves the scope per call.
 }
 

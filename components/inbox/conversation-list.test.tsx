@@ -128,13 +128,17 @@ describe("ConversationList", () => {
     ]
     render(<ConversationList />)
 
+    // The conversation row is now wrapped in a <div> (so plugin actions
+    // can hang off the right side without a nested-button violation); the
+    // click target is the inner <button> with testid
+    // `conversation-row-button-${ck}`. Order is preserved across the
+    // refactor — assert against the inner buttons.
     const rows = screen.getAllByRole("button")
-    // The pinned row should come before the unread row in the DOM.
     const pinnedIndex = rows.findIndex(
-      (r) => r.getAttribute("data-testid") === "conversation-row-ck-pinned"
+      (r) => r.getAttribute("data-testid") === "conversation-row-button-ck-pinned"
     )
     const unreadIndex = rows.findIndex(
-      (r) => r.getAttribute("data-testid") === "conversation-row-ck-unread"
+      (r) => r.getAttribute("data-testid") === "conversation-row-button-ck-unread"
     )
     expect(pinnedIndex).toBeLessThan(unreadIndex)
   })
@@ -144,7 +148,7 @@ describe("ConversationList", () => {
       { session: makeSession("s5", "ck-nav", 1000), override: undefined, unreadCount: 0 },
     ]
     render(<ConversationList />)
-    fireEvent.click(screen.getByTestId("conversation-row-ck-nav"))
+    fireEvent.click(screen.getByTestId("conversation-row-button-ck-nav"))
     expect(mockPush).toHaveBeenCalledWith(`/inbox/c/${encodeURIComponent("ck-nav")}`)
   })
 

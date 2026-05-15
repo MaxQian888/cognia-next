@@ -37,6 +37,8 @@ import {
 import type { Capabilities } from "@/lib/automation/types"
 
 import { AutomationAuditTable } from "./automation-audit-table"
+import { WhitelistTab } from "./whitelist-tab"
+import { InspectorTab } from "./inspector-tab"
 
 type TabId = "overview" | "permissions" | "whitelist" | "audit" | "inspector"
 
@@ -84,36 +86,16 @@ export function AutomationSection() {
           <PermissionsTab />
         </TabsContent>
         <TabsContent value="whitelist" className="pt-4">
-          <PlaceholderTab feature="Whitelist editor" />
+          <WhitelistTab />
         </TabsContent>
         <TabsContent value="audit" className="pt-4">
           <AutomationAuditTable />
         </TabsContent>
         <TabsContent value="inspector" className="pt-4">
-          <PlaceholderTab feature="Live UIA inspector" />
+          <InspectorTab />
         </TabsContent>
       </Tabs>
     </div>
-  )
-}
-
-function PlaceholderTab({ feature }: { feature: string }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{feature}</CardTitle>
-        <CardDescription>Ships in M2 of the UI automation subsystem.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <p className="text-sm text-muted-foreground">
-          The {feature.toLowerCase()} is part of the M2 milestone — see{" "}
-          <code className="font-mono">
-            docs/superpowers/specs/2026-05-12-ui-automation-subsystem-design.md
-          </code>{" "}
-          for the full plan.
-        </p>
-      </CardContent>
-    </Card>
   )
 }
 

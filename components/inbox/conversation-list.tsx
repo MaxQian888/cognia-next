@@ -24,6 +24,7 @@ import type { ConversationOverrideRow } from "@/lib/db/connector-types"
 import { PlatformBadge } from "./platform-badge"
 import { UnreadPill } from "./unread-pill"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 interface ConversationListProps {
   adapterId?: string
@@ -167,29 +168,56 @@ function ConversationRow({
   const { session, override, unreadCount } = item
   const ck = session.platformBinding!.conversationKey
   const platform = session.platformBinding!.platform as PlatformKind
+  const adapterId = session.platformBinding!.adapterId
 
+  // Row uses a flex container with a click-target button on the left and a
+  // plugin actions zone on the right. Keeping the actions out of the
+  // <button> prevents nested-interactive accessibility violations and lets
+  // plugin contributions (archive, mute, mark-as-read, etc.) own their
+  // own click handling.
   return (
-    <button
-      type="button"
+    <div
       className={cn(
-        "w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted/60 transition-colors",
+        "w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/60 transition-colors",
         isActive && "bg-muted"
       )}
-      onClick={() => onSelect(ck)}
       data-testid={`conversation-row-${ck}`}
     >
-      {/* Platform badge */}
-      <PlatformBadge platform={platform} className="shrink-0" />
+      <button
+        type="button"
+        className="flex-1 min-w-0 flex items-center gap-2 text-left"
+        onClick={() => onSelect(ck)}
+        data-testid={`conversation-row-button-${ck}`}
+      >
+        {/* Platform badge */}
+        <PlatformBadge platform={platform} className="shrink-0" />
 
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1">
-          {override?.pinned && <PinIcon className="h-3 w-3 shrink-0 text-muted-foreground" />}
-          <span className="text-sm font-medium truncate">{session.title}</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1">
+            {override?.pinned && <PinIcon className="h-3 w-3 shrink-0 text-muted-foreground" />}
+            <span className="text-sm font-medium truncate">{session.title}</span>
+          </div>
+          <p className="text-xs text-muted-foreground truncate">{ck}</p>
         </div>
-        <p className="text-xs text-muted-foreground truncate">{ck}</p>
-      </div>
 
-      <UnreadPill count={unreadCount} />
-    </button>
+        <UnreadPill count={unreadCount} />
+      </button>
+
+      {/* Plugin contributions: per-row actions (archive, mute, transfer to
+       * workflow, …). Hidden when no plugin contributes.
+       */}
+      <PluginExtensionSlot
+        point="inbox.conversation.actions"
+        className="ml-auto flex items-center gap-1 empty:hidden"
+        context={{
+          conversationKey: ck,
+          adapterId,
+          platform,
+          sessionId: session.id,
+          pinned: !!override?.pinned,
+          archived: !!override?.archived,
+        }}
+      />
+    </div>
   )
 }

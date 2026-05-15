@@ -107,4 +107,61 @@ describe("parseV11Event", () => {
     const event: OneBotV11Event = { ...makeBase(), post_type: "meta_event" }
     expect(parseV11Event(ADAPTER_ID, event)).toBeNull()
   })
+
+  it("ignores message_sent (echo of bot's own outbound)", () => {
+    // go-cqhttp re-emits the bot's outbound as post_type="message_sent".
+    // Treating it as inbound would loop the AI on its own replies.
+    const event: OneBotV11Event = {
+      ...makeBase(),
+      post_type: "message_sent",
+    }
+    expect(parseV11Event(ADAPTER_ID, event)).toBeNull()
+  })
+
+  it("group_recall notice maps to a kind=delete event", () => {
+    const event: OneBotV11Event = {
+      time: 1700000100,
+      self_id: 100000,
+      post_type: "notice",
+      notice_type: "group_recall",
+      group_id: 300001,
+      user_id: 200001,
+      message_id: 1001,
+    }
+    const r = parseV11Event(ADAPTER_ID, event)
+    expect(r).not.toBeNull()
+    expect(r!.kind).toBe("delete")
+    expect(r!.replacesMessageId).toBe("1001")
+    expect(r!.channel.kind).toBe("group")
+    expect(r!.conversationKey).toContain("g:300001")
+  })
+
+  it("friend_recall notice maps to a kind=delete event in a private chat", () => {
+    const event: OneBotV11Event = {
+      time: 1700000200,
+      self_id: 100000,
+      post_type: "notice",
+      notice_type: "friend_recall",
+      user_id: 200001,
+      message_id: 2002,
+    }
+    const r = parseV11Event(ADAPTER_ID, event)
+    expect(r).not.toBeNull()
+    expect(r!.kind).toBe("delete")
+    expect(r!.replacesMessageId).toBe("2002")
+    expect(r!.channel.kind).toBe("private")
+  })
+
+  it("returns null for notice events with unhandled notice_type", () => {
+    // E.g. group_admin / group_member_increase — we don't track those.
+    const event: OneBotV11Event = {
+      time: 1700000300,
+      self_id: 100000,
+      post_type: "notice",
+      notice_type: "group_admin",
+      group_id: 300001,
+      user_id: 200001,
+    }
+    expect(parseV11Event(ADAPTER_ID, event)).toBeNull()
+  })
 })

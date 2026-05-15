@@ -1,9 +1,10 @@
-//! Screen capture via `xcap`. Works cross-platform; we keep the file inside
-//! the UIA module because in M1 only Windows builds with the backend wired.
+//! Screen capture via `xcap`. Works cross-platform; used by every backend
+//! (Windows UIA + macOS AX + Linux AT-SPI) so screenshot semantics stay
+//! identical across platforms.
 //!
-//! Output is always PNG; the format option is honored as a hint and may be
-//! lifted later (xcap emits raw RGBA frames; PNG encoding goes through the
-//! `image` crate).
+//! Output is always PNG by default; `format` is honored as a hint and may
+//! be lifted later (xcap emits raw RGBA frames; PNG / JPEG encoding goes
+//! through the `image` crate).
 
 use std::io::Cursor;
 

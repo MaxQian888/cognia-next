@@ -97,6 +97,7 @@ import { HelperHints } from "./composer/helper-hints"
 import { ScreenshotButton } from "./composer/screenshot-button"
 import { VoiceControls } from "./composer/voice-controls"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { InboxComposerActionsHost } from "@/components/inbox/inbox-composer-actions-host"
 
 interface Props {
   session?: ChatSession | null
@@ -819,6 +820,21 @@ function ComposerInner(props: InnerProps) {
       </div>
 
       <PluginExtensionSlot point="chat.input.below" className="px-1 pt-1 empty:hidden" />
+
+      {/* Inbox-only composer actions (IM-completion §C). Mounted only when
+       * the active session is bound to an external platform conversation;
+       * keeps the inbox extension surface separate from the generic
+       * chat.input.actions one so a regular chat session never sees them.
+       */}
+      {props.session?.platformBinding && (
+        <InboxComposerActionsHost
+          conversationKey={props.session.platformBinding.conversationKey}
+          adapterId={props.session.platformBinding.adapterId}
+          platform={props.session.platformBinding.platform}
+          sessionId={props.session.id}
+          className="px-1 pt-1 flex items-center gap-1 empty:hidden"
+        />
+      )}
 
       {cwd && (
         <div className="flex items-center gap-1 px-2 pb-1 text-[11px] text-muted-foreground">

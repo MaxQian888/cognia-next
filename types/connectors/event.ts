@@ -45,6 +45,20 @@ export interface MentionDescriptor {
   users: string[]
 }
 
+/**
+ * What this event represents on the wire. Most adapter parsers emit
+ * `"create"` (default when omitted, for backward compatibility with rows
+ * persisted before Phase 2). `"edit"` and `"delete"` are emitted by adapters
+ * that surface platform-side message edits / deletes (Telegram
+ * `edited_message`, Discord `MESSAGE_UPDATE` / `MESSAGE_DELETE`, OneBot v12
+ * `message.event.edit` / `message.event.delete`, etc.). The bus uses the
+ * variant to choose between insert / update-in-place / soft-delete on the
+ * existing `StoredMessage`. `"system"` covers non-message bookkeeping events
+ * (Lark read-indicators, member-joined / member-removed) that produce an
+ * audit row but no message persistence.
+ */
+export type InboundEventKind = "create" | "edit" | "delete" | "system"
+
 export interface NormalizedInboundEvent {
   platform: PlatformKind
   adapterId: string
@@ -61,6 +75,30 @@ export interface NormalizedInboundEvent {
   timestamp: number
   raw: unknown
   channelData?: Record<string, unknown>
+  /**
+   * Defaults to `"create"` when omitted, preserving the Phase 1 contract.
+   * See {@link InboundEventKind}.
+   */
+  kind?: InboundEventKind
+  /**
+   * The platform-native message id this event mutates. Required when
+   * `kind === "edit"` or `kind === "delete"` so the bus can find the
+   * existing `StoredMessage` to update / soft-delete. Ignored on `"create"`
+   * and `"system"` events.
+   */
+  replacesMessageId?: string
+  /**
+   * Sub-kind for `kind === "system"` bookkeeping events so the audit log
+   * can distinguish read-indicators, member-joined, member-removed, and
+   * future variants without a string-typing free-for-all. Ignored on
+   * non-system events.
+   */
+  systemKind?:
+    | "read_indicator"
+    | "member_added"
+    | "member_removed"
+    | "reaction_added"
+    | "reaction_removed"
 }
 
 const KEY_SEP = ":"

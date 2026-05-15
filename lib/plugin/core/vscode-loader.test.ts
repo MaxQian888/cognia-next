@@ -106,6 +106,12 @@ describe("vscode-loader — Tauri mode", () => {
     installTauriWindow()
     jest.resetModules()
     jest.clearAllMocks()
+    // The dispatcher wires itself to `@tauri-apps/api/event::listen` the
+    // first time loadVscodeDefinition runs in Tauri mode. Mock it here so
+    // we don't pull in the real Tauri runtime.
+    jest.doMock("@tauri-apps/api/event", () => ({
+      listen: jest.fn(async () => () => {}),
+    }))
   })
 
   afterAll(() => {

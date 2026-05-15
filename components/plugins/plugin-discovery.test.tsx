@@ -27,6 +27,7 @@ beforeEach(() => {
     getFeaturedPlugins: jest.fn(async () => SAMPLE),
     getPopularPlugins: jest.fn(async () => SAMPLE),
     getRecentPlugins: jest.fn(async () => SAMPLE),
+    getPlugin: jest.fn(async () => null),
     installPlugin: jest.fn(async () => undefined),
     uninstallPlugin: jest.fn(async () => undefined),
   })
@@ -45,6 +46,7 @@ describe("PluginDiscovery", () => {
       getFeaturedPlugins: jest.fn(async () => SAMPLE),
       getPopularPlugins: jest.fn(async () => SAMPLE),
       getRecentPlugins: jest.fn(async () => SAMPLE),
+      getPlugin: jest.fn(async () => null),
       installPlugin: install,
       uninstallPlugin: jest.fn(async () => undefined),
     })

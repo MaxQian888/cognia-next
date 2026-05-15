@@ -42,6 +42,11 @@ jest.mock("@/components/ui/tooltip", () => ({
   TooltipContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
 
+const mockUseCharacter = jest.fn()
+jest.mock("@/lib/data-hooks/context", () => ({
+  useCharacter: (id: string | null | undefined) => mockUseCharacter(id),
+}))
+
 // ---------------------------------------------------------------------------
 // Subject
 // ---------------------------------------------------------------------------
@@ -58,6 +63,7 @@ const EMPTY_POLICY: TriggerPolicy = {
 
 beforeEach(() => {
   ;(isTauri as jest.Mock).mockReturnValue(false)
+  mockUseCharacter.mockReturnValue(undefined)
 })
 
 describe("ConversationHeader", () => {
@@ -75,7 +81,8 @@ describe("ConversationHeader", () => {
     expect(screen.getByText("My Telegram Chat")).toBeInTheDocument()
   })
 
-  it("renders the mode switcher chip", () => {
+  it("renders the live mode switcher chip in desktop mode", () => {
+    ;(isTauri as jest.Mock).mockReturnValue(true)
     render(
       <ConversationHeader
         conversationKey="ck2"
@@ -104,7 +111,7 @@ describe("ConversationHeader", () => {
     expect(screen.getByTestId("policy-info-trigger")).toBeInTheDocument()
   })
 
-  it("wraps mode switcher with disabled span in web mode (isTauri=false)", () => {
+  it("renders a static disabled badge in web mode (isTauri=false)", () => {
     ;(isTauri as jest.Mock).mockReturnValue(false)
     render(
       <ConversationHeader
@@ -116,11 +123,15 @@ describe("ConversationHeader", () => {
         policy={EMPTY_POLICY}
       />
     )
-    // In web mode the mode switcher is wrapped in a pointer-events-none disabled span
+    // Web mode renders a static, read-only badge — NOT a live <ModeSwitcher>.
+    // The static badge shows the localized mode label and has aria-disabled.
     const disabled = screen.getByTestId("mode-switcher-disabled")
     expect(disabled).toBeInTheDocument()
     expect(disabled).toHaveAttribute("aria-disabled", "true")
-    expect(disabled).toHaveClass("pointer-events-none")
+    expect(disabled).toHaveTextContent("Auto")
+    // The live dropdown trigger must not render — that was the bug we fixed
+    // (Radix portals the menu past the pointer-events-none wrapper).
+    expect(screen.queryByTestId("mode-switcher-trigger")).not.toBeInTheDocument()
   })
 
   it("renders mode switcher directly in desktop mode (isTauri=true)", () => {
@@ -138,5 +149,37 @@ describe("ConversationHeader", () => {
     // In desktop mode there is no disabled wrapper
     expect(screen.queryByTestId("mode-switcher-disabled")).not.toBeInTheDocument()
     expect(screen.getByTestId("mode-switcher-trigger")).toBeInTheDocument()
+  })
+
+  it("renders the character chip when a character is bound", () => {
+    mockUseCharacter.mockReturnValue({ id: "c1", name: "Ada" })
+    render(
+      <ConversationHeader
+        conversationKey="ck6"
+        sessionId="s6"
+        title="Character chat"
+        platform="telegram"
+        currentMode="auto"
+        policy={EMPTY_POLICY}
+        characterId="c1"
+      />
+    )
+    expect(screen.getByTestId("conversation-character-chip")).toBeInTheDocument()
+    expect(screen.getByText("Ada")).toBeInTheDocument()
+  })
+
+  it("omits the character chip when no character is bound", () => {
+    mockUseCharacter.mockReturnValue(undefined)
+    render(
+      <ConversationHeader
+        conversationKey="ck7"
+        sessionId="s7"
+        title="No character"
+        platform="discord"
+        currentMode="auto"
+        policy={EMPTY_POLICY}
+      />
+    )
+    expect(screen.queryByTestId("conversation-character-chip")).not.toBeInTheDocument()
   })
 })

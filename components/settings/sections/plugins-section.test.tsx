@@ -97,17 +97,21 @@ function renderWithTab(tab: string) {
   return render(<PluginsSection />)
 }
 
-describe("PluginsSection", () => {
-  it("renders all 8 sub-tab triggers", () => {
+describe("PluginsSection (governance panel)", () => {
+  it("renders all 4 sub-tab triggers", () => {
     render(<PluginsSection />)
     expect(screen.getByRole("tab", { name: /subTabs.overview/ })).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: /subTabs.installed/ })).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: /subTabs.marketplace/ })).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: /subTabs.permissions/ })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /subTabs.scheduled/ })).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: /subTabs.devtools/ })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /subTabs.audit/ })).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: /subTabs.settings/ })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /subTabs.policy/ })).toBeInTheDocument()
+  })
+
+  it("does NOT render the removed sub-tabs (installed/marketplace/permissions/devtools)", () => {
+    render(<PluginsSection />)
+    expect(screen.queryByRole("tab", { name: /subTabs.installed/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: /subTabs.marketplace/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: /subTabs.permissions/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: /subTabs.devtools/ })).not.toBeInTheDocument()
   })
 
   it("overview tab shows badges driven by mocked plugins", () => {
@@ -118,23 +122,38 @@ describe("PluginsSection", () => {
     expect(screen.getByText(/badgeError:1/)).toBeInTheDocument()
   })
 
-  it("installed tab lists plugin rows from mocked data", () => {
-    renderWithTab("installed")
-    expect(screen.getByText("Alpha plugin")).toBeInTheDocument()
-    expect(screen.getByText("Beta plugin")).toBeInTheDocument()
-    expect(screen.getByText("1.0.0")).toBeInTheDocument()
+  it("overview tab renders the three always-on deep-link summary cards", () => {
+    render(<PluginsSection />)
+    // installed / marketplace / permissions are always rendered; devtools is
+    // gated by NODE_ENV === "development" which jest sets to "test".
+    expect(screen.getByText("installedCard.title")).toBeInTheDocument()
+    expect(screen.getByText("marketplaceCard.title")).toBeInTheDocument()
+    expect(screen.getByText("permissionsCard.title")).toBeInTheDocument()
+    expect(screen.queryByText("devtoolsCard.title")).not.toBeInTheDocument()
   })
 
-  it("permissions tab renders 8 permission groups", () => {
-    renderWithTab("permissions")
-    expect(screen.getByText(/groups.filesystem/)).toBeInTheDocument()
-    expect(screen.getByText(/groups.network/)).toBeInTheDocument()
-    expect(screen.getByText(/groups.clipboard/)).toBeInTheDocument()
-    expect(screen.getByText(/groups.media/)).toBeInTheDocument()
-    expect(screen.getByText(/groups.database/)).toBeInTheDocument()
-    expect(screen.getByText(/groups.settings/)).toBeInTheDocument()
-    expect(screen.getByText(/groups.session/)).toBeInTheDocument()
-    expect(screen.getByText(/groups.dangerous/)).toBeInTheDocument()
+  it("overview tab installed card links to /plugins?tab=installed", () => {
+    render(<PluginsSection />)
+    const link = screen.getByText("installedCard.cta").closest("a")
+    expect(link).toHaveAttribute("href", "/plugins?tab=installed")
+  })
+
+  it("overview tab marketplace card links to /plugins?tab=browse", () => {
+    render(<PluginsSection />)
+    const link = screen.getByText("marketplaceCard.cta").closest("a")
+    expect(link).toHaveAttribute("href", "/plugins?tab=browse")
+  })
+
+  it("overview tab permissions card links to /plugins?tab=permissions", () => {
+    render(<PluginsSection />)
+    const link = screen.getByText("permissionsCard.cta").closest("a")
+    expect(link).toHaveAttribute("href", "/plugins?tab=permissions")
+  })
+
+  it("overview tab manage button links to /plugins", () => {
+    render(<PluginsSection />)
+    const link = screen.getByText("manageButton").closest("a")
+    expect(link).toHaveAttribute("href", "/plugins")
   })
 
   // TODO(cognia-next): the audit tab triggers a Zustand
@@ -144,12 +163,11 @@ describe("PluginsSection", () => {
   // root cause needs more time than the build-fixer pass should spend.
   it.skip("audit tab renders the contract audit summary", () => {
     renderWithTab("audit")
-    // Contract registry is non-empty, so badgeTotal must show > 0.
     expect(screen.getByText(/badgeTotal:\d+/)).toBeInTheDocument()
   })
 
-  it("settings tab toggling governance persists to localStorage", () => {
-    renderWithTab("settings")
+  it("policy tab toggling governance persists to localStorage", () => {
+    renderWithTab("policy")
     const switches = screen.getAllByRole("switch")
     // First switch is governance (warn ↔ block)
     fireEvent.click(switches[0])
@@ -158,17 +176,16 @@ describe("PluginsSection", () => {
     expect(JSON.parse(stored as string).governance).toBe("block")
   })
 
-  it("settings tab signature-required toggle persists", () => {
-    renderWithTab("settings")
+  it("policy tab signature-required toggle persists", () => {
+    renderWithTab("policy")
     const switches = screen.getAllByRole("switch")
-    // Switches: 0=governance, 1=signatureRequired, 2=autoUpdate
     fireEvent.click(switches[1])
     const stored = window.localStorage.getItem("cognia.plugins.policy")
     expect(JSON.parse(stored as string).signatureRequired).toBe(true)
   })
 
-  it("settings tab auto-update toggle persists", () => {
-    renderWithTab("settings")
+  it("policy tab auto-update toggle persists", () => {
+    renderWithTab("policy")
     const switches = screen.getAllByRole("switch")
     fireEvent.click(switches[2])
     const stored = window.localStorage.getItem("cognia.plugins.policy")
@@ -176,18 +193,10 @@ describe("PluginsSection", () => {
   })
 
   it("hydrates initial tab from ?pluginsTab=", () => {
-    renderWithTab("installed")
+    renderWithTab("scheduled")
     expect(
-      screen.getByRole("tab", { name: /subTabs.installed/, selected: true })
+      screen.getByRole("tab", { name: /subTabs.scheduled/, selected: true })
     ).toBeInTheDocument()
-  })
-
-  it("marketplace tab shows the storefront pointer", () => {
-    renderWithTab("marketplace")
-    // The mocked translator returns the key without namespace, so test
-    // by the keys unique to this tab body.
-    expect(screen.getByText("openButton")).toBeInTheDocument()
-    expect(screen.getByText("hint")).toBeInTheDocument()
   })
 
   it("scheduled tab links to the scheduler section", () => {
@@ -196,9 +205,10 @@ describe("PluginsSection", () => {
     expect(link).toHaveAttribute("href", "/settings?section=scheduled-tasks")
   })
 
-  it("devtools tab is gated outside development", () => {
-    renderWithTab("devtools")
-    // process.env.NODE_ENV in jest is "test" — the gate hint must show.
-    expect(screen.getByText("gateHint")).toBeInTheDocument()
+  it("falls back to overview when ?pluginsTab= is unknown", () => {
+    renderWithTab("nonsense")
+    expect(
+      screen.getByRole("tab", { name: /subTabs.overview/, selected: true })
+    ).toBeInTheDocument()
   })
 })

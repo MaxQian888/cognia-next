@@ -31,13 +31,13 @@ interface OutboundStatusPillProps {
 
 const STATUS_CONFIG: Record<
   OutboundJobStatus,
-  { label: string; icon: React.ComponentType<{ className?: string }>; colorClass: string }
+  { icon: React.ComponentType<{ className?: string }>; colorClass: string }
 > = {
-  pending: { label: "Queued", icon: ClockIcon, colorClass: "text-muted-foreground" },
-  sending: { label: "Sending", icon: LoaderIcon, colorClass: "text-amber-500" },
-  sent: { label: "Sent", icon: CheckIcon, colorClass: "text-emerald-500" },
-  failed: { label: "Failed", icon: AlertCircleIcon, colorClass: "text-destructive" },
-  deadlettered: { label: "Dead-lettered", icon: BanIcon, colorClass: "text-destructive" },
+  pending: { icon: ClockIcon, colorClass: "text-muted-foreground" },
+  sending: { icon: LoaderIcon, colorClass: "text-amber-500" },
+  sent: { icon: CheckIcon, colorClass: "text-emerald-500" },
+  failed: { icon: AlertCircleIcon, colorClass: "text-destructive" },
+  deadlettered: { icon: BanIcon, colorClass: "text-destructive" },
 }
 
 export function OutboundStatusPill({ jobId, className }: OutboundStatusPillProps) {
@@ -52,6 +52,7 @@ export function OutboundStatusPill({ jobId, className }: OutboundStatusPillProps
 
   const config = STATUS_CONFIG[job.status]
   const Icon = config.icon
+  const statusLabel = t(`status.${job.status}`)
 
   const handleRetry = async () => {
     await getDb().outboundQueue.update(jobId, {
@@ -69,7 +70,7 @@ export function OutboundStatusPill({ jobId, className }: OutboundStatusPillProps
           data-status={job.status}
         >
           <Icon className={cn("h-3 w-3", job.status === "sending" && "animate-spin")} />
-          <span>{config.label}</span>
+          <span>{statusLabel}</span>
           {job.status === "failed" && (
             <Button
               size="sm"
@@ -86,8 +87,8 @@ export function OutboundStatusPill({ jobId, className }: OutboundStatusPillProps
       </TooltipTrigger>
       <TooltipContent side="top" className="text-xs">
         {job.status === "failed" || job.status === "deadlettered"
-          ? (job.lastError ?? "Unknown error")
-          : config.label}
+          ? (job.lastError ?? t("unknownError"))
+          : statusLabel}
       </TooltipContent>
     </Tooltip>
   )

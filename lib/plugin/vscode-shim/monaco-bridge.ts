@@ -153,6 +153,71 @@ export interface CodeActionsProviderRequest extends BaseProviderRequest {
   providedKinds?: string[]
 }
 
+// Request shapes for the additional Tier-2 providers wired in Phase B.
+export interface InlineCompletionProviderRequest extends BaseProviderRequest {
+  triggerCharacters?: string[]
+}
+export interface SignatureHelpProviderRequest extends BaseProviderRequest {
+  triggerCharacters?: string[]
+  retriggerCharacters?: string[]
+}
+export type WorkspaceSymbolProviderRequest = Omit<BaseProviderRequest, "selector">
+export type ColorProviderRequest = BaseProviderRequest
+export type FoldingRangeProviderRequest = BaseProviderRequest
+export type SelectionRangeProviderRequest = BaseProviderRequest
+export type DocumentLinkProviderRequest = BaseProviderRequest
+export interface OnTypeFormattingProviderRequest extends BaseProviderRequest {
+  firstTriggerCharacter: string
+  moreTriggerCharacter?: string[]
+}
+export interface SemanticTokensProviderRequest extends BaseProviderRequest {
+  legend: { tokenTypes: string[]; tokenModifiers: string[] }
+  range?: boolean
+}
+export type InlayHintsProviderRequest = BaseProviderRequest
+export type CallHierarchyProviderRequest = BaseProviderRequest
+export type TypeHierarchyProviderRequest = BaseProviderRequest
+export type LinkedEditingRangeProviderRequest = BaseProviderRequest
+
+// Generic untyped value shape used by the bag of new providers. Monaco's
+// exact result types vary — the bridge only enforces array-vs-object at the
+// call site, and the sidecar's shim is the source of truth for VS Code
+// type semantics.
+export type MonacoUnknownArray = unknown[]
+export interface MonacoColorInformation {
+  range: MonacoRange
+  color: { red: number; green: number; blue: number; alpha: number }
+}
+export interface MonacoFoldingRange {
+  start: number
+  end: number
+  kind?: string
+}
+export interface MonacoSelectionRange {
+  range: MonacoRange
+  parent?: MonacoSelectionRange
+}
+export interface MonacoDocumentLink {
+  range: MonacoRange
+  url?: string
+  tooltip?: string
+}
+export interface MonacoInlayHint {
+  position: MonacoPosition
+  label: string
+  kind?: "type" | "parameter"
+}
+export interface MonacoSemanticTokens {
+  /** vscode-format: deltaLine, deltaStart, length, tokenType, tokenModifiers — chained. */
+  data: number[]
+  resultId?: string
+}
+export interface MonacoSignatureHelp {
+  signatures: Array<{ label: string; documentation?: string; parameters?: unknown[] }>
+  activeSignature: number
+  activeParameter: number
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // Sidecar RPC dispatch
 // ────────────────────────────────────────────────────────────────────────
@@ -259,6 +324,136 @@ export interface MonacoApi {
         provideDocumentSymbols: (model: MonacoTextModel) => Promise<unknown[] | null | undefined>
       }
     ): Disposable
+    registerInlineCompletionsProvider(
+      languageSelector: string | string[],
+      provider: {
+        triggerCharacters?: string[]
+        provideInlineCompletions: (
+          model: MonacoTextModel,
+          position: MonacoPosition
+        ) => Promise<{ items: MonacoUnknownArray } | null | undefined>
+        freeInlineCompletions?(value: unknown): void
+      }
+    ): Disposable
+    registerSignatureHelpProvider(
+      languageSelector: string | string[],
+      provider: {
+        signatureHelpTriggerCharacters?: string[]
+        signatureHelpRetriggerCharacters?: string[]
+        provideSignatureHelp: (
+          model: MonacoTextModel,
+          position: MonacoPosition
+        ) => Promise<{ value: MonacoSignatureHelp } | null | undefined>
+      }
+    ): Disposable
+    registerColorProvider(
+      languageSelector: string | string[],
+      provider: {
+        provideDocumentColors: (
+          model: MonacoTextModel
+        ) => Promise<MonacoColorInformation[] | null | undefined>
+        provideColorPresentations: (
+          model: MonacoTextModel,
+          colorInfo: MonacoColorInformation
+        ) => Promise<MonacoUnknownArray | null | undefined>
+      }
+    ): Disposable
+    registerFoldingRangeProvider(
+      languageSelector: string | string[],
+      provider: {
+        provideFoldingRanges: (
+          model: MonacoTextModel
+        ) => Promise<MonacoFoldingRange[] | null | undefined>
+      }
+    ): Disposable
+    registerSelectionRangeProvider(
+      languageSelector: string | string[],
+      provider: {
+        provideSelectionRanges: (
+          model: MonacoTextModel,
+          positions: MonacoPosition[]
+        ) => Promise<MonacoSelectionRange[][] | null | undefined>
+      }
+    ): Disposable
+    registerLinkProvider(
+      languageSelector: string | string[],
+      provider: {
+        provideLinks: (
+          model: MonacoTextModel
+        ) => Promise<{ links: MonacoDocumentLink[] } | null | undefined>
+      }
+    ): Disposable
+    registerOnTypeFormattingEditProvider(
+      languageSelector: string | string[],
+      provider: {
+        autoFormatTriggerCharacters: string[]
+        provideOnTypeFormattingEdits: (
+          model: MonacoTextModel,
+          position: MonacoPosition,
+          ch: string
+        ) => Promise<MonacoTextEdit[] | null | undefined>
+      }
+    ): Disposable
+    registerDocumentSemanticTokensProvider(
+      languageSelector: string | string[],
+      provider: {
+        getLegend(): { tokenTypes: string[]; tokenModifiers: string[] }
+        provideDocumentSemanticTokens: (
+          model: MonacoTextModel
+        ) => Promise<MonacoSemanticTokens | null | undefined>
+        releaseDocumentSemanticTokens?(resultId: string | undefined): void
+      }
+    ): Disposable
+    registerDocumentRangeSemanticTokensProvider(
+      languageSelector: string | string[],
+      provider: {
+        getLegend(): { tokenTypes: string[]; tokenModifiers: string[] }
+        provideDocumentRangeSemanticTokens: (
+          model: MonacoTextModel,
+          range: MonacoRange
+        ) => Promise<MonacoSemanticTokens | null | undefined>
+      }
+    ): Disposable
+    registerInlayHintsProvider(
+      languageSelector: string | string[],
+      provider: {
+        provideInlayHints: (
+          model: MonacoTextModel,
+          range: MonacoRange
+        ) => Promise<{ hints: MonacoInlayHint[] } | null | undefined>
+      }
+    ): Disposable
+    registerCallHierarchyProvider(
+      languageSelector: string | string[],
+      provider: {
+        prepareCallHierarchy: (
+          model: MonacoTextModel,
+          position: MonacoPosition
+        ) => Promise<MonacoUnknownArray | null | undefined>
+        provideIncomingCalls: (item: unknown) => Promise<MonacoUnknownArray | null | undefined>
+        provideOutgoingCalls: (item: unknown) => Promise<MonacoUnknownArray | null | undefined>
+      }
+    ): Disposable
+    registerTypeHierarchyProvider(
+      languageSelector: string | string[],
+      provider: {
+        prepareTypeHierarchy: (
+          model: MonacoTextModel,
+          position: MonacoPosition
+        ) => Promise<MonacoUnknownArray | null | undefined>
+        provideSupertypes: (item: unknown) => Promise<MonacoUnknownArray | null | undefined>
+        provideSubtypes: (item: unknown) => Promise<MonacoUnknownArray | null | undefined>
+      }
+    ): Disposable
+    registerLinkedEditingRangeProvider(
+      languageSelector: string | string[],
+      provider: {
+        provideLinkedEditingRanges: (
+          model: MonacoTextModel,
+          position: MonacoPosition
+        ) => Promise<{ ranges: MonacoRange[] } | null | undefined>
+      }
+    ): Disposable
   }
   editor: {
     setModelMarkers(model: MonacoTextModel, owner: string, markers: MonacoMarker[]): void
@@ -288,6 +483,10 @@ interface RegistrationRecord {
 
 const registrations = new Map<string, RegistrationRecord>()
 const decorationTypes = new Map<string, { extensionId: string; className?: string }>()
+const workspaceSymbolProviders = new Map<
+  string,
+  { extensionId: string; invoke: (query: string) => Promise<unknown[] | null> }
+>()
 
 const activeEditorListeners = new Set<(editor: MonacoEditor | null) => void>()
 const editorChangeListeners = new Set<(event: MonacoEditorChangeEvent) => void>()
@@ -567,6 +766,316 @@ export function registerDocumentSymbolProvider(req: DocumentSymbolProviderReques
   return registerToken(token, req.extensionId, disposable)
 }
 
+// ────────────────────────────────────────────────────────────────────────
+// Phase B additions — 10 previously-stranded providers + 4 brand-new ones.
+// Every one mirrors the established shape: register through Monaco's
+// `languages.*`, route invocations back through `dispatchRpc`.
+// ────────────────────────────────────────────────────────────────────────
+
+export function registerInlineCompletionProvider(req: InlineCompletionProviderRequest) {
+  assertConfigured()
+  const token = nanoid()
+  const disposable = monacoApi!.languages.registerInlineCompletionsProvider(req.selector, {
+    triggerCharacters: req.triggerCharacters,
+    provideInlineCompletions: async (model, position) => {
+      const result = await dispatchRpc!<{ items: MonacoUnknownArray } | null>(
+        req.extensionId,
+        "provideInlineCompletionItems",
+        { token, uri: model.uri, position }
+      )
+      return result ?? null
+    },
+    freeInlineCompletions: () => {
+      // No-op: cognia doesn't pool inline completion result objects.
+    },
+  })
+  return registerToken(token, req.extensionId, disposable)
+}
+
+export function registerSignatureHelpProvider(req: SignatureHelpProviderRequest) {
+  assertConfigured()
+  const token = nanoid()
+  const disposable = monacoApi!.languages.registerSignatureHelpProvider(req.selector, {
+    signatureHelpTriggerCharacters: req.triggerCharacters,
+    signatureHelpRetriggerCharacters: req.retriggerCharacters,
+    provideSignatureHelp: async (model, position) => {
+      const result = await dispatchRpc!<{ value: MonacoSignatureHelp } | null>(
+        req.extensionId,
+        "provideSignatureHelp",
+        { token, uri: model.uri, position }
+      )
+      return result ?? null
+    },
+  })
+  return registerToken(token, req.extensionId, disposable)
+}
+
+/**
+ * Workspace symbol search has no direct Monaco equivalent — Monaco
+ * registers per-model providers, not cross-workspace search. We surface
+ * the provider via the command registry instead: the sidecar's
+ * `WorkspaceSymbolProvider` becomes a callable command
+ * `<extensionId>:workspaceSymbol(query)` that any cognia UI (command
+ * palette, quick-open) can invoke.
+ */
+export function registerWorkspaceSymbolProvider(req: WorkspaceSymbolProviderRequest) {
+  assertConfigured()
+  const token = nanoid()
+  const disposable: Disposable = {
+    dispose() {
+      workspaceSymbolProviders.delete(token)
+    },
+  }
+  workspaceSymbolProviders.set(token, {
+    extensionId: req.extensionId,
+    invoke: (query) =>
+      dispatchRpc!<unknown[] | null>(req.extensionId, "provideWorkspaceSymbols", { token, query }),
+  })
+  return registerToken(token, req.extensionId, disposable)
+}
+
+/**
+ * Public helper for cognia UI surfaces (command palette, sidebar search)
+ * to query every registered workspace symbol provider.
+ */
+export async function searchWorkspaceSymbols(query: string): Promise<unknown[]> {
+  const results: unknown[] = []
+  for (const provider of workspaceSymbolProviders.values()) {
+    try {
+      const batch = await provider.invoke(query)
+      if (Array.isArray(batch)) results.push(...batch)
+    } catch (err) {
+      console.warn("monaco-bridge: workspaceSymbolProvider failed:", err)
+    }
+  }
+  return results
+}
+
+export function registerColorProvider(req: ColorProviderRequest) {
+  assertConfigured()
+  const token = nanoid()
+  const disposable = monacoApi!.languages.registerColorProvider(req.selector, {
+    provideDocumentColors: async (model) => {
+      const result = await dispatchRpc!<MonacoColorInformation[] | null>(
+        req.extensionId,
+        "provideDocumentColors",
+        { token, uri: model.uri }
+      )
+      return result ?? null
+    },
+    provideColorPresentations: async (model, colorInfo) => {
+      const result = await dispatchRpc!<MonacoUnknownArray | null>(
+        req.extensionId,
+        "provideColorPresentations",
+        { token, uri: model.uri, colorInfo }
+      )
+      return result ?? null
+    },
+  })
+  return registerToken(token, req.extensionId, disposable)
+}
+
+export function registerFoldingRangeProvider(req: FoldingRangeProviderRequest) {
+  assertConfigured()
+  const token = nanoid()
+  const disposable = monacoApi!.languages.registerFoldingRangeProvider(req.selector, {
+    provideFoldingRanges: async (model) => {
+      const result = await dispatchRpc!<MonacoFoldingRange[] | null>(
+        req.extensionId,
+        "provideFoldingRanges",
+        { token, uri: model.uri }
+      )
+      return result ?? null
+    },
+  })
+  return registerToken(token, req.extensionId, disposable)
+}
+
+export function registerSelectionRangeProvider(req: SelectionRangeProviderRequest) {
+  assertConfigured()
+  const token = nanoid()
+  const disposable = monacoApi!.languages.registerSelectionRangeProvider(req.selector, {
+    provideSelectionRanges: async (model, positions) => {
+      const result = await dispatchRpc!<MonacoSelectionRange[][] | null>(
+        req.extensionId,
+        "provideSelectionRanges",
+        { token, uri: model.uri, positions }
+      )
+      return result ?? null
+    },
+  })
+  return registerToken(token, req.extensionId, disposable)
+}
+
+export function registerDocumentLinkProvider(req: DocumentLinkProviderRequest) {
+  assertConfigured()
+  const token = nanoid()
+  const disposable = monacoApi!.languages.registerLinkProvider(req.selector, {
+    provideLinks: async (model) => {
+      const result = await dispatchRpc!<{ links: MonacoDocumentLink[] } | null>(
+        req.extensionId,
+        "provideDocumentLinks",
+        { token, uri: model.uri }
+      )
+      return result ?? null
+    },
+  })
+  return registerToken(token, req.extensionId, disposable)
+}
+
+export function registerOnTypeFormattingProvider(req: OnTypeFormattingProviderRequest) {
+  assertConfigured()
+  const token = nanoid()
+  const disposable = monacoApi!.languages.registerOnTypeFormattingEditProvider(req.selector, {
+    autoFormatTriggerCharacters: [req.firstTriggerCharacter, ...(req.moreTriggerCharacter ?? [])],
+    provideOnTypeFormattingEdits: async (model, position, ch) => {
+      const result = await dispatchRpc!<MonacoTextEdit[] | null>(
+        req.extensionId,
+        "provideOnTypeFormattingEdits",
+        { token, uri: model.uri, position, ch }
+      )
+      return result ?? null
+    },
+  })
+  return registerToken(token, req.extensionId, disposable)
+}
+
+export function registerDocumentSemanticTokensProvider(req: SemanticTokensProviderRequest) {
+  assertConfigured()
+  const token = nanoid()
+  const disposable = monacoApi!.languages.registerDocumentSemanticTokensProvider(req.selector, {
+    getLegend: () => req.legend,
+    provideDocumentSemanticTokens: async (model) => {
+      const result = await dispatchRpc!<MonacoSemanticTokens | null>(
+        req.extensionId,
+        "provideDocumentSemanticTokens",
+        { token, uri: model.uri }
+      )
+      return result ?? null
+    },
+    releaseDocumentSemanticTokens: () => {
+      // Sidecar manages its own cache keyed by resultId.
+    },
+  })
+  return registerToken(token, req.extensionId, disposable)
+}
+
+export function registerDocumentRangeSemanticTokensProvider(req: SemanticTokensProviderRequest) {
+  assertConfigured()
+  const token = nanoid()
+  const disposable = monacoApi!.languages.registerDocumentRangeSemanticTokensProvider(
+    req.selector,
+    {
+      getLegend: () => req.legend,
+      provideDocumentRangeSemanticTokens: async (model, range) => {
+        const result = await dispatchRpc!<MonacoSemanticTokens | null>(
+          req.extensionId,
+          "provideDocumentRangeSemanticTokens",
+          { token, uri: model.uri, range }
+        )
+        return result ?? null
+      },
+    }
+  )
+  return registerToken(token, req.extensionId, disposable)
+}
+
+export function registerInlayHintsProvider(req: InlayHintsProviderRequest) {
+  assertConfigured()
+  const token = nanoid()
+  const disposable = monacoApi!.languages.registerInlayHintsProvider(req.selector, {
+    provideInlayHints: async (model, range) => {
+      const result = await dispatchRpc!<{ hints: MonacoInlayHint[] } | null>(
+        req.extensionId,
+        "provideInlayHints",
+        { token, uri: model.uri, range }
+      )
+      return result ?? null
+    },
+  })
+  return registerToken(token, req.extensionId, disposable)
+}
+
+export function registerCallHierarchyProvider(req: CallHierarchyProviderRequest) {
+  assertConfigured()
+  const token = nanoid()
+  const disposable = monacoApi!.languages.registerCallHierarchyProvider(req.selector, {
+    prepareCallHierarchy: async (model, position) => {
+      const result = await dispatchRpc!<MonacoUnknownArray | null>(
+        req.extensionId,
+        "prepareCallHierarchy",
+        { token, uri: model.uri, position }
+      )
+      return result ?? null
+    },
+    provideIncomingCalls: async (item) => {
+      const result = await dispatchRpc!<MonacoUnknownArray | null>(
+        req.extensionId,
+        "provideIncomingCalls",
+        { token, item }
+      )
+      return result ?? null
+    },
+    provideOutgoingCalls: async (item) => {
+      const result = await dispatchRpc!<MonacoUnknownArray | null>(
+        req.extensionId,
+        "provideOutgoingCalls",
+        { token, item }
+      )
+      return result ?? null
+    },
+  })
+  return registerToken(token, req.extensionId, disposable)
+}
+
+export function registerTypeHierarchyProvider(req: TypeHierarchyProviderRequest) {
+  assertConfigured()
+  const token = nanoid()
+  const disposable = monacoApi!.languages.registerTypeHierarchyProvider(req.selector, {
+    prepareTypeHierarchy: async (model, position) => {
+      const result = await dispatchRpc!<MonacoUnknownArray | null>(
+        req.extensionId,
+        "prepareTypeHierarchy",
+        { token, uri: model.uri, position }
+      )
+      return result ?? null
+    },
+    provideSupertypes: async (item) => {
+      const result = await dispatchRpc!<MonacoUnknownArray | null>(
+        req.extensionId,
+        "provideSupertypes",
+        { token, item }
+      )
+      return result ?? null
+    },
+    provideSubtypes: async (item) => {
+      const result = await dispatchRpc!<MonacoUnknownArray | null>(
+        req.extensionId,
+        "provideSubtypes",
+        { token, item }
+      )
+      return result ?? null
+    },
+  })
+  return registerToken(token, req.extensionId, disposable)
+}
+
+export function registerLinkedEditingRangeProvider(req: LinkedEditingRangeProviderRequest) {
+  assertConfigured()
+  const token = nanoid()
+  const disposable = monacoApi!.languages.registerLinkedEditingRangeProvider(req.selector, {
+    provideLinkedEditingRanges: async (model, position) => {
+      const result = await dispatchRpc!<{ ranges: MonacoRange[] } | null>(
+        req.extensionId,
+        "provideLinkedEditingRanges",
+        { token, uri: model.uri, position }
+      )
+      return result ?? null
+    },
+  })
+  return registerToken(token, req.extensionId, disposable)
+}
+
 /**
  * Push a diagnostic collection to Monaco's marker store.
  * Used by `vscode.languages.createDiagnosticCollection().set(uri, diagnostics)`.
@@ -650,6 +1159,11 @@ export function unregisterByExtension(extensionId: string): number {
       decorationTypes.delete(id)
     }
   }
+  for (const [token, provider] of workspaceSymbolProviders) {
+    if (provider.extensionId === extensionId) {
+      workspaceSymbolProviders.delete(token)
+    }
+  }
   return removed
 }
 
@@ -708,6 +1222,7 @@ export function __resetMonacoBridgeForTesting(): void {
   activeEditorId = null
   registrations.clear()
   decorationTypes.clear()
+  workspaceSymbolProviders.clear()
   activeEditorListeners.clear()
   editorChangeListeners.clear()
 }

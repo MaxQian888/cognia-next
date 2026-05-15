@@ -149,21 +149,104 @@ describe("parseTelegramUpdate", () => {
     })
   })
 
-  describe("edited_message returns null (Phase 1)", () => {
+  describe("edited_message produces an edit event", () => {
     const update = editedMessageFixture as TelegramUpdate
+    const result = parseTelegramUpdate(ADAPTER_ID, SELF_ID, update)
 
-    it("returns null for edited_message", () => {
-      // TODO (Phase 2): handle edited_message as edit events
+    it("returns a non-null event", () => {
+      expect(result).not.toBeNull()
+    })
+
+    it("kind is edit", () => {
+      expect(result!.kind).toBe("edit")
+    })
+
+    it("replacesMessageId points back to the original message_id", () => {
+      // Telegram reuses message_id for edits — the field is the same value
+      // as messageId, but downstream consumers (bus.ts) key off
+      // replacesMessageId for the lookup so it must be set.
+      expect(result!.replacesMessageId).toBe("1006")
+      expect(result!.messageId).toBe("1006")
+    })
+
+    it("uses edit_date for the timestamp (not the original send date)", () => {
+      expect(result!.timestamp).toBe(1714900600 * 1000)
+    })
+
+    it("carries the edited text in the segments", () => {
+      expect(result!.segments).toEqual([{ type: "text", text: "Edited text message" }])
+    })
+  })
+
+  describe("callback_query produces a synthetic create event", () => {
+    const update = callbackQueryFixture as TelegramUpdate
+    const result = parseTelegramUpdate(ADAPTER_ID, SELF_ID, update)
+
+    it("returns a non-null event", () => {
+      expect(result).not.toBeNull()
+    })
+
+    it("kind is create (treated as a fresh user turn)", () => {
+      expect(result!.kind).toBe("create")
+    })
+
+    it("messageId is prefixed with tgcq: + the callback_query.id for dedup", () => {
+      expect(result!.messageId).toBe("tgcq:4382bfdwdsb323b2d9")
+    })
+
+    it("segments carry the callback data as a text payload", () => {
+      expect(result!.segments).toEqual([{ type: "text", text: "option_a" }])
+      expect(result!.plainText).toBe("option_a")
+    })
+
+    it("sender is the user who pressed the button (not the bot)", () => {
+      expect(result!.sender.remoteUserId).toBe("777777777")
+      expect(result!.sender.displayName).toBe("Grace")
+    })
+
+    it("conversationKey anchors to the chat where the button lives", () => {
+      expect(result!.conversationKey).toBe(`telegram:${ADAPTER_ID}:777777777`)
+    })
+
+    it("conversationRef carries the callback_query.id for the responder to ack", () => {
+      expect((result!.conversationRef as { callbackQueryId?: string }).callbackQueryId).toBe(
+        "4382bfdwdsb323b2d9"
+      )
+    })
+  })
+
+  describe("inline-message-only callback_query (no chat) returns null", () => {
+    it("returns null when callback_query has no message", () => {
+      const update: TelegramUpdate = {
+        update_id: 1,
+        callback_query: {
+          id: "abc",
+          from: { id: 1, first_name: "X" },
+          inline_message_id: "inline-1",
+          data: "x",
+        },
+      }
       expect(parseTelegramUpdate(ADAPTER_ID, SELF_ID, update)).toBeNull()
     })
   })
 
-  describe("callback_query returns null (Phase 1)", () => {
-    const update = callbackQueryFixture as TelegramUpdate
-
-    it("returns null for callback_query", () => {
-      // TODO (Phase 2): handle callback_query for interactive button flows
-      expect(parseTelegramUpdate(ADAPTER_ID, SELF_ID, update)).toBeNull()
+  describe("edited_channel_post produces an edit event for channel posts", () => {
+    it("returns kind=edit when the update carries edited_channel_post", () => {
+      const update: TelegramUpdate = {
+        update_id: 2,
+        edited_channel_post: {
+          message_id: 555,
+          chat: { id: -1009999, type: "channel", title: "News" },
+          date: 1714900800,
+          edit_date: 1714900900,
+          text: "Channel edit",
+        },
+      }
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, update)
+      expect(r).not.toBeNull()
+      expect(r!.kind).toBe("edit")
+      expect(r!.replacesMessageId).toBe("555")
+      expect(r!.channel.kind).toBe("channel")
     })
   })
 })

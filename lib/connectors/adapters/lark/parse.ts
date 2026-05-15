@@ -1,8 +1,19 @@
 /**
  * Lark event-subscription envelope → NormalizedInboundEvent parser.
  *
- * Handles im.message.receive_v1 events (schema 2.0).
- * Returns null for unsupported event types.
+ * Handles (schema 2.0):
+ *   - im.message.receive_v1            → kind="create"
+ *   - im.message.message_read_v1        → kind="system" / read_indicator
+ *   - im.message.recalled_v1            → kind="delete" with replacesMessageId
+ *   - im.chat.member.bot.added_v1       → kind="system" / member_added (bot)
+ *   - im.chat.member.bot.deleted_v1     → kind="system" / member_removed (bot)
+ *   - im.chat.member.user.added_v1      → kind="system" / member_added
+ *   - im.chat.member.user.deleted_v1    → kind="system" / member_removed
+ *
+ * `im.message.receive_v1` carries the only payload that produces a
+ * StoredMessage downstream; the system events feed the audit log.
+ *
+ * Returns null for any other event type.
  */
 
 import type { NormalizedInboundEvent, PlatformIdentity } from "@/types/connectors/event"
@@ -56,8 +67,22 @@ export interface LarkEventHeader {
 }
 
 export interface LarkEventBody {
-  sender: LarkSender
-  message: LarkMessage
+  // im.message.receive_v1
+  sender?: LarkSender
+  message?: LarkMessage
+  // im.message.message_read_v1
+  reader?: { reader_id?: LarkSenderId; read_time?: string; tenant_key?: string }
+  message_id_list?: string[]
+  // im.message.recalled_v1
+  message_id?: string
+  chat_id?: string
+  recall_time?: string
+  recall_type?: string
+  // im.chat.member.* — both user + bot variants share these fields
+  chat_id_list?: never
+  operator_id?: LarkSenderId
+  external?: boolean
+  users?: Array<{ user_id?: LarkSenderId; name?: string }>
 }
 
 export interface LarkEventEnvelope {
@@ -151,11 +176,59 @@ function buildSegments(message: LarkMessage): MessageSegment[] {
 }
 
 /**
+ * Build a system / audit-only stub event. The bus uses
+ * `kind === "system"` to skip StoredMessage insertion and write a single
+ * audit row matching `systemKind`. The downstream consumer doesn't see
+ * any text — fields are minimal but typed.
+ */
+function buildSystemEvent(
+  adapterId: string,
+  selfBotOpenId: string,
+  envelope: LarkEventEnvelope,
+  systemKind: NonNullable<NormalizedInboundEvent["systemKind"]>,
+  chatId: string,
+  actorOpenId: string | undefined,
+  syntheticMessageId: string,
+  channelKind: "private" | "group" | "thread" = "group"
+): NormalizedInboundEvent {
+  return {
+    platform: "lark",
+    adapterId,
+    selfId: selfBotOpenId,
+    messageId: syntheticMessageId,
+    conversationRef: {
+      platform: "lark",
+      adapterId,
+      channelId: chatId,
+    },
+    conversationKey: buildConversationKey("lark", adapterId, chatId),
+    sender: actorOpenId
+      ? buildPlatformIdentity(adapterId, actorOpenId)
+      : {
+          id: `lark:unknown`,
+          platform: "lark",
+          adapterId,
+          remoteUserId: "unknown",
+        },
+    channel: {
+      id: buildConversationKey("lark", adapterId, chatId),
+      kind: channelKind,
+      platformChannelId: chatId,
+    },
+    segments: [],
+    plainText: "",
+    mentions: { selfMentioned: false, users: [] },
+    timestamp: Date.now(),
+    raw: envelope,
+    kind: "system",
+    systemKind,
+  }
+}
+
+/**
  * Parse a Lark event-subscription envelope into a NormalizedInboundEvent.
  *
- * Returns null for:
- * - Non-im.message.receive_v1 event types (TODO: member-changes, read-indicators, etc.)
- * - Missing sender open_id
+ * Returns null for unrecognised event types or malformed payloads.
  */
 export function parseLarkEventEnvelope(
   adapterId: string,
@@ -164,14 +237,83 @@ export function parseLarkEventEnvelope(
 ): NormalizedInboundEvent | null {
   const eventType = envelope.header?.event_type
 
-  if (eventType !== "im.message.receive_v1") {
-    // TODO: handle im.message.read_v1, member changes, etc. in Phase 2
-    return null
+  // ── Read indicator ───────────────────────────────────────────────────
+  if (eventType === "im.message.message_read_v1") {
+    const readerOpenId = envelope.event.reader?.reader_id?.open_id
+    // Lark does not include chat_id on read events — fall back to the
+    // first message id as a synthetic key so the audit row at least
+    // ties back to one message. When neither is present we drop.
+    const messageIds = envelope.event.message_id_list ?? []
+    if (messageIds.length === 0) return null
+    return buildSystemEvent(
+      adapterId,
+      selfBotOpenId,
+      envelope,
+      "read_indicator",
+      messageIds[0],
+      readerOpenId,
+      `lark.read:${messageIds.join(",")}`
+    )
   }
 
-  const { sender, message } = envelope.event
+  // ── Recall (= delete) ────────────────────────────────────────────────
+  if (eventType === "im.message.recalled_v1") {
+    const messageId = envelope.event.message_id
+    const chatId = envelope.event.chat_id
+    if (!messageId || !chatId) return null
+    return {
+      platform: "lark",
+      adapterId,
+      selfId: selfBotOpenId,
+      messageId,
+      conversationRef: { platform: "lark", adapterId, channelId: chatId },
+      conversationKey: buildConversationKey("lark", adapterId, chatId),
+      sender: { id: `lark:unknown`, platform: "lark", adapterId, remoteUserId: "unknown" },
+      channel: {
+        id: buildConversationKey("lark", adapterId, chatId),
+        kind: "group",
+        platformChannelId: chatId,
+      },
+      segments: [],
+      plainText: "",
+      mentions: { selfMentioned: false, users: [] },
+      timestamp: envelope.event.recall_time ? parseInt(envelope.event.recall_time, 10) : Date.now(),
+      raw: envelope,
+      kind: "delete",
+      replacesMessageId: messageId,
+    }
+  }
 
-  const openId = sender?.sender_id?.open_id
+  // ── Member changes (user + bot variants) ─────────────────────────────
+  const memberAddRemove: Record<string, "member_added" | "member_removed"> = {
+    "im.chat.member.bot.added_v1": "member_added",
+    "im.chat.member.bot.deleted_v1": "member_removed",
+    "im.chat.member.user.added_v1": "member_added",
+    "im.chat.member.user.deleted_v1": "member_removed",
+  }
+  if (eventType && eventType in memberAddRemove) {
+    const chatId = envelope.event.chat_id
+    if (!chatId) return null
+    const operator = envelope.event.operator_id?.open_id
+    return buildSystemEvent(
+      adapterId,
+      selfBotOpenId,
+      envelope,
+      memberAddRemove[eventType],
+      chatId,
+      operator,
+      `lark.member:${eventType}:${envelope.header.event_id}`
+    )
+  }
+
+  // ── Regular message create ───────────────────────────────────────────
+  if (eventType !== "im.message.receive_v1") return null
+
+  const sender = envelope.event.sender
+  const message = envelope.event.message
+  if (!sender || !message) return null
+
+  const openId = sender.sender_id?.open_id
   if (!openId) return null
 
   const chatId = message.chat_id

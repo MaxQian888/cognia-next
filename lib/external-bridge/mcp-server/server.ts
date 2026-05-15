@@ -23,6 +23,7 @@ import { listSkills, getSkill } from "@/lib/db/skills"
 import { listCharacters, getCharacter } from "@/lib/db/characters"
 import { recordCall } from "../audit-log"
 import { checkRagCall, checkRuntimeCall, checkScope, checkToolCall } from "../permission-gate"
+import { computerUse } from "../handlers/computer-use"
 import { ragSearch } from "../handlers/rag"
 import { parseResourceUri } from "../handlers/resources"
 import { runtimeQuery, type RuntimeEntityType } from "../handlers/runtime"
@@ -54,6 +55,7 @@ export function buildMcpServer(opts: BuildServerOptions): McpServer {
   registerWikiTools(server, opts.settingsGetter)
   registerRagTool(server, opts.settingsGetter)
   registerRuntimeTool(server, opts.settingsGetter)
+  registerComputerUseTool(server, opts.settingsGetter)
   registerResources(server, opts.settingsGetter)
   registerPrompts(server)
 
@@ -219,6 +221,67 @@ function registerRuntimeTool(server: McpServer, settingsGetter: SettingsGetter) 
           }),
       })
     }
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// computer_use — the desktop driving tool (default OFF; `mcp:computer-use`).
+// ─────────────────────────────────────────────────────────────────────────────
+
+function registerComputerUseTool(server: McpServer, settingsGetter: SettingsGetter) {
+  server.registerTool(
+    "computer_use",
+    {
+      title: "Drive the host computer",
+      description:
+        "Take a screenshot, move the cursor, click, scroll, type, send keyboard " +
+        "chords, drag, or release mouse buttons on the user's desktop. Routes " +
+        "through Cognia's automation permission gate (`Surface::Mcp`) — denied " +
+        "by default until the user enables this scope in Settings → External " +
+        "Bridge.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      inputSchema: {
+        action: z.enum([
+          "screenshot",
+          "click",
+          "type",
+          "keys",
+          "mouse_move",
+          "drag",
+          "scroll",
+          "hold_key",
+          "mouse_button",
+        ]),
+        coordinate: z
+          .tuple([z.number().int(), z.number().int()])
+          .optional()
+          .describe("Target [x, y]. Required for click / mouse_move / drag / scroll."),
+        startCoordinate: z
+          .tuple([z.number().int(), z.number().int()])
+          .optional()
+          .describe("Drag origin [x, y]."),
+        button: z.enum(["left", "right", "middle"]).optional(),
+        double: z.boolean().optional(),
+        text: z.string().optional().describe("Text to type."),
+        chord: z.string().optional().describe('Keyboard chord, e.g. "ctrl+shift+t" or "{F4}".'),
+        dx: z.number().int().optional(),
+        dy: z.number().int().optional(),
+        durationMs: z.number().int().min(0).optional(),
+        transition: z.enum(["down", "up"]).optional(),
+      },
+    },
+    async (args) =>
+      runWithGate({
+        tool: "computer_use",
+        scope: "mcp:computer-use",
+        check: checkToolCall(await settingsGetter(), "computer_use"),
+        body: () => computerUse(args as Parameters<typeof computerUse>[0]),
+      })
   )
 }
 

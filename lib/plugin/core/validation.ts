@@ -628,6 +628,71 @@ export function validatePluginManifest(
     }
   }
 
+  // ── i18n block ──────────────────────────────────────────────────────────────
+  // Plugin-supplied localized strings. Validated as a flat per-locale string
+  // map; merged into the host bundle under `plugin.<id>.` by the manager.
+  if (m.i18n !== undefined) {
+    if (!m.i18n || typeof m.i18n !== "object" || Array.isArray(m.i18n)) {
+      pushError("i18n", "manifest.i18n.invalid", '"i18n" must be an object')
+    } else {
+      const i18nBlock = m.i18n as Record<string, unknown>
+      const locales = i18nBlock.locales
+      if (!locales || typeof locales !== "object" || Array.isArray(locales)) {
+        pushError(
+          "i18n.locales",
+          "manifest.i18n.locales.invalid",
+          '"i18n.locales" must be an object keyed by locale code'
+        )
+      } else {
+        const I18N_KEY_PATTERN = /^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$/
+        const MAX_KEYS_PER_LOCALE = 1000
+        const HOST_LOCALES = new Set(["en", "zh-CN"])
+        for (const [locale, dict] of Object.entries(locales as Record<string, unknown>)) {
+          if (!HOST_LOCALES.has(locale)) {
+            pushWarning(
+              `i18n.locales.${locale}`,
+              "manifest.i18n.invalid_locale",
+              `Locale "${locale}" is not one of the host's canonical locales (${[...HOST_LOCALES].join(", ")}); plugin strings for this locale will never resolve.`
+            )
+            continue
+          }
+          if (!dict || typeof dict !== "object" || Array.isArray(dict)) {
+            pushError(
+              `i18n.locales.${locale}`,
+              "manifest.i18n.invalid_keys",
+              `Locale "${locale}" must be a flat string map (no nested objects or arrays).`
+            )
+            continue
+          }
+          const entries = Object.entries(dict as Record<string, unknown>)
+          if (entries.length > MAX_KEYS_PER_LOCALE) {
+            pushError(
+              `i18n.locales.${locale}`,
+              "manifest.i18n.too_many_keys",
+              `Locale "${locale}" declares ${entries.length} keys; the per-locale cap is ${MAX_KEYS_PER_LOCALE}.`
+            )
+          }
+          for (const [key, value] of entries) {
+            if (!I18N_KEY_PATTERN.test(key)) {
+              pushError(
+                `i18n.locales.${locale}.${key}`,
+                "manifest.i18n.invalid_keys",
+                `Key "${key}" must match ${I18N_KEY_PATTERN.source}.`
+              )
+            }
+            if (typeof value !== "string") {
+              pushError(
+                `i18n.locales.${locale}.${key}`,
+                "manifest.i18n.invalid_keys",
+                `Value for "${key}" must be a string.`
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+
   const errors = diagnostics.filter((item) => item.severity === "error").map((item) => item.message)
   const warnings = diagnostics
     .filter((item) => item.severity === "warning")

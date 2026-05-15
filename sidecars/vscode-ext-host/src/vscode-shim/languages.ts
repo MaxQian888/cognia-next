@@ -287,5 +287,82 @@ export function createLanguagesNamespace(deps: ShimDependencies) {
     getLanguages() {
       return connection.sendRequest<string[]>("languages:list", {})
     },
+    getDiagnostics(uri?: unknown) {
+      return connection.sendRequest("languages:getDiagnostics", {
+        extensionId,
+        uri,
+      })
+    },
+    setLanguageConfiguration(language: string, configuration: unknown) {
+      return connection.sendRequest("languages:setLanguageConfiguration", {
+        extensionId,
+        language,
+        configuration,
+      })
+    },
+    registerInlayHintsProvider(
+      selector: string | DocumentSelector,
+      provider: { provideInlayHints: (...args: unknown[]) => unknown }
+    ) {
+      return registerProvider("inlayHints", selector, (payload) =>
+        provider.provideInlayHints(payload)
+      )
+    },
+    registerCallHierarchyProvider(
+      selector: string | DocumentSelector,
+      provider: {
+        prepareCallHierarchy: (...args: unknown[]) => unknown
+        provideCallHierarchyIncomingCalls: (...args: unknown[]) => unknown
+        provideCallHierarchyOutgoingCalls: (...args: unknown[]) => unknown
+      }
+    ) {
+      // Three-method provider: register each branch behind the same token
+      // family so monaco-bridge can route by method name.
+      const disp = registerProvider("callHierarchyPrepare", selector, (payload) =>
+        provider.prepareCallHierarchy(payload)
+      )
+      const incoming = registerProvider("callHierarchyIncoming", selector, (payload) =>
+        provider.provideCallHierarchyIncomingCalls(payload)
+      )
+      const outgoing = registerProvider("callHierarchyOutgoing", selector, (payload) =>
+        provider.provideCallHierarchyOutgoingCalls(payload)
+      )
+      return new Disposable(() => {
+        disp.dispose()
+        incoming.dispose()
+        outgoing.dispose()
+      })
+    },
+    registerTypeHierarchyProvider(
+      selector: string | DocumentSelector,
+      provider: {
+        prepareTypeHierarchy: (...args: unknown[]) => unknown
+        provideTypeHierarchySupertypes: (...args: unknown[]) => unknown
+        provideTypeHierarchySubtypes: (...args: unknown[]) => unknown
+      }
+    ) {
+      const disp = registerProvider("typeHierarchyPrepare", selector, (payload) =>
+        provider.prepareTypeHierarchy(payload)
+      )
+      const sup = registerProvider("typeHierarchySuper", selector, (payload) =>
+        provider.provideTypeHierarchySupertypes(payload)
+      )
+      const sub = registerProvider("typeHierarchySub", selector, (payload) =>
+        provider.provideTypeHierarchySubtypes(payload)
+      )
+      return new Disposable(() => {
+        disp.dispose()
+        sup.dispose()
+        sub.dispose()
+      })
+    },
+    registerLinkedEditingRangeProvider(
+      selector: string | DocumentSelector,
+      provider: { provideLinkedEditingRanges: (...args: unknown[]) => unknown }
+    ) {
+      return registerProvider("linkedEditingRange", selector, (payload) =>
+        provider.provideLinkedEditingRanges(payload)
+      )
+    },
   }
 }

@@ -58,6 +58,53 @@ export interface SidecarExtensionContext {
     packageJSON: Record<string, unknown>
     exports?: unknown
   }
+  /**
+   * Resolves a relative path against `extensionPath`. Mirrors VS Code's
+   * `ExtensionContext.asAbsolutePath`. Returns the absolute path on disk
+   * the extension can pass to `fs.readFile`, `path.join`, etc.
+   */
+  asAbsolutePath: (relativePath: string) => string
+  /**
+   * Environment variable collection — VS Code lets extensions append /
+   * prepend / replace env vars in spawned terminals. cognia tracks the
+   * mutations and applies them when `window.createTerminal` runs.
+   */
+  environmentVariableCollection: EnvironmentVariableCollection
+  /**
+   * VS Code's chat / lm permission gate. cognia always returns "limited"
+   * (extensions can call lm.* but the policy layer may apply rate limits
+   * later). The `onDidChange` emitter never fires today.
+   */
+  languageModelAccessInformation: LanguageModelAccessInformation
+}
+
+export interface EnvironmentVariableMutator {
+  type: "replace" | "append" | "prepend"
+  value: string
+}
+
+export interface EnvironmentVariableCollection {
+  persistent: boolean
+  description?: string
+  replace(variable: string, value: string): void
+  append(variable: string, value: string): void
+  prepend(variable: string, value: string): void
+  get(variable: string): EnvironmentVariableMutator | undefined
+  forEach(callback: (variable: string, mutator: EnvironmentVariableMutator) => void): void
+  delete(variable: string): void
+  clear(): void
+  /** Project the current mutations onto a starting env map. */
+  apply(env: Record<string, string | undefined>): Record<string, string>
+}
+
+export interface LanguageModelAccessInformation {
+  /** "limited" (cognia config gates) | "unlimited" | "denied". */
+  canSendRequest(): "limited" | "unlimited" | "denied"
+  /** EventEmitter-shaped — cognia never fires today; reserved for future
+   *  quota-change events. */
+  onDidChange: {
+    (listener: () => void): { dispose(): void }
+  }
 }
 
 export interface Disposable {

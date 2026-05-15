@@ -3,14 +3,16 @@
 //! Three commands map 1:1 to the Anthropic native tools registered by the
 //! plugin manifest (`computer_20251124`, `bash_20250124`, `text_editor_20250728`).
 //! Every command routes through the automation subsystem's permission gate
-//! with `Surface::ComputerUse`.
+//! with `Surface::ComputerUse`. PerCall consent now lands in the renderer
+//! via the shared `ConsentBroker` — no more "Consent required" hard error.
 
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tokio::process::Command as TokioCommand;
 
+use crate::automation::audit::{AuditEntry, Decision as AuditDecision};
 use crate::automation::commands::AutomationState;
 use crate::automation::permission::{Call, Decision, Surface, TargetMeta};
 use crate::automation::types::*;
@@ -69,15 +71,6 @@ async fn execute_shell(
 // Common permission + audit path
 // =============================================================================
 
-fn build_call_ctx(_process_name: Option<String>, _window_title: Option<String>) -> CallContext {
-    CallContext {
-        surface: Some(Surface::ComputerUse),
-        plugin_id: Some("cognia-computer-use".into()),
-        process_name: _process_name,
-        window_title: _window_title,
-    }
-}
-
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CallContext {
@@ -93,7 +86,7 @@ pub struct CallContext {
 
 impl CallContext {
     fn surface(&self) -> Surface {
-        self.surface.unwrap_or(Surface::Workflow)
+        self.surface.unwrap_or(Surface::ComputerUse)
     }
     fn target(&self) -> TargetMeta {
         TargetMeta {
@@ -103,32 +96,96 @@ impl CallContext {
     }
 }
 
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
 /// Common skeleton: evaluate permission gate, run the action, record audit.
-async fn with_gate<F, T>(
+/// Mirrors `automation::commands::command_body!` semantics but operates on
+/// the plugin-specific `with_gate` async signature (closures-of-futures
+/// don't play nice with the cross-crate macro export).
+async fn with_gate<F, Fut, T>(
+    app: &AppHandle,
     state: &AutomationState,
     ctx: CallContext,
     command: &str,
     action: F,
 ) -> std::result::Result<T, String>
 where
-    F: std::future::Future<Output = std::result::Result<T, String>>,
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = std::result::Result<T, String>>,
 {
+    let started = Instant::now();
     let target = ctx.target();
+    let surface = ctx.surface();
+    let plugin_id = ctx.plugin_id.clone();
     let call = Call {
         command,
-        surface: ctx.surface(),
-        plugin_id: ctx.plugin_id.as_deref(),
+        surface,
+        plugin_id: plugin_id.as_deref(),
         target: target.clone(),
     };
 
-    match state.gate.evaluate(&call) {
-        Decision::Deny(err) => Err(format!("{}", err)),
-        Decision::RequireConsent { .. } => {
-            // M5.4 will wire the consent dialog. For now, return a clear error.
-            Err("Consent required for this action. Enable automation in Settings → Automation.".into())
+    let allow = match state.gate.evaluate(&call) {
+        Decision::Allow => true,
+        Decision::Deny(err) => {
+            let entry = AuditEntry {
+                id: String::new(),
+                ts: now_ms(),
+                surface,
+                plugin_id: plugin_id.clone(),
+                command: command.to_string(),
+                process_name: target.process_name.clone(),
+                window_title: target.window_title.clone(),
+                decision: AuditDecision::Deny,
+                reason: Some(format!("{err}")),
+                duration_ms: started.elapsed().as_millis() as u64,
+                error: Some(format!("{err}")),
+            };
+            let recorded = state.audit.record(entry);
+            let _ = app.emit("automation:event", &recorded);
+            return Err(format!("{err}"));
         }
-        Decision::Allow => action.await,
+        Decision::RequireConsent { prompt } => state.consent.request(app.clone(), prompt).await,
+    };
+
+    if !allow {
+        let err = AutomationError::UserDeclined;
+        let entry = AuditEntry {
+            id: String::new(),
+            ts: now_ms(),
+            surface,
+            plugin_id: plugin_id.clone(),
+            command: command.to_string(),
+            process_name: target.process_name.clone(),
+            window_title: target.window_title.clone(),
+            decision: AuditDecision::Deny,
+            reason: Some("user declined or timed out".into()),
+            duration_ms: started.elapsed().as_millis() as u64,
+            error: Some(format!("{err}")),
+        };
+        let recorded = state.audit.record(entry);
+        let _ = app.emit("automation:event", &recorded);
+        return Err(format!("{err}"));
     }
+
+    let result = action().await;
+    let entry = AuditEntry {
+        id: String::new(),
+        ts: now_ms(),
+        surface,
+        plugin_id: plugin_id.clone(),
+        command: command.to_string(),
+        process_name: target.process_name.clone(),
+        window_title: target.window_title.clone(),
+        decision: AuditDecision::Allow,
+        reason: None,
+        duration_ms: started.elapsed().as_millis() as u64,
+        error: result.as_ref().err().map(|e| e.to_string()),
+    };
+    let recorded = state.audit.record(entry);
+    let _ = app.emit("automation:event", &recorded);
+    result
 }
 
 // =============================================================================
@@ -137,90 +194,68 @@ where
 
 #[tauri::command]
 pub async fn plugin_computer_use_execute(
+    app: AppHandle,
     state: State<'_, AutomationState>,
     action: ComputerAction,
     ctx: Option<CallContext>,
 ) -> std::result::Result<ComputerResult, String> {
     let ctx = ctx.unwrap_or_default();
+    let handle = state.handle.clone();
 
-    with_gate(&state, ctx, "computer_use", async {
+    with_gate(&app, &state, ctx, "computer_use", || async move {
         let translated = translate_computer_action(&action)?;
 
         match translated {
             super::translator::TranslatedAction::Screenshot { opts } => {
-                let sc = state.handle.screenshot(opts).await.map_err(|e| format!("{}", e))?;
+                let sc = handle.screenshot(opts).await.map_err(|e| format!("{e}"))?;
                 Ok(build_computer_result(Some(sc), None))
             }
 
             super::translator::TranslatedAction::Click { target, opts } => {
-                state.handle.click(target, opts).await.map_err(|e| format!("{}", e))?;
+                handle.click(target, opts).await.map_err(|e| format!("{e}"))?;
                 Ok(build_computer_result(None, None))
             }
 
-            super::translator::TranslatedAction::MouseMove { x, y } => {
-                // TODO(M5.1): Extend AutomationBackend with mouse_move.
-                // For now, emulate as a click with no button (just move).
-                state.handle.click(
-                    ClickTarget::Point { x, y },
-                    ClickOpts {
-                        button: None,
-                        double: Some(false),
-                        modifier: None,
-                    },
-                ).await.map_err(|e| format!("{}", e))?;
+            super::translator::TranslatedAction::MouseMove { point } => {
+                handle.mouse_move(point).await.map_err(|e| format!("{e}"))?;
                 Ok(build_computer_result(None, None))
             }
 
-            super::translator::TranslatedAction::Drag { start, end } => {
-                // TODO(M5.1): Extend AutomationBackend with drag.
-                // For now, perform mouse down + move + up manually.
-                state.handle.click(
-                    ClickTarget::Point { x: start.x, y: start.y },
-                    ClickOpts {
-                        button: Some(MouseButton::Left),
-                        double: Some(false),
-                        modifier: None,
-                    },
-                ).await.map_err(|e| format!("{}", e))?;
-                state.handle.click(
-                    ClickTarget::Point { x: end.x, y: end.y },
-                    ClickOpts {
-                        button: None,
-                        double: Some(false),
-                        modifier: None,
-                    },
-                ).await.map_err(|e| format!("{}", e))?;
+            super::translator::TranslatedAction::Drag { from, to, opts } => {
+                handle.drag(from, to, opts).await.map_err(|e| format!("{e}"))?;
                 Ok(build_computer_result(None, None))
             }
 
-            super::translator::TranslatedAction::MouseButtonDown { .. } => {
-                // TODO(M5.1): Extend AutomationBackend.
-                Ok(build_computer_result(None, Some("MouseButtonDown not yet implemented".into())))
+            super::translator::TranslatedAction::MouseButton { button, transition } => {
+                handle
+                    .mouse_button(button, transition)
+                    .await
+                    .map_err(|e| format!("{e}"))?;
+                Ok(build_computer_result(None, None))
             }
 
-            super::translator::TranslatedAction::MouseButtonUp { .. } => {
-                // TODO(M5.1): Extend AutomationBackend.
-                Ok(build_computer_result(None, Some("MouseButtonUp not yet implemented".into())))
-            }
-
-            super::translator::TranslatedAction::Scroll { .. } => {
-                // TODO(M5.1): Extend AutomationBackend with scroll.
-                Ok(build_computer_result(None, Some("Scroll not yet implemented".into())))
+            super::translator::TranslatedAction::Scroll { target, opts } => {
+                handle.scroll(target, opts).await.map_err(|e| format!("{e}"))?;
+                Ok(build_computer_result(None, None))
             }
 
             super::translator::TranslatedAction::TypeText { text, opts } => {
-                state.handle.type_text(text, opts).await.map_err(|e| format!("{}", e))?;
+                handle.type_text(text, opts).await.map_err(|e| format!("{e}"))?;
                 Ok(build_computer_result(None, None))
             }
 
             super::translator::TranslatedAction::SendKeys { chord } => {
-                state.handle.send_keys(chord).await.map_err(|e| format!("{}", e))?;
+                handle.send_keys(chord).await.map_err(|e| format!("{e}"))?;
                 Ok(build_computer_result(None, None))
             }
 
-            super::translator::TranslatedAction::HoldKey { .. } => {
-                // TODO(M5.1): Extend AutomationBackend.
-                Ok(build_computer_result(None, Some("HoldKey not yet implemented".into())))
+            super::translator::TranslatedAction::HoldKey {
+                chord,
+                duration_secs,
+            } => {
+                let ms = (duration_secs.max(0.0) * 1000.0) as u32;
+                handle.hold_key(chord, ms).await.map_err(|e| format!("{e}"))?;
+                Ok(build_computer_result(None, None))
             }
 
             super::translator::TranslatedAction::Wait { duration_secs } => {
@@ -228,7 +263,8 @@ pub async fn plugin_computer_use_execute(
                 Ok(build_computer_result(None, None))
             }
         }
-    }).await
+    })
+    .await
 }
 
 // =============================================================================
@@ -237,16 +273,18 @@ pub async fn plugin_computer_use_execute(
 
 #[tauri::command]
 pub async fn plugin_computer_use_bash(
+    app: AppHandle,
     state: State<'_, AutomationState>,
     action: BashAction,
     ctx: Option<CallContext>,
 ) -> std::result::Result<BashResult, String> {
     let ctx = ctx.unwrap_or_default();
 
-    with_gate(&state, ctx, "bash", async {
+    with_gate(&app, &state, ctx, "bash", || async move {
         let timeout = action.timeout.unwrap_or(DEFAULT_SHELL_TIMEOUT_MS);
         execute_shell(&action.command, timeout).await
-    }).await
+    })
+    .await
 }
 
 // =============================================================================
@@ -255,16 +293,18 @@ pub async fn plugin_computer_use_bash(
 
 #[tauri::command]
 pub async fn plugin_computer_use_text_editor(
+    app: AppHandle,
     state: State<'_, AutomationState>,
     action: TextEditorAction,
     ctx: Option<CallContext>,
 ) -> std::result::Result<TextEditorResult, String> {
     let ctx = ctx.unwrap_or_default();
 
-    with_gate(&state, ctx, "text_editor", async {
+    with_gate(&app, &state, ctx, "text_editor", || async move {
         match action {
             TextEditorAction::View { path } => {
-                let content = tokio::fs::read_to_string(&path).await
+                let content = tokio::fs::read_to_string(&path)
+                    .await
                     .map_err(|e| format!("read failed: {e}"))?;
                 Ok(TextEditorResult {
                     ok: true,
@@ -274,7 +314,8 @@ pub async fn plugin_computer_use_text_editor(
             }
 
             TextEditorAction::Create { path, file_text } => {
-                tokio::fs::write(&path, file_text).await
+                tokio::fs::write(&path, file_text)
+                    .await
                     .map_err(|e| format!("write failed: {e}"))?;
                 Ok(TextEditorResult {
                     ok: true,
@@ -283,8 +324,13 @@ pub async fn plugin_computer_use_text_editor(
                 })
             }
 
-            TextEditorAction::StrReplace { path, old_str, new_str } => {
-                let content = tokio::fs::read_to_string(&path).await
+            TextEditorAction::StrReplace {
+                path,
+                old_str,
+                new_str,
+            } => {
+                let content = tokio::fs::read_to_string(&path)
+                    .await
                     .map_err(|e| format!("read failed: {e}"))?;
                 let replaced = content.replace(&old_str, &new_str);
                 if replaced == content {
@@ -294,7 +340,8 @@ pub async fn plugin_computer_use_text_editor(
                         error: Some("old_str not found in file".into()),
                     });
                 }
-                tokio::fs::write(&path, replaced).await
+                tokio::fs::write(&path, replaced)
+                    .await
                     .map_err(|e| format!("write failed: {e}"))?;
                 Ok(TextEditorResult {
                     ok: true,
@@ -303,8 +350,13 @@ pub async fn plugin_computer_use_text_editor(
                 })
             }
 
-            TextEditorAction::Insert { path, insert_line, new_str } => {
-                let content = tokio::fs::read_to_string(&path).await
+            TextEditorAction::Insert {
+                path,
+                insert_line,
+                new_str,
+            } => {
+                let content = tokio::fs::read_to_string(&path)
+                    .await
                     .map_err(|e| format!("read failed: {e}"))?;
                 let lines: Vec<&str> = content.lines().collect();
                 let mut new_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
@@ -315,7 +367,8 @@ pub async fn plugin_computer_use_text_editor(
                     new_lines.push(new_str);
                 }
                 let output = new_lines.join("\n");
-                tokio::fs::write(&path, output).await
+                tokio::fs::write(&path, output)
+                    .await
                     .map_err(|e| format!("write failed: {e}"))?;
                 Ok(TextEditorResult {
                     ok: true,
@@ -324,5 +377,6 @@ pub async fn plugin_computer_use_text_editor(
                 })
             }
         }
-    }).await
+    })
+    .await
 }

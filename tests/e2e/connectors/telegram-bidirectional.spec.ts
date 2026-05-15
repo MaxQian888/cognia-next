@@ -137,25 +137,5 @@ test.describe("Telegram bidirectional connector (mock server)", () => {
   })
 })
 
-// ── Deferred test stubs ───────────────────────────────────────────────────────
-
-test.describe("Telegram auto-mode round-trip [DEFERRED Phase 1+]", () => {
-  test.skip(
-    true,
-    [
-      "Auto-mode AI round-trip (inbound → sendPrompt → outbound sendMessage) is deferred",
-      "because the AI pipeline (runtime.ts) is stubbed in Phase 1.",
-      "This test will be enabled once Task 40+ wires the real sendPrompt integration.",
-    ].join(" ")
-  )
-
-  // Placeholder for future implementation:
-  test("sends AI reply to Telegram chat in auto mode", async () => {
-    // 1. Configure Telegram adapter with mock server URL
-    // 2. Push inbound update from mock user
-    // 3. Wait for adapter to poll and dispatch to the bus
-    // 4. Bus routes to AI run → sendPrompt → reply captured
-    // 5. Outbound runner delivers reply via mock sendMessage
-    // 6. Assert mock server received the reply within 10s
-  })
-})
+// Auto-mode round-trip with the full AI pipeline lives in
+// tests/e2e/tauri/telegram-bidirectional.spec.ts (PLAYWRIGHT_TAURI_DRIVER=1).

@@ -117,7 +117,7 @@ describe("parseLarkEventEnvelope", () => {
   })
 
   describe("unsupported event types", () => {
-    it("returns null for im.message.read_v1", () => {
+    it("returns null for im.message.read_v1 (legacy event name)", () => {
       const envelope: LarkEventEnvelope = {
         schema: "2.0",
         header: {
@@ -159,6 +159,118 @@ describe("parseLarkEventEnvelope", () => {
         },
       }
       expect(parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)).toBeNull()
+    })
+  })
+
+  describe("im.message.message_read_v1 produces a system read_indicator event", () => {
+    it("emits kind=system / systemKind=read_indicator with the reader's open_id", () => {
+      const envelope: LarkEventEnvelope = {
+        schema: "2.0",
+        header: {
+          event_id: "evt_read_real",
+          event_type: "im.message.message_read_v1",
+          app_id: "cli_app_001",
+        },
+        event: {
+          reader: {
+            reader_id: { open_id: "ou_reader_001" },
+            read_time: "1714900100",
+          },
+          message_id_list: ["om_msg_001", "om_msg_002"],
+        },
+      }
+      const r = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)
+      expect(r).not.toBeNull()
+      expect(r!.kind).toBe("system")
+      expect(r!.systemKind).toBe("read_indicator")
+      expect(r!.sender.remoteUserId).toBe("ou_reader_001")
+      expect(r!.segments).toEqual([])
+    })
+
+    it("returns null when message_id_list is empty", () => {
+      const envelope: LarkEventEnvelope = {
+        schema: "2.0",
+        header: {
+          event_id: "evt_read_empty",
+          event_type: "im.message.message_read_v1",
+        },
+        event: {
+          reader: { reader_id: { open_id: "ou_x" } },
+          message_id_list: [],
+        },
+      }
+      expect(parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)).toBeNull()
+    })
+  })
+
+  describe("im.message.recalled_v1 produces a delete event", () => {
+    it("emits kind=delete with replacesMessageId set", () => {
+      const envelope: LarkEventEnvelope = {
+        schema: "2.0",
+        header: {
+          event_id: "evt_recall_001",
+          event_type: "im.message.recalled_v1",
+        },
+        event: {
+          message_id: "om_recall_target",
+          chat_id: "oc_chat_x",
+          recall_time: "1714900200",
+        },
+      }
+      const r = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)
+      expect(r).not.toBeNull()
+      expect(r!.kind).toBe("delete")
+      expect(r!.replacesMessageId).toBe("om_recall_target")
+      expect(r!.timestamp).toBe(1714900200)
+    })
+
+    it("returns null when chat_id or message_id is missing", () => {
+      const envelope: LarkEventEnvelope = {
+        schema: "2.0",
+        header: {
+          event_id: "evt_recall_bad",
+          event_type: "im.message.recalled_v1",
+        },
+        event: { recall_time: "1" },
+      }
+      expect(parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)).toBeNull()
+    })
+  })
+
+  describe("member-change events produce system events", () => {
+    it("im.chat.member.user.added_v1 → systemKind=member_added", () => {
+      const envelope: LarkEventEnvelope = {
+        schema: "2.0",
+        header: {
+          event_id: "evt_user_add",
+          event_type: "im.chat.member.user.added_v1",
+        },
+        event: {
+          chat_id: "oc_team_001",
+          operator_id: { open_id: "ou_admin" },
+          users: [{ user_id: { open_id: "ou_new" }, name: "Newcomer" }],
+        },
+      }
+      const r = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)
+      expect(r).not.toBeNull()
+      expect(r!.kind).toBe("system")
+      expect(r!.systemKind).toBe("member_added")
+      expect(r!.sender.remoteUserId).toBe("ou_admin")
+    })
+
+    it("im.chat.member.bot.deleted_v1 → systemKind=member_removed", () => {
+      const envelope: LarkEventEnvelope = {
+        schema: "2.0",
+        header: {
+          event_id: "evt_bot_del",
+          event_type: "im.chat.member.bot.deleted_v1",
+        },
+        event: { chat_id: "oc_team_001" },
+      }
+      const r = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, envelope)
+      expect(r).not.toBeNull()
+      expect(r!.kind).toBe("system")
+      expect(r!.systemKind).toBe("member_removed")
     })
   })
 })

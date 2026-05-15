@@ -184,13 +184,14 @@ connection.onRequest("extension:call", async (params) => {
 function buildContext(req: ActivateRequest): SidecarExtensionContext {
   const globalState = makeKvStore(req.initialGlobalState)
   const workspaceState = makeKvStore(req.initialWorkspaceState)
+  const extensionPath = req.extensionId
   return {
     subscriptions: [] as Disposable[],
     globalState,
     workspaceState,
     secrets: makeSecretsStore(req.extensionId, connection),
     extensionUri: `file://${req.extensionId}`,
-    extensionPath: req.extensionId,
+    extensionPath,
     globalStorageUri: req.globalStorageUri,
     storageUri: req.storageUri,
     logUri: req.logUri,
@@ -201,7 +202,65 @@ function buildContext(req: ActivateRequest): SidecarExtensionContext {
       isActive: true,
       packageJSON: {},
     },
+    asAbsolutePath: (relativePath: string) => {
+      // path.resolve flattens leading `./` and joins absolute paths
+      // correctly. The sidecar runs in Node so a synchronous import is
+      // safe; we avoid a top-level import to keep the build size lean.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const nodePath = require("node:path") as typeof import("node:path")
+      return nodePath.resolve(extensionPath, relativePath)
+    },
+    environmentVariableCollection: makeEnvironmentVariableCollection(),
+    languageModelAccessInformation: {
+      canSendRequest: () => "limited",
+      onDidChange: () => ({ dispose: () => {} }),
+    },
   }
+}
+
+function makeEnvironmentVariableCollection() {
+  type Mutator = { type: "replace" | "append" | "prepend"; value: string }
+  const map = new Map<string, Mutator>()
+  const collection = {
+    persistent: false,
+    description: undefined as string | undefined,
+    replace(variable: string, value: string) {
+      map.set(variable, { type: "replace", value })
+    },
+    append(variable: string, value: string) {
+      map.set(variable, { type: "append", value })
+    },
+    prepend(variable: string, value: string) {
+      map.set(variable, { type: "prepend", value })
+    },
+    get(variable: string): Mutator | undefined {
+      return map.get(variable)
+    },
+    forEach(callback: (variable: string, mutator: Mutator) => void) {
+      for (const [variable, mutator] of map) {
+        callback(variable, mutator)
+      }
+    },
+    delete(variable: string) {
+      map.delete(variable)
+    },
+    clear() {
+      map.clear()
+    },
+    apply(env: Record<string, string | undefined>): Record<string, string> {
+      const result: Record<string, string> = Object.fromEntries(
+        Object.entries(env).filter(([, v]) => v !== undefined) as Array<[string, string]>
+      )
+      for (const [variable, mutator] of map) {
+        const existing = result[variable] ?? ""
+        if (mutator.type === "replace") result[variable] = mutator.value
+        else if (mutator.type === "append") result[variable] = existing + mutator.value
+        else if (mutator.type === "prepend") result[variable] = mutator.value + existing
+      }
+      return result
+    },
+  }
+  return collection
 }
 
 function makeKvStore(initial: Record<string, unknown>): SidecarExtensionContext["globalState"] {

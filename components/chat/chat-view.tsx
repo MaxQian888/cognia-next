@@ -30,6 +30,13 @@ interface ChatPaneProps {
   composerRef?: Ref<ComposerHandle>
   /** When provided, opens the mobile inline @-mention popover on `@`. */
   mobileMentionMembers?: readonly Character[]
+  /**
+   * When false, the internal `<ChatHeader>` is omitted. The Inbox detail
+   * panel uses this so its own `<ConversationHeader>` (mode + policy +
+   * character chip) is the only header, avoiding duplicate chrome.
+   * Defaults to true.
+   */
+  showHeader?: boolean
 }
 
 /**
@@ -51,6 +58,7 @@ export function ChatPane({
   onOpenSettings,
   composerRef,
   mobileMentionMembers,
+  showHeader = true,
 }: ChatPaneProps) {
   const tCopy = useTranslations("chat.copy")
   const messages = useChatStore((s) => s.messages)
@@ -90,11 +98,13 @@ export function ChatPane({
 
   return (
     <>
-      <ChatHeader
-        session={activeSession}
-        messages={messages}
-        onOpenSettings={() => onOpenSettings("api-key")}
-      />
+      {showHeader && (
+        <ChatHeader
+          session={activeSession}
+          messages={messages}
+          onOpenSettings={() => onOpenSettings("api-key")}
+        />
+      )}
       <ExternalAgentSessionPanel />
       {messages.length === 0 ? (
         <EmptyChatState

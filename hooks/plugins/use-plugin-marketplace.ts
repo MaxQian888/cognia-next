@@ -41,20 +41,31 @@ export interface UsePluginMarketplace {
   installingId: string | null
 }
 
-interface MarketplaceClient {
+export interface MarketplaceClient {
   searchPlugins: (opts: {
     query: string
   }) => Promise<{ entries: PluginMarketplaceEntry[] } | PluginMarketplaceEntry[]>
   getFeaturedPlugins?: () => Promise<PluginMarketplaceEntry[]>
   getPopularPlugins?: (limit?: number) => Promise<PluginMarketplaceEntry[]>
   getRecentPlugins?: (limit?: number) => Promise<PluginMarketplaceEntry[]>
+  /**
+   * Returns the marketplace registry entry (manifest + metadata) for a
+   * specific plugin id. Used by the pre-install chain to read the manifest
+   * before any Dexie write. The full marketplace client returns
+   * `PluginRegistryEntry | null`; we re-state the relevant shape inline so
+   * we don't pull in the full client type tree at this layer.
+   */
+  getPlugin: (id: string) => Promise<{
+    manifest: import("@/types/plugin").PluginManifest
+    name?: string
+  } | null>
   installPlugin: (id: string, version?: string) => Promise<unknown>
   uninstallPlugin: (id: string) => Promise<unknown>
 }
 
 let cachedClient: MarketplaceClient | null = null
 
-async function loadClient(): Promise<MarketplaceClient> {
+export async function loadPluginMarketplaceClient(): Promise<MarketplaceClient> {
   if (cachedClient) return cachedClient
   const mod = (await import("@/lib/plugin/package/marketplace")) as unknown as {
     getPluginMarketplace: () => MarketplaceClient
@@ -62,6 +73,10 @@ async function loadClient(): Promise<MarketplaceClient> {
   cachedClient = mod.getPluginMarketplace()
   return cachedClient
 }
+
+// Kept as the historical short name used inside this hook so the install /
+// uninstall / refresh paths keep working unchanged.
+const loadClient = loadPluginMarketplaceClient
 
 export function __resetPluginMarketplaceClientForTests(client: MarketplaceClient | null) {
   cachedClient = client

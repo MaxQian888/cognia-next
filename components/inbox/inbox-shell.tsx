@@ -6,8 +6,17 @@
  *
  * Uses the shadcn SidebarProvider / Sidebar / SidebarInset primitives so
  * the collapse affordance works consistently with the rest of the app.
+ *
+ * Responsive behaviour:
+ *   - ≥ 1024 px (desktop): sidebar open by default, middle pane w-72.
+ *   - 768–1023 px (tablet): sidebar starts collapsed to free space for the
+ *     detail pane; the user can still expand it from the standard trigger.
+ *     Middle pane uses w-64.
+ *   - < 768 px (mobile): out of scope for this pass — three-pane still
+ *     renders but layout is not optimised.
  */
 
+import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { InboxSidebar } from "./inbox-sidebar"
@@ -28,6 +37,25 @@ export interface InboxShellProps {
   children?: React.ReactNode
 }
 
+/**
+ * Returns true when the viewport is in the tablet band (768 ≤ w < 1024).
+ * Server render and the first client render return false so we don't trigger
+ * a hydration mismatch — the effect kicks in after mount.
+ */
+function useIsTabletViewport(): boolean {
+  const [isTablet, setIsTablet] = useState(false)
+
+  useEffect(() => {
+    const mql = window.matchMedia("(min-width: 768px) and (max-width: 1023px)")
+    const onChange = () => setIsTablet(mql.matches)
+    onChange()
+    mql.addEventListener("change", onChange)
+    return () => mql.removeEventListener("change", onChange)
+  }, [])
+
+  return isTablet
+}
+
 export function InboxShell({
   view,
   adapterId,
@@ -36,9 +64,11 @@ export function InboxShell({
   children,
 }: InboxShellProps) {
   const t = useTranslations("inbox.shell")
+  const isTablet = useIsTabletViewport()
+
   return (
     <SidebarProvider
-      defaultOpen
+      defaultOpen={!isTablet}
       data-bg-target="chat"
       className="flex h-full min-h-0 flex-1 overflow-hidden safe-area-pt safe-area-pb"
       style={{ "--sidebar-width": "14rem" } as React.CSSProperties}
@@ -46,10 +76,10 @@ export function InboxShell({
       {/* Left pane — adapter sections + view-mode chips */}
       <InboxSidebar view={view} activeAdapterId={adapterId} activePlatformKind={platformKind} />
 
-      {/* Middle pane — conversation list */}
+      {/* Middle pane — conversation list (responsive width). */}
       <div
         data-testid="inbox-conversation-list-pane"
-        className="w-72 shrink-0 border-r flex flex-col overflow-hidden"
+        className="w-56 md:w-64 lg:w-72 shrink-0 border-r flex flex-col overflow-hidden"
       >
         <ConversationList
           adapterId={adapterId}

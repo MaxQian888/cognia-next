@@ -22,6 +22,8 @@ import { serializeOutbound, serializeEdit, serializeDelete, serializeReaction } 
 import { getTenantAccessToken } from "./auth"
 import { startLarkLongConn } from "./transport-long-conn"
 import { startLarkWebhookTransport } from "./transport-webhook"
+import { parseConversationKey } from "@/types/connectors/event"
+import type { NormalizedInboundEvent } from "@/types/connectors/event"
 
 export interface LarkAdapterOptions {
   id: string
@@ -37,6 +39,13 @@ export interface LarkAdapterOptions {
   /** Bot's own open_id; used to detect self-mentions. */
   selfBotOpenId: string
   transport: "webhook" | "long-connection"
+  /**
+   * Cap on `/im/v1/messages` pages walked per `fetchHistory` call. Each
+   * page is up to 50 messages (Lark's documented default). Defaults to
+   * 20 pages = 1 000 messages, matching the inbox-hydration ceiling.
+   * Pass `Infinity` to walk until the API stops returning `has_more`.
+   */
+  historyMaxPages?: number
 }
 
 const LARK_API_BASE = "https://open.feishu.cn/open-apis"
@@ -217,15 +226,81 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     await doRequest(call.method, urlPath)
   }
 
+  /**
+   * Walk Lark's `/im/v1/messages` list with `page_token` cursor
+   * pagination. Each raw message is wrapped in a synthetic
+   * im.message.receive_v1 envelope and projected through the live event
+   * parser so the consumer sees the same NormalizedInboundEvent shape.
+   *
+   * Bounds:
+   *   - per-page size = 50 (Lark default; max 50)
+   *   - max pages    = `opts.historyMaxPages` ?? 20
+   *   - `historyOpts.before` / `historyOpts.after` are forwarded as
+   *     `end_time` / `start_time` (Lark expects ISO seconds-since-epoch
+   *     strings; the caller must already provide that format).
+   *   - `historyOpts.max` further caps the total messages yielded.
+   */
   async function* fetchHistory(
-    _conversationKey: string,
-    _opts: { before?: string; after?: string; max?: number }
-  ): AsyncIterable<import("@/types/connectors").NormalizedInboundEvent> {
-    // TODO Phase 2: implement /im/v1/messages list with cursor pagination
+    conversationKey: string,
+    historyOpts: { before?: string; after?: string; max?: number }
+  ): AsyncIterable<NormalizedInboundEvent> {
+    const parsed = parseConversationKey(conversationKey)
+    const chatId = parsed.remoteChatId
+    const maxPages = opts.historyMaxPages ?? 20
+    const overallCap = historyOpts.max ?? Number.POSITIVE_INFINITY
+
+    let pageToken: string | undefined = undefined
+    let yielded = 0
+
+    for (let page = 0; page < maxPages; page++) {
+      const params: Record<string, string> = {
+        container_id_type: "chat",
+        container_id: chatId,
+        page_size: "50",
+      }
+      if (pageToken) params["page_token"] = pageToken
+      if (historyOpts.after) params["start_time"] = historyOpts.after
+      if (historyOpts.before) params["end_time"] = historyOpts.before
+
+      const search = new URLSearchParams(params).toString()
+      const response = (await doRequest("GET", `/im/v1/messages?${search}`)) as {
+        data?: {
+          items?: Array<Record<string, unknown>>
+          page_token?: string
+          has_more?: boolean
+        }
+      } | null
+
+      const items = response?.data?.items ?? []
+      for (const item of items) {
+        if (yielded >= overallCap) return
+        const envelope: LarkEventEnvelope = {
+          schema: "2.0",
+          header: {
+            event_id: `hist:${(item as { message_id?: string }).message_id ?? "?"}`,
+            event_type: "im.message.receive_v1",
+          },
+          event: {
+            sender: (item as { sender?: LarkEventEnvelope["event"]["sender"] }).sender,
+            message: item as unknown as LarkEventEnvelope["event"]["message"],
+          },
+        }
+        const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope)
+        if (event) {
+          yielded++
+          yield event
+        }
+      }
+
+      const nextToken = response?.data?.page_token
+      const hasMore = response?.data?.has_more
+      if (!hasMore || !nextToken || nextToken.length === 0) return
+      pageToken = nextToken
+    }
   }
 
   async function setTyping(_conversationKey: string, _on: boolean): Promise<void> {
-    // Lark has no native typing indicator for bots in Phase 1 — no-op.
+    // Lark has no native typing indicator for bots; no-op.
   }
 
   async function refreshCredentials(): Promise<void> {

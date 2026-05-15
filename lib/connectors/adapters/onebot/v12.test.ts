@@ -88,4 +88,56 @@ describe("parseV12Event", () => {
     const event: OneBotV12Event = { ...makeBase(), type: "meta" }
     expect(parseV12Event(ADAPTER_ID, event)).toBeNull()
   })
+
+  it("ignores message_sent (echo of bot's own outbound)", () => {
+    const event: OneBotV12Event = { ...makeBase(), type: "message_sent" }
+    expect(parseV12Event(ADAPTER_ID, event)).toBeNull()
+  })
+
+  it("group_message_delete notice maps to a kind=delete event", () => {
+    const event: OneBotV12Event = {
+      id: "evt-del-1",
+      time: 1700000400,
+      type: "notice",
+      detail_type: "group_message_delete",
+      group_id: "300001",
+      user_id: "200001",
+      message_id: "m-1001",
+      self: { platform: "qq", user_id: "100000" },
+    }
+    const r = parseV12Event(ADAPTER_ID, event)
+    expect(r).not.toBeNull()
+    expect(r!.kind).toBe("delete")
+    expect(r!.replacesMessageId).toBe("m-1001")
+    expect(r!.channel.kind).toBe("group")
+  })
+
+  it("private_message_delete notice maps to kind=delete in a private chat", () => {
+    const event: OneBotV12Event = {
+      id: "evt-del-2",
+      time: 1700000500,
+      type: "notice",
+      detail_type: "private_message_delete",
+      user_id: "200001",
+      message_id: "m-2002",
+      self: { platform: "qq", user_id: "100000" },
+    }
+    const r = parseV12Event(ADAPTER_ID, event)
+    expect(r).not.toBeNull()
+    expect(r!.kind).toBe("delete")
+    expect(r!.channel.kind).toBe("private")
+  })
+
+  it("returns null for notice variants we do not track", () => {
+    const event: OneBotV12Event = {
+      id: "evt-other",
+      time: 1700000600,
+      type: "notice",
+      detail_type: "group_member_increase",
+      group_id: "300001",
+      user_id: "200002",
+      self: { platform: "qq", user_id: "100000" },
+    }
+    expect(parseV12Event(ADAPTER_ID, event)).toBeNull()
+  })
 })

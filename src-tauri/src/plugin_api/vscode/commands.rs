@@ -3,33 +3,61 @@
 //! These are the entry points the renderer-side
 //! `lib/plugin/core/vscode-loader.ts` invokes:
 //!
-//! - `plugin_vscode_install_vsix(vsix_bytes_base64)` → InstallResult
+//! - `plugin_vscode_install_vsix(vsix_base64)` → InstallResult
 //! - `plugin_load_vscode(plugin_id, manifest_json, plugin_path)`
 //! - `plugin_activate_vscode(plugin_id, config_json)`
 //! - `plugin_deactivate_vscode(plugin_id)`
 //! - `plugin_unload_vscode(plugin_id)`
 //! - `plugin_invoke_vscode_rpc(plugin_id, method, payload_json)`
+//! - `plugin_vscode_send_response(plugin_id, response_json)` —— sends a
+//!   renderer-built response frame back to a sidecar-initiated request.
 //!
 //! All commands run on the Tauri main thread; sidecar interactions are
 //! `async` and resolve when the corresponding JSON-RPC frame returns.
 //!
+//! Parameters use the same flat camelCase-on-the-wire convention the
+//! `wasm` plugin commands use: each `plugin_id: String` Rust param maps
+//! to a `pluginId` JS-side key automatically (Tauri does the case
+//! conversion at the command boundary).
+//!
+//! `plugin_load_vscode` wires the sidecar's inbound notification/request
+//! frames to a Tauri event named `vscode://rpc/<extension_id>` so the
+//! renderer's RPC dispatcher can listen and either fire notification
+//! handlers or build responses (sent back via `plugin_vscode_send_response`).
+//!
 //! `dead_code` is silenced module-wide: every command in this file IS
 //! registered in `tauri::generate_handler!` (see `src/lib.rs`), but the
-//! macro hides its callsites from rustc's dead-code analyser. Arg structs
-//! also appear "never constructed" because Tauri deserialises them
-//! reflectively from the renderer's JSON payload — no Rust callsite ever
-//! literally builds one.
+//! macro hides its callsites from rustc's dead-code analyser.
 #![allow(dead_code)]
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::time::Duration;
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
+use tokio::sync::mpsc;
 
-use super::host::{Sidecar, SpawnRequest};
+use super::host::{InboundFrame, Sidecar, SpawnRequest};
 use super::installer::{install_vsix, InstallError, InstallResult};
 use super::VscodeExtensionState;
+
+/// Wall-clock cap on any single sidecar request. 30s matches the VS Code
+/// extension activation budget that real extensions assume.
+const RPC_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Monotonic id source for every outbound JSON-RPC frame so renderer-side
+/// pending maps never collide.
+static RPC_ID_COUNTER: AtomicI64 = AtomicI64::new(100);
+
+fn next_rpc_id() -> i64 {
+    RPC_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
+fn inbound_event_name(extension_id: &str) -> String {
+    format!("vscode://rpc/{}", extension_id)
+}
 
 #[derive(Debug, Serialize)]
 pub struct VscodeCommandError {
@@ -52,39 +80,30 @@ impl From<InstallError> for VscodeCommandError {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct InstallArgs {
-    pub vsix_base64: String,
-}
-
 #[tauri::command]
 pub async fn plugin_vscode_install_vsix(
-    args: InstallArgs,
+    vsix_base64: String,
     state: State<'_, VscodeExtensionState>,
 ) -> Result<InstallResult, VscodeCommandError> {
     let payload = base64::engine::general_purpose::STANDARD
-        .decode(&args.vsix_base64)
+        .decode(&vsix_base64)
         .map_err(|e| VscodeCommandError::new("decode_error", e.to_string()))?;
     let install_root = state.extension_install_dir.clone();
     let result = install_vsix(&payload, &install_root)?;
     Ok(result)
 }
 
-#[derive(Debug, Deserialize)]
-pub struct LoadArgs {
-    pub plugin_id: String,
-    pub manifest_json: String,
-    pub plugin_path: String,
-    pub sidecar_script: Option<String>,
-    pub node_binary: Option<String>,
-}
-
 #[tauri::command]
 pub async fn plugin_load_vscode(
-    args: LoadArgs,
+    plugin_id: String,
+    manifest_json: String,
+    plugin_path: String,
+    sidecar_script: Option<String>,
+    node_binary: Option<String>,
+    app_handle: AppHandle,
     state: State<'_, VscodeExtensionState>,
 ) -> Result<(), VscodeCommandError> {
-    let manifest: serde_json::Value = serde_json::from_str(&args.manifest_json)
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_json)
         .map_err(|e| VscodeCommandError::new("bad_manifest", e.to_string()))?;
     let main = manifest
         .get("vscodeMain")
@@ -96,31 +115,36 @@ pub async fn plugin_load_vscode(
             )
         })?;
     let request = SpawnRequest {
-        extension_id: args.plugin_id.clone(),
-        extension_path: PathBuf::from(&args.plugin_path)
+        extension_id: plugin_id.clone(),
+        extension_path: PathBuf::from(&plugin_path)
             .join(main)
             .to_string_lossy()
             .to_string(),
-        node_binary: args.node_binary,
-        sidecar_script: args.sidecar_script,
+        node_binary,
+        sidecar_script,
     };
     let sidecar = Sidecar::spawn(request)
         .await
         .map_err(|e| VscodeCommandError::new("spawn_failed", e.to_string()))?;
-    state
-        .sidecars
-        .write()
-        .insert(args.plugin_id.clone(), sidecar);
+
+    // Wire the sidecar's inbound (notification + request) channel to a
+    // Tauri event so the renderer's RPC dispatcher can listen to it.
+    let (notify_tx, mut notify_rx) = mpsc::unbounded_channel::<InboundFrame>();
+    sidecar.set_notify_sink(notify_tx);
+    let app_for_emit = app_handle.clone();
+    let event_name = inbound_event_name(&plugin_id);
+    tokio::spawn(async move {
+        while let Some(frame) = notify_rx.recv().await {
+            let _ = app_for_emit.emit(&event_name, frame.raw_frame);
+        }
+    });
+
+    state.sidecars.write().insert(plugin_id, sidecar);
     Ok(())
 }
 
-#[derive(Debug, Deserialize)]
-pub struct ActivateArgs {
-    pub plugin_id: String,
-    pub config_json: String,
-}
-
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ActivateResult {
     pub sidecar_pid: u32,
     pub registered_commands: Vec<String>,
@@ -130,58 +154,100 @@ pub struct ActivateResult {
 
 #[tauri::command]
 pub async fn plugin_activate_vscode(
-    args: ActivateArgs,
+    plugin_id: String,
+    config_json: String,
     state: State<'_, VscodeExtensionState>,
 ) -> Result<ActivateResult, VscodeCommandError> {
-    let sidecars = state.sidecars.read();
-    let sidecar = sidecars
-        .get(&args.plugin_id)
-        .ok_or_else(|| VscodeCommandError::new("not_loaded", "extension not loaded"))?;
-    // Build the JSON-RPC request frame.
-    let frame = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "extension:activate",
-        "params": {
-            "extensionId": args.plugin_id,
-            "globalStorageUri": format!("file://{}", state.extension_dir(&args.plugin_id).display()),
-            "storageUri": format!("file://{}", state.extension_dir(&args.plugin_id).display()),
-            "logUri": format!("file://{}", state.extension_dir(&args.plugin_id).display()),
-            "extensionMode": "production",
-            "initialGlobalState": {},
-            "initialWorkspaceState": {},
-            "config": serde_json::from_str::<serde_json::Value>(&args.config_json).unwrap_or(serde_json::Value::Null),
-        },
-    })
-    .to_string();
-    sidecar
-        .send(&frame)
-        .map_err(|e| VscodeCommandError::new("send_failed", e.to_string()))?;
+    // Snapshot what we need so we don't hold the read lock across the
+    // await point.
+    let (pid, rx, pending_drop) = {
+        let sidecars = state.sidecars.read();
+        let sidecar = sidecars
+            .get(&plugin_id)
+            .ok_or_else(|| VscodeCommandError::new("not_loaded", "extension not loaded"))?;
+        let id = next_rpc_id();
+        let rx = sidecar.register_pending(id);
+        let frame = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "extension:activate",
+            "params": {
+                "extensionId": plugin_id,
+                "globalStorageUri": format!("file://{}", state.extension_dir(&plugin_id).display()),
+                "storageUri": format!("file://{}", state.extension_dir(&plugin_id).display()),
+                "logUri": format!("file://{}", state.extension_dir(&plugin_id).display()),
+                "extensionMode": "production",
+                "initialGlobalState": {},
+                "initialWorkspaceState": {},
+                "config": serde_json::from_str::<serde_json::Value>(&config_json).unwrap_or(serde_json::Value::Null),
+            },
+        })
+        .to_string();
+        sidecar
+            .send(&frame)
+            .map_err(|e| VscodeCommandError::new("send_failed", e.to_string()))?;
+        (sidecar.pid, rx, (sidecar.pending.clone(), id))
+    };
+
+    let response_text = match tokio::time::timeout(RPC_TIMEOUT, rx).await {
+        Ok(Ok(text)) => text,
+        Ok(Err(_)) => {
+            return Err(VscodeCommandError::new(
+                "sidecar_dropped",
+                "activate response receiver dropped",
+            ));
+        }
+        Err(_) => {
+            pending_drop.0.lock().remove(&pending_drop.1);
+            return Err(VscodeCommandError::new(
+                "timeout",
+                "activate timed out after 30s",
+            ));
+        }
+    };
+
+    let response: serde_json::Value = serde_json::from_str(&response_text)
+        .map_err(|e| VscodeCommandError::new("bad_response", e.to_string()))?;
+    if let Some(err) = response.get("error") {
+        return Err(VscodeCommandError::new("sidecar_error", err.to_string()));
+    }
+    let result = response
+        .get("result")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+
     Ok(ActivateResult {
-        sidecar_pid: sidecar.pid,
-        registered_commands: vec![],
-        registered_webview_views: vec![],
-        registered_language_providers: vec![],
+        sidecar_pid: pid,
+        registered_commands: extract_string_array(&result, "registeredCommands"),
+        registered_webview_views: extract_string_array(&result, "registeredWebviewViews"),
+        registered_language_providers: extract_string_array(&result, "registeredLanguageProviders"),
     })
 }
 
-#[derive(Debug, Deserialize)]
-pub struct PluginIdArgs {
-    pub plugin_id: String,
+fn extract_string_array(value: &serde_json::Value, key: &str) -> Vec<String> {
+    value
+        .get(key)
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| item.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[tauri::command]
 pub async fn plugin_deactivate_vscode(
-    args: PluginIdArgs,
+    plugin_id: String,
     state: State<'_, VscodeExtensionState>,
 ) -> Result<(), VscodeCommandError> {
     let sidecars = state.sidecars.read();
-    if let Some(sidecar) = sidecars.get(&args.plugin_id) {
+    if let Some(sidecar) = sidecars.get(&plugin_id) {
         let frame = serde_json::json!({
             "jsonrpc": "2.0",
-            "id": 2,
+            "id": next_rpc_id(),
             "method": "extension:deactivate",
-            "params": { "extensionId": args.plugin_id },
+            "params": { "extensionId": plugin_id },
         })
         .to_string();
         sidecar
@@ -193,7 +259,7 @@ pub async fn plugin_deactivate_vscode(
 
 #[tauri::command]
 pub async fn plugin_unload_vscode(
-    args: PluginIdArgs,
+    plugin_id: String,
     state: State<'_, VscodeExtensionState>,
 ) -> Result<(), VscodeCommandError> {
     // Release the write lock before awaiting — tokio::process::Child is
@@ -201,43 +267,90 @@ pub async fn plugin_unload_vscode(
     // command-future-must-be-Send constraint.
     let sidecar = {
         let mut sidecars = state.sidecars.write();
-        sidecars.remove(&args.plugin_id)
+        sidecars.remove(&plugin_id)
     };
     if let Some(sidecar) = sidecar {
         sidecar.kill().await;
     }
-    state.runtimes.write().remove(&args.plugin_id);
+    state.runtimes.write().remove(&plugin_id);
     Ok(())
-}
-
-#[derive(Debug, Deserialize)]
-pub struct InvokeRpcArgs {
-    pub plugin_id: String,
-    pub method: String,
-    pub payload_json: String,
 }
 
 #[tauri::command]
 pub async fn plugin_invoke_vscode_rpc(
-    args: InvokeRpcArgs,
+    plugin_id: String,
+    method: String,
+    payload_json: String,
     state: State<'_, VscodeExtensionState>,
 ) -> Result<String, VscodeCommandError> {
+    let (rx, pending_drop) = {
+        let sidecars = state.sidecars.read();
+        let sidecar = sidecars
+            .get(&plugin_id)
+            .ok_or_else(|| VscodeCommandError::new("not_loaded", "extension not loaded"))?;
+        let id = next_rpc_id();
+        let rx = sidecar.register_pending(id);
+        let frame = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": serde_json::from_str::<serde_json::Value>(&payload_json)
+                .unwrap_or(serde_json::Value::Null),
+        })
+        .to_string();
+        sidecar
+            .send(&frame)
+            .map_err(|e| VscodeCommandError::new("send_failed", e.to_string()))?;
+        (rx, (sidecar.pending.clone(), id))
+    };
+
+    let response_text = match tokio::time::timeout(RPC_TIMEOUT, rx).await {
+        Ok(Ok(text)) => text,
+        Ok(Err(_)) => {
+            return Err(VscodeCommandError::new(
+                "sidecar_dropped",
+                "rpc response receiver dropped",
+            ));
+        }
+        Err(_) => {
+            pending_drop.0.lock().remove(&pending_drop.1);
+            return Err(VscodeCommandError::new(
+                "timeout",
+                "rpc timed out after 30s",
+            ));
+        }
+    };
+
+    let response: serde_json::Value = serde_json::from_str(&response_text)
+        .map_err(|e| VscodeCommandError::new("bad_response", e.to_string()))?;
+    if let Some(err) = response.get("error") {
+        return Err(VscodeCommandError::new("sidecar_error", err.to_string()));
+    }
+    Ok(response
+        .get("result")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null)
+        .to_string())
+}
+
+#[tauri::command]
+pub async fn plugin_vscode_send_response(
+    plugin_id: String,
+    response_json: String,
+    state: State<'_, VscodeExtensionState>,
+) -> Result<(), VscodeCommandError> {
     let sidecars = state.sidecars.read();
     let sidecar = sidecars
-        .get(&args.plugin_id)
+        .get(&plugin_id)
         .ok_or_else(|| VscodeCommandError::new("not_loaded", "extension not loaded"))?;
-    let frame = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": chrono::Utc::now().timestamp_millis(),
-        "method": args.method,
-        "params": serde_json::from_str::<serde_json::Value>(&args.payload_json)
-            .unwrap_or(serde_json::Value::Null),
-    })
-    .to_string();
+    // Sanity-check the frame parses as JSON; the sidecar reads
+    // line-delimited JSON so a malformed frame would desync the parser.
+    serde_json::from_str::<serde_json::Value>(&response_json)
+        .map_err(|e| VscodeCommandError::new("bad_response", e.to_string()))?;
     sidecar
-        .send(&frame)
+        .send(&response_json)
         .map_err(|e| VscodeCommandError::new("send_failed", e.to_string()))?;
-    Ok("null".to_string())
+    Ok(())
 }
 
 #[cfg(test)]
@@ -245,26 +358,60 @@ mod tests {
     use super::*;
 
     #[test]
-    fn install_args_deserializes() {
-        let parsed: InstallArgs = serde_json::from_str(r#"{"vsix_base64":"abc"}"#).unwrap();
-        assert_eq!(parsed.vsix_base64, "abc");
-    }
-
-    #[test]
-    fn load_args_deserializes_with_optional_fields() {
-        let parsed: LoadArgs = serde_json::from_str(
-            r#"{"plugin_id":"x.y","manifest_json":"{}","plugin_path":"/tmp"}"#,
-        )
-        .unwrap();
-        assert_eq!(parsed.plugin_id, "x.y");
-        assert!(parsed.sidecar_script.is_none());
-    }
-
-    #[test]
     fn error_helpers_round_trip() {
         let err = VscodeCommandError::new("test", "boom");
         assert_eq!(err.code, "test");
         let from_install: VscodeCommandError = InstallError::MissingField("name").into();
         assert_eq!(from_install.code, "install_error");
+    }
+
+    #[test]
+    fn extract_string_array_handles_missing_and_typed_input() {
+        let payload = serde_json::json!({
+            "registeredCommands": ["hello.world", "foo.bar"],
+            "registeredWebviewViews": [],
+        });
+        assert_eq!(
+            extract_string_array(&payload, "registeredCommands"),
+            vec!["hello.world".to_string(), "foo.bar".to_string()]
+        );
+        assert!(extract_string_array(&payload, "registeredWebviewViews").is_empty());
+        assert!(extract_string_array(&payload, "missing").is_empty());
+        let mixed = serde_json::json!({ "x": ["ok", 42, null, "two"] });
+        assert_eq!(
+            extract_string_array(&mixed, "x"),
+            vec!["ok".to_string(), "two".to_string()]
+        );
+    }
+
+    #[test]
+    fn inbound_event_name_is_namespaced_per_extension() {
+        assert_eq!(
+            inbound_event_name("publisher.ext"),
+            "vscode://rpc/publisher.ext".to_string()
+        );
+    }
+
+    #[test]
+    fn next_rpc_id_is_monotonic() {
+        let a = next_rpc_id();
+        let b = next_rpc_id();
+        let c = next_rpc_id();
+        assert!(b > a);
+        assert!(c > b);
+    }
+
+    #[test]
+    fn activate_result_serializes_camel_case() {
+        let payload = ActivateResult {
+            sidecar_pid: 7,
+            registered_commands: vec!["x".to_string()],
+            registered_webview_views: vec![],
+            registered_language_providers: vec![],
+        };
+        let serialized = serde_json::to_value(&payload).unwrap();
+        assert!(serialized.get("sidecarPid").is_some());
+        assert!(serialized.get("registeredCommands").is_some());
+        assert!(serialized.get("registeredLanguageProviders").is_some());
     }
 }

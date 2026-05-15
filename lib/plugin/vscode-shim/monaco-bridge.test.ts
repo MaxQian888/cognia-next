@@ -10,17 +10,32 @@ import {
   notifySelectionChanged,
   onActiveEditorChanged,
   onEditorChange,
+  registerCallHierarchyProvider,
   registerCodeActionsProvider,
   registerCodeLensProvider,
+  registerColorProvider,
   registerCompletionItemProvider,
   registerDecorationType,
   registerDefinitionProvider,
   registerDocumentFormattingProvider,
+  registerDocumentLinkProvider,
   registerDocumentRangeFormattingProvider,
+  registerDocumentRangeSemanticTokensProvider,
+  registerDocumentSemanticTokensProvider,
   registerDocumentSymbolProvider,
+  registerFoldingRangeProvider,
   registerHoverProvider,
+  registerInlayHintsProvider,
+  registerInlineCompletionProvider,
+  registerLinkedEditingRangeProvider,
+  registerOnTypeFormattingProvider,
   registerReferenceProvider,
   registerRenameProvider,
+  registerSelectionRangeProvider,
+  registerSignatureHelpProvider,
+  registerTypeHierarchyProvider,
+  registerWorkspaceSymbolProvider,
+  searchWorkspaceSymbols,
   setDecorations,
   setDiagnostics,
   unregisterByExtension,
@@ -30,6 +45,64 @@ import {
   type MonacoEditor,
   type MonacoTextModel,
 } from "./monaco-bridge"
+
+interface InvocationTriggerBag {
+  inlineCompletion?: (
+    m: MonacoTextModel,
+    p: { lineNumber: number; column: number }
+  ) => Promise<unknown>
+  signatureHelp?: (
+    m: MonacoTextModel,
+    p: { lineNumber: number; column: number }
+  ) => Promise<unknown>
+  color?: (m: MonacoTextModel) => Promise<unknown>
+  foldingRange?: (m: MonacoTextModel) => Promise<unknown>
+  selectionRange?: (
+    m: MonacoTextModel,
+    positions: Array<{ lineNumber: number; column: number }>
+  ) => Promise<unknown>
+  documentLink?: (m: MonacoTextModel) => Promise<unknown>
+  onTypeFormat?: (
+    m: MonacoTextModel,
+    p: { lineNumber: number; column: number },
+    ch: string
+  ) => Promise<unknown>
+  semanticTokens?: (m: MonacoTextModel) => Promise<unknown>
+  rangeSemanticTokens?: (
+    m: MonacoTextModel,
+    range: {
+      startLineNumber: number
+      startColumn: number
+      endLineNumber: number
+      endColumn: number
+    }
+  ) => Promise<unknown>
+  inlayHints?: (
+    m: MonacoTextModel,
+    range: {
+      startLineNumber: number
+      startColumn: number
+      endLineNumber: number
+      endColumn: number
+    }
+  ) => Promise<unknown>
+  callHierarchy?: (
+    m: MonacoTextModel,
+    p: { lineNumber: number; column: number }
+  ) => Promise<unknown>
+  callHierarchyIncoming?: (item: unknown) => Promise<unknown>
+  callHierarchyOutgoing?: (item: unknown) => Promise<unknown>
+  typeHierarchy?: (
+    m: MonacoTextModel,
+    p: { lineNumber: number; column: number }
+  ) => Promise<unknown>
+  typeHierarchySuper?: (item: unknown) => Promise<unknown>
+  typeHierarchySub?: (item: unknown) => Promise<unknown>
+  linkedEditingRange?: (
+    m: MonacoTextModel,
+    p: { lineNumber: number; column: number }
+  ) => Promise<unknown>
+}
 
 function makeFakeApi(): MonacoApi & {
   calls: Array<{ method: string; selector: string | string[] }>
@@ -48,6 +121,7 @@ function makeFakeApi(): MonacoApi & {
   ) => Promise<unknown>
   triggerFormatting?: (model: MonacoTextModel) => Promise<unknown>
   triggerSetModelMarkers?: jest.Mock
+  invocationTriggers: InvocationTriggerBag
 } {
   const calls: Array<{ method: string; selector: string | string[] }> = []
   const disposers: jest.Mock[] = []
@@ -61,6 +135,7 @@ function makeFakeApi(): MonacoApi & {
     | ((m: MonacoTextModel, p: { lineNumber: number; column: number }) => Promise<unknown>)
     | undefined
   let triggerFormatting: ((m: MonacoTextModel) => Promise<unknown>) | undefined
+  const invocationTriggers: InvocationTriggerBag = {}
   const setModelMarkers = jest.fn()
   const makeDisposable = () => {
     const dispose = jest.fn()
@@ -71,6 +146,7 @@ function makeFakeApi(): MonacoApi & {
     calls,
     disposers,
     triggerSetModelMarkers: setModelMarkers,
+    invocationTriggers,
     get triggerCompletion() {
       return triggerCompletion
     },
@@ -126,6 +202,78 @@ function makeFakeApi(): MonacoApi & {
       },
       registerDocumentSymbolProvider(selector) {
         calls.push({ method: "documentSymbol", selector })
+        return makeDisposable()
+      },
+      registerInlineCompletionsProvider(selector, provider) {
+        calls.push({ method: "inlineCompletion", selector })
+        invocationTriggers.inlineCompletion = (m, p) => provider.provideInlineCompletions(m, p)
+        return makeDisposable()
+      },
+      registerSignatureHelpProvider(selector, provider) {
+        calls.push({ method: "signatureHelp", selector })
+        invocationTriggers.signatureHelp = (m, p) => provider.provideSignatureHelp(m, p)
+        return makeDisposable()
+      },
+      registerColorProvider(selector, provider) {
+        calls.push({ method: "color", selector })
+        invocationTriggers.color = (m) => provider.provideDocumentColors(m)
+        return makeDisposable()
+      },
+      registerFoldingRangeProvider(selector, provider) {
+        calls.push({ method: "foldingRange", selector })
+        invocationTriggers.foldingRange = (m) => provider.provideFoldingRanges(m)
+        return makeDisposable()
+      },
+      registerSelectionRangeProvider(selector, provider) {
+        calls.push({ method: "selectionRange", selector })
+        invocationTriggers.selectionRange = (m, positions) =>
+          provider.provideSelectionRanges(m, positions)
+        return makeDisposable()
+      },
+      registerLinkProvider(selector, provider) {
+        calls.push({ method: "documentLink", selector })
+        invocationTriggers.documentLink = (m) => provider.provideLinks(m)
+        return makeDisposable()
+      },
+      registerOnTypeFormattingEditProvider(selector, provider) {
+        calls.push({ method: "onTypeFormat", selector })
+        invocationTriggers.onTypeFormat = (m, p, ch) =>
+          provider.provideOnTypeFormattingEdits(m, p, ch)
+        return makeDisposable()
+      },
+      registerDocumentSemanticTokensProvider(selector, provider) {
+        calls.push({ method: "semanticTokens", selector })
+        invocationTriggers.semanticTokens = (m) => provider.provideDocumentSemanticTokens(m)
+        return makeDisposable()
+      },
+      registerDocumentRangeSemanticTokensProvider(selector, provider) {
+        calls.push({ method: "rangeSemanticTokens", selector })
+        invocationTriggers.rangeSemanticTokens = (m, range) =>
+          provider.provideDocumentRangeSemanticTokens(m, range)
+        return makeDisposable()
+      },
+      registerInlayHintsProvider(selector, provider) {
+        calls.push({ method: "inlayHints", selector })
+        invocationTriggers.inlayHints = (m, range) => provider.provideInlayHints(m, range)
+        return makeDisposable()
+      },
+      registerCallHierarchyProvider(selector, provider) {
+        calls.push({ method: "callHierarchy", selector })
+        invocationTriggers.callHierarchy = (m, p) => provider.prepareCallHierarchy(m, p)
+        invocationTriggers.callHierarchyIncoming = (item) => provider.provideIncomingCalls(item)
+        invocationTriggers.callHierarchyOutgoing = (item) => provider.provideOutgoingCalls(item)
+        return makeDisposable()
+      },
+      registerTypeHierarchyProvider(selector, provider) {
+        calls.push({ method: "typeHierarchy", selector })
+        invocationTriggers.typeHierarchy = (m, p) => provider.prepareTypeHierarchy(m, p)
+        invocationTriggers.typeHierarchySuper = (item) => provider.provideSupertypes(item)
+        invocationTriggers.typeHierarchySub = (item) => provider.provideSubtypes(item)
+        return makeDisposable()
+      },
+      registerLinkedEditingRangeProvider(selector, provider) {
+        calls.push({ method: "linkedEditingRange", selector })
+        invocationTriggers.linkedEditingRange = (m, p) => provider.provideLinkedEditingRanges(m, p)
         return makeDisposable()
       },
     },
@@ -465,6 +613,250 @@ describe("monaco-bridge", () => {
         options: { className: "z" },
       })
       expect(typeId).toBeDefined()
+    })
+  })
+
+  describe("Phase B providers — Tier 2 additions", () => {
+    function setup(dispatchResult: unknown = null) {
+      const api = makeFakeApi()
+      const dispatch = jest.fn(
+        async () => dispatchResult
+      ) as unknown as jest.MockedFunction<DispatchRpc>
+      configureMonacoBridge({ monacoApi: api, dispatchRpc: dispatch })
+      const model: MonacoTextModel = {
+        uri: "file:///a.ts",
+        language: "typescript",
+        getValue: () => "",
+        setValue: () => {},
+        getLineCount: () => 1,
+        getLineContent: () => "",
+        isDisposed: () => false,
+      }
+      const pos = { lineNumber: 3, column: 7 }
+      const range = { startLineNumber: 1, startColumn: 1, endLineNumber: 5, endColumn: 1 }
+      return { api, dispatch, model, pos, range }
+    }
+
+    it("registerInlineCompletionProvider routes provideInlineCompletionItems", async () => {
+      const { api, dispatch, model, pos } = setup({ items: [{ insertText: "hi" }] })
+      registerInlineCompletionProvider({
+        extensionId: "ext.continue",
+        selector: ["typescript"],
+        triggerCharacters: ["."],
+      })
+      const result = await api.invocationTriggers.inlineCompletion!(model, pos)
+      expect(dispatch).toHaveBeenCalledWith(
+        "ext.continue",
+        "provideInlineCompletionItems",
+        expect.objectContaining({ uri: "file:///a.ts", position: pos })
+      )
+      expect(result).toEqual({ items: [{ insertText: "hi" }] })
+    })
+
+    it("registerSignatureHelpProvider routes provideSignatureHelp and passes trigger chars", async () => {
+      const { api, dispatch, model, pos } = setup({
+        value: { signatures: [], activeSignature: 0, activeParameter: 0 },
+      })
+      registerSignatureHelpProvider({
+        extensionId: "ext.lsp",
+        selector: ["typescript"],
+        triggerCharacters: ["("],
+        retriggerCharacters: [","],
+      })
+      const result = await api.invocationTriggers.signatureHelp!(model, pos)
+      expect(dispatch).toHaveBeenCalledWith(
+        "ext.lsp",
+        "provideSignatureHelp",
+        expect.objectContaining({ uri: "file:///a.ts" })
+      )
+      expect(result).toMatchObject({ value: { signatures: [] } })
+    })
+
+    it("registerWorkspaceSymbolProvider routes through searchWorkspaceSymbols", async () => {
+      const { dispatch } = setup([{ name: "FooBar" }])
+      registerWorkspaceSymbolProvider({ extensionId: "ext.search" })
+      const out = await searchWorkspaceSymbols("Foo")
+      expect(dispatch).toHaveBeenCalledWith(
+        "ext.search",
+        "provideWorkspaceSymbols",
+        expect.objectContaining({ query: "Foo" })
+      )
+      expect(out).toEqual([{ name: "FooBar" }])
+    })
+
+    it("searchWorkspaceSymbols aggregates across providers + survives a throw", async () => {
+      const api = makeFakeApi()
+      let counter = 0
+      const dispatch = jest.fn(async () => {
+        counter += 1
+        if (counter === 1) return [{ id: 1 }]
+        if (counter === 2) throw new Error("boom")
+        return [{ id: 3 }]
+      }) as unknown as jest.MockedFunction<DispatchRpc>
+      configureMonacoBridge({ monacoApi: api, dispatchRpc: dispatch })
+      registerWorkspaceSymbolProvider({ extensionId: "ext.a" })
+      registerWorkspaceSymbolProvider({ extensionId: "ext.b" })
+      registerWorkspaceSymbolProvider({ extensionId: "ext.c" })
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+      try {
+        const out = await searchWorkspaceSymbols("Q")
+        expect(out).toEqual([{ id: 1 }, { id: 3 }])
+        expect(warn).toHaveBeenCalled()
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
+    it("registerColorProvider routes both provideDocumentColors and presentations", async () => {
+      const { api, dispatch, model } = setup([])
+      registerColorProvider({ extensionId: "ext", selector: ["css"] })
+      await api.invocationTriggers.color!(model)
+      expect(dispatch).toHaveBeenCalledWith(
+        "ext",
+        "provideDocumentColors",
+        expect.objectContaining({ uri: "file:///a.ts" })
+      )
+    })
+
+    it("registerFoldingRangeProvider proxies provideFoldingRanges", async () => {
+      const { api, dispatch, model } = setup([{ start: 1, end: 4 }])
+      registerFoldingRangeProvider({ extensionId: "ext", selector: ["ts"] })
+      const out = await api.invocationTriggers.foldingRange!(model)
+      expect(dispatch).toHaveBeenCalledWith(
+        "ext",
+        "provideFoldingRanges",
+        expect.objectContaining({ uri: "file:///a.ts" })
+      )
+      expect(out).toEqual([{ start: 1, end: 4 }])
+    })
+
+    it("registerSelectionRangeProvider forwards positions", async () => {
+      const { api, dispatch, model, pos } = setup([])
+      registerSelectionRangeProvider({ extensionId: "ext", selector: ["ts"] })
+      await api.invocationTriggers.selectionRange!(model, [pos])
+      expect(dispatch).toHaveBeenCalledWith(
+        "ext",
+        "provideSelectionRanges",
+        expect.objectContaining({ positions: [pos] })
+      )
+    })
+
+    it("registerDocumentLinkProvider proxies provideLinks", async () => {
+      const { api, dispatch, model } = setup({ links: [] })
+      registerDocumentLinkProvider({ extensionId: "ext", selector: ["markdown"] })
+      await api.invocationTriggers.documentLink!(model)
+      expect(dispatch).toHaveBeenCalledWith(
+        "ext",
+        "provideDocumentLinks",
+        expect.objectContaining({ uri: "file:///a.ts" })
+      )
+    })
+
+    it("registerOnTypeFormattingProvider forwards trigger characters and the typed ch", async () => {
+      const { api, dispatch, model, pos } = setup([])
+      registerOnTypeFormattingProvider({
+        extensionId: "ext",
+        selector: ["ts"],
+        firstTriggerCharacter: ";",
+        moreTriggerCharacter: ["}", "\n"],
+      })
+      await api.invocationTriggers.onTypeFormat!(model, pos, ";")
+      expect(dispatch).toHaveBeenCalledWith(
+        "ext",
+        "provideOnTypeFormattingEdits",
+        expect.objectContaining({ ch: ";", position: pos })
+      )
+    })
+
+    it("registerDocumentSemanticTokensProvider preserves the legend through getLegend()", async () => {
+      const legend = { tokenTypes: ["keyword"], tokenModifiers: ["readonly"] }
+      const { api, dispatch, model } = setup({ data: [0, 0, 1, 0, 0], resultId: "r1" })
+      registerDocumentSemanticTokensProvider({
+        extensionId: "ext",
+        selector: ["ts"],
+        legend,
+      })
+      const out = await api.invocationTriggers.semanticTokens!(model)
+      expect(dispatch).toHaveBeenCalledWith(
+        "ext",
+        "provideDocumentSemanticTokens",
+        expect.objectContaining({ uri: "file:///a.ts" })
+      )
+      expect(out).toMatchObject({ resultId: "r1" })
+    })
+
+    it("registerDocumentRangeSemanticTokensProvider routes range invocations", async () => {
+      const { api, dispatch, model, range } = setup({ data: [] })
+      registerDocumentRangeSemanticTokensProvider({
+        extensionId: "ext",
+        selector: ["ts"],
+        legend: { tokenTypes: [], tokenModifiers: [] },
+      })
+      await api.invocationTriggers.rangeSemanticTokens!(model, range)
+      expect(dispatch).toHaveBeenCalledWith(
+        "ext",
+        "provideDocumentRangeSemanticTokens",
+        expect.objectContaining({ range })
+      )
+    })
+
+    it("registerInlayHintsProvider routes provideInlayHints with a range", async () => {
+      const { api, dispatch, model, range } = setup({ hints: [] })
+      registerInlayHintsProvider({ extensionId: "ext", selector: ["ts"] })
+      await api.invocationTriggers.inlayHints!(model, range)
+      expect(dispatch).toHaveBeenCalledWith(
+        "ext",
+        "provideInlayHints",
+        expect.objectContaining({ range })
+      )
+    })
+
+    it("registerCallHierarchyProvider routes prepare/incoming/outgoing", async () => {
+      const { api, dispatch, model, pos } = setup([{ name: "func" }])
+      registerCallHierarchyProvider({ extensionId: "ext", selector: ["ts"] })
+      await api.invocationTriggers.callHierarchy!(model, pos)
+      await api.invocationTriggers.callHierarchyIncoming!({ ref: 1 })
+      await api.invocationTriggers.callHierarchyOutgoing!({ ref: 2 })
+      const methods = dispatch.mock.calls.map((c) => c[1])
+      expect(methods).toEqual([
+        "prepareCallHierarchy",
+        "provideIncomingCalls",
+        "provideOutgoingCalls",
+      ])
+    })
+
+    it("registerTypeHierarchyProvider routes prepare/super/sub", async () => {
+      const { api, dispatch, model, pos } = setup([])
+      registerTypeHierarchyProvider({ extensionId: "ext", selector: ["ts"] })
+      await api.invocationTriggers.typeHierarchy!(model, pos)
+      await api.invocationTriggers.typeHierarchySuper!({ ref: 1 })
+      await api.invocationTriggers.typeHierarchySub!({ ref: 2 })
+      const methods = dispatch.mock.calls.map((c) => c[1])
+      expect(methods).toEqual(["prepareTypeHierarchy", "provideSupertypes", "provideSubtypes"])
+    })
+
+    it("registerLinkedEditingRangeProvider routes provideLinkedEditingRanges", async () => {
+      const { api, dispatch, model, pos } = setup({ ranges: [] })
+      registerLinkedEditingRangeProvider({ extensionId: "ext", selector: ["html"] })
+      await api.invocationTriggers.linkedEditingRange!(model, pos)
+      expect(dispatch).toHaveBeenCalledWith(
+        "ext",
+        "provideLinkedEditingRanges",
+        expect.objectContaining({ position: pos })
+      )
+    })
+
+    it("unregisterByExtension also clears workspace symbol providers", async () => {
+      const { dispatch } = setup([{ name: "x" }])
+      registerWorkspaceSymbolProvider({ extensionId: "ext.toRemove" })
+      registerWorkspaceSymbolProvider({ extensionId: "ext.keep" })
+      const before = await searchWorkspaceSymbols("Q")
+      expect(before).toEqual([{ name: "x" }, { name: "x" }])
+      unregisterByExtension("ext.toRemove")
+      const after = await searchWorkspaceSymbols("Q")
+      expect(after).toEqual([{ name: "x" }])
+      // dispatch was called 2+1 = 3 times total.
+      expect(dispatch).toHaveBeenCalledTimes(3)
     })
   })
 })

@@ -1,28 +1,18 @@
 "use client"
 
-// Tabbed shell for the Plugins settings section. Mirrors the pattern set by
-// `data-section.tsx` (URL-synced inner Tabs via useSyncExternalStore) so deep-
-// linking lands on the right pane, and the embedded settings dialog and the
-// stand-alone settings route share the same URL contract.
+// Tabbed shell for the Plugins settings governance panel. Four sub-tabs:
+//   overview  — counts, health, and deep-link summary cards to the
+//               /plugins workspace (installed / marketplace /
+//               permissions / devtools)
+//   scheduled — read-only summary + link to scheduler section
+//   audit     — auditPluginPointContracts() output + diagnostics panel
+//   policy    — governance mode, signature requirement, auto-update
 //
-// Eight sub-tabs cover the user-facing surface of the plugin platform:
-//   overview      — counts, governance toggle, deep-link to /plugins
-//   installed     — compact table of installed plugins (live from Dexie)
-//   marketplace   — pointer to /plugins?tab=browse (full marketplace UI is M5C)
-//   permissions   — PERMISSION_GROUPS folded UI + DANGEROUS callouts
-//   scheduled     — pointer to scheduled-tasks-section (which already supports
-//                   plugin task type) + summary of pluginScheduledJobs rows
-//   devtools      — gated by ?developerMode= or NODE_ENV=development; surfaces
-//                   the lib/plugin/devtools/ runtime hooks via plugin-extension-
-//                   slot for plugin-contributed dev panels
-//   audit         — renders auditPluginPointContracts() output (verified /
-//                   missing_proof / not_applicable) so reviewers can spot
-//                   contract drift without running tests
-//   settings      — governance mode (warn/block), signature requirement,
-//                   auto-update; rate-limit defaults are shown read-only
-//
-// All deep management (CRUD, marketplace install, conflict review, config
-// form, dependency graph, etc.) lives at /plugins and is implemented in M5B/C.
+// All workspace-level management (CRUD, install, configure, analytics,
+// devtools, permissions review, marketplace browsing) lives at
+// `/plugins`. This Settings panel intentionally exposes only the
+// governance surface so administrators can run it without leaving
+// settings.
 
 import Link from "next/link"
 import { useState } from "react"
@@ -32,16 +22,16 @@ import { useTranslations } from "next-intl"
 import {
   ArrowRightIcon,
   BoxesIcon,
-  ClockIcon,
-  ShieldCheckIcon,
   BugIcon,
-  ListChecksIcon,
-  WrenchIcon,
-  StoreIcon,
-  SettingsIcon,
-  AlertTriangleIcon,
   CheckCircle2Icon,
   CircleAlertIcon,
+  ClockIcon,
+  ListChecksIcon,
+  SettingsIcon,
+  ShieldCheckIcon,
+  StoreIcon,
+  WrenchIcon,
+  type LucideIcon,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -57,50 +47,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion"
 import { listPlugins } from "@/lib/db/plugins"
-import {
-  PERMISSION_GROUPS,
-  DANGEROUS_PERMISSIONS,
-  PERMISSION_DESCRIPTIONS,
-} from "@/lib/plugin/security/permission-guard"
 import {
   auditPluginPointContracts,
   type PluginPointGovernanceMode,
 } from "@/lib/plugin/contracts/plugin-points"
-import { PluginMarketplace } from "@/components/plugins/plugin-marketplace"
 import { PluginScheduledJobs } from "@/components/plugins/plugin-scheduled-jobs"
-import { PluginDevtoolsPanel } from "@/components/plugins/plugin-devtools-panel"
 import { PluginPointDiagnosticsPanel } from "@/components/plugins/plugin-point-diagnostics-panel"
 import { ScrollShadowRow } from "@/components/plugins/scroll-shadow-row"
 
 const PLUGINS_TAB_PARAM = "pluginsTab"
 
-export type PluginsSubTab =
-  | "overview"
-  | "installed"
-  | "marketplace"
-  | "permissions"
-  | "scheduled"
-  | "devtools"
-  | "audit"
-  | "settings"
+export type PluginsSubTab = "overview" | "scheduled" | "audit" | "policy"
 
-const TAB_IDS: PluginsSubTab[] = [
-  "overview",
-  "installed",
-  "marketplace",
-  "permissions",
-  "scheduled",
-  "devtools",
-  "audit",
-  "settings",
-]
+const TAB_IDS: PluginsSubTab[] = ["overview", "scheduled", "audit", "policy"]
 
 function isPluginsTab(value: string | null): value is PluginsSubTab {
   return !!value && (TAB_IDS as string[]).includes(value)
@@ -142,33 +102,17 @@ export function PluginsSection({ onClose }: Props) {
               <BoxesIcon className="size-3.5" />
               {t("subTabs.overview")}
             </TabsTrigger>
-            <TabsTrigger value="installed" className="gap-1.5">
-              <ListChecksIcon className="size-3.5" />
-              {t("subTabs.installed")}
-            </TabsTrigger>
-            <TabsTrigger value="marketplace" className="gap-1.5">
-              <StoreIcon className="size-3.5" />
-              {t("subTabs.marketplace")}
-            </TabsTrigger>
-            <TabsTrigger value="permissions" className="gap-1.5">
-              <ShieldCheckIcon className="size-3.5" />
-              {t("subTabs.permissions")}
-            </TabsTrigger>
             <TabsTrigger value="scheduled" className="gap-1.5">
               <ClockIcon className="size-3.5" />
               {t("subTabs.scheduled")}
-            </TabsTrigger>
-            <TabsTrigger value="devtools" className="gap-1.5">
-              <BugIcon className="size-3.5" />
-              {t("subTabs.devtools")}
             </TabsTrigger>
             <TabsTrigger value="audit" className="gap-1.5">
               <WrenchIcon className="size-3.5" />
               {t("subTabs.audit")}
             </TabsTrigger>
-            <TabsTrigger value="settings" className="gap-1.5">
+            <TabsTrigger value="policy" className="gap-1.5">
               <SettingsIcon className="size-3.5" />
-              {t("subTabs.settings")}
+              {t("subTabs.policy")}
             </TabsTrigger>
           </TabsList>
         </ScrollShadowRow>
@@ -176,26 +120,14 @@ export function PluginsSection({ onClose }: Props) {
         <TabsContent value="overview" className="mt-4">
           <OverviewTab onClose={onClose} />
         </TabsContent>
-        <TabsContent value="installed" className="mt-4">
-          <InstalledTab onClose={onClose} />
-        </TabsContent>
-        <TabsContent value="marketplace" className="mt-4">
-          <MarketplaceTab onClose={onClose} />
-        </TabsContent>
-        <TabsContent value="permissions" className="mt-4">
-          <PermissionsTab />
-        </TabsContent>
         <TabsContent value="scheduled" className="mt-4">
           <ScheduledTab />
-        </TabsContent>
-        <TabsContent value="devtools" className="mt-4">
-          <DevtoolsTab />
         </TabsContent>
         <TabsContent value="audit" className="mt-4">
           <AuditTab />
         </TabsContent>
-        <TabsContent value="settings" className="mt-4">
-          <SettingsTab />
+        <TabsContent value="policy" className="mt-4">
+          <PolicyTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -203,12 +135,15 @@ export function PluginsSection({ onClose }: Props) {
 }
 
 // =============================================================================
-// Overview tab
+// Overview tab — counts, health, deep-link summary cards
 // =============================================================================
+
+type DeepLinkKey = "installed" | "marketplace" | "permissions" | "devtools"
 
 function OverviewTab({ onClose }: { onClose?: () => void }) {
   const t = useTranslations("settings.plugins.overview")
   const plugins = useLiveQuery(() => listPlugins(), [])
+  const isDev = typeof process !== "undefined" && process.env.NODE_ENV === "development"
 
   const counts = (() => {
     const total = plugins?.length ?? 0
@@ -218,6 +153,18 @@ function OverviewTab({ onClose }: { onClose?: () => void }) {
       plugins?.filter((p) => p.status === "loading" || p.status === "enabling").length ?? 0
     return { total, enabled, errored, loading }
   })()
+
+  const cards: Array<{
+    key: DeepLinkKey
+    icon: LucideIcon
+    href: string
+    show: boolean
+  }> = [
+    { key: "installed", icon: ListChecksIcon, href: "/plugins?tab=installed", show: true },
+    { key: "marketplace", icon: StoreIcon, href: "/plugins?tab=browse", show: true },
+    { key: "permissions", icon: ShieldCheckIcon, href: "/plugins?tab=permissions", show: true },
+    { key: "devtools", icon: BugIcon, href: "/plugins?tab=devtools", show: isDev },
+  ]
 
   return (
     <Card className="p-4 space-y-4">
@@ -238,6 +185,22 @@ function OverviewTab({ onClose }: { onClose?: () => void }) {
 
       <p className="text-xs text-muted-foreground">{t("hint")}</p>
 
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {cards
+          .filter((c) => c.show)
+          .map((card) => (
+            <DeepLinkCard
+              key={card.key}
+              icon={card.icon}
+              title={t(`${card.key}Card.title`)}
+              hint={t(`${card.key}Card.hint`)}
+              cta={t(`${card.key}Card.cta`)}
+              href={card.href}
+              onNavigate={onClose}
+            />
+          ))}
+      </div>
+
       <div className="flex justify-end">
         <Button asChild size="sm" onClick={() => onClose?.()}>
           <Link href="/plugins">
@@ -250,201 +213,31 @@ function OverviewTab({ onClose }: { onClose?: () => void }) {
   )
 }
 
-// =============================================================================
-// Installed tab
-// =============================================================================
+interface DeepLinkCardProps {
+  icon: LucideIcon
+  title: string
+  hint: string
+  cta: string
+  href: string
+  onNavigate?: () => void
+}
 
-function InstalledTab({ onClose }: { onClose?: () => void }) {
-  const t = useTranslations("settings.plugins.installed")
-  const plugins = useLiveQuery(() => listPlugins(), [])
-
-  if (!plugins) {
-    return <p className="text-sm text-muted-foreground">{t("loading")}</p>
-  }
-
-  if (plugins.length === 0) {
-    return (
-      <Card className="p-6 text-center space-y-3">
-        <p className="text-sm text-muted-foreground">{t("empty")}</p>
-        <Button asChild size="sm" variant="outline" onClick={() => onClose?.()}>
-          <Link href="/plugins?tab=browse">{t("browseMarketplace")}</Link>
-        </Button>
-      </Card>
-    )
-  }
-
+function DeepLinkCard({ icon: Icon, title, hint, cta, href, onNavigate }: DeepLinkCardProps) {
   return (
-    <Card>
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("colName")}</TableHead>
-              <TableHead className="hidden md:table-cell">{t("colVersion")}</TableHead>
-              <TableHead>{t("colSource")}</TableHead>
-              <TableHead>{t("colStatus")}</TableHead>
-              <TableHead className="hidden md:table-cell text-right">
-                {t("colCapabilities")}
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {plugins.map((p) => (
-              <TableRow key={p.id}>
-                <TableCell className="font-medium">{p.name}</TableCell>
-                <TableCell className="hidden md:table-cell text-muted-foreground">
-                  {p.version}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="outline" className="text-xs">
-                    {p.source}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <PluginStatusBadge status={p.status} enabled={p.enabled} />
-                </TableCell>
-                <TableCell className="hidden md:table-cell text-right text-xs text-muted-foreground">
-                  {p.capabilities.length}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+    <Card className="p-3 space-y-2">
+      <div className="flex items-center gap-1.5 text-sm font-semibold">
+        <Icon className="size-3.5" />
+        {title}
       </div>
-      <div className="border-t p-3 flex justify-end">
-        <Button asChild size="sm" variant="ghost" onClick={() => onClose?.()}>
-          <Link href="/plugins">
-            {t("openFullManagement")}
+      <p className="text-xs text-muted-foreground">{hint}</p>
+      <div className="flex justify-end">
+        <Button asChild size="sm" variant="outline" onClick={() => onNavigate?.()}>
+          <Link href={href}>
+            {cta}
             <ArrowRightIcon className="ml-1.5 size-3.5" />
           </Link>
         </Button>
       </div>
-    </Card>
-  )
-}
-
-function PluginStatusBadge({ status, enabled }: { status: string; enabled: boolean }) {
-  const t = useTranslations("settings.plugins.statusBadge")
-  if (status === "error") {
-    return (
-      <Badge variant="destructive" className="text-xs gap-1">
-        <CircleAlertIcon className="size-3" /> {t("error")}
-      </Badge>
-    )
-  }
-  if (!enabled) {
-    return (
-      <Badge variant="outline" className="text-xs">
-        {t("disabled")}
-      </Badge>
-    )
-  }
-  if (status === "enabled" || status === "loaded") {
-    return (
-      <Badge variant="secondary" className="text-xs gap-1">
-        <CheckCircle2Icon className="size-3" /> {t("enabled")}
-      </Badge>
-    )
-  }
-  return (
-    <Badge variant="outline" className="text-xs">
-      {status}
-    </Badge>
-  )
-}
-
-// =============================================================================
-// Marketplace tab
-// =============================================================================
-
-function MarketplaceTab({ onClose }: { onClose?: () => void }) {
-  const t = useTranslations("settings.plugins.marketplace")
-  return (
-    <div className="space-y-3">
-      <Card className="p-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="space-y-0.5 min-w-0">
-          <h3 className="text-sm font-semibold flex items-center gap-1.5">
-            <StoreIcon className="size-3.5" />
-            {t("title")}
-          </h3>
-          <p className="text-xs text-muted-foreground">{t("hint")}</p>
-        </div>
-        <Button asChild size="sm" variant="outline" onClick={() => onClose?.()}>
-          <Link href="/plugins?tab=browse">
-            {t("openButton")}
-            <ArrowRightIcon className="ml-1.5 size-3.5" />
-          </Link>
-        </Button>
-      </Card>
-      <PluginMarketplace />
-    </div>
-  )
-}
-
-// =============================================================================
-// Permissions tab
-// =============================================================================
-
-function PermissionsTab() {
-  const t = useTranslations("settings.plugins.permissions")
-  const plugins = useLiveQuery(() => listPlugins(), [])
-
-  return (
-    <Card className="p-4 space-y-3">
-      <p className="text-xs text-muted-foreground">{t("hint")}</p>
-
-      <Accordion type="multiple" className="space-y-2">
-        {Object.entries(PERMISSION_GROUPS).map(([groupName, perms]) => (
-          <AccordionItem key={groupName} value={groupName} className="border rounded-md px-3">
-            <AccordionTrigger className="text-sm">
-              <div className="flex items-center gap-2">
-                <span className="font-medium">{t(`groups.${groupName}` as never)}</span>
-                <Badge variant="outline" className="text-xs">
-                  {perms.length}
-                </Badge>
-                {groupName === "dangerous" && (
-                  <Badge variant="destructive" className="text-xs gap-1">
-                    <AlertTriangleIcon className="size-3" />
-                    {t("dangerousLabel")}
-                  </Badge>
-                )}
-              </div>
-            </AccordionTrigger>
-            <AccordionContent className="space-y-2 pt-2">
-              {perms.map((perm) => {
-                const granted = (plugins ?? []).filter((p) =>
-                  (p.manifest as { permissions?: string[] })?.permissions?.includes(perm)
-                )
-                const isDangerous = DANGEROUS_PERMISSIONS.includes(perm)
-                return (
-                  <div
-                    key={perm}
-                    className="flex items-start justify-between gap-3 py-1.5 border-b last:border-b-0"
-                  >
-                    <div className="space-y-0.5 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <code className="text-xs font-mono">{perm}</code>
-                        {isDangerous && (
-                          <AlertTriangleIcon
-                            className="size-3 text-destructive shrink-0"
-                            aria-label={t("dangerousLabel")}
-                          />
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {PERMISSION_DESCRIPTIONS[perm] ?? perm}
-                      </p>
-                    </div>
-                    <Badge variant="outline" className="text-xs shrink-0">
-                      {t("grantedTo", { count: granted.length })}
-                    </Badge>
-                  </div>
-                )
-              })}
-            </AccordionContent>
-          </AccordionItem>
-        ))}
-      </Accordion>
     </Card>
   )
 }
@@ -473,45 +266,6 @@ function ScheduledTab() {
         </Button>
       </Card>
       <PluginScheduledJobs />
-    </div>
-  )
-}
-
-// =============================================================================
-// Devtools tab
-// =============================================================================
-
-function DevtoolsTab() {
-  const t = useTranslations("settings.plugins.devtools")
-  const isDev = typeof process !== "undefined" && process.env.NODE_ENV === "development"
-
-  if (!isDev) {
-    return (
-      <Card className="p-6 text-center space-y-3">
-        <BugIcon className="size-10 mx-auto text-muted-foreground" />
-        <p className="text-xs text-muted-foreground">{t("gateHint")}</p>
-      </Card>
-    )
-  }
-
-  return (
-    <div className="space-y-3">
-      <Card className="p-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="space-y-0.5 min-w-0">
-          <h3 className="text-sm font-semibold flex items-center gap-1.5">
-            <BugIcon className="size-3.5" />
-            {t("title")}
-          </h3>
-          <p className="text-xs text-muted-foreground">{t("hint")}</p>
-        </div>
-        <Button asChild size="sm" variant="outline">
-          <Link href="/plugins?tab=devtools">
-            {t("openButton")}
-            <ArrowRightIcon className="ml-1.5 size-3.5" />
-          </Link>
-        </Button>
-      </Card>
-      <PluginDevtoolsPanel />
     </div>
   )
 }
@@ -584,7 +338,7 @@ function AuditTab() {
 }
 
 // =============================================================================
-// Settings tab — global plugin policy
+// Policy tab — global plugin policy
 // =============================================================================
 
 const POLICY_STORAGE_KEY = "cognia.plugins.policy"
@@ -626,7 +380,7 @@ function writePolicy(policy: PluginsPolicy) {
   }
 }
 
-function SettingsTab() {
+function PolicyTab() {
   const t = useTranslations("settings.plugins.policy")
   // Lazy init from localStorage (fresh per mount). useSyncExternalStore would
   // need a stable snapshot reference; localStorage policy doesn't change

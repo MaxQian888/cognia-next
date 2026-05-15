@@ -3218,71 +3218,45 @@
     },
     "plugins": {
       "title": "插件",
-      "description": "浏览、安装、配置并治理插件。查看每个插件的权限、定时任务、devtools 与契约审计。",
+      "description": "治理插件：查看插件数量与运行健康度、定时任务、契约审计与全局策略。完整工作台位于 /plugins。",
       "subTabs": {
         "overview": "概览",
-        "installed": "已安装",
-        "marketplace": "市场",
-        "permissions": "权限",
         "scheduled": "定时任务",
-        "devtools": "开发工具",
         "audit": "审计",
-        "settings": "设置"
-      },
-      "statusBadge": {
-        "enabled": "已启用",
-        "disabled": "已停用",
-        "error": "错误"
+        "policy": "策略"
       },
       "overview": {
         "badgeTotal": "共 {count}",
         "badgeEnabled": "{count} 已启用",
         "badgeLoading": "{count} 加载中",
         "badgeError": "{count} 异常",
-        "hint": "管理已安装插件、浏览市场，并查看哪些扩展正在运行。",
-        "manageButton": "进入插件管理"
-      },
-      "installed": {
-        "loading": "正在加载已安装的插件…",
-        "empty": "尚未安装任何插件。",
-        "browseMarketplace": "浏览市场",
-        "colName": "名称",
-        "colVersion": "版本",
-        "colSource": "来源",
-        "colStatus": "状态",
-        "colCapabilities": "能力数",
-        "openFullManagement": "打开完整管理"
-      },
-      "marketplace": {
-        "title": "插件市场",
-        "hint": "在统一的市场中搜索并安装插件。技能与插件共享同一个商店——按 entry 类型自动分流到对应的安装路径。",
-        "openButton": "打开市场"
-      },
-      "permissions": {
-        "hint": "manifest 中声明的权限会在安装时静默授权；可选权限与运行时新申请会弹窗确认。危险权限会单独高亮。",
-        "dangerousLabel": "危险",
-        "grantedTo": "{count} 个插件",
-        "groups": {
-          "filesystem": "文件系统",
-          "network": "网络",
-          "clipboard": "剪贴板",
-          "media": "媒体",
-          "database": "数据库",
-          "settings": "设置",
-          "session": "会话",
-          "dangerous": "危险权限"
+        "hint": "下方展示插件数量与健康状况，需要管理、市场、权限或开发工具时请进入完整工作台。",
+        "manageButton": "进入插件工作台",
+        "installedCard": {
+          "title": "已安装",
+          "hint": "启用、停用、配置或卸载插件。",
+          "cta": "打开已安装"
+        },
+        "marketplaceCard": {
+          "title": "市场",
+          "hint": "在统一市场中搜索并安装插件。",
+          "cta": "打开市场"
+        },
+        "permissionsCard": {
+          "title": "权限",
+          "hint": "审查每个插件持有的权限，重点关注危险权限。",
+          "cta": "打开权限"
+        },
+        "devtoolsCard": {
+          "title": "开发工具",
+          "hint": "查看实时消息总线、Hook 历史、沙箱状态并触发热重载（仅开发版本）。",
+          "cta": "打开开发工具"
         }
       },
       "scheduled": {
         "title": "插件定时任务",
         "hint": "插件贡献的定时任务与其它定时任务共享同一治理面板。前往调度器配置 cron、间隔与确认策略。",
         "openSchedulerButton": "打开调度器"
-      },
-      "devtools": {
-        "title": "插件开发工具",
-        "hint": "查看实时消息总线、Hook 历史、沙箱状态，并对开发中的插件触发热重载。",
-        "gateHint": "插件开发工具仅在开发版本中可用。运行 `pnpm dev` 或开启开发者模式即可访问。",
-        "openButton": "打开开发工具"
       },
       "audit": {
         "title": "契约审计",
@@ -3320,6 +3294,17 @@
         "autoUpdate": "自动更新",
         "autoUpdateHint": "市场更新可用时自动应用。",
         "rateLimitsNote": "速率限制与沙箱默认值在全局配置；每个插件的实际用量在 /plugins 中可见。"
+      },
+      "dataManagement": {
+        "emptyForAll": "尚无插件声明自定义数据表。",
+        "emptyForPlugin": "该插件未声明任何自定义数据表。",
+        "deleteButton": "删除数据",
+        "deleteDialog": {
+          "title": "删除插件数据？",
+          "description": "这将永久删除 {pluginId} 的所有 IndexedDB 数据。插件本身不会被卸载，但所有已存储的记录将被擦除，无法恢复。",
+          "cancel": "取消",
+          "confirm": "删除"
+        }
       }
     },
     "remoteControl": {
@@ -4319,6 +4304,9 @@
       "confirm": "卸载"
     },
     "detail": {
+      "tabGeneral": "总览",
+      "tabContributed": "贡献",
+      "tabData": "数据",
       "tabOverview": "概览",
       "tabManifest": "清单",
       "tabCapabilities": "能力",
@@ -4349,7 +4337,24 @@
       "optional": "可选权限",
       "optionalEmpty": "无可选权限。",
       "dependencies": "依赖",
-      "notFound": "未找到该插件。"
+      "notFound": "未找到该插件。",
+      "contributed": {
+        "empty": "此插件尚未注册任何运行时贡献。",
+        "countBadge": "{count}",
+        "tools": "Agent 工具",
+        "modes": "Agent 模式",
+        "commands": "命令",
+        "a2uiComponents": "A2UI 组件",
+        "a2uiTemplates": "A2UI 模板",
+        "themes": "主题",
+        "mcpServerPresets": "MCP 服务预设",
+        "skills": "技能",
+        "nativeAnthropicTools": "原生 Anthropic 工具",
+        "externalAgentPresets": "外部 Agent 预设",
+        "connectors": "连接器适配器",
+        "workflowNodes": "工作流节点",
+        "workflowTriggers": "工作流触发器"
+      }
     },
     "permissionReview": {
       "description": "查看该插件声明的、当前已授予的权限，并按需调整运行时授权。危险权限会高亮显示。",
@@ -4469,7 +4474,34 @@
         "degradedHint": "正在显示上次同步的本地缓存，安装与更新操作在网络恢复前不可用。",
         "demoTitle": "演示市场",
         "demoHint": "你正在浏览示例目录，在此模式下安装为模拟，不会真正运行插件代码。"
-      }
+      },
+      "installCancelled": {
+        "conflict": "已在冲突审查步骤取消安装。",
+        "permission": "已在权限审查步骤取消安装。",
+        "config": "已在配置步骤取消安装。"
+      },
+      "installFailed": "安装失败：{message}",
+      "installSucceeded": "{name} 已安装。"
+    },
+    "preInstall": {
+      "title": "安装 {name} 前确认",
+      "description": "在 {name} 写入插件库之前依次确认冲突、权限与必填配置。",
+      "stepConflict": "冲突",
+      "stepPermission": "权限",
+      "stepConfig": "配置",
+      "stepBadge": "第 {current} 步 / 共 {total} 步",
+      "conflictHint": "本次安装将覆盖或影响以下项目，确认无误后再继续。",
+      "conflictAlreadyInstalled": "已安装该插件的 {version} 版本。",
+      "permissionsHint": "插件声明了以下权限。可选权限稍后仍可在权限页撤销。",
+      "permissionsDeclared": "manifest 声明",
+      "permissionsOptional": "可选",
+      "permissionsNone": "未声明权限。",
+      "configHint": "请填写必填的配置项，之后插件才会启用。",
+      "configNone": "此插件无需额外配置。",
+      "back": "上一步",
+      "next": "下一步",
+      "confirm": "安装",
+      "cancel": "取消"
     },
     "batchActions": {
       "ariaLabel": "批量操作",
@@ -10285,22 +10317,67 @@
       "title": "收件箱",
       "viewModeAria": "视图模式",
       "adapters": "适配器",
-      "noAdapters": "未配置适配器"
+      "noAdapters": "未配置适配器",
+      "viewModes": {
+        "by-adapter": "按适配器",
+        "by-platform": "按平台",
+        "unified": "统一视图"
+      },
+      "recentEmpty": "暂无会话"
     },
     "modeSwitcher": {
-      "aria": "切换模式"
+      "aria": "切换模式",
+      "modes": {
+        "auto": "自动",
+        "manual": "手动",
+        "draft": "草稿"
+      }
     },
     "outboundStatus": {
-      "retry": "重试"
+      "retry": "重试",
+      "status": {
+        "pending": "排队中",
+        "sending": "发送中",
+        "sent": "已发送",
+        "failed": "失败",
+        "deadlettered": "已死信"
+      },
+      "unknownError": "未知错误"
     },
     "policyInfo": {
       "aria": "策略信息",
-      "title": "策略"
+      "title": "策略",
+      "rules": {
+        "private-default": "全部私聊消息",
+        "self-mention": "@ 提及",
+        "reply-to-bot": "回复机器人",
+        "slash-command": "命令：{names}",
+        "keyword": "关键词：{names}",
+        "user-allowlist": "用户：{names}",
+        "channel-allowlist": "频道：{names}",
+        "unknown": "未知规则"
+      },
+      "blockers": {
+        "rate-limit": "每用户每分钟限制 {perUserPerMin} 条",
+        "cooldown-after-bot-reply": "机器人回复后 {secs} 秒冷却",
+        "user-blocklist": "屏蔽用户：{names}",
+        "channel-blocklist": "屏蔽频道：{names}",
+        "keyword-blocklist": "屏蔽关键词：{names}",
+        "unknown": "未知拦截器"
+      },
+      "noRules": "未配置触发规则。"
     },
     "conversation": {
-      "loading": "加载中…",
-      "sessionLabel": "会话：{id}",
-      "conversationKeyLabel": "对话：{key}"
+      "loading": "加载中…"
+    },
+    "unreadPill": {
+      "aria": "{count} 条未读"
+    },
+    "extensionPoints": {
+      "sidebarSection": "收件箱侧栏分区",
+      "conversationActions": "会话行操作",
+      "composerActions": "收件箱输入框操作",
+      "draftActions": "草稿审阅操作"
     }
   },
   "connectors": {
@@ -10312,6 +10389,36 @@
       "primaryBadge": "主",
       "merge": "合并",
       "cancel": "取消"
+    },
+    "audit": {
+      "kind": {
+        "delivery.success": "投递成功",
+        "delivery.error": "投递错误",
+        "delivery.deadlettered": "投递失败（死信）",
+        "delivery.downgraded": "投递降级",
+        "inbound.received": "已接收消息",
+        "inbound.deduped": "重复消息已忽略",
+        "inbound.policy_blocked": "策略已拦截",
+        "inbound.signature_failed": "签名校验失败",
+        "inbound.edited": "消息已编辑",
+        "inbound.deleted": "消息已撤回",
+        "inbound.read_indicator": "已读回执",
+        "inbound.member_added": "成员加入",
+        "inbound.member_removed": "成员退出",
+        "inbound.deferred_quiet_hours": "已延后（勿扰时段）",
+        "inbound.deferred_muted": "已延后（已静音）",
+        "inbound.deferred_manual_mode": "已延后（手动模式）",
+        "outbound.enqueued": "已加入发送队列",
+        "outbound.ai_run_enqueued": "AI 回复已加入队列",
+        "circuit.opened": "熔断器已打开",
+        "circuit.half_opened": "熔断器半开",
+        "circuit.closed": "熔断器已关闭",
+        "rate_limit.tripped": "已触发限流",
+        "credential.refreshed": "凭据已刷新",
+        "adapter.started": "适配器已启动",
+        "adapter.stopped": "适配器已停止",
+        "adapter.error": "适配器错误"
+      }
     }
   }
 }

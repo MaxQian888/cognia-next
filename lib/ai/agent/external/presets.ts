@@ -187,6 +187,23 @@ export function getDynamicPresetEntry(id: string): RegisteredPreset | undefined 
   return dynamicPresets.get(id)
 }
 
+/**
+ * Returns every dynamically-registered preset entry (`id + config + pluginId`)
+ * in registration order. Used by the Plugin Detail Sheet's Contributed tab to
+ * enumerate the presets a single plugin contributed.
+ */
+export function listDynamicPresetEntries(): Array<{
+  id: string
+  config: ExternalAgentPresetConfig
+  pluginId?: string
+}> {
+  return Array.from(dynamicPresets, ([id, entry]) => ({
+    id,
+    config: entry.config,
+    pluginId: entry.pluginId,
+  }))
+}
+
 // ============================================================================
 // Preset Utilities
 // ============================================================================

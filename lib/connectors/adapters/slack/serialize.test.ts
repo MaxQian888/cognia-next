@@ -6,6 +6,8 @@ import {
   serializeDeleteMessage,
   serializeReaction,
   serializeTyping,
+  serializeAssistantStatus,
+  serializeAssistantSuggestedPrompts,
 } from "./serialize"
 
 function makeRef(channelId: string, threadTs?: string): Record<string, unknown> {
@@ -98,9 +100,59 @@ describe("serializeReaction", () => {
   })
 })
 
-describe("serializeTyping", () => {
-  it("returns null (no-op) in Phase 1", () => {
+describe("serializeTyping (deprecated alias)", () => {
+  it("still returns null so existing call sites remain safe", () => {
     expect(serializeTyping("C123")).toBeNull()
     expect(serializeTyping("C123", "1714900000.000100")).toBeNull()
+  })
+})
+
+describe("serializeAssistantStatus", () => {
+  it("builds POST assistant.threads.setStatus with channel_id + thread_ts + status", () => {
+    const call = serializeAssistantStatus("C123", "1714900000.000100", "is typing…")
+    expect(call.method).toBe("POST")
+    expect(call.url).toBe("https://slack.com/api/assistant.threads.setStatus")
+    expect(call.payload).toEqual({
+      channel_id: "C123",
+      thread_ts: "1714900000.000100",
+      status: "is typing…",
+    })
+  })
+
+  it("uses an empty status string to clear the indicator", () => {
+    const call = serializeAssistantStatus("C123", "1.0", "")
+    expect(call.payload["status"]).toBe("")
+  })
+})
+
+describe("serializeAssistantSuggestedPrompts", () => {
+  it("builds POST assistant.threads.setSuggestedPrompts with the prompts array", () => {
+    const prompts = [
+      { title: "Summarise this", message: "Summarise the thread" },
+      { title: "Plan", message: "Outline next steps" },
+    ]
+    const call = serializeAssistantSuggestedPrompts("C123", "1.0", prompts, "Quick actions")
+    expect(call.method).toBe("POST")
+    expect(call.url).toBe("https://slack.com/api/assistant.threads.setSuggestedPrompts")
+    expect(call.payload).toEqual({
+      channel_id: "C123",
+      thread_ts: "1.0",
+      prompts,
+      title: "Quick actions",
+    })
+  })
+
+  it("trims prompts to Slack's hard cap of 4", () => {
+    const prompts = Array.from({ length: 6 }, (_, i) => ({
+      title: `t${i}`,
+      message: `m${i}`,
+    }))
+    const call = serializeAssistantSuggestedPrompts("C123", "1.0", prompts)
+    expect((call.payload["prompts"] as unknown[]).length).toBe(4)
+  })
+
+  it("omits the title field when not provided", () => {
+    const call = serializeAssistantSuggestedPrompts("C123", "1.0", [{ title: "x", message: "y" }])
+    expect("title" in call.payload).toBe(false)
   })
 })

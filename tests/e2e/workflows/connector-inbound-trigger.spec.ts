@@ -16,7 +16,7 @@
  */
 
 import { expect, test } from "@playwright/test"
-import { createTelegramMockServer, makeTelegramUpdate } from "../connectors/telegram-mock-server"
+import { createTelegramMockServer } from "../connectors/telegram-mock-server"
 
 const MOCK_PORT = 19877
 const APP_BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000"
@@ -52,18 +52,6 @@ test.describe("connector.inbound → workflow trigger", () => {
     await expect(page.getByTestId("workflow-audit-tab")).toBeVisible({ timeout: 10_000 })
   })
 
-  // ── Tauri-only end-to-end ───────────────────────────────────────────────
-
-  test.skip("Tauri-only: inbound Telegram message triggers a workflow that sends a reply", async () => {
-    // Documented flow:
-    //   1. Plugin runtime registers a workflow with `trigger.connector.inbound`
-    //      bound to an `adapterId`.
-    //   2. Adapter receives the mock update; `dispatchInboundFull` runs.
-    //   3. The new M2 fan-out finds the matching workflow and dispatches a
-    //      trigger event through `lib/workflow/runtime/trigger-bridge`.
-    //   4. The workflow runs (`action.character.send` posts back).
-    //   5. The mock server records the reply.
-    void mock?.start
-    void makeTelegramUpdate
-  })
+  // Full end-to-end inbound-trigger flow lives in
+  // tests/e2e/tauri/connector-inbound-trigger.spec.ts (PLAYWRIGHT_TAURI_DRIVER=1).
 })

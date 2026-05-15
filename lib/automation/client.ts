@@ -15,18 +15,25 @@
 import { transport } from "@/lib/tauri"
 
 import type {
+  ButtonTransition,
   Capabilities,
   ClickOpts,
   ClickTarget,
+  DragOpts,
   ElementInfo,
   ElementRef,
   KeyChord,
   Locator,
+  MouseButton,
   PatternKind,
+  Point,
   Screenshot,
   ScreenshotOpts,
+  ScrollOpts,
+  ScrollTarget,
   TreeOpts,
   TypeOpts,
+  WindowOp,
 } from "./types"
 
 export type Surface = "workflow" | "computerUse" | "mcp" | "plugin"
@@ -100,6 +107,69 @@ export const desktop = {
     })
   },
 
+  // ── M5 completion: direct primitives that match Anthropic computer_20251124 ──
+
+  mouseMove(point: Point, ctx: CallContext = {}): Promise<void> {
+    return transport.call<void>("desktop_mouse_move", { args: { point, ctx } })
+  },
+
+  drag(from: Point, to: Point, opts: DragOpts = {}, ctx: CallContext = {}): Promise<void> {
+    return transport.call<void>("desktop_drag", {
+      args: { from, to, opts, ctx },
+    })
+  },
+
+  scroll(target: ScrollTarget, opts: ScrollOpts = {}, ctx: CallContext = {}): Promise<void> {
+    return transport.call<void>("desktop_scroll", {
+      args: { target, opts, ctx },
+    })
+  },
+
+  holdKey(chord: KeyChord, durationMs: number, ctx: CallContext = {}): Promise<void> {
+    return transport.call<void>("desktop_hold_key", {
+      args: { chord, durationMs, ctx },
+    })
+  },
+
+  mouseButton(
+    button: MouseButton,
+    transition: ButtonTransition,
+    ctx: CallContext = {}
+  ): Promise<void> {
+    return transport.call<void>("desktop_mouse_button", {
+      args: { button, transition, ctx },
+    })
+  },
+
+  /**
+   * Direct WindowOp dispatch — replaces the workflow executor's previous
+   * `invokePattern("window", { op: "focus" })` hack. The backend uses
+   * `UIWindowPattern.set_window_visual_state` for minimize/maximize/restore
+   * and `UITransformPattern` for resize; focus/close use UIElement.set_focus
+   * + Alt+F4.
+   */
+  windowOp(target: ElementRef, op: WindowOp, ctx: CallContext = {}): Promise<void> {
+    return transport.call<void>("desktop_window_op", {
+      args: { target, op, ctx },
+    })
+  },
+
+  /**
+   * Reply to a consent-request event raised by `automation:consent-request`.
+   * `persist == true` means "always allow this kind of call for the rest of
+   * the session". The `prompt` field MUST match the one received in the
+   * event payload so the broker can register the session grant against the
+   * same tuple.
+   */
+  consentRespond(args: {
+    id: string
+    allow: boolean
+    persist?: boolean
+    prompt?: ConsentPromptPayload
+  }): Promise<void> {
+    return transport.call<void>("automation_consent_respond", { args })
+  },
+
   /** Snapshot the current in-memory audit ring (capped at 5000). */
   auditSnapshot(): Promise<AuditEntry[]> {
     return transport.call<AuditEntry[]>("automation_audit_snapshot", {})
@@ -124,6 +194,29 @@ export const desktop = {
 // --- Types mirrored from `src-tauri/src/automation/{audit,permission}.rs` ---
 // Defined here rather than in types.ts because they're consumer-side only
 // (Tauri command return shapes, not part of the core element/locator model).
+
+/**
+ * Payload of the `automation:consent-request` Tauri event. The renderer-side
+ * overlay receives this and renders a Allow once / Always allow / Reject
+ * floating card. The same `prompt` body must be echoed back to
+ * `desktop.consentRespond` so the broker can register a session grant.
+ */
+export interface ConsentPromptPayload {
+  command: string
+  surface: Surface
+  pluginId: string | null
+  processName: string | null
+  windowTitle: string | null
+}
+
+/**
+ * Full event payload — includes the broker id the renderer must pass back
+ * to `desktop.consentRespond`, plus the timeout the broker honors.
+ */
+export interface ConsentRequestEvent extends ConsentPromptPayload {
+  id: string
+  timeoutMs: number
+}
 
 export type AuditDecision = "allow" | "deny" | "consent"
 

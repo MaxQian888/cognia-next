@@ -24,12 +24,22 @@ export interface OneBotV11Sender {
 export interface OneBotV11Event {
   time: number
   self_id: number
-  post_type: "message" | "notice" | "request" | "meta_event"
+  /**
+   * `message` is normal inbound, `notice` carries recall events,
+   * `message_sent` is the bot's own echo (we ignore it). go-cqhttp also
+   * uses the literal string `"message_sent"` here even though the OneBot
+   * spec only defines four post_types — keep it stringly-typed for safety.
+   */
+  post_type: "message" | "notice" | "request" | "meta_event" | "message_sent" | string
   message_type?: "private" | "group"
+  /** Notice subtype — `group_recall` / `friend_recall` map to delete events. */
+  notice_type?: string
   sub_type?: string
   message_id?: number
   user_id?: number
   group_id?: number
+  /** Notice-only: id of the message being recalled. */
+  recalled_message_id?: number
   /** Array format or CQ-code string */
   message?: OneBotSegment[] | string
   raw_message?: string
@@ -63,14 +73,83 @@ function normalizeMessageSegments(message: OneBotSegment[] | string | undefined)
 }
 
 /**
+ * Build a synthetic delete event from a v11 `notice` recall payload.
+ * `group_recall` carries `message_id` (and optionally `group_id`);
+ * `friend_recall` carries `message_id` and `user_id`. We don't have full
+ * sender / segment metadata on a recall — the bus only needs
+ * `replacesMessageId` + `conversationKey` to soft-delete the row.
+ */
+function v11RecallToEvent(adapterId: string, event: OneBotV11Event): NormalizedInboundEvent | null {
+  // Some implementations put the id under `message_id`; others under
+  // `recalled_message_id`. Accept both.
+  const recalledId = event.recalled_message_id ?? event.message_id
+  if (recalledId === undefined) return null
+  const isGroup = event.notice_type === "group_recall"
+  const userId = event.user_id ?? 0
+  const groupId = event.group_id ?? 0
+  const chatKey = isGroup ? `g:${groupId}` : `p:${userId}`
+  const conversationKey = buildConversationKey("onebot", adapterId, chatKey)
+
+  return {
+    platform: "onebot",
+    adapterId,
+    selfId: String(event.self_id),
+    messageId: String(recalledId),
+    conversationRef: {
+      platform: "onebot",
+      adapterId,
+      chatKey,
+      messageType: isGroup ? "group" : "private",
+      groupId: isGroup ? groupId : undefined,
+      userId,
+    },
+    conversationKey,
+    sender: {
+      id: `onebot:${userId}`,
+      platform: "onebot",
+      adapterId,
+      remoteUserId: String(userId),
+    },
+    channel: {
+      id: conversationKey,
+      kind: isGroup ? "group" : "private",
+      platformChannelId: isGroup ? String(groupId) : String(userId),
+    },
+    segments: [],
+    plainText: "",
+    mentions: { selfMentioned: false, users: [] },
+    timestamp: event.time * 1000,
+    raw: event,
+    kind: "delete",
+    replacesMessageId: String(recalledId),
+  }
+}
+
+/**
  * Parse a raw OneBot v11 event payload into a NormalizedInboundEvent.
  *
- * Returns null for non-message post_types (Phase 1).
+ * - `post_type === "message"`           → kind="create"
+ * - `post_type === "notice"` with
+ *    notice_type=group_recall|friend_recall → kind="delete"
+ * - `post_type === "message_sent"`      → null (echo of our own send)
+ * - everything else                     → null
  */
 export function parseV11Event(
   adapterId: string,
   event: OneBotV11Event
 ): NormalizedInboundEvent | null {
+  // ── Echo filter — bot's own outbound replays as message_sent in
+  // go-cqhttp. We never want to treat it as inbound.
+  if (event.post_type === "message_sent") return null
+
+  // ── Recall (delete) ──────────────────────────────────────────────────
+  if (
+    event.post_type === "notice" &&
+    (event.notice_type === "group_recall" || event.notice_type === "friend_recall")
+  ) {
+    return v11RecallToEvent(adapterId, event)
+  }
+
   if (event.post_type !== "message") return null
 
   const messageType = event.message_type ?? "private"

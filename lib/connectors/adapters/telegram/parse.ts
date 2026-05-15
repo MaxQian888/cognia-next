@@ -1,10 +1,14 @@
 /**
  * Telegram update → NormalizedInboundEvent parser.
  *
- * Only handles the subset of update types relevant to Phase 1:
- * - message (text, photo with caption)
- * - edited_message → null (TODO: Phase 2 edit events)
- * - callback_query → null (TODO: Phase 2 interactive flows)
+ * Handles the four update types Phase 1 + Phase 2 surface:
+ * - `message`         → kind="create" with text + photo segments.
+ * - `channel_post`    → kind="create" (anonymous channel post).
+ * - `edited_message`  → kind="edit" with `replacesMessageId` set so the bus
+ *                       can update the existing StoredMessage in place.
+ * - `callback_query`  → kind="create" with a single text segment carrying
+ *                       the button payload. Treated as a fresh message so
+ *                       downstream gates (rate-limit, dedup) apply normally.
  */
 
 import type { NormalizedInboundEvent, PlatformIdentity } from "@/types/connectors/event"
@@ -60,6 +64,8 @@ export interface TelegramMessage {
   entities?: TelegramMessageEntity[]
   photo?: TelegramPhotoSize[]
   reply_to_message?: TelegramMessage
+  /** Set on edited_message updates — Telegram's wall-clock for the edit. */
+  edit_date?: number
 }
 
 export interface TelegramCallbackQuery {
@@ -67,6 +73,9 @@ export interface TelegramCallbackQuery {
   from: TelegramUser
   message?: TelegramMessage
   data?: string
+  /** Inline-keyboard data passthrough; rare. Not used by parse logic. */
+  game_short_name?: string
+  inline_message_id?: string
 }
 
 export interface TelegramUpdate {
@@ -74,11 +83,12 @@ export interface TelegramUpdate {
   message?: TelegramMessage
   edited_message?: TelegramMessage
   channel_post?: TelegramMessage
+  edited_channel_post?: TelegramMessage
   callback_query?: TelegramCallbackQuery
 }
 
 // ---------------------------------------------------------------------------
-// Parser
+// Helpers
 // ---------------------------------------------------------------------------
 
 function buildSenderId(chatId: number, userId: number): string {
@@ -172,26 +182,19 @@ function buildSegments(msg: TelegramMessage): MessageSegment[] {
 }
 
 /**
- * Parse a Telegram `result[]` element into a `NormalizedInboundEvent`.
- *
- * Returns `null` for update types not yet handled in Phase 1:
- * - `edited_message` (TODO: Phase 2 edit events)
- * - `callback_query` (TODO: Phase 2 interactive flows)
+ * Project a Telegram message into a NormalizedInboundEvent. Shared by the
+ * regular-message, channel-post, and edited-message paths so all three carry
+ * identical sender / channel / mention metadata. The caller decides the
+ * `kind` and (for edits) sets `replacesMessageId`.
  */
-export function parseTelegramUpdate(
+function messageToEvent(
   adapterId: string,
   selfId: string,
-  update: TelegramUpdate
-): NormalizedInboundEvent | null {
-  // TODO (Phase 2): handle edited_message as edit events
-  if (update.edited_message !== undefined) return null
-
-  // TODO (Phase 2): handle callback_query for interactive button flows
-  if (update.callback_query !== undefined) return null
-
-  const msg = update.message ?? update.channel_post
-  if (!msg) return null
-
+  msg: TelegramMessage,
+  rawUpdate: TelegramUpdate,
+  kindOverride?: "create" | "edit",
+  replacesMessageId?: string
+): NormalizedInboundEvent {
   const from = msg.from
   const chat = msg.chat
   const chatId = chat.id
@@ -230,6 +233,10 @@ export function parseTelegramUpdate(
           ? "thread"
           : "group"
 
+  // Use edit_date when present so dedup on edited messages picks the
+  // wall-clock the edit happened, not the original send time.
+  const timestamp = (msg.edit_date ?? msg.date) * 1000
+
   return {
     platform: "telegram",
     adapterId,
@@ -253,7 +260,132 @@ export function parseTelegramUpdate(
     plainText,
     replyTo,
     mentions: { selfMentioned, users },
-    timestamp: msg.date * 1000,
-    raw: update,
+    timestamp,
+    raw: rawUpdate,
+    kind: kindOverride ?? "create",
+    replacesMessageId,
   }
+}
+
+/**
+ * Project a callback_query into a NormalizedInboundEvent. Inline-button
+ * presses look like a fresh user message whose body is the button payload.
+ * We synthesise a `messageId` from the callback id so the dedup ledger
+ * treats two presses of the same button-press idempotency-wise (Telegram
+ * never re-issues a callback_query id for the same press).
+ */
+function callbackQueryToEvent(
+  adapterId: string,
+  selfId: string,
+  cq: TelegramCallbackQuery,
+  rawUpdate: TelegramUpdate
+): NormalizedInboundEvent | null {
+  // Without an originating message we can't anchor a conversationKey.
+  // Inline_message_id-only presses (no chat) fall through to null — they
+  // are an admin / bot-management surface we don't subscribe to.
+  if (!cq.message) return null
+
+  const msg = cq.message
+  const chatId = msg.chat.id
+  const threadId = msg.message_thread_id !== undefined ? String(msg.message_thread_id) : undefined
+  const conversationKey = buildConversationKey("telegram", adapterId, String(chatId), threadId)
+
+  const sender = buildPlatformIdentity(adapterId, chatId, cq.from)
+
+  const data = cq.data ?? ""
+  const segments: MessageSegment[] = data
+    ? [{ type: "text", text: data }]
+    : [{ type: "text", text: "[callback_query]" }]
+  const plainText = segmentsToPlainText(segments)
+
+  const channelKind: "private" | "group" | "channel" | "thread" =
+    msg.chat.type === "private"
+      ? "private"
+      : msg.chat.type === "channel"
+        ? "channel"
+        : threadId !== undefined
+          ? "thread"
+          : "group"
+
+  // The synthetic messageId mirrors `tgcq:<callback_query.id>` so dedup
+  // can spot a re-delivered callback. Telegram's callback_query.id is
+  // globally unique per press.
+  const messageId = `tgcq:${cq.id}`
+
+  return {
+    platform: "telegram",
+    adapterId,
+    selfId,
+    messageId,
+    conversationRef: {
+      platform: "telegram",
+      adapterId,
+      chatId: String(chatId),
+      messageId,
+      callbackQueryId: cq.id,
+    },
+    conversationKey,
+    sender,
+    channel: {
+      id: conversationKey,
+      name: msg.chat.title ?? msg.chat.username ?? msg.chat.first_name,
+      kind: channelKind,
+      platformChannelId: String(chatId),
+    },
+    segments,
+    plainText,
+    mentions: { selfMentioned: false, users: [] },
+    timestamp: Date.now(),
+    raw: rawUpdate,
+    kind: "create",
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a Telegram update envelope into a `NormalizedInboundEvent`.
+ *
+ * Returns `null` for updates we deliberately ignore:
+ * - inline-message-only callback_query (no anchoring chat)
+ * - empty / unrecognised update types
+ */
+export function parseTelegramUpdate(
+  adapterId: string,
+  selfId: string,
+  update: TelegramUpdate
+): NormalizedInboundEvent | null {
+  // ── Edits (regular chat or channel post) → kind=edit ──────────────────
+  if (update.edited_message !== undefined) {
+    return messageToEvent(
+      adapterId,
+      selfId,
+      update.edited_message,
+      update,
+      "edit",
+      String(update.edited_message.message_id)
+    )
+  }
+  if (update.edited_channel_post !== undefined) {
+    return messageToEvent(
+      adapterId,
+      selfId,
+      update.edited_channel_post,
+      update,
+      "edit",
+      String(update.edited_channel_post.message_id)
+    )
+  }
+
+  // ── Inline button press → synthetic create event ──────────────────────
+  if (update.callback_query !== undefined) {
+    return callbackQueryToEvent(adapterId, selfId, update.callback_query, update)
+  }
+
+  // ── Regular create paths ──────────────────────────────────────────────
+  const msg = update.message ?? update.channel_post
+  if (!msg) return null
+  return messageToEvent(adapterId, selfId, msg, update)
 }

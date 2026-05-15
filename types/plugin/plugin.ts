@@ -495,6 +495,23 @@ export interface PluginManifest {
    * resolves them on plugin enable and unregisters them on disable.
    */
   themes?: PluginThemeContribution[]
+
+  /**
+   * Optional localized strings shipped by the plugin. Keys are merged into
+   * the host's next-intl bundle under the `plugin.<id>.` prefix so plugins
+   * cannot collide with the host namespace; plugin code calls
+   * `t("plugin.<id>.<key>")` to consume them.
+   *
+   * Validation rules enforced in `lib/plugin/core/validation.ts`:
+   *   - Each locale must be one of the host's canonical locales.
+   *   - Each value must be a flat `Record<string, string>` (no nested
+   *     objects, no arrays) so the runtime merge is O(n) and predictable.
+   *   - Keys must match `^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$`.
+   *   - Max 1000 keys per locale.
+   */
+  i18n?: {
+    locales: Partial<Record<string, Record<string, string>>>
+  }
 }
 
 /**

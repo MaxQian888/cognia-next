@@ -71,4 +71,31 @@ describe("PolicyInfo", () => {
     )
     expect(screen.getByText(/keywords: hello, help/i)).toBeInTheDocument()
   })
+
+  it("renders private-default rule as 'All private messages'", () => {
+    render(<PolicyInfo policy={makePolicy({ rules: [{ kind: "private-default" }] })} />)
+    expect(screen.getByText(/all private messages/i)).toBeInTheDocument()
+  })
+
+  it("describes cooldown blocker with seconds parameter", () => {
+    render(
+      <PolicyInfo
+        policy={makePolicy({
+          blockers: [{ kind: "cooldown-after-bot-reply", secs: 7 }],
+        })}
+      />
+    )
+    expect(screen.getByText(/7s cooldown after bot reply/i)).toBeInTheDocument()
+  })
+
+  it("describes user-blocklist with names list", () => {
+    render(
+      <PolicyInfo
+        policy={makePolicy({
+          blockers: [{ kind: "user-blocklist", userIds: ["alice", "bob"] }],
+        })}
+      />
+    )
+    expect(screen.getByText(/blocked users: alice, bob/i)).toBeInTheDocument()
+  })
 })

@@ -20,6 +20,7 @@ import { installRuntime } from "@/lib/connectors/runtime"
 import { startOutboundRunner } from "@/lib/connectors/outbound-runner"
 import { listEnabledAdapterInstances } from "@/lib/db/adapter-instances"
 import { buildAdapterFromRow } from "@/lib/connectors/adapter-registry"
+import { runAndCaptureAssistantReply } from "@/lib/claude/run-and-capture"
 
 export function ConnectorBusProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
@@ -52,15 +53,12 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
 
       const bus = getBus()
 
-      // Phase 1: stub sendPrompt. The real chat pipeline is driven by the
-      // composer's standard onSend path (auto mode) or enqueueOutbound (manual
-      // mode). This runtime wires routing / draft / store-only decisions.
-      // TODO(phase 1+): wire to lib/claude/ipc.ts:sendPrompt for streaming.
-      installRuntime(bus, {
-        sendPrompt: async () => {
-          // Placeholder — see runtime.ts for the ai-run stub comment.
-        },
-      })
+      // Wire the runtime to the real `runAndCaptureAssistantReply` so the
+      // ai-run branch drives a real Claude turn (subscribe → sendPrompt →
+      // accumulate assistant text → resolve) instead of enqueueing a
+      // placeholder. The wrapper handles its own subscription lifecycle and
+      // unlistens before resolving / rejecting.
+      installRuntime(bus, { runAndCapture: runAndCaptureAssistantReply })
 
       // Instantiate and register each enabled adapter.
       for (const row of enabled) {

@@ -83,6 +83,31 @@ enum Request {
         sub: SubscriptionId,
         reply: oneshot::Sender<Result<()>>,
     },
+    MouseMove {
+        point: Point,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    Drag {
+        from: Point,
+        to: Point,
+        opts: DragOpts,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    Scroll {
+        target: ScrollTarget,
+        opts: ScrollOpts,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    HoldKey {
+        chord: KeyChord,
+        duration_ms: u32,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    MouseButton {
+        button: MouseButton,
+        transition: ButtonTransition,
+        reply: oneshot::Sender<Result<()>>,
+    },
     Shutdown,
 }
 
@@ -174,6 +199,38 @@ impl Worker {
                         }
                         Request::Unsubscribe { sub, reply } => {
                             let _ = reply.send(backend.unsubscribe(sub));
+                        }
+                        Request::MouseMove { point, reply } => {
+                            let _ = reply.send(backend.mouse_move(point));
+                        }
+                        Request::Drag {
+                            from,
+                            to,
+                            opts,
+                            reply,
+                        } => {
+                            let _ = reply.send(backend.drag(from, to, opts));
+                        }
+                        Request::Scroll {
+                            target,
+                            opts,
+                            reply,
+                        } => {
+                            let _ = reply.send(backend.scroll(target, opts));
+                        }
+                        Request::HoldKey {
+                            chord,
+                            duration_ms,
+                            reply,
+                        } => {
+                            let _ = reply.send(backend.hold_key(&chord, duration_ms));
+                        }
+                        Request::MouseButton {
+                            button,
+                            transition,
+                            reply,
+                        } => {
+                            let _ = reply.send(backend.mouse_button(button, transition));
                         }
                         Request::Shutdown => break,
                     }
@@ -287,6 +344,51 @@ impl AutomationHandle {
 
     pub async fn unsubscribe(&self, sub: SubscriptionId) -> Result<()> {
         round_trip(&self.tx, |reply| Request::Unsubscribe { sub, reply }).await
+    }
+
+    pub async fn mouse_move(&self, point: Point) -> Result<()> {
+        round_trip(&self.tx, |reply| Request::MouseMove { point, reply }).await
+    }
+
+    pub async fn drag(&self, from: Point, to: Point, opts: DragOpts) -> Result<()> {
+        round_trip(&self.tx, |reply| Request::Drag {
+            from,
+            to,
+            opts,
+            reply,
+        })
+        .await
+    }
+
+    pub async fn scroll(&self, target: ScrollTarget, opts: ScrollOpts) -> Result<()> {
+        round_trip(&self.tx, |reply| Request::Scroll {
+            target,
+            opts,
+            reply,
+        })
+        .await
+    }
+
+    pub async fn hold_key(&self, chord: KeyChord, duration_ms: u32) -> Result<()> {
+        round_trip(&self.tx, |reply| Request::HoldKey {
+            chord,
+            duration_ms,
+            reply,
+        })
+        .await
+    }
+
+    pub async fn mouse_button(
+        &self,
+        button: MouseButton,
+        transition: ButtonTransition,
+    ) -> Result<()> {
+        round_trip(&self.tx, |reply| Request::MouseButton {
+            button,
+            transition,
+            reply,
+        })
+        .await
     }
 
     /// Best-effort shutdown — the worker drains in-flight requests and then

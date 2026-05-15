@@ -162,3 +162,167 @@ jobs:
           mkdir -p .github/size-snapshot
           du -sb out/ | cut -f1 > .github/size-snapshot/build-size.txt
         continue-on-error: true
+
+  e2e:
+    name: E2E Suite (Playwright)
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - chromium
+          - mobile-pixel-7
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.x
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Install Playwright system deps (cached browsers)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm exec playwright install-deps chromium
+
+      - name: Run Playwright tests (${{ matrix.project }})
+        run: pnpm exec playwright test --project=${{ matrix.project }}
+        env:
+          CI: "true"
+          NEXT_PUBLIC_E2E: "1"
+
+      - name: Upload Playwright HTML report
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: playwright-report-${{ matrix.project }}
+          path: playwright-report/
+          retention-days: 14
+
+      - name: Upload Playwright trace + screenshots
+        uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-traces-${{ matrix.project }}
+          path: test-results/
+          retention-days: 14
+
+  e2e-ios-weekly:
+    name: E2E iOS (Weekly)
+    runs-on: macos-14
+    # Run on schedule + manual dispatch; the workflow_call parent decides
+    # whether to fan this out via its own schedule.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.x
+          cache: "pnpm"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright (chromium + webkit)
+        run: pnpm exec playwright install --with-deps chromium webkit
+      - name: Run Playwright mobile-iphone-13 project
+        run: pnpm exec playwright test --project=mobile-iphone-13 tests/e2e/mobile/
+        env:
+          CI: "true"
+          NEXT_PUBLIC_E2E: "1"
+          PLAYWRIGHT_MOBILE_IOS: "1"
+      - name: Upload Playwright HTML report
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: playwright-report-mobile-iphone-13
+          path: playwright-report/
+          retention-days: 14
+
+  e2e-tauri-driver:
+    name: E2E Tauri (Windows, opt-in)
+    runs-on: windows-latest
+    # Only runs when the workflow_dispatch input asks for it. Avoids paying
+    # the cargo build cost on every PR.
+    if: github.event_name == 'workflow_dispatch'
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.x
+          cache: "pnpm"
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+      - name: Build Tauri debug binary
+        run: pnpm tauri build --debug --no-bundle
+      - name: Install Playwright chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run Playwright tauri-driver project
+        run: pnpm exec playwright test --project=tauri-driver tests/e2e/tauri/
+        env:
+          CI: "true"
+          NEXT_PUBLIC_E2E: "1"
+          PLAYWRIGHT_TAURI_DRIVER: "1"
+          PLAYWRIGHT_TAURI_BIN: ${{ github.workspace }}\src-tauri\target\debug\cognia-next.exe
+      - name: Upload Playwright HTML report
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: playwright-report-tauri-driver
+          path: playwright-report/
+          retention-days: 14

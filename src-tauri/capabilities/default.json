@@ -77,6 +77,17 @@
     "cli:allow-cli-matches",
 
     "log:default",
-    "log:allow-log"
+    "log:allow-log",
+
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "cloudflared-tunnel",
+          "cmd": "cloudflared",
+          "args": ["tunnel", "--url", { "validator": "^https?://.+" }]
+        }
+      ]
+    }
   ]
 }

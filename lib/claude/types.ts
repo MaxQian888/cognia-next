@@ -128,6 +128,46 @@ export interface SendOptions {
    */
   containerSkillIds?: Array<{ skill_id: string; version?: string }>
 
+  /**
+   * Anthropic native tool descriptors (`computer_20251124`, `bash_20250124`,
+   * `text_editor_20250728`) sourced from the
+   * `native-anthropic-tool-registry`. Populated by `resolveSendOptions`
+   * when the character has `enableComputerUse === true`. The sidecar
+   * appends them to the SDK's `tools` array and routes `tool_use`
+   * messages from the model back to the renderer via Tauri commands
+   * named by `executeIpc.invoke` (e.g., `plugin_computer_use_execute`).
+   *
+   * Each descriptor mirrors the Anthropic Tools API shape — the sidecar
+   * passes them through verbatim with only the `executeIpc` field
+   * stripped (it's a renderer-side dispatch hint, not part of the API
+   * contract).
+   */
+  anthropicTools?: Array<{
+    /** Tool name surfaced to the model (e.g., `"computer"`). */
+    name: string
+    /** Anthropic native-tool type tag (e.g., `"computer_20251124"`). */
+    type: string
+    /** Optional per-tool beta header override (rare). */
+    betaHeader?: string
+    displayWidthPx?: number
+    displayHeightPx?: number
+    displayNumber?: number
+    enableZoom?: boolean
+    /** Tauri command name the sidecar invokes for each tool_use. */
+    executeIpc: { invoke: string }
+    permissionPolicy?: "always-ask" | "session-allow" | "preauth"
+  }>
+
+  /**
+   * Extra HTTP headers the sidecar should merge into the Anthropic
+   * request. Populated by `resolveSendOptions` from
+   * `computeAnthropicBetaHeaders` when at least one Anthropic native
+   * tool is attached — `anthropic-beta: computer-use-2025-11-24` is the
+   * canonical example. Multiple beta tokens are joined with commas; the
+   * sidecar treats this map as authoritative and does not de-dup.
+   */
+  appendHeaders?: Record<string, string>
+
   // ---- Convenience modes (sidecar-protocol fields) -------------------------
   // The dispatcher in `sidecar/dispatch/anthropic.mjs` strips these three
   // fields before calling `query()`. Translation to real SDK options happens
@@ -212,6 +252,22 @@ export interface SendOptions {
     strategy: RoutingStrategy
     reason: string
   }
+
+  /**
+   * Inbox / connector-driven gate. Set by `resolveSendOptions` when the
+   * caller passed a `conversationOverride` whose `trigger.quietHours`
+   * window covers `now`, when the conversation is muted, or when the
+   * conversation has been forced into manual mode by the user. The
+   * connector runtime checks this AFTER `resolveSendOptions` returns and
+   * short-circuits the ai-run capture (no sidecar call, no outbound
+   * enqueue) — instead it appends an `inbound.deferred_quiet_hours`
+   * (or matching) audit row.
+   *
+   * Sidecar-protocol metadata only — the sidecar ignores it (mirrors
+   * `aliasResolution` / `routingDecision`). Direct chat sends never set
+   * it; this field is exclusively for the inbox context input.
+   */
+  suppressedReason?: "quiet_hours" | "muted" | "manual_mode_override"
 }
 
 /**
@@ -1165,6 +1221,36 @@ export interface Character {
     styleSamplesK?: number
   }
   platformDefaults?: import("@/types/connectors/binding").CharacterPlatformDefaults
+  /**
+   * Opt-in to the Anthropic Computer Use native tools (computer / bash /
+   * text_editor) registered by the `cognia-computer-use` plugin or any
+   * other plugin that calls `ctx.agent.registerNativeAnthropicTool`.
+   * When `undefined` or `false`, `resolveSendOptions` does NOT attach the
+   * registry's tool descriptors to the send — equivalent to "no
+   * computer-use for this character". Mirrors the `twinId` / `a2uiEnabled`
+   * soft-binding convention.
+   */
+  enableComputerUse?: boolean
+  /**
+   * Fine-grained per-character configuration that only applies when
+   * `enableComputerUse === true`.
+   */
+  computerUseSettings?: {
+    /**
+     * Subset of registered native-anthropic-tool ids to expose. When
+     * `undefined` or empty, every registered tool is exposed. Use this to
+     * restrict a character to just `computer` without `bash` / `text_editor`,
+     * for example.
+     */
+    allowedToolIds?: string[]
+    /**
+     * When `true`, every driving call is forced into the
+     * `Decision::RequireConsent` path regardless of the global tier. The
+     * default `false` honours the tier as configured in Settings →
+     * Automation → Permissions.
+     */
+    requireConsent?: boolean
+  }
   createdAt: number
   updatedAt: number
 }

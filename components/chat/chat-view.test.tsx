@@ -5,7 +5,9 @@
 import * as ReactForMocks from "react"
 
 jest.mock("./composer", () => ({ Composer: () => null }))
-jest.mock("./chat-header", () => ({ ChatHeader: () => null }))
+jest.mock("./chat-header", () => ({
+  ChatHeader: jest.fn(() => null),
+}))
 jest.mock("./empty-state", () => ({ EmptyChatState: jest.fn(() => null) }))
 jest.mock("./inline-error", () => ({ InlineError: () => null }))
 jest.mock("./message-list", () => ({
@@ -153,5 +155,25 @@ describe("ChatPane", () => {
     expect(onEditResend).toBeDefined()
     await onEditResend?.("msg-1", { text: "edited" })
     expect(props.onEditResend).toHaveBeenCalledWith("msg-1", { text: "edited" })
+  })
+
+  describe("showHeader prop", () => {
+    it("renders ChatHeader by default", () => {
+      const { ChatHeader } = jest.requireMock("./chat-header") as {
+        ChatHeader: jest.Mock
+      }
+      ChatHeader.mockClear()
+      render(<ChatPane {...makeProps()} />)
+      expect(ChatHeader).toHaveBeenCalled()
+    })
+
+    it("omits ChatHeader when showHeader is false", () => {
+      const { ChatHeader } = jest.requireMock("./chat-header") as {
+        ChatHeader: jest.Mock
+      }
+      ChatHeader.mockClear()
+      render(<ChatPane {...makeProps()} showHeader={false} />)
+      expect(ChatHeader).not.toHaveBeenCalled()
+    })
   })
 })

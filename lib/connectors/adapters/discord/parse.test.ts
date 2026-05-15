@@ -144,25 +144,97 @@ describe("parseDiscordDispatch", () => {
     })
   })
 
-  describe("unsupported event types", () => {
-    it("returns null for MESSAGE_UPDATE", () => {
+  describe("MESSAGE_UPDATE produces an edit event", () => {
+    it("returns kind=edit with replacesMessageId == message id", () => {
       const dispatch: DiscordDispatch = {
         t: "MESSAGE_UPDATE",
         op: 0,
         d: {
-          id: "123",
-          content: "edited",
-          channel_id: "456",
-          author: { id: "789", username: "user" },
+          id: "msg-edit-1",
+          content: "edited content",
+          channel_id: "ch-1",
+          author: { id: "u-1", username: "alice" },
           timestamp: "2024-05-05T12:00:00.000000+00:00",
           attachments: [],
           mentions: [],
         },
       }
-      // TODO (Phase 2): handle MESSAGE_UPDATE as edit events
-      expect(parseDiscordDispatch(ADAPTER_ID, SELF_ID, dispatch)).toBeNull()
+      const r = parseDiscordDispatch(ADAPTER_ID, SELF_ID, dispatch)
+      expect(r).not.toBeNull()
+      expect(r!.kind).toBe("edit")
+      expect(r!.replacesMessageId).toBe("msg-edit-1")
+      expect(r!.messageId).toBe("msg-edit-1")
+      expect(r!.segments).toEqual([{ type: "text", text: "edited content" }])
     })
 
+    it("preserves attachments on an edited message", () => {
+      const dispatch: DiscordDispatch = {
+        t: "MESSAGE_UPDATE",
+        op: 0,
+        d: {
+          id: "msg-edit-2",
+          content: "with image",
+          channel_id: "ch-2",
+          author: { id: "u-2", username: "bob" },
+          timestamp: "2024-05-05T12:00:00.000000+00:00",
+          attachments: [
+            {
+              id: "att-1",
+              filename: "p.png",
+              url: "https://cdn.discordapp.com/attachments/1/2/p.png",
+              content_type: "image/png",
+              width: 100,
+              height: 100,
+              size: 1024,
+            },
+          ],
+          mentions: [],
+        },
+      }
+      const r = parseDiscordDispatch(ADAPTER_ID, SELF_ID, dispatch)
+      expect(r).not.toBeNull()
+      expect(r!.kind).toBe("edit")
+      expect(r!.segments[0]).toMatchObject({ type: "image" })
+    })
+  })
+
+  describe("MESSAGE_DELETE produces a delete event", () => {
+    it("returns kind=delete with replacesMessageId set", () => {
+      const dispatch: DiscordDispatch = {
+        t: "MESSAGE_DELETE",
+        op: 0,
+        d: {
+          id: "msg-del-1",
+          channel_id: "ch-1",
+          guild_id: "g-1",
+        },
+      }
+      const r = parseDiscordDispatch(ADAPTER_ID, SELF_ID, dispatch)
+      expect(r).not.toBeNull()
+      expect(r!.kind).toBe("delete")
+      expect(r!.replacesMessageId).toBe("msg-del-1")
+      expect(r!.segments).toEqual([])
+      expect(r!.plainText).toBe("")
+      // Discord doesn't send sender on delete events
+      expect(r!.sender.remoteUserId).toBe("unknown")
+    })
+
+    it("uses thread channel kind when thread_id is present", () => {
+      const dispatch: DiscordDispatch = {
+        t: "MESSAGE_DELETE",
+        op: 0,
+        d: {
+          id: "msg-del-2",
+          channel_id: "ch-1",
+          thread_id: "th-1",
+        },
+      }
+      const r = parseDiscordDispatch(ADAPTER_ID, SELF_ID, dispatch)
+      expect(r!.channel.kind).toBe("thread")
+    })
+  })
+
+  describe("unsupported event types", () => {
     it("returns null for unknown dispatch type", () => {
       const dispatch: DiscordDispatch = {
         t: "GUILD_CREATE",

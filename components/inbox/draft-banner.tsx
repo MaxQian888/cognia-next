@@ -16,6 +16,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { getDb } from "@/lib/db/schema"
 import type { ConnectorDraftRow } from "@/lib/db/connector-types"
 import { DraftEditor } from "./draft-editor"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 interface DraftBannerProps {
   conversationKey: string
@@ -50,6 +51,19 @@ export function DraftBanner({ conversationKey }: DraftBannerProps) {
       >
         <PenLineIcon className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
         <p className="flex-1 text-sm text-amber-800 dark:text-amber-300">{t("pending")}</p>
+        {/* Plugin contributions: per-draft actions (kick back, rewrite,
+         * "ask a teammate to review", …). Hidden when no plugin contributes.
+         */}
+        <PluginExtensionSlot
+          point="inbox.draft.actions"
+          className="flex items-center gap-1 empty:hidden"
+          context={{
+            conversationKey,
+            draftId: firstDraft.id,
+            sessionId: firstDraft.sessionId,
+            sourceMessageId: firstDraft.sourceMessageId,
+          }}
+        />
         <Button
           size="sm"
           variant="outline"

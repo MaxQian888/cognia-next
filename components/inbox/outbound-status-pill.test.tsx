@@ -120,4 +120,21 @@ describe("OutboundStatusPill", () => {
       )
     })
   })
+
+  it("renders the localized label for each status", () => {
+    // The label appears twice in the DOM: once in the trigger span and once in
+    // the TooltipContent. getAllByText collects both occurrences.
+    mockJob = makeJob("jq", "pending")
+    const { rerender } = render(<OutboundStatusPill jobId="jq" />)
+    expect(screen.getAllByText("Queued").length).toBeGreaterThanOrEqual(1)
+
+    mockJob = makeJob("js", "sending")
+    rerender(<OutboundStatusPill jobId="js" />)
+    expect(screen.getAllByText("Sending").length).toBeGreaterThanOrEqual(1)
+
+    mockJob = makeJob("jd", "deadlettered")
+    rerender(<OutboundStatusPill jobId="jd" />)
+    // Dead-lettered renders only in the trigger (TooltipContent shows the lastError or unknownError fallback).
+    expect(screen.getAllByText("Dead-lettered").length).toBeGreaterThanOrEqual(1)
+  })
 })

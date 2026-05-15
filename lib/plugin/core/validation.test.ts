@@ -695,5 +695,95 @@ describe("Plugin Validation", () => {
       expect(result.valid).toBe(true)
       expect(result.errors).toHaveLength(0)
     })
+
+    describe("manifest.i18n", () => {
+      it("accepts a flat per-locale string map", () => {
+        const manifest = createValidManifest()
+        ;(manifest as unknown as Record<string, unknown>).i18n = {
+          locales: {
+            en: { "panel.title": "Hello" },
+            "zh-CN": { "panel.title": "你好" },
+          },
+        }
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(true)
+        expect(result.errors).toHaveLength(0)
+      })
+
+      it("rejects when `i18n` is not an object", () => {
+        const manifest = createValidManifest()
+        ;(manifest as unknown as Record<string, unknown>).i18n = "yes"
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(result.diagnostics!.some((d) => d.code === "manifest.i18n.invalid")).toBe(true)
+      })
+
+      it("rejects when `i18n.locales` is missing or not an object", () => {
+        const manifest = createValidManifest()
+        ;(manifest as unknown as Record<string, unknown>).i18n = {}
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(result.diagnostics!.some((d) => d.code === "manifest.i18n.locales.invalid")).toBe(
+          true
+        )
+      })
+
+      it("warns when a locale is not one of the host's canonical locales", () => {
+        const manifest = createValidManifest()
+        ;(manifest as unknown as Record<string, unknown>).i18n = {
+          locales: { ja: { hi: "konnichiwa" } },
+        }
+        const result = validatePluginManifest(manifest)
+        // Warnings don't break the validity gate.
+        expect(result.valid).toBe(true)
+        expect(
+          result.diagnostics!.some(
+            (d) => d.code === "manifest.i18n.invalid_locale" && d.severity === "warning"
+          )
+        ).toBe(true)
+      })
+
+      it("rejects nested objects under a locale (only flat dot-notation accepted)", () => {
+        const manifest = createValidManifest()
+        ;(manifest as unknown as Record<string, unknown>).i18n = {
+          locales: { en: "not an object" },
+        }
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(result.diagnostics!.some((d) => d.code === "manifest.i18n.invalid_keys")).toBe(true)
+      })
+
+      it("rejects keys that violate the I18N_KEY_PATTERN", () => {
+        const manifest = createValidManifest()
+        ;(manifest as unknown as Record<string, unknown>).i18n = {
+          locales: { en: { "bad key!": "value" } },
+        }
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(result.diagnostics!.some((d) => d.code === "manifest.i18n.invalid_keys")).toBe(true)
+      })
+
+      it("rejects non-string values", () => {
+        const manifest = createValidManifest()
+        ;(manifest as unknown as Record<string, unknown>).i18n = {
+          locales: { en: { greet: 123 as unknown as string } },
+        }
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(result.diagnostics!.some((d) => d.code === "manifest.i18n.invalid_keys")).toBe(true)
+      })
+
+      it("flags when a locale exceeds the per-locale key cap", () => {
+        const manifest = createValidManifest()
+        const big: Record<string, string> = {}
+        for (let i = 0; i <= 1000; i++) big[`k${i}`] = "v"
+        ;(manifest as unknown as Record<string, unknown>).i18n = {
+          locales: { en: big },
+        }
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(result.diagnostics!.some((d) => d.code === "manifest.i18n.too_many_keys")).toBe(true)
+      })
+    })
   })
 })

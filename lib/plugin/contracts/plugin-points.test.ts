@@ -17,6 +17,22 @@ describe("plugin point contracts", () => {
     expect(new Set(CANONICAL_EXTENSION_POINTS).size).toBe(CANONICAL_EXTENSION_POINTS.length)
   })
 
+  it("declares the four inbox extension points (IM-completion §C)", () => {
+    const expectedInboxPoints = [
+      "inbox.sidebar.section",
+      "inbox.conversation.actions",
+      "inbox.composer.actions",
+      "inbox.draft.actions",
+    ]
+    for (const id of expectedInboxPoints) {
+      expect(CANONICAL_EXTENSION_POINTS).toContain(id)
+      const result = validateExtensionPoint(id)
+      expect(result.allowed).toBe(true)
+      expect(result.contract?.status).toBe("implemented")
+      expect(result.contract?.binding).toMatch(/^components\/inbox\//)
+    }
+  })
+
   it("has unique canonical hook points", () => {
     expect(new Set(CANONICAL_HOOK_POINTS).size).toBe(CANONICAL_HOOK_POINTS.length)
   })

@@ -210,10 +210,7 @@ registerNodeExecutor({
     if (!target) {
       throw new Error("action.desktop.windowFocus requires a 'target' element ref")
     }
-    // window_op is mapped via invokePattern's underlying surface in M1 — for
-    // a direct focus call we use the Rust window_op path through invokePattern
-    // with a synthetic 'window-focus' marker. M2 surfaces a dedicated call.
-    await desktop.invokePattern(target, "window", { op: "focus" }, callCtx(ctx.params))
+    await desktop.windowOp(target, { kind: "focus" }, callCtx(ctx.params))
     return { output: { focused: target } }
   },
 })
@@ -226,7 +223,7 @@ registerNodeExecutor({
     if (!target) {
       throw new Error("action.desktop.windowClose requires a 'target' element ref")
     }
-    await desktop.invokePattern(target, "window", { op: "close" }, callCtx(ctx.params))
+    await desktop.windowOp(target, { kind: "close" }, callCtx(ctx.params))
     return { output: { closed: target } }
   },
 })
@@ -244,8 +241,16 @@ registerNodeExecutor({
     if (!rect) {
       throw new Error("action.desktop.windowResize requires a 'rect' with x/y/width/height")
     }
-    await desktop.invokePattern(target, "transform", { op: "resize", rect }, callCtx(params))
-    return { output: { resized: target, rect } }
+    const x = num(rect, "x") ?? 0
+    const y = num(rect, "y") ?? 0
+    const width = num(rect, "width") ?? 0
+    const height = num(rect, "height") ?? 0
+    await desktop.windowOp(
+      target,
+      { kind: "resize", rect: { x, y, width, height } },
+      callCtx(params)
+    )
+    return { output: { resized: target, rect: { x, y, width, height } } }
   },
 })
 

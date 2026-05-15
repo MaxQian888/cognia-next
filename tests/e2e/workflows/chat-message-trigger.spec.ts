@@ -47,15 +47,6 @@ test.describe("chat.message → workflow trigger", () => {
     await expect(sectionHeading).toBeVisible({ timeout: 10_000 })
   })
 
-  // ── Tauri-only ──────────────────────────────────────────────────────────
-
-  test.skip("Tauri-only: chat send fires `trigger.chat.message` → workflow runs twin RAG", async () => {
-    // Documented flow:
-    //   1. Plugin runtime + sidecar online.
-    //   2. Workflow registered with `trigger.chat.message` bound to characterId.
-    //   3. User sends a chat message.
-    //   4. `persistMessages` detects the new user message and fires the trigger.
-    //   5. Workflow runs `action.twin.rag` → `ai.prompt` → response.
-    //   6. workflowAudit table shows the run; the chat shows the reply.
-  })
+  // Full end-to-end flow with sidecar + workflow runtime now lives in
+  // tests/e2e/tauri/chat-message-trigger.spec.ts (PLAYWRIGHT_TAURI_DRIVER=1).
 })

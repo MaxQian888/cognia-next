@@ -69,15 +69,6 @@ test.describe("GitHub Delivery surface", () => {
     await expect(heading).toBeVisible()
   })
 
-  // ── Full webhook → workflow → action.github.commentPr (deferred) ─────────
-
-  test.skip("Tauri-only: webhook arrives → workflow runs → comment posts back", async () => {
-    // Documented expected flow:
-    //   1. Plugin enabled, repo registered (PAT + webhook secret).
-    //   2. Create a workflow (trigger.github.webhook → ai.prompt → action.github.commentPr).
-    //   3. POST to the Rust webhook URL with HMAC sha256 header.
-    //   4. Verify the orchestrator runs the workflow + Octokit hits the mock GitHub.
-    //   5. Verify a workflowAudit row + a github-delivery:audit row.
-    // Implementation requires the Tauri shell + a mock GitHub server.
-  })
+  // Full webhook → workflow → action.github.commentPr lives in
+  // tests/e2e/tauri/github-delivery-flow.spec.ts (PLAYWRIGHT_TAURI_DRIVER=1).
 })

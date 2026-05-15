@@ -107,6 +107,9 @@ const SCOPE_DESCRIPTIONS: Record<BridgeScope, string> = {
   "runtime:twins": "⚠ Exposes Twin profiles. PII redaction has run, but review before enabling.",
   "runtime:plugins": "Exposes the list and metadata of installed plugins.",
   "runtime:agent-teams": "Exposes agent-team definitions.",
+  "mcp:computer-use":
+    "⚠ Drives the host computer (mouse / keyboard / screenshot) from external coding agents. " +
+    "Honours Settings → Automation → Permissions; per-call tier surfaces the consent overlay.",
 }
 
 export function ExternalBridgeSection() {

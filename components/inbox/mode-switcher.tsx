@@ -35,12 +35,6 @@ interface ModeSwitcherProps {
   onModeChange?: (mode: ConnectorMode) => void
 }
 
-const MODE_LABELS: Record<ConnectorMode, string> = {
-  auto: "Auto",
-  manual: "Manual",
-  draft: "Draft",
-}
-
 export function ModeSwitcher({
   conversationKey,
   sessionId,
@@ -89,7 +83,7 @@ export function ModeSwitcher({
           aria-label={t("aria")}
         >
           <Badge variant="secondary" className="cursor-pointer select-none">
-            {MODE_LABELS[currentMode]}
+            {t(`modes.${currentMode}`)}
           </Badge>
         </button>
       </DropdownMenuTrigger>
@@ -100,7 +94,7 @@ export function ModeSwitcher({
             onClick={() => void handleSelect(mode)}
             data-testid={`mode-option-${mode}`}
           >
-            {MODE_LABELS[mode]}
+            {t(`modes.${mode}`)}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

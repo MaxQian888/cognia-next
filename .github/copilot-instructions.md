@@ -1,5 +1,15 @@
 # Copilot Instructions for cognia-next
 
+## Working Rules (hard requirements)
+
+These project rules override any default behavior to the contrary.
+
+1. **Research before implementing.** Before writing new code, search `lib/`, `components/`, `hooks/`, `src-tauri/`, and the relevant ADR for an existing implementation. Reuse — don't reimplement. New files require justification that no existing module can be extended.
+2. **No simplifications.** Implement the full behavior the task requires. No stubs, `// TODO later`, abbreviated happy paths, or stripped error handling/validation/edge cases. Surface blockers instead of silently degrading scope.
+3. **Every component ships with a unit test.** New or edited files under `components/**`, `hooks/**`, `lib/**`, `src-tauri/src/**` (excluding `components/ui/` and `components/ai-elements/`) need co-located `*.test.ts(x)` or in-file `#[cfg(test)]` tests in the same change. Coverage stays ≥90% — verify with `pnpm test:coverage` before claiming done.
+4. **Every frontend component is i18n-wired.** No hard-coded user-facing strings in `.tsx`. Use `next-intl` (`useTranslations` / `getTranslations`), add keys to **both** `i18n/messages/en.json` and `i18n/messages/zh-CN.json`, then run `pnpm lint:i18n` to confirm parity. Aria labels, placeholders, toasts, and error messages count.
+5. **Language convention.** Internal narration (status updates, commit messages, code comments) is in **English**. Clarifying questions to the user are in **Chinese** — identifiers and paths stay English even inside Chinese sentences.
+
 ## Project Architecture
 
 This is a **Next.js 16 (App Router) + Tauri v2 hybrid desktop application** combining:
@@ -69,7 +79,7 @@ This is a **Next.js 16 (App Router) + Tauri v2 hybrid desktop application** comb
 - **Linting**: `pnpm run lint` (ESLint flat config with `eslint-config-next`)
   - Auto-fix: `pnpm exec eslint . --fix`
   - Single file: `pnpm exec eslint <file>`
-- **No test framework configured** (no test scripts present)
+- **Testing**: Jest 30 (`pnpm test` / `pnpm test:watch` / `pnpm test:coverage`); ≥90% coverage required (see Working Rule 3). Sidecar uses `node --test` via `pnpm sidecar:test`.
 
 ### Adding shadcn/ui Components
 

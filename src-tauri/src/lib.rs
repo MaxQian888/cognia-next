@@ -256,13 +256,17 @@ pub fn run() {
             // the permission gate with disabled defaults (renderer enables via
             // Settings → Automation), and a fresh in-memory audit ring. The
             // back-end is constructed *on* the worker thread so Windows UIA
-            // can initialize COM there.
+            // can initialize COM there. The ConsentBroker fields are empty —
+            // the renderer-side overlay populates `pending` requests via the
+            // `automation:consent-request` event, and the user's responses
+            // come back via `automation_consent_respond`.
             let handle = automation::Worker::spawn(automation::make_default_backend);
             let gate = automation::PermissionGate::new(
                 automation::permission::AutomationSettings::default(),
             );
             let audit = automation::AuditRing::new();
-            automation::commands::AutomationState::new(handle, gate, audit)
+            let consent = automation::ConsentBroker::new();
+            automation::commands::AutomationState::new(handle, gate, audit, consent)
         })
         .invoke_handler(tauri::generate_handler![
             commands::greet,
@@ -500,6 +504,7 @@ pub fn run() {
             plugin_api::vscode::commands::plugin_deactivate_vscode,
             plugin_api::vscode::commands::plugin_unload_vscode,
             plugin_api::vscode::commands::plugin_invoke_vscode_rpc,
+            plugin_api::vscode::commands::plugin_vscode_send_response,
             plugin_api::backup::plugin_backup_create,
             plugin_api::backup::plugin_backup_restore,
             plugin_api::backup::plugin_backup_delete,
@@ -524,10 +529,17 @@ pub fn run() {
             automation::commands::desktop_type,
             automation::commands::desktop_keys,
             automation::commands::desktop_invoke_pattern,
+            automation::commands::desktop_mouse_move,
+            automation::commands::desktop_drag,
+            automation::commands::desktop_scroll,
+            automation::commands::desktop_hold_key,
+            automation::commands::desktop_mouse_button,
+            automation::commands::desktop_window_op,
             automation::commands::automation_audit_snapshot,
             automation::commands::automation_settings_get,
             automation::commands::automation_settings_set,
             automation::commands::automation_kill_switch,
+            automation::commands::automation_consent_respond,
             plugins::computer_use::commands::plugin_computer_use_execute,
             plugins::computer_use::commands::plugin_computer_use_bash,
             plugins::computer_use::commands::plugin_computer_use_text_editor,

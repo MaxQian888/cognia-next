@@ -83,14 +83,7 @@
       ]
     },
     "shell": {
-      "open": false,
-      "scope": [
-        {
-          "name": "cloudflared-tunnel",
-          "command": "cloudflared",
-          "args": ["tunnel", "--url", { "validator": "^https?://.+" }]
-        }
-      ]
+      "open": false
     }
   }
 }

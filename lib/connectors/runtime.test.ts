@@ -1,20 +1,30 @@
 /**
- * Tests for lib/connectors/runtime.ts — Task 37.
+ * Tests for lib/connectors/runtime.ts — Task 37 + IM completion §A.
  *
  * Verifies that installRuntime wires the bus routeHandler correctly for all
- * 5 route decisions:
- *   - "ai-run"        → ChatSession created, StoredMessage inserted, outbound job enqueued
- *   - "manual-store"  → ChatSession created, StoredMessage inserted, no outbound job
- *   - "draft-prepare" → ChatSession created, StoredMessage inserted, draft created
- *   - "store-only"    → ChatSession created, StoredMessage inserted, no outbound job
- *   - "drop"          → nothing inserted
+ * 5 route decisions plus the new suppression / capture branches:
+ *   - "ai-run" (happy path)  → ChatSession + StoredMessage + runAndCapture
+ *                              invoked → outbound job with REAL assistant
+ *                              text + outbound.ai_run_enqueued audit.
+ *   - "ai-run" (suppressed)  → no runAndCapture call, no outbound enqueue,
+ *                              an `inbound.deferred_*` audit row.
+ *   - "ai-run" (capture err) → no outbound enqueue, an `adapter.error`
+ *                              audit row.
+ *   - "manual-store"         → ChatSession + StoredMessage, no outbound.
+ *   - "draft-prepare"        → ChatSession + StoredMessage + draft row.
+ *   - "store-only"           → ChatSession + StoredMessage, no outbound / draft.
+ *   - "drop"                 → nothing inserted.
  *
- * Also verifies session reuse across events with the same conversationKey.
+ * Also verifies session reuse across events with the same conversationKey
+ * and that edit / delete / system events short-circuit through the bus
+ * (the runtime's defensive `kind` guard).
  */
 
 import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
-import { installRuntime } from "./runtime"
+import { createAdapterInstance } from "@/lib/db/adapter-instances"
+import { upsertByConversationKey } from "@/lib/db/conversation-overrides"
+import { installRuntime, inboundEventToSendContent, type RunAndCaptureFn } from "./runtime"
 import { getBus, __resetBusForTesting } from "./bus"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { RouteDecision } from "./mode-router"
@@ -61,7 +71,8 @@ const RESOLVED: ResolvedBinding = {
 
 /**
  * Invoke the bus routeHandler directly (bypasses the full bus pipeline so we
- * don't need to seed adapter instances / dedup ledger etc.).
+ * don't need to seed the dedup ledger). Adapter rows ARE created where the
+ * test needs them so the runtime's inboxPolicy lookup has data to read.
  */
 async function callHandler(
   event: NormalizedInboundEvent,
@@ -73,6 +84,39 @@ async function callHandler(
   await bus.routeHandler(event, decision, resolved)
 }
 
+/**
+ * Seed an adapter row matching the event's adapterId so the runtime's
+ * inboxPolicy lookup picks up `quietHours` / `muted` defaults.
+ */
+async function seedAdapter(
+  adapterId: string,
+  patch: Partial<{ quietHours?: { from: string; to: string; tz: string }; muted?: boolean }> = {}
+): Promise<void> {
+  await createAdapterInstance({
+    type: "telegram",
+    displayName: "test",
+    enabled: true,
+    transportMode: "long-poll",
+    settings: {},
+    credentialsRef: { keyringService: "test", accounts: [] },
+    trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+    defaultMode: "auto",
+    ...patch,
+  } as unknown as Parameters<typeof createAdapterInstance>[0])
+  // The DB row's id is auto-generated. Tests that need a specific id
+  // override the row directly:
+  await getDb()
+    .adapterInstances.toCollection()
+    .modify((r) => {
+      r.id = adapterId
+    })
+}
+
+const DEFAULT_RUN_AND_CAPTURE: RunAndCaptureFn = jest.fn(async () => ({
+  text: "Hello back from Claude!",
+  messageId: "uuid-asst-1",
+}))
+
 // ── setup ─────────────────────────────────────────────────────────────────────
 
 beforeEach(async () => {
@@ -80,12 +124,17 @@ beforeEach(async () => {
   __resetDbForTesting()
   __resetBusForTesting()
   const bus = getBus()
-  installRuntime(bus, { sendPrompt: jest.fn() })
+  ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockClear()
+  ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockResolvedValue({
+    text: "Hello back from Claude!",
+    messageId: "uuid-asst-1",
+  })
+  installRuntime(bus, { runAndCapture: DEFAULT_RUN_AND_CAPTURE })
 })
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
-describe("installRuntime — ai-run", () => {
+describe("installRuntime — ai-run (happy path)", () => {
   it("creates a ChatSession with platformBinding", async () => {
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_ai" })
     await callHandler(event, "ai-run")
@@ -111,7 +160,18 @@ describe("installRuntime — ai-run", () => {
     expect(messages[0].metadata?.platformMessage?.platform).toBe("telegram")
   })
 
-  it("enqueues a placeholder outbound job", async () => {
+  it("invokes runAndCapture with the session id and event content", async () => {
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_ai" })
+    await callHandler(event, "ai-run")
+
+    expect(DEFAULT_RUN_AND_CAPTURE).toHaveBeenCalledTimes(1)
+    const [sessionId, content] = (DEFAULT_RUN_AND_CAPTURE as jest.Mock).mock.calls[0]
+    expect(typeof sessionId).toBe("string")
+    expect(sessionId.length).toBeGreaterThan(0)
+    expect(content).toBe("hello runtime")
+  })
+
+  it("enqueues an outbound job with the captured assistant text", async () => {
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_ai" })
     await callHandler(event, "ai-run")
 
@@ -121,16 +181,79 @@ describe("installRuntime — ai-run", () => {
     expect(jobs[0].status).toBe("pending")
     expect(jobs[0].request.segments[0]).toMatchObject({
       type: "text",
-      text: "[AI reply placeholder]",
+      text: "Hello back from Claude!",
     })
   })
 
-  it("writes an outbound.enqueued audit entry", async () => {
+  it("uses the captured messageId as the outbound idempotency key", async () => {
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_ai" })
+    await callHandler(event, "ai-run")
+
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs[0].idempotencyKey).toBe("airun:uuid-asst-1")
+  })
+
+  it("writes an outbound.ai_run_enqueued audit entry with the message id", async () => {
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_ai" })
     await callHandler(event, "ai-run")
 
     const audits = await getDb().connectorAudit.toArray()
-    expect(audits.some((a) => a.kind === "outbound.enqueued")).toBe(true)
+    const aiRunAudits = audits.filter((a) => a.kind === "outbound.ai_run_enqueued")
+    expect(aiRunAudits).toHaveLength(1)
+    expect(aiRunAudits[0].message).toBe("uuid-asst-1")
+    expect(aiRunAudits[0].idempotencyKey).toBe("airun:uuid-asst-1")
+  })
+})
+
+describe("installRuntime — ai-run (suppression gate)", () => {
+  it("skips capture + enqueue and writes inbound.deferred_muted when adapter is muted", async () => {
+    await seedAdapter("adapter_muted", { muted: true })
+    const event = makeEvent({
+      adapterId: "adapter_muted",
+      conversationKey: "telegram:adapter_muted:chat_x",
+      conversationRef: { platform: "telegram", adapterId: "adapter_muted" },
+    })
+    await callHandler(event, "ai-run")
+
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(0)
+    const audits = await getDb().connectorAudit.toArray()
+    expect(audits.some((a) => a.kind === "inbound.deferred_muted")).toBe(true)
+  })
+
+  it("skips capture and writes inbound.deferred_manual_mode when override mode is manual", async () => {
+    await upsertByConversationKey({
+      conversationKey: "telegram:adapter_1:chat_manual_override",
+      sessionId: "ses_placeholder",
+      mode: "manual",
+    })
+    const event = makeEvent({
+      conversationKey: "telegram:adapter_1:chat_manual_override",
+    })
+    await callHandler(event, "ai-run")
+
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(0)
+    const audits = await getDb().connectorAudit.toArray()
+    expect(audits.some((a) => a.kind === "inbound.deferred_manual_mode")).toBe(true)
+  })
+})
+
+describe("installRuntime — ai-run (capture failure)", () => {
+  it("writes an adapter.error audit and skips outbound enqueue when runAndCapture rejects", async () => {
+    ;(DEFAULT_RUN_AND_CAPTURE as jest.Mock).mockRejectedValueOnce(new Error("sidecar died"))
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_err" })
+    await callHandler(event, "ai-run")
+
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(0)
+    const audits = await getDb().connectorAudit.toArray()
+    const errAudits = audits.filter((a) => a.kind === "adapter.error")
+    expect(errAudits).toHaveLength(1)
+    expect(errAudits[0].reason).toBe("ai_run_capture_failed")
+    expect(errAudits[0].message).toContain("sidecar died")
   })
 })
 
@@ -148,6 +271,7 @@ describe("installRuntime — manual-store", () => {
 
     const jobs = await getDb().outboundQueue.toArray()
     expect(jobs).toHaveLength(0)
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
   })
 })
 
@@ -202,6 +326,35 @@ describe("installRuntime — drop", () => {
   })
 })
 
+describe("installRuntime — edit / delete / system kinds", () => {
+  it("does not write a new StoredMessage for kind=edit events (bus owns the path)", async () => {
+    const event = makeEvent({
+      conversationKey: "telegram:adapter_1:chat_edit",
+      kind: "edit",
+      replacesMessageId: "old_msg_id",
+    })
+    await callHandler(event, "ai-run")
+
+    const sessions = await getDb().sessions.toArray()
+    expect(sessions).toHaveLength(0)
+    const messages = await getDb().messages.toArray()
+    expect(messages).toHaveLength(0)
+    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+  })
+
+  it("does not write a new StoredMessage for kind=system events", async () => {
+    const event = makeEvent({
+      conversationKey: "telegram:adapter_1:chat_sys",
+      kind: "system",
+      systemKind: "read_indicator",
+    })
+    await callHandler(event, "ai-run")
+
+    const messages = await getDb().messages.toArray()
+    expect(messages).toHaveLength(0)
+  })
+})
+
 describe("installRuntime — session reuse", () => {
   it("reuses existing session on second event with same conversationKey", async () => {
     const key = "telegram:adapter_1:chat_reuse"
@@ -247,5 +400,70 @@ describe("installRuntime — session reuse", () => {
     await callHandler(event, "store-only")
     const sessions = await getDb().sessions.toArray()
     expect(sessions[0].title).toBe("Alice")
+  })
+})
+
+describe("inboundEventToSendContent", () => {
+  it("collapses a single text segment to a plain string", () => {
+    const event = makeEvent({
+      segments: [{ type: "text", text: "single" }],
+      plainText: "single",
+    })
+    expect(inboundEventToSendContent(event)).toBe("single")
+  })
+
+  it("joins multiple text + markdown segments with newlines", () => {
+    const event = makeEvent({
+      segments: [
+        { type: "text", text: "hello" },
+        { type: "markdown", md: "**bold**" },
+      ],
+      plainText: "hello\n**bold**",
+    })
+    expect(inboundEventToSendContent(event)).toBe("hello\n**bold**")
+  })
+
+  it("falls back to plainText when segments are empty", () => {
+    const event = makeEvent({ segments: [], plainText: "fallback" })
+    expect(inboundEventToSendContent(event)).toBe("fallback")
+  })
+
+  it("emits [empty] when both segments and plainText are empty", () => {
+    const event = makeEvent({ segments: [], plainText: "" })
+    expect(inboundEventToSendContent(event)).toBe("[empty]")
+  })
+
+  it("renders image segments without inline data as text markers", () => {
+    const event = makeEvent({
+      segments: [{ type: "image", url: "https://example.com/p.png" }],
+      plainText: "",
+    })
+    expect(inboundEventToSendContent(event)).toBe("[image: https://example.com/p.png]")
+  })
+
+  it("preserves base64 image segments as image blocks (multimodal)", () => {
+    const event = makeEvent({
+      segments: [
+        { type: "text", text: "look:" },
+        {
+          type: "image",
+          url: "ignored",
+          // @ts-expect-error - dataBase64 is an extension field used by adapters
+          //  that surface inline image bytes
+          dataBase64: "AAA",
+          mimeType: "image/jpeg",
+        },
+      ],
+      plainText: "look:",
+    })
+    const out = inboundEventToSendContent(event)
+    expect(Array.isArray(out)).toBe(true)
+    if (Array.isArray(out)) {
+      expect(out[0]).toEqual({ type: "text", text: "look:" })
+      expect(out[1]).toEqual({
+        type: "image",
+        source: { type: "base64", media_type: "image/jpeg", data: "AAA" },
+      })
+    }
   })
 })

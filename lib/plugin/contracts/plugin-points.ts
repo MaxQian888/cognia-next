@@ -102,6 +102,14 @@ export const CANONICAL_EXTENSION_POINTS = [
   "settings.ai",
   "settings.plugins",
   "command-palette",
+  // Inbox surface (IM-completion §C). Each slot is conversation-scoped:
+  // contributions receive a `context` prop with `conversationKey`,
+  // `adapterId`, `platform`, `draftId` (where applicable) so plugins
+  // don't have to re-derive identifiers.
+  "inbox.sidebar.section",
+  "inbox.conversation.actions",
+  "inbox.composer.actions",
+  "inbox.draft.actions",
   // VS Code extension reuse layer (see ~/.claude/plans/vscode-snug-squid.md).
   // These slots host UI contributed by VS Code extensions running in the Node
   // sidecar — distinct from cognia-native sidebar/toolbar slots so plugin-vs-
@@ -139,6 +147,10 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "settings.appearance",
   "settings.plugins",
   "command-palette",
+  "inbox.sidebar.section",
+  "inbox.conversation.actions",
+  "inbox.composer.actions",
+  "inbox.draft.actions",
   "vscode.sidebar.view",
   "vscode.webview.panel",
   "vscode.activity-bar",
@@ -170,6 +182,10 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "settings.appearance": "components/settings/appearance/appearance-section.tsx",
   "settings.plugins": "components/plugins/plugin-panel.tsx",
   "command-palette": "components/desktop/command-palette.tsx",
+  "inbox.sidebar.section": "components/inbox/inbox-sidebar.tsx",
+  "inbox.conversation.actions": "components/inbox/conversation-list.tsx",
+  "inbox.composer.actions": "components/inbox/inbox-composer-actions-host.tsx",
+  "inbox.draft.actions": "components/inbox/draft-banner.tsx",
   "vscode.sidebar.view": "components/extensions/vscode-extension-panel.tsx",
   "vscode.webview.panel": "components/extensions/vscode-extension-panel.tsx",
   "vscode.activity-bar": "components/extensions/vscode-extension-panel.tsx",

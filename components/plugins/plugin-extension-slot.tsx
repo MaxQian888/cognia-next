@@ -23,9 +23,18 @@ interface Props {
   limit?: number
   /** Fallback rendered when no extensions are registered for the point. */
   fallback?: ReactNode
+  /**
+   * Optional host-provided context bag merged into each extension's props
+   * as `context`. Inbox slots use this to deliver `conversationKey`,
+   * `adapterId`, `platform`, `draftId`, etc. — so plugin contributions can
+   * react to the active conversation without re-deriving identifiers from
+   * the URL or store. The shape is freeform; each slot's docs should
+   * describe the keys it provides.
+   */
+  context?: Record<string, unknown>
 }
 
-export function PluginExtensionSlot({ point, className, limit, fallback }: Props) {
+export function PluginExtensionSlot({ point, className, limit, fallback, context }: Props) {
   // Re-render whenever the registry mutates. Snapshot is the revision number
   // (a primitive — stable identity), not the registration array, so React's
   // "snapshot should be cached" check passes.
@@ -45,11 +54,18 @@ export function PluginExtensionSlot({ point, className, limit, fallback }: Props
       data-plugin-extension-slot={point}
       data-extension-count={visible.length}
     >
-      {visible.map((ext) => (
-        <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
-          <ext.component pluginId={ext.pluginId} extensionId={ext.id} />
-        </PluginExtensionBoundary>
-      ))}
+      {visible.map((ext) => {
+        const Cmp = ext.component as unknown as React.ComponentType<{
+          pluginId: string
+          extensionId: string
+          context?: Record<string, unknown>
+        }>
+        return (
+          <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
+            <Cmp pluginId={ext.pluginId} extensionId={ext.id} context={context} />
+          </PluginExtensionBoundary>
+        )
+      })}
     </div>
   )
 }

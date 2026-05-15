@@ -137,6 +137,63 @@ pub struct ClickOpts {
     pub button: Option<MouseButton>,
     pub double: Option<bool>,
     pub modifier: Option<KeyChord>,
+    /// When `Some(true)` or `None` (default) and `target` is an
+    /// `Element { .. }`, the backend tries the appropriate UIA pattern
+    /// (Invoke → Toggle → SelectionItem) before falling back to a coordinate
+    /// click at the element's bounding-rect center. Set to `Some(false)` to
+    /// force coordinate input — useful for games / custom-drawn surfaces UIA
+    /// can't see.
+    pub use_native: Option<bool>,
+}
+
+/// Cross-platform 2D point in screen coordinates.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Point {
+    pub x: i32,
+    pub y: i32,
+}
+
+/// Options for `AutomationBackend::drag`. The path is straight-line; the
+/// backend interpolates intermediate moves so the OS sees a real-looking
+/// drag rather than a teleport (which some apps reject).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DragOpts {
+    pub button: Option<MouseButton>,
+    /// How long the move from start → end should take in milliseconds.
+    /// Defaults to ~150ms.
+    pub duration_ms: Option<u32>,
+    /// Number of interpolated steps (default ~12 — produces smooth-looking
+    /// drag without overwhelming the input queue).
+    pub steps: Option<u32>,
+}
+
+/// Either a screen point or an element (its bounding-rect center is used).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ScrollTarget {
+    Point { x: i32, y: i32 },
+    Element { element_ref: ElementRef },
+}
+
+/// Scroll deltas. Positive `dy` scrolls down; positive `dx` scrolls right.
+/// Magnitude is in OS-native wheel units (typically 120 per "notch").
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ScrollOpts {
+    #[serde(default)]
+    pub dx: i32,
+    #[serde(default)]
+    pub dy: i32,
+}
+
+/// Mouse button down / up transition for `mouse_button` calls.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ButtonTransition {
+    Down,
+    Up,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -340,6 +397,62 @@ mod tests {
         assert!(json.contains("\"code\":\"KILL_SWITCH_ACTIVE\""));
         let json = serde_json::to_string(&AutomationError::WhitelistMiss).unwrap();
         assert!(json.contains("\"code\":\"WHITELIST_MISS\""));
+    }
+
+    #[test]
+    fn point_roundtrips_camel_case() {
+        let p = Point { x: 100, y: 200 };
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(json.contains("\"x\":100"));
+        assert!(json.contains("\"y\":200"));
+        let back: Point = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, p);
+    }
+
+    #[test]
+    fn drag_opts_optional_fields() {
+        let opts = DragOpts {
+            button: Some(MouseButton::Left),
+            duration_ms: Some(200),
+            steps: Some(15),
+        };
+        let json = serde_json::to_string(&opts).unwrap();
+        assert!(json.contains("\"durationMs\":200"));
+        assert!(json.contains("\"steps\":15"));
+        let back: DragOpts = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.steps, Some(15));
+    }
+
+    #[test]
+    fn scroll_target_tagged_union() {
+        let p = ScrollTarget::Point { x: 5, y: 10 };
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(json.contains("\"kind\":\"point\""));
+        let elt = ScrollTarget::Element {
+            element_ref: ElementRef("ff".into()),
+        };
+        let json = serde_json::to_string(&elt).unwrap();
+        assert!(json.contains("\"kind\":\"element\""));
+        let _back: ScrollTarget = serde_json::from_str(&json).unwrap();
+    }
+
+    #[test]
+    fn button_transition_roundtrips() {
+        let json = serde_json::to_string(&ButtonTransition::Down).unwrap();
+        assert_eq!(json, "\"down\"");
+        let back: ButtonTransition = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, ButtonTransition::Down);
+    }
+
+    #[test]
+    fn click_opts_use_native_default_omitted() {
+        let opts = ClickOpts::default();
+        let json = serde_json::to_string(&opts).unwrap();
+        // Default is None; serde writes null but the field is still present.
+        // What matters is that deserialization of a json without the field works.
+        let _back: ClickOpts = serde_json::from_str("{}").unwrap();
+        assert!(opts.use_native.is_none());
+        let _ = json;
     }
 
     #[test]

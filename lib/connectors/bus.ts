@@ -21,14 +21,18 @@ import type {
   OutboundRequest,
   OutboundResult,
 } from "@/types/connectors"
+import type { StoredMessage } from "@/lib/claude/types"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { readForResolution } from "@/lib/db/conversation-overrides"
 import { getCharacter } from "@/lib/db/characters"
+import { getDb } from "@/lib/db/schema"
 import { recordAndCheckInbound } from "./dedup"
 import { appendAudit } from "./audit"
 import { evaluatePolicy, type PolicyEvalState } from "./policy-eval"
 import { resolveBinding, type ResolvedBinding } from "./policy-resolve"
 import { routeInbound, type RouteDecision } from "./mode-router"
+import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
+import { findMatchingWorkflows } from "@/lib/workflow/runtime/trigger-subscriptions"
 
 export interface BusInboundHandler {
   (event: NormalizedInboundEvent): Promise<void>
@@ -80,10 +84,30 @@ class ConnectorBus {
    * Full inbound dispatch pipeline — Task 28.
    *
    * Runs dedup → adapter lookup → override lookup → character lookup →
-   * resolve binding → evaluate policy → route → bookkeep → audit → handler.
+   * resolve binding → evaluate policy → route → bookkeep → audit →
+   * handler → workflow fan-out.
+   *
+   * Edit / delete / system events branch out at the very top: they don't
+   * carry a fresh user message, so they bypass the full pipeline and get
+   * applied to the existing StoredMessage directly. They still write an
+   * audit row and (where relevant) fire workflow triggers.
    */
   async dispatchInboundFull(event: NormalizedInboundEvent): Promise<void> {
     const now = Date.now()
+
+    // ── Edit / Delete / System short-circuit ─────────────────────────────────
+    if (event.kind === "edit") {
+      await this.applyMessageEdit(event, now)
+      return
+    }
+    if (event.kind === "delete") {
+      await this.applyMessageDelete(event, now)
+      return
+    }
+    if (event.kind === "system") {
+      await this.applySystemEvent(event, now)
+      return
+    }
 
     // ── Step 1: dedup ────────────────────────────────────────────────────────
     const isNew = await recordAndCheckInbound(event.adapterId, event.messageId)
@@ -161,6 +185,210 @@ class ConnectorBus {
     if (this.routeHandler && decision !== "drop") {
       await this.routeHandler(event, decision, resolved)
     }
+
+    // ── Step 11: workflow fan-out ────────────────────────────────────────────
+    // Workflows subscribed to `trigger.connector.inbound` get the event
+    // payload regardless of the routing decision — a workflow may want
+    // to react to a draft-mode message just as much as an ai-run one.
+    // Fan-out is suppressed when the policy gate blocked the event so
+    // we don't bypass the rate-limit / cooldown rules indirectly.
+    //
+    // We DO suppress fan-out for `decision === "drop"` because dropped
+    // events leave no StoredMessage for the workflow to act on, and
+    // every existing trigger expects a real conversation context.
+    if (!evalResult.blocked && decision !== "drop") {
+      await this.fanOutWorkflowTriggers(event)
+    }
+  }
+
+  /**
+   * Apply a `kind === "edit"` event to the matching StoredMessage. The
+   * lookup keys off `metadata.platformMessage.messageId === replacesMessageId`
+   * so we can update in place without a Dexie schema change. When no row
+   * matches (race / dedup window expiry / never-stored direction), we just
+   * audit and move on — the platform side already shows the edit.
+   */
+  private async applyMessageEdit(event: NormalizedInboundEvent, now: number): Promise<void> {
+    const replaces = event.replacesMessageId
+    if (!replaces) {
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "adapter.error",
+        at: now,
+        conversationKey: event.conversationKey,
+        reason: "edit_event_missing_replaces_id",
+      })
+      return
+    }
+    const db = getDb()
+    const candidates = await db.messages.toArray()
+    const target = candidates.find((m) => m.metadata?.platformMessage?.messageId === replaces)
+    if (target) {
+      // Map the new segments → parts the same way insertInboundMessage does.
+      const parts: StoredMessage["parts"] = event.segments
+        .map((seg) => {
+          if (seg.type === "text" || seg.type === "markdown") {
+            return {
+              type: "text" as const,
+              text: seg.type === "text" ? seg.text : seg.md,
+            }
+          }
+          if (seg.type === "image") {
+            return { type: "text" as const, text: `[image: ${seg.url}]` }
+          }
+          return { type: "text" as const, text: event.plainText }
+        })
+        .filter((p, i, arr) => {
+          if (i === 0) return true
+          const prev = arr[i - 1]
+          return !(prev.type === "text" && p.type === "text" && prev.text === p.text)
+        })
+      const finalParts =
+        parts.length > 0 ? parts : [{ type: "text" as const, text: event.plainText }]
+      const editedMetadata: StoredMessage["metadata"] = {
+        ...target.metadata,
+        editedAt: now,
+        editCount: ((target.metadata?.editCount as number | undefined) ?? 0) + 1,
+      }
+      await db.messages.update(target.id, {
+        parts: finalParts,
+        metadata: editedMetadata,
+      })
+    }
+    await appendAudit({
+      adapterId: event.adapterId,
+      kind: "inbound.edited",
+      at: now,
+      conversationKey: event.conversationKey,
+      message: replaces,
+      fields: { matched: !!target },
+    })
+    // Edits do not fan out to workflows — most subscribers expect new
+    // messages, and re-firing on every keystroke would amplify noise.
+  }
+
+  /**
+   * Apply a `kind === "delete"` event by soft-deleting the matching
+   * StoredMessage (set `metadata.deletedAt` + clear `parts`). Audit fires
+   * regardless of whether a matching row was found.
+   */
+  private async applyMessageDelete(event: NormalizedInboundEvent, now: number): Promise<void> {
+    const replaces = event.replacesMessageId
+    if (!replaces) {
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "adapter.error",
+        at: now,
+        conversationKey: event.conversationKey,
+        reason: "delete_event_missing_replaces_id",
+      })
+      return
+    }
+    const db = getDb()
+    const candidates = await db.messages.toArray()
+    const target = candidates.find((m) => m.metadata?.platformMessage?.messageId === replaces)
+    if (target) {
+      const deletedMetadata: StoredMessage["metadata"] = {
+        ...target.metadata,
+        deletedAt: now,
+      }
+      await db.messages.update(target.id, {
+        parts: [{ type: "text" as const, text: "[deleted]" }],
+        metadata: deletedMetadata,
+      })
+    }
+    await appendAudit({
+      adapterId: event.adapterId,
+      kind: "inbound.deleted",
+      at: now,
+      conversationKey: event.conversationKey,
+      message: replaces,
+      fields: { matched: !!target },
+    })
+  }
+
+  /**
+   * Apply a `kind === "system"` event — read indicators, member joins /
+   * leaves. These never produce a StoredMessage; the audit row is the
+   * whole record. Map `systemKind` → audit kind so the timeline UI can
+   * render them with semantic icons.
+   */
+  private async applySystemEvent(event: NormalizedInboundEvent, now: number): Promise<void> {
+    const sk = event.systemKind
+    let kind: "inbound.read_indicator" | "inbound.member_added" | "inbound.member_removed"
+    if (sk === "read_indicator") kind = "inbound.read_indicator"
+    else if (sk === "member_added") kind = "inbound.member_added"
+    else if (sk === "member_removed") kind = "inbound.member_removed"
+    else {
+      // Unknown system variant — surface it as adapter.error so the
+      // trail catches the schema gap on next deploy.
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "adapter.error",
+        at: now,
+        conversationKey: event.conversationKey,
+        reason: `unknown_system_kind:${sk ?? "<absent>"}`,
+      })
+      return
+    }
+    await appendAudit({
+      adapterId: event.adapterId,
+      kind,
+      at: now,
+      conversationKey: event.conversationKey,
+      fields: {
+        actorOpenId: event.sender.remoteUserId,
+        rawType: (event.raw as { header?: { event_type?: string } } | undefined)?.header
+          ?.event_type,
+      },
+    })
+  }
+
+  /**
+   * Fan a `trigger.connector.inbound` event out to every matching
+   * workflow. Failures in one workflow don't break the others or the
+   * bus — we collect rejections and log them once.
+   */
+  private async fanOutWorkflowTriggers(event: NormalizedInboundEvent): Promise<void> {
+    let matches: Array<{ workflowId: string; nodeId: string; params: Record<string, unknown> }> = []
+    try {
+      matches = findMatchingWorkflows("trigger.connector.inbound", {
+        adapterId: event.adapterId,
+        conversationKey: event.conversationKey,
+      })
+    } catch {
+      return
+    }
+    if (matches.length === 0) return
+
+    const originAt = Date.now()
+    const dispatches = matches.map(async (m) => {
+      try {
+        await dispatchTrigger({
+          workflowId: m.workflowId,
+          kind: "trigger.connector.inbound",
+          payload: event,
+          originAt,
+          binding: {
+            adapterId: event.adapterId,
+            conversationKey: event.conversationKey,
+          },
+        })
+      } catch (err) {
+        // Per-workflow failure — never crash the bus. Audit so the
+        // operator can see the breakage.
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "adapter.error",
+          at: Date.now(),
+          conversationKey: event.conversationKey,
+          reason: "workflow_dispatch_failed",
+          message: err instanceof Error ? err.message : String(err),
+          fields: { workflowId: m.workflowId, nodeId: m.nodeId },
+        })
+      }
+    })
+    await Promise.all(dispatches)
   }
 
   async sendOutbound(adapterId: string, req: OutboundRequest): Promise<OutboundResult> {

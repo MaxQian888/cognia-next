@@ -34,19 +34,34 @@ const SERVER_ONLY_PACKAGES = [
 // Truly un-polyfillable Node.js built-ins (safety net for any dep that slips
 // past the package-level alias above). Do NOT include modules that Turbopack/
 // webpack polyfill automatically (path, stream, os, zlib).
+//
+// Both bare (`fs`) and `node:`-prefixed (`node:fs`) forms must be listed:
+// Turbopack matches `resolveAlias` keys against the literal request string
+// and does NOT strip the `node:` protocol, so `import "node:fs/promises"`
+// bypasses an alias keyed only on `"fs/promises"`.
 const NODE_ONLY_MODULES = [
   "dns",
+  "node:dns",
   "net",
+  "node:net",
   "tls",
+  "node:tls",
   "fs",
+  "node:fs",
+  "fs/promises",
+  "node:fs/promises",
   "child_process",
+  "node:child_process",
   "http2",
+  "node:http2",
   "stream/promises",
+  "node:stream/promises",
   // Webpack 5 with Next.js 16 doesn't auto-polyfill `node:events` for
   // ESM deps that import it explicitly. Aliasing to the stub keeps the
   // mobile bundle from blowing up the moment any transitive dep
   // (simple-git → @kwsites/file-exists, etc.) reaches for it.
   "events",
+  "node:events",
 ]
 
 // Enable static export for Tauri production builds.

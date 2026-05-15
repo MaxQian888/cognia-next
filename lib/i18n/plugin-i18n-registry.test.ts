@@ -4,6 +4,9 @@ import {
   getPluginI18nBundle,
   getMergedPluginMessages,
   lookupPluginMessage,
+  subscribeToPluginI18n,
+  getPluginI18nSnapshot,
+  inflateFlatKeys,
   __resetPluginI18nForTesting,
 } from "./plugin-i18n-registry"
 
@@ -56,5 +59,37 @@ describe("plugin-i18n registry", () => {
     expect(lookupPluginMessage("en", "greet")).toBe("Hello")
     expect(lookupPluginMessage("en", "missing")).toBeUndefined()
     expect(lookupPluginMessage("ja", "greet")).toBeUndefined()
+  })
+
+  it("subscribeToPluginI18n fires on register and unregister, and the snapshot version moves", () => {
+    const observed: number[] = []
+    const initial = getPluginI18nSnapshot()
+    const unsubscribe = subscribeToPluginI18n(() => observed.push(getPluginI18nSnapshot()))
+    registerPluginI18n({ pluginId: "p", messages: { en: { a: "A" } } })
+    unregisterPluginI18n("p")
+    unsubscribe()
+    // Subsequent mutations after unsubscribe must not fire the listener.
+    registerPluginI18n({ pluginId: "q", messages: { en: { b: "B" } } })
+    expect(observed.length).toBe(2)
+    expect(observed[0]).toBeGreaterThan(initial)
+    expect(observed[1]).toBeGreaterThan(observed[0])
+  })
+
+  it("inflateFlatKeys expands dot-notation into the nested shape next-intl expects", () => {
+    const nested = inflateFlatKeys({
+      "panel.title": "Hi",
+      "panel.body": "World",
+      "deep.a.b.c": "x",
+      flat: "y",
+    })
+    expect(nested).toEqual({
+      panel: { title: "Hi", body: "World" },
+      deep: { a: { b: { c: "x" } } },
+      flat: "y",
+    })
+  })
+
+  it("inflateFlatKeys never crashes on an empty input", () => {
+    expect(inflateFlatKeys({})).toEqual({})
   })
 })

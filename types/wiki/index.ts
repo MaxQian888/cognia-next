@@ -50,6 +50,13 @@ export type BridgeScope =
   | "runtime:twins"
   | "runtime:plugins"
   | "runtime:agent-teams"
+  /**
+   * `computer_use` MCP tool — drives the local desktop (screenshot, click,
+   * type, scroll, drag, etc.) for external coding agents. Default OFF; goes
+   * through the same automation `PerCall` consent path as native chat
+   * Computer Use calls.
+   */
+  | "mcp:computer-use"
 
 export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "wiki:cognia",
@@ -62,6 +69,7 @@ export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "runtime:twins",
   "runtime:plugins",
   "runtime:agent-teams",
+  "mcp:computer-use",
 ] as const
 
 /** Scopes enabled by default for a fresh install. Public-code wiki + RAG only. */

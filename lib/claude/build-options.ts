@@ -11,6 +11,7 @@ import { getCharacter, listCharactersByIds } from "@/lib/db/characters"
 import { listEnabledSkillsByIds, recordSkillUsage, renderSkillsSection } from "@/lib/db/skills"
 import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import { getTeam } from "@/lib/db/teams"
+import { isInQuietHours } from "@/lib/connectors/outbound-runner"
 import type {
   AppSettings,
   Character,
@@ -20,6 +21,7 @@ import type {
   Team,
   TeamMember,
 } from "@/lib/claude/types"
+import type { ConnectorMode } from "@/types/connectors/policy"
 import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
@@ -111,6 +113,52 @@ export interface BuildOptionsContext {
    * chat passes `null` to opt out.
    */
   activeGoal?: import("@/types/goal").Goal | null
+  /**
+   * Conversation key for connector-driven sends. Set by the connector
+   * runtime when an inbound message kicks off an ai-run. Direct chat sends
+   * leave this undefined. Currently only used for audit / metadata; the
+   * gating logic lives in `inboxPolicy` so the resolver doesn't have to
+   * fetch the override row itself.
+   */
+  conversationKey?: string
+  /**
+   * Pulls through verbatim from `ChatSession.platformBinding`. Same purpose
+   * as `conversationKey` — context only, no behavioural impact at this
+   * resolver layer.
+   */
+  platformBinding?: ChatSession["platformBinding"]
+  /**
+   * Inbox / connector policy facts the runtime gathers from the adapter row
+   * (`quietHours`, `muted`) and the matching `ConversationOverrideRow`
+   * (`mode === "manual"` → forcedMode). When any field hits, the resolver
+   * stamps `opts.suppressedReason` and the runtime short-circuits the
+   * sidecar call. `null` / undefined means "no inbox gating applies".
+   *
+   * Direct chat hooks pass undefined; only the connector ai-run path sets
+   * this. The resolver does not fetch any of these facts itself — the
+   * runtime owns the lookup so the gate stays one-stop.
+   */
+  inboxPolicy?: InboxSendPolicy | null
+}
+
+/**
+ * Aggregate of inbox / connector facts evaluated by `resolveSendOptions`
+ * to decide whether the send should be suppressed. Constructed by the
+ * connector runtime from `AdapterInstanceRow.{quietHours,muted}` plus the
+ * matching `ConversationOverrideRow.mode`. Never set by direct chat sends.
+ */
+export interface InboxSendPolicy {
+  /** Quiet-hours window from the adapter row. Undefined = always allowed. */
+  quietHours?: { from: string; to: string; tz: string }
+  /** Adapter-wide global mute switch from the adapter row. */
+  muted?: boolean
+  /**
+   * The conversation override's mode. When `"manual"` we suppress an
+   * ai-run ahead of any other gate so the user owns the reply. `"auto"` /
+   * `"draft"` / `undefined` do not suppress here — they are handled
+   * elsewhere in the runtime (`mode-router`, `draft-prepare`, etc.).
+   */
+  forcedMode?: ConnectorMode
 }
 
 /**
@@ -544,6 +592,21 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  // --- Anthropic native tools (Computer Use) -------------------------------
+  // When the character has `enableComputerUse === true`, attach every
+  // registered native Anthropic tool (computer / bash / text_editor) plus
+  // the matching `anthropic-beta` header to `appendHeaders`. The sidecar
+  // forwards them to the Anthropic SDK verbatim. See ADR-0020.
+  try {
+    const { applyComputerUseTools } = await import("@/lib/claude/computer-use-tools")
+    const applied = applyComputerUseTools({ character, opts })
+    Object.assign(opts, applied.opts)
+  } catch {
+    // Non-fatal — the registry import shouldn't ever fail in production,
+    // but a hot-reload during dev can briefly leave it unresolved. Better
+    // to skip computer-use than to break the send.
+  }
+
   // --- Convenience modes (bare / debug / brief) ----------------------------
   // Precedence: session > character > appSettings. memberOverride is omitted
   // intentionally — these are runtime-feel toggles, not per-team-slot config.
@@ -587,6 +650,35 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       appendSystemPrompt: opts.appendSystemPrompt,
       activeGoal: ctx.activeGoal,
     })
+  }
+
+  // --- Inbox / connector suppression gate (ADR-0009) -----------------------
+  // Stamps `opts.suppressedReason` so the connector runtime can short-circuit
+  // the sidecar call (no streaming run, no outbound enqueue) and instead
+  // append a deferred audit row. Direct chat sends never pass `inboxPolicy`,
+  // so this branch is a no-op for the regular composer hook.
+  //
+  // Precedence (first hit wins):
+  //   1. Manual mode override   — user has taken the wheel.
+  //   2. Adapter mute           — operator killswitch.
+  //   3. Adapter quiet hours    — wall-clock window in the adapter's tz.
+  //
+  // Why precedence matters: a muted adapter inside its quiet window should
+  // surface as `"muted"` so the audit log is honest about the strongest
+  // reason — quiet hours is a same-day-only gate while a mute is operator
+  // intent, and the difference is what the troubleshooter wants to see.
+  if (ctx.inboxPolicy) {
+    const policy = ctx.inboxPolicy
+    if (policy.forcedMode === "manual") {
+      opts.suppressedReason = "manual_mode_override"
+    } else if (policy.muted === true) {
+      opts.suppressedReason = "muted"
+    } else if (policy.quietHours) {
+      const { from, to, tz } = policy.quietHours
+      if (isInQuietHours(Date.now(), from, to, tz)) {
+        opts.suppressedReason = "quiet_hours"
+      }
+    }
   }
 
   // --- Extended thinking budget --------------------------------------------

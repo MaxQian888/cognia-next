@@ -109,7 +109,50 @@ export interface ClickOpts {
   button?: MouseButton
   double?: boolean
   modifier?: KeyChord
+  /**
+   * When true (default), clicking an `Element`-target tries UIA patterns
+   * (`Invoke` → `Toggle` → `SelectionItem`) before falling back to a
+   * coordinate click at the element's bounding-rect center. Pass `false`
+   * to force a coordinate click — useful for games / custom-drawn surfaces
+   * UIA can't see, or to drive an exact pixel-level interaction.
+   */
+  useNative?: boolean
 }
+
+/** 2D screen coordinate, mirror of Rust `automation::types::Point`. */
+export interface Point {
+  x: number
+  y: number
+}
+
+export interface DragOpts {
+  button?: MouseButton
+  /** Total move duration in milliseconds (default ~150). */
+  durationMs?: number
+  /** Number of interpolated waypoints (default ~12). */
+  steps?: number
+}
+
+/**
+ * Scroll target — either a point on the screen or an element. For
+ * elements, the backend prefers UIA `ScrollPattern` / `ScrollItemPattern`
+ * over wheel events when available.
+ */
+export type ScrollTarget =
+  | { kind: "point"; x: number; y: number }
+  | { kind: "element"; elementRef: ElementRef }
+
+/**
+ * Scroll deltas. Positive `dy` scrolls down; positive `dx` scrolls right.
+ * Magnitude is in OS-native wheel units (typically 120 per notch).
+ */
+export interface ScrollOpts {
+  dx?: number
+  dy?: number
+}
+
+/** Mouse button transition for `mouse_button` direct down/up control. */
+export type ButtonTransition = "down" | "up"
 
 export interface TypeOpts {
   delayMs?: number

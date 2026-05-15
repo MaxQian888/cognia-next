@@ -41,6 +41,31 @@ jest.mock("@/components/inbox/draft-banner", () => ({
   DraftBanner: () => <div data-testid="draft-banner-stub" />,
 }))
 
+jest.mock("@/components/chat/chat-view", () => ({
+  ChatPane: () => <div data-testid="chat-pane-stub" />,
+}))
+
+jest.mock("@/components/chat/use-resolved-connector-mode", () => ({
+  useResolvedConnectorMode: () => "auto",
+}))
+
+const mockSelect = jest.fn()
+jest.mock("@/hooks/chat", () => ({
+  useSessions: () => ({ select: mockSelect }),
+  useClaudeChat: () => ({
+    send: jest.fn(),
+    stop: jest.fn(),
+    regenerate: jest.fn(),
+    editAndResend: jest.fn(),
+  }),
+  useTeamChat: () => ({
+    send: jest.fn(),
+    stop: jest.fn(),
+    regenerate: jest.fn(),
+    editAndResend: jest.fn(),
+  }),
+}))
+
 // React.use — mock to unwrap the params promise synchronously.
 let mockParamsValue = { conversationKey: "ck1" }
 
@@ -115,5 +140,18 @@ describe("ConversationPage (/inbox/c/[conversationKey])", () => {
     mockSession = makeSession("s1", "ck1")
     render(<ConversationPage params={Promise.resolve({ conversationKey: "ck1" })} />)
     expect(screen.getByTestId("conversation-detail")).toBeInTheDocument()
+  })
+
+  it("mounts ChatPane in the detail pane", () => {
+    mockSession = makeSession("s1", "ck1")
+    render(<ConversationPage params={Promise.resolve({ conversationKey: "ck1" })} />)
+    expect(screen.getByTestId("chat-pane-stub")).toBeInTheDocument()
+  })
+
+  it("selects the resolved session so the chat store binds to it", () => {
+    mockSelect.mockClear()
+    mockSession = makeSession("s1", "ck1")
+    render(<ConversationPage params={Promise.resolve({ conversationKey: "ck1" })} />)
+    expect(mockSelect).toHaveBeenCalledWith("s1")
   })
 })

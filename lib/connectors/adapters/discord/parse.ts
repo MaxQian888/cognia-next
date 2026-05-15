@@ -1,8 +1,15 @@
 /**
  * Discord Gateway dispatch → NormalizedInboundEvent parser.
  *
- * Handles MESSAGE_CREATE in Phase 1.
- * MESSAGE_UPDATE → null (TODO: Phase 2 edit events).
+ * Handles:
+ * - MESSAGE_CREATE → kind="create"
+ * - MESSAGE_UPDATE → kind="edit"  with `replacesMessageId` set so the bus
+ *                     can update the existing StoredMessage in place.
+ * - MESSAGE_DELETE → kind="delete" with `replacesMessageId` set; the bus
+ *                     soft-deletes the matching StoredMessage. The delete
+ *                     dispatch carries no sender / content metadata, so we
+ *                     synthesise a thin event using just the channel + ids.
+ *
  * All other dispatch types → null.
  */
 
@@ -131,24 +138,18 @@ function buildSegments(msg: DiscordMessage): MessageSegment[] {
 }
 
 /**
- * Parse a Discord Gateway dispatch into a NormalizedInboundEvent.
- *
- * Returns null for:
- * - MESSAGE_UPDATE (TODO: Phase 2)
- * - All non-MESSAGE_CREATE dispatch types
+ * Project a `MESSAGE_CREATE` / `MESSAGE_UPDATE` payload into the common
+ * NormalizedInboundEvent shape. Discord delivers the same `DiscordMessage`
+ * envelope on both events; the only difference is whether we tag the
+ * resulting event as `create` or `edit` and set `replacesMessageId`.
  */
-export function parseDiscordDispatch(
+function messageToEvent(
   adapterId: string,
   selfId: string,
-  dispatch: DiscordDispatch
-): NormalizedInboundEvent | null {
-  // TODO (Phase 2): handle MESSAGE_UPDATE as edit events
-  if (dispatch.t === "MESSAGE_UPDATE") return null
-
-  if (dispatch.t !== "MESSAGE_CREATE") return null
-
-  const msg = dispatch.d as DiscordMessage
-
+  msg: DiscordMessage,
+  dispatch: DiscordDispatch,
+  kindOverride?: "create" | "edit"
+): NormalizedInboundEvent {
   const channelId = msg.channel_id
   const threadId = msg.thread_id
 
@@ -197,5 +198,92 @@ export function parseDiscordDispatch(
     mentions: { selfMentioned, users },
     timestamp: new Date(msg.timestamp).getTime(),
     raw: dispatch,
+    kind: kindOverride ?? "create",
+    replacesMessageId: kindOverride === "edit" ? msg.id : undefined,
   }
+}
+
+/**
+ * Project a `MESSAGE_DELETE` payload into a synthetic `kind="delete"`
+ * event. Discord's MESSAGE_DELETE only carries `{ id, channel_id, guild_id }`
+ * — no author or content — so we set sender / segments to empty stubs and
+ * rely on `replacesMessageId` for the bus to find the row to soft-delete.
+ */
+interface DiscordMessageDeletePayload {
+  id: string
+  channel_id: string
+  guild_id?: string
+  thread_id?: string
+}
+
+function deleteToEvent(
+  adapterId: string,
+  selfId: string,
+  payload: DiscordMessageDeletePayload,
+  dispatch: DiscordDispatch
+): NormalizedInboundEvent {
+  const channelId = payload.channel_id
+  const threadId = payload.thread_id
+  const conversationKey = buildConversationKey("discord", adapterId, channelId, threadId)
+
+  const channelKind: "private" | "group" | "channel" | "thread" =
+    threadId !== undefined ? "thread" : payload.guild_id !== undefined ? "group" : "private"
+
+  return {
+    platform: "discord",
+    adapterId,
+    selfId,
+    messageId: payload.id,
+    conversationRef: {
+      platform: "discord",
+      adapterId,
+      channelId,
+      guildId: payload.guild_id,
+      messageId: payload.id,
+    },
+    conversationKey,
+    // Sender unknown — Discord does not include it on the delete event.
+    sender: {
+      id: `discord:unknown`,
+      platform: "discord",
+      adapterId,
+      remoteUserId: "unknown",
+    },
+    channel: {
+      id: conversationKey,
+      kind: channelKind,
+      platformChannelId: channelId,
+    },
+    segments: [],
+    plainText: "",
+    mentions: { selfMentioned: false, users: [] },
+    timestamp: Date.now(),
+    raw: dispatch,
+    kind: "delete",
+    replacesMessageId: payload.id,
+  }
+}
+
+/**
+ * Parse a Discord Gateway dispatch into a NormalizedInboundEvent.
+ *
+ * Handles MESSAGE_CREATE / MESSAGE_UPDATE / MESSAGE_DELETE; returns null
+ * for every other dispatch type (we do not subscribe to typing indicators,
+ * presence updates, or guild events).
+ */
+export function parseDiscordDispatch(
+  adapterId: string,
+  selfId: string,
+  dispatch: DiscordDispatch
+): NormalizedInboundEvent | null {
+  if (dispatch.t === "MESSAGE_CREATE") {
+    return messageToEvent(adapterId, selfId, dispatch.d as DiscordMessage, dispatch)
+  }
+  if (dispatch.t === "MESSAGE_UPDATE") {
+    return messageToEvent(adapterId, selfId, dispatch.d as DiscordMessage, dispatch, "edit")
+  }
+  if (dispatch.t === "MESSAGE_DELETE") {
+    return deleteToEvent(adapterId, selfId, dispatch.d as DiscordMessageDeletePayload, dispatch)
+  }
+  return null
 }

@@ -89,14 +89,63 @@ export function serializeReaction(channel: string, ts: string, name: string): Se
 }
 
 /**
- * Typing indicator via assistant.threads.setStatus.
+ * Typing indicator via `assistant.threads.setStatus`.
  *
- * NOTE: This is only available for assistant apps and is not a standard bot
- * capability. Phase 1 makes this a no-op.
- * TODO (Phase 2): implement for assistant apps when transport mode supports it.
+ * Slack's assistants API only honours this on threads spawned from an
+ * assistant-enabled app — calling it on a regular channel returns
+ * `not_supported`. The runtime gate is `AdapterInstanceRow.settings.
+ * assistantAppEnabled`; the adapter's `setTyping` skips this serializer
+ * entirely when the gate is false, so callers can rely on the call being
+ * issued only against threads where Slack will accept it.
+ *
+ * `status` is the typing-indicator caption Slack shows under the
+ * assistant's name (e.g., "is typing…"). An empty string clears the
+ * indicator — pass `""` when typing stops.
+ */
+export function serializeAssistantStatus(
+  channel: string,
+  threadTs: string,
+  status: string
+): SerializedSlackCall {
+  return {
+    method: "POST",
+    url: `${SLACK_API_BASE}/assistant.threads.setStatus`,
+    payload: { channel_id: channel, thread_ts: threadTs, status },
+  }
+}
+
+/**
+ * Set the suggested prompts shown above an assistant thread's input box
+ * via `assistant.threads.setSuggestedPrompts`. Same gating as
+ * {@link serializeAssistantStatus} — only valid on assistant-app
+ * threads. `prompts` is capped at 4 by Slack; we trim defensively so the
+ * caller never gets a 4xx for over-supplying.
+ */
+export function serializeAssistantSuggestedPrompts(
+  channel: string,
+  threadTs: string,
+  prompts: Array<{ title: string; message: string }>,
+  title?: string
+): SerializedSlackCall {
+  const trimmed = prompts.slice(0, 4)
+  return {
+    method: "POST",
+    url: `${SLACK_API_BASE}/assistant.threads.setSuggestedPrompts`,
+    payload: {
+      channel_id: channel,
+      thread_ts: threadTs,
+      prompts: trimmed,
+      ...(title ? { title } : {}),
+    },
+  }
+}
+
+/**
+ * @deprecated Phase 1 alias — returns null. Use
+ * {@link serializeAssistantStatus} guarded by
+ * `settings.assistantAppEnabled` for assistant-app threads.
  */
 export function serializeTyping(_channel: string, _threadTs?: string): SerializedSlackCall | null {
-  // No-op in Phase 1 — assistant.threads.setStatus requires the assistants beta
   return null
 }
 
