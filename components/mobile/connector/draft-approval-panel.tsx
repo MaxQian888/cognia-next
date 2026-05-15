@@ -18,6 +18,7 @@ import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { PullToRefresh } from "@/components/mobile/interactions/pull-to-refresh"
 import { SwipeRow } from "@/components/mobile/interactions/swipe-row"
 import { useDraftApproval } from "@/hooks/use-draft-approval"
@@ -111,22 +112,25 @@ function DraftApprovalRow({
         </div>
         <p className="mt-1 line-clamp-3 text-sm">{summarize(row)}</p>
         <div className="mt-2 flex gap-2">
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={() => void reject()}
-            className="touch-target flex-1 rounded-md border border-destructive/40 px-3 py-1.5 text-xs font-medium text-destructive"
+            className="touch-target flex-1 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
             data-testid={`draft-reject-${row.id}`}
           >
             {rejectLabel}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            size="sm"
             onClick={() => void approve()}
-            className="touch-target flex-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
+            className="touch-target flex-1"
             data-testid={`draft-approve-${row.id}`}
           >
             {approveLabel}
-          </button>
+          </Button>
         </div>
       </div>
     </SwipeRow>
