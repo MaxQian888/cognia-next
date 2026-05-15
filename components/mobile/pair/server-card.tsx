@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl"
 import { ChevronRightIcon, HistoryIcon, RouterIcon, ShieldCheckIcon, WifiIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { DiscoveredServer } from "@/lib/connectivity/lan-scanner"
 
@@ -32,8 +33,9 @@ export function ServerCard({ server, onSelect, selected, className }: ServerCard
   const sourceKey = SOURCE_TO_KEY[server.source]
   const subtitle = server.hostname && server.hostname !== server.ip ? server.hostname : server.ip
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={() => onSelect(server)}
       data-testid="pair-server-card"
       data-server-id={server.id}
@@ -41,9 +43,8 @@ export function ServerCard({ server, onSelect, selected, className }: ServerCard
       data-selected={selected ? "true" : undefined}
       aria-pressed={selected}
       className={cn(
-        "group flex w-full items-center gap-3 rounded-lg border bg-card p-3 text-left transition-colors",
-        "min-h-16 active:bg-muted/60",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+        "group h-auto min-h-16 w-full items-center justify-start gap-3 rounded-lg border bg-card p-3 text-left font-normal",
+        "active:bg-muted/60",
         selected ? "border-primary/60 bg-primary/5" : "border-border hover:bg-muted/30",
         className
       )}
@@ -97,6 +98,6 @@ export function ServerCard({ server, onSelect, selected, className }: ServerCard
         aria-hidden="true"
         className="size-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
       />
-    </button>
+    </Button>
   )
 }

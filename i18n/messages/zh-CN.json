@@ -8411,6 +8411,7 @@
       "tokenLabel": "配对令牌",
       "fingerprintPinned": "桌面身份已锁定",
       "fingerprintHint": "今后重连时如果桌面签名密钥不一致，本机将自动拒绝。",
+      "fingerprintMismatch": "服务器身份不匹配（期望 {expected}…，实际 {reported}…），请重新扫描桌面端最新的二维码完成配对。",
       "formCardTitle": "配对手机",
       "formCardDescription": "扫码或手动粘贴均可——两条路径共用同一份 5 分钟令牌。",
       "submit": "完成配对",

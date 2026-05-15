@@ -174,7 +174,10 @@ export function PairStep({
             if (reported && reported !== expected) {
               setPhase({
                 kind: "error",
-                message: `Server identity mismatch (expected ${expected.slice(0, 8)}…, got ${reported.slice(0, 8)}…). Re-pair from the desktop's current QR.`,
+                message: t("fingerprintMismatch", {
+                  expected: expected.slice(0, 8),
+                  reported: reported.slice(0, 8),
+                }),
               })
               return
             }

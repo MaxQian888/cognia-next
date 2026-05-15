@@ -8411,6 +8411,7 @@
       "tokenLabel": "Pair token",
       "fingerprintPinned": "Desktop identity pinned",
       "fingerprintHint": "This phone will refuse a different desktop signing key on every reconnect.",
+      "fingerprintMismatch": "Server identity mismatch (expected {expected}…, got {reported}…). Re-pair from the desktop's current QR.",
       "formCardTitle": "Pair this phone",
       "formCardDescription": "One-tap scan or manual paste — both routes use the same 5-minute pair token.",
       "submit": "Complete pairing",
