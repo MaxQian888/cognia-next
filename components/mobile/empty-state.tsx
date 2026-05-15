@@ -3,6 +3,14 @@
 import type { ComponentType, ReactNode, SVGProps } from "react"
 
 import { Button } from "@/components/ui/button"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
 
 export interface EmptyStateProps {
@@ -27,36 +35,42 @@ export function EmptyState({
   children,
 }: EmptyStateProps) {
   return (
-    <div
+    <Empty
       data-testid="empty-state"
       className={cn(
-        "flex flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border bg-card/40 px-6 py-10 text-center",
+        "gap-2 border border-dashed border-border bg-card/40 px-6 py-10 md:p-10",
         className
       )}
     >
-      {Icon ? (
-        <Icon
-          aria-hidden="true"
-          className="size-10 text-muted-foreground/70"
-          data-testid="empty-state-icon"
-        />
-      ) : null}
-      <h3 className="text-sm font-semibold">{title}</h3>
-      {description ? (
-        <p className="max-w-[28ch] text-xs text-muted-foreground">{description}</p>
-      ) : null}
+      <EmptyHeader className="gap-2">
+        {Icon ? (
+          <EmptyMedia className="bg-transparent">
+            <Icon
+              aria-hidden="true"
+              className="size-10 text-muted-foreground/70"
+              data-testid="empty-state-icon"
+            />
+          </EmptyMedia>
+        ) : null}
+        <EmptyTitle className="text-sm font-semibold tracking-normal">{title}</EmptyTitle>
+        {description ? (
+          <EmptyDescription className="max-w-[28ch] text-xs">{description}</EmptyDescription>
+        ) : null}
+      </EmptyHeader>
       {cta ? (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={cta.onSelect}
-          data-testid={cta.testId ?? "empty-state-cta"}
-        >
-          {cta.label}
-        </Button>
+        <EmptyContent className="gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={cta.onSelect}
+            data-testid={cta.testId ?? "empty-state-cta"}
+          >
+            {cta.label}
+          </Button>
+        </EmptyContent>
       ) : null}
       {children}
-    </div>
+    </Empty>
   )
 }
