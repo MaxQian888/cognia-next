@@ -45,6 +45,7 @@ jest.mock("next-intl", () => ({
       swipePin: "Pin",
       swipeUnpin: "Unpin",
       swipeDelete: "Delete",
+      unreadCount: `${vars?.count ?? 0} unread`,
     }
     return map[key] ?? key
   },

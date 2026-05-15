@@ -8752,7 +8752,8 @@
       "swipePin": "Pin",
       "swipeUnpin": "Unpin",
       "swipeDelete": "Delete",
-      "presenceStreaming": "Streaming"
+      "presenceStreaming": "Streaming",
+      "unreadCount": "{count, plural, =1 {1 unread} other {# unread}}"
     },
     "settingsPanel": {
       "theme": "Theme",

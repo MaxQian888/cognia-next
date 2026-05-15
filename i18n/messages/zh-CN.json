@@ -8752,7 +8752,8 @@
       "swipePin": "置顶",
       "swipeUnpin": "取消置顶",
       "swipeDelete": "删除",
-      "presenceStreaming": "回复中"
+      "presenceStreaming": "回复中",
+      "unreadCount": "{count, plural, =1 {1 条未读} other {# 条未读}}"
     },
     "settingsPanel": {
       "theme": "主题",

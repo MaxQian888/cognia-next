@@ -15,6 +15,7 @@ import { useTranslations } from "next-intl"
 import { CompassIcon, MessageCircleIcon, UserIcon, WorkflowIcon } from "lucide-react"
 import { useTransition } from "react"
 
+import { Badge } from "@/components/ui/badge"
 import { selectionFeedback } from "@/lib/capacitor/haptics"
 import { cn } from "@/lib/utils"
 
@@ -126,13 +127,14 @@ export function MobileTabBar({ className, badges }: MobileTabBarProps) {
             <span className="relative">
               <Icon className="size-5" aria-hidden="true" />
               {badge > 0 && (
-                <span
+                <Badge
+                  variant="destructive"
                   data-testid={`mobile-tab-badge-${tab.id}`}
                   aria-label={tBar("unread", { count: badge })}
-                  className="absolute -right-1.5 -top-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-semibold text-destructive-foreground"
+                  className="absolute -right-1.5 -top-0.5 h-4 min-w-[16px] rounded-full px-1 text-[9px] font-semibold"
                 >
                   {badge > 99 ? "99+" : badge}
-                </span>
+                </Badge>
               )}
             </span>
             <span>{t(tab.id)}</span>

@@ -113,30 +113,31 @@ export function MobileChannelList({
             placeholder={t("search")}
             aria-label={t("searchAria")}
             data-testid="mobile-channel-search"
-            className="h-8 pl-7 pr-7 text-sm"
+            className="h-9 pl-7 pr-8 text-sm"
           />
           {query.length > 0 ? (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               aria-label={tShell("clearSearch")}
               data-testid="mobile-channel-search-clear"
               onClick={() => setQuery("")}
-              className="absolute right-1.5 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-muted"
+              className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground"
             >
-              <XIcon className="size-3.5" />
-            </button>
+              <XIcon />
+            </Button>
           ) : null}
         </div>
         <Button
           type="button"
           size="icon"
           variant="ghost"
-          className="size-8"
           onClick={onNewDirect}
           aria-label={tShell("newChat")}
           data-testid="mobile-channel-new"
         >
-          <PlusIcon className="size-4" />
+          <PlusIcon />
         </Button>
       </div>
 
@@ -162,6 +163,7 @@ export function MobileChannelList({
                 onDelete={() => void onDelete(r.session.id)}
                 pinLabel={t("swipeUnpin")}
                 deleteLabel={t("swipeDelete")}
+                unreadLabel={t("unreadCount", { count: r.unread })}
               />
             ))}
           </Section>
@@ -179,6 +181,7 @@ export function MobileChannelList({
                 onDelete={() => void onDelete(r.session.id)}
                 pinLabel={t("swipePin")}
                 deleteLabel={t("swipeDelete")}
+                unreadLabel={t("unreadCount", { count: r.unread })}
               />
             ))}
           </Section>
@@ -215,6 +218,7 @@ function ChannelRow({
   onDelete,
   pinLabel,
   deleteLabel,
+  unreadLabel,
 }: {
   resolved: ResolvedSession
   active: boolean
@@ -223,6 +227,7 @@ function ChannelRow({
   onDelete: () => void
   pinLabel: string
   deleteLabel: string
+  unreadLabel: string
 }) {
   const { session, unread, glyph, color } = resolved
   return (
@@ -272,7 +277,7 @@ function ChannelRow({
               {unread > 0 ? (
                 <span
                   data-testid={`mobile-channel-unread-${session.id}`}
-                  aria-label={`${unread} unread`}
+                  aria-label={unreadLabel}
                   className="absolute -right-0.5 -top-0.5 inline-flex size-2 rounded-full bg-destructive"
                 />
               ) : null}
