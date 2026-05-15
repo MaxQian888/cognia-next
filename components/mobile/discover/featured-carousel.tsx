@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import type { Character } from "@/lib/claude/types"
 import { cn } from "@/lib/utils"
@@ -36,11 +37,12 @@ export function FeaturedCarousel({ characters, onSelect, className }: FeaturedCa
       >
         {characters.map((c) => (
           <li key={c.id} className="snap-start">
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => onSelect(c)}
               data-testid={`featured-tile-${c.id}`}
-              className="flex w-24 flex-col items-center gap-1.5 rounded-md border border-border bg-card p-3 text-left active:bg-muted/50"
+              className="h-auto w-24 flex-col items-center gap-1.5 rounded-md border border-border bg-card p-3 text-left font-normal"
             >
               <Avatar className="size-12">
                 <AvatarFallback
@@ -54,7 +56,7 @@ export function FeaturedCarousel({ characters, onSelect, className }: FeaturedCa
               <span className="line-clamp-2 text-center text-[11px] font-medium leading-tight">
                 {c.name}
               </span>
-            </button>
+            </Button>
           </li>
         ))}
       </ul>

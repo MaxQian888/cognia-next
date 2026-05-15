@@ -150,29 +150,31 @@ export function TwinSourcesPanel({ twinId = "default", className }: TwinSourcesP
           data-testid="twin-sources-menu"
           className="mb-3 grid grid-cols-3 gap-2 rounded-md border border-border bg-card p-3"
         >
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={() => void onPaste()}
-            className="touch-target flex flex-col items-center gap-1 rounded-md p-2 text-xs active:bg-muted/60"
+            className="touch-target h-auto flex-col items-center gap-1 p-2 text-xs font-normal"
             data-testid="twin-sources-paste"
           >
-            <ClipboardPasteIcon className="size-5" />
+            <ClipboardPasteIcon />
             <span>{t("pickPaste")}</span>
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="ghost"
             onClick={() => void onCamera()}
-            className="touch-target flex flex-col items-center gap-1 rounded-md p-2 text-xs active:bg-muted/60"
+            className="touch-target h-auto flex-col items-center gap-1 p-2 text-xs font-normal"
             data-testid="twin-sources-camera"
           >
-            <CameraIcon className="size-5" />
+            <CameraIcon />
             <span>{t("pickCamera")}</span>
-          </button>
+          </Button>
           <label
-            className="touch-target flex flex-col items-center gap-1 rounded-md p-2 text-xs active:bg-muted/60"
+            className="touch-target flex flex-col items-center gap-1 rounded-md p-2 text-xs hover:bg-accent hover:text-accent-foreground active:bg-muted/60"
             data-testid="twin-sources-file"
           >
-            <FileIcon className="size-5" />
+            <FileIcon className="size-4" />
             <span>{t("pickFile")}</span>
             <input
               ref={fileInputRef}

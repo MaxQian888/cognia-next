@@ -5,6 +5,7 @@ import { SparklesIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import {
   ItemActions,
@@ -37,12 +38,13 @@ export function SkillCard({ skill, onToggle, className }: SkillCardProps) {
 
   return (
     <>
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={() => setOpen(true)}
         aria-label={tSkills("openSheet", { name: skill.name })}
         className={cn(
-          "flex w-full items-start gap-3 rounded-md border border-border bg-card p-3 text-left",
+          "h-auto w-full items-start justify-start gap-3 rounded-md border border-border bg-card p-3 text-left font-normal",
           "active:bg-muted/50 transition-colors",
           className
         )}
@@ -81,7 +83,7 @@ export function SkillCard({ skill, onToggle, className }: SkillCardProps) {
             aria-label={tSkills("toggleEnabled")}
           />
         </ItemActions>
-      </button>
+      </Button>
       <MobileSkillSheet skill={skill} open={open} onOpenChange={setOpen} />
     </>
   )

@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import type { Character } from "@/lib/claude/types"
 import { cn } from "@/lib/utils"
 
@@ -65,9 +66,14 @@ export function CharacterCard({ character, href, onSelect, className }: Characte
   }
   if (onSelect) {
     return (
-      <button type="button" onClick={() => onSelect(character)} className="block w-full text-left">
+      <Button
+        type="button"
+        variant="ghost"
+        onClick={() => onSelect(character)}
+        className="block h-auto w-full p-0 text-left font-normal"
+      >
         {inner}
-      </button>
+      </Button>
     )
   }
   return inner

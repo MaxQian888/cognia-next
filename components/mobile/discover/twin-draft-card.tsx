@@ -4,6 +4,7 @@ import { ClockIcon, FileTextIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import type { TwinDraft } from "@/types/twin"
 import { cn } from "@/lib/utils"
 
@@ -41,11 +42,12 @@ export function TwinDraftCard({ draft, onSelect, className }: TwinDraftCardProps
   )
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={() => onSelect?.(draft)}
       className={cn(
-        "flex w-full items-start gap-3 rounded-md border border-border bg-card p-3 text-left",
+        "h-auto w-full items-start justify-start gap-3 rounded-md border border-border bg-card p-3 text-left font-normal",
         "active:bg-muted/50 transition-colors",
         accepted && "opacity-70",
         className
@@ -76,6 +78,6 @@ export function TwinDraftCard({ draft, onSelect, className }: TwinDraftCardProps
           <span>· {t("qualityScore", { percent: Math.round(qualityScore * 100) })}</span>
         </p>
       </div>
-    </button>
+    </Button>
   )
 }

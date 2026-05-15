@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl"
 import { SearchIcon, XIcon } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 
@@ -30,15 +31,17 @@ export function DiscoverSearch({ value, onChange, className }: DiscoverSearchPro
         className="h-9 pl-9 pr-9"
       />
       {value.length > 0 ? (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-xs"
           aria-label={tShell("clearSearch")}
           data-testid="discover-search-clear"
           onClick={() => onChange("")}
-          className="absolute right-2 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-muted"
+          className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground"
         >
-          <XIcon className="size-3.5" />
-        </button>
+          <XIcon />
+        </Button>
       ) : null}
     </div>
   )
