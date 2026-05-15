@@ -18,6 +18,7 @@ import { CopyIcon, Share2Icon } from "lucide-react"
 import { toast } from "sonner"
 import type { UIMessage } from "ai"
 
+import { Button } from "@/components/ui/button"
 import {
   Drawer,
   DrawerContent,
@@ -111,16 +112,17 @@ interface RowProps {
 
 function Row({ icon, label, onClick, disabled, testid }: RowProps) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={onClick}
       disabled={disabled}
       data-testid={testid}
-      className="touch-target flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent active:bg-accent disabled:opacity-50"
+      className="touch-target h-auto w-full justify-start gap-3 px-3 py-2 text-left text-sm font-normal"
     >
       <span aria-hidden="true">{icon}</span>
       <span className="flex-1">{label}</span>
-    </button>
+    </Button>
   )
 }
 

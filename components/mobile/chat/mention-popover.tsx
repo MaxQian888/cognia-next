@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl"
 import { useMemo } from "react"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
+import { Button } from "@/components/ui/button"
 import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { avatarColor } from "@/lib/ui/avatar"
 import { cn } from "@/lib/utils"
@@ -63,9 +64,10 @@ export function MentionPopover({ open, query, members, onPick, onDismiss, classN
           <ul className="max-h-72 overflow-y-auto py-1">
             {filtered.map((member) => (
               <li key={member.id}>
-                <button
+                <Button
                   type="button"
-                  className="flex w-full min-h-12 items-center gap-3 px-3 py-2 text-left text-sm hover:bg-accent active:bg-accent"
+                  variant="ghost"
+                  className="h-auto min-h-12 w-full justify-start gap-3 rounded-none px-3 py-2 text-left text-sm font-normal"
                   onClick={() => onPick(member)}
                 >
                   <AvatarBadge subject={member} size={28} textClassName="text-xs" />
@@ -75,7 +77,7 @@ export function MentionPopover({ open, query, members, onPick, onDismiss, classN
                   >
                     {member.name}
                   </span>
-                </button>
+                </Button>
               </li>
             ))}
           </ul>

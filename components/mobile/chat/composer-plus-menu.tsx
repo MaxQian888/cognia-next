@@ -22,6 +22,7 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { CameraIcon, FileIcon, ImageIcon, MicIcon, PaperclipIcon, XIcon } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { pickMultiplePhotos, pickPhoto } from "@/lib/capacitor/camera"
 import { selectionFeedback } from "@/lib/capacitor/haptics"
 import { showToast } from "@/lib/capacitor/toast"
@@ -200,16 +201,18 @@ export function ComposerPlusMenu({ onAttach, onSend, onError, className }: Compo
 
   return (
     <div className={cn("relative", className)}>
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="icon"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-label={t("toggleAria")}
-        className="touch-target flex size-9 items-center justify-center rounded-full text-muted-foreground hover:bg-muted/60 active:bg-muted"
+        className="touch-target rounded-full text-muted-foreground"
         data-testid="composer-plus-toggle"
       >
-        {open ? <XIcon className="size-5" /> : <PaperclipIcon className="size-5" />}
-      </button>
+        {open ? <XIcon /> : <PaperclipIcon />}
+      </Button>
 
       {open ? (
         <div
@@ -243,15 +246,17 @@ export function ComposerPlusMenu({ onAttach, onSend, onError, className }: Compo
             />
           </label>
           {recording ? (
-            <button
+            <Button
               type="button"
+              variant="destructive"
+              size="sm"
               onClick={() => void onVoiceStop()}
-              className="col-span-3 flex items-center justify-center gap-2 rounded-md bg-destructive px-3 py-2 text-xs font-medium text-destructive-foreground"
+              className="col-span-3 gap-2 text-xs"
               data-testid="composer-plus-voice-stop"
             >
-              <MicIcon className="size-4 animate-pulse" />
+              <MicIcon className="animate-pulse" />
               <span>{t("voiceStop")}</span>
-            </button>
+            </Button>
           ) : (
             <PlusItem
               icon={<MicIcon className="size-5" />}
@@ -275,16 +280,17 @@ interface PlusItemProps {
 
 function PlusItem({ icon, label, onSelect, testId }: PlusItemProps) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       role="menuitem"
       onClick={onSelect}
       data-testid={testId}
-      className="flex flex-col items-center gap-1 rounded-md p-2 text-center text-xs active:bg-muted/60"
+      className="h-auto flex-col items-center gap-1 p-2 text-center text-xs font-normal"
     >
       {icon}
       <span>{label}</span>
-    </button>
+    </Button>
   )
 }
 
