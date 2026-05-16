@@ -2,8 +2,10 @@
 
 import { useTranslations } from "next-intl"
 import Link from "next/link"
+import { motion, useReducedMotion } from "motion/react"
 
 import type { WorkflowRunRow } from "@/types/workflow/visual"
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 
 import { RunStatusBadge } from "./run-status-badge"
@@ -27,6 +29,7 @@ function formatDuration(run: WorkflowRunRow): string {
 
 export function RunVerticalGantt({ runs, hrefForRun, className }: RunVerticalGanttProps) {
   const t = useTranslations("mobile.workflow")
+  const reduce = useReducedMotion()
 
   if (runs.length === 0) {
     return (
@@ -37,10 +40,13 @@ export function RunVerticalGantt({ runs, hrefForRun, className }: RunVerticalGan
   }
 
   return (
-    <ol
+    <motion.ol
       className={cn("flex flex-col", className)}
       data-testid="run-vertical-gantt"
       aria-label={t("runsHeader")}
+      initial={reduce ? false : "initial"}
+      animate="animate"
+      variants={STAGGER_CONTAINER}
     >
       {runs.map((run) => {
         const href = hrefForRun
@@ -49,7 +55,11 @@ export function RunVerticalGantt({ runs, hrefForRun, className }: RunVerticalGan
         const startedDate = new Date(run.startedAt).toLocaleString()
         const duration = formatDuration(run)
         return (
-          <li key={run.id} className="border-b border-border last:border-0">
+          <motion.li
+            key={run.id}
+            className="border-b border-border last:border-0"
+            variants={STAGGER_CHILD}
+          >
             <Link
               href={href}
               className="flex items-center gap-3 px-3 py-3 active:bg-muted/50"
@@ -81,9 +91,9 @@ export function RunVerticalGantt({ runs, hrefForRun, className }: RunVerticalGan
                 ) : null}
               </div>
             </Link>
-          </li>
+          </motion.li>
         )
       })}
-    </ol>
+    </motion.ol>
   )
 }

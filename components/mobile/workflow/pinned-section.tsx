@@ -4,9 +4,12 @@ import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { PinIcon } from "lucide-react"
+import { motion, useReducedMotion } from "motion/react"
 
+import { Card } from "@/components/ui/card"
 import type { WorkflowRow, WorkflowRunRow } from "@/types/workflow/visual"
 import { getDb } from "@/lib/db/schema"
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 
 import { TriggerButton } from "./trigger-button"
@@ -26,6 +29,7 @@ export function PinnedSection({ workflows, pinnedIds, className }: PinnedSection
       []
     ) ?? []
   const activeIds = new Set(activeRuns.map((r) => r.workflowId))
+  const reduce = useReducedMotion()
 
   if (pinned.length === 0) return null
 
@@ -34,11 +38,19 @@ export function PinnedSection({ workflows, pinnedIds, className }: PinnedSection
       <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {t("pinned")}
       </h2>
-      <ul className="grid grid-cols-2 gap-2" role="list" data-testid="pinned-section-list">
+      <motion.ul
+        className="grid grid-cols-2 gap-2"
+        role="list"
+        data-testid="pinned-section-list"
+        initial={reduce ? false : "initial"}
+        animate="animate"
+        variants={STAGGER_CONTAINER}
+      >
         {pinned.map((wf) => (
-          <li key={wf.id}>
-            <div
-              className="flex h-full flex-col gap-2 rounded-md border border-border bg-card p-3"
+          <motion.li key={wf.id} variants={STAGGER_CHILD}>
+            <Card
+              // Compact 2-col-grid card: smaller radius, no shadow.
+              className="flex h-full flex-col gap-2 rounded-md p-3 py-3 shadow-none"
               data-testid={`pinned-card-${wf.id}`}
             >
               <Link
@@ -60,10 +72,10 @@ export function PinnedSection({ workflows, pinnedIds, className }: PinnedSection
                 ) : null}
               </Link>
               <TriggerButton workflowId={wf.id} workflowName={wf.name} className="w-full" />
-            </div>
-          </li>
+            </Card>
+          </motion.li>
         ))}
-      </ul>
+      </motion.ul>
     </section>
   )
 }

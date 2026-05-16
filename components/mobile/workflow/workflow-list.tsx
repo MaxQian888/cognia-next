@@ -4,13 +4,16 @@ import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { ChevronRightIcon, WorkflowIcon } from "lucide-react"
+import { motion, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
+import { Card } from "@/components/ui/card"
 import { EmptyState } from "@/components/mobile/empty-state"
 import { LongPress } from "@/components/mobile/interactions/long-press"
 import { listWorkflows } from "@/lib/db/workflows"
 import { getDb } from "@/lib/db/schema"
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { useSettingsStore } from "@/stores/settings"
 import type { WorkflowRow, WorkflowRunRow } from "@/types/workflow/visual"
 import { cn } from "@/lib/utils"
@@ -46,6 +49,7 @@ export function WorkflowList({ className }: WorkflowListProps) {
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const pinnedIds = settings?.pinnedWorkflowIds ?? []
+  const reduce = useReducedMotion()
 
   const togglePin = async (id: string, name: string) => {
     const next = pinnedIds.includes(id) ? pinnedIds.filter((p) => p !== id) : [...pinnedIds, id]
@@ -77,12 +81,19 @@ export function WorkflowList({ className }: WorkflowListProps) {
         {workflows.length === 0 ? (
           <EmptyState icon={WorkflowIcon} title={t("empty")} />
         ) : (
-          <ul className="flex flex-col gap-2">
+          <motion.ul
+            className="flex flex-col gap-2"
+            initial={reduce ? false : "initial"}
+            animate="animate"
+            variants={STAGGER_CONTAINER}
+          >
             {workflows.map((wf) => (
-              <li key={wf.id}>
+              <motion.li key={wf.id} variants={STAGGER_CHILD}>
                 <LongPress onLongPress={() => void togglePin(wf.id, wf.name)}>
-                  <div
-                    className="flex items-center gap-3 rounded-md border border-border bg-card p-3 active:bg-muted/50"
+                  <Card
+                    // Compact mobile-row treatment: tighter padding/radius +
+                    // shadow-none + horizontal flex (Card defaults to col).
+                    className="flex flex-row items-center gap-3 rounded-md p-3 py-3 shadow-none transition-colors active:bg-muted/50"
                     data-testid={`workflow-row-${wf.id}`}
                   >
                     <Link
@@ -123,11 +134,11 @@ export function WorkflowList({ className }: WorkflowListProps) {
                       />
                     </Link>
                     <TriggerButton workflowId={wf.id} workflowName={wf.name} />
-                  </div>
+                  </Card>
                 </LongPress>
-              </li>
+              </motion.li>
             ))}
-          </ul>
+          </motion.ul>
         )}
       </section>
 

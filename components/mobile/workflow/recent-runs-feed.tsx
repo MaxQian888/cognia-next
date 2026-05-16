@@ -4,10 +4,12 @@ import Link from "next/link"
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
+import { motion, useReducedMotion } from "motion/react"
 
 import { getDb } from "@/lib/db/schema"
 import { listWorkflows } from "@/lib/db/workflows"
 import type { WorkflowRow, WorkflowRunRow } from "@/types/workflow/visual"
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 
 export interface RecentRunsFeedProps {
@@ -46,6 +48,7 @@ export function RecentRunsFeed({ limit = 10, className }: RecentRunsFeedProps) {
     for (const wf of workflows) map.set(wf.id, wf)
     return map
   }, [workflows])
+  const reduce = useReducedMotion()
 
   return (
     <section className={cn("flex flex-col gap-2 px-4", className)} data-testid="recent-runs-feed">
@@ -60,12 +63,17 @@ export function RecentRunsFeed({ limit = 10, className }: RecentRunsFeedProps) {
           {t("noRuns")}
         </p>
       ) : (
-        <ul className="flex flex-col divide-y divide-border rounded-md border border-border bg-card">
+        <motion.ul
+          className="flex flex-col divide-y divide-border rounded-md border border-border bg-card"
+          initial={reduce ? false : "initial"}
+          animate="animate"
+          variants={STAGGER_CONTAINER}
+        >
           {runs.map((r) => {
             const wf = workflowById.get(r.workflowId)
             const dot = STATUS_COLOR[r.status] ?? "bg-muted-foreground"
             return (
-              <li key={r.id}>
+              <motion.li key={r.id} variants={STAGGER_CHILD}>
                 <Link
                   href={`/workflows/${encodeURIComponent(r.workflowId)}/runs/${encodeURIComponent(r.id)}`}
                   data-testid={`recent-run-${r.id}`}
@@ -83,10 +91,10 @@ export function RecentRunsFeed({ limit = 10, className }: RecentRunsFeedProps) {
                     {relative(r.startedAt)}
                   </span>
                 </Link>
-              </li>
+              </motion.li>
             )
           })}
-        </ul>
+        </motion.ul>
       )}
     </section>
   )

@@ -17,6 +17,7 @@ import { useTranslations } from "next-intl"
 import { ArrowDownIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
+import { Card } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 
 interface GraphNode {
@@ -75,8 +76,11 @@ export function WorkflowGraphViewer({ graph, className }: WorkflowGraphViewerPro
 
 function NodeCard({ node }: { node: GraphNode }) {
   return (
-    <div
-      className="w-full rounded-md border border-border bg-card p-3 shadow-sm"
+    <Card
+      // Compact node card for the vertical graph: smaller radius +
+      // tighter padding than shadcn Card's defaults, but keep the
+      // light shadow that distinguishes a node from the page bg.
+      className="w-full gap-2 rounded-md p-3 py-3"
       data-testid={`workflow-node-${node.id}`}
     >
       <div className="flex items-center gap-2">
@@ -90,7 +94,7 @@ function NodeCard({ node }: { node: GraphNode }) {
       {node.description ? (
         <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{node.description}</p>
       ) : null}
-    </div>
+    </Card>
   )
 }
 
