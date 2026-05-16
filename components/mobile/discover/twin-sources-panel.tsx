@@ -23,6 +23,8 @@ import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { pickPhoto } from "@/lib/capacitor/camera"
 import { prompt as nativePrompt } from "@/lib/capacitor/dialog"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
@@ -132,85 +134,84 @@ export function TwinSourcesPanel({ twinId = "default", className }: TwinSourcesP
     <div className={cn("flex flex-1 flex-col", className)} data-testid="twin-sources-panel">
       <div className="flex items-center justify-between gap-2 px-1 pb-3">
         <h2 className="text-sm font-medium uppercase text-muted-foreground">{t("title")}</h2>
-        <Button
-          type="button"
-          size="sm"
-          onClick={() => setMenuOpen((v) => !v)}
-          aria-expanded={menuOpen}
-          data-testid="twin-sources-add"
-        >
-          <PlusIcon className="size-3.5" aria-hidden="true" />
-          <span className="ml-1">{t("addCta")}</span>
-        </Button>
+        <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+          <PopoverTrigger asChild>
+            <Button type="button" size="sm" data-testid="twin-sources-add">
+              <PlusIcon className="size-3.5" aria-hidden="true" />
+              <span className="ml-1">{t("addCta")}</span>
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            side="bottom"
+            role="menu"
+            data-testid="twin-sources-menu"
+            className="grid w-60 grid-cols-3 gap-2 p-3"
+          >
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => void onPaste()}
+              className="touch-target h-auto flex-col items-center gap-1 p-2 text-xs font-normal"
+              data-testid="twin-sources-paste"
+            >
+              <ClipboardPasteIcon />
+              <span>{t("pickPaste")}</span>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => void onCamera()}
+              className="touch-target h-auto flex-col items-center gap-1 p-2 text-xs font-normal"
+              data-testid="twin-sources-camera"
+            >
+              <CameraIcon />
+              <span>{t("pickCamera")}</span>
+            </Button>
+            <label
+              className="touch-target flex flex-col items-center gap-1 rounded-md p-2 text-xs hover:bg-accent hover:text-accent-foreground active:bg-muted/60"
+              data-testid="twin-sources-file"
+            >
+              <FileIcon className="size-4" />
+              <span>{t("pickFile")}</span>
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="sr-only"
+                onChange={onFilePicked}
+                data-testid="twin-sources-file-input"
+              />
+            </label>
+          </PopoverContent>
+        </Popover>
       </div>
-
-      {menuOpen ? (
-        <div
-          role="menu"
-          data-testid="twin-sources-menu"
-          className="mb-3 grid grid-cols-3 gap-2 rounded-md border border-border bg-card p-3"
-        >
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => void onPaste()}
-            className="touch-target h-auto flex-col items-center gap-1 p-2 text-xs font-normal"
-            data-testid="twin-sources-paste"
-          >
-            <ClipboardPasteIcon />
-            <span>{t("pickPaste")}</span>
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => void onCamera()}
-            className="touch-target h-auto flex-col items-center gap-1 p-2 text-xs font-normal"
-            data-testid="twin-sources-camera"
-          >
-            <CameraIcon />
-            <span>{t("pickCamera")}</span>
-          </Button>
-          <label
-            className="touch-target flex flex-col items-center gap-1 rounded-md p-2 text-xs hover:bg-accent hover:text-accent-foreground active:bg-muted/60"
-            data-testid="twin-sources-file"
-          >
-            <FileIcon className="size-4" />
-            <span>{t("pickFile")}</span>
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="sr-only"
-              onChange={onFilePicked}
-              data-testid="twin-sources-file-input"
-            />
-          </label>
-        </div>
-      ) : null}
 
       {sources.length === 0 ? (
         <p className="px-1 text-sm text-muted-foreground">{t("empty")}</p>
       ) : (
-        <ul className="flex flex-col gap-2">
+        <ItemGroup className="gap-2">
           {sources.map((src) => (
-            <li
+            <Item
               key={src.id}
-              className="flex items-start gap-3 rounded-md border border-border bg-card p-3"
+              variant="outline"
+              size="sm"
+              className="bg-card"
               data-testid={`twin-source-${src.id}`}
             >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="truncate text-sm font-semibold">{src.title}</h3>
+              <ItemContent>
+                <ItemTitle className="flex items-center gap-2 text-sm">
+                  <span className="truncate">{src.title}</span>
                   <Badge variant="outline" className="text-[10px]">
                     {t(STATUS_KEY[src.status])}
                   </Badge>
-                </div>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                </ItemTitle>
+                <ItemDescription className="text-[11px]">
                   {src.format} · {(src.bytes / 1024).toFixed(1)} KB
-                </p>
-              </div>
-            </li>
+                </ItemDescription>
+              </ItemContent>
+            </Item>
           ))}
-        </ul>
+        </ItemGroup>
       )}
     </div>
   )

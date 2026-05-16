@@ -14,6 +14,7 @@
 import { CheckIcon, XIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
+import { motion, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 
 import { SwipeRow } from "@/components/mobile/interactions/swipe-row"
@@ -27,6 +28,7 @@ import {
   markTwinDraftRejected,
 } from "@/lib/db/twin-drafts"
 import { getDb } from "@/lib/db/schema"
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import type { TwinDraft } from "@/types/twin"
 import { cn } from "@/lib/utils"
 
@@ -47,6 +49,7 @@ function dataAs<T extends Record<string, unknown>>(draft: TwinDraft): T {
 
 export function TwinDraftsPanel({ twinId, className }: TwinDraftsPanelProps) {
   const t = useTranslations("mobile.twinDraftActions")
+  const reduce = useReducedMotion()
   const drafts =
     useLiveQuery<TwinDraft[]>(
       () =>
@@ -107,9 +110,14 @@ export function TwinDraftsPanel({ twinId, className }: TwinDraftsPanelProps) {
       {drafts.length === 0 ? (
         <p className="text-sm text-muted-foreground">{/* delegated to caller's empty state */}</p>
       ) : (
-        <ul className="flex flex-col gap-2">
+        <motion.ul
+          className="flex flex-col gap-2"
+          initial={reduce ? false : "initial"}
+          animate="animate"
+          variants={STAGGER_CONTAINER}
+        >
           {drafts.map((d) => (
-            <li key={d.id}>
+            <motion.li key={d.id} variants={STAGGER_CHILD}>
               <SwipeRow
                 leftActions={[
                   {
@@ -132,9 +140,9 @@ export function TwinDraftsPanel({ twinId, className }: TwinDraftsPanelProps) {
               >
                 <TwinDraftCard draft={d} />
               </SwipeRow>
-            </li>
+            </motion.li>
           ))}
-        </ul>
+        </motion.ul>
       )}
     </div>
   )

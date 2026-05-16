@@ -1,10 +1,12 @@
 "use client"
 
 import { useTranslations } from "next-intl"
+import { motion, useReducedMotion } from "motion/react"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import type { Character } from "@/lib/claude/types"
 import { cn } from "@/lib/utils"
 
@@ -22,6 +24,7 @@ export interface FeaturedCarouselProps {
  */
 export function FeaturedCarousel({ characters, onSelect, className }: FeaturedCarouselProps) {
   const t = useTranslations("mobile.discover")
+  const reduce = useReducedMotion()
   if (characters.length < 3) return null
   return (
     <section className={cn("flex flex-col gap-2", className)} data-testid="featured-carousel">
@@ -30,13 +33,16 @@ export function FeaturedCarousel({ characters, onSelect, className }: FeaturedCa
           {t("featured")}
         </h2>
       </header>
-      <ul
+      <motion.ul
         className="flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2"
         role="list"
         data-testid="featured-carousel-list"
+        initial={reduce ? false : "initial"}
+        animate="animate"
+        variants={STAGGER_CONTAINER}
       >
         {characters.map((c) => (
-          <li key={c.id} className="snap-start">
+          <motion.li key={c.id} className="snap-start" variants={STAGGER_CHILD}>
             <Button
               type="button"
               variant="ghost"
@@ -57,9 +63,9 @@ export function FeaturedCarousel({ characters, onSelect, className }: FeaturedCa
                 {c.name}
               </span>
             </Button>
-          </li>
+          </motion.li>
         ))}
-      </ul>
+      </motion.ul>
     </section>
   )
 }

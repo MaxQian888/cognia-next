@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl"
 import { UsersIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
+import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
 import type { Team } from "@/lib/claude/types"
 import { cn } from "@/lib/utils"
 
@@ -22,34 +23,32 @@ export function TeamCard({ team, className }: TeamCardProps) {
       className="block"
       data-testid={`team-card-${team.id}`}
     >
-      <div
-        className={cn(
-          "flex items-start gap-3 rounded-md border border-border bg-card p-3",
-          "active:bg-muted/50 transition-colors",
-          className
-        )}
+      <Item
+        variant="outline"
+        size="sm"
+        className={cn("flex-nowrap bg-card transition-colors active:bg-muted/50", className)}
       >
-        <span
-          aria-hidden
-          className="flex size-12 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground"
+        <ItemMedia
+          variant="icon"
+          className="size-12 rounded-md bg-secondary text-secondary-foreground"
         >
           <UsersIcon className="size-5" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <h3 className="truncate text-sm font-semibold">{team.name}</h3>
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle className="flex items-center gap-2 text-sm">
+            <span className="truncate">{team.name}</span>
             {team.isBuiltIn ? (
               <Badge variant="outline" className="text-[10px]">
                 {t("builtInBadge")}
               </Badge>
             ) : null}
-          </div>
-          <p className="text-xs text-muted-foreground">
+          </ItemTitle>
+          <ItemDescription className="text-xs">
             {t("memberCount", { count: memberCount })}
             {team.description ? <span> · {team.description}</span> : null}
-          </p>
-        </div>
-      </div>
+          </ItemDescription>
+        </ItemContent>
+      </Item>
     </Link>
   )
 }

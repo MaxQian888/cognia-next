@@ -14,6 +14,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
+import { Item, ItemActions, ItemContent, ItemGroup, ItemTitle } from "@/components/ui/item"
 import { Switch } from "@/components/ui/switch"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { getDb } from "@/lib/db/schema"
@@ -56,34 +57,38 @@ export function PluginsPanel() {
   }
 
   return (
-    <ul className="flex flex-col gap-2" data-testid="plugins-panel">
+    <ItemGroup className="gap-2" data-testid="plugins-panel">
       {rows.map((row) => {
         const name = row.name ?? row.id
         return (
-          <li
+          <Item
             key={row.id}
-            className="flex items-center justify-between gap-3 rounded-md border bg-card p-3"
+            variant="outline"
+            size="sm"
+            className="bg-card"
             data-testid={`plugin-row-${row.id}`}
           >
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="truncate text-sm font-medium">{name}</span>
+            <ItemContent>
+              <ItemTitle className="flex items-center gap-2 text-sm">
+                <span className="truncate">{name}</span>
                 {row.version ? (
                   <Badge variant="outline" className="text-[10px]">
                     v{row.version}
                   </Badge>
                 ) : null}
-              </div>
-            </div>
-            <Switch
-              checked={row.enabled ?? false}
-              onCheckedChange={(next) => void onToggle(row.id, name, next)}
-              aria-label={t("toggleAria", { name })}
-              data-testid={`plugin-switch-${row.id}`}
-            />
-          </li>
+              </ItemTitle>
+            </ItemContent>
+            <ItemActions>
+              <Switch
+                checked={row.enabled ?? false}
+                onCheckedChange={(next) => void onToggle(row.id, name, next)}
+                aria-label={t("toggleAria", { name })}
+                data-testid={`plugin-switch-${row.id}`}
+              />
+            </ItemActions>
+          </Item>
         )
       })}
-    </ul>
+    </ItemGroup>
   )
 }
