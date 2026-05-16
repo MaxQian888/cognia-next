@@ -337,11 +337,11 @@ function DiagnosticsCard({
     <Card>
       <Collapsible open={open} onOpenChange={onOpenChange}>
         <CollapsibleTrigger asChild>
-          <button
+          <Button
             type="button"
-            className="flex w-full items-start justify-between gap-3 px-6 text-left"
+            variant="ghost"
+            className="h-auto w-full items-start justify-between gap-3 rounded-none px-6 py-3 text-left font-normal hover:bg-transparent"
             data-testid="pair-diagnostics-toggle"
-            aria-expanded={open}
           >
             <span className="flex flex-col gap-1">
               <span className="text-base font-semibold leading-none">{t("diagnostics.title")}</span>
@@ -357,7 +357,7 @@ function DiagnosticsCard({
                 {open ? t("diagnostics.collapse") : t("diagnostics.expand")}
               </span>
             </span>
-          </button>
+          </Button>
         </CollapsibleTrigger>
         <CollapsibleContent>
           <CardContent className="flex flex-col gap-4 pt-4">

@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { ArrowRightIcon, RefreshCwIcon, SearchXIcon, ScanLineIcon } from "lucide-react"
+import { motion, useReducedMotion } from "motion/react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 import { scanLan, type DiscoveredServer } from "@/lib/connectivity/lan-scanner"
 
@@ -91,6 +93,7 @@ export function DiscoverStep({ history, onSelect, onSkip, scan = scanLan }: Disc
   const sortedServers = useMemo(() => sortServers(servers), [servers])
   const foundCount = sortedServers.length
   const showEmpty = scanState === "idle" && foundCount === 0
+  const reduce = useReducedMotion()
 
   return (
     <section
@@ -127,13 +130,19 @@ export function DiscoverStep({ history, onSelect, onSkip, scan = scanLan }: Disc
       ) : null}
 
       {sortedServers.length > 0 ? (
-        <ul className="flex flex-col gap-2" role="list">
+        <motion.ul
+          className="flex flex-col gap-2"
+          role="list"
+          initial={reduce ? false : "initial"}
+          animate="animate"
+          variants={STAGGER_CONTAINER}
+        >
           {sortedServers.map((server) => (
-            <li key={server.id}>
+            <motion.li key={server.id} variants={STAGGER_CHILD}>
               <ServerCard server={server} onSelect={onSelect} />
-            </li>
+            </motion.li>
           ))}
-        </ul>
+        </motion.ul>
       ) : null}
 
       {showEmpty ? (
