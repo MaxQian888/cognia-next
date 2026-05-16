@@ -16,6 +16,7 @@
 
 import { useTranslations } from "next-intl"
 
+import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -160,17 +161,19 @@ function BiometricRow({
   testid: string
 }) {
   return (
-    <div className="flex items-start justify-between gap-3">
-      <div className="flex flex-col gap-0.5">
-        <span className="text-xs font-medium">{label}</span>
-        <span className="text-[11px] text-muted-foreground">{help}</span>
-      </div>
-      <Switch
-        checked={checked}
-        onCheckedChange={onChange}
-        data-testid={testid}
-        aria-label={label}
-      />
-    </div>
+    <Item size="sm" className="px-0">
+      <ItemContent>
+        <ItemTitle className="text-xs">{label}</ItemTitle>
+        <ItemDescription className="text-[11px]">{help}</ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <Switch
+          checked={checked}
+          onCheckedChange={onChange}
+          data-testid={testid}
+          aria-label={label}
+        />
+      </ItemActions>
+    </Item>
   )
 }

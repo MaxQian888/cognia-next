@@ -3,11 +3,13 @@
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
+import { motion, useReducedMotion } from "motion/react"
 
 import { Card, CardContent } from "@/components/ui/card"
 import { listSessions } from "@/lib/db/sessions"
 import { getDb } from "@/lib/db/schema"
 import { getLatestSuccessful } from "@/lib/db/backup-history"
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 
 export interface TodayStatsCardProps {
@@ -48,6 +50,7 @@ const defaultLoaders = {
 export function TodayStatsCard({ loaders, className }: TodayStatsCardProps) {
   const t = useTranslations("mobile.me.todayStats")
   const [stats, setStats] = useState<Stats>(initial)
+  const reduce = useReducedMotion()
 
   useEffect(() => {
     let cancelled = false
@@ -87,19 +90,27 @@ export function TodayStatsCard({ loaders, className }: TodayStatsCardProps) {
   ]
 
   return (
-    <div className={cn("grid grid-cols-3 gap-2", className)} data-testid="today-stats-card">
+    <motion.div
+      className={cn("grid grid-cols-3 gap-2", className)}
+      data-testid="today-stats-card"
+      initial={reduce ? false : "initial"}
+      animate="animate"
+      variants={STAGGER_CONTAINER}
+    >
       {tiles.map((tile) => (
-        <Link key={tile.testId} href={tile.href} data-testid={tile.testId} className="block">
-          <Card className="h-full active:bg-muted/50">
-            <CardContent className="flex h-full flex-col items-start justify-center gap-1 px-3 py-3">
-              <span className="text-base font-semibold leading-tight tracking-tight">
-                {tile.value}
-              </span>
-              <span className="text-[11px] text-muted-foreground">{tile.label}</span>
-            </CardContent>
-          </Card>
-        </Link>
+        <motion.div key={tile.testId} variants={STAGGER_CHILD}>
+          <Link href={tile.href} data-testid={tile.testId} className="block">
+            <Card className="h-full active:bg-muted/50">
+              <CardContent className="flex h-full flex-col items-start justify-center gap-1 px-3 py-3">
+                <span className="text-base font-semibold leading-tight tracking-tight">
+                  {tile.value}
+                </span>
+                <span className="text-[11px] text-muted-foreground">{tile.label}</span>
+              </CardContent>
+            </Card>
+          </Link>
+        </motion.div>
       ))}
-    </div>
+    </motion.div>
   )
 }
