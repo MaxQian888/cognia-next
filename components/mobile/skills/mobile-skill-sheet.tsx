@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
+import { motion, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -9,10 +10,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
-import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item"
+import { Item, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
 import { updateSkill } from "@/lib/db/skills"
 import { SkillResourceManager } from "@/components/skills/skill-resource-manager"
 import { SkillValidationSection } from "@/components/skills/skill-validation-section"
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import type { Skill } from "@/lib/claude/types"
 
 interface Props {
@@ -32,6 +34,7 @@ export function MobileSkillSheet({ skill, open, onOpenChange }: Props) {
   const [description, setDescription] = useState(skill.description ?? "")
   const [content, setContent] = useState(skill.content)
   const [saving, setSaving] = useState(false)
+  const reduce = useReducedMotion()
 
   const save = async () => {
     setSaving(true)
@@ -60,26 +63,38 @@ export function MobileSkillSheet({ skill, open, onOpenChange }: Props) {
             <TabsTrigger value="validation">{t("tabValidation")}</TabsTrigger>
           </TabsList>
           <TabsContent value="overview" className="flex-1 overflow-y-auto px-4 py-3">
-            <ItemGroup>
-              <Item>
-                <ItemContent>
-                  <ItemTitle>{t("metaCategory")}</ItemTitle>
-                  <ItemDescription>{skill.category ?? "—"}</ItemDescription>
-                </ItemContent>
-              </Item>
-              <Item>
-                <ItemContent>
-                  <ItemTitle>{t("metaUsage")}</ItemTitle>
-                  <ItemDescription>{skill.usageCount ?? 0}</ItemDescription>
-                </ItemContent>
-              </Item>
-              <Item>
-                <ItemContent>
-                  <ItemTitle>{t("metaUpdated")}</ItemTitle>
-                  <ItemDescription>{new Date(skill.updatedAt).toLocaleString()}</ItemDescription>
-                </ItemContent>
-              </Item>
-            </ItemGroup>
+            <motion.div
+              role="list"
+              className="group/item-group flex flex-col"
+              initial={reduce ? false : "initial"}
+              animate="animate"
+              variants={STAGGER_CONTAINER}
+            >
+              <motion.div variants={STAGGER_CHILD}>
+                <Item>
+                  <ItemContent>
+                    <ItemTitle>{t("metaCategory")}</ItemTitle>
+                    <ItemDescription>{skill.category ?? "—"}</ItemDescription>
+                  </ItemContent>
+                </Item>
+              </motion.div>
+              <motion.div variants={STAGGER_CHILD}>
+                <Item>
+                  <ItemContent>
+                    <ItemTitle>{t("metaUsage")}</ItemTitle>
+                    <ItemDescription>{skill.usageCount ?? 0}</ItemDescription>
+                  </ItemContent>
+                </Item>
+              </motion.div>
+              <motion.div variants={STAGGER_CHILD}>
+                <Item>
+                  <ItemContent>
+                    <ItemTitle>{t("metaUpdated")}</ItemTitle>
+                    <ItemDescription>{new Date(skill.updatedAt).toLocaleString()}</ItemDescription>
+                  </ItemContent>
+                </Item>
+              </motion.div>
+            </motion.div>
           </TabsContent>
           <TabsContent value="edit" className="flex-1 overflow-y-auto px-4 py-3">
             <FieldGroup>

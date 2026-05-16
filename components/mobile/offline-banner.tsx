@@ -14,10 +14,12 @@
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { CloudOffIcon, LoaderIcon } from "lucide-react"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 
 import { useNetworkStatus } from "@/hooks/use-network-status"
 import { usePlatform } from "@/hooks/use-platform"
 import { getQueueSummary } from "@/lib/queue/outbound-queue"
+import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 
 const POLL_MS = 15_000
@@ -56,15 +58,52 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
 
   const offline = !status.connected
   const showQueue = pending > 0
-
-  if (!offline && !showQueue) return null
+  const visible = offline || showQueue
 
   return (
-    <div
+    <AnimatePresence initial={false}>
+      {visible ? (
+        <BannerBody
+          offline={offline}
+          pending={pending}
+          messageOffline={t("bannerOffline")}
+          messageQueue={t("queuePending", { count: pending })}
+          className={className}
+        />
+      ) : null}
+    </AnimatePresence>
+  )
+}
+
+interface BannerBodyProps {
+  offline: boolean
+  pending: number
+  messageOffline: string
+  messageQueue: string
+  className?: string
+}
+
+function BannerBody({
+  offline,
+  pending,
+  messageOffline,
+  messageQueue,
+  className,
+}: BannerBodyProps) {
+  const reduce = useReducedMotion()
+  return (
+    <motion.div
       role="status"
       aria-live="polite"
       data-testid="offline-banner"
       data-offline={offline ? "true" : "false"}
+      initial={reduce ? false : { opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={reduce ? { opacity: 0 } : { opacity: 0, y: -8 }}
+      transition={{
+        duration: MOBILE_DURATION.fast,
+        ease: MOBILE_EASE as unknown as number[],
+      }}
       className={cn(
         "sticky top-0 z-30 flex items-center gap-2 border-b border-border px-3 py-2 text-xs",
         offline
@@ -78,9 +117,10 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
       ) : (
         <LoaderIcon className="size-3.5 animate-spin" aria-hidden="true" />
       )}
-      <span className="flex-1">
-        {offline ? t("bannerOffline") : t("queuePending", { count: pending })}
-      </span>
-    </div>
+      <span className="flex-1">{offline ? messageOffline : messageQueue}</span>
+      {/* `pending` is included in the queue message via t("queuePending"); kept
+       *  as a separate prop so this component is trivial to render-test. */}
+      <span className="sr-only">{pending}</span>
+    </motion.div>
   )
 }
