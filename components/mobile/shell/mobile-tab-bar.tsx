@@ -13,10 +13,12 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { CompassIcon, MessageCircleIcon, UserIcon, WorkflowIcon } from "lucide-react"
+import { motion, useReducedMotion } from "motion/react"
 import { useTransition } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { selectionFeedback } from "@/lib/capacitor/haptics"
+import { MOBILE_EASE, MOBILE_DURATION, STAGGER_INTERVAL } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 
 export interface TabSpec {
@@ -80,10 +82,13 @@ export interface MobileTabBarProps {
   badges?: Partial<Record<TabId, number>>
 }
 
+const MotionLink = motion.create(Link)
+
 export function MobileTabBar({ className, badges }: MobileTabBarProps) {
   const pathname = usePathname() ?? "/"
   const activeId = pickActiveTabId(pathname)
   const [, startTransition] = useTransition()
+  const reduce = useReducedMotion()
   const t = useTranslations("mobile.tabs")
   const tBar = useTranslations("mobile.tabBar")
   const tShell = useTranslations("mobile.shell")
@@ -96,19 +101,24 @@ export function MobileTabBar({ className, badges }: MobileTabBarProps) {
   return (
     <nav
       className={cn(
-        "fixed inset-x-0 bottom-0 z-40 flex h-14 items-stretch border-t border-border bg-background/95 backdrop-blur safe-area-pb",
+        // `min-h-14` instead of fixed `h-14` so a longer translated label
+        // (e.g. Chinese 工作流 keeps fine, but future locales may wrap) never
+        // clips the icon; each link still reserves 56px so the existing
+        // `pb-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]` reserve
+        // stays correct.
+        "fixed inset-x-0 bottom-0 z-40 flex h-14 min-h-14 items-stretch border-t border-border bg-background/95 backdrop-blur safe-area-pb",
         className
       )}
       role="tablist"
       aria-label={tShell("tabBarAria")}
       data-testid="mobile-tab-bar"
     >
-      {MOBILE_TABS.map((tab) => {
+      {MOBILE_TABS.map((tab, index) => {
         const Icon = tab.icon
         const active = tab.id === activeId
         const badge = badges?.[tab.id] ?? 0
         return (
-          <Link
+          <MotionLink
             key={tab.id}
             href={tab.href}
             role="tab"
@@ -119,8 +129,19 @@ export function MobileTabBar({ className, badges }: MobileTabBarProps) {
               onTap()
               startTransition(() => {})
             }}
+            initial={reduce ? false : { opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{
+              duration: MOBILE_DURATION.fast,
+              ease: MOBILE_EASE as unknown as number[],
+              delay: reduce ? 0 : index * STAGGER_INTERVAL,
+            }}
             className={cn(
-              "relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium",
+              // `min-h-[44px]` enforces the iOS HIG / WCAG touch-target
+              // floor on dense screens; the parent already sets h-14 (56px)
+              // so this is belt-and-braces for landscape orientations where
+              // the nav can otherwise compress.
+              "relative flex min-h-[44px] flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium",
               active ? "text-primary" : "text-muted-foreground"
             )}
           >
@@ -138,7 +159,7 @@ export function MobileTabBar({ className, badges }: MobileTabBarProps) {
               )}
             </span>
             <span>{t(tab.id)}</span>
-          </Link>
+          </MotionLink>
         )
       })}
     </nav>

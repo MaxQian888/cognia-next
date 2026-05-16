@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Badge } from "@/components/ui/badge"
 import { avatarColor, avatarGlyph, type AvatarSubject } from "@/lib/ui/avatar"
 import { cn } from "@/lib/utils"
 
@@ -60,16 +61,17 @@ export function CharacterHeader({
           {subject.name}
         </span>
         {streaming ? (
-          <span
-            className="inline-flex items-center gap-1 text-[10px] text-primary"
+          <Badge
+            variant="outline"
             data-testid="character-header-streaming"
+            className="h-4 w-fit gap-1 border-primary/30 bg-primary/5 px-1.5 py-0 text-[10px] font-normal text-primary"
           >
             <span
               aria-hidden="true"
               className="size-1.5 rounded-full bg-primary motion-safe:animate-pulse"
             />
             {t("presenceStreaming")}
-          </span>
+          </Badge>
         ) : null}
       </div>
     </div>

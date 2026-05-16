@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { PinIcon, PinOffIcon, PlusIcon, SearchIcon, Trash2Icon, XIcon } from "lucide-react"
+import { motion, useReducedMotion } from "motion/react"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -12,6 +13,7 @@ import { listCharacters } from "@/lib/db/characters"
 import { listSessionStates } from "@/lib/db/session-state"
 import { updateSession } from "@/lib/db/sessions"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 import type { Character, ChatSession } from "@/lib/claude/types"
 
@@ -200,12 +202,20 @@ function Section({
   testId: string
   children: React.ReactNode
 }) {
+  const reduce = useReducedMotion()
   return (
     <section data-testid={testId}>
       <h2 className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
         {title}
       </h2>
-      <ul className="flex flex-col">{children}</ul>
+      <motion.ul
+        className="flex flex-col"
+        initial={reduce ? false : "initial"}
+        animate="animate"
+        variants={STAGGER_CONTAINER}
+      >
+        {children}
+      </motion.ul>
     </section>
   )
 }
@@ -231,7 +241,7 @@ function ChannelRow({
 }) {
   const { session, unread, glyph, color } = resolved
   return (
-    <li>
+    <motion.li variants={STAGGER_CHILD}>
       <SwipeRow
         rightActions={[
           {
@@ -254,13 +264,14 @@ function ChannelRow({
         ]}
       >
         <LongPress onLongPress={onTogglePin}>
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={onSelect}
             data-testid={`mobile-channel-row-${session.id}`}
             data-active={active ? "true" : "false"}
             className={cn(
-              "flex w-full items-center gap-3 px-3 py-2 text-left",
+              "h-auto w-full justify-start gap-3 rounded-none px-3 py-2 text-left font-normal",
               active && "bg-muted/60"
             )}
           >
@@ -293,9 +304,9 @@ function ChannelRow({
                 {relativeTime(session.updatedAt)}
               </span>
             </span>
-          </button>
+          </Button>
         </LongPress>
       </SwipeRow>
-    </li>
+    </motion.li>
   )
 }
