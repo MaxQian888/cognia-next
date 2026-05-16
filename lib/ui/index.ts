@@ -12,3 +12,14 @@ export {
   type AvatarSubject,
 } from "./avatar"
 export { captureScreenshot } from "./screenshot"
+export {
+  MOBILE_EASE,
+  MOBILE_DURATION,
+  STAGGER_CHILD,
+  STAGGER_CONTAINER,
+  STAGGER_INTERVAL,
+  mobileTransition,
+  useReducedMotionTransition,
+  useReducedMotionVariants,
+  type MobileDurationKey,
+} from "./motion"
