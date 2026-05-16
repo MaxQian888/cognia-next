@@ -17,14 +17,18 @@ import { CheckIcon, MessageSquareIcon, XIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 
+import { motion, useReducedMotion } from "motion/react"
+
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
 import { PullToRefresh } from "@/components/mobile/interactions/pull-to-refresh"
 import { SwipeRow } from "@/components/mobile/interactions/swipe-row"
 import { useDraftApproval } from "@/hooks/use-draft-approval"
 import { listAllPendingDrafts, sweepExpired } from "@/lib/db/connector-drafts"
 import type { ConnectorDraftRow } from "@/lib/db/connector-types"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 
 export interface DraftApprovalPanelProps {
@@ -98,41 +102,47 @@ function DraftApprovalRow({
         },
       ]}
     >
-      <div
-        className="rounded-md border border-border bg-card p-3"
+      <Card
+        // Compact mobile variant of shadcn Card: tighter padding + radius,
+        // no shadow (SwipeRow already gives the row affordance), and
+        // overrides Card's default `flex-col gap-6` so the inner content
+        // composes naturally with its own gap utilities.
+        className="gap-0 rounded-md border-border py-0 shadow-none"
         data-testid={`draft-row-${row.id}`}
       >
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className="text-[10px]">
-            {row.conversationKey}
-          </Badge>
-          <span className="ml-auto text-[10px] text-muted-foreground">
-            {new Date(row.createdAt).toLocaleTimeString()}
-          </span>
-        </div>
-        <p className="mt-1 line-clamp-3 text-sm">{summarize(row)}</p>
-        <div className="mt-2 flex gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => void reject()}
-            className="touch-target flex-1 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-            data-testid={`draft-reject-${row.id}`}
-          >
-            {rejectLabel}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => void approve()}
-            className="touch-target flex-1"
-            data-testid={`draft-approve-${row.id}`}
-          >
-            {approveLabel}
-          </Button>
-        </div>
-      </div>
+        <CardContent className="px-3 py-3">
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-[10px]">
+              {row.conversationKey}
+            </Badge>
+            <span className="ml-auto text-[10px] text-muted-foreground">
+              {new Date(row.createdAt).toLocaleTimeString()}
+            </span>
+          </div>
+          <p className="mt-1 line-clamp-3 text-sm">{summarize(row)}</p>
+          <div className="mt-2 flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void reject()}
+              className="touch-target flex-1 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              data-testid={`draft-reject-${row.id}`}
+            >
+              {rejectLabel}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void approve()}
+              className="touch-target flex-1"
+              data-testid={`draft-approve-${row.id}`}
+            >
+              {approveLabel}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </SwipeRow>
   )
 }
@@ -140,6 +150,7 @@ function DraftApprovalRow({
 export function DraftApprovalPanel({ className }: DraftApprovalPanelProps) {
   const t = useTranslations("mobile.draftApproval")
   const drafts = useLiveQuery<ConnectorDraftRow[]>(() => listAllPendingDrafts(), []) ?? []
+  const reduce = useReducedMotion()
 
   const onRefresh = async () => {
     await sweepExpired()
@@ -163,9 +174,14 @@ export function DraftApprovalPanel({ className }: DraftApprovalPanelProps) {
   return (
     <div className={cn("h-full", className)} data-testid="draft-approval-panel">
       <PullToRefresh onRefresh={onRefresh} silent={false}>
-        <ul className="flex flex-col gap-2 p-4">
+        <motion.ul
+          className="flex flex-col gap-2 p-4"
+          initial={reduce ? false : "initial"}
+          animate="animate"
+          variants={STAGGER_CONTAINER}
+        >
           {drafts.map((row) => (
-            <li key={row.id}>
+            <motion.li key={row.id} variants={STAGGER_CHILD}>
               <DraftApprovalRow
                 row={row}
                 approveLabel={t("approve")}
@@ -173,9 +189,9 @@ export function DraftApprovalPanel({ className }: DraftApprovalPanelProps) {
                 queueLabelApprove={t("queueLabelApprove")}
                 queueLabelReject={t("queueLabelReject")}
               />
-            </li>
+            </motion.li>
           ))}
-        </ul>
+        </motion.ul>
       </PullToRefresh>
     </div>
   )
