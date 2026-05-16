@@ -99,7 +99,7 @@ describe("MentionPopover", () => {
     expect(onPick.mock.calls[0]![0].id).toBe("a")
   })
 
-  it("calls onDismiss when the backdrop is clicked", () => {
+  it("calls onDismiss when the Sheet's escape-to-dismiss fires", () => {
     const onDismiss = jest.fn()
     render(
       <MentionPopover
@@ -110,8 +110,11 @@ describe("MentionPopover", () => {
         onDismiss={onDismiss}
       />
     )
-    fireEvent.click(screen.getByTestId("mobile-mention-popover-backdrop"))
-    expect(onDismiss).toHaveBeenCalledTimes(1)
+    // Radix Dialog (underlies Sheet) closes on Escape -> onOpenChange(false)
+    // -> onDismiss(). This is the canonical dismiss path now that the
+    // hand-rolled backdrop button has been replaced by SheetOverlay.
+    fireEvent.keyDown(document.body, { key: "Escape", code: "Escape" })
+    expect(onDismiss).toHaveBeenCalled()
   })
 
   it("ignores clicks inside the panel (no dismiss bubble-up)", () => {

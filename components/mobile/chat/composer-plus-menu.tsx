@@ -23,6 +23,7 @@ import { useTranslations } from "next-intl"
 import { CameraIcon, FileIcon, ImageIcon, MicIcon, PaperclipIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { pickMultiplePhotos, pickPhoto } from "@/lib/capacitor/camera"
 import { selectionFeedback } from "@/lib/capacitor/haptics"
 import { showToast } from "@/lib/capacitor/toast"
@@ -200,25 +201,27 @@ export function ComposerPlusMenu({ onAttach, onSend, onError, className }: Compo
   }
 
   return (
-    <div className={cn("relative", className)}>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        aria-label={t("toggleAria")}
-        className="touch-target rounded-full text-muted-foreground"
-        data-testid="composer-plus-toggle"
-      >
-        {open ? <XIcon /> : <PaperclipIcon />}
-      </Button>
-
-      {open ? (
-        <div
+    <Popover open={open} onOpenChange={setOpen}>
+      <div className={cn(className)}>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={t("toggleAria")}
+            className="touch-target rounded-full text-muted-foreground"
+            data-testid="composer-plus-toggle"
+          >
+            {open ? <XIcon /> : <PaperclipIcon />}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          side="top"
+          align="start"
+          sideOffset={8}
           role="menu"
           data-testid="composer-plus-menu"
-          className="absolute bottom-12 left-0 z-30 grid w-64 grid-cols-3 gap-2 rounded-xl border border-border bg-background p-3 shadow-lg"
+          className="grid w-64 grid-cols-3 gap-2 rounded-xl border border-border bg-background p-3 shadow-lg"
         >
           <PlusItem
             icon={<CameraIcon className="size-5" />}
@@ -265,9 +268,9 @@ export function ComposerPlusMenu({ onAttach, onSend, onError, className }: Compo
               testId="composer-plus-voice"
             />
           )}
-        </div>
-      ) : null}
-    </div>
+        </PopoverContent>
+      </div>
+    </Popover>
   )
 }
 

@@ -4,6 +4,13 @@ import { useTranslations } from "next-intl"
 import { useMemo } from "react"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { Button } from "@/components/ui/button"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
 import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { avatarColor } from "@/lib/ui/avatar"
 import { cn } from "@/lib/utils"
@@ -18,6 +25,16 @@ interface Props {
   className?: string
 }
 
+/**
+ * Mobile @-mention picker.
+ *
+ * Migrated from a hand-rolled fixed overlay + backdrop `<button>` to shadcn
+ * Sheet so we inherit focus trap, escape-to-dismiss, outside-click dismiss,
+ * and the slide-in/out animation for free. The Sheet anchors at the bottom
+ * of the viewport; we override its inline `bottom` so the panel floats
+ * above the composer + virtual keyboard rather than sitting flush with the
+ * bottom edge.
+ */
 export function MentionPopover({ open, query, members, onPick, onDismiss, className }: Props) {
   const t = useTranslations("mobile.mentionPopover")
   const keyboard = useKeyboardInsets()
@@ -28,61 +45,70 @@ export function MentionPopover({ open, query, members, onPick, onDismiss, classN
     return members.filter((m) => m.name.toLowerCase().includes(q))
   }, [members, query])
 
-  if (!open) return null
-
   return (
-    <div
-      className={cn("fixed inset-0 z-40 flex items-end justify-center", className)}
-      data-testid="mobile-mention-popover"
+    <Sheet
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onDismiss()
+      }}
     >
-      <button
-        type="button"
-        aria-label={t("dismiss")}
-        className="absolute inset-0 bg-background/40 backdrop-blur-sm"
-        data-testid="mobile-mention-popover-backdrop"
-        onClick={onDismiss}
-      />
-      <div
-        className="relative z-10 mx-2 w-full max-w-md rounded-2xl border bg-popover text-popover-foreground shadow-lg"
-        style={{
-          marginBottom: `calc(env(safe-area-inset-bottom, 0px) + 5rem + ${keyboard.keyboardHeight}px)`,
-        }}
+      <SheetContent
+        side="bottom"
+        showCloseButton={false}
         data-testid="mobile-mention-popover-panel"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between gap-2 border-b px-3 py-2 text-xs font-medium text-muted-foreground">
-          <span>{t("title")}</span>
-          <span>{t("count", { count: filtered.length })}</span>
-        </div>
-        {members.length === 0 ? (
-          <div className="px-3 py-6 text-center text-sm text-muted-foreground">{t("empty")}</div>
-        ) : filtered.length === 0 ? (
-          <div className="px-3 py-6 text-center text-sm text-muted-foreground">
-            {t("noMatches", { query })}
-          </div>
-        ) : (
-          <ul className="max-h-72 overflow-y-auto py-1">
-            {filtered.map((member) => (
-              <li key={member.id}>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="h-auto min-h-12 w-full justify-start gap-3 rounded-none px-3 py-2 text-left text-sm font-normal"
-                  onClick={() => onPick(member)}
-                >
-                  <AvatarBadge subject={member} size={28} textClassName="text-xs" />
-                  <span
-                    className="min-w-0 flex-1 truncate font-medium"
-                    style={{ color: avatarColor(member) }}
-                  >
-                    {member.name}
-                  </span>
-                </Button>
-              </li>
-            ))}
-          </ul>
+        className={cn(
+          // Float as a centred popover, not a true edge-to-edge bottom
+          // sheet: matches the original visual (max-md, rounded all
+          // corners) while still receiving Sheet's animation tokens.
+          "mx-auto w-[calc(100%-1rem)] max-w-md gap-0 rounded-2xl border bg-popover p-0 text-popover-foreground",
+          className
         )}
-      </div>
-    </div>
+        style={{
+          // Push above composer + keyboard. The 5rem mirrors the
+          // composer's reserved height; safe-area covers the iOS home
+          // indicator. Inline style overrides Sheet's `bottom-0`.
+          bottom: `calc(env(safe-area-inset-bottom, 0px) + 5rem + ${keyboard.keyboardHeight}px)`,
+        }}
+      >
+        <div data-testid="mobile-mention-popover" className="contents">
+          <SheetHeader className="flex flex-row items-center justify-between gap-2 space-y-0 border-b px-3 py-2">
+            <SheetTitle className="text-xs font-medium text-muted-foreground">
+              {t("title")}
+            </SheetTitle>
+            <SheetDescription className="text-xs font-medium text-muted-foreground">
+              {t("count", { count: filtered.length })}
+            </SheetDescription>
+          </SheetHeader>
+          {members.length === 0 ? (
+            <div className="px-3 py-6 text-center text-sm text-muted-foreground">{t("empty")}</div>
+          ) : filtered.length === 0 ? (
+            <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+              {t("noMatches", { query })}
+            </div>
+          ) : (
+            <ul className="max-h-72 overflow-y-auto py-1">
+              {filtered.map((member) => (
+                <li key={member.id}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-auto min-h-12 w-full justify-start gap-3 rounded-none px-3 py-2 text-left text-sm font-normal"
+                    onClick={() => onPick(member)}
+                  >
+                    <AvatarBadge subject={member} size={28} textClassName="text-xs" />
+                    <span
+                      className="min-w-0 flex-1 truncate font-medium"
+                      style={{ color: avatarColor(member) }}
+                    >
+                      {member.name}
+                    </span>
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
   )
 }

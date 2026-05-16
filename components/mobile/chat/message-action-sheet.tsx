@@ -15,6 +15,7 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { CopyIcon, Share2Icon } from "lucide-react"
+import { motion, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 import type { UIMessage } from "ai"
 
@@ -27,6 +28,7 @@ import {
   DrawerTitle,
 } from "@/components/ui/drawer"
 import { share } from "@/lib/capacitor/share"
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 
 export interface MessageActionSheetProps {
   message: UIMessage | null
@@ -81,7 +83,7 @@ export function MessageActionSheet({ message, onOpenChange }: MessageActionSheet
           <DrawerTitle>{t("title")}</DrawerTitle>
           <DrawerDescription>{t("description")}</DrawerDescription>
         </DrawerHeader>
-        <div className="flex flex-col gap-1 p-4 pb-8">
+        <StaggeredRows>
           <Row
             icon={<CopyIcon className="size-4" />}
             label={t("copy")}
@@ -96,9 +98,32 @@ export function MessageActionSheet({ message, onOpenChange }: MessageActionSheet
             disabled={busy || !text}
             testid="message-action-share"
           />
-        </div>
+        </StaggeredRows>
       </DrawerContent>
     </Drawer>
+  )
+}
+
+function StaggeredRows({ children }: { children: React.ReactNode }) {
+  const reduce = useReducedMotion()
+  return (
+    <motion.div
+      className="flex flex-col gap-1 p-4 pb-8"
+      initial={reduce ? false : "initial"}
+      animate="animate"
+      variants={STAGGER_CONTAINER}
+    >
+      {/* Each Row is wrapped in a motion span so it picks up STAGGER_CHILD
+       *  without forcing Row itself to be a motion component (keeps the
+       *  Button slot intact for shadcn focus + disabled handling). */}
+      {Array.isArray(children)
+        ? children.map((child, i) => (
+            <motion.span key={i} variants={STAGGER_CHILD} className="contents">
+              {child}
+            </motion.span>
+          ))
+        : children}
+    </motion.div>
   )
 }
 
