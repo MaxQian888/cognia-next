@@ -15,7 +15,6 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { useSettingsStore } from "@/stores"
 import { getBuiltInProviderCatalogEntry } from "@/types/provider/built-in-provider-catalog"
-import type { ProviderModelUsageEntry } from "@/stores/settings/settings-store"
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 
@@ -103,7 +102,8 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
   const t = useTranslations("providers")
   const [period, setPeriod] = useState<Period>("30d")
 
-  const providerUsageStats = useSettingsStore((s) => s.providerUsageStats) ?? {}
+  const providerUsageStatsRaw = useSettingsStore((s) => s.providerUsageStats)
+  const providerUsageStats = useMemo(() => providerUsageStatsRaw ?? {}, [providerUsageStatsRaw])
   // cognia-next stores usage as a flat `ProviderModelUsageEntry[]` keyed by
   // `${providerId}:${modelId}`. Aggregate it here into the
   // `Record<modelId, { dailyStats: Record<date, { calls, inputTokens, outputTokens }> }>`

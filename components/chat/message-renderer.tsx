@@ -29,6 +29,7 @@ import type {
   SourcesPart as SourcesPartType,
   SubagentPart as SubagentPartType,
 } from "@/lib/claude/parts-extensions"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -223,16 +224,15 @@ function MessageRendererInner({
     <Message from={message.role}>
       {speaker && message.role === "assistant" && (
         <div className="mb-1 flex items-center gap-2 self-start text-xs">
-          <span
-            className="flex size-5 items-center justify-center rounded-full text-[10px]"
-            style={{
-              backgroundColor: avatarColor(speaker),
-              color: "white",
-            }}
-            aria-hidden
-          >
-            {avatarGlyph(speaker)}
-          </span>
+          <Avatar className="size-5">
+            <AvatarFallback
+              className="text-[10px] text-white"
+              style={{ backgroundColor: avatarColor(speaker) }}
+              aria-hidden
+            >
+              {avatarGlyph(speaker)}
+            </AvatarFallback>
+          </Avatar>
           <span className="font-medium" style={{ color: avatarColor(speaker) }}>
             {speaker.name}
           </span>
@@ -655,7 +655,7 @@ function renderPart(
       const errorText =
         typeof (tp as { errorText?: unknown }).errorText === "string"
           ? ((tp as { errorText?: string }).errorText as string)
-          : "Tool call failed"
+          : t("toolCallFailed")
       return (
         <Tool key={key} defaultOpen>
           <ToolHeader type={tp.type} state={tp.state} />
@@ -663,7 +663,7 @@ function renderPart(
             {tp.input !== undefined && tp.input !== null && <ToolInput input={tp.input} />}
             <ErrorTraceDetails
               error={{ message: errorText }}
-              title="Tool call failed"
+              title={t("toolCallFailed")}
               className="mt-2"
             />
           </ToolContent>

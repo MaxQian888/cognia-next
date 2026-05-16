@@ -97,7 +97,7 @@ export function UsageTab() {
       cancelled = true
       clearInterval(id)
     }
-  }, [repos?.length, refresh])
+  }, [repos, refresh])
 
   if (repos === null) {
     return (

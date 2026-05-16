@@ -66,8 +66,11 @@ const NODE_ONLY_MODULES = [
 
 // Enable static export for Tauri production builds.
 // This makes `pnpm build` generate the `out/` directory that Tauri loads from `src-tauri/tauri.conf.json` (frontendDist: "../out").
+// In dev, leave `output` undefined so Next.js 16's strict static-export checks
+// don't reject runtime navigation to dynamic routes whose params aren't pre-listed
+// (see vercel/next.js#56477). Production export behavior is unchanged.
 const nextConfig: NextConfig = {
-  output: "export",
+  output: isProd ? "export" : undefined,
   // Note: This feature is required to use the Next.js Image component in SSG mode.
   // See https://nextjs.org/docs/messages/export-image-api for different workarounds.
   images: {

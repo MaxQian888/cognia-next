@@ -140,6 +140,7 @@ export function BottomToolbar({ session }: BottomToolbarProps) {
           point="chat.input.actions"
           limit={3}
           className="flex items-center gap-1 empty:hidden"
+          overflowLabel={t("pluginExtensionOverflow")}
         />
       </div>
 

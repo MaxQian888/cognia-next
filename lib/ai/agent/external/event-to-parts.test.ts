@@ -160,7 +160,7 @@ describe("applyExternalAgentEventToParts — artifacts", () => {
         rawInput: { id: "x", title: "y", kind: "totally-new-kind" },
       })
     )
-    expect((parts[0] as { kind: string }).kind).toBe("code")
+    expect((parts[0] as unknown as { kind: string }).kind).toBe("code")
   })
 })
 

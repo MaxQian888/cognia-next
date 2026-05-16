@@ -5,7 +5,7 @@
 
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { DownloadIcon } from "lucide-react"
 import { SingleExportDialog } from "@/components/data/export/single-export-dialog"
 import type { ChatSession } from "@/lib/claude/types"
@@ -22,14 +22,14 @@ export function SingleExportTrigger({ session, variant = "icon" }: Props) {
 
   const trigger =
     variant === "icon" ? (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label={t("singleTitle")}>
-            <DownloadIcon className="size-4" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{t("singleTitle")}</TooltipContent>
-      </Tooltip>
+      <TooltipIconButton
+        variant="ghost"
+        size="icon"
+        aria-label={t("singleTitle")}
+        tooltip={t("singleTitle")}
+      >
+        <DownloadIcon className="size-4" />
+      </TooltipIconButton>
     ) : (
       <Button variant="outline" size="sm">
         <DownloadIcon className="mr-1.5 size-4" />

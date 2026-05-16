@@ -33,6 +33,21 @@ jest.mock("@/components/ui/scroll-area", () => ({
   ScrollArea: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
 
+// SidebarTrigger requires a SidebarProvider ancestor that isn't mounted in
+// these unit tests. Stub it to a plain button so the trigger surface can still
+// be asserted on.
+jest.mock("@/components/ui/sidebar", () => ({
+  SidebarTrigger: ({
+    className,
+    "data-testid": testId,
+    "aria-label": ariaLabel,
+  }: {
+    className?: string
+    "data-testid"?: string
+    "aria-label"?: string
+  }) => <button type="button" data-testid={testId} aria-label={ariaLabel} className={className} />,
+}))
+
 // ---------------------------------------------------------------------------
 // Build fake enriched data (mimic what useLiveQuery returns)
 // ---------------------------------------------------------------------------
@@ -177,5 +192,35 @@ describe("ConversationList", () => {
     mockEnriched = undefined
     const { container } = render(<ConversationList />)
     expect(container.querySelector(".animate-pulse")).toBeInTheDocument()
+  })
+
+  it("loading state uses the shadcn Skeleton primitive", () => {
+    mockEnriched = undefined
+    const { container } = render(<ConversationList />)
+    const loadingPane = screen.getByTestId("conversation-list-loading")
+    expect(loadingPane).toBeInTheDocument()
+    // Skeleton primitive marks itself with data-slot="skeleton".
+    expect(container.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0)
+  })
+
+  it("renders a mobile-only sidebar trigger in the header", () => {
+    mockEnriched = []
+    render(<ConversationList />)
+    const trigger = screen.getByTestId("conversation-list-open-sidebar")
+    expect(trigger).toBeInTheDocument()
+    // The trigger must be visually hidden on md+ viewports so the desktop
+    // three-pane layout keeps its existing chrome.
+    expect(trigger).toHaveClass("md:hidden")
+    expect(trigger).toHaveAccessibleName(/open adapters/i)
+  })
+
+  it("row uses responsive touch-target sizing", () => {
+    mockEnriched = [
+      { session: makeSession("s7", "ck-touch", 1000), override: undefined, unreadCount: 0 },
+    ]
+    render(<ConversationList />)
+    const row = screen.getByTestId("conversation-row-ck-touch")
+    expect(row).toHaveClass("min-h-11")
+    expect(row).toHaveClass("md:min-h-9")
   })
 })

@@ -2115,6 +2115,19 @@ export class PluginManager {
     return this.pluginPointGovernanceMode
   }
 
+  /**
+   * Update the runtime governance mode. Used by the Settings → Plugins
+   * Policy panel so toggling the switch takes effect without a page
+   * reload. Validation paths that read `this.pluginPointGovernanceMode`
+   * will pick up the new value on their next invocation; already-passed
+   * manifests aren't re-validated retroactively. The Zustand store-level
+   * persisted setting (`cognia.plugins.policy.governance`) survives
+   * reloads — this setter only updates the live instance.
+   */
+  setPluginPointGovernanceMode(mode: PluginPointGovernanceMode): void {
+    this.pluginPointGovernanceMode = mode
+  }
+
   private validateHookDeclarations(pluginId: string, hooks: PluginHooks): void {
     for (const hookName of Object.keys(hooks)) {
       const validation = validateHookPoint(hookName, {

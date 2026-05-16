@@ -9,8 +9,7 @@ import { useTranslations } from "next-intl"
 import { CameraIcon } from "lucide-react"
 import { toast } from "sonner"
 import { usePromptInputAttachments } from "@/components/ai-elements/prompt-input"
-import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { captureScreenshot } from "@/lib/ui/screenshot"
 import { loggers } from "@/lib/logger"
 
@@ -36,21 +35,16 @@ export function ScreenshotButton({ disabled }: ScreenshotButtonProps) {
   }
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          aria-label={t("captureAria")}
-          className="size-8"
-          disabled={disabled}
-          onClick={() => void onClick()}
-          size="icon"
-          type="button"
-          variant="ghost"
-        >
-          <CameraIcon className="size-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{t("captureTooltip")}</TooltipContent>
-    </Tooltip>
+    <TooltipIconButton
+      aria-label={t("captureAria")}
+      tooltip={t("captureTooltip")}
+      className="size-8"
+      disabled={disabled}
+      onClick={() => void onClick()}
+      size="icon"
+      type="button"
+    >
+      <CameraIcon className="size-4" />
+    </TooltipIconButton>
   )
 }

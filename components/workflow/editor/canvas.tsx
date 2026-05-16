@@ -608,7 +608,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         className="flex flex-1 overflow-hidden"
         id="cognia-workflow-editor-layout"
       >
-        <ResizablePrimitive.Panel defaultSize={20} minSize={14} maxSize={32}>
+        <ResizablePrimitive.Panel defaultSize="20%" minSize="14%" maxSize="32%">
           <NodeSearchSidebar onAddNodeAtCenter={handleAddAtCenter} />
         </ResizablePrimitive.Panel>
         <ResizablePrimitive.Separator className="relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:outline-none">
@@ -616,7 +616,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
             <GripVerticalIcon className="size-2.5" />
           </div>
         </ResizablePrimitive.Separator>
-        <ResizablePrimitive.Panel defaultSize={56} minSize={30}>
+        <ResizablePrimitive.Panel defaultSize="56%" minSize="30%">
           <div
             className="relative h-full w-full overflow-hidden bg-muted/30"
             data-testid="workflow-canvas"
@@ -666,7 +666,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
             <GripVerticalIcon className="size-2.5" />
           </div>
         </ResizablePrimitive.Separator>
-        <ResizablePrimitive.Panel defaultSize={24} minSize={18} maxSize={40}>
+        <ResizablePrimitive.Panel defaultSize="24%" minSize="18%" maxSize="40%">
           <InspectorPanel useStore={store} className="h-full w-full" />
         </ResizablePrimitive.Panel>
       </ResizablePrimitive.Group>

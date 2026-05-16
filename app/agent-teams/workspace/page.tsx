@@ -33,6 +33,7 @@ import { Card } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from "sonner"
 
+import { useShallow } from "zustand/react/shallow"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { useExternalAgent } from "@/hooks/agent"
@@ -72,16 +73,20 @@ function AgentTeamWorkspaceInner() {
   const tComposer = useTranslations("agentTeamsWorkspace.chat.composer")
 
   const team = useAgentTeamStore((s) => (teamId ? s.teams[teamId] : undefined))
-  const teammates = useAgentTeamStore((s) =>
-    Object.values(s.teammates).filter((m) => m.teamId === teamId)
+  // Each of these selectors materialises a fresh array on every store change;
+  // wrap with `useShallow` so React doesn't bail out of useSyncExternalStore's
+  // snapshot caching (which would otherwise loop with "result of getSnapshot
+  // should be cached").
+  const teammates = useAgentTeamStore(
+    useShallow((s) => Object.values(s.teammates).filter((m) => m.teamId === teamId))
   )
-  const tasks = useAgentTeamStore((s) =>
-    Object.values(s.tasks).filter((task) => task.teamId === teamId)
+  const tasks = useAgentTeamStore(
+    useShallow((s) => Object.values(s.tasks).filter((task) => task.teamId === teamId))
   )
-  const messages = useAgentTeamStore((s) =>
-    Object.values(s.messages).filter((m) => m.teamId === teamId)
+  const messages = useAgentTeamStore(
+    useShallow((s) => Object.values(s.messages).filter((m) => m.teamId === teamId))
   )
-  const events = useAgentTeamStore((s) => s.events.filter((e) => e.teamId === teamId))
+  const events = useAgentTeamStore(useShallow((s) => s.events.filter((e) => e.teamId === teamId)))
   const upsertMessage = useAgentTeamStore((s) => s.upsertMessage)
   const removeMessage = useAgentTeamStore((s) => s.removeMessage)
   const activeTab = useAgentTeamStore((s) => s.workspaceTab)

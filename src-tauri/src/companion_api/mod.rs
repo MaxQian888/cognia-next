@@ -51,6 +51,7 @@ pub mod spec_parity;
 pub mod sync_bridge;
 pub mod sync_registry;
 pub mod mdns;
+pub mod signaling;
 pub mod tls;
 pub mod tunnel;
 pub mod ws;

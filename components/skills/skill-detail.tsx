@@ -74,7 +74,7 @@ export function SkillDetail({ skill }: Props) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-start gap-3 border-b px-5 py-4">
+      <div className="flex shrink-0 flex-wrap items-start gap-3 border-b px-4 py-3 sm:px-5 sm:py-4">
         <div
           className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md ${category.color}`}
         >
@@ -83,7 +83,7 @@ export function SkillDetail({ skill }: Props) {
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-base font-semibold">{skill.name}</h2>
           {skill.description && (
-            <p className="truncate text-xs text-muted-foreground">{skill.description}</p>
+            <p className="line-clamp-2 text-xs text-muted-foreground">{skill.description}</p>
           )}
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <Badge variant={source.badgeVariant} className="h-5 text-[10px]">
@@ -104,7 +104,7 @@ export function SkillDetail({ skill }: Props) {
             ))}
           </div>
         </div>
-        <div className="flex shrink-0 flex-col gap-1.5">
+        <div className="flex w-full shrink-0 flex-wrap items-center justify-end gap-1.5 sm:w-auto sm:flex-col sm:items-stretch">
           <Button
             size="sm"
             variant="outline"
@@ -157,25 +157,33 @@ export function SkillDetail({ skill }: Props) {
       </div>
 
       <Tabs defaultValue="overview" className="flex flex-1 flex-col overflow-hidden">
-        <TabsList className="mx-5 mt-2 self-start">
-          <TabsTrigger value="overview">{tDetail("tabOverview")}</TabsTrigger>
-          <TabsTrigger value="content">{tDetail("tabContent")}</TabsTrigger>
-          <TabsTrigger value="resources">
-            {tDetail("tabResources")}
-            {resources && resources.length > 0 && (
-              <span className="ml-1 text-[10px] opacity-60">{resources.length}</span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="security">{tDetail("tabSecurity")}</TabsTrigger>
-          <TabsTrigger value="validation">
-            {tDetail("tabValidation")}
-            {skill.validationErrors && skill.validationErrors.length > 0 && (
-              <Badge variant="destructive" className="ml-1 h-4 px-1.5 text-[10px]">
-                {skill.validationErrors.length}
-              </Badge>
-            )}
-          </TabsTrigger>
-        </TabsList>
+        <div className="mx-4 mt-2 overflow-x-auto sm:mx-5">
+          <TabsList className="self-start">
+            <TabsTrigger value="overview" className="whitespace-nowrap">
+              {tDetail("tabOverview")}
+            </TabsTrigger>
+            <TabsTrigger value="content" className="whitespace-nowrap">
+              {tDetail("tabContent")}
+            </TabsTrigger>
+            <TabsTrigger value="resources" className="whitespace-nowrap">
+              {tDetail("tabResources")}
+              {resources && resources.length > 0 && (
+                <span className="ml-1 text-[10px] opacity-60">{resources.length}</span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="security" className="whitespace-nowrap">
+              {tDetail("tabSecurity")}
+            </TabsTrigger>
+            <TabsTrigger value="validation" className="whitespace-nowrap">
+              {tDetail("tabValidation")}
+              {skill.validationErrors && skill.validationErrors.length > 0 && (
+                <Badge variant="destructive" className="ml-1 h-4 px-1.5 text-[10px]">
+                  {skill.validationErrors.length}
+                </Badge>
+              )}
+            </TabsTrigger>
+          </TabsList>
+        </div>
         <ScrollArea className="flex-1">
           <TabsContent value="overview" className="m-0 px-5 py-4">
             <OverviewSection skill={skill} />

@@ -5,6 +5,9 @@ project(':capacitor-android').projectDir = new File('../../node_modules/.pnpm/@c
 include ':capacitor-mlkit-barcode-scanning'
 project(':capacitor-mlkit-barcode-scanning').projectDir = new File('../../node_modules/.pnpm/@capacitor-mlkit+barcode-sc_4bd9424a72c1ee0f38d82e8538c325b4/node_modules/@capacitor-mlkit/barcode-scanning/android')
 
+include ':capgo-capacitor-navigation-bar'
+project(':capgo-capacitor-navigation-bar').projectDir = new File('../../node_modules/.pnpm/@capgo+capacitor-navigation-bar@7.3.18_@capacitor+core@7.6.3/node_modules/@capgo/capacitor-navigation-bar/android')
+
 include ':capacitor-app'
 project(':capacitor-app').projectDir = new File('../../node_modules/.pnpm/@capacitor+app@7.1.2_@capacitor+core@7.6.3/node_modules/@capacitor/app/android')
 

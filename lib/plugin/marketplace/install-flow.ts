@@ -17,7 +17,7 @@
  */
 
 import type { PluginManifest, PluginPermission } from "@/types/plugin"
-import { listPlugins } from "@/lib/db/plugins"
+import { listPlugins, setPluginConfig } from "@/lib/db/plugins"
 
 // =============================================================================
 // Public types
@@ -170,29 +170,35 @@ export async function runMarketplaceInstall(
   }
 
   // Step 3 — configuration (only when the manifest has parseable fields).
-  let _configValue: unknown
-  void _configValue
+  // The user-provided value is persisted post-install via setPluginConfig so
+  // the Dexie row reflects their edits before the plugin is enabled by the
+  // manager. Empty {} payloads are skipped to avoid overriding manifest
+  // defaults the manager would otherwise apply.
+  let configValue: Record<string, unknown> | undefined
   if (hasConfigSchema(manifest)) {
     const schema = (manifest as { configSchema?: Record<string, unknown> }).configSchema!
     const decision = await opts.requestConfig({ pluginId, configSchema: schema })
     if (decision.result === "cancel") {
       return { status: "cancelled", stage: "config" }
     }
-    _configValue = decision.value
-    // The marketplace's installPlugin does not currently take an initial
-    // config value — once the plugin is installed, the manager picks up the
-    // config from the manifest defaults, and the user's edits can be written
-    // through `setPluginConfig` post-install if the field schema requires
-    // explicit values. For now we surface the user-provided value to the
-    // caller through `_configValue` (reserved for a follow-up that wires it
-    // into the install API).
+    if (
+      decision.value !== undefined &&
+      decision.value !== null &&
+      typeof decision.value === "object" &&
+      Object.keys(decision.value as Record<string, unknown>).length > 0
+    ) {
+      configValue = decision.value as Record<string, unknown>
+    }
   }
 
   // Step 4 — actually install. Any failure here is a true install failure,
-  // not a cancellation.
+  // not a cancellation. After the install succeeds, persist the
+  // configuration the user supplied in step 3 so it isn't lost. If the
+  // config write fails we surface it as a failed result — the plugin row
+  // exists in Dexie but the user's intent (install + configure) wasn't
+  // fully met, so silent degradation is not acceptable here.
   try {
     await client.installPlugin(pluginId, version)
-    return { status: "installed", pluginId }
   } catch (err) {
     return {
       status: "failed",
@@ -200,4 +206,18 @@ export async function runMarketplaceInstall(
       message: err instanceof Error ? err.message : String(err),
     }
   }
+
+  if (configValue !== undefined) {
+    try {
+      await setPluginConfig(pluginId, configValue)
+    } catch (err) {
+      return {
+        status: "failed",
+        stage: "install",
+        message: err instanceof Error ? err.message : String(err),
+      }
+    }
+  }
+
+  return { status: "installed", pluginId }
 }

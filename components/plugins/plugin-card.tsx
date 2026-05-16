@@ -97,24 +97,28 @@ export function PluginCard({
           checked={selected}
           onCheckedChange={() => onToggleSelect(plugin.id)}
           className="mt-0.5"
-          aria-label={`Select ${plugin.name}`}
+          aria-label={t("selectAria", { name: plugin.name })}
         />
-        <button
-          type="button"
-          className="flex-1 min-w-0 text-left"
-          onClick={() => onOpen(plugin.id)}
+        <Button
+          asChild
+          variant="ghost"
+          className="flex-1 min-w-0 h-auto justify-start p-0 text-left font-normal hover:bg-transparent"
         >
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="font-medium truncate">{plugin.name}</span>
-            <span className="text-xs text-muted-foreground shrink-0">v{plugin.version}</span>
-            {updateAvailable && (
-              <Badge variant="secondary" className="text-xs shrink-0">
-                {t("updateBadge")}
-              </Badge>
-            )}
-          </div>
-          <div className="text-xs text-muted-foreground truncate mt-0.5">{plugin.id}</div>
-        </button>
+          <button type="button" onClick={() => onOpen(plugin.id)}>
+            <div className="block w-full min-w-0">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="font-medium truncate">{plugin.name}</span>
+                <span className="text-xs text-muted-foreground shrink-0">v{plugin.version}</span>
+                {updateAvailable && (
+                  <Badge variant="secondary" className="text-xs shrink-0">
+                    {t("updateBadge")}
+                  </Badge>
+                )}
+              </div>
+              <div className="text-xs text-muted-foreground truncate mt-0.5">{plugin.id}</div>
+            </div>
+          </button>
+        </Button>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

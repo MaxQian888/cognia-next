@@ -45,7 +45,7 @@ function setTauri(on: boolean) {
   else delete (window as unknown as Record<string, unknown>)[TAURI_KEY]
 }
 
-const mockedListen = listen as unknown as jest.Mock
+const _mockedListen = listen as unknown as jest.Mock
 
 let callSpy: jest.SpiedFunction<typeof transport.call>
 

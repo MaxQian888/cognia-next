@@ -8,6 +8,8 @@
  */
 
 import { loggers } from "@/lib/logger"
+import { initTaskScheduler, stopTaskScheduler } from "./task-scheduler"
+import { registerBuiltInExecutors } from "./executors"
 
 const log = loggers.scheduler
 

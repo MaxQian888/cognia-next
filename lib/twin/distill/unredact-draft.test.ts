@@ -14,7 +14,6 @@ import {
 import { encryptRedactionMap, __resetRedactionKey } from "@/lib/twin/ingest/redaction-key"
 import { redactText } from "@/lib/twin/ingest/redact"
 import { createTwinSource } from "@/lib/db/twin-sources"
-import { createTwinDraft } from "@/lib/db/twin-drafts"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import type { TwinDraft } from "@/types/twin"
 
@@ -141,7 +140,7 @@ describe("applyUnredactSelection", () => {
       { placeholder: "<EMAIL_001>", original: "alice@example.com", keep: true },
       { placeholder: "<PHONE_002>", original: "+14155550100", keep: false },
     ])
-    const data = (result as { data: { systemPrompt: string } }).data
+    const data = (result as unknown as { data: { systemPrompt: string } }).data
     expect(data.systemPrompt).toContain("alice@example.com")
     expect(data.systemPrompt).toContain("<PHONE_002>")
   })
@@ -154,7 +153,7 @@ describe("applyUnredactSelection", () => {
     const result = applyUnredactSelection(payload, [
       { placeholder: "<NAME_001>", original: 'Alice "Codename Q"', keep: true },
     ])
-    const data = (result as { data: { content: string } }).data
+    const data = (result as unknown as { data: { content: string } }).data
     expect(data.content).toBe('Contact Alice "Codename Q"')
   })
 

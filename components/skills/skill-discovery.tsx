@@ -26,7 +26,6 @@ type ScanState =
 
 export function SkillDiscovery() {
   const t = useTranslations("skills.discovery")
-  const tCommon = useTranslations("skills")
   const [scan, setScan] = useState<ScanState>({ status: "idle" })
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [customPath, setCustomPath] = useState("")
@@ -140,15 +139,13 @@ export function SkillDiscovery() {
         </Button>
       </div>
 
-      <div className="flex items-end gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
         <div className="flex-1 space-y-1">
-          <Label className="text-xs">
-            {tCommon("toolbar.import")} — {t("pathLabel")}
-          </Label>
+          <Label className="text-xs">{t("pathLabelFull")}</Label>
           <Input
             value={customPath}
             onChange={(e) => setCustomPath(e.target.value)}
-            placeholder="/path/to/skills"
+            placeholder={t("pathPlaceholder")}
             className="h-8 font-mono text-xs"
             disabled={!desktop}
           />

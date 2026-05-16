@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 
 // ---------------------------------------------------------------------------
 // Mocks — declared before importing the SUT.
@@ -43,6 +43,44 @@ jest.mock("@/lib/db/mobile-outbound-queue", () => ({
   enqueue: (arg: unknown) => enqueueMock(arg),
 }))
 
+// Transport mock — programmable per test. Default to "not in Capacitor" so
+// the tier indicator stays hidden unless a test explicitly opts in.
+type TierHandler = (tier: string) => void
+const tierHandlers: Set<TierHandler> = new Set()
+const transportMock: {
+  isCapacitor: jest.Mock<boolean, []>
+  tier: string
+  call: jest.Mock
+  subscribe: jest.Mock
+  getActiveTier: jest.Mock<string, []>
+  onTierChange: jest.Mock<() => void, [TierHandler]>
+} = {
+  isCapacitor: jest.fn(() => false),
+  tier: "offline",
+  call: jest.fn(),
+  subscribe: jest.fn(() => () => undefined),
+  getActiveTier: jest.fn(() => transportMock.tier),
+  onTierChange: jest.fn((h: TierHandler) => {
+    h(transportMock.tier)
+    tierHandlers.add(h)
+    return () => {
+      tierHandlers.delete(h)
+    }
+  }),
+}
+
+// Getter form — `transportMock` is declared above but jest.mock factories
+// can be invoked before the surrounding `const` is initialized (the SUT
+// loads transitively through other mock factories). A getter defers the
+// dereference until the SUT actually reads `transport`.
+jest.mock("@/lib/tauri", () => ({
+  isCapacitor: () => transportMock.isCapacitor(),
+  isTauri: () => false,
+  get transport() {
+    return transportMock
+  },
+}))
+
 import { MobileSettingsPanel } from "./mobile-settings-panel"
 import type { BiometricGuardPolicy } from "@/lib/claude/types"
 
@@ -59,6 +97,12 @@ beforeEach(() => {
     fontScale: "md",
     defaultModel: "",
   }
+  // Reset the transport mock so each test starts in "not Capacitor".
+  transportMock.isCapacitor.mockReturnValue(false)
+  transportMock.tier = "offline"
+  transportMock.getActiveTier.mockClear()
+  transportMock.onTierChange.mockClear()
+  tierHandlers.clear()
 })
 
 describe("<MobileSettingsPanel />", () => {
@@ -164,5 +208,58 @@ describe("<MobileSettingsPanel />", () => {
       exportBackup: true,
       revealSecrets: false,
     })
+  })
+})
+
+describe("<MobileSettingsPanel /> — transport tier indicator", () => {
+  it("hides the indicator outside of Capacitor", () => {
+    transportMock.isCapacitor.mockReturnValue(false)
+    render(<MobileSettingsPanel />)
+    expect(screen.queryByTestId("mobile-transport-tier")).not.toBeInTheDocument()
+  })
+
+  it("renders the tier indicator under Capacitor with the seeded value", () => {
+    transportMock.isCapacitor.mockReturnValue(true)
+    transportMock.tier = "rtc-direct"
+    render(<MobileSettingsPanel />)
+    const row = screen.getByTestId("mobile-transport-tier")
+    expect(row).toBeInTheDocument()
+    expect(row).toHaveTextContent(/WebRTC \(direct\)/)
+    expect(transportMock.getActiveTier).toHaveBeenCalled()
+    expect(transportMock.onTierChange).toHaveBeenCalled()
+  })
+
+  it.each([
+    ["rtc-direct", /WebRTC \(direct\)/],
+    ["rtc-relay", /WebRTC \(TURN\)/],
+    ["ws-lan", /LAN/],
+    ["ws-tunnel", /Cloudflared/],
+    ["offline", /Offline/],
+  ])("renders the label for tier=%s", (tier, expected) => {
+    transportMock.isCapacitor.mockReturnValue(true)
+    transportMock.tier = tier
+    render(<MobileSettingsPanel />)
+    expect(screen.getByTestId("mobile-transport-tier")).toHaveTextContent(expected)
+  })
+
+  it("updates the tier when the transport emits a change", () => {
+    transportMock.isCapacitor.mockReturnValue(true)
+    transportMock.tier = "offline"
+    render(<MobileSettingsPanel />)
+    expect(screen.getByTestId("mobile-transport-tier")).toHaveTextContent(/Offline/)
+    // Drive a transition through the captured subscriber.
+    act(() => {
+      for (const h of tierHandlers) h("rtc-direct")
+    })
+    expect(screen.getByTestId("mobile-transport-tier")).toHaveTextContent(/WebRTC \(direct\)/)
+  })
+
+  it("detaches the tier subscription on unmount", () => {
+    transportMock.isCapacitor.mockReturnValue(true)
+    transportMock.tier = "ws-lan"
+    const { unmount } = render(<MobileSettingsPanel />)
+    expect(tierHandlers.size).toBe(1)
+    unmount()
+    expect(tierHandlers.size).toBe(0)
   })
 })

@@ -66,7 +66,7 @@ function WorkspaceContent() {
       {/* Left: Component Tree */}
       {showTree && workspaceMode === "edit" && (
         <>
-          <ResizablePanel defaultSize={20} minSize={15} maxSize={35}>
+          <ResizablePanel defaultSize="20%" minSize="15%" maxSize="35%">
             <ComponentTreePanel />
           </ResizablePanel>
           <ResizableHandle withHandle />
@@ -74,7 +74,7 @@ function WorkspaceContent() {
       )}
 
       {/* Center: Preview */}
-      <ResizablePanel defaultSize={workspaceMode === "data" ? 50 : 60} minSize={30}>
+      <ResizablePanel defaultSize={workspaceMode === "data" ? "50%" : "60%"} minSize="30%">
         <div className="h-full overflow-auto p-4 bg-muted/20">
           <A2UIInlineSurface surfaceId={surfaceId} className="min-h-[200px]" />
         </div>
@@ -84,7 +84,7 @@ function WorkspaceContent() {
       {workspaceMode === "edit" && showProperties && (
         <>
           <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={25} minSize={15} maxSize={40}>
+          <ResizablePanel defaultSize="25%" minSize="15%" maxSize="40%">
             <PropertyInspectorPanel />
           </ResizablePanel>
         </>
@@ -93,7 +93,7 @@ function WorkspaceContent() {
       {workspaceMode === "data" && (
         <>
           <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={50} minSize={25} maxSize={70}>
+          <ResizablePanel defaultSize="50%" minSize="25%" maxSize="70%">
             <DataModelPanel />
           </ResizablePanel>
         </>

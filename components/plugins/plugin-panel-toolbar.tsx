@@ -5,6 +5,10 @@
 // File install stages parsed JSON manifests through
 // `usePluginsStore.setImportStaging`; URL install delegates to a proper
 // modal dialog instead of `window.prompt`.
+//
+// Two install lanes are exposed via grouped dropdown items:
+//   • Manifest (web + desktop) — JSON manifest file / URL, staged for review
+//   • WASM bundle (Tauri only) — local .wasm/.zip or signed URL with grant sheet
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
@@ -15,16 +19,23 @@ import {
   UploadIcon,
   GlobeIcon,
   Loader2Icon,
+  FilePlus2Icon,
+  ShieldCheckIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { canUseTauriInvoke } from "@/lib/native/utils"
 import { usePluginsStore } from "@/stores/plugins"
 import { PluginInstallFromUrlDialog } from "./plugin-install-from-url-dialog"
+import { InstallFromUrlDialog } from "./install-from-url-dialog"
+import { useInstallWasmFromLocal } from "./install-wasm-plugin-button"
 
 interface Props {
   /** Opens the update dialog (mounted by the parent panel). */
@@ -42,6 +53,9 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
   const setImportStaging = usePluginsStore((s) => s.setImportStaging)
   const [busy, setBusy] = useState(false)
   const [urlDialogOpen, setUrlDialogOpen] = useState(false)
+  const [signedUrlDialogOpen, setSignedUrlDialogOpen] = useState(false)
+  const wasmLocal = useInstallWasmFromLocal()
+  const wasmAvailable = canUseTauriInvoke()
 
   const handleInstallFromFile = async () => {
     setBusy(true)
@@ -101,12 +115,13 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
       <div className="flex items-center gap-2 flex-wrap">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" disabled={busy}>
+            <Button size="sm" disabled={busy || wasmLocal.busy}>
               <PlusIcon className="size-3.5 mr-1.5" />
               {t("install")}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuLabel>{t("groupManifest")}</DropdownMenuLabel>
             <DropdownMenuItem onClick={() => void handleInstallFromFile()}>
               <UploadIcon className="size-3.5 mr-2" />
               {t("fromFile")}
@@ -115,6 +130,23 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
               <GlobeIcon className="size-3.5 mr-2" />
               {t("fromUrl")}
             </DropdownMenuItem>
+            {wasmAvailable && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>{t("groupWasm")}</DropdownMenuLabel>
+                <DropdownMenuItem
+                  onClick={() => void wasmLocal.trigger()}
+                  disabled={wasmLocal.busy}
+                >
+                  <FilePlus2Icon className="size-3.5 mr-2" />
+                  {t("fromLocalWasm")}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSignedUrlDialogOpen(true)}>
+                  <ShieldCheckIcon className="size-3.5 mr-2" />
+                  {t("fromUrlSigned")}
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
         <Button size="sm" variant="outline" onClick={onCheckUpdates}>
@@ -137,7 +169,17 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
         </Button>
       </div>
 
+      {wasmLocal.error && (
+        <p className="mt-1 text-xs text-destructive" role="alert">
+          {wasmLocal.error}
+        </p>
+      )}
+
       <PluginInstallFromUrlDialog open={urlDialogOpen} onOpenChange={setUrlDialogOpen} />
+      {wasmAvailable && (
+        <InstallFromUrlDialog open={signedUrlDialogOpen} onOpenChange={setSignedUrlDialogOpen} />
+      )}
+      {wasmLocal.sheet}
     </>
   )
 }

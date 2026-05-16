@@ -19,6 +19,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { getTwin, updateTwin } from "@/lib/db/twins"
 import { describeCronExpression, validateCronExpression } from "@/lib/scheduler/cron-parser"
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
@@ -162,23 +169,30 @@ function CronField({ label, value, onChange, preview, disabled, testid }: CronFi
           placeholder={t("placeholder")}
           disabled={disabled}
         />
-        <select
-          aria-label={t("presetAria", { label })}
-          className="border-border bg-background h-9 rounded border px-2 text-sm"
+        <Select
+          // Always treat as "empty" so the dropdown stays a one-shot picker;
+          // selecting a preset writes the cron string back via onChange.
           value=""
-          onChange={(e) => {
-            if (e.target.value) onChange(e.target.value)
+          onValueChange={(next) => {
+            if (next) onChange(next)
           }}
           disabled={disabled}
-          data-testid={`${testid}-preset`}
         >
-          <option value="">{t("presetHint")}</option>
-          {CRON_PRESETS.map((p) => (
-            <option key={p.value} value={p.value}>
-              {p.label}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger
+            aria-label={t("presetAria", { label })}
+            className="w-[12rem] shrink-0"
+            data-testid={`${testid}-preset`}
+          >
+            <SelectValue placeholder={t("presetHint")} />
+          </SelectTrigger>
+          <SelectContent>
+            {CRON_PRESETS.map((p) => (
+              <SelectItem key={p.value} value={p.value}>
+                {p.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       <p className="text-muted-foreground text-xs">{preview}</p>
     </div>

@@ -107,7 +107,7 @@ describe("resolveSendOptions twin injection", () => {
   it("forwards precomputedQueryEmbedding to applyTwinContext", async () => {
     // Mock the applyTwinContext function to capture the arguments it receives
     jest.mock("@/lib/twin/runtime", () => ({
-      applyTwinContext: jest.fn(async (input) => ({
+      applyTwinContext: jest.fn(async (_input) => ({
         applied: {
           systemPrompt: "TWIN_SYSTEM_PROMPT",
         },

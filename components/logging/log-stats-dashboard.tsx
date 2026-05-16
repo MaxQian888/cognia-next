@@ -9,7 +9,7 @@
  */
 
 import { useMemo } from "react"
-import { useTranslations } from "next-intl"
+import { useTranslations, useLocale } from "next-intl"
 import {
   PieChart,
   Pie,
@@ -29,6 +29,7 @@ import {
 } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Activity,
   AlertTriangle,
@@ -70,7 +71,8 @@ const LEVEL_COLORS: Record<LogLevel, string> = {
  */
 function computeVolumeBuckets(
   logs: StructuredLogEntry[],
-  bucketMinutes = 5
+  bucketMinutes = 5,
+  locale = "en"
 ): { time: string; info: number; warn: number; error: number; other: number }[] {
   if (logs.length === 0) return []
 
@@ -90,7 +92,7 @@ function computeVolumeBuckets(
   for (let i = 0; i < capped; i++) {
     const bucketStart = startTime + i * bucketMs
     buckets.push({
-      time: new Date(bucketStart).toLocaleTimeString("en-US", {
+      time: new Date(bucketStart).toLocaleTimeString(locale, {
         hour12: false,
         hour: "2-digit",
         minute: "2-digit",
@@ -199,6 +201,7 @@ export function LogStatsDashboard({
   className,
 }: LogStatsDashboardProps) {
   const t = useTranslations("logging")
+  const locale = useLocale()
 
   // Level distribution data
   const levelData = useMemo(() => {
@@ -229,7 +232,7 @@ export function LogStatsDashboard({
   }, [logs])
 
   // Volume timeline data
-  const volumeData = useMemo(() => computeVolumeBuckets(logs), [logs])
+  const volumeData = useMemo(() => computeVolumeBuckets(logs, 5, locale), [logs, locale])
   const errorTrendData = useMemo(() => computeErrorTrendData(volumeData), [volumeData])
 
   // Summary stats
@@ -327,8 +330,8 @@ export function LogStatsDashboard({
 
   return (
     <div className={cn("space-y-4 p-4", className)}>
-      {/* Summary Cards — 2 rows of 4 */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* Summary Cards — responsive 1 → 2 → 3 → 4 columns */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
         <StatCard
           icon={Layers}
           label={t("dashboard.totalLogs")}
@@ -407,7 +410,7 @@ export function LogStatsDashboard({
               <p className="font-medium">
                 {nativeLogging.activeTargets.length > 0
                   ? nativeLogging.activeTargets.join(", ")
-                  : "none"}
+                  : t("panel.nativeLoggingNoTargets")}
               </p>
             </div>
             {nativeLogging.platformLogging.error && (
@@ -421,14 +424,17 @@ export function LogStatsDashboard({
       )}
 
       {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Level Distribution - Pie Chart */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">{t("dashboard.levelDistribution")}</CardTitle>
           </CardHeader>
           <CardContent>
-            <div style={{ width: "100%", height: 220 }}>
+            <div
+              data-testid="dashboard-chart-pie"
+              className="w-full h-[180px] sm:h-[200px] md:h-[220px] lg:h-[260px]"
+            >
               <ResponsiveContainer>
                 <PieChart>
                   <Pie
@@ -465,7 +471,10 @@ export function LogStatsDashboard({
             <CardTitle className="text-sm">{t("dashboard.logVolume")}</CardTitle>
           </CardHeader>
           <CardContent>
-            <div style={{ width: "100%", height: 220 }}>
+            <div
+              data-testid="dashboard-chart-area"
+              className="w-full h-[180px] sm:h-[200px] md:h-[220px] lg:h-[260px]"
+            >
               <ResponsiveContainer>
                 <AreaChart data={volumeData} margin={CHART_MARGINS.default}>
                   <defs>
@@ -496,7 +505,7 @@ export function LogStatsDashboard({
                     stackId="1"
                     stroke="#22c55e"
                     fill="url(#logVolumeInfo)"
-                    name="Info"
+                    name={t("levels.info")}
                   />
                   <Area
                     type="monotone"
@@ -504,7 +513,7 @@ export function LogStatsDashboard({
                     stackId="1"
                     stroke="#eab308"
                     fill="url(#logVolumeWarn)"
-                    name="Warn"
+                    name={t("levels.warn")}
                   />
                   <Area
                     type="monotone"
@@ -512,7 +521,7 @@ export function LogStatsDashboard({
                     stackId="1"
                     stroke="#ef4444"
                     fill="url(#logVolumeError)"
-                    name="Error"
+                    name={t("levels.error")}
                   />
                   <Area
                     type="monotone"
@@ -521,7 +530,7 @@ export function LogStatsDashboard({
                     stroke="#94a3b8"
                     fill="#94a3b8"
                     fillOpacity={0.2}
-                    name="Other"
+                    name={t("dashboard.otherSeries")}
                   />
                 </AreaChart>
               </ResponsiveContainer>
@@ -537,7 +546,10 @@ export function LogStatsDashboard({
             <CardTitle className="text-sm">{t("dashboard.errorTrend")}</CardTitle>
           </CardHeader>
           <CardContent>
-            <div style={{ width: "100%", height: 220 }}>
+            <div
+              data-testid="dashboard-chart-line"
+              className="w-full h-[180px] sm:h-[200px] md:h-[220px] lg:h-[260px]"
+            >
               <ResponsiveContainer>
                 <LineChart data={errorTrendData} margin={CHART_MARGINS.default}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -573,7 +585,7 @@ export function LogStatsDashboard({
       )}
 
       {/* Bottom Row: Module Activity + Top Errors */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Module Activity - Bar Chart */}
         {moduleData.length > 0 && (
           <Card>
@@ -581,7 +593,13 @@ export function LogStatsDashboard({
               <CardTitle className="text-sm">{t("dashboard.moduleActivity")}</CardTitle>
             </CardHeader>
             <CardContent>
-              <div style={{ width: "100%", height: Math.max(180, moduleData.length * 32) }}>
+              <div
+                data-testid="dashboard-chart-bar"
+                className="w-full"
+                style={{
+                  height: `clamp(180px, ${moduleData.length * 32}px, 480px)`,
+                }}
+              >
                 <ResponsiveContainer>
                   <BarChart
                     data={moduleData}
@@ -599,7 +617,12 @@ export function LogStatsDashboard({
                       contentStyle={TOOLTIP_STYLE.contentStyle}
                       labelStyle={TOOLTIP_STYLE.labelStyle}
                     />
-                    <Bar dataKey="count" fill="#3b82f6" radius={[0, 4, 4, 0]} name="Logs" />
+                    <Bar
+                      dataKey="count"
+                      fill="#3b82f6"
+                      radius={[0, 4, 4, 0]}
+                      name={t("dashboard.logsSeries")}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -616,10 +639,12 @@ export function LogStatsDashboard({
             <CardContent>
               <div className="space-y-2">
                 {topErrors.map((err, i) => (
-                  <button
+                  <Button
                     key={i}
-                    className="flex items-start gap-2 w-full text-left px-2 py-1.5 rounded hover:bg-muted/50 transition-colors"
+                    variant="ghost"
+                    className="flex items-start gap-2 w-full justify-start px-2 py-1.5 h-auto text-xs font-normal motion-safe:transition-colors"
                     onClick={() => onSearchFilter?.(err.message)}
+                    data-testid={`top-error-${i}`}
                   >
                     <Badge variant="destructive" className="text-[10px] shrink-0 mt-0.5">
                       {err.count}
@@ -627,7 +652,7 @@ export function LogStatsDashboard({
                     <span className="text-xs text-muted-foreground break-words line-clamp-2">
                       {err.message}
                     </span>
-                  </button>
+                  </Button>
                 ))}
               </div>
             </CardContent>

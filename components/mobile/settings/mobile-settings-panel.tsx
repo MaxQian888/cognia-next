@@ -12,9 +12,17 @@
  * The server-side allowlist (`APP_SETTINGS_MOBILE_ALLOWED_KEYS` in
  * `companion_api/rpc.rs`) rejects keys outside the safe list, so any
  * field added here that isn't in that allowlist will receive a 400.
+ *
+ * ADR-0021 follow-up — also renders a read-only transport-tier row that
+ * subscribes to `CompanionTransport.onTierChange` so the user can see
+ * whether they're reaching the desktop over WebRTC, LAN HTTPS, or a
+ * tunnel. The row is hidden outside of Capacitor (the web/dev runtime
+ * uses a stub transport that doesn't have a meaningful tier).
  */
 
+import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
+import { CircleIcon } from "lucide-react"
 
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
 import { Label } from "@/components/ui/label"
@@ -27,6 +35,9 @@ import {
 } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
+import { cn } from "@/lib/utils"
+import { isCapacitor, transport } from "@/lib/tauri"
+import type { TransportTier } from "@/lib/tauri/transport-companion"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import type { AppLanguage, AppTheme, BiometricGuardPolicy } from "@/lib/claude/types"
 import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
@@ -60,6 +71,7 @@ export function MobileSettingsPanel() {
 
   return (
     <div className="space-y-4" data-testid="mobile-settings-panel">
+      <TransportTierIndicator />
       <Row label={t("theme")}>
         <Select value={theme} onValueChange={(v) => void update({ theme: v as AppTheme })}>
           <SelectTrigger data-testid="settings-theme">
@@ -175,5 +187,87 @@ function BiometricRow({
         />
       </ItemActions>
     </Item>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Transport tier indicator — ADR-0021 follow-up
+// ---------------------------------------------------------------------------
+
+/** Maps `TransportTier` → a Tailwind color class for the colored dot. */
+const TIER_COLOR: Record<TransportTier, string> = {
+  "rtc-direct": "fill-emerald-500 text-emerald-500",
+  "rtc-relay": "fill-emerald-500 text-emerald-500",
+  "ws-lan": "fill-sky-500 text-sky-500",
+  "ws-tunnel": "fill-amber-500 text-amber-500",
+  offline: "fill-muted-foreground text-muted-foreground",
+}
+
+/** Maps `TransportTier` → the i18n key suffix under `mobile.transportTier`. */
+const TIER_KEY: Record<TransportTier, string> = {
+  "rtc-direct": "rtcDirect",
+  "rtc-relay": "rtcRelay",
+  "ws-lan": "wsLan",
+  "ws-tunnel": "wsTunnel",
+  offline: "offline",
+}
+
+/**
+ * Read-only row showing how the mobile client is currently reaching the
+ * desktop. Subscribes to `CompanionTransport.onTierChange` so the value
+ * stays live without polling. Hidden outside Capacitor — the web stub
+ * doesn't have a meaningful tier.
+ */
+export function TransportTierIndicator(): React.JSX.Element | null {
+  const t = useTranslations("mobile.settingsPanel")
+  const tt = useTranslations("mobile.transportTier")
+  // Default to "offline" for the SSR / first-paint case; the effect below
+  // will overwrite immediately on Capacitor.
+  const [tier, setTier] = useState<TransportTier>("offline")
+  const [active, setActive] = useState<boolean>(false)
+
+  useEffect(() => {
+    // The CompanionTransport singleton exposes `getActiveTier` /
+    // `onTierChange`; the Tauri + web stubs do not. Duck-type so a
+    // mocked transport in tests also lights up the row.
+    if (!isCapacitor()) return
+    const candidate = transport as unknown as {
+      getActiveTier?: () => TransportTier
+      onTierChange?: (h: (t: TransportTier) => void) => () => void
+    }
+    if (
+      typeof candidate.getActiveTier !== "function" ||
+      typeof candidate.onTierChange !== "function"
+    ) {
+      return
+    }
+    // SSR-safe init: the transport singleton isn't accessible during the
+    // server / first paint, so we must seed `tier` + `active` once on mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setActive(true)
+
+    setTier(candidate.getActiveTier())
+    return candidate.onTierChange((next) => setTier(next))
+  }, [])
+
+  if (!active) return null
+
+  const key = TIER_KEY[tier]
+  return (
+    <section
+      className="flex flex-col gap-1 rounded border bg-card px-3 py-2 text-xs"
+      data-testid="mobile-transport-tier"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium">{t("transportTier")}</span>
+        <span className="flex items-center gap-1.5">
+          <CircleIcon aria-hidden="true" className={cn("size-2 shrink-0", TIER_COLOR[tier])} />
+          <span className="text-xs">{tt(key)}</span>
+        </span>
+      </div>
+      <p className="text-[11px] text-muted-foreground">{tt(`${key}Description`)}</p>
+    </section>
   )
 }

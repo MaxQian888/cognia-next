@@ -28,7 +28,7 @@ import { saveSettings, getSettings } from "@/lib/db/settings"
 import type { AgentId } from "@/lib/claude/types"
 import { isTauri } from "@/lib/tauri"
 
-import { writeClaudeSettingsEnv } from "./client"
+import { writeClaudeSettingsEnv, writeCodexAuthEnv } from "./client"
 import type {
   AgentEnvPatch,
   ActiveProviderState,
@@ -43,20 +43,40 @@ export function ccswitchProviderRefId(provider: CcswitchProvider): string {
 }
 
 /**
- * Agents we currently know how to write a provider env into. In v1 we only
- * support claude-code (the dominant target); other agents surface as
- * `unsupported: true` in the plan so the user can see them but not select.
+ * Agents we currently know how to write a provider env into.
+ *
+ * v1: `claude-code` (the dominant target).
+ * v2 (this update): `codex` — writes `OPENAI_API_KEY` + `auth_mode = "ApiKey"`
+ * to `~/.codex/auth.json`. `baseUrl` propagation is **not** implemented for
+ * codex because codex-cli reads base URLs from the `[model_providers.*]`
+ * tables in `config.toml`, which requires picking / creating a stable
+ * `model_provider` id and rewriting profile refs — out of scope for this
+ * iteration. The dialog surfaces a warning when a selected codex provider
+ * has a baseUrl set so the user knows the URL change won't reach codex.
+ *
+ * Other agents (`gemini`, `claude-desktop`, `opencode`, `openclaw`) remain
+ * `unsupported: true` so they show up greyed out in the picker.
  */
-const SUPPORTED_AGENTS: ReadonlySet<AgentId> = new Set<AgentId>(["claude-code"])
+const SUPPORTED_AGENTS: ReadonlySet<AgentId> = new Set<AgentId>(["claude-code", "codex"])
 
-function envUpdatesForProvider(provider: CcswitchProvider): Array<{
-  key: string
-  value: string | null
-}> {
-  return [
-    { key: "ANTHROPIC_API_KEY", value: provider.apiKey?.trim() || null },
-    { key: "ANTHROPIC_BASE_URL", value: provider.baseUrl?.trim() || null },
-  ]
+function envUpdatesForProvider(
+  agent: AgentId,
+  provider: CcswitchProvider
+): Array<{ key: string; value: string | null }> {
+  switch (agent) {
+    case "codex":
+      // codex-cli persists its OpenAI API key under the top-level
+      // `OPENAI_API_KEY` field in `~/.codex/auth.json` (alongside the
+      // ChatGPT bearer in `tokens`). We treat the field like an env-update:
+      // Some(v) sets it + flips auth_mode to "ApiKey"; null removes it.
+      return [{ key: "OPENAI_API_KEY", value: provider.apiKey?.trim() || null }]
+    case "claude-code":
+    default:
+      return [
+        { key: "ANTHROPIC_API_KEY", value: provider.apiKey?.trim() || null },
+        { key: "ANTHROPIC_BASE_URL", value: provider.baseUrl?.trim() || null },
+      ]
+  }
 }
 
 function targetPathFor(agent: AgentId): string | null {
@@ -65,6 +85,12 @@ function targetPathFor(agent: AgentId): string | null {
       // ~/.claude/settings.json — the env block file, NOT ~/.claude.json
       // (which is the MCP config). The Rust side computes the actual path.
       return "~/.claude/settings.json"
+    case "codex":
+      // ~/.codex/auth.json — owned by codex-cli. Our write touches only the
+      // top-level `OPENAI_API_KEY` + `auth_mode` fields; tokens/agent_identity
+      // are preserved verbatim. Rust side enforces atomic write + mtime
+      // drift detection via fs_atomic.
+      return "~/.codex/auth.json"
     default:
       return null
   }
@@ -108,7 +134,7 @@ export function planSwitch(
       agentId,
       targetPath: targetPathFor(agentId),
       unsupported: false,
-      envUpdates: envUpdatesForProvider(provider),
+      envUpdates: envUpdatesForProvider(agentId, provider),
     }
   })
 
@@ -188,6 +214,19 @@ export async function applySwitch(plan: SwitchPlan): Promise<ApplyResult> {
       switch (patch.agentId) {
         case "claude-code": {
           const out = await writeClaudeSettingsEnv(updates)
+          result.agentResults.push({
+            agentId: patch.agentId,
+            ok: true,
+            path: out.path,
+            backupPath: out.backupPath,
+          })
+          break
+        }
+        case "codex": {
+          // codex-cli's `~/.codex/auth.json` doesn't use an `env` block —
+          // updates apply at the top level. The Rust command handles the
+          // `auth_mode` flip when `OPENAI_API_KEY` is set/cleared.
+          const out = await writeCodexAuthEnv(updates)
           result.agentResults.push({
             agentId: patch.agentId,
             ok: true,

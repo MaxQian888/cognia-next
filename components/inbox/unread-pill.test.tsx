@@ -36,4 +36,16 @@ describe("UnreadPill", () => {
     render(<UnreadPill count={5} />)
     expect(screen.getByLabelText("5 unread")).toBeInTheDocument()
   })
+
+  it("uses the shadcn Badge primitive (destructive variant)", () => {
+    render(<UnreadPill count={2} />)
+    const pill = screen.getByTestId("unread-pill")
+    expect(pill).toHaveAttribute("data-slot", "badge")
+    expect(pill).toHaveAttribute("data-variant", "destructive")
+  })
+
+  it("merges a custom className", () => {
+    render(<UnreadPill count={1} className="custom-extra" />)
+    expect(screen.getByTestId("unread-pill")).toHaveClass("custom-extra")
+  })
 })

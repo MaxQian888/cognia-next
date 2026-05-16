@@ -1,6 +1,6 @@
 "use client"
 
-import { makeDefaultLoader, withPlugin, type ValueOutcome } from "./_shared"
+import { makeDefaultLoader, type ValueOutcome } from "./_shared"
 
 /**
  * `@capacitor/geolocation` wrapper. Used by location-aware workflow triggers

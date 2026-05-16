@@ -24,7 +24,7 @@ import { PlanCard } from "./mcp-renderers/plan-card"
 import { ReadCard } from "./mcp-renderers/read-card"
 import { GlobCard } from "./mcp-renderers/glob-card"
 
-type CardComponent = (props: { part: ToolUIPart }) => JSX.Element | null
+type CardComponent = (props: { part: ToolUIPart }) => React.JSX.Element | null
 
 const REGISTRY: Record<string, CardComponent> = {
   // cognia external bridge

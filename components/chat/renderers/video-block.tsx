@@ -14,7 +14,7 @@ import {
 } from "lucide-react"
 import { cn, formatVideoTime } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { downloadFromUrl } from "@/lib/files/download"
 import { loggers } from "@/lib/logger"
 
@@ -261,35 +261,27 @@ export const VideoBlock = memo(function VideoBlock({
 
             <div className="flex items-center justify-between px-3 py-2">
               <div className="flex items-center gap-2">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-white hover:bg-white/20"
-                      onClick={handlePlayPause}
-                      aria-label={isPlaying ? t("pause") : t("play")}
-                    >
-                      {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{isPlaying ? t("pause") : t("play")}</TooltipContent>
-                </Tooltip>
+                <TooltipIconButton
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-white hover:bg-white/20"
+                  onClick={handlePlayPause}
+                  aria-label={isPlaying ? t("pause") : t("play")}
+                  tooltip={isPlaying ? t("pause") : t("play")}
+                >
+                  {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                </TooltipIconButton>
 
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-white hover:bg-white/20"
-                      onClick={handleMuteToggle}
-                      aria-label={isMuted ? t("unmute") : t("mute")}
-                    >
-                      {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{isMuted ? t("unmute") : t("mute")}</TooltipContent>
-                </Tooltip>
+                <TooltipIconButton
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-white hover:bg-white/20"
+                  onClick={handleMuteToggle}
+                  aria-label={isMuted ? t("unmute") : t("mute")}
+                  tooltip={isMuted ? t("unmute") : t("mute")}
+                >
+                  {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                </TooltipIconButton>
 
                 <span className="text-xs text-white">
                   {formatVideoTime(currentTime)} / {formatVideoTime(duration)}
@@ -298,36 +290,28 @@ export const VideoBlock = memo(function VideoBlock({
 
               <div className="flex items-center gap-1">
                 {!isEmbed && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-white hover:bg-white/20"
-                        onClick={handleDownload}
-                        aria-label={t("download")}
-                      >
-                        <Download className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{t("download")}</TooltipContent>
-                  </Tooltip>
+                  <TooltipIconButton
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-white hover:bg-white/20"
+                    onClick={handleDownload}
+                    aria-label={t("download")}
+                    tooltip={t("download")}
+                  >
+                    <Download className="h-4 w-4" />
+                  </TooltipIconButton>
                 )}
 
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-white hover:bg-white/20"
-                      onClick={handleFullscreen}
-                      aria-label={t("fullscreen")}
-                    >
-                      <Maximize className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("fullscreen")}</TooltipContent>
-                </Tooltip>
+                <TooltipIconButton
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-white hover:bg-white/20"
+                  onClick={handleFullscreen}
+                  aria-label={t("fullscreen")}
+                  tooltip={t("fullscreen")}
+                >
+                  <Maximize className="h-4 w-4" />
+                </TooltipIconButton>
               </div>
             </div>
           </div>

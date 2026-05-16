@@ -107,7 +107,7 @@ export function PluginPointDiagnosticsPanel({
             onValueChange={(v) => {
               if (v === "all" || v === "errors" || v === "warnings") setSeverity(v)
             }}
-            aria-label="severity-filter"
+            aria-label={t("severityFilterAria")}
           >
             <ToggleGroupItem value="all" aria-label={t("filterAll")}>
               {t("filterAll")}

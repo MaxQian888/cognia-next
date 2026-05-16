@@ -293,7 +293,7 @@ describe("tool parts", () => {
     const trace = document.querySelector("[data-test='error-trace']")
     expect(trace).toBeTruthy()
     expect(trace?.textContent).toBe("Command failed with exit code 1")
-    expect(trace?.getAttribute("data-title")).toBe("Tool call failed")
+    expect(trace?.getAttribute("data-title")).toBe("toolCallFailed")
     // The input section is preserved so users still see the failing call.
     expect(document.querySelector("[data-test='tool-input']")).toBeTruthy()
   })
@@ -314,7 +314,7 @@ describe("tool parts", () => {
     }
     render(<MessageRenderer message={msg} />)
     const trace = document.querySelector("[data-test='error-trace']")
-    expect(trace?.textContent).toBe("Tool call failed")
+    expect(trace?.textContent).toBe("toolCallFailed")
   })
 
   it("renders TodoWrite as task list when todos are valid", () => {

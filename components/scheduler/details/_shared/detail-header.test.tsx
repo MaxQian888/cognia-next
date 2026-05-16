@@ -28,7 +28,11 @@ describe("DetailHeader", () => {
     render(<DetailHeader item={makeItem()} />)
     expect(screen.getByTestId("detail-header-name")).toHaveTextContent("My workflow trigger")
     expect(screen.getByTestId("detail-header-desc")).toHaveTextContent("Daily cron")
-    expect(screen.getByText("workflow")).toBeInTheDocument()
+    // kind tag routes through t("kindFilter.<kind>") so the mock returns
+    // "kindFilter.workflow" — match the prefix.
+    expect(screen.getByText(/kindFilter\.workflow/)).toBeInTheDocument()
+    // status badge routes through t("statuses.<status>") — match the prefix.
+    expect(screen.getByText(/statuses\.active/)).toBeInTheDocument()
   })
 
   it("hides the description when the item has none", () => {

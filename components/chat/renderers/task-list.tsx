@@ -1,6 +1,7 @@
 "use client"
 
 import { memo, useCallback } from "react"
+import { useTranslations } from "next-intl"
 import { Circle, CheckCircle2, Square, SquareCheck } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Progress } from "@/components/ui/progress"
@@ -29,6 +30,7 @@ export const TaskList = memo(function TaskList({
   showProgress = false,
   variant = "checkbox",
 }: TaskListProps) {
+  const t = useTranslations("chat.renderers.taskList")
   const handleToggle = useCallback(
     (id: string, currentChecked: boolean) => {
       if (interactive && onToggle) {
@@ -48,7 +50,7 @@ export const TaskList = memo(function TaskList({
       {showProgress && totalCount > 0 && (
         <div className="mb-3 space-y-1">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>Progress</span>
+            <span>{t("progress")}</span>
             <span>
               {completedCount} / {totalCount} ({Math.round(progress)}%)
             </span>

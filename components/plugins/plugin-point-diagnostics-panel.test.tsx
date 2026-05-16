@@ -192,6 +192,12 @@ describe("PluginPointDiagnosticsPanel", () => {
     expect(span.className).toMatch(/cursor-help/)
   })
 
+  it("ToggleGroup uses the localized severityFilterAria for screen readers", () => {
+    const harness = buildHarness()
+    render(<PluginPointDiagnosticsPanel {...harness} />)
+    expect(screen.getByLabelText("severityFilterAria")).toBeInTheDocument()
+  })
+
   it("re-invokes getDiagnostics after each subscriber notify", () => {
     const harness = buildHarness({
       "plugin-a": [diagnostic({ severity: "warning", message: "first" })],

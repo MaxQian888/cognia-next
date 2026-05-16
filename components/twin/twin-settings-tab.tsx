@@ -12,6 +12,14 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Loader2Icon } from "lucide-react"
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -62,7 +70,7 @@ export function TwinSettingsTab({ twinId }: { twinId: string }) {
   return (
     <div className="flex flex-col gap-3">
       <h2 className="text-lg font-medium">{t("title")}</h2>
-      <Card className="grid gap-3 p-4 sm:grid-cols-2">
+      <Card className="grid gap-3 p-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
         <Stat label={t("statsTwinId")} value={twinId} mono />
         <Stat label={t("statsSources")} value={String(sourceCount)} />
         <Stat label={t("statsChunks")} value={String(chunkCount)} />
@@ -155,7 +163,7 @@ function RuntimeConfigCard() {
         </Label>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-2">
         <FieldGroup
           legend={t("embedding")}
           fields={[
@@ -215,23 +223,33 @@ function RuntimeConfigCard() {
         </legend>
         <div className="flex flex-col gap-1">
           <Label htmlFor="twin-vector-backend">{t("backend")}</Label>
-          <select
-            id="twin-vector-backend"
-            className="border-border bg-background h-9 rounded border px-2 text-sm"
+          <Select
             value={settings.storage.vectorBackend}
-            onChange={(e) =>
+            onValueChange={(next) =>
               updateField({
                 ...settings,
-                storage: { ...settings.storage, vectorBackend: e.target.value as VectorBackend },
+                storage: {
+                  ...settings.storage,
+                  vectorBackend: next as VectorBackend,
+                },
               })
             }
           >
-            {visibleBackends.map((b) => (
-              <option key={b} value={b}>
-                {b === "native" ? t("backendNativeDisplay") : b}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger
+              id="twin-vector-backend"
+              aria-label={t("backend")}
+              className="w-full sm:w-[16rem]"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {visibleBackends.map((b) => (
+                <SelectItem key={b} value={b}>
+                  {b === "native" ? t("backendNativeDisplay") : b}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <BackendSpecificFields
           settings={settings}
@@ -243,7 +261,14 @@ function RuntimeConfigCard() {
 
       <div className="flex items-center justify-end gap-2">
         <Button onClick={() => void handleSave()} disabled={saving}>
-          {saving ? t("saving") : t("save")}
+          {saving ? (
+            <>
+              <Loader2Icon className="mr-1.5 size-3.5 animate-spin" aria-hidden />
+              {t("saving")}
+            </>
+          ) : (
+            t("save")
+          )}
         </Button>
       </div>
     </Card>
@@ -337,20 +362,30 @@ function BackendSpecificFields({ settings, onPatch }: BackendFieldsProps) {
   }
   if (backend === "chroma") {
     const c = settings.storage.chroma ?? { mode: "embedded" }
+    const tChromaMode = (mode: "embedded" | "server") =>
+      mode === "embedded" ? t("chromaModeEmbedded") : t("chromaModeServer")
     return (
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1">
-          <Label>{t("mode")}</Label>
-          <select
-            className="border-border bg-background h-9 rounded border px-2 text-sm"
+          <Label htmlFor="twin-chroma-mode">{t("mode")}</Label>
+          <Select
             value={c.mode}
-            onChange={(e) =>
-              onPatch({ chroma: { ...c, mode: e.target.value as "embedded" | "server" } })
+            onValueChange={(next) =>
+              onPatch({ chroma: { ...c, mode: next as "embedded" | "server" } })
             }
           >
-            <option value="embedded">embedded</option>
-            <option value="server">server</option>
-          </select>
+            <SelectTrigger
+              id="twin-chroma-mode"
+              aria-label={t("mode")}
+              className="w-full sm:w-[12rem]"
+            >
+              <SelectValue>{tChromaMode(c.mode)}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="embedded">{tChromaMode("embedded")}</SelectItem>
+              <SelectItem value="server">{tChromaMode("server")}</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         {c.mode === "server" ? (
           <Field
@@ -455,7 +490,14 @@ function NativeBackendFields({ settings }: { settings: TwinRuntimeSettings }) {
           onClick={() => void handleTestConnection()}
           disabled={testLoading}
         >
-          {testLoading ? t("testing") : t("testConnection")}
+          {testLoading ? (
+            <>
+              <Loader2Icon className="mr-1.5 size-3.5 animate-spin" aria-hidden />
+              {t("testing")}
+            </>
+          ) : (
+            t("testConnection")
+          )}
         </Button>
         {testState !== null && (
           <Badge variant={stateVariant(testState)}>
@@ -507,17 +549,18 @@ function FieldGroup({ legend, fields }: { legend: string; fields: FieldDef[] }) 
         <div key={field.label} className="flex flex-col gap-1">
           <Label>{field.label}</Label>
           {field.kind === "select" && field.options ? (
-            <select
-              className="border-border bg-background h-9 rounded border px-2 text-sm"
-              value={field.value}
-              onChange={(e) => field.onChange(e.target.value)}
-            >
-              {field.options.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
+            <Select value={field.value} onValueChange={field.onChange}>
+              <SelectTrigger aria-label={field.label} className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {field.options.map((opt) => (
+                  <SelectItem key={opt} value={opt}>
+                    {opt}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           ) : (
             <Input
               type={field.kind === "secret" ? "password" : "text"}

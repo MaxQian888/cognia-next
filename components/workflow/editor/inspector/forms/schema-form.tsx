@@ -75,11 +75,6 @@ function isNumeric(s: JsonSchema): boolean {
   return s.type === "number" || s.type === "integer"
 }
 
-function readDefault(schema: JsonSchema, value: unknown): unknown {
-  if (value !== undefined) return value
-  return schema.default
-}
-
 function placeholderFor(schema: JsonSchema): string | undefined {
   const ex = schema.examples?.[0]
   if (typeof ex === "string") return ex

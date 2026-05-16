@@ -2,11 +2,13 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
+import { motion, useReducedMotion } from "motion/react"
 import { ListTodoIcon, PlusIcon, Trash2Icon } from "lucide-react"
 
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { StatusBadge } from "@/components/status-badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -38,12 +40,12 @@ import { createLogger } from "@/lib/logger"
 
 const log = createLogger("agentTeams.tasks")
 
-const PRIORITIES = [
-  { value: "critical", label: "Critical" },
-  { value: "high", label: "High" },
-  { value: "normal", label: "Normal" },
-  { value: "low", label: "Low" },
-  { value: "background", label: "Background" },
+const PRIORITIES: ReadonlyArray<{ value: string; labelKey: string }> = [
+  { value: "critical", labelKey: "critical" },
+  { value: "high", labelKey: "high" },
+  { value: "normal", labelKey: "normal" },
+  { value: "low", labelKey: "low" },
+  { value: "background", labelKey: "background" },
 ]
 
 export interface AgentTeamTasksProps {
@@ -54,6 +56,8 @@ export interface AgentTeamTasksProps {
 
 export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps) {
   const t = useTranslations("agentTeamsWorkspace.tasks")
+  const tPriority = useTranslations("agentPriority")
+  const prefersReducedMotion = useReducedMotion()
   const createTask = useAgentTeamStore((s) => s.createTask)
   const deleteTask = useAgentTeamStore((s) => s.deleteTask)
 
@@ -103,7 +107,7 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
   return (
     <div className="space-y-4" data-testid="workspace-tasks">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium">{tasks.length} tasks</p>
+        <p className="text-sm font-medium">{t("tasksCount", { count: tasks.length })}</p>
         {!showForm && (
           <Button size="sm" variant="outline" onClick={() => setShowForm(true)}>
             <PlusIcon className="mr-2 size-3.5" />
@@ -134,7 +138,7 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
               className="text-xs"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1">
               <Label className="text-xs">{t("priority")}</Label>
               <Select value={priority} onValueChange={setPriority}>
@@ -144,7 +148,7 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
                 <SelectContent>
                   {PRIORITIES.map((p) => (
                     <SelectItem key={p.value} value={p.value}>
-                      {p.label}
+                      {tPriority(p.labelKey)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -154,10 +158,10 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
               <Label className="text-xs">{t("assignee")}</Label>
               <Select value={assigneeId} onValueChange={setAssigneeId}>
                 <SelectTrigger className="h-8 text-xs">
-                  <SelectValue placeholder="Unassigned" />
+                  <SelectValue placeholder={t("unassigned")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Unassigned</SelectItem>
+                  <SelectItem value="">{t("unassigned")}</SelectItem>
                   {teammates.map((m) => (
                     <SelectItem key={m.id} value={m.id}>
                       {m.name}
@@ -169,7 +173,7 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={() => setShowForm(false)}>
-              Cancel
+              {t("cancel")}
             </Button>
             <Button size="sm" onClick={handleCreate} disabled={!title.trim()}>
               {t("save")}
@@ -180,83 +184,94 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
 
       {/* Task list */}
       <div className="space-y-2">
-        {tasks.map((task) => {
+        {tasks.map((task, index) => {
           const cfg = TASK_STATUS_CONFIG[task.status]
           const assignee = task.assignedTo ? teammates.find((m) => m.id === task.assignedTo) : null
           return (
-            <Card key={task.id} className="space-y-1 p-3" data-testid={`task-${task.id}`}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium truncate">{task.title}</p>
-                    <Badge
-                      variant="outline"
-                      className="text-[10px] shrink-0"
-                      data-testid={`task-${task.id}-status`}
-                    >
-                      {cfg?.labelKey ?? task.status}
-                    </Badge>
-                    {task.priority && (
-                      <Badge variant="secondary" className="text-[10px] shrink-0">
-                        {task.priority}
-                      </Badge>
+            <motion.div
+              key={task.id}
+              initial={prefersReducedMotion ? false : { opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{
+                duration: 0.15,
+                ease: "easeOut",
+                delay: prefersReducedMotion ? 0 : Math.min(index * 0.03, 0.15),
+              }}
+            >
+              <Card className="space-y-1 p-3" data-testid={`task-${task.id}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium truncate">{task.title}</p>
+                      <StatusBadge
+                        value={cfg?.labelKey ?? task.status}
+                        labelNamespace="agentTeam.taskStatus"
+                        pulse={task.status === "in_progress" || task.status === "claimed"}
+                        className="text-[10px] shrink-0"
+                        data-testid={`task-${task.id}-status`}
+                      />
+                      {task.priority && (
+                        <Badge variant="secondary" className="text-[10px] shrink-0">
+                          {tPriority(task.priority)}
+                        </Badge>
+                      )}
+                    </div>
+                    {task.description && (
+                      <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                        {task.description}
+                      </p>
                     )}
+                    <div className="mt-1 flex items-center gap-3 text-[10px] text-muted-foreground">
+                      {assignee && <span>{assignee.name}</span>}
+                      {task.tags && task.tags.length > 0 && (
+                        <span className="flex gap-1">
+                          {task.tags.map((tag) => (
+                            <span key={tag} className="rounded bg-muted px-1 py-0.5">
+                              {tag}
+                            </span>
+                          ))}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  {task.description && (
-                    <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                      {task.description}
-                    </p>
-                  )}
-                  <div className="mt-1 flex items-center gap-3 text-[10px] text-muted-foreground">
-                    {assignee && <span>{assignee.name}</span>}
-                    {task.tags && task.tags.length > 0 && (
-                      <span className="flex gap-1">
-                        {task.tags.map((tag) => (
-                          <span key={tag} className="rounded bg-muted px-1 py-0.5">
-                            {tag}
-                          </span>
-                        ))}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7 shrink-0 text-muted-foreground hover:text-destructive"
-                    >
-                      <Trash2Icon className="size-3" />
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Delete task?</AlertDialogTitle>
-                      <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction
-                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                        onClick={() => {
-                          deleteTask(task.id)
-                          toast.success(t("taskDeleted"))
-                        }}
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 shrink-0 text-muted-foreground hover:text-destructive"
                       >
-                        Delete
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
-              {task.error && <p className="text-xs text-destructive">{task.error}</p>}
-              {task.result && (
-                <p className="line-clamp-2 text-[11px] italic text-muted-foreground">
-                  {task.result}
-                </p>
-              )}
-            </Card>
+                        <Trash2Icon className="size-3" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>{t("deleteTitle")}</AlertDialogTitle>
+                        <AlertDialogDescription>{t("deleteBody")}</AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                        <AlertDialogAction
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          onClick={() => {
+                            deleteTask(task.id)
+                            toast.success(t("taskDeleted"))
+                          }}
+                        >
+                          {t("delete")}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
+                {task.error && <p className="text-xs text-destructive">{task.error}</p>}
+                {task.result && (
+                  <p className="line-clamp-2 text-[11px] italic text-muted-foreground">
+                    {task.result}
+                  </p>
+                )}
+              </Card>
+            </motion.div>
           )
         })}
       </div>

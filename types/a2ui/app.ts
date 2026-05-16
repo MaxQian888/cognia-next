@@ -7,7 +7,7 @@ import type { A2UIUserAction, A2UIDataModelChange } from "@/types/artifact/a2ui"
 import type { A2UIAppInstance } from "@/hooks/a2ui/app-builder/types"
 import type { A2UIAppTemplate } from "@/lib/a2ui/templates"
 import type { PaperAnalysisType } from "@/types/academic"
-import type { ViewMode, SortField } from "@/hooks/a2ui/use-app-gallery-filter"
+import type { ViewMode } from "@/hooks/a2ui/use-app-gallery-filter"
 
 /**
  * Props for the AppCard component

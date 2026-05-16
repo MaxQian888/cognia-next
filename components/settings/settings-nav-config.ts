@@ -48,6 +48,7 @@ export type SettingsSectionId =
   | "api-key"
   | "providers"
   | "subscription"
+  | "codex-subscription"
   | "ccswitch"
   | "agents"
   | "agent-modes"
@@ -125,6 +126,14 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "subscription",
     group: "ai",
     icon: ZapIcon,
+    desktopOnly: true,
+  },
+  {
+    id: "codex-subscription",
+    labelKey: "codex-subscription",
+    descriptionKey: "codex-subscription",
+    group: "ai",
+    icon: SparklesIcon,
     desktopOnly: true,
   },
   {
@@ -461,6 +470,26 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "用量",
     "登录",
     "授权",
+  ],
+  "codex-subscription": [
+    "codex",
+    "openai",
+    "chatgpt",
+    "plus",
+    "pro",
+    "subscription",
+    "oauth",
+    "device code",
+    "sign in",
+    "login",
+    "reuse",
+    "openai api key",
+    "codex cli",
+    "订阅",
+    "复用",
+    "登录",
+    "授权",
+    "OpenAI 订阅",
   ],
   agents: [
     "external",

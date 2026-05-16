@@ -17,6 +17,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CircleIcon, CopyIcon, KeyRoundIcon, RefreshCwIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -93,6 +94,19 @@ function ServerStatusBadge({ status, desktop }: { status: McpServerStatus; deskt
       idle
     </span>
   )
+}
+
+/**
+ * Resolve a scope description with i18n preference. Scopes that have an
+ * `automation` / `Computer Use` connection are surfaced via the i18n key
+ * `settings.externalBridge.scopeDescriptions.<scope>`; the rest fall back
+ * to the hard-coded English baseline below.
+ */
+function getScopeDescription(scope: BridgeScope, t: (key: string) => string): string {
+  if (scope === "mcp:computer-use") {
+    return t(`scopeDescriptions.${scope}`)
+  }
+  return SCOPE_DESCRIPTIONS[scope]
 }
 
 const SCOPE_DESCRIPTIONS: Record<BridgeScope, string> = {
@@ -329,6 +343,7 @@ function ScopeTogglesCard({
   settings: ExternalBridgeSettings
   onChange: (next: ExternalBridgeSettings) => void
 }) {
+  const tScope = useTranslations("settings.externalBridge")
   const enabledSet = useMemo(() => new Set(settings.enabledScopes), [settings.enabledScopes])
 
   const onToggleScope = useCallback(
@@ -361,7 +376,9 @@ function ScopeTogglesCard({
             >
               <div className="space-y-0.5">
                 <Label className="font-mono text-xs">{scope}</Label>
-                <p className="text-xs text-muted-foreground">{SCOPE_DESCRIPTIONS[scope]}</p>
+                <p className="text-xs text-muted-foreground">
+                  {getScopeDescription(scope, tScope)}
+                </p>
               </div>
               <Switch
                 checked={checked}

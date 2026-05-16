@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useTranslations } from "next-intl"
 import { ChevronDownIcon, BookOpenCheckIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 import { Button } from "@/components/ui/button"
@@ -15,6 +16,7 @@ interface WikiReadOutput {
 }
 
 export function WikiReadCard({ part }: { part: ToolUIPart }) {
+  const t = useTranslations("chat.mcp.wikiRead")
   const parsed = useParsedOutput<WikiReadOutput>(part.output)
   const [open, setOpen] = useState(true)
   if (!parsed) return null
@@ -42,7 +44,7 @@ export function WikiReadCard({ part }: { part: ToolUIPart }) {
             <ChevronDownIcon
               className={`mr-1 size-3 transition-transform ${open ? "" : "-rotate-90"}`}
             />
-            {open ? "Hide" : "Show"} body
+            {open ? t("hide") : t("show")} body
           </Button>
           {open &&
             (sections.length > 0 ? (
@@ -63,7 +65,7 @@ export function WikiReadCard({ part }: { part: ToolUIPart }) {
                 <MarkdownRenderer content={fallbackBody} className="text-xs" />
               </div>
             ) : (
-              <p className="text-muted-foreground">No content.</p>
+              <p className="text-muted-foreground">{t("noContent")}</p>
             ))}
         </div>
       </div>

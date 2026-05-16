@@ -102,7 +102,7 @@ function BannerBody({
       exit={reduce ? { opacity: 0 } : { opacity: 0, y: -8 }}
       transition={{
         duration: MOBILE_DURATION.fast,
-        ease: MOBILE_EASE as unknown as number[],
+        ease: MOBILE_EASE,
       }}
       className={cn(
         "sticky top-0 z-30 flex items-center gap-2 border-b border-border px-3 py-2 text-xs",

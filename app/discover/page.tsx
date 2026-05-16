@@ -45,21 +45,24 @@ export default function DiscoverPage() {
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(null)
   const [query, setQuery] = useState("")
 
-  const characters = useLiveQuery<Character[]>(() => listCharacters(), []) ?? []
-  const teams = useLiveQuery<Team[]>(() => listTeams(), []) ?? []
-  const skills = useLiveQuery<Skill[]>(() => listSkills(), []) ?? []
-  const twinDrafts =
-    useLiveQuery<TwinDraft[]>(
-      // `createdAt` is not a Dexie index on twinDrafts (see lib/db/schema.ts),
-      // so use sortBy() — in-memory sort that does not require an index — and
-      // reverse the resulting array for newest-first.
-      () =>
-        getDb()
-          .twinDrafts.toCollection()
-          .sortBy("createdAt")
-          .then((arr) => arr.reverse() as TwinDraft[]),
-      []
-    ) ?? []
+  const charactersRaw = useLiveQuery<Character[]>(() => listCharacters(), [])
+  const teamsRaw = useLiveQuery<Team[]>(() => listTeams(), [])
+  const skillsRaw = useLiveQuery<Skill[]>(() => listSkills(), [])
+  const twinDraftsRaw = useLiveQuery<TwinDraft[]>(
+    // `createdAt` is not a Dexie index on twinDrafts (see lib/db/schema.ts),
+    // so use sortBy() — in-memory sort that does not require an index — and
+    // reverse the resulting array for newest-first.
+    () =>
+      getDb()
+        .twinDrafts.toCollection()
+        .sortBy("createdAt")
+        .then((arr) => arr.reverse() as TwinDraft[]),
+    []
+  )
+  const characters = useMemo(() => charactersRaw ?? [], [charactersRaw])
+  const teams = useMemo(() => teamsRaw ?? [], [teamsRaw])
+  const skills = useMemo(() => skillsRaw ?? [], [skillsRaw])
+  const twinDrafts = useMemo(() => twinDraftsRaw ?? [], [twinDraftsRaw])
 
   const trimmed = query.trim().toLowerCase()
   const matches = (text: string | undefined): boolean =>

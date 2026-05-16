@@ -41,9 +41,9 @@ export function InspectRow({ label, value, compareValue }: InspectRowProps) {
     )
   }
   return (
-    <div className="grid grid-cols-[1fr_2fr] gap-2 py-1.5 border-b border-border/40 text-xs">
+    <div className="grid grid-cols-[minmax(120px,180px)_1fr] gap-3 py-1.5 border-b border-border/40 text-xs">
       <span className="font-medium text-muted-foreground">{label}</span>
-      <span>{renderCell(value)}</span>
+      <span className="min-w-0 break-words">{renderCell(value)}</span>
     </div>
   )
 }

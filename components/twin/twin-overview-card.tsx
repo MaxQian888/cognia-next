@@ -71,7 +71,6 @@ interface Props {
 }
 
 export function TwinOverviewCard({ twinId }: Props) {
-  const t = useTranslations("settings.characters.editor.twinBinding")
   const tCharts = useTranslations("twin.charts")
   const sources = useLiveQuery(() => listTwinSourcesByTwin(twinId), [twinId], [] as TwinSource[])
   const chunks = useLiveQuery(() => listTwinChunksByTwin(twinId), [twinId], [] as TwinChunk[])
@@ -112,7 +111,7 @@ export function TwinOverviewCard({ twinId }: Props) {
       </div>
 
       {/* Three-column chart strip; collapses to a single column on mobile. */}
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {/* Chunks growth area chart */}
         <div className="bg-muted/20 space-y-2 rounded-md border p-3">
           <p className="text-muted-foreground text-xs uppercase tracking-wide">

@@ -9,6 +9,7 @@
  */
 
 import type { ToolUIPart } from "ai"
+import { useTranslations } from "next-intl"
 import { Tool, ToolBody, ToolContent, ToolHeader, ToolInput } from "@/components/ai-elements/tool"
 import { Terminal, TerminalHeader, TerminalStatus } from "@/components/ai-elements/terminal"
 
@@ -37,6 +38,7 @@ function extractRunningOutput(output: unknown): string | undefined {
 }
 
 export function TerminalToolPart({ part }: TerminalToolPartProps) {
+  const t = useTranslations("chat.terminalTool")
   const running = part.state === "input-available"
   const command = extractCommand(part.input)
   const liveOutput = extractRunningOutput(part.output)
@@ -51,8 +53,8 @@ export function TerminalToolPart({ part }: TerminalToolPartProps) {
             <div className="h-40 w-full">
               <Terminal isStreaming output={liveOutput ?? ""}>
                 <TerminalHeader>
-                  <span>Bash</span>
-                  <TerminalStatus status="running">running</TerminalStatus>
+                  <span>{t("bashLabel")}</span>
+                  <TerminalStatus status="running">{t("runningStatus")}</TerminalStatus>
                 </TerminalHeader>
               </Terminal>
             </div>

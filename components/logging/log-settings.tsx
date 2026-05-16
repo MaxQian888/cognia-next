@@ -387,55 +387,17 @@ export function LogSettings({ className }: LogSettingsProps) {
         (1024 * 1024)
     )
   )
-  const nativeLoggingStatusText = t("settings.native.status")
-  const nativeLoggingStatusLabel =
-    nativeLoggingStatusText === "settings.native.status"
-      ? "Native logging status"
-      : nativeLoggingStatusText
-  const nativeLoggingTitleText = t("settings.native.title")
-  const nativeLoggingTitle =
-    nativeLoggingTitleText === "settings.native.title"
-      ? "Native logging readiness"
-      : nativeLoggingTitleText
-  const nativeModeLabelText = t("settings.native.mode")
-  const nativeModeLabel =
-    nativeModeLabelText === "settings.native.mode" ? "Startup mode" : nativeModeLabelText
-  const nativeBridgeLabelText = t("settings.native.bridge")
-  const nativeBridgeLabel =
-    nativeBridgeLabelText === "settings.native.bridge" ? "Bridge state" : nativeBridgeLabelText
-  const nativeTargetsLabelText = t("settings.native.targets")
-  const nativeTargetsLabel =
-    nativeTargetsLabelText === "settings.native.targets" ? "Active targets" : nativeTargetsLabelText
-  const nativeFallbackReasonLabelText = t("settings.native.fallbackReason")
-  const nativeFallbackReasonLabel =
-    nativeFallbackReasonLabelText === "settings.native.fallbackReason"
-      ? "Fallback reason"
-      : nativeFallbackReasonLabelText
-  const nativeBridgeErrorLabelText = t("settings.native.bridgeError")
-  const nativeBridgeErrorLabel =
-    nativeBridgeErrorLabelText === "settings.native.bridgeError"
-      ? "Last bridge error"
-      : nativeBridgeErrorLabelText
-  const nativePlatformBackendLabelText = t("settings.native.platformBackend")
-  const nativePlatformBackendLabel =
-    nativePlatformBackendLabelText === "settings.native.platformBackend"
-      ? "Platform backend"
-      : nativePlatformBackendLabelText
-  const nativePlatformHealthLabelText = t("settings.native.platformHealth")
-  const nativePlatformHealthLabel =
-    nativePlatformHealthLabelText === "settings.native.platformHealth"
-      ? "Platform health"
-      : nativePlatformHealthLabelText
-  const nativePlatformLevelLabelText = t("settings.native.platformLevel")
-  const nativePlatformLevelLabel =
-    nativePlatformLevelLabelText === "settings.native.platformLevel"
-      ? "Platform threshold"
-      : nativePlatformLevelLabelText
-  const nativePlatformErrorLabelText = t("settings.native.platformError")
-  const nativePlatformErrorLabel =
-    nativePlatformErrorLabelText === "settings.native.platformError"
-      ? "Platform error"
-      : nativePlatformErrorLabelText
+  const nativeLoggingStatusLabel = t("settings.native.status")
+  const nativeLoggingTitle = t("settings.native.title")
+  const nativeModeLabel = t("settings.native.mode")
+  const nativeBridgeLabel = t("settings.native.bridge")
+  const nativeTargetsLabel = t("settings.native.targets")
+  const nativeFallbackReasonLabel = t("settings.native.fallbackReason")
+  const nativeBridgeErrorLabel = t("settings.native.bridgeError")
+  const nativePlatformBackendLabel = t("settings.native.platformBackend")
+  const nativePlatformHealthLabel = t("settings.native.platformHealth")
+  const nativePlatformLevelLabel = t("settings.native.platformLevel")
+  const nativePlatformErrorLabel = t("settings.native.platformError")
   const updateSamplingRule = (modulePrefix: string, percentage: number) => {
     setSamplingRules((prev) =>
       prev.map((rule) => (rule.modulePrefix === modulePrefix ? { ...rule, percentage } : rule))
@@ -484,25 +446,12 @@ export function LogSettings({ className }: LogSettingsProps) {
     muted: "border-border bg-muted/30 text-muted-foreground",
   }
   const tabLabels = {
-    levels:
-      t("settings.tabs.levels") === "settings.tabs.levels" ? "Levels" : t("settings.tabs.levels"),
-    transports:
-      t("settings.tabs.transports") === "settings.tabs.transports"
-        ? "Transports"
-        : t("settings.tabs.transports"),
-    advanced:
-      t("settings.tabs.advanced") === "settings.tabs.advanced"
-        ? "Advanced & Sampling"
-        : t("settings.tabs.advanced"),
-    retention:
-      t("settings.tabs.retention") === "settings.tabs.retention"
-        ? "Retention & Export"
-        : t("settings.tabs.retention"),
+    levels: t("settings.tabs.levels"),
+    transports: t("settings.tabs.transports"),
+    advanced: t("settings.tabs.advanced"),
+    retention: t("settings.tabs.retention"),
   }
-  const unsavedLabel =
-    t("settings.unsavedChanges") === "settings.unsavedChanges"
-      ? "Unsaved changes"
-      : t("settings.unsavedChanges")
+  const unsavedLabel = t("settings.unsavedChanges")
 
   return (
     <div className={cn("relative space-y-4 sm:space-y-6 pb-20", className)}>
@@ -646,7 +595,7 @@ export function LogSettings({ className }: LogSettingsProps) {
                 <span className="font-medium">{nativeTargetsLabel}: </span>
                 {nativeLogging.activeTargets.length > 0
                   ? nativeLogging.activeTargets.join(", ")
-                  : "none"}
+                  : t("panel.nativeLoggingNoTargets")}
               </span>
               <span>
                 <span className="font-medium">{nativePlatformBackendLabel}: </span>

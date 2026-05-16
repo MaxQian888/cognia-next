@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "next-intl"
 import { BookOpenIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 import { McpCardShell, useParsedOutput } from "./common"
@@ -16,6 +17,7 @@ interface WikiSearchOutput {
 }
 
 export function WikiSearchCard({ part }: { part: ToolUIPart }) {
+  const t = useTranslations("chat.mcp.wikiSearch")
   const parsed = useParsedOutput<WikiSearchOutput>(part.output)
   if (!parsed || !Array.isArray(parsed.hits)) return null
 
@@ -26,7 +28,7 @@ export function WikiSearchCard({ part }: { part: ToolUIPart }) {
       testId="mcp-wiki-search-card"
     >
       {parsed.hits.length === 0 ? (
-        <p className="text-muted-foreground">No results.</p>
+        <p className="text-muted-foreground">{t("noResults")}</p>
       ) : (
         <ul className="space-y-1">
           {parsed.hits.map((hit, i) => (

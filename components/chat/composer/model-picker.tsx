@@ -10,6 +10,7 @@
 // but renders inline (Popover + Command) instead of as a full dialog.
 
 import { useMemo, useState } from "react"
+import { useTranslations } from "next-intl"
 import { CheckIcon, ChevronsUpDownIcon, CpuIcon } from "lucide-react"
 
 import { useSettingsStore } from "@/stores/settings"
@@ -112,6 +113,7 @@ function groupByProvider(options: ModelOption[]): Array<{
 }
 
 export function ModelPicker({ session, disabled, className }: ModelPickerProps) {
+  const t = useTranslations("chat.composer.modelPicker")
   const providerSettings = useSettingsStore((s) => s.settings?.providerSettings)
   const customProviders = useSettingsStore((s) => s.settings?.customProviders)
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
@@ -177,19 +179,19 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
             "h-6 gap-1.5 px-1.5 text-[11px] font-normal text-muted-foreground hover:text-foreground",
             className
           )}
-          aria-label="Switch model"
+          aria-label={t("switchModelAria")}
         >
           <CpuIcon className="size-3.5 shrink-0" />
           <span className="truncate font-mono">{activeModel}</span>
           <ChevronsUpDownIcon className="size-3 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[340px] p-0">
+      <PopoverContent align="start" className="w-[340px] max-w-[calc(100vw-2rem)] p-0">
         <Command>
-          <CommandInput placeholder="Search models…" />
+          <CommandInput placeholder={t("searchPlaceholder")} />
           <CommandList>
             {groups.length === 0 ? (
-              <CommandEmpty>No providers configured. Add one in Settings → Providers.</CommandEmpty>
+              <CommandEmpty>{t("noProviders")}</CommandEmpty>
             ) : (
               groups.map((group, idx) => (
                 <div key={group.providerId}>

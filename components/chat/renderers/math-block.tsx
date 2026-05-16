@@ -4,9 +4,8 @@ import { useMemo, useState, useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { AlertCircle, Copy, Check, Maximize2, Code2, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { renderMathSafe } from "@/lib/latex/cache"
 import { withMathErrorBoundary } from "./math-error-boundary"
 import { useCopy } from "@/hooks/ui/use-copy"
@@ -62,34 +61,26 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
             <span className="text-sm font-medium">{t("error")}</span>
           </div>
           <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={handleRetry}
-                  aria-label={t("retry")}
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("retry")}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={handleCopy}
-                  aria-label={t("copyLatex")}
-                >
-                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("copyLatex")}</TooltipContent>
-            </Tooltip>
+            <TooltipIconButton
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={handleRetry}
+              aria-label={t("retry")}
+              tooltip={t("retry")}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </TooltipIconButton>
+            <TooltipIconButton
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={handleCopy}
+              aria-label={t("copyLatex")}
+              tooltip={t("copyLatex")}
+            >
+              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            </TooltipIconButton>
           </div>
         </div>
         <p className="text-xs text-muted-foreground">{result.error}</p>
@@ -110,51 +101,39 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
         aria-label={t("expressionLabel")}
       >
         <div className="absolute top-0 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-background/80 backdrop-blur-sm rounded-lg p-0.5">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => setShowSource(!showSource)}
-                aria-label={showSource ? t("hideSource") : t("showSource")}
-                aria-pressed={showSource}
-              >
-                <Code2 className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{showSource ? t("hideSource") : t("showSource")}</TooltipContent>
-          </Tooltip>
+          <TooltipIconButton
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => setShowSource(!showSource)}
+            aria-label={showSource ? t("hideSource") : t("showSource")}
+            aria-pressed={showSource}
+            tooltip={showSource ? t("hideSource") : t("showSource")}
+          >
+            <Code2 className="h-3.5 w-3.5" />
+          </TooltipIconButton>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={handleCopy}
-                aria-label={t("copyLatex")}
-              >
-                {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("copyLatex")}</TooltipContent>
-          </Tooltip>
+          <TooltipIconButton
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={handleCopy}
+            aria-label={t("copyLatex")}
+            tooltip={t("copyLatex")}
+          >
+            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          </TooltipIconButton>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => setIsFullscreen(true)}
-                aria-label={t("viewFullscreen")}
-              >
-                <Maximize2 className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("viewFullscreen")}</TooltipContent>
-          </Tooltip>
+          <TooltipIconButton
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => setIsFullscreen(true)}
+            aria-label={t("viewFullscreen")}
+            tooltip={t("viewFullscreen")}
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </TooltipIconButton>
         </div>
 
         {showSource && (
@@ -179,24 +158,16 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
             <DialogTitle className="flex items-center gap-2">
               <span>{t("expressionLabel")}</span>
               <div className="flex items-center gap-1 ml-auto">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={handleCopy}
-                      aria-label={t("copyLatex")}
-                    >
-                      {copied ? (
-                        <Check className="h-3.5 w-3.5" />
-                      ) : (
-                        <Copy className="h-3.5 w-3.5" />
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("copyLatex")}</TooltipContent>
-                </Tooltip>
+                <TooltipIconButton
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={handleCopy}
+                  aria-label={t("copyLatex")}
+                  tooltip={t("copyLatex")}
+                >
+                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                </TooltipIconButton>
               </div>
             </DialogTitle>
           </DialogHeader>

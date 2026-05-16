@@ -58,6 +58,25 @@ function resolvePluginPointGovernanceMode(): PluginPointGovernanceMode {
   }
 }
 
+/**
+ * Reads a boolean field from the persisted plugin-policy localStorage
+ * blob. Mirrors `resolvePluginPointGovernanceMode` so the seed path in
+ * `initialize()` doesn't depend on the Settings panel implementation
+ * details (the policy panel writes to the same key but is mounted
+ * later).
+ */
+function resolvePluginPolicyFlag(field: "signatureRequired" | "autoUpdate"): boolean {
+  if (typeof window === "undefined") return false
+  try {
+    const raw = window.localStorage.getItem(PLUGIN_POLICY_STORAGE_KEY)
+    if (!raw) return false
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return !!parsed?.[field]
+  } catch {
+    return false
+  }
+}
+
 const log = loggers.plugin
 
 // =============================================================================
@@ -888,6 +907,23 @@ export const usePluginStore = create<PluginState>()(
 
       initialize: async (pluginDirectory) => {
         set({ pluginDirectory, initialized: true })
+        // Hydrate persisted plugin-policy (governance / signature /
+        // autoUpdate) into the runtime singletons so behavior is
+        // consistent with what the Settings → Plugins → Policy panel
+        // shows. Done lazily to avoid pulling the manager into the store
+        // module's static graph.
+        try {
+          const { applyPluginPolicyToRuntime } = await import("@/lib/plugin/policy-runtime")
+          applyPluginPolicyToRuntime({
+            governance: resolvePluginPointGovernanceMode(),
+            signatureRequired: resolvePluginPolicyFlag("signatureRequired"),
+            autoUpdate: resolvePluginPolicyFlag("autoUpdate"),
+          })
+        } catch (error) {
+          log.debug("Plugin policy hydration skipped:", {
+            message: error instanceof Error ? error.message : String(error),
+          })
+        }
       },
 
       scanPlugins: async () => {

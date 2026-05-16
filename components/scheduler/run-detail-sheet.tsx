@@ -53,7 +53,7 @@ export function RunDetailSheet({ open, onOpenChange, run }: RunDetailSheetProps)
                 {run.itemName}
               </SheetTitle>
               <p className="text-xs text-muted-foreground mt-1">
-                {run.kind} · {run.origin.tableName}
+                {t(`kindFilter.${run.kind}`) || run.kind} · {run.origin.tableName}
               </p>
             </div>
             <RunStatusPill status={toRunStatusPill(run.status)} />

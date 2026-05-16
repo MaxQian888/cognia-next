@@ -7,10 +7,12 @@ mod automation;
 mod canvas;
 mod ccswitch;
 mod claude;
+mod codex_subscription;
 mod commands;
 mod connectors;
 mod external_agent;
 mod files;
+mod fs_atomic;
 mod hooks;
 mod logging;
 mod mcp_server;
@@ -219,6 +221,10 @@ pub fn run() {
         .manage(companion_api::CompanionServerState::with_data_dir(
             dirs::data_dir(),
         ))
+        // ADR-0021 — process-wide WebRTC signaling registry. One hub per app
+        // instance; the renderer pushes device registrations via
+        // `companion_signaling_sync_devices` after Dexie hydration completes.
+        .manage(companion_api::signaling::SignalingHub::new())
         .setup(|app| {
             // Phase B follow-up — install the keyring-backed push credential
             // store before any push-related command can fire, then reinstate
@@ -283,9 +289,18 @@ pub fn run() {
             ccswitch::commands::ccswitch_list_mcp_servers,
             ccswitch::commands::ccswitch_list_prompts,
             ccswitch::commands::ccswitch_list_skills,
+            ccswitch::commands::write_codex_auth_env,
             anthropic_subscription::commands::claude_sub_save_token,
             anthropic_subscription::commands::claude_sub_load_token,
             anthropic_subscription::commands::claude_sub_clear_token,
+            codex_subscription::commands::codex_sub_save_token,
+            codex_subscription::commands::codex_sub_load_token,
+            codex_subscription::commands::codex_sub_clear_token,
+            codex_subscription::commands::codex_sub_discover,
+            codex_subscription::commands::codex_sub_request_device_code,
+            codex_subscription::commands::codex_sub_poll_device_code,
+            codex_subscription::commands::codex_sub_refresh,
+            codex_subscription::commands::codex_sub_revoke,
             claude_set_api_key,
             claude_set_provider_env,
             claude_set_oauth_bearer,
@@ -419,6 +434,11 @@ pub fn run() {
             companion_api::commands::companion_tunnel_start,
             companion_api::commands::companion_tunnel_stop,
             companion_api::commands::companion_tunnel_current,
+            // ADR-0021 — WebRTC WAN signaling control surface.
+            companion_api::signaling::commands::companion_signaling_sync_devices,
+            companion_api::signaling::commands::companion_signaling_configure,
+            companion_api::signaling::commands::companion_signaling_status,
+            companion_api::signaling::commands::companion_signaling_devices_status,
             companion_api::commands::companion_push_configure_fcm,
             companion_api::commands::companion_push_configure_apns,
             companion_api::commands::companion_push_clear_fcm,

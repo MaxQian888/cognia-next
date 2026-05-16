@@ -2,11 +2,13 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
+import { motion, useReducedMotion } from "motion/react"
 import { MoreHorizontalIcon, PlusIcon, Settings2Icon, Trash2Icon, UsersIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { StatusBadge } from "@/components/status-badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -83,6 +85,7 @@ export interface AgentTeamMembersProps {
 
 export function AgentTeamMembers({ teamId, teammates, leadId }: AgentTeamMembersProps) {
   const t = useTranslations("agentTeamsWorkspace.members")
+  const prefersReducedMotion = useReducedMotion()
   const addTeammate = useAgentTeamStore((s) => s.addTeammate)
   const removeTeammate = useAgentTeamStore((s) => s.removeTeammate)
   const updateTeammate = useAgentTeamStore((s) => s.updateTeammate)
@@ -172,15 +175,26 @@ export function AgentTeamMembers({ teamId, teammates, leadId }: AgentTeamMembers
 
       {/* Workers */}
       {workers.length > 0 && (
-        <div className="grid gap-2">
-          {workers.map((m) => (
-            <Card key={m.id} className="p-3" data-testid={`member-${m.id}`}>
-              <MemberRow
-                member={m}
-                onRemove={() => setRemoving(m)}
-                onRuntimeChange={(r) => handleRuntimeChange(m, r)}
-              />
-            </Card>
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {workers.map((m, index) => (
+            <motion.div
+              key={m.id}
+              initial={prefersReducedMotion ? false : { opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{
+                duration: 0.15,
+                ease: "easeOut",
+                delay: prefersReducedMotion ? 0 : Math.min(index * 0.03, 0.15),
+              }}
+            >
+              <Card className="p-3" data-testid={`member-${m.id}`}>
+                <MemberRow
+                  member={m}
+                  onRemove={() => setRemoving(m)}
+                  onRuntimeChange={(r) => handleRuntimeChange(m, r)}
+                />
+              </Card>
+            </motion.div>
           ))}
         </div>
       )}
@@ -201,7 +215,7 @@ export function AgentTeamMembers({ teamId, teammates, leadId }: AgentTeamMembers
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => removing && handleRemove(removing)}
@@ -247,9 +261,13 @@ function MemberRow({
             {isLead ? t("lead") : t("teammate")}
           </Badge>
           {statusCfg && (
-            <Badge variant="outline" className="text-[10px]">
-              {member.status}
-            </Badge>
+            <StatusBadge
+              value={statusCfg.labelKey ?? member.status}
+              labelNamespace="agentTeam.teammateStatus"
+              pulse={member.status === "executing" || member.status === "planning"}
+              className="text-[10px]"
+              data-testid={`member-${member.id}-status`}
+            />
           )}
           <RuntimeBadge runtime={runtime} />
         </div>
@@ -347,7 +365,7 @@ function AddDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{t("addMemberTitle")}</DialogTitle>
           <DialogDescription>{t("descriptionPlaceholder")}</DialogDescription>
@@ -410,7 +428,7 @@ function AddDialog({
         </div>
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("cancel")}
           </Button>
           <Button size="sm" onClick={submit} disabled={!name.trim()}>
             {t("save")}

@@ -79,7 +79,7 @@ export function SchedulerContentHeader({
 
         {/* Breadcrumb */}
         <nav
-          aria-label="breadcrumb"
+          aria-label={t("breadcrumb")}
           className="flex items-center gap-1 text-sm text-muted-foreground"
         >
           <span className="font-medium text-foreground">{t("title") || "Scheduler"}</span>
@@ -101,7 +101,7 @@ export function SchedulerContentHeader({
         {/* Overflow menu */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" aria-label="More options">
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" aria-label={t("moreOptions")}>
               <MoreVertical className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
@@ -132,7 +132,7 @@ export function SchedulerContentHeader({
           size="sm"
           onClick={onRefresh}
           disabled={isRefreshing}
-          aria-label="Refresh"
+          aria-label={t("refresh")}
         >
           <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
         </Button>

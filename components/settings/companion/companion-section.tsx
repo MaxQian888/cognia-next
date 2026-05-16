@@ -52,6 +52,7 @@ import { encodePairPayload } from "@/lib/qr/pair-payload"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { formatRelative } from "@/lib/time/relative"
 import { cn } from "@/lib/utils"
+import { WebRtcCard } from "./webrtc-card"
 
 // ---------------------------------------------------------------------------
 // Tauri command shapes — mirror src-tauri/src/companion_api/commands.rs
@@ -149,6 +150,7 @@ export function CompanionSection() {
       <ServerStatusCard />
       <TunnelCard />
       <MdnsCard />
+      <WebRtcCard />
       <PairDeviceCard />
       <PairedDevicesCard />
       <ReachabilityDiagnosticsCard />

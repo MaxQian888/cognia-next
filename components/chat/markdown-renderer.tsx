@@ -407,6 +407,7 @@ function buildComponents(
       }
 
       return (
+        // eslint-disable-next-line @next/next/no-img-element -- markdown sources lack the fixed dimensions that next/image requires; ImageBlock above is the optimised path
         <img
           src={src}
           alt={alt || ""}

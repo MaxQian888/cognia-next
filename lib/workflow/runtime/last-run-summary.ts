@@ -36,8 +36,6 @@ export interface LastRunSummary {
   attempt: number
 }
 
-const TERMINAL_TYPES = new Set<string>(["step_completed", "step_failed", "step_skipped"])
-
 function statusFromType(type: string): LastRunStatus | null {
   switch (type) {
     case "step_completed":

@@ -53,7 +53,7 @@ export function PluginMarketplace() {
     void loadPluginMarketplaceClient().then(setClient)
   }, [])
 
-  const preInstall = usePluginPreInstall(client ?? STUB_CLIENT)
+  const preInstall = usePluginPreInstall(client)
 
   const runInstall = (entry: PluginMarketplaceEntry, version?: string) => {
     if (!client) return
@@ -197,17 +197,4 @@ export function PluginMarketplace() {
     )
     if (entry) runInstall(entry, version)
   }
-}
-
-/**
- * Placeholder client used until `loadPluginMarketplaceClient` resolves. The
- * marketplace UI is gated by `if (!client) return`, so this stub is
- * effectively unreachable — it exists only to satisfy the
- * `usePluginPreInstall` parameter type without an additional null branch.
- */
-const STUB_CLIENT: MarketplaceClient = {
-  searchPlugins: () => Promise.resolve({ entries: [] }),
-  getPlugin: () => Promise.resolve(null),
-  installPlugin: () => Promise.resolve(),
-  uninstallPlugin: () => Promise.resolve(),
 }

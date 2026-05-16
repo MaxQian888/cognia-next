@@ -97,6 +97,15 @@ export function ContextGauge({ modelId, maxTokens, className }: ContextGaugeProp
     cachedInputTokens: (usage.cacheReadInputTokens ?? 0) + (usage.cacheCreationInputTokens ?? 0),
     reasoningTokens: 0,
     totalTokens: used,
+    inputTokenDetails: {
+      noCacheTokens: undefined,
+      cacheReadTokens: usage.cacheReadInputTokens,
+      cacheWriteTokens: usage.cacheCreationInputTokens,
+    },
+    outputTokenDetails: {
+      textTokens: undefined,
+      reasoningTokens: undefined,
+    },
   }
 
   return (

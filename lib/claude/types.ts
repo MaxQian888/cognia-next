@@ -639,6 +639,16 @@ export interface AppSettings {
    * docs and {@link DEFAULT_SUBSCRIPTION_SETTINGS} for defaults.
    */
   subscriptionSettings?: import("@/lib/anthropic-subscription/types").SubscriptionSettings
+  /**
+   * Codex (OpenAI) subscription settings — drives the Settings → Codex
+   * Subscription section. The credential itself lives in the OS keyring
+   * (Tauri-only); only renderer-side preferences (discovery preference,
+   * auto-refresh) are stored here. See
+   * `lib/codex-subscription/types.ts:CodexSubscriptionSettings` for
+   * field-level docs and {@link DEFAULT_CODEX_SUBSCRIPTION_SETTINGS} for
+   * defaults.
+   */
+  codexSubscriptionSettings?: import("@/lib/codex-subscription/types").CodexSubscriptionSettings
   /** Last time the auto-updater check ran (ms since epoch). Daily debounce. */
   lastUpdateCheckAt?: number
   /** UI theme; "system" follows OS preference. */
@@ -922,6 +932,36 @@ export interface AppSettings {
   customCss?: string
   customCssEnabled?: boolean
   importedVscodeThemes?: import("@/types/appearance").ImportedThemeRecord[]
+
+  // ---- WebRTC WAN transport (ADR-0021) ----
+  /**
+   * Feature flag for the WebRTC DataChannel transport tier. When `true`
+   * (default), the mobile companion tries `signaling → WebRTC` before
+   * falling back to cloudflared on the WAN. When `false`, the tier is
+   * skipped entirely and the transport stays on HTTPS+WS. Toggle from the
+   * "Mobile companion" settings tab.
+   */
+  webrtcEnabled?: boolean
+  /**
+   * WSS endpoint of the rendezvous signaling service. Default: the project's
+   * hosted endpoint (`wss://signaling.cognia.app/v1/signaling`). Users may
+   * override to self-host the `cognia-signaling-server` binary on their
+   * own VPS.
+   */
+  signalingUrl?: string
+  /**
+   * Additional ICE servers presented to the browser's `RTCPeerConnection`.
+   * STUN entries only — TURN goes in {@link turnServers} so the UI can
+   * render them separately. Defaults to two public STUN servers when
+   * unset (Google + Cloudflare).
+   */
+  iceServers?: RTCIceServer[]
+  /**
+   * Optional TURN relay servers. Empty by default; ICE falls back to
+   * cloudflared when STUN-only NAT traversal fails. Self-hosted coturn or
+   * paid TURN-as-a-service URLs go here.
+   */
+  turnServers?: RTCIceServer[]
 
   // ---- External Bridge / MCP server (schema v17, Phase 1) ----
   /**

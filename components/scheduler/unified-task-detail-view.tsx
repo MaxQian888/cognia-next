@@ -89,19 +89,20 @@ function KindBody({
         <ConnectorDigestDetail taskId={item.sourceId} onSelectRun={onSelectRun} />
       )
     case "app":
-      return <UnknownKindDetail label="App tasks render via TaskDetailView." />
+      return <UnknownKindDetail labelKey="unknownKindAppNote" />
     default:
       return <UnknownKindDetail />
   }
 }
 
 function SystemKindBody({ sourceId }: { sourceId: string }) {
+  const t = useTranslations("scheduler")
   const { tasks } = useSystemScheduler()
   // Pure derivation from props/store — no need for separate state.
-  const resolved = tasks.find((t) => t.id === sourceId) ?? null
+  const resolved = tasks.find((task) => task.id === sourceId) ?? null
 
   if (!resolved) {
-    return <div className="p-5 text-sm text-muted-foreground">System task not found.</div>
+    return <div className="p-5 text-sm text-muted-foreground">{t("systemTaskNotFound")}</div>
   }
   return (
     <div className="p-5">
@@ -110,11 +111,11 @@ function SystemKindBody({ sourceId }: { sourceId: string }) {
   )
 }
 
-function UnknownKindDetail({ label }: { label?: string }) {
+function UnknownKindDetail({ labelKey }: { labelKey?: "unknownKindAppNote" }) {
   const t = useTranslations("scheduler")
   return (
     <div className="p-5 text-sm text-muted-foreground" data-testid="unknown-kind-detail">
-      {label ?? t("unknownKind") ?? "No detail view for this kind."}
+      {labelKey ? t(labelKey) : t("unknownKind")}
     </div>
   )
 }

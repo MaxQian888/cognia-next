@@ -63,7 +63,10 @@ export function WorkspaceTrustDialog({ workspacePath, pendingActions, onResolved
 
   return (
     <Dialog open={open}>
-      <DialogContent showCloseButton={false} className="max-w-xl">
+      <DialogContent
+        showCloseButton={false}
+        className="max-w-xl max-w-[calc(100vw-2rem)] sm:max-w-xl"
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ShieldAlertIcon className="size-4 text-amber-500" />

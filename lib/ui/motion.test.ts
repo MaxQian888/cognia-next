@@ -92,7 +92,7 @@ describe("useReducedMotionVariants()", () => {
 describe("useReducedMotionTransition()", () => {
   it("passes the transition through when reduced motion is off", () => {
     reduceMotionRef.current = false
-    const transition = { duration: 0.4, ease: "easeOut" }
+    const transition = { duration: 0.4, ease: "easeOut" as const }
     const { result } = renderHook(() => useReducedMotionTransition(transition))
     expect(result.current).toBe(transition)
   })

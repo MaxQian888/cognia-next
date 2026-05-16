@@ -37,12 +37,13 @@ function relative(ms: number, now: number = Date.now()): string {
 
 export function RecentRunsFeed({ limit = 10, className }: RecentRunsFeedProps) {
   const t = useTranslations("mobile.workflow")
-  const runs =
-    useLiveQuery<WorkflowRunRow[]>(
-      () => getDb().workflowRuns.orderBy("startedAt").reverse().limit(limit).toArray(),
-      [limit]
-    ) ?? []
-  const workflows = useLiveQuery<WorkflowRow[]>(() => listWorkflows(), []) ?? []
+  const runsRaw = useLiveQuery<WorkflowRunRow[]>(
+    () => getDb().workflowRuns.orderBy("startedAt").reverse().limit(limit).toArray(),
+    [limit]
+  )
+  const workflowsRaw = useLiveQuery<WorkflowRow[]>(() => listWorkflows(), [])
+  const runs = useMemo(() => runsRaw ?? [], [runsRaw])
+  const workflows = useMemo(() => workflowsRaw ?? [], [workflowsRaw])
   const workflowById = useMemo(() => {
     const map = new Map<string, WorkflowRow>()
     for (const wf of workflows) map.set(wf.id, wf)

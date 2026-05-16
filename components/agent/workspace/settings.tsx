@@ -38,18 +38,18 @@ import { createLogger } from "@/lib/logger"
 
 const log = createLogger("agentTeams.settings")
 
-const EXECUTION_MODES = [
-  { value: "coordinated", label: "Coordinated" },
-  { value: "autonomous", label: "Autonomous" },
-  { value: "delegate", label: "Delegate" },
+const EXECUTION_MODES: ReadonlyArray<{ value: string; labelKey: string }> = [
+  { value: "coordinated", labelKey: "coordinated" },
+  { value: "autonomous", labelKey: "autonomous" },
+  { value: "delegate", labelKey: "delegate" },
 ]
 
-const EXECUTION_PATTERNS = [
-  { value: "manager_worker", label: "Manager / Worker" },
-  { value: "parallel_specialists", label: "Parallel Specialists" },
-  { value: "background_handoff", label: "Background Handoff" },
-  { value: "external_handoff", label: "External Handoff" },
-  { value: "single_agent_recommended", label: "Single Agent (Recommended)" },
+const EXECUTION_PATTERNS: ReadonlyArray<{ value: string; labelKey: string }> = [
+  { value: "manager_worker", labelKey: "managerWorker" },
+  { value: "parallel_specialists", labelKey: "parallelSpecialists" },
+  { value: "background_handoff", labelKey: "backgroundHandoff" },
+  { value: "external_handoff", labelKey: "externalHandoff" },
+  { value: "single_agent_recommended", labelKey: "singleAgent" },
 ]
 
 export interface AgentTeamSettingsProps {
@@ -59,6 +59,8 @@ export interface AgentTeamSettingsProps {
 export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
   const t = useTranslations("agentTeamsWorkspace.settings")
   const tCommon = useTranslations("agentTeamsWorkspace")
+  const tMode = useTranslations("agentTeamsWorkspace.settings.executionModeOption")
+  const tPattern = useTranslations("agentTeamsWorkspace.settings.executionPatternOption")
   const router = useRouter()
 
   const updateTeam = useAgentTeamStore((s) => s.updateTeam)
@@ -124,7 +126,7 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
         <p className="text-sm font-medium">{t("title")}</p>
         <div className="space-y-1">
           <Label className="text-xs">{t("name")}</Label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} />
+          <Input value={name} onChange={(e) => setName(e.target.value)} className="max-w-md" />
         </div>
         <div className="space-y-1">
           <Label className="text-xs">{t("description")}</Label>
@@ -132,14 +134,14 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
             rows={3}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className="text-xs"
+            className="max-w-2xl text-xs"
           />
         </div>
       </Card>
 
       {/* Execution */}
       <Card className="space-y-3 p-4">
-        <p className="text-sm font-medium">Execution</p>
+        <p className="text-sm font-medium">{t("sectionExecution")}</p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="space-y-1">
             <Label className="text-xs">{t("executionMode")}</Label>
@@ -153,7 +155,7 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
               <SelectContent>
                 {EXECUTION_MODES.map((m) => (
                   <SelectItem key={m.value} value={m.value}>
-                    {m.label}
+                    {tMode(m.labelKey)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -171,7 +173,7 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
               <SelectContent>
                 {EXECUTION_PATTERNS.map((p) => (
                   <SelectItem key={p.value} value={p.value}>
-                    {p.label}
+                    {tPattern(p.labelKey)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -205,7 +207,7 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
 
       {/* Toggles */}
       <Card className="space-y-3 p-4">
-        <p className="text-sm font-medium">Controls</p>
+        <p className="text-sm font-medium">{t("sectionControls")}</p>
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <Label className="text-xs">{t("autoShutdown")}</Label>
@@ -270,7 +272,7 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
               />
             </div>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
               <AlertDialogAction
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 disabled={deleteConfirmText !== team.name}

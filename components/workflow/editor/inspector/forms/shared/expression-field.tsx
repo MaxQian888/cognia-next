@@ -68,7 +68,7 @@ function useLatestRunOutputs(workflowId: string | undefined) {
     async () => {
       if (!workflowId) return {}
       const rows = await getDb()
-        .workflowRuns.where("[workflowId+createdAt]")
+        .workflowRuns.where("[workflowId+startedAt]")
         .between([workflowId, 0], [workflowId, Number.POSITIVE_INFINITY])
         .reverse()
         .limit(5)
@@ -128,7 +128,7 @@ export function ExpressionField({
     workflowId: s.baseWorkflow.id,
   }))
   const editorState = store?.(shallowSelector)
-  const nodes = editorState?.nodes ?? []
+  const nodes = useMemo(() => editorState?.nodes ?? [], [editorState?.nodes])
   const workflowId = editorState?.workflowId
 
   const upstreamOutputs = useLatestRunOutputs(workflowId)

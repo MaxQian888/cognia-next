@@ -24,7 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { downloadFromUrl } from "@/lib/files/download"
 import { loggers } from "@/lib/logger"
@@ -149,50 +149,38 @@ export const ImageBlock = memo(function ImageBlock({
         />
 
         <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="secondary"
-                size="icon"
-                className="h-7 w-7 bg-background/80 backdrop-blur-sm"
-                onClick={() => setIsOpen(true)}
-                aria-label={t("viewFullscreen")}
-              >
-                <Maximize2 className="h-3 w-3" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("viewFullscreen")}</TooltipContent>
-          </Tooltip>
+          <TooltipIconButton
+            variant="secondary"
+            size="icon"
+            className="h-7 w-7 bg-background/80 backdrop-blur-sm"
+            onClick={() => setIsOpen(true)}
+            aria-label={t("viewFullscreen")}
+            tooltip={t("viewFullscreen")}
+          >
+            <Maximize2 className="h-3 w-3" />
+          </TooltipIconButton>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="secondary"
-                size="icon"
-                className="h-7 w-7 bg-background/80 backdrop-blur-sm"
-                onClick={handleDownload}
-                aria-label={t("download")}
-              >
-                <Download className="h-3 w-3" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("download")}</TooltipContent>
-          </Tooltip>
+          <TooltipIconButton
+            variant="secondary"
+            size="icon"
+            className="h-7 w-7 bg-background/80 backdrop-blur-sm"
+            onClick={handleDownload}
+            aria-label={t("download")}
+            tooltip={t("download")}
+          >
+            <Download className="h-3 w-3" />
+          </TooltipIconButton>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="secondary"
-                size="icon"
-                className="h-7 w-7 bg-background/80 backdrop-blur-sm"
-                onClick={handleCopyUrl}
-                aria-label={t("copyUrl")}
-              >
-                {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("copyUrl")}</TooltipContent>
-          </Tooltip>
+          <TooltipIconButton
+            variant="secondary"
+            size="icon"
+            className="h-7 w-7 bg-background/80 backdrop-blur-sm"
+            onClick={handleCopyUrl}
+            aria-label={t("copyUrl")}
+            tooltip={t("copyUrl")}
+          >
+            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+          </TooltipIconButton>
         </div>
 
         {(alt || title) && (
@@ -213,101 +201,77 @@ export const ImageBlock = memo(function ImageBlock({
             </DialogTitle>
             <DialogDescription className="sr-only">{t("previewDescription")}</DialogDescription>
             <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-white hover:bg-white/20"
-                    onClick={handleZoomOut}
-                    disabled={zoom <= 0.5}
-                    aria-label={t("zoomOut")}
-                  >
-                    <ZoomOut className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t("zoomOut")}</TooltipContent>
-              </Tooltip>
+              <TooltipIconButton
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-white hover:bg-white/20"
+                onClick={handleZoomOut}
+                disabled={zoom <= 0.5}
+                aria-label={t("zoomOut")}
+                tooltip={t("zoomOut")}
+              >
+                <ZoomOut className="h-4 w-4" />
+              </TooltipIconButton>
 
               <span className="text-white text-xs px-2 min-w-[3rem] text-center">
                 {Math.round(zoom * 100)}%
               </span>
 
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-white hover:bg-white/20"
-                    onClick={handleZoomIn}
-                    disabled={zoom >= 3}
-                    aria-label={t("zoomIn")}
-                  >
-                    <ZoomIn className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t("zoomIn")}</TooltipContent>
-              </Tooltip>
+              <TooltipIconButton
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-white hover:bg-white/20"
+                onClick={handleZoomIn}
+                disabled={zoom >= 3}
+                aria-label={t("zoomIn")}
+                tooltip={t("zoomIn")}
+              >
+                <ZoomIn className="h-4 w-4" />
+              </TooltipIconButton>
 
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-white hover:bg-white/20"
-                    onClick={handleRotate}
-                    aria-label={t("rotate")}
-                  >
-                    <RotateCw className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t("rotate")}</TooltipContent>
-              </Tooltip>
+              <TooltipIconButton
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-white hover:bg-white/20"
+                onClick={handleRotate}
+                aria-label={t("rotate")}
+                tooltip={t("rotate")}
+              >
+                <RotateCw className="h-4 w-4" />
+              </TooltipIconButton>
 
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-white hover:bg-white/20"
-                    onClick={handleDownload}
-                    aria-label={t("download")}
-                  >
-                    <Download className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t("download")}</TooltipContent>
-              </Tooltip>
+              <TooltipIconButton
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-white hover:bg-white/20"
+                onClick={handleDownload}
+                aria-label={t("download")}
+                tooltip={t("download")}
+              >
+                <Download className="h-4 w-4" />
+              </TooltipIconButton>
 
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-white hover:bg-white/20"
-                    onClick={handleOpenExternal}
-                    aria-label={t("openInNewTab")}
-                  >
-                    <ExternalLink className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t("openInNewTab")}</TooltipContent>
-              </Tooltip>
+              <TooltipIconButton
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-white hover:bg-white/20"
+                onClick={handleOpenExternal}
+                aria-label={t("openInNewTab")}
+                tooltip={t("openInNewTab")}
+              >
+                <ExternalLink className="h-4 w-4" />
+              </TooltipIconButton>
 
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-white hover:bg-white/20"
-                    onClick={() => setIsOpen(false)}
-                    aria-label={t("close")}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t("close")}</TooltipContent>
-              </Tooltip>
+              <TooltipIconButton
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-white hover:bg-white/20"
+                onClick={() => setIsOpen(false)}
+                aria-label={t("close")}
+                tooltip={t("close")}
+              >
+                <X className="h-4 w-4" />
+              </TooltipIconButton>
             </div>
           </DialogHeader>
 

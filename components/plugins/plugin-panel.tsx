@@ -66,16 +66,21 @@ export function PluginPanel() {
   const setActiveTab = usePluginsStore((s) => s.setActiveTab)
 
   // Honor ?tab= deep links coming from settings or external surfaces.
-  // We only adopt the URL value once on mount — afterwards the user's
-  // tab clicks own the active tab via the zustand store.
+  // We adopt the URL value on mount AND whenever the URL changes —
+  // e.g. when the user clicks "Open marketplace" in Settings while
+  // /plugins is already open in the same window. Local tab clicks
+  // don't touch the URL, so re-syncing here doesn't fight the user:
+  // the guard `requested !== activeTab` makes the effect a no-op when
+  // the store and URL already agree, and tab clicks only flip the
+  // store (`searchParams` stays stable so this effect doesn't fire).
   const searchParams = useSearchParams()
+  const requestedTabParam = searchParams?.get("tab") ?? null
   useEffect(() => {
-    const requested = searchParams?.get("tab") ?? null
-    if (isValidTab(requested) && requested !== activeTab) {
-      setActiveTab(requested)
+    if (isValidTab(requestedTabParam) && requestedTabParam !== activeTab) {
+      setActiveTab(requestedTabParam)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [requestedTabParam])
 
   const [updateOpen, setUpdateOpen] = useState(false)
   const rollbackTarget = usePluginsStore((s) => s.rollbackTarget)

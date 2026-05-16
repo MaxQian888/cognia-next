@@ -141,7 +141,7 @@ export function ExternalAgentPlan({
         </div>
         <Progress value={progress} className="mt-2 h-1" />
       </div>
-      <ScrollArea className={cn(compact ? "h-[200px]" : "h-[300px]")}>
+      <ScrollArea className={cn(compact ? "h-[160px] md:h-[200px]" : "h-[220px] md:h-[300px]")}>
         <div className="p-2 space-y-1">
           {entries.map((entry, index) => (
             <PlanEntry

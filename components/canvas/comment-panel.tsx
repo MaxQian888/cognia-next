@@ -26,6 +26,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
 import { useCommentStore } from "@/stores/canvas/comment-store"
 import { formatRelativeDate } from "@/lib/canvas/utils"
@@ -146,7 +147,7 @@ export function CommentPanel({
           </Button>
         )}
       </SheetTrigger>
-      <SheetContent side="right" className="w-full sm:w-[400px]">
+      <SheetContent side="right" className="flex w-full flex-col sm:w-[min(90vw,480px)]">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <MessageSquare className="h-5 w-5" />
@@ -154,7 +155,7 @@ export function CommentPanel({
           </SheetTitle>
         </SheetHeader>
 
-        <div className="mt-4 space-y-4">
+        <div className="mt-4 flex flex-1 min-h-0 flex-col space-y-4">
           {/* Add Comment */}
           <div className="space-y-2">
             <Textarea
@@ -166,7 +167,10 @@ export function CommentPanel({
             <div className="flex items-center justify-between">
               {selectedRange && (
                 <Badge variant="outline" className="text-xs">
-                  {t("lines")} {selectedRange.startLine}-{selectedRange.endLine}
+                  {t("linesRange", {
+                    start: selectedRange.startLine,
+                    end: selectedRange.endLine,
+                  })}
                 </Badge>
               )}
               <Button
@@ -186,7 +190,7 @@ export function CommentPanel({
           {/* Filter */}
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">
-              {displayedComments.length} {t("comments")}
+              {t("commentsCount", { count: displayedComments.length })}
             </span>
             <Button
               variant="ghost"
@@ -199,10 +203,17 @@ export function CommentPanel({
           </div>
 
           {/* Comments List */}
-          <ScrollArea className="h-[calc(100vh-320px)]">
+          <ScrollArea className="flex-1 min-h-0">
             <div className="space-y-3 pr-4">
               {displayedComments.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">{t("noComments")}</p>
+                <Empty className="border-0 py-8">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <MessageSquare />
+                    </EmptyMedia>
+                    <EmptyDescription>{t("noComments")}</EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
               ) : (
                 displayedComments.map((comment) => (
                   <CommentThread

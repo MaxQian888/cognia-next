@@ -101,7 +101,7 @@ export function VersionDiffView({
     return (
       <div className={cn("flex flex-col text-xs font-mono", className)}>
         {headerStats}
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
           <ScrollArea className="rounded border bg-muted/20 p-2">
             <pre className="whitespace-pre-wrap">{oldText}</pre>
           </ScrollArea>

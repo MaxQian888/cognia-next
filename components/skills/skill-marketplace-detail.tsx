@@ -73,8 +73,8 @@ export function SkillMarketplaceDetail({
 
   return (
     <Sheet open onOpenChange={(o) => !o && onClose()}>
-      <SheetContent side="right" className="w-full p-0 sm:max-w-2xl">
-        <SheetHeader className="border-b px-5 py-4">
+      <SheetContent side="right" className="flex w-full flex-col p-0 sm:max-w-2xl">
+        <SheetHeader className="shrink-0 border-b px-5 py-4">
           <SheetTitle className="flex items-center gap-2">
             <span className={`flex h-8 w-8 items-center justify-center rounded-md ${cat.color}`}>
               <Icon className="size-4" />
@@ -102,7 +102,7 @@ export function SkillMarketplaceDetail({
           </SheetDescription>
         </SheetHeader>
 
-        <div className="border-b bg-muted/20 px-5 py-3">
+        <div className="shrink-0 border-b bg-muted/20 px-5 py-3">
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge variant="secondary" className="h-5 text-[10px]">
               {item.source === "registry" ? tMp("sourceRegistry") : tMp("sourceSkillsmp")}
@@ -152,7 +152,7 @@ export function SkillMarketplaceDetail({
           </div>
         </div>
 
-        <ScrollArea className="h-[calc(100svh-220px)]">
+        <ScrollArea className="min-h-0 flex-1">
           <div className="prose prose-sm dark:prose-invert max-w-none px-5 py-4">
             {loading ? (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">

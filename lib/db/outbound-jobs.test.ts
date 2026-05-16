@@ -50,7 +50,6 @@ describe("outbound-jobs", () => {
   })
 
   it("pickNextDue returns the oldest pending row due now", async () => {
-    const before = Date.now()
     const row = await enqueueOutbound({
       adapterId: "adp_1",
       conversationKey: "conv_1",

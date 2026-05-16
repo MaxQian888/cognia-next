@@ -25,7 +25,6 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useSettingsStore } from "@/stores/settings"
@@ -72,8 +71,11 @@ export function ThemeTab() {
   const theme: AppTheme = settings?.theme ?? "system"
   const colorTheme: ColorThemePreset = settings?.colorTheme ?? "default"
   const activeCustomThemeId = settings?.activeCustomThemeId ?? null
-  const customThemes = settings?.customThemes ?? []
-  const importedRecords = settings?.importedVscodeThemes ?? []
+  const customThemes = useMemo(() => settings?.customThemes ?? [], [settings?.customThemes])
+  const importedRecords = useMemo(
+    () => settings?.importedVscodeThemes ?? [],
+    [settings?.importedVscodeThemes]
+  )
   const router = useRouter()
   const searchParams = useSearchParams()
 

@@ -6,6 +6,7 @@
 
 import { useTranslations } from "next-intl"
 import { usePromptInputAttachments } from "@/components/ai-elements/prompt-input"
+import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { cn } from "@/lib/utils"
 import { FileIcon, XIcon } from "lucide-react"
 
@@ -39,14 +40,15 @@ export function AttachmentPreview() {
                 </span>
               </>
             )}
-            <button
+            <TooltipIconButton
               type="button"
               onClick={() => attachments.remove(f.id)}
-              className="absolute top-0.5 right-0.5 rounded bg-background/80 p-0.5 opacity-0 transition-opacity group-hover:opacity-100"
+              className="absolute top-0.5 right-0.5 size-5 rounded bg-background/80 p-0.5 opacity-0 transition-opacity group-hover:opacity-100"
               aria-label={t("removeAria", { filename: displayName })}
+              tooltip={t("removeAria", { filename: displayName })}
             >
               <XIcon className="size-3" />
-            </button>
+            </TooltipIconButton>
           </div>
         )
       })}

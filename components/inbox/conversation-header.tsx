@@ -8,11 +8,15 @@
  * Right: policy info chip (PolicyInfo).
  */
 
+import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
+import { ChevronLeftIcon } from "lucide-react"
 import { ModeSwitcher } from "./mode-switcher"
 import { PolicyInfo } from "./policy-info"
 import { PlatformBadge } from "./platform-badge"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { isTauri } from "@/lib/tauri"
 import { useCharacter } from "@/lib/data-hooks/context"
@@ -45,12 +49,44 @@ export function ConversationHeader({
   const tModes = useTranslations("inbox.modeSwitcher.modes")
   const desktop = isTauri()
   const character = useCharacter(characterId)
+  const router = useRouter()
+
+  // Mobile back: prefer router.back() so we restore the previous Inbox list /
+  // scope; fall back to /inbox when this is a fresh deep-link load with no
+  // history to pop.
+  const handleBack = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back()
+    } else {
+      router.push("/inbox")
+    }
+  }
 
   return (
     <header
-      className="flex h-12 shrink-0 items-center gap-3 border-b px-4"
+      className="flex h-12 shrink-0 items-center gap-2 border-b px-2 md:gap-3 md:px-4"
       data-testid="conversation-header"
     >
+      {/* Mobile-only nav cluster: back to the conversation list + open the
+       * adapters Sheet. Hidden on md+ where the three-pane shell exposes
+       * both surfaces directly. */}
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="md:hidden"
+        onClick={handleBack}
+        aria-label={t("backToList")}
+        data-testid="conversation-header-back"
+      >
+        <ChevronLeftIcon className="h-4 w-4" />
+      </Button>
+      <SidebarTrigger
+        className="md:hidden"
+        aria-label={t("openSidebar")}
+        data-testid="conversation-header-open-sidebar"
+      />
+
       {/* Left: platform + character chip + title */}
       <div className="flex items-center gap-2 min-w-0 flex-1">
         <PlatformBadge platform={platform} iconOnly />

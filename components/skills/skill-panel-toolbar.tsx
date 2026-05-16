@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   FolderDownIcon,
+  MoreHorizontalIcon,
   PlusIcon,
   RefreshCwIcon,
   SearchIcon,
@@ -181,16 +182,16 @@ export function SkillPanelToolbar() {
   }
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-1.5">
       <Button size="sm" onClick={openCreate} disabled={busy}>
-        <PlusIcon className="mr-1.5 size-3.5" />
-        {t("new")}
+        <PlusIcon className="size-3.5 sm:mr-1.5" />
+        <span className="hidden sm:inline">{t("new")}</span>
       </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button size="sm" variant="outline" disabled={busy}>
-            <UploadIcon className="mr-1.5 size-3.5" />
-            {t("import")}
+            <UploadIcon className="size-3.5 sm:mr-1.5" />
+            <span className="hidden sm:inline">{t("import")}</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-64">
@@ -229,7 +230,15 @@ export function SkillPanelToolbar() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <Button size="sm" variant="outline" onClick={() => void handleExportAll()} disabled={busy}>
+
+      {/* Export + Sync visible inline at md+ */}
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => void handleExportAll()}
+        disabled={busy}
+        className="hidden md:inline-flex"
+      >
         <FolderDownIcon className="mr-1.5 size-3.5" />
         {t("exportAll")}
       </Button>
@@ -240,6 +249,7 @@ export function SkillPanelToolbar() {
             variant="ghost"
             disabled={!isTauri() || busy || sync.busy}
             title={!isTauri() ? t("syncNativeDesktopOnly") : t("syncNative")}
+            className="hidden md:inline-flex"
           >
             <RefreshCwIcon className="mr-1.5 size-3.5" />
             {tCommon("syncLabel")}
@@ -251,6 +261,47 @@ export function SkillPanelToolbar() {
             {tSync("pushAll")}
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => void sync.pull()} className="text-xs">
+            <RefreshCwIcon className="mr-2 size-3.5 -scale-x-100" />
+            {tSync("pullAll")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {/* Below md, Export + Sync collapse into a single overflow menu. */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-8 md:hidden"
+            disabled={busy}
+            aria-label={t("moreActions")}
+          >
+            <MoreHorizontalIcon className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuItem
+            onSelect={() => void handleExportAll()}
+            disabled={busy}
+            className="text-xs"
+          >
+            <FolderDownIcon className="mr-2 size-3.5" />
+            {t("exportAll")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => void sync.push()}
+            disabled={!isTauri() || sync.busy}
+            className="text-xs"
+          >
+            <RefreshCwIcon className="mr-2 size-3.5" />
+            {tSync("pushAll")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => void sync.pull()}
+            disabled={!isTauri() || sync.busy}
+            className="text-xs"
+          >
             <RefreshCwIcon className="mr-2 size-3.5 -scale-x-100" />
             {tSync("pullAll")}
           </DropdownMenuItem>

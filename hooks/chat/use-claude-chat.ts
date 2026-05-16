@@ -102,7 +102,7 @@ export function useClaudeChat() {
     let cancelled = false
 
     onClaudeMessage((evt) => {
-      void handleEvent(evt, activeRef, allowListRef).catch((err) => {
+      void handleEvent(evt, activeRef, allowListRef, pendingBranchTagRef).catch((err) => {
         console.error("handleEvent failed", err)
       })
     })
@@ -592,7 +592,8 @@ function isTeamSubSession(sessionId: string): boolean {
 async function handleEvent(
   evt: ClaudeEvent,
   activeRef: React.MutableRefObject<string | null>,
-  allowListRef: React.MutableRefObject<string[]>
+  allowListRef: React.MutableRefObject<string[]>,
+  pendingBranchTagRef: React.MutableRefObject<Map<string, { groupId: string; index: number }>>
 ) {
   // Skip events for team sub-sessions outright — useTeamChat handles them.
   if (

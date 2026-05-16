@@ -10,6 +10,7 @@
  */
 
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
 import { useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { useChatStore, selectBranchSiblings } from "@/stores/chat/chat-store"
@@ -22,6 +23,7 @@ interface BranchNavigatorProps {
 }
 
 export function BranchNavigator({ message, className }: BranchNavigatorProps) {
+  const t = useTranslations("chat.branchNavigator")
   const groupId = (message.metadata as { branchGroupId?: string } | undefined)?.branchGroupId
   const messages = useChatStore((s) => s.messages)
   const activeId = useChatStore((s) => (groupId ? s.activeBranchByGroup[groupId] : undefined))
@@ -61,8 +63,8 @@ export function BranchNavigator({ message, className }: BranchNavigatorProps) {
         size="icon-sm"
         variant="ghost"
         type="button"
-        title="Previous branch"
-        aria-label="Previous branch"
+        title={t("prevBranch")}
+        aria-label={t("prevBranch")}
         data-testid="branch-navigator-prev"
         onClick={() => goTo(currentIndex - 1)}
       >
@@ -78,8 +80,8 @@ export function BranchNavigator({ message, className }: BranchNavigatorProps) {
         size="icon-sm"
         variant="ghost"
         type="button"
-        title="Next branch"
-        aria-label="Next branch"
+        title={t("nextBranch")}
+        aria-label={t("nextBranch")}
         data-testid="branch-navigator-next"
         onClick={() => goTo(currentIndex + 1)}
       >

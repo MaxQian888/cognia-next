@@ -62,7 +62,7 @@ describe("startLarkWebhookTransport", () => {
         adapterId: "lark-2",
         signal: ctrl.signal,
       })) {
-        collected.push(env.event.message.message_id)
+        collected.push(env.event.message!.message_id)
         if (collected.length >= 2) {
           ctrl.abort()
           break
@@ -93,7 +93,7 @@ describe("startLarkWebhookTransport", () => {
         adapterId: "lark-3",
         signal: ctrl.signal,
       })) {
-        results.push(env.event.message.message_id)
+        results.push(env.event.message!.message_id)
       }
       return results
     })()

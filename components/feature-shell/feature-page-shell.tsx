@@ -117,9 +117,9 @@ export function FeaturePageShell({
             <>
               <ResizablePanel
                 id={`pane-${storageId}-left`}
-                defaultSize={leftPane.defaultSize ?? DEFAULT_LEFT_SIZE}
-                minSize={leftPane.minSize ?? DEFAULT_LEFT_MIN}
-                maxSize={leftPane.maxSize ?? DEFAULT_LEFT_MAX}
+                defaultSize={`${leftPane.defaultSize ?? DEFAULT_LEFT_SIZE}%`}
+                minSize={`${leftPane.minSize ?? DEFAULT_LEFT_MIN}%`}
+                maxSize={`${leftPane.maxSize ?? DEFAULT_LEFT_MAX}%`}
               >
                 <aside
                   aria-label={leftPane.label}
@@ -134,12 +134,12 @@ export function FeaturePageShell({
 
           <ResizablePanel
             id={`pane-${storageId}-center`}
-            defaultSize={
+            defaultSize={`${
               100 -
               (leftPane?.defaultSize ?? (leftPane ? DEFAULT_LEFT_SIZE : 0)) -
               (rightPane?.defaultSize ?? (rightPane ? DEFAULT_RIGHT_SIZE : 0))
-            }
-            minSize={DEFAULT_CENTER_MIN}
+            }%`}
+            minSize={`${DEFAULT_CENTER_MIN}%`}
           >
             <div
               className={cn("flex h-full min-w-0 flex-1 flex-col overflow-hidden", centerClassName)}
@@ -154,9 +154,9 @@ export function FeaturePageShell({
               <ResizableHandle withHandle />
               <ResizablePanel
                 id={`pane-${storageId}-right`}
-                defaultSize={rightPane.defaultSize ?? DEFAULT_RIGHT_SIZE}
-                minSize={rightPane.minSize ?? DEFAULT_RIGHT_MIN}
-                maxSize={rightPane.maxSize ?? DEFAULT_RIGHT_MAX}
+                defaultSize={`${rightPane.defaultSize ?? DEFAULT_RIGHT_SIZE}%`}
+                minSize={`${rightPane.minSize ?? DEFAULT_RIGHT_MIN}%`}
+                maxSize={`${rightPane.maxSize ?? DEFAULT_RIGHT_MAX}%`}
               >
                 <aside
                   aria-label={rightPane.label}

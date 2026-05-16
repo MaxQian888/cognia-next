@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
+import { motion, useReducedMotion } from "motion/react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -11,6 +12,7 @@ import { RefreshCwIcon, SearchIcon, ShoppingBagIcon } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { useSkillMarketplace, type MarketplaceSourceFilter } from "@/hooks/skills"
 import type { MarketplaceItem } from "@/lib/skills/marketplace-types"
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { SkillMarketplaceCard } from "./skill-marketplace-card"
 import { SkillMarketplaceDetail } from "./skill-marketplace-detail"
 import { SkillMarketplaceEmpty } from "./skill-marketplace-empty"
@@ -62,18 +64,22 @@ export function SkillMarketplace() {
   }
 
   const showSkillsMpHint = !m.isSkillsMpEnabled && (m.source === "skillsmp" || m.source === "all")
+  const reduce = useReducedMotion()
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
-        <ShoppingBagIcon className="size-4" />
-        <h2 className="text-sm font-semibold">{t("title")}</h2>
-        <div className="ml-2 flex-1">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 sm:px-4 sm:py-3">
+        <div className="flex items-center gap-2">
+          <ShoppingBagIcon className="size-4" />
+          <h2 className="text-sm font-semibold">{t("title")}</h2>
+        </div>
+        <div className="order-last w-full md:order-none md:ml-2 md:w-auto md:flex-1">
           <ToggleGroup
             type="single"
             value={m.source}
             onValueChange={(v) => v && m.setSource(v as MarketplaceSourceFilter)}
             size="sm"
+            className="w-full md:w-auto md:justify-start"
           >
             <ToggleGroupItem value="all" className="text-xs">
               {t("sourceAll")}
@@ -86,7 +92,7 @@ export function SkillMarketplace() {
             </ToggleGroupItem>
           </ToggleGroup>
         </div>
-        <div className="relative w-64">
+        <div className="relative w-full flex-1 sm:w-48 md:w-64 md:flex-none">
           <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={m.query}
@@ -98,7 +104,7 @@ export function SkillMarketplace() {
         <Button
           size="icon"
           variant="ghost"
-          className="size-8"
+          className="size-8 shrink-0"
           onClick={() => void m.refresh()}
           disabled={m.state.loading}
           aria-label={tCommon("refresh")}
@@ -128,19 +134,26 @@ export function SkillMarketplace() {
         ) : m.state.items.length === 0 ? (
           <div className="p-12 text-center text-xs text-muted-foreground">{t("empty")}</div>
         ) : (
-          <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
+          <motion.div
+            className="grid grid-cols-1 gap-3 p-3 sm:p-4 md:grid-cols-2 xl:grid-cols-3"
+            initial={reduce ? false : "initial"}
+            animate="animate"
+            variants={STAGGER_CONTAINER}
+            data-testid="skill-marketplace-grid"
+          >
             {m.state.items.map((item) => (
-              <SkillMarketplaceCard
-                key={item.id}
-                item={item}
-                installed={m.installed.has(`${item.source}:${item.sourceId}`)}
-                installing={m.installingId === item.id}
-                onInstall={(it) => void handleInstall(it)}
-                onUninstall={(it) => void handleUninstall(it)}
-                onOpen={setOpenItem}
-              />
+              <motion.div key={item.id} variants={STAGGER_CHILD}>
+                <SkillMarketplaceCard
+                  item={item}
+                  installed={m.installed.has(`${item.source}:${item.sourceId}`)}
+                  installing={m.installingId === item.id}
+                  onInstall={(it) => void handleInstall(it)}
+                  onUninstall={(it) => void handleUninstall(it)}
+                  onOpen={setOpenItem}
+                />
+              </motion.div>
             ))}
-          </div>
+          </motion.div>
         )}
       </ScrollArea>
 

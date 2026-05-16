@@ -1,13 +1,16 @@
 "use client"
 
 import { useTranslations } from "next-intl"
+import { motion, useReducedMotion } from "motion/react"
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
+import { Spinner } from "@/components/ui/spinner"
 import { useSkillAnalytics } from "@/hooks/skills"
 import { getCategoryMeta, getSourceMeta } from "@/lib/skills/categories"
 import { useSkillsStore } from "@/stores/skills"
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { SkillUsageTrend } from "./skill-usage-trend"
 
 export function SkillAnalytics() {
@@ -16,11 +19,13 @@ export function SkillAnalytics() {
   const tSrc = useTranslations("skills.source")
   const data = useSkillAnalytics()
   const openDetail = useSkillsStore((s) => s.openDetail)
+  const reduce = useReducedMotion()
 
   if (data.loading) {
     return (
-      <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
-        Loading…
+      <div className="flex flex-1 items-center justify-center gap-2 p-12 text-xs text-muted-foreground">
+        <Spinner className="size-3.5" />
+        {t("loading")}
       </div>
     )
   }
@@ -37,18 +42,34 @@ export function SkillAnalytics() {
 
   return (
     <ScrollArea className="flex-1">
-      <div className="space-y-4 p-4">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <SummaryCard label={t("totalSkills")} value={data.totalSkills} />
-          <SummaryCard label={t("totalEnabled")} value={data.totalEnabled} />
-          <SummaryCard label={t("totalUsage")} value={data.totalUsage} />
-          <SummaryCard label={t("tokensEstimated")} value={data.estimatedTokens.toLocaleString()} />
-        </div>
+      <div className="space-y-4 p-3 sm:p-4">
+        <motion.div
+          className="grid grid-cols-2 gap-3 md:grid-cols-4"
+          initial={reduce ? false : "initial"}
+          animate="animate"
+          variants={STAGGER_CONTAINER}
+        >
+          <motion.div variants={STAGGER_CHILD}>
+            <SummaryCard label={t("totalSkills")} value={data.totalSkills} />
+          </motion.div>
+          <motion.div variants={STAGGER_CHILD}>
+            <SummaryCard label={t("totalEnabled")} value={data.totalEnabled} />
+          </motion.div>
+          <motion.div variants={STAGGER_CHILD}>
+            <SummaryCard label={t("totalUsage")} value={data.totalUsage} />
+          </motion.div>
+          <motion.div variants={STAGGER_CHILD}>
+            <SummaryCard
+              label={t("tokensEstimated")}
+              value={data.estimatedTokens.toLocaleString()}
+            />
+          </motion.div>
+        </motion.div>
 
         <SkillUsageTrend />
 
         <Card className="p-4">
-          <p className="mb-2 text-xs font-medium">{t("mostUsedTitle")}</p>
+          <p className="mb-2 text-xs font-medium">{t("categoryUsageTitle")}</p>
           {categoryRows.length > 0 ? (
             <div className="h-56">
               <ResponsiveContainer width="100%" height="100%">

@@ -1,11 +1,6 @@
 import type { UIMessage } from "ai"
 
-import {
-  applySdkEvent,
-  contentPreview,
-  extractArtifactPartFromToolUse,
-  makeUserMessage,
-} from "./adapter"
+import { applySdkEvent, contentPreview, makeUserMessage } from "./adapter"
 import type {
   BetaMessage,
   SDKAssistantMessage,

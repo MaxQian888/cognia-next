@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "next-intl"
 import { FileSearchIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 import { Badge } from "@/components/ui/badge"
@@ -18,6 +19,7 @@ interface RagSearchOutput {
 }
 
 export function RagSearchCard({ part }: { part: ToolUIPart }) {
+  const t = useTranslations("chat.mcp.ragSearch")
   const parsed = useParsedOutput<RagSearchOutput>(part.output)
   if (!parsed || !Array.isArray(parsed.hits)) return null
 
@@ -28,7 +30,7 @@ export function RagSearchCard({ part }: { part: ToolUIPart }) {
       testId="mcp-rag-search-card"
     >
       {parsed.hits.length === 0 ? (
-        <p className="text-muted-foreground">No matches.</p>
+        <p className="text-muted-foreground">{t("noMatches")}</p>
       ) : (
         <ul className="space-y-2">
           {parsed.hits.map((hit, i) => (

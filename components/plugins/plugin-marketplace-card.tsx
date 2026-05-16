@@ -56,13 +56,21 @@ export function PluginMarketplaceCard({
   return (
     <Card className="p-3 space-y-2 flex flex-col">
       <div className="flex items-start justify-between gap-2">
-        <button type="button" className="flex-1 min-w-0 text-left" onClick={() => onView(entry.id)}>
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="font-medium truncate">{entry.name}</span>
-            <span className="text-xs text-muted-foreground shrink-0">v{entry.version}</span>
-          </div>
-          <div className="text-xs text-muted-foreground truncate mt-0.5">{entry.id}</div>
-        </button>
+        <Button
+          asChild
+          variant="ghost"
+          className="flex-1 min-w-0 h-auto justify-start p-0 text-left font-normal hover:bg-transparent"
+        >
+          <button type="button" onClick={() => onView(entry.id)}>
+            <div className="block w-full min-w-0">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="font-medium truncate">{entry.name}</span>
+                <span className="text-xs text-muted-foreground shrink-0">v{entry.version}</span>
+              </div>
+              <div className="text-xs text-muted-foreground truncate mt-0.5">{entry.id}</div>
+            </div>
+          </button>
+        </Button>
         <PluginSignatureBadge state={sigState} compact />
       </div>
 

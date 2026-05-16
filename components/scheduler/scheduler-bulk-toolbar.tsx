@@ -79,7 +79,7 @@ export function SchedulerBulkToolbar({
     <>
       <div
         data-testid="scheduler-bulk-toolbar"
-        className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b bg-background/95 px-3 py-2 backdrop-blur"
+        className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b bg-background/95 px-3 py-2 backdrop-blur"
       >
         <div className="flex items-center gap-2">
           <Button
@@ -96,7 +96,7 @@ export function SchedulerBulkToolbar({
             {t("selected") || "selected"}
           </span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <Button
             size="sm"
             variant="outline"

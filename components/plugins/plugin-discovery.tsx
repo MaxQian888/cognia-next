@@ -13,14 +13,16 @@ import { usePluginMarketplace } from "@/hooks/plugins"
 
 interface Props {
   /**
-   * Optional install handler. When provided, the discovery cards delegate
-   * to it (used by the marketplace panel to route through the pre-install
-   * chain). When omitted, fall back to the legacy fire-and-forget path.
+   * Install handler. The discovery surface always routes through this so
+   * the caller (today: the marketplace panel) can run the pre-install
+   * chain (conflict → permission → config) before any Dexie write. The
+   * historical fire-and-forget fallback was removed — callers must pass
+   * a handler that goes through `usePluginPreInstall`.
    */
-  onInstall?: (id: string, version?: string) => void
+  onInstall: (id: string, version?: string) => void
 }
 
-export function PluginDiscovery({ onInstall }: Props = {}) {
+export function PluginDiscovery({ onInstall }: Props) {
   const t = useTranslations("plugins.discovery")
   const market = usePluginMarketplace()
 
@@ -61,10 +63,7 @@ export function PluginDiscovery({ onInstall }: Props = {}) {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => {
-                  if (onInstall) onInstall(entry.id, entry.version)
-                  else void market.install(entry.id, entry.version)
-                }}
+                onClick={() => onInstall(entry.id, entry.version)}
                 disabled={market.installingId === entry.id}
               >
                 {market.installingId === entry.id ? t("installing") : t("install")}

@@ -3,10 +3,12 @@
 import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
+import { motion, useReducedMotion } from "motion/react"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Button } from "@/components/ui/button"
+import { StatusBadge } from "@/components/status-badge"
 import { listTwinJobsByTwin, retryFailedJob } from "@/lib/db/twin-jobs"
 import { listTwinSourcesByTwinAndStatus } from "@/lib/db/twin-sources"
 import { enqueueIngestJob } from "@/lib/twin/ingest"
@@ -24,8 +26,8 @@ const STATUS_VARIANT: Record<TwinJobStatus, "default" | "secondary" | "destructi
 
 export function TwinJobsTab({ twinId }: { twinId: string }) {
   const t = useTranslations("twin.jobs")
-  const tStatus = useTranslations("twin.status")
   const tKind = useTranslations("twin.kind")
+  const prefersReducedMotion = useReducedMotion()
   const jobs = useLiveQuery(() => listTwinJobsByTwin(twinId), [twinId], [])
 
   const queueIngest = async () => {
@@ -58,8 +60,20 @@ export function TwinJobsTab({ twinId }: { twinId: string }) {
         </Card>
       ) : (
         <ul className="flex flex-col gap-2">
-          {jobs.map((job) => (
-            <JobRow key={job.id} job={job} t={t} tStatus={tStatus} tKind={tKind} />
+          {jobs.map((job, index) => (
+            <motion.li
+              key={job.id}
+              initial={prefersReducedMotion ? false : { opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{
+                duration: 0.15,
+                ease: "easeOut",
+                delay: prefersReducedMotion ? 0 : Math.min(index * 0.03, 0.15),
+              }}
+              className="list-none"
+            >
+              <JobRow job={job} t={t} tKind={tKind} />
+            </motion.li>
           ))}
         </ul>
       )}
@@ -70,12 +84,10 @@ export function TwinJobsTab({ twinId }: { twinId: string }) {
 function JobRow({
   job,
   t,
-  tStatus,
   tKind,
 }: {
   job: TwinJob
   t: ReturnType<typeof useTranslations>
-  tStatus: ReturnType<typeof useTranslations>
   tKind: ReturnType<typeof useTranslations>
 }) {
   const [retrying, setRetrying] = useState(false)
@@ -99,7 +111,13 @@ function JobRow({
     <Card className="flex flex-col gap-2 p-3">
       <div className="flex items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={STATUS_VARIANT[job.status]}>{tStatus(job.status)}</Badge>
+          <StatusBadge
+            value={job.status}
+            labelNamespace="twin.status"
+            variantMap={STATUS_VARIANT}
+            pulse={job.status === "running"}
+            data-testid={`twin-job-${job.id}-status`}
+          />
           <Badge variant="outline">{tKind(job.kind)}</Badge>
           {job.retryCount > 0 && (
             <Badge variant="secondary" className="font-mono text-[10px]">

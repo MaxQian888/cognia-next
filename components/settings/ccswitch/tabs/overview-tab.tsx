@@ -155,6 +155,11 @@ export function CcswitchOverviewTab() {
               <FolderOpenIcon className="size-3 shrink-0" />
               {status.dbPath ?? "—"}
             </div>
+            {status.resolutionSource && status.resolutionSource !== "default" && (
+              <Badge variant="outline" className="mt-1 text-[10px]">
+                {t(`overview.resolutionSource.${status.resolutionSource}`)}
+              </Badge>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-2">
             <CountBadge label={t("counts.providers")} value={status.counts.providers} />

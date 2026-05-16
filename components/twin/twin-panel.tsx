@@ -22,8 +22,16 @@ import { Suspense, useCallback, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { useTranslations } from "next-intl"
+import { motion, useReducedMotion } from "motion/react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card } from "@/components/ui/card"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { listCharacters } from "@/lib/db/characters"
 import { TwinSourcesTab } from "./twin-sources-tab"
 import { TwinJobsTab } from "./twin-jobs-tab"
@@ -132,23 +140,23 @@ function TwinPanelInner() {
   }
 
   return (
-    <div className="flex h-full flex-col gap-3 p-4">
-      <header className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+    <div className="flex h-full flex-col gap-3 p-4 sm:gap-4 sm:p-6">
+      <header className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="flex w-full items-center gap-2 sm:w-auto">
           <h1 className="text-xl font-semibold">{t("title")}</h1>
           {twins.length > 1 ? (
-            <select
-              className="border-border bg-background rounded border px-2 py-1 text-sm"
-              value={effectiveTwinId}
-              onChange={(e) => setActiveTwinId(e.target.value)}
-              aria-label={t("activeTwin")}
-            >
-              {twins.map((tw) => (
-                <option key={tw.twinId} value={tw.twinId}>
-                  {tw.displayName}
-                </option>
-              ))}
-            </select>
+            <Select value={effectiveTwinId} onValueChange={setActiveTwinId}>
+              <SelectTrigger size="sm" aria-label={t("activeTwin")} className="max-w-[14rem]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {twins.map((tw) => (
+                  <SelectItem key={tw.twinId} value={tw.twinId}>
+                    {tw.displayName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           ) : (
             <span className="text-muted-foreground text-sm">{twins[0].displayName}</span>
           )}
@@ -159,32 +167,72 @@ function TwinPanelInner() {
               ? "text-xs text-emerald-600 dark:text-emerald-400"
               : "text-muted-foreground text-xs"
           }
-          title={workerStatus.reason}
+          title={workerStatus.reasonKey ? t(`workerStatus.${workerStatus.reasonKey}`) : undefined}
         >
           {workerStatus.active ? t("workerActive") : t("workerIdle")}
         </span>
       </header>
 
       <Tabs value={tab} onValueChange={setTab} className="flex flex-1 flex-col">
-        <TabsList className="self-start">
-          <TabsTrigger value="sources">{t("tabs.sources")}</TabsTrigger>
-          <TabsTrigger value="jobs">{t("tabs.jobs")}</TabsTrigger>
-          <TabsTrigger value="drafts">{t("tabs.drafts")}</TabsTrigger>
-          <TabsTrigger value="settings">{t("tabs.settings")}</TabsTrigger>
-        </TabsList>
+        <div className="-mx-1 overflow-x-auto px-1">
+          <TabsList className="w-max">
+            <TabsTrigger value="sources">{t("tabs.sources")}</TabsTrigger>
+            <TabsTrigger value="jobs">{t("tabs.jobs")}</TabsTrigger>
+            <TabsTrigger value="drafts">{t("tabs.drafts")}</TabsTrigger>
+            <TabsTrigger value="settings">{t("tabs.settings")}</TabsTrigger>
+          </TabsList>
+        </div>
         <TabsContent value="sources" className="mt-3 flex-1 overflow-auto">
-          <TwinSourcesTab twinId={effectiveTwinId} />
+          <AnimatedTabContent tabKey={tab} active="sources">
+            <TwinSourcesTab twinId={effectiveTwinId} />
+          </AnimatedTabContent>
         </TabsContent>
         <TabsContent value="jobs" className="mt-3 flex-1 overflow-auto">
-          <TwinJobsTab twinId={effectiveTwinId} />
+          <AnimatedTabContent tabKey={tab} active="jobs">
+            <TwinJobsTab twinId={effectiveTwinId} />
+          </AnimatedTabContent>
         </TabsContent>
         <TabsContent value="drafts" className="mt-3 flex-1 overflow-auto">
-          <TwinDraftsTab twinId={effectiveTwinId} />
+          <AnimatedTabContent tabKey={tab} active="drafts">
+            <TwinDraftsTab twinId={effectiveTwinId} />
+          </AnimatedTabContent>
         </TabsContent>
         <TabsContent value="settings" className="mt-3 flex-1 overflow-auto">
-          <TwinSettingsTab twinId={effectiveTwinId} />
+          <AnimatedTabContent tabKey={tab} active="settings">
+            <TwinSettingsTab twinId={effectiveTwinId} />
+          </AnimatedTabContent>
         </TabsContent>
       </Tabs>
     </div>
+  )
+}
+
+/**
+ * Fade tab content in when it becomes the active tab. Suppresses motion when
+ * the OS reports `prefers-reduced-motion`. The `key` swap forces a fresh
+ * animation each time the user lands on this tab.
+ */
+function AnimatedTabContent({
+  tabKey,
+  active,
+  children,
+}: {
+  tabKey: string
+  active: string
+  children: React.ReactNode
+}) {
+  const prefersReducedMotion = useReducedMotion()
+  if (prefersReducedMotion || tabKey !== active) {
+    return <>{children}</>
+  }
+  return (
+    <motion.div
+      key={active}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.12, ease: "easeOut" }}
+    >
+      {children}
+    </motion.div>
   )
 }

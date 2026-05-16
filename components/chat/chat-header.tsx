@@ -1,5 +1,6 @@
 "use client"
 
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -301,17 +302,15 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
     <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur">
       <div className="flex flex-1 items-center gap-2 truncate">
         {character && (
-          <span
-            className="flex size-7 shrink-0 items-center justify-center rounded-full text-xs"
-            style={{
-              backgroundColor: avatarColor(character),
-              color: "white",
-            }}
-            aria-hidden
-            title={character.name}
-          >
-            {avatarGlyph(character)}
-          </span>
+          <Avatar className="size-7 shrink-0" title={character.name}>
+            <AvatarFallback
+              className="text-xs text-white"
+              style={{ backgroundColor: avatarColor(character) }}
+              aria-hidden
+            >
+              {avatarGlyph(character)}
+            </AvatarFallback>
+          </Avatar>
         )}
         <div className="flex min-w-0 flex-col">
           <span className="truncate text-sm font-medium" title={session.title}>
@@ -402,7 +401,7 @@ export function ChatHeader({ session, messages, onOpenSettings }: Props) {
             <Settings2Icon className="size-4" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="end" className="w-96">
+        <PopoverContent align="end" className="w-96 max-w-[calc(100vw-2rem)]">
           <div className="space-y-4">
             <div>
               <h4 className="text-sm font-semibold">{t("title")}</h4>
@@ -752,7 +751,7 @@ function SkillsBadge({ skills, disabled, onToggle }: SkillsBadgeProps) {
           {t("counter", { active: activeCount, total: skills.length })}
         </Badge>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-72 space-y-2 p-3">
+      <PopoverContent align="end" className="w-72 max-w-[calc(100vw-2rem)] space-y-2 p-3">
         <div className="space-y-0.5">
           <p className="text-sm font-semibold">{t("title")}</p>
           <p className="text-[11px] text-muted-foreground">{t("description")}</p>

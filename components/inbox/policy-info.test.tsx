@@ -98,4 +98,11 @@ describe("PolicyInfo", () => {
     )
     expect(screen.getByText(/blocked users: alice, bob/i)).toBeInTheDocument()
   })
+
+  it("uses the shadcn Button primitive for the tooltip trigger", () => {
+    render(<PolicyInfo policy={makePolicy()} />)
+    const trigger = screen.getByTestId("policy-info-trigger")
+    expect(trigger).toHaveAttribute("data-slot", "button")
+    expect(trigger).toHaveAccessibleName(/policy/i)
+  })
 })

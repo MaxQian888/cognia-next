@@ -35,24 +35,36 @@ beforeEach(() => {
 
 describe("PluginDiscovery", () => {
   it("renders featured entries returned by the marketplace", async () => {
-    render(<PluginDiscovery />)
+    render(<PluginDiscovery onInstall={jest.fn()} />)
     await waitFor(() => expect(screen.getByText("Plugin 1")).toBeInTheDocument())
   })
 
-  it("install button invokes the marketplace client", async () => {
-    const install = jest.fn(async () => undefined)
+  it("install button delegates to the onInstall prop with id + version", async () => {
+    const onInstall = jest.fn()
+    render(<PluginDiscovery onInstall={onInstall} />)
+    await waitFor(() => expect(screen.getByText("Plugin 1")).toBeInTheDocument())
+    fireEvent.click(screen.getByText("install"))
+    expect(onInstall).toHaveBeenCalledWith("p1", "1.0.0")
+  })
+
+  it("does NOT call the marketplace client install directly when the user clicks install", async () => {
+    const directInstall = jest.fn(async () => undefined)
     __resetPluginMarketplaceClientForTests({
       searchPlugins: jest.fn(async () => SAMPLE),
       getFeaturedPlugins: jest.fn(async () => SAMPLE),
       getPopularPlugins: jest.fn(async () => SAMPLE),
       getRecentPlugins: jest.fn(async () => SAMPLE),
       getPlugin: jest.fn(async () => null),
-      installPlugin: install,
+      installPlugin: directInstall,
       uninstallPlugin: jest.fn(async () => undefined),
     })
-    render(<PluginDiscovery />)
+    const onInstall = jest.fn()
+    render(<PluginDiscovery onInstall={onInstall} />)
     await waitFor(() => expect(screen.getByText("Plugin 1")).toBeInTheDocument())
     fireEvent.click(screen.getByText("install"))
-    await waitFor(() => expect(install).toHaveBeenCalledWith("p1", "1.0.0"))
+    expect(onInstall).toHaveBeenCalledWith("p1", "1.0.0")
+    // The pre-install chain owns the install — the marketplace client must
+    // not be invoked directly from the discovery surface.
+    expect(directInstall).not.toHaveBeenCalled()
   })
 })

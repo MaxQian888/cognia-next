@@ -17,6 +17,8 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { PinIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { SidebarTrigger } from "@/components/ui/sidebar"
+import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { getDb } from "@/lib/db/schema"
 import type { ChatSession } from "@/lib/claude/types"
@@ -76,9 +78,10 @@ export function ConversationList({
 
   if (!enriched) {
     return (
-      <div className="flex flex-col gap-1 p-3">
-        <div className="h-12 animate-pulse rounded-md bg-muted" />
-        <div className="h-12 animate-pulse rounded-md bg-muted" />
+      <div className="flex flex-col gap-1 p-3" data-testid="conversation-list-loading">
+        {Array.from({ length: 6 }).map((_, idx) => (
+          <Skeleton key={idx} className="h-12 w-full rounded-md" />
+        ))}
       </div>
     )
   }
@@ -117,7 +120,12 @@ export function ConversationList({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="shrink-0 border-b px-3 py-2">
+      <div className="shrink-0 flex items-center gap-1 border-b px-3 py-2">
+        <SidebarTrigger
+          className="-ml-1 size-9 md:hidden"
+          aria-label={t("openSidebar")}
+          data-testid="conversation-list-open-sidebar"
+        />
         <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
           {t("header")}
         </h3>
@@ -178,7 +186,8 @@ function ConversationRow({
   return (
     <div
       className={cn(
-        "w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/60 transition-colors",
+        "w-full flex items-center gap-2 px-3 py-2 min-h-11 hover:bg-muted/60 transition-colors",
+        "md:min-h-9 md:py-1.5",
         isActive && "bg-muted"
       )}
       data-testid={`conversation-row-${ck}`}

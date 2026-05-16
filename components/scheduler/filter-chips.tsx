@@ -16,7 +16,7 @@ interface FilterChipsProps {
 
 export function FilterChips({ filters, activeFilter, onFilterChange }: FilterChipsProps) {
   return (
-    <div className="flex gap-1.5 overflow-x-auto px-3 pb-2 scrollbar-none">
+    <div className="flex flex-wrap gap-1.5 px-3 pb-2">
       {filters.map((filter) => (
         <button
           key={filter.key}

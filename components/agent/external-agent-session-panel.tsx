@@ -22,6 +22,7 @@ import { GitBranchIcon } from "lucide-react"
 import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session-extension-errors"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
+import { cn } from "@/lib/utils"
 
 interface Props {
   className?: string
@@ -67,12 +68,7 @@ export function ExternalAgentSessionPanel({ className }: Props) {
 
   return (
     <div
-      className={[
-        "flex shrink-0 flex-col gap-2 border-b bg-background/60 px-3 py-2",
-        className ?? "",
-      ]
-        .filter(Boolean)
-        .join(" ")}
+      className={cn("flex shrink-0 flex-col gap-2 border-b bg-background/60 px-3 py-2", className)}
     >
       {(hasCommands || hasConfigOptions || canFork) && (
         <div className="flex flex-wrap items-center gap-2">

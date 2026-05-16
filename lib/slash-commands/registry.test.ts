@@ -9,6 +9,7 @@ import {
   seedBuiltinSlashCommands,
   __resetSlashCommandsForTesting,
 } from "./registry"
+import * as canonical from "./registry"
 import * as reExport from "@/lib/chat/slash-command-registry"
 
 afterEach(() => {

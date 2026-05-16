@@ -9,7 +9,7 @@
  */
 
 import { useState, useMemo, useCallback } from "react"
-import { useTranslations } from "next-intl"
+import { useTranslations, useLocale } from "next-intl"
 import {
   X,
   Copy,
@@ -31,6 +31,7 @@ import {
   Wrench,
   Brain,
 } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -308,14 +309,14 @@ function AgentTraceDetailSection({
 
         {data.toolArgs && (
           <Collapsible>
-            <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+            <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground motion-safe:transition-colors">
               <ChevronRight className="h-3 w-3" />
               {t("trace.toolArgs")}
             </CollapsibleTrigger>
             <CollapsibleContent>
-              <pre className="text-[11px] font-mono p-2 mt-1 rounded bg-muted/50 overflow-x-auto max-h-[200px] overflow-y-auto">
-                {data.toolArgs}
-              </pre>
+              <ScrollArea className="max-h-[200px] mt-1 rounded bg-muted/50">
+                <pre className="text-[11px] font-mono p-2 whitespace-pre">{data.toolArgs}</pre>
+              </ScrollArea>
             </CollapsibleContent>
           </Collapsible>
         )}
@@ -363,22 +364,22 @@ function AgentTraceDetailSection({
 
         {/* Cost estimate */}
         {data.costEstimate && data.costEstimate.totalCost > 0 && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Coins className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <span className="text-xs text-muted-foreground">{t("trace.costEstimate")}:</span>
             <span className="text-xs font-mono">{formatCost(data.costEstimate.totalCost)}</span>
             <span className="text-[10px] text-muted-foreground">
-              (in: {formatCost(data.costEstimate.inputCost)}, out:{" "}
-              {formatCost(data.costEstimate.outputCost)})
+              ({t("trace.costInputPrefix")} {formatCost(data.costEstimate.inputCost)},{" "}
+              {t("trace.costOutputPrefix")} {formatCost(data.costEstimate.outputCost)})
             </span>
           </div>
         )}
 
         {/* Error message */}
         {data.error && (
-          <div className="rounded-md bg-red-50 dark:bg-red-900/20 p-2">
-            <p className="text-xs text-red-600 dark:text-red-400 break-words">{data.error}</p>
-          </div>
+          <Alert variant="destructive" className="py-2">
+            <AlertDescription className="text-xs break-words">{data.error}</AlertDescription>
+          </Alert>
         )}
 
         {/* Response preview */}
@@ -431,9 +432,10 @@ export function LogDetailPanel({
   className,
 }: LogDetailPanelProps) {
   const t = useTranslations("logging")
+  const locale = useLocale()
 
   const timestamp = new Date(log.timestamp)
-  const timeStr = timestamp.toLocaleString("en-US", {
+  const timeStr = timestamp.toLocaleString(locale, {
     hour12: false,
     year: "numeric",
     month: "2-digit",
@@ -509,7 +511,7 @@ export function LogDetailPanel({
           <Separator />
 
           {/* Metadata Grid */}
-          <div className="grid grid-cols-2 gap-3 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             <div className="flex items-center gap-1.5">
               <Clock className="h-3.5 w-3.5 text-muted-foreground" />
               <div>
@@ -527,7 +529,7 @@ export function LogDetailPanel({
             </div>
 
             {log.traceId && (
-              <div className="flex items-center gap-1.5 col-span-2">
+              <div className="flex items-center gap-1.5 sm:col-span-2">
                 <Hash className="h-3.5 w-3.5 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
                   <p className="text-muted-foreground">{t("panel.traceId")}</p>
@@ -540,7 +542,7 @@ export function LogDetailPanel({
             )}
 
             {log.sessionId && (
-              <div className="flex items-center gap-1.5 col-span-2">
+              <div className="flex items-center gap-1.5 sm:col-span-2">
                 <Hash className="h-3.5 w-3.5 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
                   <p className="text-muted-foreground">{t("detail.sessionId")}</p>
@@ -550,7 +552,7 @@ export function LogDetailPanel({
             )}
 
             {log.source && (
-              <div className="flex items-center gap-1.5 col-span-2">
+              <div className="flex items-center gap-1.5 sm:col-span-2">
                 <FileCode className="h-3.5 w-3.5 text-muted-foreground" />
                 <div>
                   <p className="text-muted-foreground">{t("panel.source")}</p>
@@ -654,9 +656,11 @@ export function LogDetailPanel({
                     ))}
                   </div>
                 ) : (
-                  <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap p-3 rounded-md bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400">
-                    {log.stack}
-                  </pre>
+                  <ScrollArea className="max-h-40 rounded-md bg-red-50 dark:bg-red-900/20">
+                    <pre className="text-xs font-mono whitespace-pre-wrap p-3 text-red-600 dark:text-red-400">
+                      {log.stack}
+                    </pre>
+                  </ScrollArea>
                 )}
               </div>
             </>
@@ -672,20 +676,19 @@ export function LogDetailPanel({
                 </span>
                 <div className="space-y-1">
                   {filteredRelated.map((related) => {
-                    const relTime = new Date(related.timestamp).toLocaleTimeString("en-US", {
+                    const relTime = new Date(related.timestamp).toLocaleTimeString(locale, {
                       hour12: false,
                       hour: "2-digit",
                       minute: "2-digit",
                       second: "2-digit",
                     })
                     return (
-                      <button
+                      <Button
                         key={related.id}
-                        className={cn(
-                          "flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs text-left",
-                          "hover:bg-muted/50 transition-colors"
-                        )}
+                        variant="ghost"
+                        className="flex items-center gap-2 w-full justify-start px-2 py-1.5 h-auto text-xs font-normal motion-safe:transition-colors"
                         onClick={() => onSelectRelated?.(related)}
+                        data-testid={`related-log-${related.id}`}
                       >
                         <Badge
                           className={cn(
@@ -697,7 +700,7 @@ export function LogDetailPanel({
                         </Badge>
                         <span className="font-mono text-muted-foreground shrink-0">{relTime}</span>
                         <span className="truncate">{related.message}</span>
-                      </button>
+                      </Button>
                     )
                   })}
                 </div>

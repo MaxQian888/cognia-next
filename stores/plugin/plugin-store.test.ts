@@ -1,3 +1,12 @@
+/**
+ * @jest-environment jsdom
+ */
+
+const applyPolicyMock = jest.fn()
+jest.mock("@/lib/plugin/policy-runtime", () => ({
+  applyPluginPolicyToRuntime: (...args: unknown[]) => applyPolicyMock(...args),
+}))
+
 import { usePluginStore } from "./plugin-store"
 import * as barrel from "./"
 
@@ -17,5 +26,36 @@ describe("usePluginStore", () => {
     const second = usePluginStore.getState().getAllModes()
     expect(first).toEqual([])
     expect(second).toEqual([])
+  })
+
+  it("initialize() hydrates the persisted policy into the runtime", async () => {
+    applyPolicyMock.mockClear()
+    window.localStorage.setItem(
+      "cognia.plugins.policy",
+      JSON.stringify({ governance: "block", signatureRequired: true, autoUpdate: true })
+    )
+
+    await usePluginStore.getState().initialize("/tmp/plugins")
+
+    expect(applyPolicyMock).toHaveBeenCalledWith({
+      governance: "block",
+      signatureRequired: true,
+      autoUpdate: true,
+    })
+
+    window.localStorage.clear()
+  })
+
+  it("initialize() defaults policy flags when localStorage has no blob", async () => {
+    applyPolicyMock.mockClear()
+    window.localStorage.clear()
+
+    await usePluginStore.getState().initialize("/tmp/plugins")
+
+    expect(applyPolicyMock).toHaveBeenCalledWith({
+      governance: "warn",
+      signatureRequired: false,
+      autoUpdate: false,
+    })
   })
 })

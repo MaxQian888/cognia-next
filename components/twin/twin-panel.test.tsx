@@ -10,8 +10,109 @@
  */
 
 import "fake-indexeddb/auto"
+import React from "react"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+
+// Radix Select is tricky in jsdom because of pointer-event/scroll APIs.
+// Use a native-<select>-backed stub that mirrors the contract we use:
+// the Select wrapper exposes a single native <select> carrying the aria-label
+// from SelectTrigger and the option list from SelectItem children.
+jest.mock("@/components/ui/select", () => {
+  type SelectChildren = {
+    ariaLabel?: string
+    options: Array<{ value: string; label: React.ReactNode }>
+  }
+
+  const collect = (nodes: React.ReactNode, sink: SelectChildren): void => {
+    React.Children.forEach(nodes, (child) => {
+      if (!React.isValidElement(child)) return
+      const { type, props } = child as React.ReactElement<{
+        children?: React.ReactNode
+        value?: string
+        "aria-label"?: string
+        __stubKind?: string
+      }>
+      if (
+        typeof type === "function" &&
+        (type as { displayName?: string }).displayName === "SelectTriggerStub"
+      ) {
+        if (props["aria-label"]) sink.ariaLabel = props["aria-label"]
+      }
+      if (
+        typeof type === "function" &&
+        (type as { displayName?: string }).displayName === "SelectItemStub"
+      ) {
+        sink.options.push({ value: props.value ?? "", label: props.children })
+        return
+      }
+      collect(props.children, sink)
+    })
+  }
+
+  const SelectTriggerStub: React.FC<
+    React.HTMLAttributes<HTMLDivElement> & { "aria-label"?: string }
+  > = ({ children }) => <>{children}</>
+  ;(SelectTriggerStub as React.FC & { displayName?: string }).displayName = "SelectTriggerStub"
+
+  const SelectItemStub: React.FC<{ value: string; children: React.ReactNode }> = ({ children }) => (
+    <>{children}</>
+  )
+  ;(SelectItemStub as React.FC & { displayName?: string }).displayName = "SelectItemStub"
+
+  const Select: React.FC<{
+    value: string
+    onValueChange: (v: string) => void
+    children: React.ReactNode
+  }> = ({ value, onValueChange, children }) => {
+    const harvest: SelectChildren = { options: [] }
+    collect(children, harvest)
+    return (
+      <select
+        value={value}
+        onChange={(e) => onValueChange(e.target.value)}
+        aria-label={harvest.ariaLabel}
+      >
+        {harvest.options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    )
+  }
+
+  return {
+    Select,
+    SelectTrigger: SelectTriggerStub,
+    SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    SelectValue: () => null,
+    SelectItem: SelectItemStub,
+  }
+})
+
+// motion/react can hydrate fine in jsdom but ships unnecessary overhead in tests.
+jest.mock("motion/react", () => {
+  const passthrough = (tag: keyof React.JSX.IntrinsicElements & string) => {
+    const Stub = ({ children, ...props }: React.HTMLAttributes<HTMLElement>) =>
+      React.createElement(tag, props, children)
+    Stub.displayName = `MotionStub(${tag})`
+    return Stub
+  }
+  const AnimatePresence = ({ children }: { children: React.ReactNode }) => <>{children}</>
+  AnimatePresence.displayName = "AnimatePresenceStub"
+  return {
+    motion: {
+      div: passthrough("div"),
+      li: passthrough("li"),
+      span: passthrough("span"),
+      button: passthrough("button"),
+    },
+    AnimatePresence,
+    useReducedMotion: () => false,
+  }
+})
+
 import { TwinPanel } from "./twin-panel"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createCharacter } from "@/lib/db/characters"

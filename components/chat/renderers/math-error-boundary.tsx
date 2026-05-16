@@ -4,8 +4,7 @@ import React from "react"
 import { AlertCircle, RefreshCw, Copy, Check } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { loggers } from "@/lib/logger"
 
@@ -94,36 +93,28 @@ export function MathErrorFallback({ error, latex, onRetry, className }: MathErro
         </div>
         <div className="flex items-center gap-1">
           {onRetry && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={onRetry}
-                  aria-label={t("retry")}
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("retry")}</TooltipContent>
-            </Tooltip>
+            <TooltipIconButton
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={onRetry}
+              aria-label={t("retry")}
+              tooltip={t("retry")}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </TooltipIconButton>
           )}
           {latex && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={handleCopy}
-                  aria-label={t("copySource")}
-                >
-                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("copySource")}</TooltipContent>
-            </Tooltip>
+            <TooltipIconButton
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={handleCopy}
+              aria-label={t("copySource")}
+              tooltip={t("copySource")}
+            >
+              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            </TooltipIconButton>
           )}
         </div>
       </div>

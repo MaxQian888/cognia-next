@@ -133,7 +133,7 @@ export function MobileTabBar({ className, badges }: MobileTabBarProps) {
             animate={{ opacity: 1, y: 0 }}
             transition={{
               duration: MOBILE_DURATION.fast,
-              ease: MOBILE_EASE as unknown as number[],
+              ease: MOBILE_EASE,
               delay: reduce ? 0 : index * STAGGER_INTERVAL,
             }}
             className={cn(

@@ -17,13 +17,14 @@ jest.mock("@/lib/db/settings", () => ({
 
 jest.mock("./client", () => ({
   writeClaudeSettingsEnv: jest.fn(),
+  writeCodexAuthEnv: jest.fn(),
 }))
 
 import { restartSidecar, setProviderEnv } from "@/lib/claude/ipc"
 import { saveSettings, getSettings } from "@/lib/db/settings"
 import { isTauri } from "@/lib/tauri"
 
-import { writeClaudeSettingsEnv } from "./client"
+import { writeClaudeSettingsEnv, writeCodexAuthEnv } from "./client"
 import { applySwitch, ccswitchProviderRefId, detectActive, planSwitch, _internals } from "./switch"
 import type { CcswitchProvider, SwitchScope } from "./types"
 
@@ -33,6 +34,7 @@ const mRestart = restartSidecar as jest.Mock
 const mSave = saveSettings as jest.Mock
 const mGet = getSettings as jest.Mock
 const mWriteClaude = writeClaudeSettingsEnv as jest.Mock
+const mWriteCodex = writeCodexAuthEnv as jest.Mock
 
 function provider(overrides: Partial<CcswitchProvider>): CcswitchProvider {
   return {
@@ -80,10 +82,29 @@ describe("planSwitch", () => {
     ])
   })
 
-  it("marks unsupported agents", () => {
-    const plan = planSwitch(provider({}), { cognia: true, agents: ["codex"] }, {})
+  it("marks unsupported agents (gemini)", () => {
+    const plan = planSwitch(provider({}), { cognia: true, agents: ["gemini"] }, {})
     expect(plan.agentChanges[0].unsupported).toBe(true)
     expect(plan.agentChanges[0].envUpdates).toEqual([])
+  })
+
+  it("emits codex-specific env updates for the codex agent", () => {
+    const p = provider({ apiKey: "sk-openai-x", baseUrl: "https://api.openai.com" })
+    const plan = planSwitch(p, { cognia: true, agents: ["codex"] }, {})
+    const ac = plan.agentChanges[0]
+    expect(ac.agentId).toBe("codex")
+    expect(ac.unsupported).toBe(false)
+    expect(ac.targetPath).toBe("~/.codex/auth.json")
+    expect(ac.envUpdates).toEqual([{ key: "OPENAI_API_KEY", value: "sk-openai-x" }])
+  })
+
+  it("codex agent emits null when provider has no api key", () => {
+    const plan = planSwitch(
+      provider({ apiKey: undefined }),
+      { cognia: true, agents: ["codex"] },
+      {}
+    )
+    expect(plan.agentChanges[0].envUpdates).toEqual([{ key: "OPENAI_API_KEY", value: null }])
   })
 
   it("emits null env values when the provider has no key/url", () => {
@@ -185,13 +206,44 @@ describe("applySwitch", () => {
   })
 
   it("records unsupported agents as not-ok rather than failing", async () => {
+    const plan = planSwitch(provider({}), { cognia: true, agents: ["gemini"] }, {})
+    const result = await applySwitch(plan)
+    expect(result.agentResults[0]).toMatchObject({
+      agentId: "gemini",
+      ok: false,
+    })
+    expect(mWriteClaude).not.toHaveBeenCalled()
+    expect(mWriteCodex).not.toHaveBeenCalled()
+  })
+
+  it("commits to ~/.codex/auth.json when codex is selected", async () => {
+    mWriteCodex.mockResolvedValue({
+      path: "/u/.codex/auth.json",
+      backupPath: "/u/.codex/auth.json.bak.1",
+    })
+    const p = provider({ apiKey: "sk-openai-x", baseUrl: "https://api.openai.com" })
+    const plan = planSwitch(p, { cognia: true, agents: ["codex"] }, {})
+    const result = await applySwitch(plan)
+
+    expect(mWriteCodex).toHaveBeenCalledWith({ OPENAI_API_KEY: "sk-openai-x" })
+    expect(mWriteClaude).not.toHaveBeenCalled()
+    expect(result.agentResults[0]).toEqual({
+      agentId: "codex",
+      ok: true,
+      path: "/u/.codex/auth.json",
+      backupPath: "/u/.codex/auth.json.bak.1",
+    })
+  })
+
+  it("surfaces drift_detected from the codex write as an error", async () => {
+    mWriteCodex.mockRejectedValue(new Error("drift_detected"))
     const plan = planSwitch(provider({}), { cognia: true, agents: ["codex"] }, {})
     const result = await applySwitch(plan)
     expect(result.agentResults[0]).toMatchObject({
       agentId: "codex",
       ok: false,
+      error: "drift_detected",
     })
-    expect(mWriteClaude).not.toHaveBeenCalled()
   })
 })
 
@@ -277,16 +329,28 @@ describe("internals", () => {
     expect(_internals.detectDrift(undefined, { "claude-code": undefined })).toBe(false)
   })
 
-  it("envUpdatesForProvider strips whitespace-only fields to null", () => {
-    const updates = _internals.envUpdatesForProvider(provider({ apiKey: "  ", baseUrl: "" }))
+  it("envUpdatesForProvider strips whitespace-only fields to null (claude-code)", () => {
+    const updates = _internals.envUpdatesForProvider(
+      "claude-code",
+      provider({ apiKey: "  ", baseUrl: "" })
+    )
     expect(updates).toEqual([
       { key: "ANTHROPIC_API_KEY", value: null },
       { key: "ANTHROPIC_BASE_URL", value: null },
     ])
   })
 
-  it("SUPPORTED_AGENTS contains claude-code in v1", () => {
+  it("envUpdatesForProvider emits OPENAI_API_KEY only for codex", () => {
+    const updates = _internals.envUpdatesForProvider(
+      "codex",
+      provider({ apiKey: "sk-openai", baseUrl: "https://api.openai.com" })
+    )
+    expect(updates).toEqual([{ key: "OPENAI_API_KEY", value: "sk-openai" }])
+  })
+
+  it("SUPPORTED_AGENTS contains claude-code and codex in v2", () => {
     expect(_internals.SUPPORTED_AGENTS.has("claude-code")).toBe(true)
-    expect(_internals.SUPPORTED_AGENTS.has("codex")).toBe(false)
+    expect(_internals.SUPPORTED_AGENTS.has("codex")).toBe(true)
+    expect(_internals.SUPPORTED_AGENTS.has("gemini")).toBe(false)
   })
 })

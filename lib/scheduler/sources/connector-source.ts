@@ -33,7 +33,6 @@ import { schedulerDb } from "@/lib/scheduler/scheduler-db"
 import { getTaskScheduler } from "@/lib/scheduler/task-scheduler"
 import { getDb } from "@/lib/db/schema"
 import type {
-  CreateScheduledTaskInput,
   ScheduledTask,
   ScheduledTaskStatus,
   UpdateScheduledTaskInput,

@@ -60,4 +60,21 @@ export interface PairedDeviceRow {
    * paired before TLS landed.
    */
   serverFingerprint?: string
+
+  /**
+   * ADR-0021: public room id used by the WebRTC signaling service to route
+   * SDP/ICE messages between this device and the desktop. UUIDv4. Optional
+   * for backwards-compat with rows paired before WebRTC support landed —
+   * absence disables the WebRTC transport tier for that device.
+   */
+  rendezvousId?: string
+
+  /**
+   * ADR-0021: 32-byte HMAC key (URL-safe base64, unpadded — 43 chars) shared
+   * between desktop and this device, minted by the desktop pair handler.
+   * Signaling envelopes are HMAC-SHA256-tagged with this secret so the
+   * public signaling service can never impersonate either peer. Optional
+   * mirror of `rendezvousId`.
+   */
+  rendezvousSecret?: string
 }

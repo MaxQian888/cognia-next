@@ -29,7 +29,6 @@ import {
   serializeOutboundV12,
   serializeDeleteV11,
   serializeDeleteV12,
-  OneBotUnsupportedError,
 } from "./serialize"
 import {
   subscribeOneBotEvents,

@@ -22,6 +22,7 @@ import {
   acpTerminalWaitForExit,
 } from "@/lib/native/external-agent"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
+import { buildAgentEnv } from "./env-builder"
 import {
   createExternalAgentUnsupportedSessionExtensionError,
   isExternalAgentMethodNotFoundError,
@@ -386,13 +387,19 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
     const finalArgs = buildSpawnArgs(config.process)
 
+    // Compose the child-process env. `buildAgentEnv` reuses the Codex
+    // subscription credential (or a discovered codex-cli credential) for
+    // the `codex` preset so users don't have to log in twice. User-supplied
+    // env vars on the agent config always win.
+    const finalEnv = await buildAgentEnv(config, config.process.env || {})
+
     // Spawn the external agent process
     this.processId = await invoke<string>("spawn_external_agent", {
       config: {
         id: config.id,
         command: config.process.command,
         args: finalArgs,
-        env: config.process.env || {},
+        env: finalEnv,
         cwd: config.process.cwd,
       },
     })

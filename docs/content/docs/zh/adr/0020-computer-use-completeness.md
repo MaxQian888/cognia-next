@@ -179,3 +179,26 @@ Windows 后端解析 `uiautomation::inputs::Keyboard::send_keys` 能接受的所
   现有 `desktop_*` Tauri 命令驱动 Computer Use）。
 
 详细文件列表见英文版 ADR。
+
+## 附录 2026-05-15 — 完整性 Slate 2
+
+在 M5 脚手架之上的补齐 PR 关闭了 11 个遗留缺口。其中两个原始 Non-Goal（聊天驱动 canUseTool 侧车派发、Sidecar→Renderer 的 MCP automation-proxy IPC）经研究确认需要结构性新架构而非「补齐」工作，转入独立 ADR 跟进。
+
+**已关闭缺口**
+
+1. `text_editor` 新增 `undo_edit` 动作。`TextEditorAction::UndoEdit { path }` 在 `plugins/computer-use/rust/src/types.rs` 声明；`UNDO_STORE` 在每次 `Create` / `StrReplace` / `Insert` 之前快照旧内容；undo 恢复旧内容，若旧状态是「文件不存在」则删除当前文件。
+2. `bash.restart: true` 作为审计内空操作处理。Cognia 没有可重启的常驻 shell，命令返回合成 `BashResult` 在 `stdout` 说明差异，审计命令名为 `bash:restart`。
+3. `plugins/computer-use/plugin.json` 的 `runtimeCompatibility` 键由 `desktop` 改为规范的 `tauri`（与 `types/plugin/plugin.ts:99` 一致）。新增 `lib/plugin/core/builtin-manifest-shape.test.ts` 遍历所有内置插件 manifest，拒绝非规范键。其余 6 个插件同步修正。
+4. 删除 `plugins/computer-use/src/index.ts` 中 `activate()` 里的运行时 `registerNativeAnthropicTool` 调用；manifest 驱动注册为规范路径。
+5. TypeScript SDK 文件按能力契约路径补齐：`plugin-sdk/typescript/src/api/native-anthropic-tool.ts` 与 `plugin-sdk/typescript/src/context/extended.ts`。
+6. `runtime-proof-audit.test.ts` 锁定 `native-anthropic-tool` 的 `proofStatus` = `verified`。
+7. 设置 → 自动化 的授权浮层 + 全部五个标签（概览 / 权限 / 白名单 / 审计 / 检查器），以及 角色 → Computer Use 开关、外部网桥 `mcp:computer-use` 作用域描述均通过 `useTranslations()` 接入 i18n；新增 `automation.*` 命名空间，扩展现有 `settings.*`。`/cu` 斜杠命令通过 `lib/i18n/plugin-i18n-registry` 注册插件侧 i18n bundle。
+8. `i18n/messages/en.json` 与 `zh-CN.json` 键对齐恢复。`scripts/i18n-baseline.json` 重置 — JSX 硬编码字符串数量从 811 降至 698（关闭 ~113 处）。
+9. 能力契约 `hostBindings` 与运行时证明审计同步更新。
+
+**仍延迟（Non-Goal，独立跟进）**
+
+- 聊天驱动的 `canUseTool` 侧车派发（`computer` / `bash` / `text_editor`）。`@anthropic-ai/claude-agent-sdk` 是纯 MCP 架构，没有可以传入 API 级原生工具的字段。关闭这个缺口需要：要么让 `sidecar/dispatch/ai-sdk.mjs` 借助 Vercel AI SDK 通过 `provider-defined` 工具承载，要么新增直调 Anthropic SDK 的派发器。任一路径都是结构性新派发器，超出「补齐」范畴。
+- MCP 单机 `computer_use` IPC。Node MCP sidecar 使用 SDK 的 `StdioServerTransport`，独占 stdin/stdout。`automation_proxy` 信封需要 Node 侧自定义 Transport 包装 + Rust 侧 `mcp_server/sidecar.rs` 的 stdout 抽取重构，独立跟进。
+- macOS / Linux 等效 UIA 树遍历（Phase 6.b）。
+- 插件注册的自定义桌面动作 / UIA 模式。

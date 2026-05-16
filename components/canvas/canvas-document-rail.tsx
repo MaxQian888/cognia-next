@@ -9,6 +9,7 @@
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
+import { motion } from "motion/react"
 import {
   Plus,
   Search,
@@ -28,7 +29,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   ContextMenu,
@@ -44,11 +44,19 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
+import {
+  SidebarContent,
+  SidebarGroup,
+  SidebarHeader,
+  SidebarSeparator,
+} from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
 import type { CanvasDocument } from "@/types/artifact/artifact"
 import { LANGUAGE_OPTIONS } from "@/lib/canvas/constants"
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { RenameDialog } from "./rename-dialog"
 
 type SortField = "updatedAt" | "title" | "language"
@@ -183,11 +191,17 @@ export function CanvasDocumentRail() {
 
   return (
     <aside className="flex h-full w-full min-w-0 flex-col overflow-hidden border-r bg-muted/30">
-      <header className="flex items-center justify-between gap-2 px-3 py-2">
+      <SidebarHeader className="flex flex-row items-center justify-between gap-2 px-3 py-2">
         <h2 className="text-sm font-semibold">{t("title", { default: "Canvas" })}</h2>
         <Tooltip delayDuration={300}>
           <TooltipTrigger asChild>
-            <Button size="icon" variant="ghost" className="size-7" onClick={onCreateNew}>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7"
+              onClick={onCreateNew}
+              aria-label={t("newDocument", { default: "New document" })}
+            >
               <Plus className="size-4" />
             </Button>
           </TooltipTrigger>
@@ -195,9 +209,9 @@ export function CanvasDocumentRail() {
             {t("newDocument", { default: "New document" })}
           </TooltipContent>
         </Tooltip>
-      </header>
-      <Separator />
-      <div className="space-y-2 px-2 py-2">
+      </SidebarHeader>
+      <SidebarSeparator className="mx-0" />
+      <SidebarGroup className="space-y-2 px-2 py-2">
         <div className="relative">
           <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -262,140 +276,180 @@ export function CanvasDocumentRail() {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-      </div>
-      <Separator />
+      </SidebarGroup>
+      <SidebarSeparator className="mx-0" />
       <ScrollArea className="flex-1">
-        {grouped.length === 0 ? (
-          <p className="px-3 py-6 text-center text-xs text-muted-foreground">
-            {t("noDocuments", { default: "No documents yet." })}
-          </p>
-        ) : (
-          <div className="flex flex-col gap-0.5 p-1">
-            {grouped.map((group) => (
-              <Collapsible
-                key={group.key}
-                defaultOpen={group.key === "pinned" || group.key === "today"}
-              >
-                <CollapsibleTrigger className="flex w-full items-center gap-1 px-2 py-1 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors group/collapse rounded-sm">
-                  <ChevronRight className="size-3 transition-transform duration-200 [&[data-state=open]]:rotate-90" />
-                  {group.label}
-                  <span className="ml-auto tabular-nums text-[9px] opacity-60">
-                    {group.docs.length}
-                  </span>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <ul className="flex flex-col gap-0.5 pt-0.5">
-                    {group.docs.map((doc) => {
-                      const isActive = doc.id === activeId
-                      const isPinned = pinnedDocIds.has(doc.id)
-                      const Icon = doc.type === "code" ? FileCode : FileText
-                      return (
-                        <li key={doc.id}>
-                          <ContextMenu>
-                            <ContextMenuTrigger asChild>
-                              <button
-                                type="button"
-                                onClick={() => setActive(doc.id)}
-                                className={cn(
-                                  "group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition",
-                                  isActive
-                                    ? "bg-primary/10 font-medium text-foreground"
-                                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                                )}
-                              >
-                                {isPinned && <Pin className="size-3 shrink-0 text-amber-500" />}
-                                <Icon className="size-3.5 shrink-0" />
-                                <span className="flex-1 truncate">
-                                  {doc.title || t("untitledDefault")}
-                                </span>
-                                <Badge variant="outline" className="px-1 text-[10px] shrink-0">
-                                  {doc.language}
-                                </Badge>
-                                <Tooltip delayDuration={300}>
-                                  <TooltipTrigger asChild>
-                                    <span
-                                      role="button"
-                                      tabIndex={0}
-                                      onClick={(ev) => {
-                                        ev.stopPropagation()
-                                        if (activeId === doc.id) setActive(null)
-                                        remove(doc.id)
-                                      }}
-                                      className="opacity-0 transition group-hover:opacity-70 hover:opacity-100"
-                                      aria-label="Delete"
-                                    >
-                                      <X className="size-3" />
+        <SidebarContent>
+          {grouped.length === 0 ? (
+            <Empty className="border-0 p-4">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <FileText />
+                </EmptyMedia>
+                <EmptyDescription className="text-xs">{t("noDocuments")}</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            grouped.map((group) => (
+              <SidebarGroup key={group.key} className="gap-0.5 p-1">
+                <Collapsible defaultOpen={group.key === "pinned" || group.key === "today"}>
+                  <CollapsibleTrigger
+                    data-slot="sidebar-group-label"
+                    data-sidebar="group-label"
+                    className="flex w-full items-center gap-1 px-2 py-1 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors group/collapse rounded-sm bg-transparent"
+                  >
+                    <ChevronRight className="size-3 transition-transform duration-200 [&[data-state=open]]:rotate-90" />
+                    {group.label}
+                    <span className="ml-auto tabular-nums text-[9px] opacity-60">
+                      {group.docs.length}
+                    </span>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    {/*
+                      motion.ul mirrors the shadcn SidebarMenu's <ul> + data
+                      attributes so tests can still query [data-sidebar="menu"],
+                      while STAGGER_CONTAINER + the per-li STAGGER_CHILD ripples
+                      rows in whenever the bucket expands or a doc appears
+                      (rename / pin / new). AnimatePresence is intentionally
+                      omitted — under jsdom (and reduced-motion) exit
+                      animations don't progress, which would leave filtered-out
+                      rows mounted and break search/filter semantics. Stagger
+                      on entry is the visible win; exit is a snap, which is
+                      what users already had.
+                    */}
+                    <motion.ul
+                      data-slot="sidebar-menu"
+                      data-sidebar="menu"
+                      className="flex w-full min-w-0 flex-col gap-0.5 pt-0.5"
+                      variants={STAGGER_CONTAINER}
+                      initial="initial"
+                      animate="animate"
+                    >
+                      {group.docs.map((doc) => {
+                        const isActive = doc.id === activeId
+                        const isPinned = pinnedDocIds.has(doc.id)
+                        const Icon = doc.type === "code" ? FileCode : FileText
+                        return (
+                          <motion.li
+                            key={doc.id}
+                            layout
+                            variants={STAGGER_CHILD}
+                            data-slot="sidebar-menu-item"
+                            data-sidebar="menu-item"
+                            className="group/menu-item relative"
+                          >
+                            <ContextMenu>
+                              <ContextMenuTrigger asChild>
+                                <div
+                                  className={cn(
+                                    "group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition",
+                                    isActive
+                                      ? "bg-primary/10 font-medium text-foreground"
+                                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                  )}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => setActive(doc.id)}
+                                    className="flex flex-1 min-w-0 items-center gap-2 bg-transparent text-left"
+                                  >
+                                    {isPinned && <Pin className="size-3 shrink-0 text-amber-500" />}
+                                    <Icon className="size-3.5 shrink-0" />
+                                    <span className="flex-1 truncate">
+                                      {doc.title || t("untitledDefault")}
                                     </span>
-                                  </TooltipTrigger>
-                                  <TooltipContent side="right">
-                                    {t("delete", { default: "Delete" })}
-                                  </TooltipContent>
-                                </Tooltip>
-                              </button>
-                            </ContextMenuTrigger>
-                            <ContextMenuContent className="w-40">
-                              <ContextMenuItem onClick={() => handleStartRename(doc)}>
-                                <Edit2 className="mr-2 size-3.5" />
-                                {t("rename")}
-                              </ContextMenuItem>
-                              <ContextMenuItem
-                                onClick={() => {
-                                  const dupId = create({
-                                    title: `${doc.title} ${t("copySuffix")}`,
-                                    content: doc.content,
-                                    language: doc.language,
-                                    type: doc.type,
-                                  })
-                                  setActive(dupId)
-                                }}
-                              >
-                                <Copy className="mr-2 size-3.5" />
-                                {t("duplicate")}
-                              </ContextMenuItem>
-                              <ContextMenuItem onClick={() => handleExport(doc)}>
-                                <Download className="mr-2 size-3.5" />
-                                {t("export", { default: "Export" })}
-                              </ContextMenuItem>
-                              <ContextMenuSeparator />
-                              <ContextMenuItem
-                                onClick={() => {
-                                  isPinned ? unpinDocument(doc.id) : pinDocument(doc.id)
-                                }}
-                              >
-                                {isPinned ? (
-                                  <>
-                                    <PinOff className="mr-2 size-3.5" />
-                                    {t("unpin", { default: "Unpin" })}
-                                  </>
-                                ) : (
-                                  <>
-                                    <Pin className="mr-2 size-3.5" />
-                                    {t("pin", { default: "Pin" })}
-                                  </>
-                                )}
-                              </ContextMenuItem>
-                              <ContextMenuSeparator />
-                              <ContextMenuItem
-                                onClick={() => {
-                                  remove(doc.id)
-                                  if (activeId === doc.id) setActive(null)
-                                }}
-                                className="text-destructive focus:text-destructive"
-                              >
-                                <Trash2 className="mr-2 size-3.5" />
-                                {t("delete")}
-                              </ContextMenuItem>
-                            </ContextMenuContent>
-                          </ContextMenu>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                </CollapsibleContent>
-              </Collapsible>
-            ))}
-          </div>
-        )}
+                                    <Badge variant="outline" className="px-1 text-[10px] shrink-0">
+                                      {doc.language}
+                                    </Badge>
+                                  </button>
+                                  <Tooltip delayDuration={300}>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        type="button"
+                                        aria-label={t("deleteAria")}
+                                        onClick={(ev) => {
+                                          ev.stopPropagation()
+                                          if (activeId === doc.id) setActive(null)
+                                          remove(doc.id)
+                                        }}
+                                        className="size-5 shrink-0 opacity-0 transition group-hover:opacity-70 hover:opacity-100"
+                                      >
+                                        <X className="size-3" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="right">
+                                      {t("delete", { default: "Delete" })}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </div>
+                              </ContextMenuTrigger>
+                              <ContextMenuContent className="w-40">
+                                <ContextMenuItem onClick={() => handleStartRename(doc)}>
+                                  <Edit2 className="mr-2 size-3.5" />
+                                  {t("rename")}
+                                </ContextMenuItem>
+                                <ContextMenuItem
+                                  onClick={() => {
+                                    const dupId = create({
+                                      title: `${doc.title} ${t("copySuffix")}`,
+                                      content: doc.content,
+                                      language: doc.language,
+                                      type: doc.type,
+                                    })
+                                    setActive(dupId)
+                                  }}
+                                >
+                                  <Copy className="mr-2 size-3.5" />
+                                  {t("duplicate")}
+                                </ContextMenuItem>
+                                <ContextMenuItem onClick={() => handleExport(doc)}>
+                                  <Download className="mr-2 size-3.5" />
+                                  {t("export", { default: "Export" })}
+                                </ContextMenuItem>
+                                <ContextMenuSeparator />
+                                <ContextMenuItem
+                                  onClick={() => {
+                                    if (isPinned) unpinDocument(doc.id)
+                                    else pinDocument(doc.id)
+                                  }}
+                                >
+                                  {isPinned ? (
+                                    <>
+                                      <PinOff className="mr-2 size-3.5" />
+                                      {t("unpin", { default: "Unpin" })}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Pin className="mr-2 size-3.5" />
+                                      {t("pin", { default: "Pin" })}
+                                    </>
+                                  )}
+                                </ContextMenuItem>
+                                <ContextMenuSeparator />
+                                <ContextMenuItem
+                                  onClick={() => {
+                                    remove(doc.id)
+                                    if (activeId === doc.id) setActive(null)
+                                  }}
+                                  className="text-destructive focus:text-destructive"
+                                >
+                                  <Trash2 className="mr-2 size-3.5" />
+                                  {t("delete")}
+                                </ContextMenuItem>
+                              </ContextMenuContent>
+                            </ContextMenu>
+                          </motion.li>
+                        )
+                      })}
+                    </motion.ul>
+                  </CollapsibleContent>
+                </Collapsible>
+              </SidebarGroup>
+            ))
+          )}
+        </SidebarContent>
       </ScrollArea>
       <RenameDialog
         open={renameDialogOpen}

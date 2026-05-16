@@ -10,7 +10,7 @@
  */
 
 import { memo, useEffect, useMemo, useCallback, useState, useRef } from "react"
-import { useTranslations } from "next-intl"
+import { useTranslations, useLocale } from "next-intl"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -73,6 +73,7 @@ interface TimelineBucketTileProps {
   totalLabel: string
   errorsLabel: string
   warningsLabel: string
+  locale: string
 }
 
 const TimelineBucketTile = memo(function TimelineBucketTile({
@@ -92,18 +93,19 @@ const TimelineBucketTile = memo(function TimelineBucketTile({
   totalLabel,
   errorsLabel,
   warningsLabel,
+  locale,
 }: TimelineBucketTileProps) {
   const handleMouseDown = useCallback(() => onMouseDown(index), [onMouseDown, index])
   const handleMouseEnter = useCallback(() => onMouseEnter(index), [onMouseEnter, index])
   const startLabel = useMemo(
     () =>
-      new Date(startMs).toLocaleTimeString("en-US", {
+      new Date(startMs).toLocaleTimeString(locale, {
         hour12: false,
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
       }),
-    [startMs]
+    [startMs, locale]
   )
   return (
     <Tooltip>
@@ -154,6 +156,7 @@ export function LogTimeline({
   selectedRange = null,
 }: LogTimelineProps) {
   const t = useTranslations("logging")
+  const locale = useLocale()
   const [dragStartIdx, setDragStartIdx] = useState<number | null>(null)
   const [dragCurrentIdx, setDragCurrentIdx] = useState<number | null>(null)
   const isDragging = useRef(false)
@@ -309,73 +312,80 @@ export function LogTimeline({
   const hasWarns = buckets.some((b) => b.warn > 0)
 
   return (
-    <div className={cn("px-3 py-2 border-b bg-muted/10", className)}>
+    <div className={cn("px-3 py-2 sm:px-3 border-b bg-muted/10", className)}>
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-[10px] text-muted-foreground font-medium">{t("timeline.title")}</span>
+        <span className="text-xs sm:text-[10px] text-muted-foreground font-medium">
+          {t("timeline.title")}
+        </span>
         {selectedRange && (
           <Button
             variant="ghost"
             size="sm"
-            className="h-4 px-1 text-[10px]"
+            className="h-4 px-1 text-xs sm:text-[10px]"
             onClick={() => onTimeRangeClick?.(new Date(0), new Date())}
           >
             <X className="h-2.5 w-2.5 mr-0.5" />
-            Clear
+            {t("timeline.clear")}
           </Button>
         )}
         <div className="flex items-center gap-1.5 ml-auto">
           <div className="flex items-center gap-1">
-            <div className="h-2 w-2 rounded-sm bg-green-500" />
-            <span className="text-[10px] text-muted-foreground">{t("levels.info")}</span>
+            <div aria-hidden="true" className="h-2 w-2 rounded-sm bg-green-500" />
+            <span className="text-xs sm:text-[10px] text-muted-foreground">{t("levels.info")}</span>
           </div>
           <div className="flex items-center gap-1">
-            <div className="h-2 w-2 rounded-sm bg-yellow-500" />
-            <span className="text-[10px] text-muted-foreground">{t("levels.warn")}</span>
+            <div aria-hidden="true" className="h-2 w-2 rounded-sm bg-yellow-500" />
+            <span className="text-xs sm:text-[10px] text-muted-foreground">{t("levels.warn")}</span>
           </div>
           <div className="flex items-center gap-1">
-            <div className="h-2 w-2 rounded-sm bg-red-500" />
-            <span className="text-[10px] text-muted-foreground">{t("levels.error")}</span>
+            <div aria-hidden="true" className="h-2 w-2 rounded-sm bg-red-500" />
+            <span className="text-xs sm:text-[10px] text-muted-foreground">
+              {t("levels.error")}
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Main density bar */}
+      {/* Main density bar — wrapper provides ≥36px touch target on mobile */}
       <div
-        className="flex gap-px h-6 rounded overflow-hidden select-none"
+        className="flex items-center min-h-[36px] sm:min-h-0"
         onMouseLeave={handleMouseUp}
         onMouseUp={handleMouseUp}
       >
-        {buckets.map((bucket, i) => (
-          <TimelineBucketTile
-            key={i}
-            index={i}
-            total={bucket.total}
-            error={bucket.error}
-            warn={bucket.warn}
-            startMs={bucket.start.getTime()}
-            colorClass={getBucketColor(bucket)}
-            opacity={getBucketOpacity(bucket, maxCount)}
-            isSelected={isInRange(bucket, selectedRange)}
-            isInBrush={brushRange ? i >= brushRange.min && i <= brushRange.max : false}
-            clickable={Boolean(onTimeRangeClick)}
-            onMouseDown={handleMouseDown}
-            onMouseEnter={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            totalLabel={timelineLabels.total}
-            errorsLabel={timelineLabels.errors}
-            warningsLabel={timelineLabels.warnings}
-          />
-        ))}
+        <div className="flex gap-px h-6 w-full rounded overflow-hidden select-none motion-safe:transition-all">
+          {buckets.map((bucket, i) => (
+            <TimelineBucketTile
+              key={i}
+              index={i}
+              total={bucket.total}
+              error={bucket.error}
+              warn={bucket.warn}
+              startMs={bucket.start.getTime()}
+              colorClass={getBucketColor(bucket)}
+              opacity={getBucketOpacity(bucket, maxCount)}
+              isSelected={isInRange(bucket, selectedRange)}
+              isInBrush={brushRange ? i >= brushRange.min && i <= brushRange.max : false}
+              clickable={Boolean(onTimeRangeClick)}
+              onMouseDown={handleMouseDown}
+              onMouseEnter={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              totalLabel={timelineLabels.total}
+              errorsLabel={timelineLabels.errors}
+              warningsLabel={timelineLabels.warnings}
+              locale={locale}
+            />
+          ))}
+        </div>
       </div>
 
-      {/* Level-specific mini-sparklines */}
-      <div className="mt-0.5 space-y-px">
+      {/* Level-specific mini-sparklines (decorative) */}
+      <div className="mt-0.5 space-y-px" aria-hidden="true">
         {hasErrors && (
           <div className="flex gap-px h-[3px] rounded overflow-hidden">
             {buckets.map((bucket, i) => (
               <div
                 key={i}
-                className="flex-1 min-w-0 bg-red-500 transition-opacity"
+                className="flex-1 min-w-0 bg-red-500 motion-safe:transition-opacity"
                 style={{
                   opacity:
                     bucket.error > 0 ? Math.max(0.3, bucket.error / maxPerLevel.error) : 0.05,
@@ -389,7 +399,7 @@ export function LogTimeline({
             {buckets.map((bucket, i) => (
               <div
                 key={i}
-                className="flex-1 min-w-0 bg-yellow-500 transition-opacity"
+                className="flex-1 min-w-0 bg-yellow-500 motion-safe:transition-opacity"
                 style={{
                   opacity: bucket.warn > 0 ? Math.max(0.3, bucket.warn / maxPerLevel.warn) : 0.05,
                 }}
@@ -401,15 +411,15 @@ export function LogTimeline({
 
       {/* Time labels */}
       <div className="flex justify-between mt-0.5">
-        <span className="text-[10px] text-muted-foreground">
-          {firstTime?.toLocaleTimeString("en-US", {
+        <span className="text-xs sm:text-[10px] text-muted-foreground">
+          {firstTime?.toLocaleTimeString(locale, {
             hour12: false,
             hour: "2-digit",
             minute: "2-digit",
           })}
         </span>
-        <span className="text-[10px] text-muted-foreground">
-          {lastTime?.toLocaleTimeString("en-US", {
+        <span className="text-xs sm:text-[10px] text-muted-foreground">
+          {lastTime?.toLocaleTimeString(locale, {
             hour12: false,
             hour: "2-digit",
             minute: "2-digit",

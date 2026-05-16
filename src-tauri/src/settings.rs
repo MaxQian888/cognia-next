@@ -310,13 +310,23 @@ pub fn write_claude_settings_env(
         ));
     }
 
-    let root: serde_json::Map<String, Value> = if path.is_file() {
-        let raw = std::fs::read_to_string(&path)
+    // Read + capture mtime in a single shot so the drift window is as small
+    // as possible. The fs_atomic helper re-checks the mtime right before
+    // renaming the temp file into place; if CCSwitch or another tool wrote
+    // between these two points, we abort with drift_detected and the
+    // renderer reloads.
+    let (bytes, mtime) =
+        crate::fs_atomic::read_with_mtime(&path).map_err(|e| format!("read {}: {}", path.display(), e))?;
+
+    let root: serde_json::Map<String, Value> = if bytes.is_empty() {
+        serde_json::Map::new()
+    } else {
+        let raw = std::str::from_utf8(&bytes)
             .map_err(|e| format!("read {}: {}", path.display(), e))?;
         if raw.trim().is_empty() {
             serde_json::Map::new()
         } else {
-            match serde_json::from_str::<Value>(&raw) {
+            match serde_json::from_str::<Value>(raw) {
                 Ok(Value::Object(m)) => m,
                 Ok(_) => {
                     return Err(format!(
@@ -327,43 +337,33 @@ pub fn write_claude_settings_env(
                 Err(e) => return Err(format!("parse {}: {}", path.display(), e)),
             }
         }
-    } else {
-        serde_json::Map::new()
     };
 
     let merged = merge_env_updates(root, env_updates);
-    let serialized =
-        serde_json::to_string_pretty(&Value::Object(merged)).map_err(|e| format!("serialize: {}", e))?;
+    let serialized = serde_json::to_string_pretty(&Value::Object(merged))
+        .map_err(|e| format!("serialize: {}", e))?;
     let serialized = format!("{}\n", serialized);
 
-    // Atomic write with backup, mirroring `agents::io::write_file`.
-    let backup_path = if path.exists() {
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let bp = path.with_extension(format!("json.bak.{}", ts));
-        std::fs::copy(&path, &bp).map_err(|e| format!("backup: {}", e))?;
-        Some(bp.to_string_lossy().into_owned())
-    } else {
-        None
+    let plan = crate::fs_atomic::AtomicWritePlan {
+        path: path.clone(),
+        // Only enforce the mtime check when we actually observed an existing
+        // file. Brand-new writes (~/.claude/settings.json was empty) can
+        // proceed without it.
+        expected_mtime: mtime,
+        tmp_suffix: "tmp".into(),
+        backup_suffix: "bak".into(),
     };
-    let tmp_path = path.with_extension("json.tmp");
-    {
-        use std::io::Write as _;
-        let mut f = std::fs::File::create(&tmp_path).map_err(|e| format!("create tmp: {}", e))?;
-        f.write_all(serialized.as_bytes())
-            .map_err(|e| format!("write tmp: {}", e))?;
-        f.sync_all().ok();
-    }
-    std::fs::rename(&tmp_path, &path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp_path);
-        format!("rename into place: {}", e)
-    })?;
+    let out = crate::fs_atomic::atomic_write_with_mtime_check(&plan, serialized.as_bytes())
+        .map_err(|e| match e {
+            crate::fs_atomic::AtomicWriteError::DriftDetected { .. } => {
+                crate::fs_atomic::DRIFT_DETECTED_TAG.to_string()
+            }
+            other => format!("{other}"),
+        })?;
 
     Ok(ClaudeSettingsWriteResult {
-        path: path.to_string_lossy().into_owned(),
-        backup_path,
+        path: out.path.to_string_lossy().into_owned(),
+        backup_path: out.backup_path.map(|p| p.to_string_lossy().into_owned()),
     })
 }
 

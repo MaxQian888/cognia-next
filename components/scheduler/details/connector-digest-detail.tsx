@@ -107,7 +107,9 @@ export function ConnectorDigestDetail({ taskId, onSelectRun }: ConnectorDigestDe
                   className="w-full text-left flex items-center justify-between gap-2 rounded px-2 py-1.5 text-xs hover:bg-accent"
                 >
                   <span className="truncate">{new Date(run.startedAt).toLocaleString()}</span>
-                  <span className="shrink-0 text-muted-foreground">{run.status}</span>
+                  <span className="shrink-0 text-muted-foreground">
+                    {t(`unifiedRunStatuses.${run.status}`) || run.status}
+                  </span>
                 </button>
               </li>
             ))}

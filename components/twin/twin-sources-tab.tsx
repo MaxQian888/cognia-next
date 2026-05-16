@@ -3,9 +3,11 @@
 import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
+import { motion, useReducedMotion } from "motion/react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
+import { StatusBadge } from "@/components/status-badge"
 import { listTwinSourcesByTwin, deleteTwinSource } from "@/lib/db/twin-sources"
 import type { TwinSource, TwinSourceStatus } from "@/types/twin"
 import { TwinSourceUploader } from "./twin-source-uploader"
@@ -29,8 +31,8 @@ function formatBytes(n: number): string {
 
 export function TwinSourcesTab({ twinId }: { twinId: string }) {
   const t = useTranslations("twin.sources")
-  const tCharts = useTranslations("twin.charts.status")
   const tFormat = useTranslations("twin.format")
+  const prefersReducedMotion = useReducedMotion()
   const [showUploader, setShowUploader] = useState(false)
   const sources = useLiveQuery(() => listTwinSourcesByTwin(twinId), [twinId], [])
 
@@ -53,14 +55,20 @@ export function TwinSourcesTab({ twinId }: { twinId: string }) {
         </Card>
       ) : (
         <ul className="flex flex-col gap-2">
-          {sources.map((source) => (
-            <SourceRow
+          {sources.map((source, index) => (
+            <motion.li
               key={source.id}
-              source={source}
-              t={t}
-              statusLabel={(s) => tCharts(s as Exclude<TwinSourceStatus, never>)}
-              formatLabel={(f) => tFormat(f)}
-            />
+              initial={prefersReducedMotion ? false : { opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{
+                duration: 0.15,
+                ease: "easeOut",
+                delay: prefersReducedMotion ? 0 : Math.min(index * 0.03, 0.15),
+              }}
+              className="list-none"
+            >
+              <SourceRow source={source} t={t} formatLabel={(f) => tFormat(f)} />
+            </motion.li>
           ))}
         </ul>
       )}
@@ -71,22 +79,25 @@ export function TwinSourcesTab({ twinId }: { twinId: string }) {
 function SourceRow({
   source,
   t,
-  statusLabel,
   formatLabel,
 }: {
   source: TwinSource
   t: ReturnType<typeof useTranslations>
-  statusLabel: (s: TwinSourceStatus) => string
   formatLabel: (f: TwinSource["format"]) => string
 }) {
   return (
     <Card className="flex items-center justify-between gap-3 p-3">
       <div className="flex min-w-0 flex-col gap-1">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="truncate font-medium">{source.title}</span>
-          <Badge variant={STATUS_VARIANT[source.status]} className="shrink-0">
-            {statusLabel(source.status)}
-          </Badge>
+          <StatusBadge
+            value={source.status}
+            labelNamespace="twin.charts.status"
+            variantMap={STATUS_VARIANT}
+            pulse={source.status === "parsing"}
+            className="shrink-0"
+            data-testid={`twin-source-${source.id}-status`}
+          />
           <Badge variant="outline" className="shrink-0">
             {formatLabel(source.format)}
           </Badge>

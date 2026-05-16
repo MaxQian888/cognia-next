@@ -44,6 +44,7 @@ interface CommandItemProps {
 }
 
 function CommandItem({ command, onExecute, isExecuting }: CommandItemProps) {
+  const t = useTranslations("externalAgent")
   const [args, setArgs] = useState("")
   const hasInput = command.input !== null && command.input !== undefined
 
@@ -60,7 +61,7 @@ function CommandItem({ command, onExecute, isExecuting }: CommandItemProps) {
           <code className="text-sm font-medium">/{command.name}</code>
           {hasInput && (
             <Badge variant="outline" className="text-xs">
-              {command.input?.hint || "args"}
+              {command.input?.hint || t("commandDefaultArgs")}
             </Badge>
           )}
         </div>

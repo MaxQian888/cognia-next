@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useState, useCallback } from "react"
+import { useTranslations } from "next-intl"
 import { loggers } from "@/lib/logger"
 import { cn } from "@/lib/utils"
 import { useA2UI } from "@/hooks/a2ui"
@@ -20,6 +21,8 @@ import {
 } from "@/components/ui/dialog"
 import { RefreshCw, Sparkles } from "lucide-react"
 import type { A2UIComponent, A2UIUserAction, A2UIDataModelChange } from "@/types/a2ui/schema"
+
+type DemoT = ReturnType<typeof useTranslations<"chat.welcomeDemo">>
 
 interface WelcomeA2UIDemoProps {
   className?: string
@@ -48,8 +51,10 @@ const QUICK_ACTION_PROMPTS: Record<string, string> = {
 
 const log = loggers.chat.child("welcome-a2ui-demo")
 
-// Create demo components for interactive showcase
-function createDemoComponents(showSettings: boolean = true): A2UIComponent[] {
+// Create demo components for interactive showcase. The `t` translator is
+// scoped to `chat.welcomeDemo`; the inner `QUICK_ACTION_PROMPTS` map remains
+// English since those strings are LLM-bound prompts, not UI labels.
+function createDemoComponents(t: DemoT, showSettings: boolean = true): A2UIComponent[] {
   const baseComponents: A2UIComponent[] = [
     {
       id: "root",
@@ -62,7 +67,7 @@ function createDemoComponents(showSettings: boolean = true): A2UIComponent[] {
     {
       id: "header",
       component: "Text",
-      text: "✨ Quick Actions",
+      text: t("quickActions"),
       variant: "heading3",
     },
     {
@@ -74,21 +79,21 @@ function createDemoComponents(showSettings: boolean = true): A2UIComponent[] {
     {
       id: "btn-summarize",
       component: "Button",
-      text: "📝 Summarize",
+      text: t("summarize"),
       variant: "outline",
       action: "summarize",
     },
     {
       id: "btn-translate",
       component: "Button",
-      text: "🌐 Translate",
+      text: t("translate"),
       variant: "outline",
       action: "translate",
     },
     {
       id: "btn-analyze",
       component: "Button",
-      text: "📊 Analyze",
+      text: t("analyze"),
       variant: "outline",
       action: "analyze",
     },
@@ -101,21 +106,21 @@ function createDemoComponents(showSettings: boolean = true): A2UIComponent[] {
     {
       id: "btn-code-review",
       component: "Button",
-      text: "💻 Code Review",
+      text: t("codeReview"),
       variant: "outline",
       action: "code-review",
     },
     {
       id: "btn-ideas",
       component: "Button",
-      text: "💡 Generate Ideas",
+      text: t("generateIdeas"),
       variant: "outline",
       action: "generate-ideas",
     },
     {
       id: "btn-explain",
       component: "Button",
-      text: "📖 Explain Concept",
+      text: t("explainConcept"),
       variant: "outline",
       action: "explain-concept",
     },
@@ -130,7 +135,7 @@ function createDemoComponents(showSettings: boolean = true): A2UIComponent[] {
       {
         id: "quick-settings",
         component: "Card",
-        title: "⚙️ Response Settings",
+        title: t("responseSettings"),
         children: ["settings-row"],
         className: "bg-muted/30",
       } as A2UIComponent,
@@ -143,7 +148,7 @@ function createDemoComponents(showSettings: boolean = true): A2UIComponent[] {
       {
         id: "tone-select",
         component: "Select",
-        label: "Tone",
+        label: t("tone"),
         value: { path: "/settings/tone" },
         options: [
           { value: "professional", label: "👔 Professional" },
@@ -151,19 +156,19 @@ function createDemoComponents(showSettings: boolean = true): A2UIComponent[] {
           { value: "creative", label: "🎨 Creative" },
           { value: "technical", label: "🔧 Technical" },
         ],
-        placeholder: "Select tone...",
+        placeholder: t("selectTonePlaceholder"),
       } as A2UIComponent,
       {
         id: "length-select",
         component: "Select",
-        label: "Length",
+        label: t("length"),
         value: { path: "/settings/length" },
         options: [
           { value: "brief", label: "📄 Brief" },
           { value: "moderate", label: "📋 Moderate" },
           { value: "detailed", label: "📚 Detailed" },
         ],
-        placeholder: "Select length...",
+        placeholder: t("selectLengthPlaceholder"),
       } as A2UIComponent
     )
   }
@@ -185,6 +190,7 @@ export function WelcomeA2UIDemo({
   onSuggestionClick,
   showSettings = true,
 }: WelcomeA2UIDemoProps) {
+  const t = useTranslations("chat.welcomeDemo")
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isOpen, setIsOpen] = useState(false)
   const [hasShown, setHasShown] = useState(() => {
@@ -222,29 +228,29 @@ export function WelcomeA2UIDemo({
 
   // Create demo surface on mount
   useEffect(() => {
-    const components = createDemoComponents(showSettings)
+    const components = createDemoComponents(t, showSettings)
     createQuickSurface(DEMO_SURFACE_ID, components, initialDataModel, {
       type: "inline",
-      title: "Interactive Demo",
+      title: t("dialogTitle"),
     })
 
     return () => {
       deleteSurface(DEMO_SURFACE_ID)
     }
-  }, [createQuickSurface, deleteSurface, showSettings])
+  }, [createQuickSurface, deleteSurface, showSettings, t])
 
   const surface = getSurface(DEMO_SURFACE_ID)
 
   const handleRefresh = useCallback(() => {
     setIsRefreshing(true)
     deleteSurface(DEMO_SURFACE_ID)
-    const components = createDemoComponents(showSettings)
+    const components = createDemoComponents(t, showSettings)
     createQuickSurface(DEMO_SURFACE_ID, components, initialDataModel, {
       type: "inline",
-      title: "Interactive Demo",
+      title: t("dialogTitle"),
     })
     setTimeout(() => setIsRefreshing(false), 300)
-  }, [createQuickSurface, deleteSurface, showSettings])
+  }, [createQuickSurface, deleteSurface, showSettings, t])
 
   const handleOpen = useCallback(() => {
     setIsOpen(true)
@@ -281,15 +287,13 @@ export function WelcomeA2UIDemo({
           className="w-full gap-2 animate-in fade-in-0 slide-in-from-bottom-4 duration-500"
         >
           <Sparkles className="h-4 w-4" />
-          <span>✨ Try Interactive Demo</span>
+          <span>{t("openDemo")}</span>
         </Button>
 
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[80vh] max-w-[calc(100vw-2rem)] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>✨ Quick Actions Demo</DialogTitle>
-            <DialogDescription>
-              Experience the power of A2UI - interactive AI-generated UI components
-            </DialogDescription>
+            <DialogTitle>{t("dialogTitle")}</DialogTitle>
+            <DialogDescription>{t("dialogDescription")}</DialogDescription>
           </DialogHeader>
 
           {surface && (
@@ -301,6 +305,7 @@ export function WelcomeA2UIDemo({
                   className="h-6 w-6"
                   onClick={handleRefresh}
                   disabled={isRefreshing}
+                  aria-label={t("refresh")}
                 >
                   <RefreshCw className={cn("h-3 w-3", isRefreshing && "animate-spin")} />
                 </Button>

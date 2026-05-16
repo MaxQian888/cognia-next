@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "next-intl"
 import { FileSearchIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 import { McpCardShell, useParsedOutput } from "./common"
@@ -10,6 +11,7 @@ interface GlobOutput {
 }
 
 export function GlobCard({ part }: { part: ToolUIPart }) {
+  const t = useTranslations("chat.mcp.glob")
   const input = (part.input ?? {}) as { pattern?: string; path?: string }
   const parsed = useParsedOutput<GlobOutput>(part.output)
 
@@ -43,7 +45,7 @@ export function GlobCard({ part }: { part: ToolUIPart }) {
             </p>
           )}
           {matches.length === 0 ? (
-            <p className="text-muted-foreground">No matches.</p>
+            <p className="text-muted-foreground">{t("noMatches")}</p>
           ) : (
             <ul
               className="mt-1 max-h-60 overflow-auto rounded border bg-muted/30 px-2 py-1 font-mono text-[11px]"

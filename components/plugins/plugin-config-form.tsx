@@ -255,6 +255,7 @@ function FieldRow({
   value: unknown
   onChange: (v: unknown) => void
 }) {
+  const t = useTranslations("plugins.configForm")
   const id = `plugin-config-${fieldKey}`
   return (
     <div className="space-y-1.5">
@@ -262,7 +263,7 @@ function FieldRow({
         {fieldKey}
       </Label>
       {field.description && <p className="text-xs text-muted-foreground">{field.description}</p>}
-      {renderInput(field, id, value, onChange)}
+      {renderInput(field, id, value, onChange, t)}
     </div>
   )
 }
@@ -271,7 +272,8 @@ function renderInput(
   field: SchemaField,
   id: string,
   value: unknown,
-  onChange: (v: unknown) => void
+  onChange: (v: unknown) => void,
+  t: (key: string) => string
 ) {
   switch (field.type) {
     case "string": {
@@ -326,14 +328,10 @@ function renderInput(
                 .filter(Boolean)
             )
           }
-          placeholder="one entry per line"
+          placeholder={t("arrayPlaceholder")}
         />
       )
     default:
-      return (
-        <p className="text-xs text-muted-foreground italic">
-          unsupported schema type — edit via JSON
-        </p>
-      )
+      return <p className="text-xs text-muted-foreground italic">{t("unsupportedField")}</p>
   }
 }

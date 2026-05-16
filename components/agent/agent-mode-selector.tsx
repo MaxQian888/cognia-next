@@ -375,7 +375,7 @@ export function AgentModeSelector({
                               {team.task}
                             </p>
                             <span className="text-[10px] text-muted-foreground">
-                              {team.teammateIds.length} teammates
+                              {t("teammatesCount", { count: team.teammateIds.length })}
                             </span>
                           </div>
                         </DropdownMenuItem>

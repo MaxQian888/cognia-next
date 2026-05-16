@@ -72,7 +72,7 @@ export function useLocalProvider(args: UseLocalProviderArgs): UseLocalProviderRe
 
   const [status, setStatus] = useState<LocalServerStatus | null>(null)
   const [models, setModels] = useState<LocalModelInfo[]>([])
-  const [runningModels, setRunningModels] = useState<LocalModelInfo[]>([])
+  const [runningModels, _setRunningModels] = useState<LocalModelInfo[]>([])
   const [pullStates, setPullStates] = useState<Map<string, LocalPullState>>(() => new Map())
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)

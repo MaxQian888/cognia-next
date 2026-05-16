@@ -4,6 +4,7 @@
 // the most useful shortcuts. Kept terse to avoid stealing attention.
 
 import { useTranslations } from "next-intl"
+import { Badge } from "@/components/ui/badge"
 
 export function HelperHints() {
   const t = useTranslations("chat.composer.helperHints")
@@ -21,8 +22,8 @@ export function HelperHints() {
 
 function Hint({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded-full border border-border/50 bg-background/60 px-2 py-0.5">
+    <Badge variant="outline" className="rounded-full bg-background/60 px-2 py-0.5 text-[10px]">
       {children}
-    </span>
+    </Badge>
   )
 }

@@ -108,7 +108,7 @@ async function writeMasterKeyBytes(bytes: Uint8Array): Promise<void> {
   const existing = ((await db.settings.get("singleton")) ?? {
     id: "singleton",
   }) as AppSettings & { [SETTINGS_FIELD]?: string }
-  await db.settings.put({ ...existing, [SETTINGS_FIELD]: b64 })
+  await db.settings.put({ ...existing, [SETTINGS_FIELD]: b64 } as AppSettings)
 }
 
 /**

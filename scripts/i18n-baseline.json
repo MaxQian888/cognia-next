@@ -1,5 +1,5 @@
 {
-  "count": 954,
+  "count": 698,
   "samples": [
     {
       "file": "components/a2ui/a2ui-error-boundary.tsx",
@@ -247,9 +247,9 @@
       "text": "Latest"
     },
     {
-      "file": "components/agent/a2ui-template-preview.tsx",
-      "context": "jsx-text",
-      "text": "A2UI Template Preview"
+      "file": "components/agent/external-agent-manager.tsx",
+      "context": "placeholder",
+      "text": "Claude Code"
     }
   ],
   "knownParityDrift": {

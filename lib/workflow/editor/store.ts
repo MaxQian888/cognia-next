@@ -22,13 +22,7 @@ import { create, type StoreApi, type UseBoundStore } from "zustand"
 import { temporal, type TemporalState } from "zundo"
 import { nanoid } from "nanoid"
 import type { Viewport } from "@xyflow/react"
-import type {
-  VisualWorkflow,
-  WorkflowEdge,
-  WorkflowNode,
-  WorkflowNodeData,
-  WorkflowNodeKind,
-} from "@/types/workflow/visual"
+import type { VisualWorkflow, WorkflowNodeData, WorkflowNodeKind } from "@/types/workflow/visual"
 import {
   reactFlowToWorkflow,
   workflowToReactFlow,

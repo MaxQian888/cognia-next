@@ -4,6 +4,11 @@
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
+    vars ? `${key}:${JSON.stringify(vars)}` : key,
+}))
+
 const installFromLocalMock = jest.fn()
 const previewBundleManifestMock = jest.fn()
 const dialogOpenMock = jest.fn()
@@ -60,9 +65,7 @@ describe("InstallWasmPluginButton", () => {
     canUseTauriInvokeMock.mockReturnValue(false)
     render(<InstallWasmPluginButton />)
     fireEvent.click(screen.getByTestId("install-wasm-plugin-button"))
-    await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent(/Tauri desktop runtime/i)
-    )
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("tauriRequiredError"))
     expect(dialogOpenMock).not.toHaveBeenCalled()
   })
 

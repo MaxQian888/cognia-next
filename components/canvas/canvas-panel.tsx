@@ -17,7 +17,6 @@ import type { editor as MonacoEditor } from "monaco-editor"
 import { useTheme } from "next-themes"
 import { useTranslations } from "next-intl"
 import {
-  Loader2,
   Save,
   Wand2,
   Bug,
@@ -38,6 +37,8 @@ import {
   Edit2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   DropdownMenu,
@@ -78,7 +79,7 @@ function EditorLoading() {
   const t = useTranslations("canvas")
   return (
     <div className="flex h-full items-center justify-center bg-muted/20 text-sm text-muted-foreground">
-      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+      <Spinner className="mr-2 size-4" />
       {t("loadingEditor")}
     </div>
   )
@@ -169,14 +170,25 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   // via JS that prevents the flex container from shrinking (microsoft/monaco-editor#3393).
   // A ResizeObserver on the container explicitly calls editor.layout() to
   // override Monaco's stale inline dimensions when the panel is resized.
+  // The 60ms trailing debounce coalesces the burst of observer ticks fired
+  // while a user drags a ResizableHandle — without it, Monaco rerenders on
+  // every animation frame and visibly stutters.
   useEffect(() => {
     const container = editorContainerRef.current
     if (!container || typeof ResizeObserver === "undefined") return
+    let pending: ReturnType<typeof setTimeout> | null = null
     const observer = new ResizeObserver(() => {
-      editorRef.current?.layout()
+      if (pending) clearTimeout(pending)
+      pending = setTimeout(() => {
+        pending = null
+        editorRef.current?.layout()
+      }, 60)
     })
     observer.observe(container)
-    return () => observer.disconnect()
+    return () => {
+      if (pending) clearTimeout(pending)
+      observer.disconnect()
+    }
   }, [])
 
   const handleEditorChange = useCallback(
@@ -348,13 +360,20 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
             />
           </Suspense>
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            {t("empty.subtitle", { default: "Select or create a document to start." })}
-          </div>
+          <Empty className="h-full border-0">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <FileText />
+              </EmptyMedia>
+              <EmptyDescription>
+                {t("empty.subtitle", { default: "Select or create a document to start." })}
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         )}
         {(actions.running || suggestions.running) && (
           <div className="pointer-events-none absolute right-3 top-2 flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs shadow">
-            <Loader2 className="h-3 w-3 animate-spin" />
+            <Spinner className="size-3" />
             {actions.running
               ? t("running", { default: "AI working…" })
               : t("suggesting", { default: "Suggesting…" })}

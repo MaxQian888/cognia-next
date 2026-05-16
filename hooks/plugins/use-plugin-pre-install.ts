@@ -46,7 +46,15 @@ export interface UsePluginPreInstall {
   busy: boolean
 }
 
-export function usePluginPreInstall(client: MarketplaceClient): UsePluginPreInstall {
+/**
+ * Accepts a possibly-null client so the marketplace UI doesn't need to
+ * fabricate a no-op stub while the lazy `loadPluginMarketplaceClient()`
+ * resolves. When `client` is null the returned `install()` short-circuits
+ * to a `failed/install/client_not_ready` result without mounting any
+ * dialog state — callers should guard their UI (disabled install buttons)
+ * to avoid reaching this branch in normal flows.
+ */
+export function usePluginPreInstall(client: MarketplaceClient | null): UsePluginPreInstall {
   const [target, setTarget] = useState<PreInstallTarget | null>(null)
   const [busy, setBusy] = useState(false)
   const pendingResolver = useRef<((value: unknown) => void) | null>(null)
@@ -95,6 +103,14 @@ export function usePluginPreInstall(client: MarketplaceClient): UsePluginPreInst
       version: string | undefined,
       pluginName: string
     ): Promise<RunMarketplaceInstallResult> => {
+      if (!client) {
+        return {
+          status: "failed",
+          stage: "install",
+          message: "client_not_ready",
+        }
+      }
+
       setBusy(true)
 
       // Pre-fetch the manifest once so we can compute totalSteps before any

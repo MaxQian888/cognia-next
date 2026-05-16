@@ -343,7 +343,8 @@
       "commentsSummary": "{count} comments ({unresolved} unresolved)",
       "collabHint": "Real-time collaboration is disabled by default. Enable it in Settings → Canvas → Collaboration and provide a CRDT signalling URL.",
       "openCollab": "Open collaboration",
-      "executionHint": "Press the Run button on the editor toolbar to execute selected code."
+      "executionHint": "Press the Run button on the editor toolbar to execute selected code.",
+      "moreVersions": "+{count} more"
     },
     "empty": {
       "title": "Welcome to Canvas",
@@ -425,7 +426,32 @@
       "unfoldAll": "Unfold all",
       "foldLevel1": "Fold level 1",
       "foldLevel2": "Fold level 2"
-    }
+    },
+    "deleteAria": "Delete {name}",
+    "renameDocument": "Rename document",
+    "save": "Save",
+    "versionHistory": "Version history",
+    "saveVersion": "Save version",
+    "compare": "Compare",
+    "cancelCompare": "Cancel compare",
+    "compareInstructions": "Select two versions to compare them.",
+    "viewDiff": "View diff",
+    "descriptionOptional": "Description (optional)",
+    "descriptionPlaceholder": "Brief description of changes",
+    "versionPreview": "Version preview",
+    "restoreVersion": "Restore version",
+    "deleteVersion": "Delete version",
+    "deleteVersionConfirm": "Are you sure you want to delete this version? This action cannot be undone.",
+    "versionComparison": "Version comparison",
+    "noVersions": "No versions yet",
+    "noVersionsHint": "Save a version to keep a snapshot.",
+    "history": "History",
+    "current": "Current",
+    "autoSave": "Auto-saved",
+    "linesCount": "{count, plural, =1 {# line} other {# lines}}",
+    "selected": "Selected",
+    "previewAction": "Preview",
+    "restore": "Restore"
   },
   "chat": {
     "subagentPart": {
@@ -444,7 +470,8 @@
       "cache": "Cache",
       "cost": "Cost",
       "byModelTitle": "By model",
-      "noModelData": "No persisted usage rows yet — totals above come from in-memory turns."
+      "noModelData": "No persisted usage rows yet — totals above come from in-memory turns.",
+      "tokensTitle": "Input: {input} · Output: {output}"
     },
     "agentTeamDispatch": {
       "title": "Dispatch",
@@ -588,7 +615,8 @@
         "modelTooltip": "Active model · change in Settings → API Key",
         "usageInput": "Input",
         "usageOutput": "Output",
-        "usageCached": "Cached"
+        "usageCached": "Cached",
+        "pluginExtensionOverflow": "More plugin actions"
       },
       "helperHints": {
         "send": "⏎ Send · ⇧⏎ New line",
@@ -614,7 +642,18 @@
         "removeAria": "Remove reference to {path}"
       },
       "ariaToggleWebSearch": "Toggle web search",
-      "webLabel": "Web"
+      "webLabel": "Web",
+      "draftReview": {
+        "title": "Review pending drafts",
+        "noPendingDrafts": "No drafts are waiting for review.",
+        "reject": "Reject",
+        "approve": "Approve & send"
+      },
+      "modelPicker": {
+        "switchModelAria": "Switch model",
+        "searchPlaceholder": "Search models…",
+        "noProviders": "No providers configured"
+      }
     },
     "permissionMode": {
       "default": {
@@ -5228,7 +5267,25 @@
       "copyLogEntry": "Copy log entry",
       "focusTraceMenu": "Focus on this trace",
       "focusSessionMenu": "Focus on this session",
-      "viewDetailsMenu": "View details"
+      "viewDetailsMenu": "View details",
+      "moreFilters": {
+        "show": "Show more filters"
+      },
+      "shortcutsHint": "Keyboard shortcuts",
+      "shiftClickPrefix": "Shift-click to",
+      "openDetailsPanel": "Open details panel",
+      "scrollMenuLabel": "Scroll",
+      "allLevelsTab": "All",
+      "shortcuts": {
+        "refresh": "Refresh logs",
+        "dashboardView": "Toggle dashboard view",
+        "nextEntry": "Next entry",
+        "previousEntry": "Previous entry",
+        "expandEntry": "Expand entry",
+        "openDetails": "Open details panel",
+        "closeOrClear": "Close dialog or clear focus",
+        "showShortcuts": "Show this shortcut list"
+      }
     },
     "dashboard": {
       "noData": "No log data available for visualization",
@@ -6113,7 +6170,10 @@
       "skill": "Skill",
       "test": "Test / Health Check",
       "external-agent": "External Agent (ACP)",
-      "im-push": "IM Push"
+      "im-push": "IM Push",
+      "twin": "Employee Twin",
+      "connection:scheduled:digest": "Scheduled Digest",
+      "connection:outbound:send": "Outbound Send"
     },
     "payloadStructuredHelp": "Pick the agent / tools / MCP servers / built-in tool toggles for this run.",
     "payloadFieldErrors": "Please fix the highlighted fields",
@@ -6211,12 +6271,20 @@
       "active": "Active",
       "paused": "Paused",
       "disabled": "Disabled",
-      "expired": "Expired"
+      "expired": "Expired",
+      "unknown": "Unknown"
     },
     "executionStatuses": {
       "pending": "Pending",
       "running": "Running",
       "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "skipped": "Skipped"
+    },
+    "unifiedRunStatuses": {
+      "running": "Running",
+      "succeeded": "Succeeded",
       "failed": "Failed",
       "cancelled": "Cancelled",
       "skipped": "Skipped"
@@ -6622,7 +6690,8 @@
       "workflow": "Workflow",
       "backup": "Backup",
       "plugin": "Plugin",
-      "system": "System"
+      "system": "System",
+      "connector": "Connector"
     },
     "emptyTitle": "No scheduled tasks yet",
     "emptyDescription": "Create your first scheduled task to automate recurring work.",
@@ -6635,7 +6704,74 @@
     "panelErrorRetry": "Retry",
     "openInSourceEditor": "Open in source editor",
     "createTaskKind": "Choose task kind",
-    "active": "active"
+    "active": "active",
+    "selectRow": "Select row",
+    "loading": "Loading…",
+    "clearSelection": "Clear selection",
+    "bulkDeleteTitle": "Delete selected tasks?",
+    "bulkDeleteDescription": "This will delete {n} selected tasks across all kinds. This action cannot be undone.",
+    "unknownKind": "No detail view for this kind.",
+    "unknownKindAppNote": "App tasks render via the task detail view.",
+    "systemTaskNotFound": "System task not found.",
+    "workflowTriggerNotFound": "Workflow trigger not found.",
+    "pluginJobNotFound": "Plugin job not found.",
+    "connectorDigestNotFound": "Connector digest task not found.",
+    "configuration": "Configuration",
+    "workflow": "Workflow",
+    "triggerKind": "Trigger kind",
+    "cron": "Cron",
+    "webhookPath": "Webhook path",
+    "enabled": "Enabled",
+    "openInWorkflowEditor": "Open in workflow editor",
+    "openInPluginSettings": "Open in plugin settings",
+    "recentRuns": "Recent runs",
+    "noRecentRuns": "No recent runs.",
+    "recentDispatches": "Recent dispatches",
+    "noRecentDispatches": "No recent dispatches.",
+    "days": "days",
+    "interval": "Interval",
+    "destination": "Destination",
+    "retainCount": "Retain count",
+    "plugin": "Plugin",
+    "handler": "Handler",
+    "status": "Status",
+    "adapter": "Adapter",
+    "conversation": "Conversation",
+    "character": "Character",
+    "queueStatus": "Queue status",
+    "queueLength": "Queue length",
+    "breakerLastOpened": "Breaker last opened",
+    "breakerLastClosed": "Breaker last closed",
+    "timing": "Timing",
+    "startedAt": "Started at",
+    "finishedAt": "Finished at",
+    "duration": "Duration",
+    "triggerPayload": "Trigger payload",
+    "result": "Result",
+    "error": "Error",
+    "logs": "Logs",
+    "close": "Close",
+    "back": "Back",
+    "more": "More",
+    "moreOptions": "More options",
+    "breadcrumb": "Breadcrumb",
+    "loadingScheduler": "Loading scheduler",
+    "eventSourceLiteralPlaceholder": "Source",
+    "quickCreateWorkflowTrigger": "Create workflow trigger",
+    "quickCreateWorkflowTriggerDescription": "Add a cron trigger to an existing workflow without leaving the scheduler.",
+    "pickWorkflow": "Pick a workflow",
+    "pickAWorkflow": "Pick a workflow",
+    "cronTriggerLabel": "Cron trigger",
+    "cronRequired": "Cron expression required",
+    "workflowNotFound": "Workflow not found",
+    "cronPreset": {
+      "hourly": "Every hour",
+      "daily": "Daily at 9:00 AM",
+      "weeklyMon": "Mondays at 9:00 AM",
+      "custom": "Custom"
+    },
+    "create": "Create",
+    "creating": "Creating…"
   },
   "desktop": {
     "channelList": {
@@ -9012,261 +9148,303 @@
       "blockedSaveTitle": "Workflow saved with {count, plural, one {# unresolved issue} other {# unresolved issues}}"
     },
     "nodes": {
-      "trigger.manual": {
-        "label": "Run manually",
-        "description": "Fires when you click Run in the editor."
+      "trigger": {
+        "manual": {
+          "label": "Run manually",
+          "description": "Fires when you click Run in the editor."
+        },
+        "cron": {
+          "label": "On schedule",
+          "description": "Fires on a cron schedule. Backed by the Tauri scheduler when running."
+        },
+        "connector": {
+          "inbound": {
+            "label": "Incoming message",
+            "description": "Fires when a message arrives on a connected platform (Telegram, Slack, ...)."
+          }
+        },
+        "chat": {
+          "message": {
+            "label": "On chat message",
+            "description": "Fires when a user sends a message in a bound character session."
+          }
+        },
+        "webhook": {
+          "label": "On webhook",
+          "description": "Fires when an HTTP request hits the workflow's webhook path."
+        },
+        "github": {
+          "webhook": {
+            "label": "On GitHub event",
+            "description": "Fires when GitHub posts a webhook (PR opened, Issue labeled, push, …). Verifies x-hub-signature-256."
+          }
+        },
+        "desktop": {
+          "event": {
+            "label": "On UIA event",
+            "description": "Fire when a UIA focus / structure / property event matches."
+          }
+        }
       },
-      "trigger.cron": {
-        "label": "On schedule",
-        "description": "Fires on a cron schedule. Backed by the Tauri scheduler when running."
+      "action": {
+        "character": {
+          "send": {
+            "label": "Send as character",
+            "description": "Sends a message as a chosen character into a session."
+          },
+          "create": {
+            "label": "Create character",
+            "description": "Creates a new character (employee) row."
+          },
+          "update": {
+            "label": "Update character",
+            "description": "Patches fields on an existing character."
+          }
+        },
+        "team": {
+          "run": {
+            "label": "Run team",
+            "description": "Starts an agent team's lifecycle and waits for completion."
+          },
+          "create": {
+            "label": "Create team",
+            "description": "Creates a new agent team row."
+          },
+          "update": {
+            "label": "Update team",
+            "description": "Patches an existing team's roster or orchestration mode."
+          }
+        },
+        "skill": {
+          "invoke": {
+            "label": "Invoke skill",
+            "description": "Renders a skill into the prompt of the next AI step."
+          },
+          "upsert": {
+            "label": "Upsert skill",
+            "description": "Creates or updates a skill with the given markdown body."
+          }
+        },
+        "twin": {
+          "rag": {
+            "label": "Twin RAG",
+            "description": "Runs RAG over a twin's vector store and returns the top-K chunks."
+          },
+          "ingest": {
+            "label": "Twin ingest",
+            "description": "Queues a new source for the twin's ingest pipeline."
+          }
+        },
+        "connector": {
+          "send": {
+            "label": "Send via connector",
+            "description": "Pushes a message through the outbound queue of a connected adapter."
+          },
+          "draft": {
+            "label": "Save as draft",
+            "description": "Stores the proposed reply for human review in the Inbox."
+          }
+        },
+        "mcp": {
+          "invokeTool": {
+            "label": "Invoke MCP tool",
+            "description": "Calls a tool on a configured MCP server."
+          }
+        },
+        "plugin": {
+          "invoke": {
+            "label": "Invoke plugin",
+            "description": "Calls a plugin task handler registered in the plugin runtime."
+          }
+        },
+        "github": {
+          "openPr": {
+            "label": "Open GitHub PR",
+            "description": "Opens a pull request via the GitHub Delivery plugin (policy-gated)."
+          },
+          "closePr": {
+            "label": "Close GitHub PR",
+            "description": "Closes an open pull request without merging."
+          },
+          "mergePr": {
+            "label": "Merge GitHub PR",
+            "description": "Merges a pull request. Requires CI green + human approval per policy."
+          },
+          "reviewPr": {
+            "label": "Review GitHub PR",
+            "description": "Submits a review (APPROVE / REQUEST_CHANGES / COMMENT) on a PR."
+          },
+          "reviewPrInline": {
+            "label": "Inline review with AI",
+            "description": "Uses an LLM to produce a structured review (overall body + line-anchored inline comments) for a PR."
+          },
+          "commentPr": {
+            "label": "Comment on PR",
+            "description": "Posts a comment on a pull request."
+          },
+          "commentIssue": {
+            "label": "Comment on Issue",
+            "description": "Posts a comment on an issue."
+          },
+          "labelIssue": {
+            "label": "Label Issue/PR",
+            "description": "Adds or removes labels on an issue or pull request."
+          },
+          "closeIssue": {
+            "label": "Close Issue",
+            "description": "Closes an issue with optional reason (completed / not_planned)."
+          },
+          "createRelease": {
+            "label": "Create Release",
+            "description": "Creates a Release. Drafts always allowed; published releases gated."
+          },
+          "generateChangelog": {
+            "label": "Generate changelog",
+            "description": "Computes Conventional-Commit semver bump + Markdown release notes."
+          },
+          "pushTag": {
+            "label": "Push tag",
+            "description": "Pushes a git tag to the repo."
+          },
+          "runIssueLoop": {
+            "label": "Issue → PR loop",
+            "description": "End-to-end Issue → AI worktree → PR loop. Clones, drives the AI, opens a PR."
+          }
+        },
+        "desktop": {
+          "screenshot": {
+            "label": "Screenshot",
+            "description": "Capture the primary monitor or a region. Returns PNG bytes + dims."
+          },
+          "findElement": {
+            "label": "Find element",
+            "description": "Locate a UI element by name / automation id / control type."
+          },
+          "readTree": {
+            "label": "Read tree",
+            "description": "Snapshot the accessibility subtree as JSON for downstream nodes."
+          },
+          "click": {
+            "label": "Click",
+            "description": "Click an element or absolute screen coordinate."
+          },
+          "type": {
+            "label": "Type text",
+            "description": "Type a string into the focused element via SendInput."
+          },
+          "keys": {
+            "label": "Send keys",
+            "description": "Send a keyboard chord like ctrl+shift+t."
+          },
+          "invokePattern": {
+            "label": "Invoke pattern",
+            "description": "Dispatch a UIA pattern (Invoke / Toggle / Value / Transform / …)."
+          },
+          "windowFocus": {
+            "label": "Focus window",
+            "description": "Bring a window to the foreground."
+          },
+          "windowClose": {
+            "label": "Close window",
+            "description": "Close a window via the UIA Window pattern."
+          },
+          "windowResize": {
+            "label": "Resize window",
+            "description": "Move/resize a window via the UIA Transform pattern."
+          },
+          "wait": {
+            "label": "Wait for element",
+            "description": "Block until an element appears, disappears, or matches a property."
+          }
+        }
       },
-      "trigger.connector.inbound": {
-        "label": "Incoming message",
-        "description": "Fires when a message arrives on a connected platform (Telegram, Slack, ...)."
+      "ai": {
+        "prompt": {
+          "label": "AI prompt",
+          "description": "Direct LLM call. Uses the configured provider routing."
+        },
+        "classify": {
+          "label": "Classify",
+          "description": "LLM-based classification into one of N labels."
+        },
+        "extract": {
+          "label": "Extract data",
+          "description": "Structured extraction (JSON schema) from free-form text."
+        },
+        "embed": {
+          "label": "Embed text",
+          "description": "Generate an embedding vector for semantic similarity."
+        }
       },
-      "trigger.chat.message": {
-        "label": "On chat message",
-        "description": "Fires when a user sends a message in a bound character session."
+      "flow": {
+        "branch": {
+          "label": "If / else",
+          "description": "Routes execution down one of two branches based on a condition."
+        },
+        "switch": {
+          "label": "Switch",
+          "description": "Multi-way branch on the value of an expression."
+        },
+        "split": {
+          "label": "Split (parallel)",
+          "description": "Fans out to multiple branches that run concurrently."
+        },
+        "join": {
+          "label": "Join",
+          "description": "Joins parallel branches with all/any/race semantics."
+        },
+        "loop": {
+          "label": "Loop",
+          "description": "Repeats a sub-graph for-each / while / N times."
+        },
+        "wait": {
+          "label": "Wait",
+          "description": "Pauses for a fixed duration or until a wake-up event arrives."
+        },
+        "set": {
+          "label": "Set variable",
+          "description": "Assigns a value to a workflow-scoped variable."
+        },
+        "subworkflow": {
+          "label": "Run subworkflow",
+          "description": "Invokes another workflow as a step."
+        }
       },
-      "trigger.webhook": {
-        "label": "On webhook",
-        "description": "Fires when an HTTP request hits the workflow's webhook path."
+      "data": {
+        "transform": {
+          "label": "Transform",
+          "description": "Map / filter / reduce / sort over an input array or object."
+        },
+        "code": {
+          "label": "Code",
+          "description": "Custom JS expression with a 5s timeout."
+        },
+        "template": {
+          "label": "Template",
+          "description": "Render a mustache-style template string against the upstream data."
+        }
       },
-      "trigger.github.webhook": {
-        "label": "On GitHub event",
-        "description": "Fires when GitHub posts a webhook (PR opened, Issue labeled, push, …). Verifies x-hub-signature-256."
+      "io": {
+        "http": {
+          "label": "HTTP request",
+          "description": "Call an external HTTP API with retries and timeout."
+        },
+        "webhook": {
+          "respond": {
+            "label": "Webhook respond",
+            "description": "Respond to the inbound webhook trigger with a payload."
+          }
+        }
       },
-      "action.character.send": {
-        "label": "Send as character",
-        "description": "Sends a message as a chosen character into a session."
-      },
-      "action.character.create": {
-        "label": "Create character",
-        "description": "Creates a new character (employee) row."
-      },
-      "action.character.update": {
-        "label": "Update character",
-        "description": "Patches fields on an existing character."
-      },
-      "action.team.run": {
-        "label": "Run team",
-        "description": "Starts an agent team's lifecycle and waits for completion."
-      },
-      "action.team.create": {
-        "label": "Create team",
-        "description": "Creates a new agent team row."
-      },
-      "action.team.update": {
-        "label": "Update team",
-        "description": "Patches an existing team's roster or orchestration mode."
-      },
-      "action.skill.invoke": {
-        "label": "Invoke skill",
-        "description": "Renders a skill into the prompt of the next AI step."
-      },
-      "action.skill.upsert": {
-        "label": "Upsert skill",
-        "description": "Creates or updates a skill with the given markdown body."
-      },
-      "action.twin.rag": {
-        "label": "Twin RAG",
-        "description": "Runs RAG over a twin's vector store and returns the top-K chunks."
-      },
-      "action.twin.ingest": {
-        "label": "Twin ingest",
-        "description": "Queues a new source for the twin's ingest pipeline."
-      },
-      "action.connector.send": {
-        "label": "Send via connector",
-        "description": "Pushes a message through the outbound queue of a connected adapter."
-      },
-      "action.connector.draft": {
-        "label": "Save as draft",
-        "description": "Stores the proposed reply for human review in the Inbox."
-      },
-      "action.mcp.invokeTool": {
-        "label": "Invoke MCP tool",
-        "description": "Calls a tool on a configured MCP server."
-      },
-      "action.plugin.invoke": {
-        "label": "Invoke plugin",
-        "description": "Calls a plugin task handler registered in the plugin runtime."
-      },
-      "action.github.openPr": {
-        "label": "Open GitHub PR",
-        "description": "Opens a pull request via the GitHub Delivery plugin (policy-gated)."
-      },
-      "action.github.closePr": {
-        "label": "Close GitHub PR",
-        "description": "Closes an open pull request without merging."
-      },
-      "action.github.mergePr": {
-        "label": "Merge GitHub PR",
-        "description": "Merges a pull request. Requires CI green + human approval per policy."
-      },
-      "action.github.reviewPr": {
-        "label": "Review GitHub PR",
-        "description": "Submits a review (APPROVE / REQUEST_CHANGES / COMMENT) on a PR."
-      },
-      "action.github.reviewPrInline": {
-        "label": "Inline review with AI",
-        "description": "Uses an LLM to produce a structured review (overall body + line-anchored inline comments) for a PR."
-      },
-      "action.github.commentPr": {
-        "label": "Comment on PR",
-        "description": "Posts a comment on a pull request."
-      },
-      "action.github.commentIssue": {
-        "label": "Comment on Issue",
-        "description": "Posts a comment on an issue."
-      },
-      "action.github.labelIssue": {
-        "label": "Label Issue/PR",
-        "description": "Adds or removes labels on an issue or pull request."
-      },
-      "action.github.closeIssue": {
-        "label": "Close Issue",
-        "description": "Closes an issue with optional reason (completed / not_planned)."
-      },
-      "action.github.createRelease": {
-        "label": "Create Release",
-        "description": "Creates a Release. Drafts always allowed; published releases gated."
-      },
-      "action.github.generateChangelog": {
-        "label": "Generate changelog",
-        "description": "Computes Conventional-Commit semver bump + Markdown release notes."
-      },
-      "action.github.pushTag": {
-        "label": "Push tag",
-        "description": "Pushes a git tag to the repo."
-      },
-      "action.github.runIssueLoop": {
-        "label": "Issue → PR loop",
-        "description": "End-to-end Issue → AI worktree → PR loop. Clones, drives the AI, opens a PR."
-      },
-      "action.desktop.screenshot": {
-        "label": "Screenshot",
-        "description": "Capture the primary monitor or a region. Returns PNG bytes + dims."
-      },
-      "action.desktop.findElement": {
-        "label": "Find element",
-        "description": "Locate a UI element by name / automation id / control type."
-      },
-      "action.desktop.readTree": {
-        "label": "Read tree",
-        "description": "Snapshot the accessibility subtree as JSON for downstream nodes."
-      },
-      "action.desktop.click": {
-        "label": "Click",
-        "description": "Click an element or absolute screen coordinate."
-      },
-      "action.desktop.type": {
-        "label": "Type text",
-        "description": "Type a string into the focused element via SendInput."
-      },
-      "action.desktop.keys": {
-        "label": "Send keys",
-        "description": "Send a keyboard chord like ctrl+shift+t."
-      },
-      "action.desktop.invokePattern": {
-        "label": "Invoke pattern",
-        "description": "Dispatch a UIA pattern (Invoke / Toggle / Value / Transform / …)."
-      },
-      "action.desktop.windowFocus": {
-        "label": "Focus window",
-        "description": "Bring a window to the foreground."
-      },
-      "action.desktop.windowClose": {
-        "label": "Close window",
-        "description": "Close a window via the UIA Window pattern."
-      },
-      "action.desktop.windowResize": {
-        "label": "Resize window",
-        "description": "Move/resize a window via the UIA Transform pattern."
-      },
-      "action.desktop.wait": {
-        "label": "Wait for element",
-        "description": "Block until an element appears, disappears, or matches a property."
-      },
-      "trigger.desktop.event": {
-        "label": "On UIA event",
-        "description": "Fire when a UIA focus / structure / property event matches."
-      },
-      "ai.prompt": {
-        "label": "AI prompt",
-        "description": "Direct LLM call. Uses the configured provider routing."
-      },
-      "ai.classify": {
-        "label": "Classify",
-        "description": "LLM-based classification into one of N labels."
-      },
-      "ai.extract": {
-        "label": "Extract data",
-        "description": "Structured extraction (JSON schema) from free-form text."
-      },
-      "ai.embed": {
-        "label": "Embed text",
-        "description": "Generate an embedding vector for semantic similarity."
-      },
-      "flow.branch": {
-        "label": "If / else",
-        "description": "Routes execution down one of two branches based on a condition."
-      },
-      "flow.switch": {
-        "label": "Switch",
-        "description": "Multi-way branch on the value of an expression."
-      },
-      "flow.split": {
-        "label": "Split (parallel)",
-        "description": "Fans out to multiple branches that run concurrently."
-      },
-      "flow.join": {
-        "label": "Join",
-        "description": "Joins parallel branches with all/any/race semantics."
-      },
-      "flow.loop": {
-        "label": "Loop",
-        "description": "Repeats a sub-graph for-each / while / N times."
-      },
-      "flow.wait": {
-        "label": "Wait",
-        "description": "Pauses for a fixed duration or until a wake-up event arrives."
-      },
-      "flow.set": {
-        "label": "Set variable",
-        "description": "Assigns a value to a workflow-scoped variable."
-      },
-      "flow.subworkflow": {
-        "label": "Run subworkflow",
-        "description": "Invokes another workflow as a step."
-      },
-      "data.transform": {
-        "label": "Transform",
-        "description": "Map / filter / reduce / sort over an input array or object."
-      },
-      "data.code": {
-        "label": "Code",
-        "description": "Custom JS expression with a 5s timeout."
-      },
-      "data.template": {
-        "label": "Template",
-        "description": "Render a mustache-style template string against the upstream data."
-      },
-      "io.http": {
-        "label": "HTTP request",
-        "description": "Call an external HTTP API with retries and timeout."
-      },
-      "io.webhook.respond": {
-        "label": "Webhook respond",
-        "description": "Respond to the inbound webhook trigger with a payload."
-      },
-      "annotation.note": {
-        "label": "Sticky note",
-        "description": "Free-text note placed on the canvas. Has no execution."
-      },
-      "annotation.group": {
-        "label": "Group frame",
-        "description": "Visual group around several nodes. Has no execution."
+      "annotation": {
+        "note": {
+          "label": "Sticky note",
+          "description": "Free-text note placed on the canvas. Has no execution."
+        },
+        "group": {
+          "label": "Group frame",
+          "description": "Visual group around several nodes. Has no execution."
+        }
       }
     },
     "runs": {
@@ -9498,7 +9676,7 @@
       "github": {
         "repoFullName": {
           "label": "Repository",
-          "hint": "Format: owner/name. Supports {{ }} expressions.",
+          "hint": "Format: owner/name. Supports '{{ }}' expressions.",
           "placeholder": "octocat/hello-world"
         },
         "addLabel": "Add label",
@@ -9559,7 +9737,7 @@
           },
           "body": {
             "label": "Review body",
-            "hint": "Supports {{ }} expressions."
+            "hint": "Supports '{{ }}' expressions."
           }
         },
         "reviewPrInline": {
@@ -9587,13 +9765,13 @@
           },
           "focus": {
             "label": "Focus",
-            "hint": "Optional review angle, e.g. 'security' or 'performance'. Supports {{ }} expressions."
+            "hint": "Optional review angle, e.g. 'security' or 'performance'. Supports '{{ }}' expressions."
           }
         },
         "comment": {
           "body": {
             "label": "Comment body",
-            "hint": "Supports {{ }} expressions."
+            "hint": "Supports '{{ }}' expressions."
           }
         },
         "labelIssue": {
@@ -9625,7 +9803,7 @@
           },
           "body": {
             "label": "Body",
-            "hint": "Supports {{ }} expressions and Markdown."
+            "hint": "Supports '{{ }}' expressions and Markdown."
           },
           "draft": {
             "label": "Draft"
@@ -9722,8 +9900,8 @@
         },
         "content": {
           "label": "Message content",
-          "hint": "Supports {{ $node['id'].out.field }} expressions.",
-          "placeholder": "Hello, {{ $trigger.payload.userName }}"
+          "hint": "Supports '{{ $node[''id''].out.field }}' expressions.",
+          "placeholder": "Hello, '{{ $trigger.payload.userName }}'"
         },
         "sessionId": {
           "label": "Target session id (optional)"
@@ -9754,7 +9932,7 @@
         "query": {
           "label": "Query",
           "hint": "The text used for vector search. Supports expressions.",
-          "placeholder": "{{ $trigger.payload.text }}"
+          "placeholder": "'{{ $trigger.payload.text }}'"
         },
         "topK": {
           "label": "Top K",
@@ -9806,8 +9984,8 @@
       "branch": {
         "condition": {
           "label": "Condition",
-          "hint": "Expression that resolves to a truthy value. Supports {{ }} expressions.",
-          "placeholder": "{{ $node['n_classify'].out.label }} === 'urgent'"
+          "hint": "Expression that resolves to a truthy value. Supports '{{ }}' expressions.",
+          "placeholder": "'{{ $node[''n_classify''].out.label }}' === 'urgent'"
         },
         "truthyLabel": {
           "label": "Truthy label"
@@ -9845,7 +10023,7 @@
         },
         "url": {
           "label": "URL",
-          "hint": "Supports {{ }} expressions.",
+          "hint": "Supports '{{ }}' expressions.",
           "placeholder": "https://api.example.com/v1/things"
         },
         "body": {
@@ -9866,7 +10044,7 @@
       "template": {
         "template": {
           "label": "Template",
-          "hint": "Mustache-like {{ }} expressions are evaluated against upstream / trigger / static data."
+          "hint": "Mustache-like '{{ }}' expressions are evaluated against upstream / trigger / static data."
         }
       },
       "transform": {
@@ -9937,7 +10115,7 @@
         "responseTemplate": {
           "label": "Response body template",
           "hint": "Optional. Defaults to the workflow run id.",
-          "placeholder": "{ \"ok\": true, \"runId\": \"{{ $run.id }}\" }"
+          "placeholder": "'{ \"ok\": true, \"runId\": \"{{ $run.id }}\" }'"
         }
       },
       "characterCreate": {
@@ -9947,7 +10125,7 @@
         },
         "systemPrompt": {
           "label": "System prompt",
-          "hint": "Supports {{ }} expressions for dynamic content."
+          "hint": "Supports '{{ }}' expressions for dynamic content."
         },
         "description": {
           "label": "Description (optional)"
@@ -9971,7 +10149,7 @@
         },
         "patchJson": {
           "label": "Patch (JSON)",
-          "hint": "Fields to update. Example: { \"systemPrompt\": \"{{ $node.n_extract.out.text }}\" }"
+          "hint": "Fields to update. Example: '{ \"systemPrompt\": \"{{ $node.n_extract.out.text }}\" }'"
         }
       },
       "teamCreate": {
@@ -9994,7 +10172,7 @@
         },
         "members": {
           "label": "Members (JSON array)",
-          "hint": "[{ \"characterId\": \"...\", \"role\": \"researcher\" }]"
+          "hint": "['{ \"characterId\": \"...\", \"role\": \"researcher\" }']"
         }
       },
       "teamUpdate": {
@@ -10003,7 +10181,7 @@
         },
         "patchJson": {
           "label": "Patch (JSON)",
-          "hint": "Example: { \"orchestration\": \"supervisor\" }"
+          "hint": "Example: '{ \"orchestration\": \"supervisor\" }'"
         }
       },
       "skillUpsert": {
@@ -10054,12 +10232,12 @@
         },
         "url": {
           "label": "URL",
-          "hint": "Supports {{ }} expressions.",
+          "hint": "Supports '{{ }}' expressions.",
           "placeholder": "https://..."
         },
         "content": {
           "label": "Content",
-          "hint": "Supports {{ }} expressions."
+          "hint": "Supports '{{ }}' expressions."
         }
       },
       "mcpInvokeTool": {
@@ -10128,7 +10306,7 @@
         },
         "input": {
           "label": "Input",
-          "hint": "Supports {{ }} expressions."
+          "hint": "Supports '{{ }}' expressions."
         },
         "hint": {
           "label": "Guidance (optional)"
@@ -10150,7 +10328,7 @@
         },
         "schemaJson": {
           "label": "Schema (JSON)",
-          "hint": "Field → expected type. Example: { \"name\": \"string\", \"amount\": \"number\" }"
+          "hint": "Field → expected type. Example: '{ \"name\": \"string\", \"amount\": \"number\" }'"
         },
         "input": {
           "label": "Input"
@@ -10162,7 +10340,7 @@
       "aiEmbed": {
         "input": {
           "label": "Input",
-          "hint": "Supports {{ }} expressions."
+          "hint": "Supports '{{ }}' expressions."
         },
         "dimension": {
           "label": "Dimension",
@@ -10173,7 +10351,7 @@
         "subject": {
           "label": "Subject",
           "hint": "Expression evaluated and matched against cases.",
-          "placeholder": "{{ $node['n_classify'].out.label }}"
+          "placeholder": "'{{ $node[''n_classify''].out.label }}'"
         },
         "cases": {
           "label": "Cases",
@@ -10225,7 +10403,7 @@
         "inputExpression": {
           "label": "Input expression",
           "hint": "Resolves to the array to iterate. If empty, the first upstream output is used.",
-          "placeholder": "{{ $node['n_search'].out.results }}"
+          "placeholder": "'{{ $node[''n_search''].out.results }}'"
         },
         "whileCondition": {
           "label": "While condition",
@@ -10257,12 +10435,12 @@
         },
         "headersJson": {
           "label": "Headers (JSON)",
-          "hint": "Example: { \"Content-Type\": \"application/json\" }",
-          "placeholder": "{ \"Content-Type\": \"application/json\" }"
+          "hint": "Example: '{ \"Content-Type\": \"application/json\" }'",
+          "placeholder": "'{ \"Content-Type\": \"application/json\" }'"
         },
         "body": {
           "label": "Body",
-          "hint": "Supports {{ }} expressions."
+          "hint": "Supports '{{ }}' expressions."
         }
       },
       "groupAnnotation": {
@@ -10295,8 +10473,31 @@
     "conversationList": {
       "header": "Conversations",
       "empty": "No conversations yet",
+      "emptyDescription": "Conversations from your connected adapters will appear here.",
       "hideArchived": "Hide archived",
-      "showArchived": "Show {count} archived"
+      "showArchived": "Show {count} archived",
+      "openSidebar": "Open conversations list",
+      "search": {
+        "placeholder": "Search conversations…",
+        "aria": "Search conversations",
+        "clear": "Clear search"
+      },
+      "filter": {
+        "aria": "Filter conversations",
+        "all": "All",
+        "unread": "Unread",
+        "pinned": "Pinned",
+        "tooltip": {
+          "all": "Show all conversations",
+          "unread": "Show only unread conversations",
+          "pinned": "Show only pinned conversations"
+        }
+      },
+      "emptyFiltered": {
+        "title": "No matching conversations",
+        "description": "Try a different search term or clear the active filter.",
+        "reset": "Clear filters"
+      }
     },
     "draftEditor": {
       "textPlaceholder": "Draft text…",
@@ -10314,13 +10515,20 @@
       "reviewAria": "Review draft reply"
     },
     "shell": {
-      "selectPrompt": "Select a conversation to start"
+      "selectPrompt": "Select a conversation to start",
+      "resize": {
+        "sidebarHandle": "Resize sidebar",
+        "detailHandle": "Resize conversation list"
+      }
     },
     "sidebar": {
       "title": "Inbox",
       "viewModeAria": "View mode",
       "adapters": "Adapters",
       "noAdapters": "No adapters configured",
+      "noAdaptersTitle": "No adapters yet",
+      "expandTooltip": "Show recent conversations",
+      "toggleAdapter": "Toggle recent conversations for {name}",
       "viewModes": {
         "by-adapter": "By adapter",
         "by-platform": "By platform",
@@ -10395,32 +10603,46 @@
     },
     "audit": {
       "kind": {
-        "delivery.success": "Delivered",
-        "delivery.error": "Delivery error",
-        "delivery.deadlettered": "Delivery dead-lettered",
-        "delivery.downgraded": "Delivery downgraded",
-        "inbound.received": "Inbound received",
-        "inbound.deduped": "Inbound deduped",
-        "inbound.policy_blocked": "Blocked by policy",
-        "inbound.signature_failed": "Signature mismatch",
-        "inbound.edited": "Inbound edited",
-        "inbound.deleted": "Inbound deleted",
-        "inbound.read_indicator": "Read indicator",
-        "inbound.member_added": "Member joined",
-        "inbound.member_removed": "Member left",
-        "inbound.deferred_quiet_hours": "Deferred (quiet hours)",
-        "inbound.deferred_muted": "Deferred (muted)",
-        "inbound.deferred_manual_mode": "Deferred (manual mode)",
-        "outbound.enqueued": "Outbound queued",
-        "outbound.ai_run_enqueued": "AI reply queued",
-        "circuit.opened": "Circuit opened",
-        "circuit.half_opened": "Circuit half-opened",
-        "circuit.closed": "Circuit closed",
-        "rate_limit.tripped": "Rate limit tripped",
-        "credential.refreshed": "Credentials refreshed",
-        "adapter.started": "Adapter started",
-        "adapter.stopped": "Adapter stopped",
-        "adapter.error": "Adapter error"
+        "delivery": {
+          "success": "Delivered",
+          "error": "Delivery error",
+          "deadlettered": "Delivery dead-lettered",
+          "downgraded": "Delivery downgraded"
+        },
+        "inbound": {
+          "received": "Inbound received",
+          "deduped": "Inbound deduped",
+          "policy_blocked": "Blocked by policy",
+          "signature_failed": "Signature mismatch",
+          "edited": "Inbound edited",
+          "deleted": "Inbound deleted",
+          "read_indicator": "Read indicator",
+          "member_added": "Member joined",
+          "member_removed": "Member left",
+          "deferred_quiet_hours": "Deferred (quiet hours)",
+          "deferred_muted": "Deferred (muted)",
+          "deferred_manual_mode": "Deferred (manual mode)"
+        },
+        "outbound": {
+          "enqueued": "Outbound queued",
+          "ai_run_enqueued": "AI reply queued"
+        },
+        "circuit": {
+          "opened": "Circuit opened",
+          "half_opened": "Circuit half-opened",
+          "closed": "Circuit closed"
+        },
+        "rate_limit": {
+          "tripped": "Rate limit tripped"
+        },
+        "credential": {
+          "refreshed": "Credentials refreshed"
+        },
+        "adapter": {
+          "started": "Adapter started",
+          "stopped": "Adapter stopped",
+          "error": "Adapter error"
+        }
       }
     }
   }

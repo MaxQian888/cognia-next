@@ -62,7 +62,10 @@ function SortableHeader({
   const isActive = activeKey === sortKey
   const Icon = !isActive ? ArrowUpDownIcon : activeDir === "asc" ? ArrowUpIcon : ArrowDownIcon
   return (
-    <TableHead className={className}>
+    <TableHead
+      className={className}
+      aria-sort={isActive ? (activeDir === "asc" ? "ascending" : "descending") : "none"}
+    >
       <button
         type="button"
         onClick={() => onClick(sortKey)}
@@ -71,7 +74,6 @@ function SortableHeader({
           "hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring",
           isActive && "text-foreground"
         )}
-        aria-sort={isActive ? (activeDir === "asc" ? "ascending" : "descending") : "none"}
         data-testid={`plugin-jobs-sort-${sortKey}`}
       >
         {label}

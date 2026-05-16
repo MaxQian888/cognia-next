@@ -156,5 +156,13 @@ new line`}
       const contentSpan = document.querySelector(".overflow-x-auto")
       expect(contentSpan).toBeInTheDocument()
     })
+
+    it("collapses side-by-side grid to a single column under md", () => {
+      render(<VersionDiffView mode="side-by-side" oldContent="old line" newContent="new line" />)
+      const grid = document.querySelector(".grid")
+      expect(grid).toBeInTheDocument()
+      expect(grid?.className).toContain("grid-cols-1")
+      expect(grid?.className).toContain("md:grid-cols-2")
+    })
   })
 })

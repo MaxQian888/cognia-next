@@ -7,11 +7,13 @@ import type { PluginManifest } from "@/types/plugin"
 
 jest.mock("@/lib/db/plugins", () => ({
   listPlugins: jest.fn(),
+  setPluginConfig: jest.fn(),
 }))
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { listPlugins } = require("@/lib/db/plugins") as {
+const { listPlugins, setPluginConfig } = require("@/lib/db/plugins") as {
   listPlugins: jest.Mock
+  setPluginConfig: jest.Mock
 }
 
 function makeManifest(over: Partial<PluginManifest> = {}): PluginManifest {
@@ -44,6 +46,8 @@ describe("runMarketplaceInstall", () => {
   beforeEach(() => {
     listPlugins.mockReset()
     listPlugins.mockResolvedValue([])
+    setPluginConfig.mockReset()
+    setPluginConfig.mockResolvedValue(undefined)
   })
 
   it("returns failed when the marketplace has no entry for the id", async () => {
@@ -188,5 +192,151 @@ describe("runMarketplaceInstall", () => {
       message: "offline",
     })
     expect(client.installPlugin).not.toHaveBeenCalled()
+  })
+
+  it("persists user-supplied config to dexie after install success", async () => {
+    const client = {
+      getPlugin: jest.fn().mockResolvedValue({
+        manifest: makeManifest({
+          configSchema: {
+            type: "object",
+            properties: { token: { type: "string" } },
+          },
+        } as never),
+        name: "Demo",
+      }),
+      installPlugin: jest.fn().mockResolvedValue({ success: true }),
+    }
+    const opts = makeOpts({
+      client,
+      requestConfig: jest.fn().mockResolvedValue({ result: "save", value: { token: "abc123" } }),
+    })
+
+    const result = await runMarketplaceInstall(opts)
+
+    expect(result).toEqual({ status: "installed", pluginId: "demo-plugin" })
+    expect(client.installPlugin).toHaveBeenCalledWith("demo-plugin", undefined)
+    expect(setPluginConfig).toHaveBeenCalledWith("demo-plugin", { token: "abc123" })
+    // setPluginConfig must be invoked after installPlugin — order matters
+    // because the dexie row only exists once installPlugin returns.
+    const installOrder = client.installPlugin.mock.invocationCallOrder[0]
+    const configOrder = setPluginConfig.mock.invocationCallOrder[0]
+    expect(configOrder).toBeGreaterThan(installOrder)
+  })
+
+  it("does NOT call setPluginConfig when the config step was skipped", async () => {
+    const opts = makeOpts()
+    const result = await runMarketplaceInstall(opts)
+    expect(result).toEqual({ status: "installed", pluginId: "demo-plugin" })
+    expect(setPluginConfig).not.toHaveBeenCalled()
+  })
+
+  it("does NOT call setPluginConfig when the user provided an empty {} payload", async () => {
+    const client = {
+      getPlugin: jest.fn().mockResolvedValue({
+        manifest: makeManifest({
+          configSchema: {
+            type: "object",
+            properties: { token: { type: "string" } },
+          },
+        } as never),
+        name: "Demo",
+      }),
+      installPlugin: jest.fn().mockResolvedValue({ success: true }),
+    }
+    const opts = makeOpts({
+      client,
+      requestConfig: jest.fn().mockResolvedValue({ result: "save", value: {} }),
+    })
+
+    const result = await runMarketplaceInstall(opts)
+
+    expect(result).toEqual({ status: "installed", pluginId: "demo-plugin" })
+    expect(setPluginConfig).not.toHaveBeenCalled()
+  })
+
+  it("does NOT call setPluginConfig when the user cancels at the config step", async () => {
+    const client = {
+      getPlugin: jest.fn().mockResolvedValue({
+        manifest: makeManifest({
+          configSchema: {
+            type: "object",
+            properties: { token: { type: "string" } },
+          },
+        } as never),
+        name: "Demo",
+      }),
+      installPlugin: jest.fn(),
+    }
+    const opts = makeOpts({
+      client,
+      requestConfig: jest.fn().mockResolvedValue({ result: "cancel" }),
+    })
+
+    const result = await runMarketplaceInstall(opts)
+
+    expect(result).toEqual({ status: "cancelled", stage: "config" })
+    expect(client.installPlugin).not.toHaveBeenCalled()
+    expect(setPluginConfig).not.toHaveBeenCalled()
+  })
+
+  it("does NOT call setPluginConfig when installPlugin itself fails", async () => {
+    const client = {
+      getPlugin: jest.fn().mockResolvedValue({
+        manifest: makeManifest({
+          configSchema: {
+            type: "object",
+            properties: { token: { type: "string" } },
+          },
+        } as never),
+        name: "Demo",
+      }),
+      installPlugin: jest.fn().mockRejectedValue(new Error("network down")),
+    }
+    const opts = makeOpts({
+      client,
+      requestConfig: jest.fn().mockResolvedValue({ result: "save", value: { token: "abc" } }),
+    })
+
+    const result = await runMarketplaceInstall(opts)
+
+    expect(result).toEqual({
+      status: "failed",
+      stage: "install",
+      message: "network down",
+    })
+    expect(setPluginConfig).not.toHaveBeenCalled()
+  })
+
+  it("surfaces a failed result when setPluginConfig throws after install success", async () => {
+    setPluginConfig.mockRejectedValueOnce(new Error("indexeddb full"))
+    const client = {
+      getPlugin: jest.fn().mockResolvedValue({
+        manifest: makeManifest({
+          configSchema: {
+            type: "object",
+            properties: { token: { type: "string" } },
+          },
+        } as never),
+        name: "Demo",
+      }),
+      installPlugin: jest.fn().mockResolvedValue({ success: true }),
+    }
+    const opts = makeOpts({
+      client,
+      requestConfig: jest.fn().mockResolvedValue({ result: "save", value: { token: "abc" } }),
+    })
+
+    const result = await runMarketplaceInstall(opts)
+
+    expect(result).toEqual({
+      status: "failed",
+      stage: "install",
+      message: "indexeddb full",
+    })
+    // installPlugin already ran — the dexie row exists, only the config
+    // write failed. The orchestrator's contract is to surface this rather
+    // than silently dropping the user's input.
+    expect(client.installPlugin).toHaveBeenCalledTimes(1)
   })
 })

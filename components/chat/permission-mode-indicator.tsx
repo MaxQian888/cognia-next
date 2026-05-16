@@ -7,6 +7,7 @@
 
 import { useTranslations } from "next-intl"
 import { useChatStore, type PermissionMode } from "@/stores/chat"
+import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
@@ -51,18 +52,20 @@ export function PermissionModeIndicator({ onCycle, disabled }: PermissionModeInd
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           disabled={disabled}
           onClick={() => onCycle(nextPermissionMode(mode))}
           className={cn(
-            "rounded border px-2 py-0.5 font-mono text-[11px] transition-colors hover:bg-accent",
+            "h-auto px-2 py-0.5 font-mono text-[11px] font-normal transition-colors hover:bg-accent",
             toneClass
           )}
           aria-label={t("aria", { label })}
         >
           ⇧⇥ {label}
-        </button>
+        </Button>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-xs">
         <p className="text-xs">{tooltip}</p>

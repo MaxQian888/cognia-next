@@ -40,7 +40,7 @@ import { LarkConfigDialog } from "./lark-config"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
 
-function makeTatOkResponse(appId = "cli_test") {
+function makeTatOkResponse(_appId = "cli_test") {
   return {
     status: 200,
     headers: {},

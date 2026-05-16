@@ -56,6 +56,8 @@ interface SkillsStoreState {
   detailSkillId: string | null
   /** When true, the right-hand filter sheet is open. */
   filterSheetOpen: boolean
+  /** When true, the mobile-only category navigator sheet is open. */
+  categorySheetOpen: boolean
   /** When non-null, show the editor pre-filled with this skill (or empty when "create"). */
   editorTarget: { mode: "create" } | { mode: "edit"; skillId: string } | null
   /** When non-null, show the import dialog with these draft entries staged. */
@@ -75,6 +77,7 @@ interface SkillsStoreState {
   openDetail: (skillId: string) => void
   closeDetail: () => void
   setFilterSheetOpen: (open: boolean) => void
+  setCategorySheetOpen: (open: boolean) => void
   openCreate: () => void
   openEdit: (skillId: string) => void
   closeEditor: () => void
@@ -120,6 +123,7 @@ export const useSkillsStore = create<SkillsStoreState>((set, _get) => ({
   selection: new Set<string>(),
   detailSkillId: null,
   filterSheetOpen: false,
+  categorySheetOpen: false,
   editorTarget: null,
   importStaging: null,
   deleteTarget: null,
@@ -141,6 +145,7 @@ export const useSkillsStore = create<SkillsStoreState>((set, _get) => ({
   openDetail: (skillId) => set({ detailSkillId: skillId }),
   closeDetail: () => set({ detailSkillId: null }),
   setFilterSheetOpen: (open) => set({ filterSheetOpen: open }),
+  setCategorySheetOpen: (open) => set({ categorySheetOpen: open }),
   openCreate: () => set({ editorTarget: { mode: "create" }, detailSkillId: null }),
   openEdit: (skillId) => set({ editorTarget: { mode: "edit", skillId }, detailSkillId: null }),
   closeEditor: () => set({ editorTarget: null }),

@@ -253,3 +253,63 @@ sidecar/dispatch/anthropic.mjs — appendHeaders → ANTHROPIC_DEFAULT_HEADERS m
 
 lib/db/schema.ts — v32 marker (no migration)
 ```
+
+## Addendum 2026-05-15 — Completeness slate 2
+
+A follow-up completion pass closed 11 of the gaps left by the M5 scaffold.
+Two of the original Non-Goals (chat-driven `canUseTool` sidecar dispatch,
+sidecar→renderer MCP automation-proxy IPC) turned out to require structural
+new architecture, not "completion" work, and remain Non-Goals to be tracked
+in a dedicated follow-up ADR.
+
+**Closed gaps**
+
+1. `text_editor` `undo_edit` action — `TextEditorAction::UndoEdit { path }`
+   in `plugins/computer-use/rust/src/types.rs`, snapshotted by an
+   `UNDO_STORE: Lazy<Mutex<HashMap<PathBuf, UndoEntry>>>` before every
+   mutating action (`Create` / `StrReplace` / `Insert`). Undo restores the
+   prior content, or deletes the file when the snapshot was "absent".
+2. `bash.restart: true` honored as an audited no-op. Cognia has no persistent
+   shell to restart, so the call returns a synthetic `BashResult` whose
+   `stdout` explains the divergence. Audited under `command: "bash:restart"`.
+3. `plugins/computer-use/plugin.json` `runtimeCompatibility` key renamed
+   `desktop` → `tauri` (canonical per `types/plugin/plugin.ts:99`). A new
+   `lib/plugin/core/builtin-manifest-shape.test.ts` walks every built-in
+   manifest and rejects non-canonical surface keys. Six other plugins were
+   normalized in the same pass.
+4. The activate-time `ctx.agent?.registerNativeAnthropicTool?.(...)` calls
+   were dropped from `plugins/computer-use/src/index.ts`. Manifest-driven
+   registration (`manifest.nativeAnthropicTools`) is canonical.
+5. TypeScript SDK scaffold created at the paths the capability contract
+   advertises: `plugin-sdk/typescript/src/api/native-anthropic-tool.ts` and
+   `plugin-sdk/typescript/src/context/extended.ts`.
+6. `runtime-proof-audit.test.ts` locks `native-anthropic-tool` proof status
+   = `verified`.
+7. Settings → Automation consent overlay + all five tabs (Overview,
+   Permissions, Whitelist, Audit, Inspector) plus the Characters Computer Use
+   toggle and the External Bridge `mcp:computer-use` scope description are
+   fully i18n-wired via `useTranslations()` under the new
+   `automation.*` and existing `settings.*` namespaces. The plugin
+   `/cu` slash command registers an i18n bundle via
+   `lib/i18n/plugin-i18n-registry`.
+8. `i18n/messages/en.json` + `zh-CN.json` parity restored.
+   `scripts/i18n-baseline.json` rebased — JSX hardcoded-string count fell
+   from 811 to 698 (~113 strings closed).
+9. Capability contract `hostBindings` updated for the runtime-proof audit.
+
+**Still-deferred (Non-Goals, tracked separately)**
+
+- Chat-driven `canUseTool` sidecar dispatch for `computer` / `bash` /
+  `text_editor`. The `@anthropic-ai/claude-agent-sdk` is MCP-only — it has
+  no field through which to inject API-level native tools. Closing this
+  requires either teaching `sidecar/dispatch/ai-sdk.mjs` to plumb
+  provider-defined tools through the Vercel AI SDK, or adding a brand-new
+  Anthropic-direct dispatcher. Either path is a structural new dispatcher,
+  not a completion task.
+- MCP standalone `computer_use` IPC. The Node MCP sidecar uses the SDK's
+  `StdioServerTransport`, which owns stdin/stdout. Wiring an
+  `automation_proxy` envelope requires a custom transport wrapper on the
+  Node side plus a stdout-pumping refactor of
+  `src-tauri/src/mcp_server/sidecar.rs`. Tracked separately.
+- macOS / Linux UIA-equivalent tree walking (Phase 6.b).
+- Plugin-registered custom desktop actions / UIA patterns.

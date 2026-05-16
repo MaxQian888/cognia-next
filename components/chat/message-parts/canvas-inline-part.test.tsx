@@ -70,7 +70,7 @@ describe("CanvasInlinePart", () => {
     const node = screen.getByTestId("canvas-inline-part-missing")
     expect(node).toBeInTheDocument()
     expect(node).toHaveTextContent("lost-canvas")
-    expect(node).toHaveTextContent("(已清理)")
+    expect(node).toHaveTextContent("(cleared)")
   })
 
   it("collapses + re-expands the preview body", () => {

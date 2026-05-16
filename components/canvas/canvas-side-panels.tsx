@@ -10,15 +10,24 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
+import { AnimatePresence, motion } from "motion/react"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+} from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
 import { Lightbulb, History as HistoryIcon, MessageSquare, Users, Play } from "lucide-react"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useCommentStore } from "@/stores/canvas/comment-store"
 import { useCanvasLayoutStore, type CanvasRightTab } from "@/stores/canvas/canvas-layout-store"
+import { mobileTransition, STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { SuggestionsPanel } from "./suggestions-panel"
 import { VersionHistoryPanel } from "./version-history-panel"
 import { CommentPanel } from "./comment-panel"
@@ -27,6 +36,14 @@ import { CodeExecutionPanel } from "./code-execution-panel"
 import { useCanvasCodeExecution } from "@/hooks/canvas"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
+/**
+ * Container-width threshold (driven by a ResizeObserver on the side-panel
+ * frame) at which the tab labels collapse to icon-only. Intentionally
+ * distinct from `useIsMobile()`'s 768 px viewport threshold — even on a
+ * wide viewport the right rail can be narrow when the user has both
+ * rails uncollapsed, so the icon-only swap is local to this panel rather
+ * than mirroring the global mobile breakpoint.
+ */
 export const CANVAS_SIDE_PANELS_ICON_ONLY_BREAKPOINT = 280
 
 export function CanvasSidePanels() {
@@ -70,14 +87,28 @@ export function CanvasSidePanels() {
 
   if (!activeId) {
     return (
-      <div
-        ref={containerRef}
-        className="flex h-full items-center justify-center p-4 text-center text-xs text-muted-foreground"
-      >
-        {t("emptyHint", { default: "Open a document to see suggestions, history and comments." })}
+      <div ref={containerRef} className="flex h-full min-h-0 min-w-0 flex-col">
+        <Empty className="border-0 p-4 text-xs">
+          <EmptyHeader>
+            <EmptyDescription className="text-xs">{t("emptyHint")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       </div>
     )
   }
+
+  // Wrap each tab's host in a motion container so the rail fades + stagger
+  // animates rather than snapping when the user switches tabs. Radix already
+  // unmounts inactive TabsContent, so AnimatePresence + per-tab key drives
+  // both the enter animation and the underlying stagger.
+  const tabContentMotionProps = {
+    variants: STAGGER_CONTAINER,
+    initial: "initial",
+    animate: "animate",
+    exit: "exit",
+    transition: mobileTransition("fast"),
+    className: "h-full",
+  } as const
 
   return (
     <div ref={containerRef} className="flex h-full min-h-0 min-w-0 flex-col">
@@ -128,21 +159,53 @@ export function CanvasSidePanels() {
           />
         </TabsList>
 
-        <TabsContent value="suggestions" className="m-0 flex-1 min-h-0 overflow-hidden">
-          <SuggestionsHost documentId={activeId} />
-        </TabsContent>
-        <TabsContent value="history" className="m-0 flex-1 min-h-0 overflow-hidden">
-          <HistoryHost documentId={activeId} />
-        </TabsContent>
-        <TabsContent value="comments" className="m-0 flex-1 min-h-0 overflow-hidden">
-          <CommentsHost documentId={activeId} />
-        </TabsContent>
-        <TabsContent value="collaboration" className="m-0 flex-1 min-h-0 overflow-hidden">
-          <CollaborationHost documentId={activeId} />
-        </TabsContent>
-        <TabsContent value="execution" className="m-0 flex-1 min-h-0 overflow-hidden">
-          <ExecutionHost documentId={activeId} />
-        </TabsContent>
+        <AnimatePresence mode="wait" initial={false}>
+          <TabsContent value="suggestions" className="m-0 flex-1 min-h-0 overflow-hidden">
+            <motion.div
+              key="suggestions"
+              data-testid="canvas-tab-motion-suggestions"
+              {...tabContentMotionProps}
+            >
+              <SuggestionsHost documentId={activeId} />
+            </motion.div>
+          </TabsContent>
+          <TabsContent value="history" className="m-0 flex-1 min-h-0 overflow-hidden">
+            <motion.div
+              key="history"
+              data-testid="canvas-tab-motion-history"
+              {...tabContentMotionProps}
+            >
+              <HistoryHost documentId={activeId} />
+            </motion.div>
+          </TabsContent>
+          <TabsContent value="comments" className="m-0 flex-1 min-h-0 overflow-hidden">
+            <motion.div
+              key="comments"
+              data-testid="canvas-tab-motion-comments"
+              {...tabContentMotionProps}
+            >
+              <CommentsHost documentId={activeId} />
+            </motion.div>
+          </TabsContent>
+          <TabsContent value="collaboration" className="m-0 flex-1 min-h-0 overflow-hidden">
+            <motion.div
+              key="collaboration"
+              data-testid="canvas-tab-motion-collaboration"
+              {...tabContentMotionProps}
+            >
+              <CollaborationHost documentId={activeId} />
+            </motion.div>
+          </TabsContent>
+          <TabsContent value="execution" className="m-0 flex-1 min-h-0 overflow-hidden">
+            <motion.div
+              key="execution"
+              data-testid="canvas-tab-motion-execution"
+              {...tabContentMotionProps}
+            >
+              <ExecutionHost documentId={activeId} />
+            </motion.div>
+          </TabsContent>
+        </AnimatePresence>
       </Tabs>
     </div>
   )
@@ -171,9 +234,12 @@ function PanelTab({ value, icon, label, iconOnly, badge }: PanelTabProps) {
         {icon}
         {!iconOnly && <span className="truncate">{label}</span>}
         {showBadge && (
-          <span className="ml-0.5 inline-flex items-center justify-center rounded-full bg-primary px-1 py-0 text-[9px] font-medium text-primary-foreground leading-none min-w-[14px] h-3.5">
+          <Badge
+            variant="default"
+            className="ml-0.5 h-3.5 min-w-[14px] rounded-full px-1 py-0 text-[9px] font-medium leading-none"
+          >
             {badge > 99 ? "99+" : badge}
-          </span>
+          </Badge>
         )}
       </span>
     </TabsTrigger>
@@ -202,14 +268,14 @@ function SuggestionsHost({ documentId }: { documentId: string }) {
 
   if (suggestions.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-2 p-6 text-center">
-        <Lightbulb className="size-6 text-muted-foreground/30" />
-        <p className="text-xs text-muted-foreground">
-          {t("suggestionsEmpty", {
-            default: "No suggestions yet. Use the Suggest action to generate improvements.",
-          })}
-        </p>
-      </div>
+      <Empty className="h-full border-0">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <Lightbulb />
+          </EmptyMedia>
+          <EmptyDescription className="text-xs">{t("suggestionsEmpty")}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     )
   }
   return (
@@ -230,14 +296,14 @@ function HistoryHost({ documentId }: { documentId: string }) {
 
   if (versions.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-2 p-6 text-center">
-        <HistoryIcon className="size-6 text-muted-foreground/30" />
-        <p className="text-xs text-muted-foreground">
-          {t("historyEmpty", {
-            default: "No versions yet. Auto-save creates snapshots as you edit.",
-          })}
-        </p>
-      </div>
+      <Empty className="h-full border-0">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <HistoryIcon />
+          </EmptyMedia>
+          <EmptyDescription className="text-xs">{t("historyEmpty")}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     )
   }
 
@@ -245,28 +311,34 @@ function HistoryHost({ documentId }: { documentId: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1">
+      <motion.div
+        className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1"
+        variants={STAGGER_CONTAINER}
+        initial="initial"
+        animate="animate"
+      >
         {recent.map((v) => (
-          <div key={v.id} className="flex items-center gap-2 text-xs text-muted-foreground py-1">
+          <motion.div
+            key={v.id}
+            variants={STAGGER_CHILD}
+            className="flex items-center gap-2 text-xs text-muted-foreground py-1"
+          >
             <span className="truncate flex-1">
               {v.description || new Date(v.createdAt).toLocaleString()}
             </span>
             {v.isAutoSave && (
               <Badge variant="outline" className="text-[9px] px-1 h-4 shrink-0">
-                auto
+                <AutoSaveTag />
               </Badge>
             )}
-          </div>
+          </motion.div>
         ))}
         {versions.length > 3 && (
           <p className="text-[10px] text-muted-foreground/60 pt-1">
-            {t("moreVersions", { default: "+{count} more" }).replace(
-              "{count}",
-              String(versions.length - 3)
-            )}
+            {t("moreVersions", { count: versions.length - 3 })}
           </p>
         )}
-      </div>
+      </motion.div>
       <div className="p-3 pt-0">
         <VersionHistoryPanel
           documentId={documentId}
@@ -283,6 +355,11 @@ function HistoryHost({ documentId }: { documentId: string }) {
   )
 }
 
+function AutoSaveTag() {
+  const tRoot = useTranslations("canvas")
+  return <>{tRoot("autoTag")}</>
+}
+
 /**
  * Renders the Cognia CommentPanel inside a Sheet trigger button.
  */
@@ -294,23 +371,21 @@ function CommentsHost({ documentId }: { documentId: string }) {
 
   if (comments.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-2 p-6 text-center">
-        <MessageSquare className="size-6 text-muted-foreground/30" />
-        <p className="text-xs text-muted-foreground">
-          {t("commentsEmpty", {
-            default: "No comments yet. Add line-anchored comments to collaborate.",
-          })}
-        </p>
-      </div>
+      <Empty className="h-full border-0">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <MessageSquare />
+          </EmptyMedia>
+          <EmptyDescription className="text-xs">{t("commentsEmpty")}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     )
   }
 
   return (
     <div className="space-y-2 p-3">
       <p className="text-xs text-muted-foreground">
-        {t("commentsSummary", { default: "{count} comments ({unresolved} unresolved)" })
-          .replace("{count}", String(comments.length))
-          .replace("{unresolved}", String(unresolved.length))}
+        {t("commentsSummary", { count: comments.length, unresolved: unresolved.length })}
       </p>
       <CommentPanel
         documentId={documentId}
@@ -334,25 +409,26 @@ function CollaborationHost({ documentId }: { documentId: string }) {
   const documents = useArtifactStore((s) => s.canvasDocuments)
   const doc = documents[documentId]
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-2 p-6 text-center">
-      <Users className="size-6 text-muted-foreground/30" />
-      <p className="text-xs text-muted-foreground">
-        {t("collabHint", {
-          default:
-            "Real-time collaboration is disabled by default. Enable it in Settings → Canvas → Collaboration.",
-        })}
-      </p>
-      <CollaborationPanel
-        documentId={documentId}
-        documentContent={doc?.content ?? ""}
-        trigger={
-          <Button size="sm" variant="outline" className="text-xs">
-            <Users className="mr-2 size-3.5" />
-            {t("openCollab", { default: "Open collaboration" })}
-          </Button>
-        }
-      />
-    </div>
+    <Empty className="h-full border-0">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <Users />
+        </EmptyMedia>
+        <EmptyDescription className="text-xs">{t("collabHint")}</EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <CollaborationPanel
+          documentId={documentId}
+          documentContent={doc?.content ?? ""}
+          trigger={
+            <Button size="sm" variant="outline" className="text-xs">
+              <Users className="mr-2 size-3.5" />
+              {t("openCollab", { default: "Open collaboration" })}
+            </Button>
+          }
+        />
+      </EmptyContent>
+    </Empty>
   )
 }
 

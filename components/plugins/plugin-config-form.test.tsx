@@ -97,4 +97,41 @@ describe("PluginConfigForm", () => {
     render(<PluginConfigForm />)
     expect(screen.getByText("noSchema")).toBeInTheDocument()
   })
+
+  it("uses the localized arrayPlaceholder for array-typed fields", () => {
+    mockPlugin = {
+      ...schemaPlugin,
+      manifest: {
+        id: "p_conf",
+        configSchema: {
+          type: "object",
+          properties: {
+            tags: { type: "array", items: { type: "string" }, default: ["a", "b"] },
+          },
+        },
+      },
+      config: {},
+    }
+    render(<PluginConfigForm />)
+    const textarea = screen.getByLabelText("tags") as HTMLTextAreaElement
+    expect(textarea.placeholder).toBe("arrayPlaceholder")
+  })
+
+  it("falls back to the localized unsupportedField message for unknown schema shapes", () => {
+    mockPlugin = {
+      ...schemaPlugin,
+      manifest: {
+        id: "p_conf",
+        configSchema: {
+          type: "object",
+          properties: {
+            payload: { type: "object" },
+          },
+        },
+      },
+      config: {},
+    }
+    render(<PluginConfigForm />)
+    expect(screen.getByText("unsupportedField")).toBeInTheDocument()
+  })
 })

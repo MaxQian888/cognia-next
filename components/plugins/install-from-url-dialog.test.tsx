@@ -4,6 +4,11 @@
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
+    vars ? `${key}:${JSON.stringify(vars)}` : key,
+}))
+
 const previewMock = jest.fn()
 const installMock = jest.fn()
 const isPublisherKeyTrustedMock = jest.fn()
@@ -39,14 +44,14 @@ beforeEach(() => {
 describe("InstallFromUrlDialog", () => {
   it("renders the URL input + preview button initially", () => {
     render(<InstallFromUrlDialog open onOpenChange={() => {}} />)
-    expect(screen.getByLabelText(/Bundle URL/i)).toBeInTheDocument()
+    expect(screen.getByLabelText("bundleUrlLabel")).toBeInTheDocument()
     const previewBtn = screen.getByTestId("install-from-url-preview-button")
     expect(previewBtn).toBeDisabled()
   })
 
   it("enables Preview when a URL is entered", () => {
     render(<InstallFromUrlDialog open onOpenChange={() => {}} />)
-    fireEvent.change(screen.getByLabelText(/Bundle URL/i), {
+    fireEvent.change(screen.getByLabelText("bundleUrlLabel"), {
       target: { value: "https://example.com/p.zip" },
     })
     expect(screen.getByTestId("install-from-url-preview-button")).toBeEnabled()
@@ -54,10 +59,10 @@ describe("InstallFromUrlDialog", () => {
 
   it("disables Preview when signature URL set but public key missing", () => {
     render(<InstallFromUrlDialog open onOpenChange={() => {}} />)
-    fireEvent.change(screen.getByLabelText(/Bundle URL/i), {
+    fireEvent.change(screen.getByLabelText("bundleUrlLabel"), {
       target: { value: "https://example.com/p.zip" },
     })
-    fireEvent.change(screen.getByLabelText(/Signature URL \(optional\)/i), {
+    fireEvent.change(screen.getByLabelText("signatureUrlLabel"), {
       target: { value: "https://example.com/p.zip.sig" },
     })
     expect(screen.getByTestId("install-from-url-preview-button")).toBeDisabled()
@@ -72,7 +77,7 @@ describe("InstallFromUrlDialog", () => {
       authorFingerprint: "9f3a112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
     })
     render(<InstallFromUrlDialog open onOpenChange={() => {}} />)
-    fireEvent.change(screen.getByLabelText(/Bundle URL/i), {
+    fireEvent.change(screen.getByLabelText("bundleUrlLabel"), {
       target: { value: "https://example.com/p.zip" },
     })
     fireEvent.click(screen.getByTestId("install-from-url-preview-button"))
@@ -80,7 +85,7 @@ describe("InstallFromUrlDialog", () => {
       expect(screen.getByTestId("install-from-url-preview")).toBeInTheDocument()
     })
     expect(screen.getByText(/Demo/)).toBeInTheDocument()
-    expect(screen.getByText(/signature verified/i)).toBeInTheDocument()
+    expect(screen.getByText("signatureVerified")).toBeInTheDocument()
   })
 
   it("renders 'already trusted' when the publisher key is known", async () => {
@@ -93,19 +98,19 @@ describe("InstallFromUrlDialog", () => {
     })
     isPublisherKeyTrustedMock.mockResolvedValueOnce(true)
     render(<InstallFromUrlDialog open onOpenChange={() => {}} />)
-    fireEvent.change(screen.getByLabelText(/Bundle URL/i), {
+    fireEvent.change(screen.getByLabelText("bundleUrlLabel"), {
       target: { value: "https://example.com/p.zip" },
     })
     fireEvent.click(screen.getByTestId("install-from-url-preview-button"))
     await waitFor(() => {
-      expect(screen.getByText(/You already trust this author/i)).toBeInTheDocument()
+      expect(screen.getByText("alreadyTrusted")).toBeInTheDocument()
     })
   })
 
   it("surfaces preview errors in an alert", async () => {
     previewMock.mockRejectedValueOnce(new Error("download failed: 404"))
     render(<InstallFromUrlDialog open onOpenChange={() => {}} />)
-    fireEvent.change(screen.getByLabelText(/Bundle URL/i), {
+    fireEvent.change(screen.getByLabelText("bundleUrlLabel"), {
       target: { value: "https://example.com/p.zip" },
     })
     fireEvent.click(screen.getByTestId("install-from-url-preview-button"))
@@ -131,7 +136,7 @@ describe("InstallFromUrlDialog", () => {
       authorFingerprint: "9f3a",
     })
     render(<InstallFromUrlDialog open onOpenChange={() => {}} />)
-    fireEvent.change(screen.getByLabelText(/Bundle URL/i), {
+    fireEvent.change(screen.getByLabelText("bundleUrlLabel"), {
       target: { value: "https://example.com/p.zip" },
     })
     fireEvent.click(screen.getByTestId("install-from-url-preview-button"))
@@ -140,7 +145,7 @@ describe("InstallFromUrlDialog", () => {
     })
     fireEvent.click(screen.getByTestId("install-from-url-confirm-button"))
     await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent(/Confirm trust/i)
+      expect(screen.getByRole("alert")).toHaveTextContent("trustRequiredError")
     })
     expect(installMock).not.toHaveBeenCalled()
   })

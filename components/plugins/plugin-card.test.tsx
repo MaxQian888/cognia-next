@@ -9,6 +9,7 @@ import type { PluginRow } from "@/lib/db/plugin-types"
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     if (vars && typeof vars.count === "number") return `${key}:${vars.count}`
+    if (vars && typeof vars.name === "string") return `${key}:${vars.name}`
     return key
   },
 }))
@@ -77,8 +78,14 @@ describe("PluginCard", () => {
   it("toggling the checkbox invokes onToggleSelect", () => {
     const cb = callbacks()
     render(<PluginCard plugin={baseRow} selected={false} {...cb} />)
-    fireEvent.click(screen.getByLabelText(/Select Test Plugin/))
+    fireEvent.click(screen.getByLabelText("selectAria:Test Plugin"))
     expect(cb.onToggleSelect).toHaveBeenCalledWith("plugin_test")
+  })
+
+  it("threads the plugin name through the localized selectAria key", () => {
+    const cb = callbacks()
+    render(<PluginCard plugin={{ ...baseRow, name: "Other Name" }} selected={false} {...cb} />)
+    expect(screen.getByLabelText("selectAria:Other Name")).toBeInTheDocument()
   })
 
   it("renders error pill and message when status=error", () => {

@@ -50,6 +50,7 @@ export function SkillEditorAiPopup({
   onAiAssist,
 }: Props) {
   const t = useTranslations("skills.ai")
+  const tEditor = useTranslations("skills.editor")
   const [running, setRunning] = useState<AiIntent | null>(null)
   const [suggested, setSuggested] = useState<string | null>(null)
   const [usedIntent, setUsedIntent] = useState<AiIntent | null>(null)
@@ -78,11 +79,11 @@ export function SkillEditorAiPopup({
         <DialogHeader>
           <DialogTitle>{t("buttonLabel")}</DialogTitle>
           <DialogDescription>
-            {t("diff")} — {current.name || "(unnamed skill)"}
+            {t("diff")} — {current.name || tEditor("unnamedPreview")}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {INTENTS.map((intent) => (
             <Button
               key={intent.id}

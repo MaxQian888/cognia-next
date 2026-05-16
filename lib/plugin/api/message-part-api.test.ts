@@ -1,7 +1,6 @@
 /**
  * @jest-environment node
  */
-import React from "react"
 import { createMessagePartAPI, purgeMessagePartRenderersForPlugin } from "./message-part-api"
 import { clearAllMessagePartRenderers, getMessagePartRenderer } from "./message-part-renderers"
 

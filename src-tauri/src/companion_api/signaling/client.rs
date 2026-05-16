@@ -1,0 +1,696 @@
+//! Long-lived signaling-rendezvous WebSocket client. ADR-0021.
+//!
+//! One task per paired device that owns:
+//! - the outbound WSS connection to the public signaling rendezvous,
+//! - the `PeerSession` (created on receipt of `rtc:offer`),
+//! - the dispatcher that bridges the resulting DataChannel to
+//!   `companion_api::rpc::dispatch` + `EventBus`.
+//!
+//! Reconnect policy mirrors the Discord-gateway pattern used elsewhere
+//! in the codebase (`lib/connectors/adapters/discord/gateway-client.ts`):
+//! full-jitter exponential backoff capped at 60 s, reset on first
+//! successful `subscribed` reply.
+//!
+//! Cancellation is driven by a `tokio::sync::watch::Receiver<bool>` — the
+//! `SignalingHub` flips the flag when the device is unpaired or the user
+//! disables the WebRTC tier; the task observes the change at the next
+//! `select!` poll and unwinds cleanly.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use futures_util::{SinkExt, StreamExt};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use tokio::sync::{mpsc, watch};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{client::IntoClientRequest, Message},
+};
+use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
+use webrtc::ice_transport::ice_server::RTCIceServer;
+use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
+
+use super::dispatch::spawn as spawn_dispatcher;
+use super::envelope::{
+    build_signed_envelope, decode_secret, encode_base64_url, fresh_nonce, now_ms,
+    verify_signed_envelope, Envelope, EnvelopeKind, EnvelopeError, ReplayWindow,
+};
+use super::peer::{PeerCallbacks, PeerSession};
+use super::{DeviceTier, TierWriter};
+use crate::companion_api::SharedState;
+
+/// Reconnect backoff schedule (ms). Index = attempt count (capped). Matches
+/// `SIGNALING_BACKOFF_MS` in `lib/signaling/types.ts`.
+const BACKOFF_MS: &[u64] = &[1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 60_000];
+
+/// Configuration passed to one signaling client task.
+#[derive(Clone, Debug)]
+pub struct ClientConfig {
+    pub signaling_url: String,
+    pub rendezvous_id: String,
+    pub rendezvous_secret: String,
+    pub device_id: String,
+    /// ICE servers used by the desktop peer. STUN and optional TURN.
+    pub ice_servers: Vec<RTCIceServer>,
+    /// Handle the task uses to push its current [`DeviceTier`] into the
+    /// hub's shared snapshot.
+    pub tier_writer: TierWriter,
+}
+
+/// Spawn a signaling client task. The returned watch-sender allows the
+/// caller to cancel the task by sending `true`; the corresponding watch-
+/// receiver is observed at every `select!` poll.
+pub fn spawn(
+    config: ClientConfig,
+    state: SharedState,
+    app: tauri::AppHandle,
+) -> ClientHandle {
+    let (cancel_tx, cancel_rx) = watch::channel(false);
+    let join = tokio::spawn(run_with_reconnect(config.clone(), state, app, cancel_rx));
+    ClientHandle {
+        config,
+        cancel_tx,
+        join,
+    }
+}
+
+/// Handle to a running signaling client. Drop the handle to keep the task
+/// running; call [`shutdown`] (or simply drop after sending `true`) to
+/// stop it. The task self-aborts when its `tauri::AppHandle` becomes
+/// invalid (app quit).
+pub struct ClientHandle {
+    pub config: ClientConfig,
+    cancel_tx: watch::Sender<bool>,
+    join: tokio::task::JoinHandle<()>,
+}
+
+impl ClientHandle {
+    pub async fn shutdown(self) {
+        let _ = self.cancel_tx.send(true);
+        let _ = self.join.await;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reconnect loop
+// ---------------------------------------------------------------------------
+
+async fn run_with_reconnect(
+    config: ClientConfig,
+    state: SharedState,
+    app: tauri::AppHandle,
+    mut cancel_rx: watch::Receiver<bool>,
+) {
+    if let Err(e) = decode_secret(&config.rendezvous_secret) {
+        log::error!(
+            "signaling::client[{}]: invalid rendezvous secret: {e}",
+            config.device_id
+        );
+        config
+            .tier_writer
+            .set_with_error(DeviceTier::Failed, format!("invalid rendezvous secret: {e}"));
+        return;
+    }
+
+    let mut attempt = 0usize;
+    loop {
+        if *cancel_rx.borrow() {
+            return;
+        }
+        let label = format!("device {} (room {})", config.device_id, config.rendezvous_id);
+        log::info!(
+            "signaling::client[{label}]: connecting to {}",
+            config.signaling_url
+        );
+        // Each attempt begins from `Offline` — the moment the WSS connection
+        // is `subscribed` we'll bump to `Awaiting`.
+        config.tier_writer.set(DeviceTier::Offline);
+        match run_one_session(&config, state.clone(), app.clone(), cancel_rx.clone()).await {
+            Ok(()) => {
+                log::info!("signaling::client[{label}]: session ended cleanly");
+                attempt = 0;
+                // Clean shutdown — drop back to Offline pending next connect.
+                config.tier_writer.set(DeviceTier::Offline);
+            }
+            Err(SessionError::Cancelled) => {
+                log::info!("signaling::client[{label}]: cancelled");
+                // The hub will remove the tier entry in `cancel_one`; no
+                // need to push a final state here.
+                return;
+            }
+            Err(e) => {
+                log::warn!("signaling::client[{label}]: session error: {e}");
+                config
+                    .tier_writer
+                    .set_with_error(DeviceTier::Failed, e.to_string());
+                attempt = attempt.saturating_add(1);
+            }
+        }
+        let idx = attempt.min(BACKOFF_MS.len() - 1);
+        let base = BACKOFF_MS[idx];
+        let jitter = (rand::random::<u64>() % base.max(1)).max(1);
+        let delay = Duration::from_millis(jitter);
+        tokio::select! {
+            _ = tokio::time::sleep(delay) => {}
+            _ = cancel_rx.changed() => {
+                if *cancel_rx.borrow() {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+enum SessionError {
+    Cancelled,
+    Websocket(String),
+    Protocol(String),
+}
+
+impl std::fmt::Display for SessionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Cancelled => write!(f, "cancelled"),
+            Self::Websocket(e) => write!(f, "websocket: {e}"),
+            Self::Protocol(e) => write!(f, "protocol: {e}"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Wire frames (mirrors `signaling-server/src/proto.rs`).
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+enum ClientFrame<'a> {
+    Subscribe {
+        rendezvous_id: &'a str,
+        role: &'a str,
+        client_nonce: &'a str,
+    },
+    Relay {
+        rendezvous_id: &'a str,
+        payload: String,
+    },
+    Ping,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[allow(dead_code)] // `rendezvous_id` is informational; the client already knows its room.
+enum ServerFrame {
+    Subscribed { rendezvous_id: String, peers: Value },
+    PeerJoined { rendezvous_id: String, role: String },
+    PeerLeft { rendezvous_id: String, role: String },
+    Relay {
+        rendezvous_id: String,
+        from_role: String,
+        payload: String,
+    },
+    Pong,
+    Error { code: String, message: String },
+}
+
+// ---------------------------------------------------------------------------
+// Single-connection session
+// ---------------------------------------------------------------------------
+
+async fn run_one_session(
+    config: &ClientConfig,
+    state: SharedState,
+    app: tauri::AppHandle,
+    mut cancel_rx: watch::Receiver<bool>,
+) -> Result<(), SessionError> {
+    let request = config
+        .signaling_url
+        .as_str()
+        .into_client_request()
+        .map_err(|e| SessionError::Websocket(format!("invalid URL: {e}")))?;
+    let (ws_stream, _resp) = connect_async(request)
+        .await
+        .map_err(|e| SessionError::Websocket(e.to_string()))?;
+    let (mut write, mut read) = ws_stream.split();
+
+    // Subscribe immediately. Server replies `Subscribed`.
+    let nonce = fresh_nonce();
+    let subscribe = ClientFrame::Subscribe {
+        rendezvous_id: &config.rendezvous_id,
+        role: "desktop",
+        client_nonce: &nonce,
+    };
+    write
+        .send(Message::Text(
+            serde_json::to_string(&subscribe).expect("serialize subscribe"),
+        ))
+        .await
+        .map_err(|e| SessionError::Websocket(e.to_string()))?;
+
+    // Outbound queue → any task that wants to push a frame to the WSS sink
+    // sends through here. Bounded so a runaway producer can't OOM us.
+    let (out_tx, mut out_rx) = mpsc::channel::<String>(64);
+
+    // Per-peer channels — recreated each time a fresh PeerSession is built
+    // (i.e., each new offer). We hold the Options so we can drop them when
+    // the peer dies and create fresh channels for the next offer.
+    let mut peer_session: Option<Arc<PeerSession>> = None;
+    let mut peer_ice_rx: Option<mpsc::UnboundedReceiver<RTCIceCandidateInit>> = None;
+    let mut peer_state_rx: Option<mpsc::UnboundedReceiver<RTCPeerConnectionState>> = None;
+    let mut peer_data_rx: Option<mpsc::UnboundedReceiver<Vec<u8>>> = None;
+    let mut dispatcher: Option<tokio::task::JoinHandle<()>> = None;
+
+    // Outbound envelope sequence counter (sender = "desktop").
+    let mut next_seq: u64 = 1;
+    let mut replay = ReplayWindow::default();
+    let mut keepalive = tokio::time::interval(Duration::from_secs(25));
+    keepalive.tick().await; // skip the immediate first tick
+
+    loop {
+        // Helpers for `select!` — extract receivers that may be `None` and
+        // gate the branch on `Option::is_some()` via `if let`.
+        let ice_branch = peer_ice_rx.as_mut();
+        let state_branch = peer_state_rx.as_mut();
+
+        tokio::select! {
+            biased;
+
+            _ = cancel_rx.changed() => {
+                if *cancel_rx.borrow() {
+                    teardown(
+                        peer_session.take(),
+                        dispatcher.take(),
+                    ).await;
+                    return Err(SessionError::Cancelled);
+                }
+            }
+
+            Some(out) = out_rx.recv() => {
+                if let Err(e) = write.send(Message::Text(out)).await {
+                    return Err(SessionError::Websocket(e.to_string()));
+                }
+            }
+
+            _ = keepalive.tick() => {
+                let frame = serde_json::to_string(&ClientFrame::Ping)
+                    .expect("serialize ping");
+                if let Err(e) = write.send(Message::Text(frame)).await {
+                    return Err(SessionError::Websocket(e.to_string()));
+                }
+            }
+
+            Some(candidate) = async {
+                match ice_branch {
+                    Some(rx) => rx.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                // Forward our ICE candidate to the mobile peer as a signed
+                // rtc:ice envelope.
+                let body = json!({ "candidate": candidate });
+                let env = build_signed_envelope(
+                    next_seq,
+                    EnvelopeKind::RtcIce,
+                    body,
+                    &config.rendezvous_secret,
+                )
+                .map_err(envelope_err)?;
+                next_seq += 1;
+                push_relay(&out_tx, &config.rendezvous_id, &env).await?;
+            }
+
+            Some(s) = async {
+                match state_branch {
+                    Some(rx) => rx.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                match s {
+                    RTCPeerConnectionState::Connected => {
+                        config.tier_writer.set(DeviceTier::Connected);
+                    }
+                    RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed => {
+                        log::info!(
+                            "signaling::client[{}]: peer state {s:?} — tearing down",
+                            config.device_id
+                        );
+                        teardown(peer_session.take(), dispatcher.take()).await;
+                        peer_ice_rx = None;
+                        peer_state_rx = None;
+                        peer_data_rx = None;
+                        // Mobile peer dropped; we're still subscribed and
+                        // awaiting a fresh offer.
+                        config.tier_writer.set(DeviceTier::Awaiting);
+                    }
+                    _ => {
+                        // `New`/`Connecting`/`Disconnected` — keep the
+                        // current tier; the next definitive transition will
+                        // overwrite it.
+                    }
+                }
+            }
+
+            msg = read.next() => {
+                let Some(msg) = msg else {
+                    return Err(SessionError::Websocket("stream ended".into()));
+                };
+                let msg = msg.map_err(|e| SessionError::Websocket(e.to_string()))?;
+                match msg {
+                    Message::Text(text) => {
+                        let frame: ServerFrame = serde_json::from_str(&text).map_err(|e| {
+                            SessionError::Protocol(format!("bad server frame: {e}"))
+                        })?;
+                        match frame {
+                            ServerFrame::Subscribed { .. } => {
+                                log::info!(
+                                    "signaling::client[{}]: subscribed",
+                                    config.device_id
+                                );
+                                // WSS is up and we're in the rendezvous —
+                                // sit at `Awaiting` until a mobile peer
+                                // joins (or `PeerJoined` for an already-
+                                // present mobile fires immediately after).
+                                config.tier_writer.set(DeviceTier::Awaiting);
+                            }
+                            ServerFrame::PeerJoined { role, .. } => {
+                                log::info!(
+                                    "signaling::client[{}]: peer-joined role={role}",
+                                    config.device_id
+                                );
+                                if role == "mobile" {
+                                    config.tier_writer.set(DeviceTier::Negotiating);
+                                }
+                            }
+                            ServerFrame::PeerLeft { role, .. } => {
+                                log::info!(
+                                    "signaling::client[{}]: peer-left role={role}",
+                                    config.device_id
+                                );
+                                // Mobile dropped — tear down our peer too.
+                                teardown(peer_session.take(), dispatcher.take()).await;
+                                peer_ice_rx = None;
+                                peer_state_rx = None;
+                                peer_data_rx = None;
+                                if role == "mobile" {
+                                    config.tier_writer.set(DeviceTier::Awaiting);
+                                }
+                            }
+                            ServerFrame::Relay {
+                                from_role, payload, ..
+                            } => {
+                                handle_relay(
+                                    &from_role,
+                                    &payload,
+                                    config,
+                                    &state,
+                                    &app,
+                                    &out_tx,
+                                    &mut next_seq,
+                                    &mut replay,
+                                    &mut peer_session,
+                                    &mut peer_ice_rx,
+                                    &mut peer_state_rx,
+                                    &mut peer_data_rx,
+                                    &mut dispatcher,
+                                )
+                                .await?;
+                            }
+                            ServerFrame::Pong => {}
+                            ServerFrame::Error { code, message } => {
+                                log::warn!(
+                                    "signaling::client[{}]: server error {code}: {message}",
+                                    config.device_id
+                                );
+                                if code == "rate_limited" {
+                                    return Err(SessionError::Protocol(format!(
+                                        "rate limited by signaling server: {message}"
+                                    )));
+                                }
+                            }
+                        }
+                    }
+                    Message::Close(_) => {
+                        return Err(SessionError::Websocket("server closed".into()));
+                    }
+                    Message::Ping(buf) => {
+                        write
+                            .send(Message::Pong(buf))
+                            .await
+                            .map_err(|e| SessionError::Websocket(e.to_string()))?;
+                    }
+                    Message::Pong(_) | Message::Frame(_) | Message::Binary(_) => {}
+                }
+            }
+        }
+    }
+}
+
+async fn push_relay(
+    out_tx: &mpsc::Sender<String>,
+    rendezvous_id: &str,
+    envelope: &Envelope,
+) -> Result<(), SessionError> {
+    let env_bytes =
+        serde_json::to_vec(envelope).map_err(|e| SessionError::Protocol(e.to_string()))?;
+    let payload = URL_SAFE_NO_PAD.encode(env_bytes);
+    let frame = ClientFrame::Relay {
+        rendezvous_id,
+        payload,
+    };
+    let text = serde_json::to_string(&frame).map_err(|e| SessionError::Protocol(e.to_string()))?;
+    out_tx
+        .send(text)
+        .await
+        .map_err(|_| SessionError::Protocol("outbound queue closed".into()))
+}
+
+fn envelope_err(e: EnvelopeError) -> SessionError {
+    SessionError::Protocol(format!("envelope: {e}"))
+}
+
+/// Decode the inbound relay payload, verify HMAC + replay, and dispatch by
+/// envelope kind. May create a new `PeerSession` (on first `rtc:offer`) or
+/// tear down an existing one (on `rtc:close`).
+#[allow(clippy::too_many_arguments)]
+async fn handle_relay(
+    from_role: &str,
+    payload_b64: &str,
+    config: &ClientConfig,
+    state: &SharedState,
+    app: &tauri::AppHandle,
+    out_tx: &mpsc::Sender<String>,
+    next_seq: &mut u64,
+    replay: &mut ReplayWindow,
+    peer_session: &mut Option<Arc<PeerSession>>,
+    peer_ice_rx: &mut Option<mpsc::UnboundedReceiver<RTCIceCandidateInit>>,
+    peer_state_rx: &mut Option<mpsc::UnboundedReceiver<RTCPeerConnectionState>>,
+    peer_data_rx: &mut Option<mpsc::UnboundedReceiver<Vec<u8>>>,
+    dispatcher: &mut Option<tokio::task::JoinHandle<()>>,
+) -> Result<(), SessionError> {
+    let envelope_bytes = URL_SAFE_NO_PAD
+        .decode(payload_b64.as_bytes())
+        .map_err(|e| SessionError::Protocol(format!("relay payload base64: {e}")))?;
+    let envelope: Envelope = serde_json::from_slice(&envelope_bytes)
+        .map_err(|e| SessionError::Protocol(format!("relay envelope json: {e}")))?;
+
+    if let Err(e) = verify_signed_envelope(&envelope, &config.rendezvous_secret, None) {
+        log::warn!(
+            "signaling::client[{}]: rejected envelope: {e}",
+            config.device_id
+        );
+        return Ok(());
+    }
+    if let Err(e) = replay.observe(from_role, envelope.seq, &envelope.nonce) {
+        log::warn!(
+            "signaling::client[{}]: replay detected: {e}",
+            config.device_id
+        );
+        return Ok(());
+    }
+
+    match envelope.kind {
+        EnvelopeKind::Hello => {
+            log::debug!(
+                "signaling::client[{}]: hello from {from_role}",
+                config.device_id
+            );
+        }
+        EnvelopeKind::RtcOffer => {
+            let sdp = envelope
+                .body
+                .get("sdp")
+                .and_then(Value::as_str)
+                .ok_or_else(|| SessionError::Protocol("rtc:offer missing sdp".into()))?;
+
+            // Build the peer session lazily on first offer (or rebuild if
+            // a prior peer was torn down). Mobile re-issues offer on ICE
+            // restart, in which case we still want a fresh PC.
+            let (ice_tx, ice_rx) = mpsc::unbounded_channel();
+            let (data_tx, data_rx) = mpsc::unbounded_channel();
+            let (state_tx, state_rx) = mpsc::unbounded_channel();
+            let callbacks = PeerCallbacks {
+                outbound_ice: ice_tx,
+                inbound_data: data_tx,
+                state_change: state_tx,
+            };
+            let new_peer = PeerSession::new(config.ice_servers.clone(), callbacks)
+                .await
+                .map_err(|e| SessionError::Protocol(format!("peer build: {e}")))?;
+            let new_peer = Arc::new(new_peer);
+
+            // Generate the SDP answer and relay it back as a signed envelope.
+            let answer_sdp = new_peer
+                .accept_offer(sdp.to_string())
+                .await
+                .map_err(|e| SessionError::Protocol(format!("accept_offer: {e}")))?;
+            let answer = build_signed_envelope(
+                *next_seq,
+                EnvelopeKind::RtcAnswer,
+                json!({ "sdp": answer_sdp }),
+                &config.rendezvous_secret,
+            )
+            .map_err(envelope_err)?;
+            *next_seq += 1;
+            push_relay(out_tx, &config.rendezvous_id, &answer).await?;
+
+            // Tear down any previous dispatcher / channels.
+            if let Some(h) = dispatcher.take() {
+                h.abort();
+            }
+            *peer_session = Some(Arc::clone(&new_peer));
+            *peer_ice_rx = Some(ice_rx);
+            *peer_state_rx = Some(state_rx);
+            *peer_data_rx = Some(data_rx);
+
+            // Spawn the dispatcher — it owns the data_rx side until the
+            // DataChannel actually opens (waited on inside the dispatcher).
+            // Wrapping in tokio::spawn means the rest of the session loop
+            // continues to drive ICE / outbound while the DC is still
+            // negotiating.
+            let data_rx_take = peer_data_rx.take().expect("data rx just set");
+            let handle = spawn_dispatcher(
+                Arc::clone(&new_peer),
+                data_rx_take,
+                state.clone(),
+                app.clone(),
+                config.device_id.clone(),
+            );
+            *dispatcher = Some(handle);
+        }
+        EnvelopeKind::RtcAnswer => {
+            // We are always the answerer in the desktop role. Receiving an
+            // answer suggests the mobile is confused; log + drop.
+            log::warn!(
+                "signaling::client[{}]: unexpected rtc:answer from {from_role}",
+                config.device_id
+            );
+        }
+        EnvelopeKind::RtcIce => {
+            let candidate = envelope
+                .body
+                .get("candidate")
+                .cloned()
+                .ok_or_else(|| SessionError::Protocol("rtc:ice missing candidate".into()))?;
+            let init: RTCIceCandidateInit = serde_json::from_value(candidate)
+                .map_err(|e| SessionError::Protocol(format!("ice candidate: {e}")))?;
+            if let Some(peer) = peer_session.as_ref() {
+                if let Err(e) = peer.add_remote_ice(init).await {
+                    log::warn!(
+                        "signaling::client[{}]: addRemoteIce failed: {e}",
+                        config.device_id
+                    );
+                }
+            }
+        }
+        EnvelopeKind::RtcClose => {
+            log::info!(
+                "signaling::client[{}]: peer requested rtc:close",
+                config.device_id
+            );
+            teardown(peer_session.take(), dispatcher.take()).await;
+            *peer_ice_rx = None;
+            *peer_state_rx = None;
+            *peer_data_rx = None;
+            // Mobile cleanly closed its half — we're back to waiting for
+            // the next offer.
+            config.tier_writer.set(DeviceTier::Awaiting);
+        }
+    }
+    // Suppress unused-warnings for placeholders that fed into the macro
+    // expansions; the compiler keeps them around because we may need
+    // their values in future kinds.
+    let _ = encode_base64_url; // re-exported for tests
+    let _ = now_ms;
+    Ok(())
+}
+
+async fn teardown(
+    peer: Option<Arc<PeerSession>>,
+    dispatcher: Option<tokio::task::JoinHandle<()>>,
+) {
+    if let Some(d) = dispatcher {
+        d.abort();
+    }
+    if let Some(p) = peer {
+        p.close().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn client_frame_subscribe_serializes_camel_case() {
+        let frame = ClientFrame::Subscribe {
+            rendezvous_id: "r1",
+            role: "desktop",
+            client_nonce: "n1",
+        };
+        let text = serde_json::to_string(&frame).unwrap();
+        assert!(text.contains(r#""kind":"subscribe""#));
+        assert!(text.contains(r#""rendezvousId":"r1""#));
+        assert!(text.contains(r#""role":"desktop""#));
+        assert!(text.contains(r#""clientNonce":"n1""#));
+    }
+
+    #[test]
+    fn client_frame_relay_serializes_camel_case() {
+        let frame = ClientFrame::Relay {
+            rendezvous_id: "r1",
+            payload: "abc".into(),
+        };
+        let text = serde_json::to_string(&frame).unwrap();
+        assert!(text.contains(r#""kind":"relay""#));
+        assert!(text.contains(r#""payload":"abc""#));
+    }
+
+    #[test]
+    fn server_frame_relay_deserializes_camel_case() {
+        let raw = r#"{"kind":"relay","rendezvousId":"r1","fromRole":"mobile","payload":"x"}"#;
+        let frame: ServerFrame = serde_json::from_str(raw).unwrap();
+        match frame {
+            ServerFrame::Relay { from_role, payload, .. } => {
+                assert_eq!(from_role, "mobile");
+                assert_eq!(payload, "x");
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn server_frame_subscribed_deserializes() {
+        let raw = r#"{"kind":"subscribed","rendezvousId":"r1","peers":[]}"#;
+        let frame: ServerFrame = serde_json::from_str(raw).unwrap();
+        assert!(matches!(frame, ServerFrame::Subscribed { .. }));
+    }
+
+    #[test]
+    fn server_frame_pong_round_trip() {
+        let raw = r#"{"kind":"pong"}"#;
+        let frame: ServerFrame = serde_json::from_str(raw).unwrap();
+        assert!(matches!(frame, ServerFrame::Pong));
+    }
+}

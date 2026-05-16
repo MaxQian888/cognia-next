@@ -1,6 +1,6 @@
 "use client"
 
-import { makeDefaultLoader, withPlugin } from "./_shared"
+import { makeDefaultLoader } from "./_shared"
 
 /**
  * `@capacitor/share` wrapper. Surfaces the system share sheet for the chat

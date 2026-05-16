@@ -2,10 +2,12 @@
 
 /**
  * Unread count pill.
- * Renders a red dot + count when count > 0; renders nothing when count === 0.
+ * Renders a red destructive Badge with the count when count > 0; renders
+ * nothing when count === 0.
  */
 
 import { useTranslations } from "next-intl"
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
 interface UnreadPillProps {
@@ -18,16 +20,16 @@ export function UnreadPill({ count, className }: UnreadPillProps) {
   if (count <= 0) return null
 
   return (
-    <span
+    <Badge
+      variant="destructive"
       className={cn(
-        "inline-flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full",
-        "bg-destructive px-1 text-[10px] font-semibold text-destructive-foreground",
+        "h-4.5 min-w-[1.125rem] px-1 py-0 text-[10px] font-semibold leading-none",
         className
       )}
       aria-label={t("aria", { count })}
       data-testid="unread-pill"
     >
       {count > 99 ? "99+" : count}
-    </span>
+    </Badge>
   )
 }

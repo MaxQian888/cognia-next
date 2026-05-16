@@ -503,7 +503,7 @@ export function SystemTaskForm({
             <Input
               value={f.eventSource}
               onChange={(e) => updateForm({ eventSource: e.target.value })}
-              placeholder="Source"
+              placeholder={t("eventSourceLiteralPlaceholder")}
               disabled={isSubmitting}
             />
           </div>

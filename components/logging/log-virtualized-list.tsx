@@ -12,6 +12,7 @@ import { useTranslations } from "next-intl"
 import { AlertCircle, ChevronDown, ChevronRight, Layers, RefreshCw } from "lucide-react"
 import { Empty, EmptyTitle } from "@/components/ui/empty"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { MemoizedLogEntry, TraceGroup } from "./log-entry"
@@ -96,10 +97,10 @@ export function VirtualizedLogList({
               className="flex items-center gap-3 border-b border-border/30 px-3"
               style={{ height: ESTIMATED_LOG_HEIGHT }}
             >
-              <div className="h-3 w-12 rounded bg-muted animate-pulse" />
-              <div className="h-3 w-16 rounded bg-muted animate-pulse" />
+              <div className="h-3 w-12 rounded bg-muted motion-safe:animate-pulse" />
+              <div className="h-3 w-16 rounded bg-muted motion-safe:animate-pulse" />
               <div
-                className="h-3 rounded bg-muted animate-pulse"
+                className="h-3 rounded bg-muted motion-safe:animate-pulse"
                 style={{ width: `${40 + (index % 4) * 15}%` }}
               />
             </div>
@@ -116,6 +117,8 @@ export function VirtualizedLogList({
         error={error}
         onRetry={onRetry}
         title={t("panel.errorLoading")}
+        retryLabel={t("virtualizedList.retry")}
+        detailsLabel={t("virtualizedList.details")}
       />
     )
   }
@@ -135,21 +138,20 @@ export function VirtualizedLogList({
             {activeLabels.length > 0 ? (
               <>
                 <p className="text-xs text-muted-foreground text-center">
-                  {t("panel.emptyStateFilterPrefix") === "panel.emptyStateFilterPrefix"
-                    ? "No logs match the active filters:"
-                    : t("panel.emptyStateFilterPrefix")}
+                  {t("panel.emptyStateFilterPrefix")}
                 </p>
                 <div
                   data-testid="log-virtualized-list-empty-filters"
                   className="flex flex-wrap justify-center gap-1"
                 >
                   {activeLabels.map((label) => (
-                    <span
+                    <Badge
                       key={label}
-                      className="rounded-md border border-border bg-muted/40 px-2 py-0.5 text-[10px] font-mono"
+                      variant="outline"
+                      className="bg-muted/40 px-2 py-0.5 text-xs sm:text-[10px] font-mono"
                     >
                       {label}
-                    </span>
+                    </Badge>
                   ))}
                 </div>
                 <div className="flex items-center gap-2 mt-1">
@@ -160,9 +162,7 @@ export function VirtualizedLogList({
                       onClick={emptyStateContext.onClearFilters}
                       data-testid="log-virtualized-list-empty-clear"
                     >
-                      {t("panel.emptyStateClearFilters") === "panel.emptyStateClearFilters"
-                        ? "Clear filters"
-                        : t("panel.emptyStateClearFilters")}
+                      {t("panel.emptyStateClearFilters")}
                     </Button>
                   )}
                   {emptyStateContext?.onOpenPresets && (
@@ -172,9 +172,7 @@ export function VirtualizedLogList({
                       onClick={emptyStateContext.onOpenPresets}
                       data-testid="log-virtualized-list-empty-presets"
                     >
-                      {t("panel.emptyStateOpenPresets") === "panel.emptyStateOpenPresets"
-                        ? "Open presets"
-                        : t("panel.emptyStateOpenPresets")}
+                      {t("panel.emptyStateOpenPresets")}
                     </Button>
                   )}
                 </div>
@@ -259,9 +257,18 @@ interface ErrorStateProps {
   error: Error
   onRetry?: () => void
   title: string
+  retryLabel: string
+  detailsLabel: string
 }
 
-function ErrorState({ scrollRef, error, onRetry, title }: ErrorStateProps) {
+function ErrorState({
+  scrollRef,
+  error,
+  onRetry,
+  title,
+  retryLabel,
+  detailsLabel,
+}: ErrorStateProps) {
   const [detailsOpen, setDetailsOpen] = useState(false)
   return (
     <div
@@ -283,7 +290,7 @@ function ErrorState({ scrollRef, error, onRetry, title }: ErrorStateProps) {
                   data-testid="log-virtualized-list-error-retry"
                 >
                   <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                  Retry
+                  {retryLabel}
                 </Button>
               )}
               <Button
@@ -298,7 +305,7 @@ function ErrorState({ scrollRef, error, onRetry, title }: ErrorStateProps) {
                 ) : (
                   <ChevronRight className="h-3.5 w-3.5 mr-1.5" />
                 )}
-                Details
+                {detailsLabel}
               </Button>
             </div>
             {detailsOpen && (

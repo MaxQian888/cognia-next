@@ -17,6 +17,24 @@ jest.mock("next/link", () => ({
   default: ({ children, ...props }: { children: React.ReactNode }) => <a {...props}>{children}</a>,
 }))
 
+// Stateful next/navigation mock so the ?tab= re-sync tests can swap the URL
+// between renders without using jest.isolateModules (which breaks React
+// hook identity in this test environment).
+let mockSearchString = ""
+let mockSearchCacheKey = ""
+let mockSearchCacheValue = new URLSearchParams("")
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: jest.fn() }),
+  usePathname: () => "/plugins",
+  useSearchParams: () => {
+    if (mockSearchString !== mockSearchCacheKey) {
+      mockSearchCacheKey = mockSearchString
+      mockSearchCacheValue = new URLSearchParams(mockSearchString)
+    }
+    return mockSearchCacheValue
+  },
+}))
+
 const mockRows: PluginRow[] = [
   {
     id: "plugin_x",
@@ -63,6 +81,9 @@ import { PluginPanel } from "./plugin-panel"
 import { usePluginsStore, DEFAULT_PLUGIN_FILTERS } from "@/stores/plugins"
 
 beforeEach(() => {
+  mockSearchString = ""
+  mockSearchCacheKey = ""
+  mockSearchCacheValue = new URLSearchParams("")
   usePluginsStore.setState({
     activeTab: "installed",
     filters: DEFAULT_PLUGIN_FILTERS,
@@ -130,5 +151,35 @@ describe("PluginPanel", () => {
     render(<PluginPanel />)
     // PluginRollbackDialog renders its Dialog title via `plugins.rollback.title`.
     expect(screen.getAllByText(/title/).length).toBeGreaterThan(0)
+  })
+
+  it("hydrates active tab from ?tab= on initial mount", () => {
+    mockSearchString = "tab=browse"
+    render(<PluginPanel />)
+    expect(usePluginsStore.getState().activeTab).toBe("browse")
+  })
+
+  it("re-syncs active tab when ?tab= changes after mount (deep-link from settings)", () => {
+    mockSearchString = "tab=installed"
+    const { rerender } = render(<PluginPanel />)
+    expect(usePluginsStore.getState().activeTab).toBe("installed")
+
+    // Simulate Settings → "Open marketplace" deep-link pushing ?tab=browse
+    // while /plugins is already open. The stateful mock gives the
+    // component a new URLSearchParams; the effect should re-fire and
+    // adopt it because the `requestedTabParam` string value changed.
+    mockSearchString = "tab=browse"
+    rerender(<PluginPanel />)
+    expect(usePluginsStore.getState().activeTab).toBe("browse")
+  })
+
+  it("ignores unknown ?tab= values without overriding the current active tab", () => {
+    mockSearchString = "tab=installed"
+    const { rerender } = render(<PluginPanel />)
+    expect(usePluginsStore.getState().activeTab).toBe("installed")
+
+    mockSearchString = "tab=garbage"
+    rerender(<PluginPanel />)
+    expect(usePluginsStore.getState().activeTab).toBe("installed")
   })
 })

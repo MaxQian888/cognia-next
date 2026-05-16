@@ -164,4 +164,24 @@ describe("CanvasSidePanels", () => {
     // The visible <span> with the textual label is dropped in icon-only mode.
     expect(tab.textContent ?? "").not.toMatch(/Suggestions/i)
   })
+
+  it("pins the icon-only breakpoint export at 280 (regression guard)", () => {
+    expect(CANVAS_SIDE_PANELS_ICON_ONLY_BREAKPOINT).toBe(280)
+  })
+
+  it("wraps the active tab's host in a motion container", () => {
+    seedDocument("doc-1")
+    renderWithProviders(<CanvasSidePanels />)
+    // Default tab is "suggestions" — the motion wrapper carries a stable data-testid.
+    expect(screen.getByTestId("canvas-tab-motion-suggestions")).toBeInTheDocument()
+  })
+
+  it("renders the motion wrapper matching the persisted active tab", () => {
+    act(() => {
+      useCanvasLayoutStore.getState().setActiveRightTab("history")
+    })
+    seedDocument("doc-1")
+    renderWithProviders(<CanvasSidePanels />)
+    expect(screen.getByTestId("canvas-tab-motion-history")).toBeInTheDocument()
+  })
 })

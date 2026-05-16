@@ -15,7 +15,7 @@
 // settings.
 
 import Link from "next/link"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
@@ -55,6 +55,8 @@ import {
 import { PluginScheduledJobs } from "@/components/plugins/plugin-scheduled-jobs"
 import { PluginPointDiagnosticsPanel } from "@/components/plugins/plugin-point-diagnostics-panel"
 import { ScrollShadowRow } from "@/components/plugins/scroll-shadow-row"
+import { PluginDataManagement } from "@/components/settings/plugins/plugin-data-management"
+import { applyPluginPolicyToRuntime } from "@/lib/plugin/policy-runtime"
 
 const PLUGINS_TAB_PARAM = "pluginsTab"
 
@@ -333,6 +335,18 @@ function AuditTab() {
       </Card>
 
       <PluginPointDiagnosticsPanel />
+
+      {/* Per-plugin Dexie table maintenance — list mode renders every plugin
+          that has declared custom tables, so administrators can purge
+          plugin data without uninstalling the plugin itself. The single-mode
+          version is rendered inside each plugin's detail Sheet (Data tab). */}
+      <Card className="p-4 space-y-3" data-testid="audit-data-management-card">
+        <div className="space-y-1">
+          <h3 className="text-sm font-semibold">{t("dataManagementTitle")}</h3>
+          <p className="text-xs text-muted-foreground">{t("dataManagementHint")}</p>
+        </div>
+        <PluginDataManagement />
+      </Card>
     </div>
   )
 }
@@ -387,10 +401,22 @@ function PolicyTab() {
   // externally during a tab session, so plain useState avoids that constraint.
   const [policy, setPolicy] = useState<PluginsPolicy>(() => readPolicy())
 
+  // Apply the persisted policy to the live runtime once when the panel
+  // mounts. The plugin-store boot path also calls this for normal app
+  // start, but mounting Settings without having opened a plugin yet may
+  // still hit a stale runtime state — re-applying is idempotent.
+  useEffect(() => {
+    applyPluginPolicyToRuntime(policy)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const update = (patch: Partial<PluginsPolicy>) => {
     const next = { ...policy, ...patch }
     setPolicy(next)
     writePolicy(next)
+    // Push the change into the live runtime so it takes effect without a
+    // page reload (the previous behavior).
+    applyPluginPolicyToRuntime(next)
   }
 
   return (

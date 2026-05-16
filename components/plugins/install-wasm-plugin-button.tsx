@@ -1,11 +1,9 @@
 "use client"
 
 /**
- * "Install local WASM plugin" entry button.
+ * "Install local WASM plugin" entry button + the underlying flow hook.
  *
- * Opens the Tauri file picker for a `.wasm` or `.zip` bundle, then runs
- * the install flow:
- *
+ * Flow:
  *   1. peek the manifest (via a temp-dir install) so we can show the user
  *      what they're about to grant
  *   2. open the capability grant sheet (via `useWasmCapabilityGrant`)
@@ -14,11 +12,15 @@
  *   4. on cancel, the staged bundle stays in place and the user can
  *      revisit the grant later from per-plugin settings
  *
- * Sister button to the install-from-URL dialog; the two share the grant
- * hook so first-time grants behave the same regardless of source.
+ * `useInstallWasmFromLocal` is exported separately so the plugin panel
+ * toolbar can wire the same flow into a `DropdownMenuItem` without nesting
+ * a `<Button>` inside another `<Button>`. The button below is a thin
+ * wrapper around the hook, kept for standalone use (and its existing
+ * test coverage).
  */
 
-import { useCallback, useState } from "react"
+import { useCallback, useState, type ReactNode } from "react"
+import { useTranslations } from "next-intl"
 import { FilePlus2Icon, Loader2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { canUseTauriInvoke } from "@/lib/native/utils"
@@ -40,16 +42,22 @@ interface PickedPath {
   isBareWasm: boolean
 }
 
-async function pickFile(): Promise<PickedPath | null> {
+interface PickerLabels {
+  title: string
+  bundleFilter: string
+  allFilesFilter: string
+}
+
+async function pickFile(labels: PickerLabels): Promise<PickedPath | null> {
   if (!canUseTauriInvoke()) return null
   const dialog = await import("@tauri-apps/plugin-dialog")
   const selected = await dialog.open({
     multiple: false,
     directory: false,
-    title: "Select a WASM plugin bundle (.wasm or .zip)",
+    title: labels.title,
     filters: [
-      { name: "WASM plugin bundle", extensions: ["wasm", "zip"] },
-      { name: "All files", extensions: ["*"] },
+      { name: labels.bundleFilter, extensions: ["wasm", "zip"] },
+      { name: labels.allFilesFilter, extensions: ["*"] },
     ],
   })
   if (typeof selected !== "string") return null
@@ -59,20 +67,36 @@ async function pickFile(): Promise<PickedPath | null> {
   }
 }
 
-export function InstallWasmPluginButton({ className, onInstalled }: InstallWasmPluginButtonProps) {
+export interface UseInstallWasmFromLocal {
+  trigger: () => Promise<void>
+  busy: boolean
+  error: string | null
+  /** The grant sheet element — must be rendered exactly once in the tree. */
+  sheet: ReactNode
+}
+
+export function useInstallWasmFromLocal(
+  opts: { onInstalled?: (pluginId: string) => void } = {}
+): UseInstallWasmFromLocal {
+  const { onInstalled } = opts
+  const t = useTranslations("plugins.wasmInstall.fromLocalButton")
   const grant = useWasmCapabilityGrant()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const handleClick = useCallback(async () => {
+  const trigger = useCallback(async () => {
     setError(null)
     if (!canUseTauriInvoke()) {
-      setError("Local WASM plugin install requires the Tauri desktop runtime.")
+      setError(t("tauriRequiredError"))
       return
     }
     try {
       setBusy(true)
-      const picked = await pickFile()
+      const picked = await pickFile({
+        title: t("filePickerTitle"),
+        bundleFilter: t("filterWasmBundle"),
+        allFilesFilter: t("filterAllFiles"),
+      })
       if (!picked) return // User cancelled the file picker.
 
       // Preview manifest. For bare .wasm we go straight to install with no
@@ -92,7 +116,8 @@ export function InstallWasmPluginButton({ className, onInstalled }: InstallWasmP
 
       // We need *some* manifest before opening the grant sheet. For bare
       // .wasm sideloads, build a minimal stub the user can grant against —
-      // no manifest field will be populated except the required ones.
+      // `description` is a stored manifest field, not user-facing prose, so
+      // it stays in English to keep the persisted record stable.
       const grantManifest: import("@/types/plugin").PluginManifest = manifest ?? {
         id: deriveIdFromPath(picked.path),
         name: pathBaseName(picked.path),
@@ -114,9 +139,6 @@ export function InstallWasmPluginButton({ className, onInstalled }: InstallWasmP
         return
       }
 
-      // Hand off to the manager. For .zip bundles the manager's existing
-      // install path opens the file. For bare .wasm we wrap it in a tiny
-      // implicit bundle (caller code path).
       const manager = getPluginManager()
       const plugin = await manager.installWasmPluginFromLocalFile(picked.path, decision.decision)
       onInstalled?.(plugin.manifest.id)
@@ -125,12 +147,19 @@ export function InstallWasmPluginButton({ className, onInstalled }: InstallWasmP
     } finally {
       setBusy(false)
     }
-  }, [grant, onInstalled])
+  }, [grant, onInstalled, t])
+
+  return { trigger, busy, error, sheet: grant.sheet }
+}
+
+export function InstallWasmPluginButton({ className, onInstalled }: InstallWasmPluginButtonProps) {
+  const t = useTranslations("plugins.wasmInstall.fromLocalButton")
+  const { trigger, busy, error, sheet } = useInstallWasmFromLocal({ onInstalled })
 
   return (
     <>
       <Button
-        onClick={handleClick}
+        onClick={() => void trigger()}
         disabled={busy}
         className={className}
         data-testid="install-wasm-plugin-button"
@@ -140,14 +169,14 @@ export function InstallWasmPluginButton({ className, onInstalled }: InstallWasmP
         ) : (
           <FilePlus2Icon className="mr-2 size-4" aria-hidden />
         )}
-        Install local WASM plugin
+        {t("label")}
       </Button>
       {error && (
         <p className="mt-1 text-xs text-destructive" role="alert">
           {error}
         </p>
       )}
-      {grant.sheet}
+      {sheet}
     </>
   )
 }

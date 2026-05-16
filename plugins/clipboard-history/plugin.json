@@ -18,7 +18,7 @@
       "availability": "supported",
       "entrypoint": "src/index.ts"
     },
-    "desktop": {
+    "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
     }

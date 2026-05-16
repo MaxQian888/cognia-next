@@ -23,6 +23,7 @@
  */
 
 import { useEffect, useState } from "react"
+import { useTranslations } from "next-intl"
 import { CrosshairIcon, PlusIcon, TrashIcon } from "lucide-react"
 import { toast } from "sonner"
 
@@ -40,6 +41,7 @@ import {
 } from "@/lib/automation/client"
 
 export function WhitelistTab() {
+  const t = useTranslations("automation.whitelist")
   const [settings, setSettings] = useState<AutomationSettings | null>(() =>
     isTauri() ? null : defaultAutomationSettings()
   )
@@ -67,7 +69,7 @@ export function WhitelistTab() {
       await desktop.settingsSet(next)
       setSettings(next)
     } catch (err) {
-      toast.error("Update failed", { description: String(err) })
+      toast.error(t("updateFailed"), { description: String(err) })
     } finally {
       setSaving(false)
     }
@@ -142,9 +144,9 @@ export function WhitelistTab() {
       })
       if (info.processName && !processInput) setProcessInput(info.processName)
       if (info.windowTitle && !titleInput) setTitleInput(info.windowTitle)
-      toast.success("Captured focused window")
+      toast.success(t("captureFocused"))
     } catch (err) {
-      toast.error("Capture failed", { description: String(err) })
+      toast.error(t("captureFailed"), { description: String(err) })
     }
   }
 
@@ -167,26 +169,23 @@ export function WhitelistTab() {
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>Quick capture</CardTitle>
-          <CardDescription>
-            Click below to prefill the inputs with the currently-focused window. Helpful when you
-            don&apos;t want to retype the process name or full title.
-          </CardDescription>
+          <CardTitle>{t("quickCapture")}</CardTitle>
+          <CardDescription>{t("quickCaptureHint")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
           <Button onClick={captureFocus} disabled={saving} variant="secondary">
             <CrosshairIcon className="size-4 mr-2" />
-            Capture focused window
+            {t("captureFocused")}
           </Button>
           {currentFocus && (
             <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs font-mono">
               <div>
-                <span className="text-muted-foreground">process:</span>{" "}
-                {currentFocus.processName ?? "(none)"}
+                <span className="text-muted-foreground">{t("processLabel")}</span>{" "}
+                {currentFocus.processName ?? t("none")}
               </div>
               <div>
-                <span className="text-muted-foreground">title:</span>{" "}
-                {currentFocus.windowTitle ?? "(none)"}
+                <span className="text-muted-foreground">{t("titleLabel")}</span>{" "}
+                {currentFocus.windowTitle ?? t("none")}
               </div>
             </div>
           )}
@@ -195,11 +194,8 @@ export function WhitelistTab() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Process names</CardTitle>
-          <CardDescription>
-            Case-insensitive exact match against the target window&apos;s process executable name
-            (e.g. <code>notepad.exe</code>).
-          </CardDescription>
+          <CardTitle>{t("processNames")}</CardTitle>
+          <CardDescription>{t("processNamesHint")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <form
@@ -210,18 +206,18 @@ export function WhitelistTab() {
             }}
           >
             <Input
-              placeholder="notepad.exe"
+              placeholder={t("processPlaceholder")}
               value={processInput}
               onChange={(e) => setProcessInput(e.target.value)}
               disabled={saving}
             />
             <Button type="submit" disabled={saving || !processInput.trim()}>
               <PlusIcon className="size-4 mr-1" />
-              Add
+              {t("add")}
             </Button>
           </form>
           {settings.whitelist.processNames.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No process names yet.</p>
+            <p className="text-xs text-muted-foreground">{t("emptyProcess")}</p>
           ) : (
             <div className="flex flex-wrap gap-2">
               {settings.whitelist.processNames.map((p) => (
@@ -233,7 +229,7 @@ export function WhitelistTab() {
                     className="size-5"
                     onClick={() => removeProcess(p)}
                     disabled={saving}
-                    aria-label={`Remove ${p}`}
+                    aria-label={t("removeEntryAria", { entry: p })}
                   >
                     <TrashIcon className="size-3" />
                   </Button>
@@ -246,11 +242,8 @@ export function WhitelistTab() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Window title patterns</CardTitle>
-          <CardDescription>
-            Tiny glob with <code>*</code> wildcards (e.g. <code>*Excel*</code>). A pattern with no{" "}
-            <code>*</code> is treated as substring match.
-          </CardDescription>
+          <CardTitle>{t("windowTitles")}</CardTitle>
+          <CardDescription>{t("windowTitlesHint")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <form
@@ -261,18 +254,18 @@ export function WhitelistTab() {
             }}
           >
             <Input
-              placeholder="*Excel*"
+              placeholder={t("windowPlaceholder")}
               value={titleInput}
               onChange={(e) => setTitleInput(e.target.value)}
               disabled={saving}
             />
             <Button type="submit" disabled={saving || !titleInput.trim()}>
               <PlusIcon className="size-4 mr-1" />
-              Add
+              {t("add")}
             </Button>
           </form>
           {settings.whitelist.windowTitlePatterns.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No window title patterns yet.</p>
+            <p className="text-xs text-muted-foreground">{t("emptyWindow")}</p>
           ) : (
             <div className="flex flex-wrap gap-2">
               {settings.whitelist.windowTitlePatterns.map((p) => (
@@ -284,7 +277,7 @@ export function WhitelistTab() {
                     className="size-5"
                     onClick={() => removePattern(p)}
                     disabled={saving}
-                    aria-label={`Remove ${p}`}
+                    aria-label={t("removeEntryAria", { entry: p })}
                   >
                     <TrashIcon className="size-3" />
                   </Button>

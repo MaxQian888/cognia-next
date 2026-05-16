@@ -18,11 +18,19 @@
 
 import { useRef, useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
+import { Loader2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { createTwinSource } from "@/lib/db/twin-sources"
 import { isTauri } from "@/lib/tauri"
 import { parseGitRepo } from "@/lib/twin/importers"
@@ -240,20 +248,45 @@ async function readFileAsArrayBuffer(file: File): Promise<ArrayBuffer> {
   })
 }
 
+/**
+ * Structured error code returned by {@link ingestFile} — translated at the
+ * React boundary so the parsing layer stays free of `useTranslations`.
+ * `params` are passed straight through to next-intl's interpolation engine.
+ */
+export interface IngestError {
+  code:
+    | "unknownFileType"
+    | "noTextExtracted"
+    | "parseFailed"
+    | "parseFailedFallback"
+    | "formatUnsupported"
+    | "fileEmpty"
+    | "shapeNoMessages"
+    | "importParseFailed"
+    | "importParseFailedFallback"
+    | "dingTalkNoMessages"
+    | "dingTalkParseFailed"
+    | "dingTalkParseFailedFallback"
+    | "noMessagesParsed"
+    | "noCommitsFound"
+    | "pasteContentRequired"
+  params?: Record<string, string | number>
+}
+
 interface IngestedFromFile {
   /** Sources actually created (already written to Dexie). */
   sources: number
   /** Per-file diagnostic — used to render the post-batch summary. */
-  perFile: Array<{ filename: string; sources: number; error?: string }>
+  perFile: Array<{ filename: string; sources: number; error?: IngestError }>
 }
 
 async function ingestFile(
   file: File,
   twinId: string
-): Promise<{ sources: number; error?: string }> {
+): Promise<{ sources: number; error?: IngestError }> {
   const detected = detectSourceFormat(file.name)
   if (!detected) {
-    return { sources: 0, error: "Unknown file type — pick the format manually via paste mode." }
+    return { sources: 0, error: { code: "unknownFileType" } }
   }
 
   // Binary formats — parse in the browser via the ported document processor
@@ -269,7 +302,10 @@ async function ingestFile(
       })
       const text = processed.embeddableContent || processed.content
       if (!text.trim()) {
-        return { sources: 0, error: `Parsed ${detected} but no text was extracted.` }
+        return {
+          sources: 0,
+          error: { code: "noTextExtracted", params: { format: detected } },
+        }
       }
       const fingerprint = await sha256(text)
       await createTwinSource({
@@ -289,7 +325,9 @@ async function ingestFile(
       return {
         sources: 0,
         error:
-          err instanceof Error ? `Failed to parse ${detected}: ${err.message}` : "Parse failed",
+          err instanceof Error
+            ? { code: "parseFailed", params: { format: detected, reason: err.message } }
+            : { code: "parseFailedFallback", params: { format: detected } },
       }
     }
   }
@@ -297,13 +335,13 @@ async function ingestFile(
   if (!TEXTUAL_FORMATS.has(detected)) {
     return {
       sources: 0,
-      error: `Format "${detected}" is not yet supported in the file picker. Paste-text path still works.`,
+      error: { code: "formatUnsupported", params: { format: detected } },
     }
   }
 
   const text = await readFileAsText(file)
   if (!text.trim()) {
-    return { sources: 0, error: "File is empty." }
+    return { sources: 0, error: { code: "fileEmpty" } }
   }
 
   // JSON files: detect chat-export shape and dispatch to the right
@@ -325,7 +363,7 @@ async function ingestFile(
         if (raws.length === 0) {
           return {
             sources: 0,
-            error: `Detected ${importerKey} shape but no usable messages.`,
+            error: { code: "shapeNoMessages", params: { importer: importerKey } },
           }
         }
         let count = 0
@@ -351,8 +389,14 @@ async function ingestFile(
           sources: 0,
           error:
             err instanceof Error
-              ? `Failed to parse ${importerKey}: ${err.message}`
-              : `${importerKey} parse failed`,
+              ? {
+                  code: "importParseFailed",
+                  params: { importer: importerKey, reason: err.message },
+                }
+              : {
+                  code: "importParseFailedFallback",
+                  params: { importer: importerKey },
+                },
         }
       }
     }
@@ -366,7 +410,7 @@ async function ingestFile(
         source: file.name.replace(/\.[^./]+$/i, ""),
       })
       if (raws.length === 0) {
-        return { sources: 0, error: "DingTalk-shaped text had no usable messages." }
+        return { sources: 0, error: { code: "dingTalkNoMessages" } }
       }
       let count = 0
       for (const raw of raws) {
@@ -391,8 +435,8 @@ async function ingestFile(
         sources: 0,
         error:
           err instanceof Error
-            ? `Failed to parse DingTalk text: ${err.message}`
-            : "DingTalk parse failed",
+            ? { code: "dingTalkParseFailed", params: { reason: err.message } }
+            : { code: "dingTalkParseFailedFallback" },
       }
     }
   }
@@ -403,7 +447,7 @@ async function ingestFile(
       detected === "mbox"
         ? parseMbox(text, { twinId, source: file.name })
         : parseEml(text, { twinId, source: file.name })
-    if (raws.length === 0) return { sources: 0, error: "No messages parsed from the file." }
+    if (raws.length === 0) return { sources: 0, error: { code: "noMessagesParsed" } }
     let count = 0
     for (const raw of raws) {
       const fingerprint = await sha256(raw.text ?? "")
@@ -447,6 +491,9 @@ export interface TwinSourceUploaderProps {
 
 export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderProps) {
   const t = useTranslations("twin.sourceUploader")
+  const tErr = useTranslations("twin.sourceUploader.errors")
+  /** Resolves an IngestError to a localized string. */
+  const renderError = (err: IngestError): string => tErr(err.code, err.params)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [title, setTitle] = useState("")
   const [content, setContent] = useState("")
@@ -480,7 +527,7 @@ export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderPro
         author: repoAuthor.trim() || undefined,
       })
       if (raws.length === 0) {
-        setError("No commits found at that path (empty repo, or simple-git failed to load).")
+        setError(tErr("noCommitsFound"))
         return
       }
       let count = 0
@@ -514,7 +561,7 @@ export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderPro
 
   const handlePasteSubmit = async () => {
     if (!content.trim()) {
-      setError("Paste some content before saving")
+      setError(tErr("pasteContentRequired"))
       return
     }
     setSubmitting(true)
@@ -562,7 +609,10 @@ export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderPro
           summary.perFile.push({
             filename: file.name,
             sources: 0,
-            error: err instanceof Error ? err.message : String(err),
+            error: {
+              code: "parseFailed",
+              params: { message: err instanceof Error ? err.message : String(err) },
+            },
           })
         }
       }
@@ -606,7 +656,9 @@ export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderPro
                   {entry.sources === 1
                     ? t("perFileSrcSingular")
                     : t("perFileSrcPlural", { count: entry.sources })}
-                  {entry.error ? <span className="text-destructive"> ({entry.error})</span> : null}
+                  {entry.error ? (
+                    <span className="text-destructive"> ({renderError(entry.error)})</span>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -648,7 +700,14 @@ export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderPro
                 disabled={submitting}
                 data-testid="twin-source-uploader-gitrepo-pick"
               >
-                {submitting ? t("walking") : t("pickRepoFolder")}
+                {submitting ? (
+                  <>
+                    <Loader2Icon className="mr-1.5 size-3.5 animate-spin" aria-hidden />
+                    {t("walking")}
+                  </>
+                ) : (
+                  t("pickRepoFolder")
+                )}
               </Button>
             </div>
             {repoSummary ? (
@@ -679,18 +738,22 @@ export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderPro
           </div>
           <div className="flex flex-col gap-1">
             <Label htmlFor="twin-source-format">{t("formatLabel")}</Label>
-            <select
-              id="twin-source-format"
-              className="border-border bg-background h-9 rounded border px-2 text-sm"
-              value={format}
-              onChange={(e) => setFormat(e.target.value as TwinSourceFormat)}
-            >
-              {FORMATS.map((f) => (
-                <option key={f} value={f}>
-                  {f}
-                </option>
-              ))}
-            </select>
+            <Select value={format} onValueChange={(next) => setFormat(next as TwinSourceFormat)}>
+              <SelectTrigger
+                id="twin-source-format"
+                className="w-[12rem]"
+                aria-label={t("formatLabel")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FORMATS.map((f) => (
+                  <SelectItem key={f} value={f}>
+                    {f}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -707,7 +770,14 @@ export function TwinSourceUploader({ twinId, onUploaded }: TwinSourceUploaderPro
 
         <div className="flex justify-end">
           <Button onClick={() => void handlePasteSubmit()} disabled={submitting}>
-            {submitting ? t("saving") : t("savePastedSource")}
+            {submitting ? (
+              <>
+                <Loader2Icon className="mr-1.5 size-3.5 animate-spin" aria-hidden />
+                {t("saving")}
+              </>
+            ) : (
+              t("savePastedSource")
+            )}
           </Button>
         </div>
       </section>

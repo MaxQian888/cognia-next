@@ -38,10 +38,7 @@ export function KindFilterChips({
   const allActive = selected.size === 0
   const totalCount = KIND_ORDER.reduce((sum, k) => sum + (countsByKind[k] ?? 0), 0)
   return (
-    <div
-      data-testid="kind-filter-chips"
-      className="flex gap-1.5 overflow-x-auto px-3 pb-2 scrollbar-none"
-    >
+    <div data-testid="kind-filter-chips" className="flex flex-wrap gap-1.5 px-3 pb-2">
       <button
         type="button"
         data-active={allActive}

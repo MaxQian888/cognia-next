@@ -4,10 +4,9 @@ import { useEffect, useRef, useState, useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { AlertCircle, Copy, Check, Maximize2, Code2, Download, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { downloadBlob } from "@/lib/files/download"
 import { loggers } from "@/lib/logger"
@@ -121,34 +120,26 @@ export function MermaidBlock({ content, className }: MermaidBlockProps) {
             <span className="text-sm font-medium">{t("error")}</span>
           </div>
           <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={handleRetry}
-                  aria-label={t("retry")}
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("retry")}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={handleCopy}
-                  aria-label={t("copySource")}
-                >
-                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("copySource")}</TooltipContent>
-            </Tooltip>
+            <TooltipIconButton
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={handleRetry}
+              aria-label={t("retry")}
+              tooltip={t("retry")}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </TooltipIconButton>
+            <TooltipIconButton
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={handleCopy}
+              aria-label={t("copySource")}
+              tooltip={t("copySource")}
+            >
+              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            </TooltipIconButton>
           </div>
         </div>
         <p className="text-xs text-muted-foreground">{error}</p>
@@ -167,66 +158,50 @@ export function MermaidBlock({ content, className }: MermaidBlockProps) {
         aria-label={t("diagramLabel")}
       >
         <div className="absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-background/80 backdrop-blur-sm rounded-lg p-0.5">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => setShowSource(!showSource)}
-                aria-label={showSource ? t("hideSource") : t("showSource")}
-                aria-pressed={showSource}
-              >
-                <Code2 className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{showSource ? t("hideSource") : t("showSource")}</TooltipContent>
-          </Tooltip>
+          <TooltipIconButton
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => setShowSource(!showSource)}
+            aria-label={showSource ? t("hideSource") : t("showSource")}
+            aria-pressed={showSource}
+            tooltip={showSource ? t("hideSource") : t("showSource")}
+          >
+            <Code2 className="h-3.5 w-3.5" />
+          </TooltipIconButton>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={handleCopy}
-                aria-label={t("copySource")}
-              >
-                {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("copySource")}</TooltipContent>
-          </Tooltip>
+          <TooltipIconButton
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={handleCopy}
+            aria-label={t("copySource")}
+            tooltip={t("copySource")}
+          >
+            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          </TooltipIconButton>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={handleExportSvg}
-                aria-label={t("exportSvg")}
-              >
-                <Download className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("exportSvg")}</TooltipContent>
-          </Tooltip>
+          <TooltipIconButton
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={handleExportSvg}
+            aria-label={t("exportSvg")}
+            tooltip={t("exportSvg")}
+          >
+            <Download className="h-3.5 w-3.5" />
+          </TooltipIconButton>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => setIsFullscreen(true)}
-                aria-label={t("viewFullscreen")}
-              >
-                <Maximize2 className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("viewFullscreen")}</TooltipContent>
-          </Tooltip>
+          <TooltipIconButton
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => setIsFullscreen(true)}
+            aria-label={t("viewFullscreen")}
+            tooltip={t("viewFullscreen")}
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </TooltipIconButton>
         </div>
 
         {showSource && (
@@ -248,38 +223,26 @@ export function MermaidBlock({ content, className }: MermaidBlockProps) {
             <DialogTitle className="flex items-center gap-2">
               <span>{t("diagramTitle")}</span>
               <div className="flex items-center gap-1 ml-auto">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={handleCopy}
-                      aria-label={t("copySource")}
-                    >
-                      {copied ? (
-                        <Check className="h-3.5 w-3.5" />
-                      ) : (
-                        <Copy className="h-3.5 w-3.5" />
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("copySource")}</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={handleExportSvg}
-                      aria-label={t("exportSvg")}
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("exportSvg")}</TooltipContent>
-                </Tooltip>
+                <TooltipIconButton
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={handleCopy}
+                  aria-label={t("copySource")}
+                  tooltip={t("copySource")}
+                >
+                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                </TooltipIconButton>
+                <TooltipIconButton
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={handleExportSvg}
+                  aria-label={t("exportSvg")}
+                  tooltip={t("exportSvg")}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                </TooltipIconButton>
               </div>
             </DialogTitle>
           </DialogHeader>

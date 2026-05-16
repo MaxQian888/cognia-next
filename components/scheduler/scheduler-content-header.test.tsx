@@ -153,19 +153,19 @@ describe("SchedulerContentHeader", () => {
     const onCleanup = jest.fn()
     setup({ onOpenTemplates, onExport, onImport, onCleanup })
 
-    fireEvent.click(screen.getByRole("button", { name: /more options/i }))
+    fireEvent.click(screen.getByRole("button", { name: /moreOptions/i }))
     fireEvent.click(screen.getByText(/templateGallery\.title/))
     expect(onOpenTemplates).toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole("button", { name: /more options/i }))
+    fireEvent.click(screen.getByRole("button", { name: /moreOptions/i }))
     fireEvent.click(screen.getByText("exportTasks"))
     expect(onExport).toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole("button", { name: /more options/i }))
+    fireEvent.click(screen.getByRole("button", { name: /moreOptions/i }))
     fireEvent.click(screen.getByText("importTasks"))
     expect(onImport).toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole("button", { name: /more options/i }))
+    fireEvent.click(screen.getByRole("button", { name: /moreOptions/i }))
     fireEvent.click(screen.getByText(/quickActions\.cleanup/))
     expect(onCleanup).toHaveBeenCalled()
   })

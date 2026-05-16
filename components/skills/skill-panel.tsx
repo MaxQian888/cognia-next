@@ -2,16 +2,19 @@
 
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { loggers } from "@/lib/logger"
 import { createSkill, deleteSkill, getSkill, updateSkill } from "@/lib/db/skills"
 import { useSkills } from "@/hooks/skills"
 import { useSkillsStore } from "@/stores/skills"
+import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { SkillPanelHeader } from "./skill-panel-header"
 import { SkillPanelTabs } from "./skill-panel-tabs"
 import { SkillPanelGrid } from "./skill-panel-grid"
 import { SkillCategorySidebar } from "./skill-category-sidebar"
+import { SkillCategorySheet } from "./skill-category-sheet"
 import { SkillFilterSheet } from "./skill-filter-sheet"
 import { SkillBatchActionsBar } from "./skill-batch-actions-bar"
 import { SkillDetailPanel } from "./skill-detail-panel"
@@ -38,9 +41,12 @@ interface Props {
 }
 
 export function SkillPanel({ className }: Props) {
-  const t = useTranslations("skills")
   const view = useSkills()
   const activeTab = useSkillsStore((s) => s.activeTab)
+  const reduce = useReducedMotion()
+  const fadeTransition = reduce
+    ? { duration: 0 }
+    : { duration: MOBILE_DURATION.fast, ease: MOBILE_EASE }
 
   return (
     <SkillPanelProvider className={className}>
@@ -49,23 +55,39 @@ export function SkillPanel({ className }: Props) {
         <SkillPanelTabs />
 
         <div className="flex flex-1 min-h-0 overflow-hidden">
-          {activeTab === "my-skills" && (
-            <>
-              <SkillCategorySidebar
-                total={view.all.length}
-                countsByCategory={view.countsByCategory}
-                countsBySource={view.countsBySource}
-              />
-              <ScrollArea className="flex-1">
-                <SkillPanelGrid skills={view.filtered} />
-              </ScrollArea>
-            </>
-          )}
-          {activeTab === "browse" && <SkillMarketplace />}
-          {activeTab === "editor" && <SkillEditorWorkspace />}
-          {activeTab === "analytics" && <SkillAnalytics />}
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={activeTab}
+              initial={reduce ? false : { opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={reduce ? undefined : { opacity: 0 }}
+              transition={fadeTransition}
+              className="flex flex-1 min-h-0 overflow-hidden"
+            >
+              {activeTab === "my-skills" && (
+                <>
+                  <SkillCategorySidebar
+                    total={view.all.length}
+                    countsByCategory={view.countsByCategory}
+                    countsBySource={view.countsBySource}
+                  />
+                  <ScrollArea className="flex-1">
+                    <SkillPanelGrid skills={view.filtered} />
+                  </ScrollArea>
+                </>
+              )}
+              {activeTab === "browse" && <SkillMarketplace />}
+              {activeTab === "editor" && <SkillEditorWorkspace />}
+              {activeTab === "analytics" && <SkillAnalytics />}
+            </motion.div>
+          </AnimatePresence>
         </div>
 
+        <SkillCategorySheet
+          total={view.all.length}
+          countsByCategory={view.countsByCategory}
+          countsBySource={view.countsBySource}
+        />
         <SkillFilterSheet allTags={view.allTags} />
         <SkillBatchActionsBar />
         <SkillDetailPanel />
@@ -75,8 +97,6 @@ export function SkillPanel({ className }: Props) {
       </div>
     </SkillPanelProvider>
   )
-
-  void t // Kept to avoid an unused-import lint after the placeholder removal.
 }
 
 /**

@@ -23,6 +23,18 @@ export interface AddPairedDeviceInput {
    * stays absent.
    */
   serverFingerprint?: string
+  /**
+   * ADR-0021 — public room id used by the WebRTC signaling service. UUIDv4
+   * minted by the desktop pair handler. Absent for rows paired before
+   * WebRTC support landed.
+   */
+  rendezvousId?: string
+  /**
+   * ADR-0021 — 32-byte HMAC key (URL-safe base64, unpadded) shared with the
+   * paired device, used to authenticate signaling envelopes. Absent for
+   * legacy rows.
+   */
+  rendezvousSecret?: string
   /** Defaults to `Date.now()` — pass an explicit value in tests. */
   nowMs?: number
 }
@@ -40,6 +52,12 @@ export async function addPairedDevice(input: AddPairedDeviceInput): Promise<void
   }
   if (input.serverFingerprint) {
     row.serverFingerprint = input.serverFingerprint
+  }
+  if (input.rendezvousId) {
+    row.rendezvousId = input.rendezvousId
+  }
+  if (input.rendezvousSecret) {
+    row.rendezvousSecret = input.rendezvousSecret
   }
   await getDb().pairedDevices.put(row)
 }

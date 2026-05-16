@@ -69,3 +69,11 @@ next-env.d.ts
 coverage_output.txt
 .playwright-mcp
 .VSCodeCounter
+
+# Rust build artifacts (src-tauri/target is ignored by src-tauri/.gitignore)
+/signaling-server/target/
+/crates/*/target/
+
+# local lint / verification dumps
+.lint-output.*
+batch-final-verify-*.png

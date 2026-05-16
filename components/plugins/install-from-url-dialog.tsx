@@ -15,6 +15,7 @@
  */
 
 import { useCallback, useMemo, useState } from "react"
+import { useTranslations } from "next-intl"
 import {
   AlertCircleIcon,
   CheckCircle2Icon,
@@ -57,6 +58,7 @@ export function InstallFromUrlDialog({
   onOpenChange,
   onInstalled,
 }: InstallFromUrlDialogProps) {
+  const t = useTranslations("plugins.wasmInstall.fromUrlDialog")
   const grant = useWasmCapabilityGrant()
   const [bundleUrl, setBundleUrl] = useState("")
   const [signatureUrl, setSignatureUrl] = useState("")
@@ -107,6 +109,8 @@ export function InstallFromUrlDialog({
     }
   }, [bundleUrl, signatureUrl, publicKey])
 
+  const trustRequiredError = t("trustRequiredError")
+
   const handleConfirm = useCallback(async () => {
     if (!preview) return
     setErrorMessage(null)
@@ -115,7 +119,7 @@ export function InstallFromUrlDialog({
       // If the user opted not to trust an unknown signed author, abort
       // before we hit the network again — they have to accept first.
       if (preview.signatureVerified && !publisherAlreadyTrusted && !trustAuthor) {
-        throw new Error("Confirm trust for this author's signing key to proceed with the install.")
+        throw new Error(trustRequiredError)
       }
       const result = await installFromUrl({
         bundleUrl: bundleUrl.trim(),
@@ -152,6 +156,7 @@ export function InstallFromUrlDialog({
     grant,
     onInstalled,
     handleOpenChange,
+    trustRequiredError,
   ])
 
   const canPreview = useMemo(() => {
@@ -166,43 +171,38 @@ export function InstallFromUrlDialog({
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="max-w-xl" data-testid="install-from-url-dialog">
           <DialogHeader>
-            <DialogTitle>Install plugin from URL</DialogTitle>
-            <DialogDescription>
-              Paste the URL of a `.zip` plugin bundle. If the author published a detached signature,
-              paste its URL and the author&apos;s Ed25519 public key below.
-            </DialogDescription>
+            <DialogTitle>{t("title")}</DialogTitle>
+            <DialogDescription>{t("description")}</DialogDescription>
           </DialogHeader>
 
           {(stage === "input" || stage === "error") && (
             <div className="space-y-3">
               <div className="space-y-1">
-                <Label htmlFor="bundle-url">Bundle URL</Label>
+                <Label htmlFor="bundle-url">{t("bundleUrlLabel")}</Label>
                 <Input
                   id="bundle-url"
                   type="url"
-                  placeholder="https://example.com/my-plugin-0.1.0.zip"
+                  placeholder={t("bundleUrlPlaceholder")}
                   value={bundleUrl}
                   onChange={(e) => setBundleUrl(e.target.value)}
                 />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="sig-url">Signature URL (optional)</Label>
+                <Label htmlFor="sig-url">{t("signatureUrlLabel")}</Label>
                 <Input
                   id="sig-url"
                   type="url"
-                  placeholder="https://example.com/my-plugin-0.1.0.zip.sig"
+                  placeholder={t("signatureUrlPlaceholder")}
                   value={signatureUrl}
                   onChange={(e) => setSignatureUrl(e.target.value)}
                 />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="pubkey">
-                  Author public key (base64, required if signature URL is set)
-                </Label>
+                <Label htmlFor="pubkey">{t("publicKeyLabel")}</Label>
                 <Input
                   id="pubkey"
                   type="text"
-                  placeholder="base64(Ed25519 32-byte pubkey)"
+                  placeholder={t("publicKeyPlaceholder")}
                   value={publicKey}
                   onChange={(e) => setPublicKey(e.target.value)}
                 />
@@ -234,23 +234,23 @@ export function InstallFromUrlDialog({
                 <KeyRoundIcon className="size-4 mt-0.5 text-muted-foreground" aria-hidden />
                 <div className="text-sm space-y-1">
                   <div className="font-medium">
-                    {preview.manifest.author?.name ?? "Anonymous publisher"}
+                    {preview.manifest.author?.name ?? t("anonymousAuthor")}
                   </div>
                   {preview.authorFingerprint ? (
                     <div className="font-mono text-xs text-muted-foreground break-all">
                       {shortFingerprint(preview.authorFingerprint)}
                     </div>
                   ) : (
-                    <div className="text-xs text-muted-foreground">No author key declared.</div>
+                    <div className="text-xs text-muted-foreground">{t("noAuthorKey")}</div>
                   )}
                   {preview.signatureVerified ? (
                     <Badge variant="outline" className="text-emerald-600 border-emerald-500/40">
                       <ShieldCheckIcon className="size-3 mr-1" aria-hidden />
-                      signature verified
+                      {t("signatureVerified")}
                     </Badge>
                   ) : (
                     <Badge variant="outline" className="text-amber-600 border-amber-500/40">
-                      unsigned bundle
+                      {t("unsignedBundle")}
                     </Badge>
                   )}
                 </div>
@@ -260,7 +260,7 @@ export function InstallFromUrlDialog({
                   <Checkbox
                     checked={trustAuthor}
                     onCheckedChange={(checked) => setTrustAuthor(checked === true)}
-                    aria-label="Trust this author for future updates"
+                    aria-label={t("trustAriaLabel")}
                     data-testid="trust-author-checkbox"
                   />
                   <span>
@@ -270,11 +270,10 @@ export function InstallFromUrlDialog({
                           className="size-3.5 inline mr-1 text-emerald-500"
                           aria-hidden
                         />
-                        You already trust this author. Updates from this key will install without
-                        re-confirmation.
+                        {t("alreadyTrusted")}
                       </>
                     ) : (
-                      <>Trust this Ed25519 key for future updates from the same author.</>
+                      <>{t("trustFirstTime")}</>
                     )}
                   </span>
                 </label>
@@ -294,7 +293,9 @@ export function InstallFromUrlDialog({
           {stage === "installing" && (
             <div className="flex items-center justify-center py-8">
               <Loader2Icon className="size-5 animate-spin text-muted-foreground" aria-hidden />
-              <span className="ml-2 text-sm">{preview ? "Installing…" : "Fetching manifest…"}</span>
+              <span className="ml-2 text-sm">
+                {preview ? t("installing") : t("fetchingManifest")}
+              </span>
             </div>
           )}
 
@@ -304,7 +305,7 @@ export function InstallFromUrlDialog({
               onClick={() => handleOpenChange(false)}
               data-testid="install-from-url-cancel"
             >
-              Cancel
+              {t("cancel")}
             </Button>
             {(stage === "input" || stage === "error") && (
               <Button
@@ -312,12 +313,12 @@ export function InstallFromUrlDialog({
                 disabled={!canPreview}
                 data-testid="install-from-url-preview-button"
               >
-                Preview
+                {t("preview")}
               </Button>
             )}
             {stage === "preview" && (
               <Button onClick={handleConfirm} data-testid="install-from-url-confirm-button">
-                Install
+                {t("install")}
               </Button>
             )}
           </DialogFooter>

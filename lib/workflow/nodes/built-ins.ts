@@ -12,9 +12,9 @@
  * surface as "no executor registered" run failures.
  */
 
-import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
+import type { StepExecutionContext } from "@/types/workflow/visual"
 import { registerNodeExecutor } from "./registry"
-import { resolveDeep, resolveExpression } from "@/lib/workflow/runtime/expression"
+import { resolveExpression } from "@/lib/workflow/runtime/expression"
 import {
   createSkill,
   deleteSkill,

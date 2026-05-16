@@ -23,6 +23,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useTranslations } from "next-intl"
 import { CrosshairIcon, RefreshCwIcon } from "lucide-react"
 import { toast } from "sonner"
 
@@ -51,6 +52,7 @@ interface TreeRow {
 }
 
 export function InspectorTab() {
+  const t = useTranslations("automation.inspector")
   const [caps, setCaps] = useState<Capabilities | null>(null)
   const [rootMode, setRootMode] = useState<"focused" | "desktop" | "manual">("focused")
   const [manualRef, setManualRef] = useState("")
@@ -104,14 +106,14 @@ export function InspectorTab() {
       setPatternBusy(kind)
       try {
         await desktop.invokePattern(selected.elementRef, kind, {})
-        toast.success(`${kind} pattern fired`)
+        toast.success(t("invokeOk", { pattern: kind }))
       } catch (err) {
-        toast.error(`${kind} pattern failed`, { description: String(err) })
+        toast.error(t("invokeFailed", { error: String(err) }))
       } finally {
         setPatternBusy(null)
       }
     },
-    [selected]
+    [selected, t]
   )
 
   const locatorJson = useMemo(() => {
@@ -156,10 +158,8 @@ export function InspectorTab() {
     <div className="grid gap-4 lg:grid-cols-[1fr,1fr]">
       <Card className="lg:col-span-1">
         <CardHeader>
-          <CardTitle>Tree</CardTitle>
-          <CardDescription>
-            Read an accessibility tree from the focused window, the desktop root, or a captured ref.
-          </CardDescription>
+          <CardTitle>{t("tree")}</CardTitle>
+          <CardDescription>{t("treeDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-wrap gap-2">
@@ -168,32 +168,32 @@ export function InspectorTab() {
               variant={rootMode === "focused" ? "default" : "outline"}
               onClick={() => setRootMode("focused")}
             >
-              Focused
+              {t("rootMode.focused")}
             </Button>
             <Button
               size="sm"
               variant={rootMode === "desktop" ? "default" : "outline"}
               onClick={() => setRootMode("desktop")}
             >
-              Desktop
+              {t("rootMode.desktop")}
             </Button>
             <Button
               size="sm"
               variant={rootMode === "manual" ? "default" : "outline"}
               onClick={() => setRootMode("manual")}
             >
-              Manual
+              {t("rootMode.manual")}
             </Button>
-            <Button size="sm" variant="ghost" disabled title="Point-and-click picker lands in M5b">
+            <Button size="sm" variant="ghost" disabled title={t("pickInactiveTooltip")}>
               <CrosshairIcon className="size-4 mr-1" />
-              Pick (M5b)
+              {t("pickInactive")}
             </Button>
           </div>
           {rootMode === "manual" && (
             <div className="space-y-1">
-              <Label className="text-xs">Element ref</Label>
+              <Label className="text-xs">{t("elementRef")}</Label>
               <Input
-                placeholder="hex string from getFocus / readTree"
+                placeholder={t("elementRefPlaceholder")}
                 value={manualRef}
                 onChange={(e) => setManualRef(e.target.value)}
                 className="font-mono text-xs"
@@ -202,7 +202,7 @@ export function InspectorTab() {
           )}
           <div className="flex items-end gap-2">
             <div className="space-y-1">
-              <Label className="text-xs">Max depth</Label>
+              <Label className="text-xs">{t("maxDepth")}</Label>
               <Input
                 type="number"
                 min={0}
@@ -214,14 +214,14 @@ export function InspectorTab() {
             </div>
             <Button onClick={refresh} disabled={loading} size="sm">
               <RefreshCwIcon className="size-4 mr-1" />
-              {loading ? "Reading…" : "Read tree"}
+              {loading ? t("reading") : t("readTree")}
             </Button>
           </div>
 
           <ScrollArea className="h-[360px] rounded-md border">
             {rows ? (
               rows.length === 0 ? (
-                <p className="p-3 text-xs text-muted-foreground">Empty result.</p>
+                <p className="p-3 text-xs text-muted-foreground">{t("emptyResult")}</p>
               ) : (
                 <div className="divide-y">
                   {rows.map((row, idx) => {
@@ -252,9 +252,7 @@ export function InspectorTab() {
                 </div>
               )
             ) : (
-              <p className="p-3 text-xs text-muted-foreground">
-                Click &quot;Read tree&quot; to populate.
-              </p>
+              <p className="p-3 text-xs text-muted-foreground">{t("clickToPopulate")}</p>
             )}
           </ScrollArea>
         </CardContent>
@@ -262,14 +260,12 @@ export function InspectorTab() {
 
       <Card className="lg:col-span-1">
         <CardHeader>
-          <CardTitle>Element details</CardTitle>
-          <CardDescription>
-            Inspect the selected element and test which UIA patterns it supports.
-          </CardDescription>
+          <CardTitle>{t("elementDetails")}</CardTitle>
+          <CardDescription>{t("elementDetailsDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {!selected ? (
-            <p className="text-xs text-muted-foreground">Select a row to inspect.</p>
+            <p className="text-xs text-muted-foreground">{t("selectRow")}</p>
           ) : (
             <>
               <div className="space-y-1.5 text-xs">
@@ -293,7 +289,7 @@ export function InspectorTab() {
               </div>
 
               <div className="space-y-2">
-                <Label className="text-xs">Locator JSON</Label>
+                <Label className="text-xs">{t("locatorJson")}</Label>
                 <pre className="rounded-md border bg-muted/30 px-3 py-2 text-[11px] font-mono overflow-x-auto">
                   {locatorJson}
                 </pre>
@@ -303,26 +299,26 @@ export function InspectorTab() {
                     variant="secondary"
                     onClick={() => {
                       void navigator.clipboard.writeText(locatorJson)
-                      toast.success("Copied locator JSON")
+                      toast.success(t("copyLocator"))
                     }}
                   >
-                    Copy locator
+                    {t("copyLocator")}
                   </Button>
                   <Button
                     size="sm"
                     variant="secondary"
                     onClick={() => {
                       void navigator.clipboard.writeText(elementRefValue(selected.elementRef))
-                      toast.success("Copied element ref")
+                      toast.success(t("copyRef"))
                     }}
                   >
-                    Copy ref
+                    {t("copyRef")}
                   </Button>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label className="text-xs">Test patterns</Label>
+                <Label className="text-xs">{t("testPatterns")}</Label>
                 <div className="flex flex-wrap gap-2">
                   {(["invoke", "toggle", "selectionItem"] as PatternKind[]).map((k) => (
                     <Button
@@ -336,9 +332,7 @@ export function InspectorTab() {
                     </Button>
                   ))}
                 </div>
-                <p className="text-[10px] text-muted-foreground">
-                  Driving patterns route through the consent gate just like a regular click.
-                </p>
+                <p className="text-[10px] text-muted-foreground">{t("testPatternsHint")}</p>
               </div>
             </>
           )}

@@ -313,7 +313,9 @@ function LogPanelToolbarImpl({
               size="sm"
               className="relative h-8 px-2 shrink-0"
               onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-              aria-label={showAdvancedFilters ? "Hide more filters" : "More filters"}
+              aria-label={
+                showAdvancedFilters ? t("panel.moreFilters.hide") : t("panel.moreFilters.show")
+              }
             >
               <Filter className="h-4 w-4" />
               {hasActiveAdvancedFilters && !showAdvancedFilters && (
@@ -322,7 +324,7 @@ function LogPanelToolbarImpl({
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {showAdvancedFilters ? "Hide more filters" : "More filters"}
+            {showAdvancedFilters ? t("panel.moreFilters.hide") : t("panel.moreFilters.show")}
           </TooltipContent>
         </Tooltip>
 
@@ -335,7 +337,7 @@ function LogPanelToolbarImpl({
               className="h-8 px-2 shrink-0 hidden sm:inline-flex"
               onClick={() => setShowShortcutsDialog(true)}
               data-testid="log-toolbar-shortcut-hint"
-              aria-label="Show keyboard shortcuts"
+              aria-label={t("panel.shortcutsHint")}
             >
               <Keyboard className="h-4 w-4" />
             </Button>
@@ -373,13 +375,13 @@ function LogPanelToolbarImpl({
                 setAutoRefresh(!autoRefresh)
               }}
             >
-              <RefreshCw className={cn("h-4 w-4", autoRefresh && "animate-spin")} />
+              <RefreshCw className={cn("h-4 w-4", autoRefresh && "motion-safe:animate-spin")} />
             </Button>
           </TooltipTrigger>
           <TooltipContent>
             {autoRefresh ? t("panel.disableAutoRefresh") : t("panel.refresh")}
             <span className="block text-muted-foreground text-[10px]">
-              Shift+Click:{" "}
+              {t("panel.shiftClickPrefix")}{" "}
               {autoRefresh ? t("panel.disableAutoRefresh") : t("panel.enableAutoRefresh")}
             </span>
           </TooltipContent>
@@ -414,10 +416,10 @@ function LogPanelToolbarImpl({
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setShowDetailPanel(!showDetailPanel)}>
               <PanelRightClose className="h-4 w-4 mr-2" />
-              {showDetailPanel ? t("panel.closeDetails") : "Open details panel"}
+              {showDetailPanel ? t("panel.closeDetails") : t("panel.openDetailsPanel")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel>Scroll</DropdownMenuLabel>
+            <DropdownMenuLabel>{t("panel.scrollMenuLabel")}</DropdownMenuLabel>
             <DropdownMenuItem onClick={scrollToTop}>
               <ChevronsUp className="h-4 w-4 mr-2" />
               {t("panel.scrollToTop")}
@@ -442,7 +444,7 @@ function LogPanelToolbarImpl({
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => setShowShortcutsDialog(true)}>
               <Keyboard className="h-4 w-4 mr-2" />
-              Keyboard shortcuts
+              {t("panel.keyboardShortcuts")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -466,13 +468,13 @@ function LogPanelToolbarImpl({
               data-testid="facet-chip-source"
               className="h-6 pl-2 pr-1 gap-1 text-xs font-normal"
             >
-              <span className="text-muted-foreground">Source:</span>
+              <span className="text-muted-foreground">{t("panel.filterChip.sourceLabel")}</span>
               <span>{t(`panel.sources.${sourceFilter}`)}</span>
               <button
                 type="button"
                 onClick={() => setSourceFilter("all")}
                 className="ml-0.5 rounded hover:bg-muted-foreground/10 p-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                aria-label={`Clear source filter ${sourceFilter}`}
+                aria-label={t("panel.filterChip.clearSource", { value: sourceFilter })}
               >
                 <X className="h-3 w-3" />
               </button>
@@ -484,13 +486,13 @@ function LogPanelToolbarImpl({
               data-testid="facet-chip-session"
               className="h-6 pl-2 pr-1 gap-1 text-xs font-normal"
             >
-              <span className="text-muted-foreground">Session:</span>
+              <span className="text-muted-foreground">{t("panel.filterChip.sessionLabel")}</span>
               <span className="font-mono truncate max-w-[120px]">{sessionFilter}</span>
               <button
                 type="button"
                 onClick={() => setSessionFilter("")}
                 className="ml-0.5 rounded hover:bg-muted-foreground/10 p-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                aria-label="Clear session filter"
+                aria-label={t("panel.filterChip.clearSession")}
               >
                 <X className="h-3 w-3" />
               </button>
@@ -502,7 +504,7 @@ function LogPanelToolbarImpl({
               data-testid="facet-chip-module"
               className="h-6 pl-2 pr-1 gap-1 text-xs font-normal"
             >
-              <span className="text-muted-foreground">Module:</span>
+              <span className="text-muted-foreground">{t("panel.filterChip.moduleLabel")}</span>
               <span className="truncate max-w-[140px]">
                 {moduleFilter === AGENT_TRACE_MODULE ? t("panel.agentTraceModule") : moduleFilter}
               </span>
@@ -510,7 +512,7 @@ function LogPanelToolbarImpl({
                 type="button"
                 onClick={() => setModuleFilter("all")}
                 className="ml-0.5 rounded hover:bg-muted-foreground/10 p-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                aria-label="Clear module filter"
+                aria-label={t("panel.filterChip.clearModule")}
               >
                 <X className="h-3 w-3" />
               </button>
@@ -528,7 +530,7 @@ function LogPanelToolbarImpl({
                 type="button"
                 onClick={() => setTimeRange("all")}
                 className="ml-0.5 rounded hover:bg-muted-foreground/10 p-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                aria-label="Clear time range filter"
+                aria-label={t("panel.filterChip.clearTimeRange")}
               >
                 <X className="h-3 w-3" />
               </button>
@@ -541,12 +543,12 @@ function LogPanelToolbarImpl({
               className="h-6 pl-2 pr-1 gap-1 text-xs font-normal"
             >
               <Crosshair className="h-3 w-3" />
-              <span>Trace</span>
+              <span>{t("panel.filterChip.traceLabel")}</span>
               <button
                 type="button"
                 onClick={() => setTraceFocusId(null)}
                 className="ml-0.5 rounded hover:bg-muted-foreground/10 p-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                aria-label="Clear trace focus"
+                aria-label={t("panel.filterChip.clearTrace")}
               >
                 <X className="h-3 w-3" />
               </button>
@@ -558,13 +560,13 @@ function LogPanelToolbarImpl({
               data-testid="facet-chip-transport"
               className="h-6 pl-2 pr-1 gap-1 text-xs font-normal"
             >
-              <span className="text-muted-foreground">Transport:</span>
+              <span className="text-muted-foreground">{t("panel.filterChip.transportLabel")}</span>
               <span>{diagnosticTransportFilter}</span>
               <button
                 type="button"
                 onClick={() => setDiagnosticTransportFilter(null)}
                 className="ml-0.5 rounded hover:bg-muted-foreground/10 p-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                aria-label="Clear transport filter"
+                aria-label={t("panel.filterChip.clearTransport")}
               >
                 <X className="h-3 w-3" />
               </button>
@@ -586,7 +588,7 @@ function LogPanelToolbarImpl({
             setBookmarkFilterActive(false)
           }}
         >
-          All
+          {t("panel.allLevelsTab")}
           {stats.total > 0 && (
             <Badge variant="secondary" className="h-4 px-1 text-[10px]">
               {stats.total}
@@ -615,7 +617,7 @@ function LogPanelToolbarImpl({
                 setBookmarkFilterActive(false)
               }}
             >
-              {level === "error" ? "Error" : level.charAt(0).toUpperCase() + level.slice(1)}
+              {t(`levels.${level}`)}
               {count > 0 && (
                 <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                   {count}
@@ -642,7 +644,7 @@ function LogPanelToolbarImpl({
           }}
         >
           <BookmarkCheck className="h-3 w-3" />
-          Bookmarked
+          {t("panel.bookmarked")}
           {bookmarkedCount > 0 && (
             <Badge variant="secondary" className="h-4 px-1 text-[10px]">
               {bookmarkedCount}
@@ -655,12 +657,12 @@ function LogPanelToolbarImpl({
       {showAdvancedFilters && (
         <div
           data-testid="log-panel-filter-group"
-          className="flex flex-wrap items-center gap-2 px-2 pb-2 pt-1 border-t border-border/50 animate-in slide-in-from-top-1 duration-150"
+          className="flex flex-wrap items-center gap-2 px-2 pb-2 pt-1 border-t border-border/50 motion-safe:animate-in motion-safe:slide-in-from-top-1 motion-safe:duration-150"
         >
           {/* Module selector */}
           <Select value={moduleFilter} onValueChange={setModuleFilter}>
             <SelectTrigger className="h-8 w-full sm:w-[140px]">
-              <SelectValue placeholder="Module" />
+              <SelectValue placeholder={t("panel.modulePlaceholder")} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">{t("panel.allModules")}</SelectItem>
@@ -703,7 +705,7 @@ function LogPanelToolbarImpl({
           <Select value={timeRange} onValueChange={(v) => setTimeRange(v as PresetTimeRange)}>
             <SelectTrigger className="h-8 w-full sm:w-[100px]">
               <Calendar className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-              <SelectValue placeholder="Time" />
+              <SelectValue placeholder={t("panel.timePlaceholder")} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">{t("panel.timeRangeAll")}</SelectItem>
@@ -791,7 +793,7 @@ function LogPanelToolbarImpl({
               className="h-7 px-2 gap-1 text-xs"
               onClick={() => setDiagnosticTransportFilter(null)}
             >
-              Transport: {diagnosticTransportFilter}
+              {t("panel.filterChip.transportPrefix", { name: diagnosticTransportFilter })}
               <X className="h-3 w-3" />
             </Button>
           )}
@@ -800,21 +802,21 @@ function LogPanelToolbarImpl({
 
       {/* Keyboard shortcuts dialog */}
       <Dialog open={showShortcutsDialog} onOpenChange={setShowShortcutsDialog}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-sm sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Keyboard shortcuts</DialogTitle>
+            <DialogTitle>{t("panel.keyboardShortcuts")}</DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
             {(
               [
-                ["r", "Refresh"],
-                ["d", "Dashboard view"],
-                ["j / ↓", "Next entry"],
-                ["k / ↑", "Previous entry"],
-                ["Enter", "Expand entry"],
-                ["o", "Open details"],
-                ["Esc", "Close / clear"],
-                ["?", "Show shortcuts"],
+                ["r", t("panel.shortcuts.refresh")],
+                ["d", t("panel.shortcuts.dashboardView")],
+                ["j / ↓", t("panel.shortcuts.nextEntry")],
+                ["k / ↑", t("panel.shortcuts.previousEntry")],
+                ["Enter", t("panel.shortcuts.expandEntry")],
+                ["o", t("panel.shortcuts.openDetails")],
+                ["Esc", t("panel.shortcuts.closeOrClear")],
+                ["?", t("panel.shortcuts.showShortcuts")],
               ] as [string, string][]
             ).map(([key, action]) => (
               <Fragment key={key}>
@@ -858,6 +860,7 @@ function SearchWithHistory({
   regexPlaceholder,
   searchPlaceholder,
 }: SearchWithHistoryProps) {
+  const t = useTranslations("logging")
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const historyItems = useMemo(() => searchHistory, [searchHistory])
@@ -919,20 +922,22 @@ function SearchWithHistory({
             data-testid="log-search-history-combobox"
           >
             <div className="flex items-center justify-between px-2 py-1 border-b">
-              <span className="text-xs text-muted-foreground">Recent searches</span>
-              <button
-                type="button"
-                className="text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              <span className="text-xs text-muted-foreground">{t("panel.searchHistory")}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-auto px-1.5 py-0.5 text-xs font-normal text-muted-foreground hover:text-foreground"
                 onMouseDown={(e) => {
                   e.preventDefault()
                   clearSearchHistory()
                 }}
+                data-testid="log-search-history-clear"
               >
-                Clear
-              </button>
+                {t("panel.recentSearches.clear")}
+              </Button>
             </div>
             <CommandList className="max-h-60">
-              <CommandEmpty>No recent searches</CommandEmpty>
+              <CommandEmpty>{t("panel.recentSearches.empty")}</CommandEmpty>
               <CommandGroup>
                 {historyItems.map((item) => (
                   <CommandItem
@@ -949,12 +954,13 @@ function SearchWithHistory({
                     <span className="flex-1 text-sm truncate">{item}</span>
                     <button
                       type="button"
+                      tabIndex={-1}
                       className="ml-2 text-muted-foreground hover:text-foreground shrink-0 rounded p-0.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                       onMouseDown={(e) => {
                         e.preventDefault()
                         removeSearchHistoryItem(item)
                       }}
-                      aria-label={`Remove recent search ${item}`}
+                      aria-label={t("panel.recentSearches.removeAria", { query: item })}
                     >
                       <X className="h-3 w-3" />
                     </button>

@@ -6,7 +6,6 @@ import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
 import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin-extended"
 import type { BackgroundSettings, ImportedThemeRecord, Wallpaper } from "@/types/appearance"
 import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
-import type { CustomProviderDefinition, ProviderSettingsEntry } from "@/lib/ai/provider-consumption"
 import type {
   CustomModelMetadata,
   CustomProviderSettings,
@@ -441,6 +440,7 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         // store doesn't cycle through this file.
         if (s.networkProxy) {
           try {
+            const { applyProxyToRust } = await import("@/stores/network-proxy")
             await applyProxyToRust(s.networkProxy)
           } catch (err) {
             console.warn("networkProxy.applyToRust failed", err)
@@ -468,6 +468,7 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       // outbound call. Other patches don't need this hop.
       if (patch.networkProxy !== undefined) {
         try {
+          const { applyProxyToRust } = await import("@/stores/network-proxy")
           await applyProxyToRust(next.networkProxy)
         } catch (err) {
           console.warn("networkProxy.applyToRust failed", err)

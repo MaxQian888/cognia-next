@@ -32,7 +32,7 @@ export function SkillMarketplaceCard({
   const Icon = cat.icon
 
   return (
-    <Card className="flex flex-col gap-3 p-4">
+    <Card className="flex h-full flex-col gap-3 p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md motion-reduce:transform-none motion-reduce:transition-none">
       <div className="flex items-start gap-3">
         <div
           className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md ${cat.color}`}
@@ -75,7 +75,7 @@ export function SkillMarketplaceCard({
         ))}
       </div>
 
-      <div className="flex items-center justify-between gap-2 pt-1">
+      <div className="mt-auto flex items-center justify-between gap-2 pt-1">
         {item.repository && (
           <a
             href={
@@ -85,13 +85,14 @@ export function SkillMarketplaceCard({
             }
             target="_blank"
             rel="noreferrer"
-            className="text-[11px] text-muted-foreground hover:underline"
+            className="min-w-0 truncate text-[11px] text-muted-foreground hover:underline max-w-[12rem] md:max-w-[16rem]"
+            title={item.repository}
           >
             <ExternalLinkIcon className="mr-1 inline size-3" />
-            {item.repository}
+            <span className="truncate align-middle">{item.repository}</span>
           </a>
         )}
-        <div className="ml-auto">
+        <div className="ml-auto shrink-0">
           {installed ? (
             <Button
               size="sm"

@@ -1,8 +1,8 @@
 "use client"
 
 /**
- * Settings → Automation. Five-tab shell (`?autoTab=`); M1 ships Overview,
- * Permissions, Audit, and a placeholder for Whitelist + Inspector (M2).
+ * Settings → Automation. Five-tab shell (`?autoTab=`) — Overview, Permissions,
+ * Whitelist, Audit, Inspector.
  *
  * The data plane:
  *   - Capabilities + settings load from the Rust state on mount.
@@ -14,6 +14,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
+import { useTranslations } from "next-intl"
 import { CameraIcon, ShieldAlertIcon, ShieldCheckIcon } from "lucide-react"
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -53,6 +54,8 @@ export function AutomationSection() {
   const searchParams = useSearchParams()
   const requested = searchParams.get("autoTab")
   const activeTab: TabId = isTabId(requested) ? requested : "overview"
+  const tHeader = useTranslations("automation.header")
+  const tTabs = useTranslations("automation.tabs")
 
   const setTab = (tab: TabId) => {
     const next = new URLSearchParams(searchParams.toString())
@@ -63,20 +66,17 @@ export function AutomationSection() {
   return (
     <div className="space-y-6">
       <header className="space-y-1">
-        <h2 className="text-2xl font-semibold">UI Automation</h2>
-        <p className="text-sm text-muted-foreground">
-          Drive the desktop on behalf of AI agents and workflow nodes — with consent. Disabled by
-          default; the global kill switch on the Overview tab cuts every in-flight call.
-        </p>
+        <h2 className="text-2xl font-semibold">{tHeader("title")}</h2>
+        <p className="text-sm text-muted-foreground">{tHeader("description")}</p>
       </header>
 
       <Tabs value={activeTab} onValueChange={(t) => setTab(t as TabId)}>
         <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="permissions">Permissions</TabsTrigger>
-          <TabsTrigger value="whitelist">Whitelist</TabsTrigger>
-          <TabsTrigger value="audit">Audit</TabsTrigger>
-          <TabsTrigger value="inspector">Inspector</TabsTrigger>
+          <TabsTrigger value="overview">{tTabs("overview")}</TabsTrigger>
+          <TabsTrigger value="permissions">{tTabs("permissions")}</TabsTrigger>
+          <TabsTrigger value="whitelist">{tTabs("whitelist")}</TabsTrigger>
+          <TabsTrigger value="audit">{tTabs("audit")}</TabsTrigger>
+          <TabsTrigger value="inspector">{tTabs("inspector")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="pt-4">
@@ -100,6 +100,7 @@ export function AutomationSection() {
 }
 
 function OverviewTab() {
+  const t = useTranslations("automation.overview")
   const [caps, setCaps] = useState<Capabilities | null>(null)
   const [settings, setSettings] = useState<AutomationSettings | null>(() =>
     isTauri() ? null : defaultAutomationSettings()
@@ -174,27 +175,27 @@ function OverviewTab() {
     )
   }
 
+  const yes = t("yes")
+  const no = t("no")
+  const planned = t("noPlanned")
+
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <ShieldCheckIcon className="size-4" />
-            Engine status
+            {t("engineStatus")}
           </CardTitle>
-          <CardDescription>
-            The Rust worker thread is always alive; this switch flips whether commands are accepted.
-          </CardDescription>
+          <CardDescription>{t("engineStatusDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <Label htmlFor="automation-enabled" className="font-medium">
-                Automation engine
+                {t("engineToggle")}
               </Label>
-              <p className="text-xs text-muted-foreground">
-                When off, every Tauri command returns <code>KILL_SWITCH_ACTIVE</code>.
-              </p>
+              <p className="text-xs text-muted-foreground">{t("engineToggleHint")}</p>
             </div>
             <Switch
               id="automation-enabled"
@@ -205,12 +206,9 @@ function OverviewTab() {
           </div>
 
           <Button variant="destructive" onClick={engageKillSwitch} className="w-full">
-            Engage global kill switch
+            {t("killSwitch")}
           </Button>
-          <p className="text-xs text-muted-foreground">
-            Equivalent to flipping the switch off, but also surfaces a toast and is wired to the
-            system-tray menu + the <kbd>Esc Esc Esc</kbd> global hotkey.
-          </p>
+          <p className="text-xs text-muted-foreground">{t("killSwitchHint")}</p>
         </CardContent>
       </Card>
 
@@ -218,20 +216,26 @@ function OverviewTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <CameraIcon className="size-4" />
-            Platform capabilities
+            {t("platformCapabilities")}
           </CardTitle>
         </CardHeader>
         <CardContent>
           {caps ? (
             <div className="flex flex-wrap gap-2">
-              <CapBadge label="Platform" value={caps.platform} />
-              <CapBadge label="UIA" value={caps.hasUia ? "yes" : "no"} />
-              <CapBadge label="Input simulation" value={caps.hasInputSim ? "yes" : "no"} />
-              <CapBadge label="Screenshot" value={caps.hasScreenshot ? "yes" : "no"} />
-              <CapBadge label="Events" value={caps.hasEvents ? "yes" : "no (M2)"} />
+              <CapBadge label={t("capabilities.platform")} value={caps.platform} />
+              <CapBadge label={t("capabilities.uia")} value={caps.hasUia ? yes : no} />
+              <CapBadge
+                label={t("capabilities.inputSimulation")}
+                value={caps.hasInputSim ? yes : no}
+              />
+              <CapBadge
+                label={t("capabilities.screenshot")}
+                value={caps.hasScreenshot ? yes : no}
+              />
+              <CapBadge label={t("capabilities.events")} value={caps.hasEvents ? yes : planned} />
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">Capability probe failed.</p>
+            <p className="text-sm text-muted-foreground">{t("capabilityProbeFailed")}</p>
           )}
         </CardContent>
       </Card>
@@ -242,13 +246,15 @@ function OverviewTab() {
 function CapBadge({ label, value }: { label: string; value: string }) {
   return (
     <Badge variant="secondary" className="gap-1">
-      <span className="text-muted-foreground">{label}:</span>
+      <span className="text-muted-foreground">{label}</span>
       <span>{value}</span>
     </Badge>
   )
 }
 
 function PermissionsTab() {
+  const t = useTranslations("automation.permissions")
+  const tAuditFilters = useTranslations("automation.audit.filters")
   const [settings, setSettings] = useState<AutomationSettings | null>(() =>
     isTauri() ? null : defaultAutomationSettings()
   )
@@ -283,36 +289,37 @@ function PermissionsTab() {
   const surfaces: Array<{ id: Surface; label: string; description: string }> = [
     {
       id: "workflow",
-      label: "Workflows",
-      description: "Tier for action.desktop.* nodes in visual workflows.",
+      label: t("tier.off") /* placeholder; overridden below */,
+      description: t("surfaces.workflowDescription"),
     },
     {
       id: "computerUse",
-      label: "Computer use",
-      description: "Tier for Anthropic native computer-use tool calls (M2).",
+      label: "",
+      description: t("surfaces.computerUseDescription"),
     },
     {
       id: "mcp",
-      label: "MCP tools",
-      description: "Tier for desktop_* MCP tools exposed via External Bridge (M2).",
+      label: "",
+      description: t("surfaces.mcpDescription"),
     },
     {
       id: "plugin",
-      label: "Plugin API",
-      description: "Tier for plugins using ctx.desktop (M2).",
+      label: "",
+      description: t("surfaces.pluginDescription"),
     },
   ]
+  // Surface labels reuse the audit filter strings already in i18n.
+  surfaces[0].label = tAuditFilters("surfaceWorkflow")
+  surfaces[1].label = tAuditFilters("surfaceComputerUse")
+  surfaces[2].label = tAuditFilters("surfaceMcp")
+  surfaces[3].label = tAuditFilters("surfacePlugin")
 
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>Default tier</CardTitle>
-          <CardDescription>
-            Off blocks everything. Whitelist allows calls whose target window matches the global
-            whitelist (Whitelist tab, M2). Per-call requires HITL consent for driving calls (click,
-            type, keys).
-          </CardDescription>
+          <CardTitle>{t("defaultTier")}</CardTitle>
+          <CardDescription>{t("defaultTierDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
           <TierSelect
@@ -325,10 +332,8 @@ function PermissionsTab() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Per-surface override</CardTitle>
-          <CardDescription>
-            Each consumer surface can override the default tier with a stricter setting.
-          </CardDescription>
+          <CardTitle>{t("perSurface")}</CardTitle>
+          <CardDescription>{t("perSurfaceDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {surfaces.map((s) => {
@@ -369,17 +374,28 @@ function TierSelect({
   onChange: (v: Tier) => void
   disabled?: boolean
 }) {
+  const t = useTranslations("automation.permissions.tier")
+  const labelFor = (tier: Tier): string => {
+    switch (tier) {
+      case "off":
+        return t("off")
+      case "whitelist":
+        return t("whitelist")
+      case "perCall":
+        return t("perCall")
+    }
+  }
   return (
     <div className="flex gap-2">
-      {(["off", "whitelist", "perCall"] as Tier[]).map((t) => (
+      {(["off", "whitelist", "perCall"] as Tier[]).map((tier) => (
         <Button
-          key={t}
-          variant={value === t ? "default" : "outline"}
+          key={tier}
+          variant={value === tier ? "default" : "outline"}
           size="sm"
           disabled={disabled}
-          onClick={() => onChange(t)}
+          onClick={() => onChange(tier)}
         >
-          {t === "perCall" ? "Per-call" : t.charAt(0).toUpperCase() + t.slice(1)}
+          {labelFor(tier)}
         </Button>
       ))}
     </div>

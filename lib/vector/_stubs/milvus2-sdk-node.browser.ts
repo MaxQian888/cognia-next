@@ -80,4 +80,12 @@ export const VectorDataTypes: DataType[] = [
   DataType.SparseFloatVector,
 ]
 
-export default { MilvusClient, CloudClient, DataType, MetricType, ConsistencyLevelEnum, IndexType }
+const milvusBrowserStub = {
+  MilvusClient,
+  CloudClient,
+  DataType,
+  MetricType,
+  ConsistencyLevelEnum,
+  IndexType,
+}
+export default milvusBrowserStub

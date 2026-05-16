@@ -39,6 +39,21 @@ export interface CompanionConfig {
    * rolled out.
    */
   serverFingerprint?: string
+  /**
+   * ADR-0021 — public room id used by the WebRTC signaling service to route
+   * SDP/ICE messages between this client and its desktop server. UUIDv4
+   * minted by the desktop pair handler. Absence disables the WebRTC
+   * transport tier on this client.
+   */
+  rendezvousId?: string
+  /**
+   * ADR-0021 — 32-byte HMAC key (URL-safe base64, unpadded — 43 chars)
+   * shared with the desktop server, used to sign signaling envelopes so the
+   * public rendezvous service can never impersonate either side. Treated as
+   * sensitive: persisted alongside `deviceJwt` in the Capacitor secure
+   * storage entry on iOS Keychain / Android Keystore.
+   */
+  rendezvousSecret?: string
 }
 
 export interface CompanionConfigStorage {

@@ -2,6 +2,10 @@
  * @jest-environment jsdom
  */
 
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => key,
+}))
+
 import { fireEvent, render, screen } from "@testing-library/react"
 import { SkillFileTree } from "./skill-file-tree"
 import type { Skill, SkillResource } from "@/lib/claude/types"
@@ -80,5 +84,13 @@ describe("SkillFileTree", () => {
       kind: "resource",
       resource: resources[0],
     })
+  })
+
+  it("uses the localized fileTreeAria label", () => {
+    render(
+      <SkillFileTree skill={skill} resources={resources} activeFileId={null} onSelect={jest.fn()} />
+    )
+    // next-intl mock echoes the key; the literal "Skill files" should no longer appear.
+    expect(screen.getByRole("navigation", { name: "fileTreeAria" })).toBeInTheDocument()
   })
 })

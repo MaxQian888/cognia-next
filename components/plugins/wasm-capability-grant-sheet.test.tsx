@@ -2,6 +2,11 @@
  * @jest-environment jsdom
  */
 
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
+    vars ? `${key}:${JSON.stringify(vars)}` : key,
+}))
+
 import { render, screen, fireEvent } from "@testing-library/react"
 import { WasmCapabilityGrantSheet } from "./wasm-capability-grant-sheet"
 import type { PluginManifest } from "@/types/plugin"
@@ -31,11 +36,11 @@ describe("WasmCapabilityGrantSheet", () => {
         onConfirm={() => {}}
       />
     )
-    expect(screen.getByText(/Review permissions for Demo WASM Plugin/i)).toBeInTheDocument()
-    expect(screen.getByText("Notifications")).toBeInTheDocument()
-    expect(screen.getByText("Filesystem")).toBeInTheDocument()
-    expect(screen.getByText("OS / Process")).toBeInTheDocument()
-    expect(screen.getByText("Optional (off by default)")).toBeInTheDocument()
+    expect(screen.getByText('title:{"name":"Demo WASM Plugin"}')).toBeInTheDocument()
+    expect(screen.getByText("groups.notifications")).toBeInTheDocument()
+    expect(screen.getByText("groups.filesystem")).toBeInTheDocument()
+    expect(screen.getByText("groups.osProcess")).toBeInTheDocument()
+    expect(screen.getByText("optionalPermissions")).toBeInTheDocument()
     expect(screen.getByText("ed25519:9f:3a:11:22:33:44:55:66")).toBeInTheDocument()
   })
 
@@ -49,9 +54,13 @@ describe("WasmCapabilityGrantSheet", () => {
         onConfirm={() => {}}
       />
     )
-    const reqCheckbox = screen.getByRole("checkbox", { name: /Toggle notification/i })
+    const reqCheckbox = screen.getByRole("checkbox", {
+      name: 'togglePermissionAriaLabel:{"permission":"notification"}',
+    })
     expect(reqCheckbox).toHaveAttribute("data-state", "checked")
-    const optCheckbox = screen.getByRole("checkbox", { name: /Toggle clipboard:write/i })
+    const optCheckbox = screen.getByRole("checkbox", {
+      name: 'togglePermissionAriaLabel:{"permission":"clipboard:write"}',
+    })
     expect(optCheckbox).toHaveAttribute("data-state", "unchecked")
   })
 
@@ -67,8 +76,16 @@ describe("WasmCapabilityGrantSheet", () => {
       />
     )
     // Untick filesystem:read; tick clipboard:write.
-    fireEvent.click(screen.getByRole("checkbox", { name: /Toggle filesystem:read/i }))
-    fireEvent.click(screen.getByRole("checkbox", { name: /Toggle clipboard:write/i }))
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: 'togglePermissionAriaLabel:{"permission":"filesystem:read"}',
+      })
+    )
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: 'togglePermissionAriaLabel:{"permission":"clipboard:write"}',
+      })
+    )
     fireEvent.click(screen.getByTestId("wasm-grant-confirm"))
     expect(onConfirm).toHaveBeenCalledTimes(1)
     const decision = onConfirm.mock.calls[0][0]
@@ -89,7 +106,8 @@ describe("WasmCapabilityGrantSheet", () => {
         onConfirm={() => {}}
       />
     )
-    expect(screen.getByText(/sensitive capabilit/i)).toBeInTheDocument()
+    // baseManifest grants `process:spawn` by default → dangerous count = 1.
+    expect(screen.getByText(/^dangerousWarning:/)).toBeInTheDocument()
   })
 
   it("renders preopens checklist when manifest declares fs.preopens", () => {
@@ -109,7 +127,7 @@ describe("WasmCapabilityGrantSheet", () => {
         onConfirm={onConfirm}
       />
     )
-    expect(screen.getByText("Extra filesystem access")).toBeInTheDocument()
+    expect(screen.getByText("extraFilesystem")).toBeInTheDocument()
     expect(screen.getByText("~/Documents/cognia")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("wasm-grant-confirm"))
     expect(onConfirm.mock.calls[0][0].grantedPreopens).toEqual(["~/Documents/cognia"])
@@ -130,9 +148,9 @@ describe("WasmCapabilityGrantSheet", () => {
         onConfirm={() => {}}
       />
     )
-    expect(screen.getByText(/does not request any sensitive permissions/i)).toBeInTheDocument()
+    expect(screen.getByText("noSensitivePermissions")).toBeInTheDocument()
     // No dangerous warning card.
-    expect(screen.queryByText(/sensitive capabilit/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^dangerousWarning:/)).not.toBeInTheDocument()
   })
 
   it("calls onCancel and closes when the user backs out", () => {

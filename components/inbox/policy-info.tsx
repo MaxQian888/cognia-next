@@ -9,6 +9,7 @@
 
 import { useTranslations } from "next-intl"
 import { InfoIcon } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { TriggerPolicy, TriggerRule, TriggerBlocker } from "@/types/connectors/policy"
 
@@ -67,15 +68,17 @@ export function PolicyInfo({ policy }: PolicyInfoProps) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
+        <Button
           type="button"
-          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          variant="ghost"
+          size="sm"
+          className="h-auto gap-1 px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground"
           data-testid="policy-info-trigger"
           aria-label={t("aria")}
         >
           <InfoIcon className="h-3.5 w-3.5" />
           <span>{t("title")}</span>
-        </button>
+        </Button>
       </TooltipTrigger>
       <TooltipContent side="bottom" className="max-w-xs text-xs" data-testid="policy-info-tooltip">
         {summary || t("noRules")}

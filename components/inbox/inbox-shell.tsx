@@ -12,13 +12,19 @@
  *   - 768–1023 px (tablet): sidebar starts collapsed to free space for the
  *     detail pane; the user can still expand it from the standard trigger.
  *     Middle pane uses w-64.
- *   - < 768 px (mobile): out of scope for this pass — three-pane still
- *     renders but layout is not optimised.
+ *   - < 768 px (mobile): single-pane stack. We show either the middle pane
+ *     (conversation list, full-width) when no conversation is selected, or
+ *     the detail pane (full-width) when `conversationKey` is set. The
+ *     `InboxSidebar` becomes an offcanvas Sheet automatically via the
+ *     primitive's own `useIsMobile` integration; the conversation header
+ *     and list expose a `SidebarTrigger` to open it.
  */
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
+import { useIsMobile } from "@/hooks/ui"
+import { cn } from "@/lib/utils"
 import { InboxSidebar } from "./inbox-sidebar"
 import { ConversationList } from "./conversation-list"
 
@@ -65,6 +71,13 @@ export function InboxShell({
 }: InboxShellProps) {
   const t = useTranslations("inbox.shell")
   const isTablet = useIsTabletViewport()
+  const isMobile = useIsMobile()
+
+  // Mobile single-pane rule: when a conversation is selected we show only the
+  // detail pane; otherwise we show only the list. md+ keeps both panes
+  // visible regardless of selection.
+  const showList = !isMobile || !conversationKey
+  const showDetail = !isMobile || Boolean(conversationKey)
 
   return (
     <SidebarProvider
@@ -76,10 +89,14 @@ export function InboxShell({
       {/* Left pane — adapter sections + view-mode chips */}
       <InboxSidebar view={view} activeAdapterId={adapterId} activePlatformKind={platformKind} />
 
-      {/* Middle pane — conversation list (responsive width). */}
+      {/* Middle pane — conversation list. Full-width on mobile when no
+       * conversation is selected; fixed responsive widths on md+. */}
       <div
         data-testid="inbox-conversation-list-pane"
-        className="w-56 md:w-64 lg:w-72 shrink-0 border-r flex flex-col overflow-hidden"
+        className={cn(
+          "w-full md:w-64 lg:w-72 shrink-0 border-e flex flex-col overflow-hidden",
+          !showList && "hidden md:flex"
+        )}
       >
         <ConversationList
           adapterId={adapterId}
@@ -92,7 +109,10 @@ export function InboxShell({
       <SidebarInset
         data-testid="inbox-detail-pane"
         data-bg-target="chat"
-        className="flex flex-col flex-1 min-w-0 overflow-hidden"
+        className={cn(
+          "flex flex-col flex-1 min-w-0 overflow-hidden",
+          !showDetail && "hidden md:flex"
+        )}
       >
         {children ?? (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">

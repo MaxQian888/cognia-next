@@ -182,7 +182,7 @@ export function ExternalAgentSelector({
           <ChevronDown className="h-3 w-3 opacity-50" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="center" className="w-72">
+      <DropdownMenuContent align="center" className="w-[calc(100vw-2rem)] max-w-72">
         <DropdownMenuLabel className="text-xs text-muted-foreground">
           {t("selectAgent")}
         </DropdownMenuLabel>
@@ -218,7 +218,7 @@ export function ExternalAgentSelector({
               <DropdownMenuLabel className="text-xs text-muted-foreground">
                 {t("externalAgents")}
               </DropdownMenuLabel>
-              <ScrollArea className="max-h-[240px]">
+              <ScrollArea className="max-h-[180px] sm:max-h-[240px]">
                 {agents.map((agent) => {
                   const status = getConnectionStatus(agent.id)
                   const isSelected = agent.id === selectedAgentId
@@ -249,7 +249,7 @@ export function ExternalAgentSelector({
                           </Badge>
                           {executionBlockedReason && (
                             <Badge variant="destructive" className="text-[10px] h-4 px-1">
-                              Coming Soon
+                              {t("selectorComingSoon")}
                             </Badge>
                           )}
                           <ConnectionStatusBadge status={status} t={t} />

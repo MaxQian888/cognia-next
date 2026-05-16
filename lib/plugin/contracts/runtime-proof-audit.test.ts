@@ -15,6 +15,31 @@ describe("plugin runtime proof audit", () => {
     )
   })
 
+  it("verifies the native-anthropic-tool capability proof is fully wired", () => {
+    const report = auditPluginRuntimeClaims()
+    const nativeTool = report.capabilities.find((entry) => entry.id === "native-anthropic-tool")
+
+    expect(nativeTool).toEqual(
+      expect.objectContaining({
+        id: "native-anthropic-tool",
+        support: "supported",
+        proofStatus: "verified",
+        missingFields: [],
+      })
+    )
+    // Lock the host-binding surface so future renames are caught.
+    expect(nativeTool?.hostBindings).toEqual(
+      expect.arrayContaining([
+        "lib/plugin/registries/native-anthropic-tool-registry.ts",
+        "lib/claude/build-options.ts",
+        "sidecar/dispatch/anthropic.mjs",
+      ])
+    )
+    expect(nativeTool?.typescriptSdk).toEqual(
+      expect.arrayContaining(["plugin-sdk/typescript/src/api/native-anthropic-tool.ts"])
+    )
+  })
+
   it("requires docs and tests for implemented plugin points", () => {
     const report = auditPluginRuntimeClaims()
     const chatHeaderPoint = report.points.find((entry) => entry.id === "chat.header")

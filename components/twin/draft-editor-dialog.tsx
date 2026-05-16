@@ -143,7 +143,10 @@ export const DraftEditorDialog = memo(function DraftEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => (busy ? null : onOpenChange(o))}>
-      <DialogContent className="max-w-2xl" data-testid="twin-draft-editor-dialog">
+      <DialogContent
+        className="max-w-2xl max-h-[85vh] overflow-y-auto"
+        data-testid="twin-draft-editor-dialog"
+      >
         <DialogHeader>
           <DialogTitle>{isCharacter ? t("titleCharacter") : t("titleSkill")}</DialogTitle>
           <DialogDescription>

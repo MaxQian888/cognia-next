@@ -24,7 +24,7 @@ export function A2UITemplatePreview({ template }: Props) {
   if (!template) {
     return (
       <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
-        {t("noTemplateSelected") || "No template selected"}
+        {t("noTemplateSelected")}
       </div>
     )
   }
@@ -33,7 +33,7 @@ export function A2UITemplatePreview({ template }: Props) {
     <Card className="border-dashed">
       <CardHeader className="pb-2">
         <CardTitle className="text-xs uppercase tracking-wide text-muted-foreground">
-          A2UI Template Preview
+          {t("a2uiTemplatePreviewTitle")}
         </CardTitle>
       </CardHeader>
       <CardContent>

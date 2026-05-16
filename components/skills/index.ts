@@ -1,6 +1,7 @@
 export { SkillPanel } from "./skill-panel"
 export { SkillCard } from "./skill-card"
-export { SkillCategorySidebar } from "./skill-category-sidebar"
+export { SkillCategorySidebar, SkillCategoryButtonList } from "./skill-category-sidebar"
+export { SkillCategorySheet } from "./skill-category-sheet"
 export { SkillFilterSheet } from "./skill-filter-sheet"
 export { SkillBatchActionsBar } from "./skill-batch-actions-bar"
 export { SkillDetail } from "./skill-detail"

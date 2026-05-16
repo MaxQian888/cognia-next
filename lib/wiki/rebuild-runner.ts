@@ -6,9 +6,10 @@
  * desktop mode; web callers get a clear error.
  */
 
+import { readDir, readTextFile } from "@tauri-apps/plugin-fs"
 import { isTauri } from "@/lib/tauri"
 import { getSettings } from "@/lib/db/settings"
-import type { LlmClient, LlmConfig } from "@/lib/twin/distill/llm"
+import { createLlmClient, type LlmClient, type LlmConfig } from "@/lib/twin/distill/llm"
 import {
   rebuildWiki,
   type FileSystem,

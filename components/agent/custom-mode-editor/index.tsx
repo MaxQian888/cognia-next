@@ -243,7 +243,7 @@ export function CustomModeEditor({ open, onOpenChange, mode, onSave }: CustomMod
         </DialogHeader>
 
         <Tabs defaultValue="basic" className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4">
             <TabsTrigger value="basic">{t("basic")}</TabsTrigger>
             <TabsTrigger value="tools">{t("tools")}</TabsTrigger>
             <TabsTrigger value="advanced">{t("advanced")}</TabsTrigger>
@@ -363,9 +363,16 @@ export function CustomModeEditor({ open, onOpenChange, mode, onSave }: CustomMod
                     {tags.map((tag) => (
                       <Badge key={tag} variant="secondary" className="gap-1">
                         {tag}
-                        <button onClick={() => removeTag(tag)}>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          type="button"
+                          className="h-3.5 w-3.5 p-0 hover:bg-transparent"
+                          aria-label={t("removeTag", { tag })}
+                          onClick={() => removeTag(tag)}
+                        >
                           <X className="h-3 w-3" />
-                        </button>
+                        </Button>
                       </Badge>
                     ))}
                   </div>
@@ -547,20 +554,20 @@ export function CustomModeEditor({ open, onOpenChange, mode, onSave }: CustomMod
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="p-2 bg-muted rounded">
-                      <span className="text-muted-foreground">Category:</span>{" "}
+                      <span className="text-muted-foreground">{t("categoryLabel")}</span>{" "}
                       <span className="font-medium">{category}</span>
                     </div>
                     <div className="p-2 bg-muted rounded">
-                      <span className="text-muted-foreground">Output:</span>{" "}
+                      <span className="text-muted-foreground">{t("outputLabel")}</span>{" "}
                       <span className="font-medium">{outputFormat}</span>
                     </div>
                     <div className="p-2 bg-muted rounded">
-                      <span className="text-muted-foreground">Tools:</span>{" "}
+                      <span className="text-muted-foreground">{t("toolsLabel")}</span>{" "}
                       <span className="font-medium">{tools.length + mcpTools.length}</span>
                     </div>
                     <div className="p-2 bg-muted rounded">
-                      <span className="text-muted-foreground">Preview:</span>{" "}
-                      <span className="font-medium">{previewEnabled ? "Yes" : "No"}</span>
+                      <span className="text-muted-foreground">{t("previewLabel")}</span>{" "}
+                      <span className="font-medium">{previewEnabled ? t("yes") : t("no")}</span>
                     </div>
                   </div>
                   {tags.length > 0 && (

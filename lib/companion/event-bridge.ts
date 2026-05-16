@@ -26,6 +26,10 @@ interface DevicePairedPayload {
   pubkey: string
   paired_at_ms: number
   app_version: string
+  /** ADR-0021: optional for legacy desktop servers that predate WebRTC. */
+  rendezvous_id?: string
+  /** ADR-0021: 32-byte HMAC key, URL-safe base64 (unpadded). */
+  rendezvous_secret?: string
 }
 
 interface DeviceSeenPayload {
@@ -78,6 +82,8 @@ async function handleDevicePaired(payload: DevicePairedPayload): Promise<void> {
       platform: normalizePlatform(payload.platform),
       pubkey: payload.pubkey,
       appVersion: payload.app_version,
+      rendezvousId: payload.rendezvous_id,
+      rendezvousSecret: payload.rendezvous_secret,
       nowMs: payload.paired_at_ms,
     })
   } catch (err) {

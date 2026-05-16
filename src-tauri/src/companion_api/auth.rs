@@ -19,6 +19,8 @@ use axum::{
     response::{IntoResponse, Response},
     Extension, Json,
 };
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
@@ -54,12 +56,21 @@ pub struct PairRequest {
 }
 
 /// Response body for `POST /api/v1/auth/pair`.
+///
+/// `rendezvous_id` and `rendezvous_secret` are minted alongside the device
+/// JWT (ADR-0021): both peers use them to authenticate signaling-server
+/// messages end-to-end without trusting the public rendezvous service. The
+/// secret is 32 random bytes encoded as URL-safe base64 (unpadded); the id is
+/// a UUIDv4. Devices that don't receive these fields (legacy pair payloads)
+/// will skip the WebRTC transport tier and continue with HTTPS+WS only.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairResponse {
     pub device_id: String,
     pub device_jwt: String,
     pub server_version: String,
+    pub rendezvous_id: String,
+    pub rendezvous_secret: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -165,6 +176,19 @@ pub async fn pair_handler(
         }
     };
 
+    // ADR-0021: mint a rendezvous room id and 32-byte shared HMAC secret
+    // alongside the device JWT. The rendezvous service routes signaling by
+    // `rendezvous_id`; both peers sign signaling envelopes with the secret
+    // so the service can never impersonate either side. We use the OS RNG
+    // (rand::thread_rng() seeds from getrandom) — same primitive that backs
+    // jti generation in `jwt.rs`.
+    let rendezvous_id = Uuid::new_v4().to_string();
+    let rendezvous_secret = {
+        let mut bytes = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut bytes);
+        URL_SAFE_NO_PAD.encode(bytes)
+    };
+
     // Emit the Tauri event so the TS layer persists the device to Dexie.
     let paired_at_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -180,6 +204,8 @@ pub async fn pair_handler(
             "pubkey": req.device_pubkey,
             "paired_at_ms": paired_at_ms,
             "app_version": req.app_version,
+            "rendezvous_id": rendezvous_id,
+            "rendezvous_secret": rendezvous_secret,
         });
         if let Err(e) = app.emit("companion://device-paired", payload) {
             log::warn!("failed to emit companion://device-paired: {e}");
@@ -192,6 +218,8 @@ pub async fn pair_handler(
             device_id,
             device_jwt,
             server_version: env!("CARGO_PKG_VERSION").to_string(),
+            rendezvous_id,
+            rendezvous_secret,
         }),
     )
         .into_response()
@@ -346,6 +374,56 @@ mod tests {
         assert!(body["deviceId"].is_string());
         assert!(body["deviceJwt"].is_string());
         assert!(body["serverVersion"].is_string());
+        // ADR-0021: rendezvous fields must be present and well-formed.
+        let rid = body["rendezvousId"].as_str().expect("rendezvousId string");
+        assert!(
+            Uuid::parse_str(rid).is_ok(),
+            "rendezvousId is not a UUID: {rid}"
+        );
+        let rsec = body["rendezvousSecret"]
+            .as_str()
+            .expect("rendezvousSecret string");
+        let decoded = URL_SAFE_NO_PAD
+            .decode(rsec.as_bytes())
+            .expect("rendezvousSecret decodes as base64url");
+        assert_eq!(decoded.len(), 32, "rendezvousSecret must be 32 bytes");
+    }
+
+    #[tokio::test]
+    async fn pair_two_redeems_produce_distinct_rendezvous() {
+        // Each pair flow gets a fresh rendezvous tuple — secrets do not
+        // collide across devices and the id is not derived from any
+        // predictable input.
+        let secret_a = test_state();
+        let secret_b = test_state();
+        let router_a = build_router(Arc::clone(&secret_a));
+        let router_b = build_router(Arc::clone(&secret_b));
+        let (jwt_a, _) = issue_pair_jwt(SECRET).expect("issue jwt a");
+        let (jwt_b, _) = issue_pair_jwt(SECRET).expect("issue jwt b");
+
+        let send = |router: Router, jwt: String| async move {
+            let req = Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/pair")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "pairJwt": jwt,
+                        "deviceLabel": "x",
+                        "devicePlatform": "ios",
+                        "devicePubkey": "",
+                        "appVersion": "0.1.0",
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap();
+            body_json(router.oneshot(req).await.unwrap()).await
+        };
+
+        let body_a = send(router_a, jwt_a).await;
+        let body_b = send(router_b, jwt_b).await;
+        assert_ne!(body_a["rendezvousId"], body_b["rendezvousId"]);
+        assert_ne!(body_a["rendezvousSecret"], body_b["rendezvousSecret"]);
     }
 
     // ── 401 invalid_pair_jwt ─────────────────────────────────────────────

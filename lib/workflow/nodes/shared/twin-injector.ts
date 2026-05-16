@@ -70,7 +70,10 @@ export async function injectTwinContext(input: TwinInjectionInput): Promise<Twin
     const result = await applyTwinContext({
       character,
       userMessage: input.userPrompt,
-      deps,
+      // `tryBuildTwinDeps` returns the "structural mirror" of the deps shape
+      // declared in build-options.ts; at runtime the store is the full
+      // IVectorStore, so widening the type at this boundary is safe.
+      deps: deps as unknown as Parameters<typeof applyTwinContext>[0]["deps"],
     })
     if (!result.applied) {
       recordTwinInject({

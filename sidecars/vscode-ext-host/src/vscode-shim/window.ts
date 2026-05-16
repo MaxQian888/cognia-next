@@ -267,7 +267,7 @@ export function createWindowNamespace(deps: ShimDependencies): SidecarWindow {
     },
     registerWebviewViewProvider(viewId, provider) {
       const token = `wvv:${extensionId}:${viewId}`
-      deps.registerProviderCallback(token, async (payload) => {
+      deps.registerProviderCallback(token, async (_payload) => {
         const view = buildWebviewView(connection, extensionId, viewId)
         try {
           await Promise.resolve(provider.resolveWebviewView(view))

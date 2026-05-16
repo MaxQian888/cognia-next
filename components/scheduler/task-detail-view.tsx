@@ -96,14 +96,14 @@ export function TaskDetailView({
                   variant="outline"
                   className="text-[10px] px-1.5 py-0 h-5 border-border/50 text-muted-foreground"
                 >
-                  {task.trigger.type}
+                  {t(`triggerTypes.${task.trigger.type}`) || task.trigger.type}
                 </Badge>
                 {/* Task type badge */}
                 <Badge
                   variant="outline"
                   className="text-[10px] px-1.5 py-0 h-5 border-border/50 text-muted-foreground"
                 >
-                  {task.type}
+                  {t(`taskTypes.${task.type}`) || task.type}
                 </Badge>
               </div>
             </div>

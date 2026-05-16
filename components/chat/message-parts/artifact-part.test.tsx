@@ -75,7 +75,7 @@ describe("ArtifactPart", () => {
     const node = screen.getByTestId("artifact-part-missing")
     expect(node).toBeInTheDocument()
     expect(node).toHaveTextContent("lost-artifact")
-    expect(node).toHaveTextContent("(已清理)")
+    expect(node).toHaveTextContent("(cleared)")
   })
 
   it("collapses and re-expands the preview body", () => {

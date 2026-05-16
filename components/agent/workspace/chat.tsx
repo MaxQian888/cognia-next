@@ -2,11 +2,13 @@
 
 import { forwardRef, useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
+import { motion, useReducedMotion } from "motion/react"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { Loader2Icon, MessageCircleIcon } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { AlertCircleIcon, Loader2Icon, MessageCircleIcon } from "lucide-react"
 import type { AgentTeamMessage } from "@/types/agent/agent-team"
 import {
   TEAM_MESSAGE_METADATA_KEYS,
@@ -165,6 +167,7 @@ export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(func
 ) {
   const t = useTranslations("agentTeamsWorkspace.chat")
   const tMsg = useTranslations("agentTeamsWorkspace.chat.messageTypes")
+  const prefersReducedMotion = useReducedMotion()
   const bottomRef = useRef<HTMLDivElement>(null)
   const localComposerRef = useRef<ComposerHandle | null>(null)
 
@@ -205,65 +208,100 @@ export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(func
           </Empty>
         </div>
       ) : (
-        <ScrollArea className="h-[55vh]">
+        <ScrollArea className="h-[clamp(360px,55vh,calc(100vh-280px))]">
           <div className="space-y-2" data-testid="workspace-chat">
-            {messages.map((msg) => {
+            {messages.map((msg, index) => {
               const runtime = readRuntimeFromMetadata(msg)
               const streaming = isStreaming(msg)
               const errored = isErrored(msg)
               const toolCalls = readToolCalls(msg)
               const tokenUsage = readTokenUsage(msg)
+              // Only stagger the last few new messages — established history
+              // would otherwise flicker on every render.
+              const shouldAnimate = !prefersReducedMotion && index >= messages.length - 5
               return (
-                <Card
+                <motion.div
                   key={msg.id}
-                  className={`group space-y-1 border-l-2 p-3 ${typeBorderColor(msg.type)} ${
-                    streaming ? "ring-1 ring-primary/20" : ""
-                  } ${errored ? "ring-1 ring-destructive/40" : ""}`}
-                  data-testid={`chat-msg-${msg.id}`}
-                  data-streaming={streaming ? "true" : "false"}
+                  initial={shouldAnimate ? { opacity: 0, y: 4 } : false}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{
+                    duration: 0.15,
+                    ease: "easeOut",
+                    delay: shouldAnimate
+                      ? Math.min((index - Math.max(messages.length - 5, 0)) * 0.03, 0.12)
+                      : 0,
+                  }}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="flex size-6 items-center justify-center rounded-full text-[10px] font-medium"
-                        style={{ backgroundColor: senderColor(msg.senderName), color: "white" }}
-                        aria-hidden
-                      >
-                        {msg.senderName.charAt(0).toUpperCase()}
-                      </span>
-                      <span className="text-xs font-medium">{msg.senderName}</span>
-                      {runtime && <RuntimeBadge runtime={runtime} iconOnly />}
-                      <Badge variant="outline" className="text-[9px]">
-                        {tMsg(msg.type as never) ?? msg.type}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span className="font-mono text-[10px] text-muted-foreground">
-                        {formatTimestamp(msg.timestamp)}
-                      </span>
-                      {!streaming && (onRetry || onDelete) && (
-                        <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                          <MessageActionsMenu message={msg} onRetry={onRetry} onDelete={onDelete} />
+                  <Card
+                    className={`group space-y-1 border-l-2 p-3 ${typeBorderColor(msg.type)} ${
+                      streaming ? "ring-1 ring-primary/20" : ""
+                    } ${errored ? "ring-1 ring-destructive/40" : ""}`}
+                    data-testid={`chat-msg-${msg.id}`}
+                    data-streaming={streaming ? "true" : "false"}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="flex size-6 items-center justify-center rounded-full text-[10px] font-medium"
+                          style={{ backgroundColor: senderColor(msg.senderName), color: "white" }}
+                          aria-hidden
+                        >
+                          {msg.senderName.charAt(0).toUpperCase()}
                         </span>
-                      )}
+                        <span className="text-xs font-medium">{msg.senderName}</span>
+                        {runtime && <RuntimeBadge runtime={runtime} iconOnly />}
+                        <Badge variant="outline" className="text-[9px]">
+                          {tMsg(msg.type as never) ?? msg.type}
+                        </Badge>
+                        {errored && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                className="text-destructive"
+                                aria-label={t("errorReason")}
+                              >
+                                <AlertCircleIcon className="size-3.5" />
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-xs text-xs">
+                              {t("errorGeneric")}
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          {formatTimestamp(msg.timestamp)}
+                        </span>
+                        {!streaming && (onRetry || onDelete) && (
+                          <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                            <MessageActionsMenu
+                              message={msg}
+                              onRetry={onRetry}
+                              onDelete={onDelete}
+                            />
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  {toolCalls && toolCalls.length > 0 && <ToolCallList calls={toolCalls} />}
-                  {renderMessageBody(msg, streaming)}
-                  {streaming && (
-                    <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                      <Loader2Icon className="size-3 animate-spin" />
-                      <span>{t("streaming")}</span>
-                    </div>
-                  )}
-                  {!streaming && tokenUsage && <TokenUsageLine usage={tokenUsage} />}
-                  {msg.structuredPayload && (
-                    <div className="rounded bg-muted/50 p-2 text-[10px] text-muted-foreground">
-                      <span className="font-medium">Structured payload:</span>{" "}
-                      {JSON.stringify(msg.structuredPayload).slice(0, 200)}
-                    </div>
-                  )}
-                </Card>
+                    {toolCalls && toolCalls.length > 0 && <ToolCallList calls={toolCalls} />}
+                    {renderMessageBody(msg, streaming)}
+                    {streaming && (
+                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                        <Loader2Icon className="size-3 animate-spin" />
+                        <span>{t("streaming")}</span>
+                      </div>
+                    )}
+                    {!streaming && tokenUsage && <TokenUsageLine usage={tokenUsage} />}
+                    {msg.structuredPayload && (
+                      <div className="rounded bg-muted/50 p-2 text-[10px] text-muted-foreground">
+                        <span className="font-medium">{t("structuredPayload")}:</span>{" "}
+                        {JSON.stringify(msg.structuredPayload).slice(0, 200)}
+                      </div>
+                    )}
+                  </Card>
+                </motion.div>
               )
             })}
             <div ref={bottomRef} />

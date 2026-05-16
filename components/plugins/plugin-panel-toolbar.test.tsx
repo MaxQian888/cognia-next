@@ -14,6 +14,36 @@ jest.mock("@/stores/plugins", () => ({
   usePluginsStore: (selector: (s: unknown) => unknown) => selector({ setImportStaging }),
 }))
 
+const canUseTauriInvokeMock = jest.fn()
+jest.mock("@/lib/native/utils", () => ({
+  canUseTauriInvoke: () => canUseTauriInvokeMock(),
+}))
+
+const wasmTriggerMock = jest.fn()
+jest.mock("./install-wasm-plugin-button", () => ({
+  useInstallWasmFromLocal: () => ({
+    trigger: wasmTriggerMock,
+    busy: false,
+    error: null,
+    sheet: <div data-testid="wasm-grant-sheet-mounted" />,
+  }),
+}))
+
+jest.mock("./install-from-url-dialog", () => ({
+  InstallFromUrlDialog: ({
+    open,
+    onOpenChange,
+  }: {
+    open: boolean
+    onOpenChange: (o: boolean) => void
+  }) =>
+    open ? (
+      <div data-testid="signed-url-dialog">
+        <button onClick={() => onOpenChange(false)}>close-signed-dialog</button>
+      </div>
+    ) : null,
+}))
+
 // The radix DropdownMenu uses pointer events that fireEvent.click does not
 // drive — render its content unconditionally so the menu items are always in
 // the DOM tree, matching the pattern used by other tests in this repo.
@@ -27,11 +57,18 @@ jest.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenuItem: ({
     children,
     onClick,
+    disabled,
   }: {
     children: React.ReactNode
     onClick?: () => void
+    disabled?: boolean
     className?: string
-  }) => <button onClick={onClick}>{children}</button>,
+  }) => (
+    <button onClick={onClick} disabled={disabled}>
+      {children}
+    </button>
+  ),
+  DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuSeparator: () => <hr />,
 }))
 
@@ -84,6 +121,9 @@ function spyOnInputCreation(): {
 describe("PluginPanelToolbar", () => {
   beforeEach(() => {
     setImportStaging.mockClear()
+    wasmTriggerMock.mockClear()
+    canUseTauriInvokeMock.mockReset()
+    canUseTauriInvokeMock.mockReturnValue(true)
   })
 
   it("renders install dropdown trigger and update / sync buttons", () => {
@@ -186,5 +226,48 @@ describe("PluginPanelToolbar", () => {
     const [[arg]] = setImportStaging.mock.calls
     expect(arg.parseErrors.length).toBeGreaterThan(0)
     restore()
+  })
+
+  describe("WASM bundle group (Tauri-only)", () => {
+    it("renders the WASM group label and both items in Tauri mode", () => {
+      canUseTauriInvokeMock.mockReturnValue(true)
+      render(<PluginPanelToolbar />)
+      expect(screen.getByText("groupWasm")).toBeInTheDocument()
+      expect(screen.getByText("fromLocalWasm")).toBeInTheDocument()
+      expect(screen.getByText("fromUrlSigned")).toBeInTheDocument()
+    })
+
+    it("hides the WASM group in web mode", () => {
+      canUseTauriInvokeMock.mockReturnValue(false)
+      render(<PluginPanelToolbar />)
+      expect(screen.queryByText("groupWasm")).not.toBeInTheDocument()
+      expect(screen.queryByText("fromLocalWasm")).not.toBeInTheDocument()
+      expect(screen.queryByText("fromUrlSigned")).not.toBeInTheDocument()
+    })
+
+    it("From local .wasm/.zip menu item triggers the install flow", () => {
+      canUseTauriInvokeMock.mockReturnValue(true)
+      render(<PluginPanelToolbar />)
+      fireEvent.click(screen.getByText("fromLocalWasm"))
+      expect(wasmTriggerMock).toHaveBeenCalledTimes(1)
+    })
+
+    it("From signed URL menu item opens the signed URL dialog", async () => {
+      canUseTauriInvokeMock.mockReturnValue(true)
+      render(<PluginPanelToolbar />)
+      fireEvent.click(screen.getByText("fromUrlSigned"))
+      expect(await screen.findByTestId("signed-url-dialog")).toBeInTheDocument()
+    })
+
+    it("mounts the grant sheet exactly once when in Tauri mode", () => {
+      canUseTauriInvokeMock.mockReturnValue(true)
+      render(<PluginPanelToolbar />)
+      expect(screen.getAllByTestId("wasm-grant-sheet-mounted")).toHaveLength(1)
+    })
+  })
+
+  it("renders manifest group label always", () => {
+    render(<PluginPanelToolbar />)
+    expect(screen.getByText("groupManifest")).toBeInTheDocument()
   })
 })

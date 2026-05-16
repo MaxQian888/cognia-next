@@ -115,10 +115,11 @@ jest.mock("@/components/ui/input", () => ({
 }))
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => {
+  useTranslations: () => (key: string, params?: Record<string, unknown>) => {
     const translations: Record<string, string> = {
       versionHistory: "Version History",
       noVersions: "No versions saved yet",
+      noVersionsHint: "Auto-save creates snapshots as you edit.",
       saveVersion: "Save Current Version",
       current: "Current",
       autoSave: "Auto",
@@ -138,6 +139,7 @@ jest.mock("next-intl", () => ({
       viewDiff: "View Diff",
       selected: "Selected",
       versionComparison: "Version Comparison",
+      linesCount: `${params?.count} lines`,
     }
     return translations[key] || key
   },
@@ -237,7 +239,10 @@ describe("VersionHistoryPanel", () => {
       const sheetContent = screen.getByTestId("sheet-content")
       const className = sheetContent.getAttribute("data-className")
       expect(className).toContain("w-full")
-      expect(className).toContain("sm:w-[400px]")
+      // History sheet was widened from sm:w-[400px] to sm:w-[min(90vw,560px)] to
+      // give diff metadata + version description rows room to breathe.
+      expect(className).toContain("sm:w-[min(90vw,560px)]")
+      expect(className).not.toContain("sm:w-[400px]")
     })
 
     it("applies mobile-first width to dialogs", () => {

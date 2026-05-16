@@ -33,6 +33,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react"
+import { useTranslations } from "next-intl"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { ShieldAlertIcon, XIcon } from "lucide-react"
 
@@ -62,53 +63,8 @@ function promptOnly(event: ConsentRequestEvent): ConsentPromptPayload {
   }
 }
 
-function humanCommand(cmd: string): string {
-  switch (cmd) {
-    case "click":
-      return "Click on screen"
-    case "type":
-      return "Type text"
-    case "keys":
-      return "Send keyboard chord"
-    case "mouse_move":
-      return "Move the cursor"
-    case "drag":
-      return "Drag the cursor"
-    case "scroll":
-      return "Scroll the wheel"
-    case "hold_key":
-      return "Hold a key down"
-    case "mouse_button":
-      return "Press or release a mouse button"
-    case "invoke_pattern":
-      return "Invoke a UIA pattern"
-    case "window_op":
-      return "Drive a window operation"
-    case "computer_use":
-      return "Run a computer_use action"
-    case "bash":
-      return "Execute a shell command"
-    case "text_editor":
-      return "Edit a file"
-    default:
-      return cmd
-  }
-}
-
-function humanSurface(s: ConsentPromptPayload["surface"]): string {
-  switch (s) {
-    case "workflow":
-      return "Workflow"
-    case "computerUse":
-      return "Computer Use"
-    case "mcp":
-      return "External MCP"
-    case "plugin":
-      return "Plugin"
-  }
-}
-
 export function ConsentOverlay() {
+  const t = useTranslations("automation.consent")
   const [queue, setQueue] = useState<PendingPrompt[]>([])
   const [now, setNow] = useState<number>(() => Date.now())
 
@@ -145,9 +101,9 @@ export function ConsentOverlay() {
   useEffect(() => {
     if (queue.length === 0) return
     const id = window.setInterval(() => {
-      const t = Date.now()
-      setNow(t)
-      setQueue((prev) => prev.filter((p) => p.expiresAt > t - 1000))
+      const ts = Date.now()
+      setNow(ts)
+      setQueue((prev) => prev.filter((p) => p.expiresAt > ts - 1000))
     }, 500)
     return () => window.clearInterval(id)
   }, [queue.length])
@@ -178,10 +134,17 @@ export function ConsentOverlay() {
   const remaining = queue.length - 1
   const secondsLeft = Math.max(0, Math.ceil((current.expiresAt - now) / 1000))
 
+  // Translate the verb / surface tags. Unknown verbs fall through to the raw
+  // command so an unrecognized future action still renders something usable.
+  const commandLabel = t.has(`commands.${current.command}`)
+    ? t(`commands.${current.command}` as Parameters<typeof t>[0])
+    : current.command
+  const surfaceLabel = t(`surfaces.${current.surface}` as Parameters<typeof t>[0])
+
   return (
     <div
       role="dialog"
-      aria-label="Automation consent"
+      aria-label={t("ariaLabel")}
       className={cn("pointer-events-none fixed bottom-6 right-6 z-[100]", "max-w-sm")}
     >
       <Card className="pointer-events-auto shadow-xl border-amber-500/30">
@@ -189,14 +152,14 @@ export function ConsentOverlay() {
           <div className="flex items-start justify-between gap-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <ShieldAlertIcon className="size-4 text-amber-500" />
-              Automation requests your consent
+              {t("title")}
             </CardTitle>
             <Button
               size="icon"
               variant="ghost"
               className="size-6"
               onClick={() => respond(current, false, false)}
-              aria-label="Reject"
+              aria-label={t("actions.close")}
             >
               <XIcon className="size-3" />
             </Button>
@@ -205,48 +168,50 @@ export function ConsentOverlay() {
         <CardContent className="space-y-3 pt-0">
           <div className="space-y-1.5 text-xs">
             <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">Action:</span>
-              <span className="font-medium">{humanCommand(current.command)}</span>
+              <span className="text-muted-foreground">{t("fields.action")}</span>
+              <span className="font-medium">{commandLabel}</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">Surface:</span>
+              <span className="text-muted-foreground">{t("fields.surface")}</span>
               <Badge variant="secondary" className="text-[10px]">
-                {humanSurface(current.surface)}
+                {surfaceLabel}
               </Badge>
             </div>
             {current.pluginId && (
               <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">Plugin:</span>
+                <span className="text-muted-foreground">{t("fields.plugin")}</span>
                 <code className="font-mono text-[11px]">{current.pluginId}</code>
               </div>
             )}
             {current.windowTitle && (
               <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">Window:</span>
+                <span className="text-muted-foreground">{t("fields.window")}</span>
                 <span className="truncate text-[11px]">{current.windowTitle}</span>
               </div>
             )}
             {current.processName && (
               <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">Process:</span>
+                <span className="text-muted-foreground">{t("fields.process")}</span>
                 <code className="font-mono text-[11px]">{current.processName}</code>
               </div>
             )}
             <div className="pt-1 text-[10px] text-muted-foreground">
-              Auto-rejects in {secondsLeft}s
-              {remaining > 0 && <span className="ml-2">• {remaining} more pending</span>}
+              {t("fields.autoReject", { seconds: secondsLeft })}
+              {remaining > 0 && (
+                <span className="ml-2">{t("fields.morePending", { count: remaining })}</span>
+              )}
             </div>
           </div>
 
           <div className="flex flex-col gap-2">
             <Button size="sm" onClick={() => respond(current, true, false)}>
-              Allow once
+              {t("actions.allowOnce")}
             </Button>
             <Button size="sm" variant="outline" onClick={() => respond(current, true, true)}>
-              Always allow this session
+              {t("actions.allowSession")}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => respond(current, false, false)}>
-              Reject
+              {t("actions.reject")}
             </Button>
           </div>
         </CardContent>

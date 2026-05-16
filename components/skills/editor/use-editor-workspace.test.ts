@@ -68,7 +68,7 @@ describe("useEditorWorkspace", () => {
     expect(updateSkillMock).not.toHaveBeenCalled()
   })
 
-  it("saveAll saves main, then resources, then toasts", async () => {
+  it("saveAll saves main, then resources, and bumps savedAllSignal", async () => {
     useSkillsStore.setState((s) => ({
       editorWorkspace: {
         ...s.editorWorkspace,
@@ -102,11 +102,15 @@ describe("useEditorWorkspace", () => {
       order.push("resource")
     })
     const { result } = renderHook(() => useEditorWorkspace())
+    const before = result.current.savedAllSignal
     await act(async () => {
       await result.current.saveAll()
     })
     expect(order).toEqual(["skill", "resource"])
-    expect(toastSuccess).toHaveBeenCalledWith("All saved.")
+    // The hook is i18n-agnostic now — the toast is fired by the parent in
+    // response to the signal increment.
+    expect(result.current.savedAllSignal).toBe(before + 1)
+    expect(toastSuccess).not.toHaveBeenCalled()
   })
 
   it("autosave fires for resources without validation gating", async () => {

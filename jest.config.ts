@@ -132,6 +132,20 @@ const config: Config = {
       lines: 40,
       statements: 40,
     },
+    // components/logging/ was scrubbed in the components-logging-jiggly-petal
+    // refactor: fallback wrappers were removed, hardcoded strings were replaced
+    // with i18n keys, raw HTML primitives were swapped for shadcn equivalents,
+    // and responsive breakpoints were added. The threshold below is the floor
+    // every co-located test must hold; the two largest files (`log-settings.tsx`
+    // 1442 LOC and `log-panel.tsx` 884 LOC) drive the floor for `functions` and
+    // `branches` because they contain many inline arrow handlers that are still
+    // covered by integration in `app/logs` rather than this unit suite.
+    "./components/logging/**/*.{ts,tsx}": {
+      branches: 45,
+      functions: 20,
+      lines: 70,
+      statements: 70,
+    },
     // Global = app/* + components/* (everything else is path-scoped above).
     // Tuned to the current state of those folders; raise once components/ has
     // its own per-file test coverage push.

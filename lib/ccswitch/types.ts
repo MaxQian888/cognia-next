@@ -61,6 +61,13 @@ export interface CcswitchCounts {
   skills: number
 }
 
+/**
+ * Where the dbPath was resolved from. `"env"` = `CC_SWITCH_HOME` test
+ * override; `"redirect"` = cc-switch's own `app_paths.json` re-pointed the
+ * data directory (cloud-sync setups); `"default"` = `~/.cc-switch/`.
+ */
+export type CcswitchResolutionSource = "env" | "redirect" | "default"
+
 export interface CcswitchStatus {
   /** Resolved DB path on this OS, or null when home dir can't be found. */
   dbPath: string | null
@@ -68,6 +75,8 @@ export interface CcswitchStatus {
   counts: CcswitchCounts
   /** Filled in when the file existed but couldn't be opened/queried. */
   error?: string
+  /** Where dbPath came from. Missing on legacy hosts. */
+  resolutionSource?: CcswitchResolutionSource
 }
 
 /**

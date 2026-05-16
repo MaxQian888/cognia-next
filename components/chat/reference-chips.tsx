@@ -8,6 +8,7 @@
 import { useTranslations } from "next-intl"
 import { FileIcon, FolderIcon, XIcon } from "lucide-react"
 import { useChatStore } from "@/stores/chat"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 export function ReferenceChips() {
@@ -31,15 +32,19 @@ export function ReferenceChips() {
           ) : (
             <FileIcon className="size-3.5 text-muted-foreground" />
           )}
-          <span className="max-w-[280px] truncate font-mono">{r.relative}</span>
-          <button
+          <span className="max-w-[min(280px,calc(100vw-6rem))] truncate font-mono">
+            {r.relative}
+          </span>
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-sm"
             aria-label={t("removeAria", { path: r.relative })}
             onClick={() => remove(r.absolute)}
-            className="rounded p-0.5 opacity-60 transition-opacity hover:bg-background hover:opacity-100"
+            className="size-5 opacity-60 transition-opacity hover:opacity-100"
           >
             <XIcon className="size-3" />
-          </button>
+          </Button>
         </div>
       ))}
     </div>

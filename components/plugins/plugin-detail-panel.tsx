@@ -6,6 +6,7 @@
 // from Dexie via useLiveQuery — no prop-passing of the row.
 
 import { useLiveQuery } from "dexie-react-hooks"
+import { useTranslations } from "next-intl"
 import {
   Sheet,
   SheetContent,
@@ -18,6 +19,7 @@ import { usePluginsStore } from "@/stores/plugins"
 import { PluginDetail } from "./plugin-detail"
 
 export function PluginDetailPanel() {
+  const t = useTranslations("plugins.detail")
   const detailPluginId = usePluginsStore((s) => s.detailPluginId)
   const closeDetail = usePluginsStore((s) => s.closeDetail)
   const open = detailPluginId !== null
@@ -29,7 +31,7 @@ export function PluginDetailPanel() {
           {detailPluginId ? (
             <PluginDetailHeader pluginId={detailPluginId} />
           ) : (
-            <SheetTitle>—</SheetTitle>
+            <SheetTitle>{t("loadingTitle")}</SheetTitle>
           )}
         </SheetHeader>
         <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
@@ -41,9 +43,10 @@ export function PluginDetailPanel() {
 }
 
 function PluginDetailHeader({ pluginId }: { pluginId: string }) {
+  const t = useTranslations("plugins.detail")
   const plugin = useLiveQuery(() => getPlugin(pluginId), [pluginId])
   if (!plugin) {
-    return <SheetTitle>{pluginId}</SheetTitle>
+    return <SheetTitle>{t("loadingTitle")}</SheetTitle>
   }
   const description = (plugin.manifest as { description?: string })?.description ?? ""
   return (

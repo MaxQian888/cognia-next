@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { AlertCircleIcon, SparklesIcon } from "lucide-react"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { Streamdown } from "streamdown"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -95,6 +96,7 @@ function parseChips(text: string): string[] {
 export function SkillEditor({ mode, initial, onCancel, onSave, onAiAssist }: Props) {
   const t = useTranslations("skills.editor")
   const tCommon = useTranslations("skills")
+  const reduce = useReducedMotion()
   const [form, setForm] = useState<FormState>(() => (initial ? fromSkill(initial) : emptyState()))
   const [saving, setSaving] = useState(false)
   const [aiOpen, setAiOpen] = useState(false)
@@ -147,7 +149,7 @@ export function SkillEditor({ mode, initial, onCancel, onSave, onAiAssist }: Pro
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label={t("name")} error={fieldErrors.get("name")}>
           <Input
             value={form.name}
@@ -182,7 +184,7 @@ export function SkillEditor({ mode, initial, onCancel, onSave, onAiAssist }: Pro
         />
       </Field>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Field label={t("version")}>
           <Input
             value={form.version}
@@ -249,7 +251,7 @@ export function SkillEditor({ mode, initial, onCancel, onSave, onAiAssist }: Pro
           <TabsContent value="preview" className="mt-1.5">
             <div className="prose prose-sm dark:prose-invert min-h-[300px] max-w-none rounded-md border bg-muted/30 px-3 py-2 text-sm">
               {form.content.trim() ? (
-                <Streamdown>{`## ${form.name || "(unnamed skill)"}\n\n${form.content}`}</Streamdown>
+                <Streamdown>{`## ${form.name || t("unnamedPreview")}\n\n${form.content}`}</Streamdown>
               ) : (
                 <p className="m-0 text-xs italic text-muted-foreground">
                   {t("contentPlaceholder")}
@@ -269,19 +271,30 @@ export function SkillEditor({ mode, initial, onCancel, onSave, onAiAssist }: Pro
         />
       </Field>
 
-      {validation.length > 0 && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
-          <p className="mb-1 flex items-center gap-1.5 font-medium">
-            <AlertCircleIcon className="size-3.5" />
-            {t("validation")}
-          </p>
-          <ul className="ml-5 list-disc space-y-0.5">
-            {validation.map((err, i) => (
-              <li key={`${err.code}-${i}`}>{err.message}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {validation.length > 0 && (
+          <motion.div
+            key="validation"
+            initial={reduce ? false : { opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={reduce ? undefined : { opacity: 0, height: 0 }}
+            transition={{ duration: reduce ? 0 : 0.18 }}
+            className="overflow-hidden"
+          >
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+              <p className="mb-1 flex items-center gap-1.5 font-medium">
+                <AlertCircleIcon className="size-3.5" />
+                {t("validation")}
+              </p>
+              <ul className="ml-5 list-disc space-y-0.5">
+                {validation.map((err, i) => (
+                  <li key={`${err.code}-${i}`}>{err.message}</li>
+                ))}
+              </ul>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="flex items-center justify-end gap-2 pt-2">
         <Button variant="ghost" size="sm" onClick={onCancel}>

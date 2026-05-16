@@ -29,7 +29,7 @@ jest.mock("@/components/skills/skill-validation-section", () => ({
   ),
 }))
 
-import { fireEvent, render, screen } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import { MobileSkillSheet } from "./mobile-skill-sheet"
 import type { Skill } from "@/lib/claude/types"
 

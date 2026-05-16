@@ -17,6 +17,7 @@
  */
 
 import { PanelLeft, PanelRight } from "lucide-react"
+import { motion } from "motion/react"
 import { useTranslations } from "next-intl"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
@@ -25,6 +26,7 @@ import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/ui"
 import { useCanvasLayoutShortcuts } from "@/hooks/canvas/use-canvas-layout-shortcuts"
 import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
+import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { CanvasDocumentRail } from "./canvas-document-rail"
 import { CanvasSidePanels } from "./canvas-side-panels"
 import { CanvasWorkspace } from "./canvas-workspace"
@@ -45,14 +47,11 @@ export function CanvasShell() {
 
 function CanvasDesktopShell() {
   const leftSize = useCanvasLayoutStore((s) => s.leftSize)
-  const centerSize = useCanvasLayoutStore((s) => s.centerSize)
   const rightSize = useCanvasLayoutStore((s) => s.rightSize)
   const leftCollapsed = useCanvasLayoutStore((s) => s.leftCollapsed)
   const rightCollapsed = useCanvasLayoutStore((s) => s.rightCollapsed)
   const layoutVersion = useCanvasLayoutStore((s) => s.layoutVersion)
   const setSizes = useCanvasLayoutStore((s) => s.setSizes)
-  const setLeftCollapsed = useCanvasLayoutStore((s) => s.setLeftCollapsed)
-  const setRightCollapsed = useCanvasLayoutStore((s) => s.setRightCollapsed)
 
   const clampedLeft = Math.max(CANVAS_SHELL_LEFT_MIN, Math.min(CANVAS_SHELL_LEFT_MAX, leftSize))
   const clampedRight = Math.max(CANVAS_SHELL_RIGHT_MIN, Math.min(CANVAS_SHELL_RIGHT_MAX, rightSize))
@@ -62,6 +61,11 @@ function CanvasDesktopShell() {
   const panelLeft = clampedLeft * scale
   const panelCenter = derivedCenter * scale
   const panelRight = clampedRight * scale
+
+  // Reuse one transition for both rails so reduced-motion only collapses once
+  // per render — keeps the motion.div opacity tween in sync with the layout
+  // interpolation that framer drives via the `layout` prop.
+  const collapseTransition = useReducedMotionTransition(mobileTransition("normal"))
 
   return (
     <div className="flex w-full flex-1 min-h-0 overflow-hidden" data-bg-target="canvas">
@@ -79,27 +83,28 @@ function CanvasDesktopShell() {
       >
         <ResizablePanel
           id="canvas-left"
-          defaultSize={leftCollapsed ? 0 : panelLeft}
-          minSize={leftCollapsed ? 0 : CANVAS_SHELL_LEFT_MIN}
-          maxSize={CANVAS_SHELL_LEFT_MAX}
+          defaultSize={leftCollapsed ? "0%" : `${panelLeft}%`}
+          minSize={leftCollapsed ? "0%" : `${CANVAS_SHELL_LEFT_MIN}%`}
+          maxSize={`${CANVAS_SHELL_LEFT_MAX}%`}
           collapsible
-          collapsedSize={0}
+          collapsedSize="0%"
         >
-          <div
-            className={cn(
-              "flex h-full min-w-0 overflow-hidden transition-opacity duration-200",
-              leftCollapsed && "opacity-0"
-            )}
+          <motion.div
+            data-testid="canvas-left-wrapper"
+            layout
+            animate={{ opacity: leftCollapsed ? 0 : 1 }}
+            transition={collapseTransition}
+            className="flex h-full min-w-0 overflow-hidden"
           >
             <CanvasDocumentRail />
-          </div>
+          </motion.div>
         </ResizablePanel>
         <ResizableHandle withHandle className={cn(leftCollapsed && "hidden")} />
 
         <ResizablePanel
           id="canvas-center"
-          defaultSize={panelCenter}
-          minSize={CANVAS_SHELL_CENTER_MIN}
+          defaultSize={`${panelCenter}%`}
+          minSize={`${CANVAS_SHELL_CENTER_MIN}%`}
         >
           <div className="flex h-full min-h-0 min-w-0 overflow-hidden">
             <CanvasWorkspace />
@@ -109,20 +114,21 @@ function CanvasDesktopShell() {
         <ResizableHandle withHandle className={cn(rightCollapsed && "hidden")} />
         <ResizablePanel
           id="canvas-right"
-          defaultSize={rightCollapsed ? 0 : panelRight}
-          minSize={rightCollapsed ? 0 : CANVAS_SHELL_RIGHT_MIN}
-          maxSize={CANVAS_SHELL_RIGHT_MAX}
+          defaultSize={rightCollapsed ? "0%" : `${panelRight}%`}
+          minSize={rightCollapsed ? "0%" : `${CANVAS_SHELL_RIGHT_MIN}%`}
+          maxSize={`${CANVAS_SHELL_RIGHT_MAX}%`}
           collapsible
-          collapsedSize={0}
+          collapsedSize="0%"
         >
-          <div
-            className={cn(
-              "flex h-full min-w-0 overflow-hidden transition-opacity duration-200",
-              rightCollapsed && "opacity-0"
-            )}
+          <motion.div
+            data-testid="canvas-right-wrapper"
+            layout
+            animate={{ opacity: rightCollapsed ? 0 : 1 }}
+            transition={collapseTransition}
+            className="flex h-full min-w-0 overflow-hidden"
           >
             <CanvasSidePanels />
-          </div>
+          </motion.div>
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>
@@ -145,7 +151,7 @@ function CanvasMobileShell() {
               <PanelLeft className="size-4" />
             </Button>
           </SheetTrigger>
-          <SheetContent side="left" className="w-[280px] p-0">
+          <SheetContent side="left" className="w-[min(85vw,360px)] p-0">
             <CanvasDocumentRail />
           </SheetContent>
         </Sheet>
@@ -156,7 +162,7 @@ function CanvasMobileShell() {
               <PanelRight className="size-4" />
             </Button>
           </SheetTrigger>
-          <SheetContent side="right" className="w-[320px] p-0">
+          <SheetContent side="right" className="w-[min(85vw,360px)] p-0">
             <CanvasSidePanels />
           </SheetContent>
         </Sheet>

@@ -216,7 +216,7 @@ function ReactMarkdown({
   // accepted but unused — this mock doesn't process remark/rehype
   remarkPlugins: _r,
   rehypePlugins: _h,
-  ...rest
+  ..._rest
 }) {
   const els = parseMarkdown(children, components)
   return React.createElement(React.Fragment, null, ...els)

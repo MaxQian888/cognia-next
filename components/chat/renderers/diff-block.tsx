@@ -4,8 +4,7 @@ import { useState, memo, useCallback, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { Copy, Check, Columns, Rows, Plus, Minus } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { loggers } from "@/lib/logger"
 
@@ -72,50 +71,38 @@ export const DiffBlock = memo(function DiffBlock({
         </div>
 
         <div className="flex items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className={cn("h-6 w-6", viewMode === "unified" && "bg-accent")}
-                onClick={() => setViewMode("unified")}
-                aria-label={t("unifiedView")}
-              >
-                <Rows className="h-3 w-3" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("unifiedView")}</TooltipContent>
-          </Tooltip>
+          <TooltipIconButton
+            variant="ghost"
+            size="icon"
+            className={cn("h-6 w-6", viewMode === "unified" && "bg-accent")}
+            onClick={() => setViewMode("unified")}
+            aria-label={t("unifiedView")}
+            tooltip={t("unifiedView")}
+          >
+            <Rows className="h-3 w-3" />
+          </TooltipIconButton>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className={cn("h-6 w-6", viewMode === "split" && "bg-accent")}
-                onClick={() => setViewMode("split")}
-                aria-label={t("splitView")}
-              >
-                <Columns className="h-3 w-3" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("splitView")}</TooltipContent>
-          </Tooltip>
+          <TooltipIconButton
+            variant="ghost"
+            size="icon"
+            className={cn("h-6 w-6", viewMode === "split" && "bg-accent")}
+            onClick={() => setViewMode("split")}
+            aria-label={t("splitView")}
+            tooltip={t("splitView")}
+          >
+            <Columns className="h-3 w-3" />
+          </TooltipIconButton>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={handleCopy}
-                aria-label={t("copy")}
-              >
-                {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("copy")}</TooltipContent>
-          </Tooltip>
+          <TooltipIconButton
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={handleCopy}
+            aria-label={t("copy")}
+            tooltip={t("copy")}
+          >
+            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+          </TooltipIconButton>
         </div>
       </div>
 

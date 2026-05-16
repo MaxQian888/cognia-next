@@ -22,19 +22,6 @@ async function readClipboardText(): Promise<string> {
   throw new Error("Clipboard read is not available in this environment.")
 }
 
-async function writeClipboardText(text: string): Promise<void> {
-  if (isTauri()) {
-    const mod = await import("@tauri-apps/plugin-clipboard-manager")
-    await mod.writeText(text)
-    return
-  }
-  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text)
-    return
-  }
-  throw new Error("Clipboard write is not available in this environment.")
-}
-
 const definition: PluginDefinition = {
   // The runtime treats the manifest as the source of truth; the
   // bundled `plugin.json` next to this file is loaded by the

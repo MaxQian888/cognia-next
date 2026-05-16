@@ -159,7 +159,14 @@ function ExecutionStatusIcon({ status }: { status: TaskExecution["status"] }) {
 // Main component
 // ---------------------------------------------------------------------------
 
-const KIND_ORDER: ScheduledItemKind[] = ["app", "workflow", "backup", "plugin", "system"]
+const KIND_ORDER: ScheduledItemKind[] = [
+  "app",
+  "workflow",
+  "backup",
+  "plugin",
+  "system",
+  "connector",
+]
 
 interface KindSummaryStripProps {
   countsByKind?: Record<ScheduledItemKind, number>
@@ -170,7 +177,10 @@ function KindSummaryStrip({ countsByKind, activeCountsByKind }: KindSummaryStrip
   const t = useTranslations("scheduler")
   if (!countsByKind) return null
   return (
-    <div data-testid="kind-summary-strip" className="flex flex-wrap gap-2">
+    <div
+      data-testid="kind-summary-strip"
+      className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6"
+    >
       {KIND_ORDER.map((kind) => {
         const total = countsByKind[kind] ?? 0
         const active = activeCountsByKind?.[kind] ?? 0
@@ -180,17 +190,19 @@ function KindSummaryStrip({ countsByKind, activeCountsByKind }: KindSummaryStrip
             key={kind}
             data-testid={`kind-summary-${kind}`}
             className={cn(
-              "flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs",
+              "flex items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-xs",
               muted ? "opacity-60 border-border/30" : "border-border/60 bg-card/50"
             )}
           >
-            <span className="font-medium capitalize">{t(`kindFilter.${kind}`) || kind}</span>
-            <span className="tabular-nums">{total}</span>
-            {!muted && (
-              <span className="text-[10px] text-green-500 tabular-nums">
-                {active} {t("active") || "active"}
-              </span>
-            )}
+            <span className="truncate font-medium">{t(`kindFilter.${kind}`) || kind}</span>
+            <span className="flex items-center gap-1.5">
+              <span className="tabular-nums">{total}</span>
+              {!muted && (
+                <span className="text-[10px] text-green-500 tabular-nums">
+                  {active} {t("active") || "active"}
+                </span>
+              )}
+            </span>
           </div>
         )
       })}

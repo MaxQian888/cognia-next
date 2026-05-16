@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useTranslations } from "next-intl"
 import { Trash2Icon, DownloadIcon, FilterIcon } from "lucide-react"
 import { toast } from "sonner"
 
@@ -37,6 +38,9 @@ type SurfaceFilter = "all" | AutomationAuditLogRow["surface"]
 type DecisionFilter = "all" | AutomationAuditLogRow["decision"]
 
 export function AutomationAuditTable() {
+  const t = useTranslations("automation.audit")
+  const tFilters = useTranslations("automation.audit.filters")
+  const tColumns = useTranslations("automation.audit.columns")
   const [rows, setRows] = useState<AutomationAuditLogRow[]>([])
   const [loading, setLoading] = useState(true)
   const [surfaceFilter, setSurfaceFilter] = useState<SurfaceFilter>("all")
@@ -104,20 +108,26 @@ export function AutomationAuditTable() {
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-4">
         <div>
-          <CardTitle>Audit log</CardTitle>
+          <CardTitle>{t("title")}</CardTitle>
           <CardDescription>
-            Newest first. Capped at 5000 rows. {counts.total} loaded —{" "}
-            <Badge variant="outline">{counts.allow} allow</Badge>{" "}
-            <Badge variant="outline">{counts.deny} deny</Badge>{" "}
-            <Badge variant="outline">{counts.consent} consent</Badge>
+            {t("description")} {counts.total} —{" "}
+            <Badge variant="outline">
+              {counts.allow} {tFilters("decisionAllow")}
+            </Badge>{" "}
+            <Badge variant="outline">
+              {counts.deny} {tFilters("decisionDeny")}
+            </Badge>{" "}
+            <Badge variant="outline">
+              {counts.consent} {tFilters("decisionConsent")}
+            </Badge>
           </CardDescription>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={handleExport} disabled={rows.length === 0}>
-            <DownloadIcon className="size-4" /> Export CSV
+            <DownloadIcon className="size-4" /> {t("exportCsv")}
           </Button>
           <Button variant="outline" size="sm" onClick={handleClear} disabled={rows.length === 0}>
-            <Trash2Icon className="size-4" /> Clear
+            <Trash2Icon className="size-4" /> {t("clear")}
           </Button>
         </div>
       </CardHeader>
@@ -129,11 +139,11 @@ export function AutomationAuditTable() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All surfaces</SelectItem>
-              <SelectItem value="workflow">Workflow</SelectItem>
-              <SelectItem value="computerUse">Computer use</SelectItem>
-              <SelectItem value="mcp">MCP</SelectItem>
-              <SelectItem value="plugin">Plugin</SelectItem>
+              <SelectItem value="all">{tFilters("allSurfaces")}</SelectItem>
+              <SelectItem value="workflow">{tFilters("surfaceWorkflow")}</SelectItem>
+              <SelectItem value="computerUse">{tFilters("surfaceComputerUse")}</SelectItem>
+              <SelectItem value="mcp">{tFilters("surfaceMcp")}</SelectItem>
+              <SelectItem value="plugin">{tFilters("surfacePlugin")}</SelectItem>
             </SelectContent>
           </Select>
           <Select
@@ -144,29 +154,29 @@ export function AutomationAuditTable() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All decisions</SelectItem>
-              <SelectItem value="allow">Allow</SelectItem>
-              <SelectItem value="deny">Deny</SelectItem>
-              <SelectItem value="consent">Consent</SelectItem>
+              <SelectItem value="all">{tFilters("allDecisions")}</SelectItem>
+              <SelectItem value="allow">{tFilters("decisionAllow")}</SelectItem>
+              <SelectItem value="deny">{tFilters("decisionDeny")}</SelectItem>
+              <SelectItem value="consent">{tFilters("decisionConsent")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
 
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <p className="text-sm text-muted-foreground">{t("loading")}</p>
         ) : rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No automation calls recorded yet.</p>
+          <p className="text-sm text-muted-foreground">{t("empty")}</p>
         ) : (
           <div className="max-h-[480px] overflow-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Time</TableHead>
-                  <TableHead>Surface</TableHead>
-                  <TableHead>Command</TableHead>
-                  <TableHead>Decision</TableHead>
-                  <TableHead>Target</TableHead>
-                  <TableHead className="text-right">Duration</TableHead>
+                  <TableHead>{tColumns("time")}</TableHead>
+                  <TableHead>{tColumns("surface")}</TableHead>
+                  <TableHead>{tColumns("command")}</TableHead>
+                  <TableHead>{tColumns("decision")}</TableHead>
+                  <TableHead>{tColumns("target")}</TableHead>
+                  <TableHead className="text-right">{tColumns("duration")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

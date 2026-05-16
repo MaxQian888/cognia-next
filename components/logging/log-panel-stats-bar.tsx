@@ -184,7 +184,10 @@ export function LogPanelStatsBar({
           <span className="flex items-center gap-1 text-muted-foreground">
             {autoRefresh && (
               <span
-                className={cn("inline-flex h-2 w-2 rounded-full animate-pulse", pulseColor)}
+                className={cn(
+                  "inline-flex h-2 w-2 rounded-full motion-safe:animate-pulse",
+                  pulseColor
+                )}
                 title={t("panel.logRatePulse")}
                 aria-label={t("panel.logRatePulse")}
               />
@@ -267,7 +270,7 @@ function TransportHealthTile({
       aria-label={ariaLabel}
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-1.5 h-6 px-2 rounded-md border text-[10px] leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        "inline-flex items-center gap-1.5 h-6 px-2 rounded-md border text-[10px] leading-none motion-safe:transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         TRANSPORT_TILE_TONE_CLASSES[tone]
       )}
     >
@@ -348,11 +351,7 @@ function TransportHealthTileGroup({
 
   const visible = allTiles.slice(0, TRANSPORT_TILE_VISIBLE_LIMIT)
   const overflow = allTiles.slice(TRANSPORT_TILE_VISIBLE_LIMIT)
-  const overflowLabelText = t("panel.transportHealthOverflow")
-  const overflowLabel =
-    overflowLabelText === "panel.transportHealthOverflow"
-      ? "Show more transports"
-      : overflowLabelText
+  const overflowLabel = t("panel.transportHealthOverflow")
 
   return (
     <div className="flex flex-wrap items-center gap-1.5" data-testid="transport-health-tile-group">
@@ -366,7 +365,7 @@ function TransportHealthTileGroup({
               type="button"
               data-testid="transport-tile-overflow"
               aria-label={`${overflowLabel} (+${overflow.length})`}
-              className="inline-flex items-center gap-1 h-6 px-2 rounded-md border border-border bg-muted/30 text-[10px] text-muted-foreground hover:bg-muted/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              className="inline-flex items-center gap-1 h-6 px-2 rounded-md border border-border bg-muted/30 text-[10px] text-muted-foreground hover:bg-muted/40 motion-safe:transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             >
               +{overflow.length}
             </button>
@@ -440,14 +439,8 @@ export function TransportHealthDetail({
   const t = useTranslations("logging")
   const now = useNow()
   const tone = transportStatusToTone(health.status)
-  const lastSuccessLabel =
-    t("panel.transportLastSuccess") === "panel.transportLastSuccess"
-      ? "Last success"
-      : t("panel.transportLastSuccess")
-  const sparklineLabel =
-    t("panel.transportQueueHistory") === "panel.transportQueueHistory"
-      ? "Queue depth history"
-      : t("panel.transportQueueHistory")
+  const lastSuccessLabel = t("panel.transportLastSuccess")
+  const sparklineLabel = t("panel.transportQueueHistory")
 
   return (
     <div className="border-b bg-muted/10 px-3 py-3 text-xs space-y-3">
@@ -467,13 +460,9 @@ export function TransportHealthDetail({
           {t("panel.closeTransportDetails")}
         </Button>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
         <MetricCell
-          label={
-            t("panel.transportQueueDepth") === "panel.transportQueueDepth"
-              ? "Queue depth"
-              : t("panel.transportQueueDepth")
-          }
+          label={t("panel.transportQueueDepth")}
           value={health.queueDepth.toLocaleString()}
         />
         <MetricCell
@@ -571,7 +560,9 @@ export function NativeLoggingDetail({
         </span>
         <span>
           {t("panel.nativeLoggingTargets")}:{" "}
-          {nativeLogging.activeTargets.length > 0 ? nativeLogging.activeTargets.join(", ") : "none"}
+          {nativeLogging.activeTargets.length > 0
+            ? nativeLogging.activeTargets.join(", ")
+            : t("panel.nativeLoggingNoTargets")}
         </span>
         {nativeLogging.fallbackReason?.message && (
           <span>

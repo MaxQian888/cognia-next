@@ -252,6 +252,13 @@ const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
     "customCss",
     "customCssEnabled",
     "importedVscodeThemes",
+    // ADR-0021 — WebRTC WAN transport configuration. Mobile clients toggle
+    // the feature and configure ICE/TURN/signaling endpoints from the
+    // Mobile companion settings tab.
+    "webrtcEnabled",
+    "signalingUrl",
+    "iceServers",
+    "turnServers",
 ];
 
 /// Public read-only accessor for the mobile-side `app_settings_update`
@@ -398,7 +405,11 @@ fn optional<T: DeserializeOwned>(
 ///
 /// If a command's signature is incompatible with this pattern (e.g., it
 /// requires `tauri::Window`), it must be excluded from the V1 allowlist.
-async fn dispatch(
+///
+/// Visibility note (ADR-0021): exposed as `pub(super)` so the WebRTC
+/// signaling module (`super::signaling::dispatch`) can route DataChannel
+/// RPCs through the same allowlist without re-implementing 1k+ lines.
+pub(super) async fn dispatch(
     name: &str,
     args: Value,
     state: &SharedState,

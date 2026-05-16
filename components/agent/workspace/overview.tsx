@@ -1,13 +1,11 @@
 "use client"
 
-import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { Card } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import { Progress } from "@/components/ui/progress"
+import { StatusBadge } from "@/components/status-badge"
+import { EditableField } from "./editable-field"
 import { PlanApprovalPanel } from "@/components/agent/plan-approval-panel"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 
@@ -34,151 +32,76 @@ export function AgentTeamOverview({
     team.config.tokenBudget && team.config.tokenBudget > 0 ? team.config.tokenBudget : 0
   const usagePct = budget > 0 ? Math.min(100, Math.round((tokens / budget) * 100)) : 0
 
-  const [editingName, setEditingName] = useState(false)
-  const [nameDraft, setNameDraft] = useState(team.name)
-  const [editingDesc, setEditingDesc] = useState(false)
-  const [descDraft, setDescDraft] = useState(team.description ?? "")
-
-  const commitName = () => {
-    if (nameDraft.trim() && nameDraft.trim() !== team.name) {
-      onUpdateTeam?.({ name: nameDraft.trim() })
+  const commitName = (next: string) => {
+    if (next && next !== team.name) {
+      onUpdateTeam?.({ name: next })
     }
-    setEditingName(false)
   }
 
-  const commitDesc = () => {
-    if (descDraft.trim() !== (team.description ?? "")) {
-      onUpdateTeam?.({ description: descDraft.trim() || undefined })
+  const commitDesc = (next: string) => {
+    if (next !== (team.description ?? "")) {
+      onUpdateTeam?.({ description: next || undefined })
     }
-    setEditingDesc(false)
   }
 
   const duration = team.totalDuration
     ? `${Math.floor(team.totalDuration / 60000)}m ${Math.floor((team.totalDuration % 60000) / 1000)}s`
     : null
 
+  const isLive = team.status === "executing" || team.status === "planning"
+
   return (
     <div className="space-y-4" data-testid="workspace-overview">
       {/* Identity card */}
       <Card className="space-y-3 p-4">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
           <div className="min-w-0 flex-1 space-y-2">
-            {editingName ? (
-              <span className="flex items-center gap-1">
-                <Input
-                  value={nameDraft}
-                  onChange={(e) => setNameDraft(e.target.value)}
-                  className="h-8 text-sm font-semibold"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") commitName()
-                    if (e.key === "Escape") setEditingName(false)
-                  }}
-                  autoFocus
-                />
-                <Button size="icon" variant="ghost" className="size-7" onClick={commitName}>
-                  ✓
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="size-7"
-                  onClick={() => setEditingName(false)}
-                >
-                  ✕
-                </Button>
-              </span>
-            ) : (
-              <button
-                type="button"
-                className="text-left text-sm font-semibold hover:text-primary transition-colors"
-                onClick={() => {
-                  setNameDraft(team.name)
-                  setEditingName(true)
-                }}
-                title={t("editName")}
-              >
-                {team.name}
-              </button>
-            )}
-            {editingDesc ? (
-              <span className="flex items-start gap-1">
-                <Textarea
-                  rows={2}
-                  value={descDraft}
-                  onChange={(e) => setDescDraft(e.target.value)}
-                  className="text-xs"
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") setEditingDesc(false)
-                  }}
-                  autoFocus
-                />
-                <span className="flex shrink-0 gap-0.5">
-                  <Button size="icon" variant="ghost" className="size-7" onClick={commitDesc}>
-                    ✓
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="size-7"
-                    onClick={() => setEditingDesc(false)}
-                  >
-                    ✕
-                  </Button>
-                </span>
-              </span>
-            ) : (
-              <button
-                type="button"
-                className="block text-left text-xs text-muted-foreground hover:text-foreground transition-colors"
-                onClick={() => {
-                  setDescDraft(team.description ?? "")
-                  setEditingDesc(true)
-                }}
-                title={t("editDescription")}
-              >
-                {team.description || "Add description..."}
-              </button>
-            )}
+            <EditableField
+              value={team.name}
+              onSave={commitName}
+              variant="input"
+              editTooltipKey="editName"
+              displayClassName="text-sm font-semibold"
+              data-testid="team-name-edit"
+            />
+            <EditableField
+              value={team.description ?? ""}
+              onSave={commitDesc}
+              variant="textarea"
+              editTooltipKey="editDescription"
+              emptyHintKey="emptyHint"
+              displayClassName="text-xs text-muted-foreground hover:text-foreground"
+              data-testid="team-description-edit"
+            />
           </div>
-          <Badge
-            variant={
-              team.status === "executing" || team.status === "planning"
-                ? "default"
-                : team.status === "failed"
-                  ? "destructive"
-                  : "outline"
-            }
+          <StatusBadge
+            value={team.status}
+            labelNamespace="agentTeam.status"
+            pulse={isLive}
+            pulseClassName={isLive ? "bg-emerald-400 size-2" : undefined}
+            className="shrink-0"
             data-testid="team-status"
-            className="shrink-0 inline-flex items-center gap-1.5"
-          >
-            {(team.status === "executing" || team.status === "planning") && (
-              <span
-                aria-hidden
-                className="inline-block size-2 rounded-full bg-emerald-400 animate-pulse"
-              />
-            )}
-            {t("status")}: {team.status}
-          </Badge>
+          />
         </div>
       </Card>
 
       {/* Config summary + Runtime */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Card className="space-y-2 p-4">
           <p className="text-xs font-medium text-muted-foreground">{t("configSummary")}</p>
           <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-            <span className="text-muted-foreground">Mode</span>
+            <span className="text-muted-foreground">{t("mode")}</span>
             <span>{team.config.executionMode ?? "coordinated"}</span>
-            <span className="text-muted-foreground">Pattern</span>
+            <span className="text-muted-foreground">{t("pattern")}</span>
             <span className="truncate">
               {team.config.preferredExecutionPattern ?? "manager_worker"}
             </span>
-            <span className="text-muted-foreground">Concurrency</span>
+            <span className="text-muted-foreground">{t("concurrency")}</span>
             <span>{team.config.maxConcurrentTeammates ?? 5}</span>
-            <span className="text-muted-foreground">Budget</span>
-            <span>{budget > 0 ? budget.toLocaleString() : "unlimited"}</span>
-            <span className="text-muted-foreground">Plan approval</span>
-            <span>{team.config.requirePlanApproval ? "Yes" : "No"}</span>
+            <span className="text-muted-foreground">{t("budget")}</span>
+            <span>{budget > 0 ? budget.toLocaleString() : t("unlimited")}</span>
+            <span className="text-muted-foreground">{t("planApproval")}</span>
+            <span>{team.config.requirePlanApproval ? t("yes") : t("no")}</span>
           </div>
         </Card>
 

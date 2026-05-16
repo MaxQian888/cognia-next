@@ -27,6 +27,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import type { UnredactPlaceholder } from "@/lib/twin/distill/unredact-draft"
 
 export interface UnredactDialogProps {
@@ -101,7 +102,10 @@ export function UnredactDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => (busy ? null : onOpenChange(o))}>
-      <DialogContent className="max-w-2xl" data-testid="twin-unredact-dialog">
+      <DialogContent
+        className="max-w-2xl max-h-[85vh] overflow-y-auto"
+        data-testid="twin-unredact-dialog"
+      >
         <DialogHeader>
           <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>
@@ -120,28 +124,30 @@ export function UnredactDialog({
                 {t("keepAll")}
               </Button>
             </div>
-            <ul className="flex max-h-72 flex-col gap-2 overflow-auto">
-              {selection.map((p) => (
-                <li
-                  key={p.placeholder}
-                  className="border-border flex items-center gap-3 rounded border p-2"
-                  data-testid={`twin-unredact-row-${p.placeholder}`}
-                >
-                  <Checkbox
-                    checked={p.keep}
-                    onCheckedChange={() => toggle(p.placeholder)}
-                    disabled={busy}
-                    aria-label={t("checkboxAria", { placeholder: p.placeholder })}
-                  />
-                  <Badge variant={KIND_TONE[p.kind] ?? "secondary"} className="font-mono">
-                    {tPiiKind(p.kind)}
-                  </Badge>
-                  <code className="text-muted-foreground text-xs">{p.placeholder}</code>
-                  <span className="text-muted-foreground">→</span>
-                  <span className="truncate font-mono text-sm">{p.original}</span>
-                </li>
-              ))}
-            </ul>
+            <ScrollArea className="max-h-72">
+              <ul className="flex flex-col gap-2 pr-2">
+                {selection.map((p) => (
+                  <li
+                    key={p.placeholder}
+                    className="border-border flex items-center gap-3 rounded border p-2"
+                    data-testid={`twin-unredact-row-${p.placeholder}`}
+                  >
+                    <Checkbox
+                      checked={p.keep}
+                      onCheckedChange={() => toggle(p.placeholder)}
+                      disabled={busy}
+                      aria-label={t("checkboxAria", { placeholder: p.placeholder })}
+                    />
+                    <Badge variant={KIND_TONE[p.kind] ?? "secondary"} className="font-mono">
+                      {tPiiKind(p.kind)}
+                    </Badge>
+                    <code className="text-muted-foreground text-xs">{p.placeholder}</code>
+                    <span className="text-muted-foreground">→</span>
+                    <span className="truncate font-mono text-sm">{p.original}</span>
+                  </li>
+                ))}
+              </ul>
+            </ScrollArea>
           </>
         )}
         <DialogFooter>

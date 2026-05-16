@@ -265,7 +265,7 @@ function ResourceForm({
   const [form, setForm] = useState<ResourceFormState>(initial)
   return (
     <Card className="space-y-2 p-3">
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div className="space-y-1">
           <Label className="text-xs">{t("name")}</Label>
           <Input

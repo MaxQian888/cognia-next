@@ -343,7 +343,8 @@
       "openComments": "打开评论",
       "collabHint": "实时协作默认关闭。在「设置 → 画布 → 协作」中启用并填入 CRDT 信令服务器 URL。",
       "openCollab": "打开协作",
-      "executionHint": "点击编辑器工具栏的 Run 按钮以执行选中的代码。"
+      "executionHint": "点击编辑器工具栏的 Run 按钮以执行选中的代码。",
+      "moreVersions": "+{count} 个版本"
     },
     "empty": {
       "title": "欢迎使用画布",
@@ -425,7 +426,32 @@
       "unfoldAll": "全部展开",
       "foldLevel1": "折叠至 1 级",
       "foldLevel2": "折叠至 2 级"
-    }
+    },
+    "deleteAria": "删除 {name}",
+    "renameDocument": "重命名文档",
+    "save": "保存",
+    "versionHistory": "版本历史",
+    "saveVersion": "保存版本",
+    "compare": "对比",
+    "cancelCompare": "取消对比",
+    "compareInstructions": "选择两个版本以进行对比。",
+    "viewDiff": "查看差异",
+    "descriptionOptional": "描述（可选）",
+    "descriptionPlaceholder": "简要描述这次变更",
+    "versionPreview": "版本预览",
+    "restoreVersion": "恢复版本",
+    "deleteVersion": "删除版本",
+    "deleteVersionConfirm": "确定要删除此版本吗？此操作不可撤销。",
+    "versionComparison": "版本对比",
+    "noVersions": "暂无版本",
+    "noVersionsHint": "保存版本以创建快照。",
+    "history": "历史",
+    "current": "当前版本",
+    "autoSave": "自动保存",
+    "linesCount": "{count, plural, other {# 行}}",
+    "selected": "已选择",
+    "previewAction": "预览",
+    "restore": "恢复"
   },
   "chat": {
     "subagentPart": {
@@ -444,7 +470,8 @@
       "cache": "缓存",
       "cost": "成本",
       "byModelTitle": "按模型拆分",
-      "noModelData": "尚无持久化用量记录——上面的汇总来自内存中已加载的轮次。"
+      "noModelData": "尚无持久化用量记录——上面的汇总来自内存中已加载的轮次。",
+      "tokensTitle": "输入：{input} · 输出：{output}"
     },
     "agentTeamDispatch": {
       "title": "调度",
@@ -588,7 +615,8 @@
         "modelTooltip": "当前模型 · 在「设置 → API Key」中切换",
         "usageInput": "输入",
         "usageOutput": "输出",
-        "usageCached": "缓存"
+        "usageCached": "缓存",
+        "pluginExtensionOverflow": "更多插件操作"
       },
       "helperHints": {
         "send": "⏎ 发送 · ⇧⏎ 换行",
@@ -614,7 +642,18 @@
         "removeAria": "移除引用 {path}"
       },
       "ariaToggleWebSearch": "切换网络搜索",
-      "webLabel": "Web"
+      "webLabel": "Web",
+      "draftReview": {
+        "title": "查看待处理草稿",
+        "noPendingDrafts": "暂无等待审核的草稿。",
+        "reject": "拒绝",
+        "approve": "通过并发送"
+      },
+      "modelPicker": {
+        "switchModelAria": "切换模型",
+        "searchPlaceholder": "搜索模型…",
+        "noProviders": "尚未配置任何模型提供商"
+      }
     },
     "permissionMode": {
       "default": {
@@ -5228,7 +5267,25 @@
       "copyLogEntry": "复制日志条目",
       "focusTraceMenu": "聚焦此追踪",
       "focusSessionMenu": "聚焦此会话",
-      "viewDetailsMenu": "查看详情"
+      "viewDetailsMenu": "查看详情",
+      "moreFilters": {
+        "show": "显示更多筛选"
+      },
+      "shortcutsHint": "键盘快捷键",
+      "shiftClickPrefix": "按住 Shift 单击以",
+      "openDetailsPanel": "打开详情面板",
+      "scrollMenuLabel": "滚动",
+      "allLevelsTab": "全部",
+      "shortcuts": {
+        "refresh": "刷新日志",
+        "dashboardView": "切换仪表盘视图",
+        "nextEntry": "下一条",
+        "previousEntry": "上一条",
+        "expandEntry": "展开条目",
+        "openDetails": "打开详情面板",
+        "closeOrClear": "关闭对话框或清除聚焦",
+        "showShortcuts": "显示快捷键列表"
+      }
     },
     "dashboard": {
       "noData": "暂无可视化日志数据",
@@ -6113,7 +6170,10 @@
       "skill": "技能",
       "test": "测试/健康检查",
       "external-agent": "外部代理 (ACP)",
-      "im-push": "IM 推送"
+      "im-push": "IM 推送",
+      "twin": "员工数字分身",
+      "connection:scheduled:digest": "定时摘要",
+      "connection:outbound:send": "外发消息"
     },
     "payloadStructuredHelp": "为本次运行选择 agent / 工具 / MCP 服务 / 内置工具开关。",
     "payloadFieldErrors": "请修正高亮字段",
@@ -6211,12 +6271,20 @@
       "active": "运行中",
       "paused": "已暂停",
       "disabled": "已禁用",
-      "expired": "已过期"
+      "expired": "已过期",
+      "unknown": "未知"
     },
     "executionStatuses": {
       "pending": "待执行",
       "running": "执行中",
       "completed": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消",
+      "skipped": "已跳过"
+    },
+    "unifiedRunStatuses": {
+      "running": "执行中",
+      "succeeded": "已成功",
       "failed": "失败",
       "cancelled": "已取消",
       "skipped": "已跳过"
@@ -6622,7 +6690,8 @@
       "workflow": "工作流",
       "backup": "备份",
       "plugin": "插件",
-      "system": "系统"
+      "system": "系统",
+      "connector": "连接器"
     },
     "emptyTitle": "暂无定时任务",
     "emptyDescription": "创建你的第一个定时任务，让重复性工作自动运行。",
@@ -6635,7 +6704,74 @@
     "panelErrorRetry": "重试",
     "openInSourceEditor": "在源编辑器中打开",
     "createTaskKind": "选择任务类型",
-    "active": "活跃"
+    "active": "活跃",
+    "selectRow": "选择此行",
+    "loading": "加载中…",
+    "clearSelection": "清除选择",
+    "bulkDeleteTitle": "删除已选任务？",
+    "bulkDeleteDescription": "将跨所有类型删除 {n} 个任务，此操作不可撤销。",
+    "unknownKind": "该类型暂无详情视图。",
+    "unknownKindAppNote": "应用任务通过任务详情视图渲染。",
+    "systemTaskNotFound": "未找到该系统任务。",
+    "workflowTriggerNotFound": "未找到该工作流触发器。",
+    "pluginJobNotFound": "未找到该插件任务。",
+    "connectorDigestNotFound": "未找到该连接器摘要任务。",
+    "configuration": "配置",
+    "workflow": "工作流",
+    "triggerKind": "触发器类型",
+    "cron": "Cron",
+    "webhookPath": "Webhook 路径",
+    "enabled": "已启用",
+    "openInWorkflowEditor": "在工作流编辑器中打开",
+    "openInPluginSettings": "在插件设置中打开",
+    "recentRuns": "最近运行",
+    "noRecentRuns": "暂无最近运行。",
+    "recentDispatches": "最近发送",
+    "noRecentDispatches": "暂无最近发送。",
+    "days": "天",
+    "interval": "间隔",
+    "destination": "目标位置",
+    "retainCount": "保留份数",
+    "plugin": "插件",
+    "handler": "处理函数",
+    "status": "状态",
+    "adapter": "适配器",
+    "conversation": "会话",
+    "character": "角色",
+    "queueStatus": "队列状态",
+    "queueLength": "队列长度",
+    "breakerLastOpened": "熔断器上次打开",
+    "breakerLastClosed": "熔断器上次关闭",
+    "timing": "时间",
+    "startedAt": "开始时间",
+    "finishedAt": "结束时间",
+    "duration": "时长",
+    "triggerPayload": "触发载荷",
+    "result": "执行结果",
+    "error": "错误",
+    "logs": "日志",
+    "close": "关闭",
+    "back": "返回",
+    "more": "更多",
+    "moreOptions": "更多选项",
+    "breadcrumb": "面包屑导航",
+    "loadingScheduler": "正在加载调度器",
+    "eventSourceLiteralPlaceholder": "来源",
+    "quickCreateWorkflowTrigger": "创建工作流触发器",
+    "quickCreateWorkflowTriggerDescription": "无需打开工作流编辑器，直接为已有工作流添加 cron 触发器。",
+    "pickWorkflow": "选择工作流",
+    "pickAWorkflow": "请先选择工作流",
+    "cronTriggerLabel": "Cron 触发器",
+    "cronRequired": "请填写 Cron 表达式",
+    "workflowNotFound": "未找到工作流",
+    "cronPreset": {
+      "hourly": "每小时",
+      "daily": "每天 9:00",
+      "weeklyMon": "每周一 9:00",
+      "custom": "自定义"
+    },
+    "create": "创建",
+    "creating": "创建中…"
   },
   "desktop": {
     "channelList": {
@@ -9012,261 +9148,303 @@
       "blockedSaveTitle": "工作流已保存，但仍有 {count} 个未解决的问题"
     },
     "nodes": {
-      "trigger.manual": {
-        "label": "手动运行",
-        "description": "在编辑器中点击「运行」按钮时触发。"
+      "trigger": {
+        "manual": {
+          "label": "手动运行",
+          "description": "在编辑器中点击「运行」按钮时触发。"
+        },
+        "cron": {
+          "label": "按计划执行",
+          "description": "按 cron 计划触发。运行时由 Tauri 调度器驱动。"
+        },
+        "connector": {
+          "inbound": {
+            "label": "收到消息",
+            "description": "当外部平台（Telegram、Slack 等）收到消息时触发。"
+          }
+        },
+        "chat": {
+          "message": {
+            "label": "聊天消息触发",
+            "description": "当用户在绑定角色的会话中发送消息时触发。"
+          }
+        },
+        "webhook": {
+          "label": "Webhook 触发",
+          "description": "当 HTTP 请求命中工作流的 Webhook 路径时触发。"
+        },
+        "github": {
+          "webhook": {
+            "label": "GitHub 事件触发",
+            "description": "当 GitHub 推送 Webhook（PR 打开、Issue 标签、推送等）时触发，会校验 x-hub-signature-256。"
+          }
+        },
+        "desktop": {
+          "event": {
+            "label": "UIA 事件触发",
+            "description": "当 UIA 焦点 / 结构 / 属性事件匹配时触发。"
+          }
+        }
       },
-      "trigger.cron": {
-        "label": "按计划执行",
-        "description": "按 cron 计划触发。运行时由 Tauri 调度器驱动。"
+      "action": {
+        "character": {
+          "send": {
+            "label": "以角色身份发送",
+            "description": "以选定的角色身份向会话发送消息。"
+          },
+          "create": {
+            "label": "创建角色",
+            "description": "新建一个角色（员工）。"
+          },
+          "update": {
+            "label": "更新角色",
+            "description": "更新现有角色的字段。"
+          }
+        },
+        "team": {
+          "run": {
+            "label": "运行团队",
+            "description": "启动智能体团队的生命周期并等待执行完成。"
+          },
+          "create": {
+            "label": "创建团队",
+            "description": "新建一个智能体团队。"
+          },
+          "update": {
+            "label": "更新团队",
+            "description": "更新现有团队的成员或编排模式。"
+          }
+        },
+        "skill": {
+          "invoke": {
+            "label": "调用技能",
+            "description": "把技能注入到下一个 AI 节点的提示词中。"
+          },
+          "upsert": {
+            "label": "新增或更新技能",
+            "description": "用给定的 Markdown 内容新建或更新技能。"
+          }
+        },
+        "twin": {
+          "rag": {
+            "label": "数字分身 RAG",
+            "description": "在数字分身的向量库上执行 RAG，返回 top-K 片段。"
+          },
+          "ingest": {
+            "label": "数字分身导入",
+            "description": "为数字分身的导入流水线排队新的数据源。"
+          }
+        },
+        "connector": {
+          "send": {
+            "label": "通过连接器发送",
+            "description": "通过连接器适配器的出站队列发送消息。"
+          },
+          "draft": {
+            "label": "保存为草稿",
+            "description": "把建议的回复保存为草稿，供人工在收件箱中审核。"
+          }
+        },
+        "mcp": {
+          "invokeTool": {
+            "label": "调用 MCP 工具",
+            "description": "调用已配置的 MCP 服务器上的工具。"
+          }
+        },
+        "plugin": {
+          "invoke": {
+            "label": "调用插件",
+            "description": "调用插件运行时中注册的任务处理器。"
+          }
+        },
+        "github": {
+          "openPr": {
+            "label": "打开 GitHub PR",
+            "description": "通过 GitHub Delivery 插件打开 PR（受策略约束）。"
+          },
+          "closePr": {
+            "label": "关闭 GitHub PR",
+            "description": "关闭打开的 PR 而不合并。"
+          },
+          "mergePr": {
+            "label": "合并 GitHub PR",
+            "description": "合并 PR。按策略需要 CI 通过 + 人工批准。"
+          },
+          "reviewPr": {
+            "label": "审查 GitHub PR",
+            "description": "在 PR 上提交审查意见（APPROVE / REQUEST_CHANGES / COMMENT）。"
+          },
+          "reviewPrInline": {
+            "label": "AI 行内审查",
+            "description": "用 LLM 为 PR 生成结构化审查（整体评语 + 行级行内评论）。"
+          },
+          "commentPr": {
+            "label": "在 PR 上评论",
+            "description": "在 PR 上发布评论。"
+          },
+          "commentIssue": {
+            "label": "在 Issue 上评论",
+            "description": "在 Issue 上发布评论。"
+          },
+          "labelIssue": {
+            "label": "为 Issue/PR 打标签",
+            "description": "在 Issue 或 PR 上添加或移除标签。"
+          },
+          "closeIssue": {
+            "label": "关闭 Issue",
+            "description": "关闭 Issue，可选关闭原因（completed / not_planned）。"
+          },
+          "createRelease": {
+            "label": "创建 Release",
+            "description": "创建 Release。草稿始终允许，发布的 Release 受策略约束。"
+          },
+          "generateChangelog": {
+            "label": "生成变更日志",
+            "description": "基于 Conventional Commits 计算语义化版本号增量并生成 Markdown 发布说明。"
+          },
+          "pushTag": {
+            "label": "推送标签",
+            "description": "推送 git 标签到仓库。"
+          },
+          "runIssueLoop": {
+            "label": "Issue → PR 循环",
+            "description": "端到端的 Issue → AI 工作树 → PR 闭环：克隆仓库、驱动 AI、打开 PR。"
+          }
+        },
+        "desktop": {
+          "screenshot": {
+            "label": "屏幕截图",
+            "description": "截取主显示器或指定区域，返回 PNG 字节和尺寸。"
+          },
+          "findElement": {
+            "label": "查找元素",
+            "description": "按名称 / automation id / 控件类型定位 UI 元素。"
+          },
+          "readTree": {
+            "label": "读取控件树",
+            "description": "把无障碍子树快照为 JSON，供下游节点使用。"
+          },
+          "click": {
+            "label": "点击",
+            "description": "点击某个元素或屏幕绝对坐标。"
+          },
+          "type": {
+            "label": "输入文本",
+            "description": "通过 SendInput 把字符串键入到焦点元素。"
+          },
+          "keys": {
+            "label": "发送按键",
+            "description": "发送键盘组合键，例如 ctrl+shift+t。"
+          },
+          "invokePattern": {
+            "label": "调用 UIA 模式",
+            "description": "派发 UIA 模式（Invoke / Toggle / Value / Transform 等）。"
+          },
+          "windowFocus": {
+            "label": "聚焦窗口",
+            "description": "把指定窗口切到前台。"
+          },
+          "windowClose": {
+            "label": "关闭窗口",
+            "description": "通过 UIA Window 模式关闭窗口。"
+          },
+          "windowResize": {
+            "label": "调整窗口大小",
+            "description": "通过 UIA Transform 模式移动或调整窗口大小。"
+          },
+          "wait": {
+            "label": "等待元素",
+            "description": "阻塞直到元素出现、消失或属性满足条件。"
+          }
+        }
       },
-      "trigger.connector.inbound": {
-        "label": "收到消息",
-        "description": "当外部平台（Telegram、Slack 等）收到消息时触发。"
+      "ai": {
+        "prompt": {
+          "label": "AI 提示",
+          "description": "直接调用 LLM，使用已配置的提供方路由。"
+        },
+        "classify": {
+          "label": "分类",
+          "description": "基于 LLM 把输入分到 N 个标签之一。"
+        },
+        "extract": {
+          "label": "结构化抽取",
+          "description": "按 JSON Schema 从自由文本抽取结构化数据。"
+        },
+        "embed": {
+          "label": "生成嵌入向量",
+          "description": "为语义相似度计算生成嵌入向量。"
+        }
       },
-      "trigger.chat.message": {
-        "label": "聊天消息触发",
-        "description": "当用户在绑定角色的会话中发送消息时触发。"
+      "flow": {
+        "branch": {
+          "label": "If / Else 分支",
+          "description": "根据条件把执行分到两条分支之一。"
+        },
+        "switch": {
+          "label": "Switch 多分支",
+          "description": "根据表达式的值做多路分支。"
+        },
+        "split": {
+          "label": "并行分发",
+          "description": "把执行扇出到多个并行分支。"
+        },
+        "join": {
+          "label": "汇聚",
+          "description": "按 all / any / race 语义汇聚并行分支。"
+        },
+        "loop": {
+          "label": "循环",
+          "description": "以 for-each / while / 固定次数重复子图。"
+        },
+        "wait": {
+          "label": "等待",
+          "description": "暂停固定时长，或等待唤醒事件到达。"
+        },
+        "set": {
+          "label": "设置变量",
+          "description": "为工作流作用域的变量赋值。"
+        },
+        "subworkflow": {
+          "label": "调用子工作流",
+          "description": "把另一个工作流作为一个步骤来调用。"
+        }
       },
-      "trigger.webhook": {
-        "label": "Webhook 触发",
-        "description": "当 HTTP 请求命中工作流的 Webhook 路径时触发。"
+      "data": {
+        "transform": {
+          "label": "数据转换",
+          "description": "对输入数组或对象执行 map / filter / reduce / sort。"
+        },
+        "code": {
+          "label": "自定义代码",
+          "description": "自定义 JS 表达式，超时 5 秒。"
+        },
+        "template": {
+          "label": "模板",
+          "description": "用 mustache 风格模板对上游数据进行渲染。"
+        }
       },
-      "trigger.github.webhook": {
-        "label": "GitHub 事件触发",
-        "description": "当 GitHub 推送 Webhook（PR 打开、Issue 标签、推送等）时触发，会校验 x-hub-signature-256。"
+      "io": {
+        "http": {
+          "label": "HTTP 请求",
+          "description": "调用外部 HTTP API，支持重试和超时。"
+        },
+        "webhook": {
+          "respond": {
+            "label": "Webhook 响应",
+            "description": "向触发本次执行的入站 Webhook 返回响应负载。"
+          }
+        }
       },
-      "action.character.send": {
-        "label": "以角色身份发送",
-        "description": "以选定的角色身份向会话发送消息。"
-      },
-      "action.character.create": {
-        "label": "创建角色",
-        "description": "新建一个角色（员工）。"
-      },
-      "action.character.update": {
-        "label": "更新角色",
-        "description": "更新现有角色的字段。"
-      },
-      "action.team.run": {
-        "label": "运行团队",
-        "description": "启动智能体团队的生命周期并等待执行完成。"
-      },
-      "action.team.create": {
-        "label": "创建团队",
-        "description": "新建一个智能体团队。"
-      },
-      "action.team.update": {
-        "label": "更新团队",
-        "description": "更新现有团队的成员或编排模式。"
-      },
-      "action.skill.invoke": {
-        "label": "调用技能",
-        "description": "把技能注入到下一个 AI 节点的提示词中。"
-      },
-      "action.skill.upsert": {
-        "label": "新增或更新技能",
-        "description": "用给定的 Markdown 内容新建或更新技能。"
-      },
-      "action.twin.rag": {
-        "label": "数字分身 RAG",
-        "description": "在数字分身的向量库上执行 RAG，返回 top-K 片段。"
-      },
-      "action.twin.ingest": {
-        "label": "数字分身导入",
-        "description": "为数字分身的导入流水线排队新的数据源。"
-      },
-      "action.connector.send": {
-        "label": "通过连接器发送",
-        "description": "通过连接器适配器的出站队列发送消息。"
-      },
-      "action.connector.draft": {
-        "label": "保存为草稿",
-        "description": "把建议的回复保存为草稿，供人工在收件箱中审核。"
-      },
-      "action.mcp.invokeTool": {
-        "label": "调用 MCP 工具",
-        "description": "调用已配置的 MCP 服务器上的工具。"
-      },
-      "action.plugin.invoke": {
-        "label": "调用插件",
-        "description": "调用插件运行时中注册的任务处理器。"
-      },
-      "action.github.openPr": {
-        "label": "打开 GitHub PR",
-        "description": "通过 GitHub Delivery 插件打开 PR（受策略约束）。"
-      },
-      "action.github.closePr": {
-        "label": "关闭 GitHub PR",
-        "description": "关闭打开的 PR 而不合并。"
-      },
-      "action.github.mergePr": {
-        "label": "合并 GitHub PR",
-        "description": "合并 PR。按策略需要 CI 通过 + 人工批准。"
-      },
-      "action.github.reviewPr": {
-        "label": "审查 GitHub PR",
-        "description": "在 PR 上提交审查意见（APPROVE / REQUEST_CHANGES / COMMENT）。"
-      },
-      "action.github.reviewPrInline": {
-        "label": "AI 行内审查",
-        "description": "用 LLM 为 PR 生成结构化审查（整体评语 + 行级行内评论）。"
-      },
-      "action.github.commentPr": {
-        "label": "在 PR 上评论",
-        "description": "在 PR 上发布评论。"
-      },
-      "action.github.commentIssue": {
-        "label": "在 Issue 上评论",
-        "description": "在 Issue 上发布评论。"
-      },
-      "action.github.labelIssue": {
-        "label": "为 Issue/PR 打标签",
-        "description": "在 Issue 或 PR 上添加或移除标签。"
-      },
-      "action.github.closeIssue": {
-        "label": "关闭 Issue",
-        "description": "关闭 Issue，可选关闭原因（completed / not_planned）。"
-      },
-      "action.github.createRelease": {
-        "label": "创建 Release",
-        "description": "创建 Release。草稿始终允许，发布的 Release 受策略约束。"
-      },
-      "action.github.generateChangelog": {
-        "label": "生成变更日志",
-        "description": "基于 Conventional Commits 计算语义化版本号增量并生成 Markdown 发布说明。"
-      },
-      "action.github.pushTag": {
-        "label": "推送标签",
-        "description": "推送 git 标签到仓库。"
-      },
-      "action.github.runIssueLoop": {
-        "label": "Issue → PR 循环",
-        "description": "端到端的 Issue → AI 工作树 → PR 闭环：克隆仓库、驱动 AI、打开 PR。"
-      },
-      "action.desktop.screenshot": {
-        "label": "屏幕截图",
-        "description": "截取主显示器或指定区域，返回 PNG 字节和尺寸。"
-      },
-      "action.desktop.findElement": {
-        "label": "查找元素",
-        "description": "按名称 / automation id / 控件类型定位 UI 元素。"
-      },
-      "action.desktop.readTree": {
-        "label": "读取控件树",
-        "description": "把无障碍子树快照为 JSON，供下游节点使用。"
-      },
-      "action.desktop.click": {
-        "label": "点击",
-        "description": "点击某个元素或屏幕绝对坐标。"
-      },
-      "action.desktop.type": {
-        "label": "输入文本",
-        "description": "通过 SendInput 把字符串键入到焦点元素。"
-      },
-      "action.desktop.keys": {
-        "label": "发送按键",
-        "description": "发送键盘组合键，例如 ctrl+shift+t。"
-      },
-      "action.desktop.invokePattern": {
-        "label": "调用 UIA 模式",
-        "description": "派发 UIA 模式（Invoke / Toggle / Value / Transform 等）。"
-      },
-      "action.desktop.windowFocus": {
-        "label": "聚焦窗口",
-        "description": "把指定窗口切到前台。"
-      },
-      "action.desktop.windowClose": {
-        "label": "关闭窗口",
-        "description": "通过 UIA Window 模式关闭窗口。"
-      },
-      "action.desktop.windowResize": {
-        "label": "调整窗口大小",
-        "description": "通过 UIA Transform 模式移动或调整窗口大小。"
-      },
-      "action.desktop.wait": {
-        "label": "等待元素",
-        "description": "阻塞直到元素出现、消失或属性满足条件。"
-      },
-      "trigger.desktop.event": {
-        "label": "UIA 事件触发",
-        "description": "当 UIA 焦点 / 结构 / 属性事件匹配时触发。"
-      },
-      "ai.prompt": {
-        "label": "AI 提示",
-        "description": "直接调用 LLM，使用已配置的提供方路由。"
-      },
-      "ai.classify": {
-        "label": "分类",
-        "description": "基于 LLM 把输入分到 N 个标签之一。"
-      },
-      "ai.extract": {
-        "label": "结构化抽取",
-        "description": "按 JSON Schema 从自由文本抽取结构化数据。"
-      },
-      "ai.embed": {
-        "label": "生成嵌入向量",
-        "description": "为语义相似度计算生成嵌入向量。"
-      },
-      "flow.branch": {
-        "label": "If / Else 分支",
-        "description": "根据条件把执行分到两条分支之一。"
-      },
-      "flow.switch": {
-        "label": "Switch 多分支",
-        "description": "根据表达式的值做多路分支。"
-      },
-      "flow.split": {
-        "label": "并行分发",
-        "description": "把执行扇出到多个并行分支。"
-      },
-      "flow.join": {
-        "label": "汇聚",
-        "description": "按 all / any / race 语义汇聚并行分支。"
-      },
-      "flow.loop": {
-        "label": "循环",
-        "description": "以 for-each / while / 固定次数重复子图。"
-      },
-      "flow.wait": {
-        "label": "等待",
-        "description": "暂停固定时长，或等待唤醒事件到达。"
-      },
-      "flow.set": {
-        "label": "设置变量",
-        "description": "为工作流作用域的变量赋值。"
-      },
-      "flow.subworkflow": {
-        "label": "调用子工作流",
-        "description": "把另一个工作流作为一个步骤来调用。"
-      },
-      "data.transform": {
-        "label": "数据转换",
-        "description": "对输入数组或对象执行 map / filter / reduce / sort。"
-      },
-      "data.code": {
-        "label": "自定义代码",
-        "description": "自定义 JS 表达式，超时 5 秒。"
-      },
-      "data.template": {
-        "label": "模板",
-        "description": "用 mustache 风格模板对上游数据进行渲染。"
-      },
-      "io.http": {
-        "label": "HTTP 请求",
-        "description": "调用外部 HTTP API，支持重试和超时。"
-      },
-      "io.webhook.respond": {
-        "label": "Webhook 响应",
-        "description": "向触发本次执行的入站 Webhook 返回响应负载。"
-      },
-      "annotation.note": {
-        "label": "便签",
-        "description": "画布上的自由文本便签，不参与执行。"
-      },
-      "annotation.group": {
-        "label": "分组框",
-        "description": "围绕多个节点的视觉分组框，不参与执行。"
+      "annotation": {
+        "note": {
+          "label": "便签",
+          "description": "画布上的自由文本便签，不参与执行。"
+        },
+        "group": {
+          "label": "分组框",
+          "description": "围绕多个节点的视觉分组框，不参与执行。"
+        }
       }
     },
     "runs": {
@@ -9498,7 +9676,7 @@
       "github": {
         "repoFullName": {
           "label": "仓库",
-          "hint": "格式：owner/name。支持 {{ }} 表达式。",
+          "hint": "格式：owner/name。支持 '{{ }}' 表达式。",
           "placeholder": "octocat/hello-world"
         },
         "addLabel": "添加标签",
@@ -9559,7 +9737,7 @@
           },
           "body": {
             "label": "审查正文",
-            "hint": "支持 {{ }} 表达式。"
+            "hint": "支持 '{{ }}' 表达式。"
           }
         },
         "reviewPrInline": {
@@ -9587,13 +9765,13 @@
           },
           "focus": {
             "label": "审查重点",
-            "hint": "可选的审查角度，例如「安全」或「性能」。支持 {{ }} 表达式。"
+            "hint": "可选的审查角度，例如「安全」或「性能」。支持 '{{ }}' 表达式。"
           }
         },
         "comment": {
           "body": {
             "label": "评论正文",
-            "hint": "支持 {{ }} 表达式。"
+            "hint": "支持 '{{ }}' 表达式。"
           }
         },
         "labelIssue": {
@@ -9625,7 +9803,7 @@
           },
           "body": {
             "label": "正文",
-            "hint": "支持 {{ }} 表达式和 Markdown。"
+            "hint": "支持 '{{ }}' 表达式和 Markdown。"
           },
           "draft": {
             "label": "草稿"
@@ -9722,8 +9900,8 @@
         },
         "content": {
           "label": "消息内容",
-          "hint": "支持 {{ $node['id'].out.field }} 表达式。",
-          "placeholder": "Hello, {{ $trigger.payload.userName }}"
+          "hint": "支持 '{{ $node[''id''].out.field }}' 表达式。",
+          "placeholder": "Hello, '{{ $trigger.payload.userName }}'"
         },
         "sessionId": {
           "label": "目标会话 ID（可选）"
@@ -9754,7 +9932,7 @@
         "query": {
           "label": "查询",
           "hint": "用于向量检索的文本，支持表达式。",
-          "placeholder": "{{ $trigger.payload.text }}"
+          "placeholder": "'{{ $trigger.payload.text }}'"
         },
         "topK": {
           "label": "Top K",
@@ -9806,8 +9984,8 @@
       "branch": {
         "condition": {
           "label": "条件",
-          "hint": "表达式，求值为真值则走真分支。支持 {{ }} 表达式。",
-          "placeholder": "{{ $node['n_classify'].out.label }} === 'urgent'"
+          "hint": "表达式，求值为真值则走真分支。支持 '{{ }}' 表达式。",
+          "placeholder": "'{{ $node[''n_classify''].out.label }}' === 'urgent'"
         },
         "truthyLabel": {
           "label": "真分支标签"
@@ -9845,7 +10023,7 @@
         },
         "url": {
           "label": "URL",
-          "hint": "支持 {{ }} 表达式。",
+          "hint": "支持 '{{ }}' 表达式。",
           "placeholder": "https://api.example.com/v1/things"
         },
         "body": {
@@ -9866,7 +10044,7 @@
       "template": {
         "template": {
           "label": "模板",
-          "hint": "类 Mustache 的 {{ }} 表达式，会对上游 / 触发 / 静态数据求值。"
+          "hint": "类 Mustache 的 '{{ }}' 表达式，会对上游 / 触发 / 静态数据求值。"
         }
       },
       "transform": {
@@ -9937,7 +10115,7 @@
         "responseTemplate": {
           "label": "响应正文模板",
           "hint": "可选。默认为工作流运行 ID。",
-          "placeholder": "{ \"ok\": true, \"runId\": \"{{ $run.id }}\" }"
+          "placeholder": "'{ \"ok\": true, \"runId\": \"{{ $run.id }}\" }'"
         }
       },
       "characterCreate": {
@@ -9947,7 +10125,7 @@
         },
         "systemPrompt": {
           "label": "系统提示词",
-          "hint": "支持 {{ }} 表达式以注入动态内容。"
+          "hint": "支持 '{{ }}' 表达式以注入动态内容。"
         },
         "description": {
           "label": "描述（可选）"
@@ -9971,7 +10149,7 @@
         },
         "patchJson": {
           "label": "Patch（JSON）",
-          "hint": "要更新的字段。例如：{ \"systemPrompt\": \"{{ $node.n_extract.out.text }}\" }"
+          "hint": "要更新的字段。例如：'{ \"systemPrompt\": \"{{ $node.n_extract.out.text }}\" }'"
         }
       },
       "teamCreate": {
@@ -9994,7 +10172,7 @@
         },
         "members": {
           "label": "成员（JSON 数组）",
-          "hint": "[{ \"characterId\": \"...\", \"role\": \"researcher\" }]"
+          "hint": "['{ \"characterId\": \"...\", \"role\": \"researcher\" }']"
         }
       },
       "teamUpdate": {
@@ -10003,7 +10181,7 @@
         },
         "patchJson": {
           "label": "Patch（JSON）",
-          "hint": "例如：{ \"orchestration\": \"supervisor\" }"
+          "hint": "例如：'{ \"orchestration\": \"supervisor\" }'"
         }
       },
       "skillUpsert": {
@@ -10054,12 +10232,12 @@
         },
         "url": {
           "label": "URL",
-          "hint": "支持 {{ }} 表达式。",
+          "hint": "支持 '{{ }}' 表达式。",
           "placeholder": "https://..."
         },
         "content": {
           "label": "内容",
-          "hint": "支持 {{ }} 表达式。"
+          "hint": "支持 '{{ }}' 表达式。"
         }
       },
       "mcpInvokeTool": {
@@ -10128,7 +10306,7 @@
         },
         "input": {
           "label": "输入",
-          "hint": "支持 {{ }} 表达式。"
+          "hint": "支持 '{{ }}' 表达式。"
         },
         "hint": {
           "label": "辅助说明（可选）"
@@ -10150,7 +10328,7 @@
         },
         "schemaJson": {
           "label": "Schema（JSON）",
-          "hint": "字段 → 期望类型。例如：{ \"name\": \"string\", \"amount\": \"number\" }"
+          "hint": "字段 → 期望类型。例如：'{ \"name\": \"string\", \"amount\": \"number\" }'"
         },
         "input": {
           "label": "输入"
@@ -10162,7 +10340,7 @@
       "aiEmbed": {
         "input": {
           "label": "输入",
-          "hint": "支持 {{ }} 表达式。"
+          "hint": "支持 '{{ }}' 表达式。"
         },
         "dimension": {
           "label": "维度",
@@ -10173,7 +10351,7 @@
         "subject": {
           "label": "Subject",
           "hint": "求值后与各 case 进行匹配的表达式。",
-          "placeholder": "{{ $node['n_classify'].out.label }}"
+          "placeholder": "'{{ $node[''n_classify''].out.label }}'"
         },
         "cases": {
           "label": "Cases",
@@ -10225,7 +10403,7 @@
         "inputExpression": {
           "label": "输入表达式",
           "hint": "求值后得到要迭代的数组。留空时使用第一条上游输出。",
-          "placeholder": "{{ $node['n_search'].out.results }}"
+          "placeholder": "'{{ $node[''n_search''].out.results }}'"
         },
         "whileCondition": {
           "label": "While 条件",
@@ -10257,12 +10435,12 @@
         },
         "headersJson": {
           "label": "Header（JSON）",
-          "hint": "例如：{ \"Content-Type\": \"application/json\" }",
-          "placeholder": "{ \"Content-Type\": \"application/json\" }"
+          "hint": "例如：'{ \"Content-Type\": \"application/json\" }'",
+          "placeholder": "'{ \"Content-Type\": \"application/json\" }'"
         },
         "body": {
           "label": "正文",
-          "hint": "支持 {{ }} 表达式。"
+          "hint": "支持 '{{ }}' 表达式。"
         }
       },
       "groupAnnotation": {
@@ -10295,8 +10473,31 @@
     "conversationList": {
       "header": "会话",
       "empty": "暂无会话",
+      "emptyDescription": "已连接适配器的会话会出现在这里。",
       "hideArchived": "隐藏已归档",
-      "showArchived": "显示 {count} 条已归档"
+      "showArchived": "显示 {count} 条已归档",
+      "openSidebar": "打开会话列表",
+      "search": {
+        "placeholder": "搜索会话…",
+        "aria": "搜索会话",
+        "clear": "清除搜索"
+      },
+      "filter": {
+        "aria": "筛选会话",
+        "all": "全部",
+        "unread": "未读",
+        "pinned": "已置顶",
+        "tooltip": {
+          "all": "显示全部会话",
+          "unread": "仅显示未读会话",
+          "pinned": "仅显示已置顶会话"
+        }
+      },
+      "emptyFiltered": {
+        "title": "没有匹配的会话",
+        "description": "尝试其他搜索词或清除当前筛选条件。",
+        "reset": "清除筛选"
+      }
     },
     "draftEditor": {
       "textPlaceholder": "草稿文本…",
@@ -10314,13 +10515,20 @@
       "reviewAria": "审核草稿回复"
     },
     "shell": {
-      "selectPrompt": "选择一个会话开始"
+      "selectPrompt": "选择一个会话开始",
+      "resize": {
+        "sidebarHandle": "调整侧栏宽度",
+        "detailHandle": "调整会话列表宽度"
+      }
     },
     "sidebar": {
       "title": "收件箱",
       "viewModeAria": "视图模式",
       "adapters": "适配器",
       "noAdapters": "未配置适配器",
+      "noAdaptersTitle": "尚无适配器",
+      "expandTooltip": "查看最近会话",
+      "toggleAdapter": "切换 {name} 的最近会话",
       "viewModes": {
         "by-adapter": "按适配器",
         "by-platform": "按平台",
@@ -10395,32 +10603,46 @@
     },
     "audit": {
       "kind": {
-        "delivery.success": "投递成功",
-        "delivery.error": "投递错误",
-        "delivery.deadlettered": "投递失败（死信）",
-        "delivery.downgraded": "投递降级",
-        "inbound.received": "已接收消息",
-        "inbound.deduped": "重复消息已忽略",
-        "inbound.policy_blocked": "策略已拦截",
-        "inbound.signature_failed": "签名校验失败",
-        "inbound.edited": "消息已编辑",
-        "inbound.deleted": "消息已撤回",
-        "inbound.read_indicator": "已读回执",
-        "inbound.member_added": "成员加入",
-        "inbound.member_removed": "成员退出",
-        "inbound.deferred_quiet_hours": "已延后（勿扰时段）",
-        "inbound.deferred_muted": "已延后（已静音）",
-        "inbound.deferred_manual_mode": "已延后（手动模式）",
-        "outbound.enqueued": "已加入发送队列",
-        "outbound.ai_run_enqueued": "AI 回复已加入队列",
-        "circuit.opened": "熔断器已打开",
-        "circuit.half_opened": "熔断器半开",
-        "circuit.closed": "熔断器已关闭",
-        "rate_limit.tripped": "已触发限流",
-        "credential.refreshed": "凭据已刷新",
-        "adapter.started": "适配器已启动",
-        "adapter.stopped": "适配器已停止",
-        "adapter.error": "适配器错误"
+        "delivery": {
+          "success": "投递成功",
+          "error": "投递错误",
+          "deadlettered": "投递失败（死信）",
+          "downgraded": "投递降级"
+        },
+        "inbound": {
+          "received": "已接收消息",
+          "deduped": "重复消息已忽略",
+          "policy_blocked": "策略已拦截",
+          "signature_failed": "签名校验失败",
+          "edited": "消息已编辑",
+          "deleted": "消息已撤回",
+          "read_indicator": "已读回执",
+          "member_added": "成员加入",
+          "member_removed": "成员退出",
+          "deferred_quiet_hours": "已延后（勿扰时段）",
+          "deferred_muted": "已延后（已静音）",
+          "deferred_manual_mode": "已延后（手动模式）"
+        },
+        "outbound": {
+          "enqueued": "已加入发送队列",
+          "ai_run_enqueued": "AI 回复已加入队列"
+        },
+        "circuit": {
+          "opened": "熔断器已打开",
+          "half_opened": "熔断器半开",
+          "closed": "熔断器已关闭"
+        },
+        "rate_limit": {
+          "tripped": "已触发限流"
+        },
+        "credential": {
+          "refreshed": "凭据已刷新"
+        },
+        "adapter": {
+          "started": "适配器已启动",
+          "stopped": "适配器已停止",
+          "error": "适配器错误"
+        }
       }
     }
   }

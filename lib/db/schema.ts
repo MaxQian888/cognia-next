@@ -23,7 +23,7 @@ import type {
 } from "./canvas-types"
 import type { A2UIAppRow, A2UISurfaceRow, A2UITemplateRow, A2UIEventHistoryRow } from "./a2ui-types"
 import { buildA2UIBridgeMcpRow, A2UI_BRIDGE_SERVER_NAME } from "@/lib/a2ui/mcp-tool-schemas"
-import type { TwinSource, TwinChunk, TwinProfile, TwinDraft, TwinJob } from "@/types/twin"
+import type { Twin, TwinSource, TwinChunk, TwinProfile, TwinDraft, TwinJob } from "@/types/twin"
 import type { MobileOutboundJobRow } from "./mobile-outbound-types"
 import type {
   PluginRow,
@@ -75,6 +75,7 @@ export class CogniaDB extends Dexie {
   a2uiSurfaces!: Table<A2UISurfaceRow, string>
   a2uiTemplates!: Table<A2UITemplateRow, string>
   a2uiEventHistory!: Table<A2UIEventHistoryRow, string>
+  twins!: Table<Twin, string>
   twinSources!: Table<TwinSource, string>
   twinChunks!: Table<TwinChunk, string>
   twinProfile!: Table<TwinProfile, string>
@@ -964,6 +965,67 @@ export class CogniaDB extends Dexie {
     //   the next contributor a clean anchor — and to surface in the migration
     //   audit trail that v32 corresponds to the Computer Use completion work.
     this.version(32).stores({})
+
+    // v33 — ADR-0021 WebRTC WAN transport: `PairedDeviceRow.rendezvousId` and
+    //   `PairedDeviceRow.rendezvousSecret` are minted by the desktop pair
+    //   handler and propagated through `companion://device-paired`. Both are
+    //   optional (non-indexed JSON columns), so no `.stores()` change is
+    //   required — IndexedDB stores the extra keys transparently. The
+    //   version bump records that pre-v33 rows have neither field and the
+    //   transport must therefore treat them as WebRTC-disabled until the
+    //   user re-pairs.
+    this.version(33).stores({})
+
+    // v34 — Twin registry table. The container row that binds Character →
+    // Twin and powers archive/rename/delete from the Twin Selector UI. Pure
+    // additive on the schema side; the upgrade hook walks every existing
+    // twin* table plus the `characters.twinId` field to ensure a registry
+    // row exists for legacy twinIds, so pre-v34 installs with twin data but
+    // no registry row land in a coherent state.
+    //   • `&id`         — primary key (`twn_*`).
+    //   • `updatedAt`   — newest-first listing in the selector.
+    //   • `archived`    — boolean filter for the "Show archived" toggle.
+    //   • `createdAt`   — debug / data settings sort.
+    this.version(34)
+      .stores({
+        twins: "&id, updatedAt, archived, createdAt",
+      })
+      .upgrade(async (tx) => {
+        const twinsTable = tx.table("twins")
+        const existing = new Set((await twinsTable.toArray()).map((t: { id: string }) => t.id))
+        const seen = new Set<string>()
+        const collectTwinIds = async (tableName: string) => {
+          const rows = await tx.table(tableName).toArray()
+          for (const row of rows) {
+            const id = (row as { twinId?: string }).twinId
+            if (id) seen.add(id)
+          }
+        }
+        await collectTwinIds("twinSources")
+        await collectTwinIds("twinChunks")
+        await collectTwinIds("twinProfile")
+        await collectTwinIds("twinDrafts")
+        await collectTwinIds("twinJobs")
+        const charactersByTwin = new Map<string, { name?: string }>()
+        for (const character of await tx.table("characters").toArray()) {
+          const id = (character as { twinId?: string }).twinId
+          if (id) {
+            seen.add(id)
+            if (!charactersByTwin.has(id)) charactersByTwin.set(id, character)
+          }
+        }
+        const now = Date.now()
+        for (const id of seen) {
+          if (!id || existing.has(id)) continue
+          const character = charactersByTwin.get(id)
+          await twinsTable.add({
+            id,
+            name: character?.name || id,
+            createdAt: now,
+            updatedAt: now,
+          })
+        }
+      })
   }
 
   sessionState!: Table<SessionStateRow, string>

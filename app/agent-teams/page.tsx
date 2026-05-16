@@ -112,7 +112,6 @@ function timeAgo(date: Date, locale: string): string {
 
 export default function AgentTeamsListPage() {
   const router = useRouter()
-  const locale = useLocale()
   const t = useTranslations("agentTeamsWorkspace")
   const tCat = useTranslations("agentTeamsWorkspace.templates.categories")
 

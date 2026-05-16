@@ -7,8 +7,7 @@
 
 import { useTranslations } from "next-intl"
 import { GlobeIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import {
@@ -52,26 +51,23 @@ export function WebSearchToggle({ disabled: streamingDisabled }: WebSearchToggle
       : t("tooltipOff")
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          size="sm"
-          variant={on ? "default" : "ghost"}
-          aria-label={tComposer("ariaToggleWebSearch")}
-          aria-pressed={on}
-          disabled={disabled}
-          onClick={() => setOn(!on)}
-          className={cn(
-            "h-6 gap-1 px-1.5 text-[11px] font-normal",
-            on && "bg-primary/90 text-primary-foreground hover:bg-primary"
-          )}
-        >
-          <GlobeIcon className="size-3.5" />
-          <span className="hidden sm:inline">{tComposer("webLabel")}</span>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="top">{tooltip}</TooltipContent>
-    </Tooltip>
+    <TooltipIconButton
+      type="button"
+      size="sm"
+      variant={on ? "default" : "ghost"}
+      tooltip={tooltip}
+      side="top"
+      aria-label={tComposer("ariaToggleWebSearch")}
+      aria-pressed={on}
+      disabled={disabled}
+      onClick={() => setOn(!on)}
+      className={cn(
+        "h-6 gap-1 px-1.5 text-[11px] font-normal",
+        on && "bg-primary/90 text-primary-foreground hover:bg-primary"
+      )}
+    >
+      <GlobeIcon className="size-3.5" />
+      <span className="hidden sm:inline">{tComposer("webLabel")}</span>
+    </TooltipIconButton>
   )
 }

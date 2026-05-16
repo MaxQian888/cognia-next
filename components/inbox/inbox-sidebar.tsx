@@ -6,13 +6,19 @@
  * Lists each enabled adapter as a collapsible section. Three view-mode chips
  * at the top ("By adapter" / "By platform" / "Unified") update the URL query
  * parameter `?view=...`.
+ *
+ * `InboxSidebar` renders the full shadcn `<Sidebar>` wrapper (used by the
+ * tablet/mobile branch of `<InboxShell />`). `InboxSidebarContent` exposes
+ * the inner content only — header + adapter group — so the desktop branch
+ * can mount it inside a `<ResizablePanel>` without doubling the offcanvas
+ * positioning Radix applies to `<Sidebar>`.
  */
 
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { CircleIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react"
+import { CircleIcon, ChevronDownIcon, ChevronRightIcon, InboxIcon } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -24,6 +30,9 @@ import {
   SidebarHeader,
 } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { getDb } from "@/lib/db/schema"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
@@ -43,7 +52,25 @@ interface InboxSidebarProps {
   activePlatformKind?: string
 }
 
-export function InboxSidebar({ view, activeAdapterId, activePlatformKind }: InboxSidebarProps) {
+/**
+ * Tablet / mobile entry-point — wraps the content in the shadcn `<Sidebar>`
+ * primitive so the offcanvas-on-mobile behavior of `SidebarProvider` keeps
+ * working. The desktop branch of `<InboxShell />` uses
+ * `<InboxSidebarContent />` directly inside a `<ResizablePanel>`.
+ */
+export function InboxSidebar(props: InboxSidebarProps) {
+  return (
+    <Sidebar>
+      <InboxSidebarContent {...props} />
+    </Sidebar>
+  )
+}
+
+export function InboxSidebarContent({
+  view,
+  activeAdapterId,
+  activePlatformKind,
+}: InboxSidebarProps) {
   const t = useTranslations("inbox.sidebar")
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -69,24 +96,33 @@ export function InboxSidebar({ view, activeAdapterId, activePlatformKind }: Inbo
   }
 
   return (
-    <Sidebar>
+    <>
       <SidebarHeader className="px-3 py-2 space-y-2">
         <h2 className="text-sm font-semibold">{t("title")}</h2>
-        {/* View-mode chips */}
-        <div className="flex flex-wrap gap-1" role="group" aria-label={t("viewModeAria")}>
+        <ToggleGroup
+          type="single"
+          value={currentViewMode}
+          onValueChange={(value) => {
+            if (!value) return
+            switchViewMode(value as InboxViewMode)
+          }}
+          variant="outline"
+          size="sm"
+          aria-label={t("viewModeAria")}
+          className="w-full"
+        >
           {ALL_VIEW_MODES.map((mode) => (
-            <Button
+            <ToggleGroupItem
               key={mode}
-              variant={currentViewMode === mode ? "default" : "outline"}
-              size="sm"
-              className="h-6 px-2 text-xs"
-              onClick={() => switchViewMode(mode)}
+              value={mode}
+              aria-label={t(`viewModes.${mode}`)}
               data-testid={`view-chip-${mode}`}
+              className="flex-1 h-7 text-xs"
             >
               {t(`viewModes.${mode}`)}
-            </Button>
+            </ToggleGroupItem>
           ))}
-        </div>
+        </ToggleGroup>
       </SidebarHeader>
 
       <SidebarContent>
@@ -95,7 +131,15 @@ export function InboxSidebar({ view, activeAdapterId, activePlatformKind }: Inbo
           <SidebarMenu>
             {!adapterInstances || adapterInstances.length === 0 ? (
               <SidebarMenuItem>
-                <span className="px-3 py-2 text-xs text-muted-foreground">{t("noAdapters")}</span>
+                <Empty className="border-0 p-4">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <InboxIcon />
+                    </EmptyMedia>
+                    <EmptyTitle>{t("noAdaptersTitle")}</EmptyTitle>
+                    <EmptyDescription>{t("noAdapters")}</EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
               </SidebarMenuItem>
             ) : (
               adapterInstances.map((adapter) => (
@@ -118,7 +162,7 @@ export function InboxSidebar({ view, activeAdapterId, activePlatformKind }: Inbo
           context={{ view: currentViewMode, activeAdapterId, activePlatformKind }}
         />
       </SidebarContent>
-    </Sidebar>
+    </>
   )
 }
 
@@ -170,19 +214,27 @@ function AdapterSection({
           />
           <span className="flex-1 truncate">{adapter.displayName}</span>
         </SidebarMenuButton>
-        <button
-          type="button"
-          onClick={toggleExpanded}
-          aria-expanded={expanded}
-          className="flex h-7 w-7 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
-          data-testid={`adapter-section-toggle-${adapter.id}`}
-        >
-          {expanded ? (
-            <ChevronDownIcon className="h-3 w-3" />
-          ) : (
-            <ChevronRightIcon className="h-3 w-3" />
-          )}
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={toggleExpanded}
+              aria-expanded={expanded}
+              aria-label={t("toggleAdapter", { name: adapter.displayName })}
+              className="h-9 w-9 shrink-0 text-muted-foreground hover:text-foreground md:h-7 md:w-7"
+              data-testid={`adapter-section-toggle-${adapter.id}`}
+            >
+              {expanded ? (
+                <ChevronDownIcon className="h-3 w-3" />
+              ) : (
+                <ChevronRightIcon className="h-3 w-3" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">{t("expandTooltip")}</TooltipContent>
+        </Tooltip>
       </div>
       {expanded && (
         <ul
@@ -198,10 +250,10 @@ function AdapterSection({
                 <li key={session.id}>
                   <Link
                     href={`/inbox/c/${encodeURIComponent(ck)}`}
-                    className="block truncate rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                    className="flex min-h-11 items-center rounded px-2 py-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground md:min-h-0 md:py-1"
                     data-testid={`adapter-recent-${adapter.id}-${session.id}`}
                   >
-                    {session.title || ck}
+                    <span className="truncate">{session.title || ck}</span>
                   </Link>
                 </li>
               )

@@ -51,6 +51,82 @@ jest.mock("sonner", () => ({
   },
 }))
 
+// Bridge the Radix Select into a native <select> for accessibility testing.
+// The mock bubbles aria-label + data-testid up from SelectTrigger so existing
+// `screen.getByLabelText("Backend")` queries keep working.
+jest.mock("@/components/ui/select", () => {
+  const React = jest.requireActual("react") as typeof import("react")
+  type Harvest = {
+    ariaLabel?: string
+    testId?: string
+    options: Array<{ value: string; label: React.ReactNode }>
+  }
+  const collect = (node: React.ReactNode, sink: Harvest): void => {
+    React.Children.forEach(node, (child) => {
+      if (!React.isValidElement(child)) return
+      const props = child.props as {
+        children?: React.ReactNode
+        value?: string
+        "aria-label"?: string
+        "data-testid"?: string
+      }
+      const kind = (child.type as React.ComponentType & { displayName?: string }).displayName
+      if (kind === "SelectTriggerStub") {
+        if (props["aria-label"]) sink.ariaLabel = props["aria-label"]
+        if (props["data-testid"]) sink.testId = props["data-testid"]
+      }
+      if (kind === "SelectItemStub") {
+        sink.options.push({
+          value: props.value ?? "",
+          label: props.children ?? "",
+        })
+        return
+      }
+      collect(props.children, sink)
+    })
+  }
+  const Trigger = ({ children }: { children: React.ReactNode }) => <>{children}</>
+  ;(Trigger as React.FC & { displayName?: string }).displayName = "SelectTriggerStub"
+  const Item = ({ children }: { value: string; children: React.ReactNode }) => <>{children}</>
+  ;(Item as React.FC & { displayName?: string }).displayName = "SelectItemStub"
+  const Select = ({
+    value,
+    onValueChange,
+    disabled,
+    children,
+  }: {
+    value: string
+    onValueChange: (v: string) => void
+    disabled?: boolean
+    children: React.ReactNode
+  }) => {
+    const harvest: Harvest = { options: [] }
+    collect(children, harvest)
+    return (
+      <select
+        aria-label={harvest.ariaLabel}
+        data-testid={harvest.testId}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onValueChange(e.target.value)}
+      >
+        {harvest.options.map((o, i) => (
+          <option key={`${o.value}-${i}`} value={o.value}>
+            {typeof o.label === "string" ? o.label : String(o.value)}
+          </option>
+        ))}
+      </select>
+    )
+  }
+  return {
+    Select,
+    SelectTrigger: Trigger,
+    SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    SelectValue: () => null,
+    SelectItem: Item,
+  }
+})
+
 // The component uses dexie-react-hooks. In jsdom we need fake-indexeddb +
 // the real Dexie schema but we mock the twin-runtime-settings module so we
 // don't need a fully seeded DB for these tests.

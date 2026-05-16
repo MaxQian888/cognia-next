@@ -1,11 +1,10 @@
 "use client"
 
-import { useCallback, useEffect, useRef } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useSkillsStore } from "@/stores/skills"
 import { getSkill, updateSkill } from "@/lib/db/skills"
 import { updateResource } from "@/lib/db/skill-resources"
 import { validateSkill } from "@/lib/skills/validate"
-import { toast } from "sonner"
 
 const AUTOSAVE_MS = 2000
 
@@ -18,11 +17,17 @@ const AUTOSAVE_MS = 2000
  *   • Autosave debounces 2s per file. The main file is held back from
  *     autosave when the current draft would fail validation; resources
  *     autosave unconditionally.
+ *
+ * The hook is i18n-agnostic: the user-visible "all saved" toast is fired
+ * by the caller via `savedAllSignal`, which increments after a successful
+ * `saveAll()` so the parent component can call `useTranslations` and
+ * `toast.success` itself.
  */
 export function useEditorWorkspace() {
   const ws = useSkillsStore((s) => s.editorWorkspace)
   const markSaved = useSkillsStore((s) => s.markSaved)
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const [savedAllSignal, setSavedAllSignal] = useState(0)
 
   const saveFile = useCallback(
     async (fileId: string) => {
@@ -69,7 +74,7 @@ export function useEditorWorkspace() {
     for (const f of state.openFiles.filter((x) => x.kind === "resource")) {
       await saveFile(f.id)
     }
-    toast.success("All saved.")
+    setSavedAllSignal((n) => n + 1)
   }, [saveFile])
 
   // Autosave per file (debounced).
@@ -87,5 +92,5 @@ export function useEditorWorkspace() {
     }
   }, [ws.openFiles, saveFile])
 
-  return { saveActive, saveAll, saveFile }
+  return { saveActive, saveAll, saveFile, savedAllSignal }
 }

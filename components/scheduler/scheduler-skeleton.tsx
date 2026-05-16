@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "next-intl"
 import { Skeleton } from "@/components/ui/skeleton"
 
 interface SchedulerSkeletonProps {
@@ -13,6 +14,7 @@ interface SchedulerSkeletonProps {
  * lands.
  */
 export function SchedulerSkeleton({ variant = "full" }: SchedulerSkeletonProps) {
+  const t = useTranslations("scheduler")
   if (variant === "sidebar") {
     return <SidebarSkeleton />
   }
@@ -24,7 +26,7 @@ export function SchedulerSkeleton({ variant = "full" }: SchedulerSkeletonProps) 
       data-testid="scheduler-skeleton-full"
       className="flex h-full w-full"
       role="status"
-      aria-label="Loading scheduler"
+      aria-label={t("loadingScheduler")}
     >
       <div className="hidden border-r sm:block sm:w-64">
         <SidebarSkeleton />

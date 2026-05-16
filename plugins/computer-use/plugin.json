@@ -16,10 +16,10 @@
       "availability": "blocked",
       "hint": "Requires Tauri Rust commands for screen capture and input synthesis — desktop only."
     },
-    "desktop": {
+    "tauri": {
       "availability": "experimental",
       "entrypoint": "src/index.ts",
-      "hint": "The plugin registers the native tool definitions and renderer-side dispatch wiring. The Rust enigo/xcap backend ships in a follow-up commit."
+      "hint": "The plugin registers the native tool definitions and renderer-side dispatch wiring. Drives the Rust uiautomation/xcap backend in src-tauri/src/automation/ via the plugin_computer_use_* Tauri commands."
     }
   }
 }

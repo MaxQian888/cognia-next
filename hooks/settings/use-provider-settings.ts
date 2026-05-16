@@ -77,8 +77,14 @@ export function useProviderSettings(): UseProviderSettingsResult {
   const upsertCustomProviderStore = useSettingsStore((s) => s.upsertCustomProvider)
   const removeCustomProviderStore = useSettingsStore((s) => s.removeCustomProvider)
 
-  const providerSettings = settings?.providerSettings ?? {}
-  const customProvidersList = settings?.customProviders ?? []
+  const providerSettings = useMemo(
+    () => settings?.providerSettings ?? {},
+    [settings?.providerSettings]
+  )
+  const customProvidersList = useMemo(
+    () => settings?.customProviders ?? [],
+    [settings?.customProviders]
+  )
   const defaultProvider = settings?.defaultProvider ?? ""
   const uiPreferences = useSettingsStore((s) => s.providerUIPreferences)
 

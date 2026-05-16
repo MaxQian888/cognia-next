@@ -38,6 +38,7 @@ import { formatRelativeDate, getDateKey, countLines } from "@/lib/canvas/utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { useArtifactStore } from "@/stores"
 import { cn } from "@/lib/utils"
 import type { CanvasDocumentVersion } from "@/types"
@@ -153,7 +154,7 @@ export function VersionHistoryPanel({ documentId, trigger }: VersionHistoryPanel
         </SheetTrigger>
         <SheetContent
           side="right"
-          className="w-full sm:w-[400px]"
+          className="flex w-full flex-col sm:w-[min(90vw,560px)]"
           data-testid="canvas-version-history-panel"
         >
           <SheetHeader>
@@ -163,7 +164,7 @@ export function VersionHistoryPanel({ documentId, trigger }: VersionHistoryPanel
             </SheetTitle>
           </SheetHeader>
 
-          <div className="mt-4 space-y-4">
+          <div className="mt-4 flex flex-1 min-h-0 flex-col space-y-4">
             {/* Action buttons */}
             <div className="flex gap-2">
               <Button
@@ -200,13 +201,17 @@ export function VersionHistoryPanel({ documentId, trigger }: VersionHistoryPanel
             )}
 
             {/* Version list */}
-            <ScrollArea className="h-[calc(100vh-200px)]">
+            <ScrollArea className="flex-1 min-h-0">
               {versions.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <History className="h-12 w-12 text-muted-foreground/50" />
-                  <p className="mt-4 text-sm text-muted-foreground">{t("noVersions")}</p>
-                  <p className="text-xs text-muted-foreground">{t("noVersionsHint")}</p>
-                </div>
+                <Empty className="border-0">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <History />
+                    </EmptyMedia>
+                    <EmptyTitle>{t("noVersions")}</EmptyTitle>
+                    <EmptyDescription>{t("noVersionsHint")}</EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
               ) : (
                 <div className="space-y-4 pr-4">
                   {Object.entries(groupedVersions).map(([dateKey, dateVersions]) => (
@@ -415,7 +420,7 @@ function VersionItem({
             <p className="mt-1 text-sm text-muted-foreground truncate">{version.description}</p>
           )}
           <p className="mt-1 text-xs text-muted-foreground">
-            {countLines(version.content)} {t("lines")}
+            {t("linesCount", { count: countLines(version.content) })}
           </p>
         </div>
       </div>

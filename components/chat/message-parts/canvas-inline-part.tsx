@@ -14,6 +14,7 @@
  */
 
 import { useState } from "react"
+import { useTranslations } from "next-intl"
 import {
   Artifact as ArtifactShell,
   ArtifactActions,
@@ -36,6 +37,8 @@ interface CanvasInlinePartProps {
 }
 
 export function CanvasInlinePart({ part, className }: CanvasInlinePartProps) {
+  const t = useTranslations("chat.canvasInline")
+  const tArtifact = useTranslations("chat.artifactPart")
   const canvas = useArtifactStore((s) => s.canvasDocuments[part.canvasId])
   const [open, setOpen] = useState(true)
 
@@ -52,7 +55,7 @@ export function CanvasInlinePart({ part, className }: CanvasInlinePartProps) {
         <FileWarningIcon className="size-3.5" aria-hidden="true" />
         <span>
           {part.title}
-          <span className="ml-2 opacity-70">(已清理)</span>
+          <span className="ml-2 opacity-70">{tArtifact("cleared")}</span>
         </span>
       </div>
     )
@@ -81,8 +84,8 @@ export function CanvasInlinePart({ part, className }: CanvasInlinePartProps) {
             href={canvasHref}
             className="inline-flex size-8 items-center justify-center rounded-md p-0 text-muted-foreground hover:bg-accent hover:text-foreground"
             data-testid="canvas-inline-part-open"
-            aria-label="Open in Canvas"
-            title="Open in Canvas"
+            aria-label={t("openInCanvas")}
+            title={t("openInCanvas")}
           >
             <ExternalLinkIcon className="size-4" />
           </a>
@@ -92,7 +95,7 @@ export function CanvasInlinePart({ part, className }: CanvasInlinePartProps) {
             className="size-8 p-0 text-muted-foreground hover:text-foreground"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
-            aria-label={open ? "Collapse canvas preview" : "Expand canvas preview"}
+            aria-label={open ? t("collapsePreview") : t("expandPreview")}
             data-testid="canvas-inline-part-toggle"
             type="button"
           >

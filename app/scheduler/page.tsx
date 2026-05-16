@@ -6,7 +6,6 @@
  */
 
 import { useState, useCallback, useMemo, useEffect, useSyncExternalStore } from "react"
-import { useTranslations } from "next-intl"
 import { useScheduler, useSystemScheduler } from "@/hooks/scheduler"
 import { useUnifiedScheduledItems } from "@/hooks/scheduler/use-unified-items"
 import { bootstrapSchedulerSources } from "@/lib/scheduler/sources/bootstrap"
@@ -95,8 +94,6 @@ export default function SchedulerPage() {
     requestElevation,
     clearError: clearSystemError,
   } = useSystemScheduler()
-
-  const t = useTranslations("scheduler")
 
   // Bootstrap the source registry exactly once per process. The bootstrap
   // function is idempotent and registers every source against the singleton
@@ -480,7 +477,12 @@ export default function SchedulerPage() {
       )}
 
       {/* Desktop + mobile list layout */}
-      <div className={cn("flex h-full", isMobile && mobileView === "detail" && "hidden")}>
+      <div
+        className={cn(
+          "flex h-full w-full min-w-0 flex-1",
+          isMobile && mobileView === "detail" && "hidden"
+        )}
+      >
         <SchedulerSidebar
           tasks={filteredTasks}
           systemTasks={systemTasks}

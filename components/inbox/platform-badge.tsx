@@ -2,8 +2,9 @@
 
 /**
  * Platform badge — small icon + colour coding per platform kind.
- * Uses Lucide icons where a reasonable analogue exists; falls back to
- * a simple text abbreviation for less-common platforms.
+ * Wraps the shadcn `Badge` primitive (ghost variant) so it inherits the same
+ * inline-flex / gap / focus-ring contract as every other badge in the app.
+ * Per-platform colour comes from `config.colorClass`, applied via className.
  */
 
 import {
@@ -16,6 +17,7 @@ import {
   GridIcon,
   GitBranchIcon,
 } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 
@@ -60,13 +62,21 @@ export function PlatformBadge({ platform, className, iconOnly = false }: Platfor
   const Icon = config.icon
 
   return (
-    <span
-      className={cn("inline-flex items-center gap-1", config.colorClass, className)}
+    <Badge
+      variant="ghost"
+      className={cn(
+        // Restore the visible icon size from the original implementation — the
+        // Badge default (`[&>svg]:size-3` = 12 px) is too small for a platform
+        // glyph in a list row.
+        "px-0 py-0 font-medium [&>svg]:size-3.5",
+        config.colorClass,
+        className
+      )}
       title={platform}
       data-testid={`platform-badge-${platform}`}
     >
-      <Icon className="h-3.5 w-3.5" />
-      {!iconOnly && <span className="text-xs font-medium leading-none">{config.label}</span>}
-    </span>
+      <Icon />
+      {!iconOnly && <span className="text-xs leading-none">{config.label}</span>}
+    </Badge>
   )
 }

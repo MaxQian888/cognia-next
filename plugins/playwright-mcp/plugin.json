@@ -18,7 +18,7 @@
       "availability": "blocked",
       "hint": "Requires npx to spawn @playwright/mcp@latest — desktop only."
     },
-    "desktop": {
+    "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
     }

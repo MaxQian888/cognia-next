@@ -3,7 +3,8 @@
  */
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
+    vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
 jest.mock("next-themes", () => ({
@@ -45,7 +46,7 @@ jest.mock("@/lib/db/skill-resources", () => ({
   updateResource: jest.fn(),
 }))
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { useSkillsStore } from "@/stores/skills"
 import { SkillEditorWorkspace } from "./skill-editor-workspace"
 
@@ -80,8 +81,46 @@ describe("SkillEditorWorkspace", () => {
     } as never
     useSkillsStore.getState().openSkillInEditor("s1", "body")
     render(<SkillEditorWorkspace />)
-    // SKILL.md appears twice (file tree + tab strip); both matter.
+    // SKILL.md appears multiple times — desktop file tree + tab strip + mobile sheet body.
     expect(screen.getAllByText("SKILL.md").length).toBeGreaterThanOrEqual(2)
     expect(screen.getByTestId("monaco")).toBeInTheDocument()
+  })
+
+  it("opens an AlertDialog when closing a dirty tab and discards on confirm", () => {
+    skillRef.current = {
+      id: "s1",
+      name: "Test",
+      content: "body",
+      createdAt: 0,
+      updatedAt: 0,
+      source: "custom",
+    } as never
+    useSkillsStore.getState().openSkillInEditor("s1", "body")
+    useSkillsStore.getState().updateDraftContent("main", "modified body")
+    render(<SkillEditorWorkspace />)
+    // The first close button in the tab strip belongs to main (file path "SKILL.md").
+    fireEvent.click(screen.getAllByLabelText("closeTab:" + JSON.stringify({ path: "SKILL.md" }))[0])
+    // AlertDialog renders the localized title + body keys via the next-intl mock.
+    expect(screen.getByText("closeDirtyTitle")).toBeInTheDocument()
+    // Discard removes the open file.
+    fireEvent.click(screen.getByText("closeDirtyDiscard"))
+    expect(useSkillsStore.getState().editorWorkspace.openFiles).toHaveLength(0)
+  })
+
+  it("keeps the file open when the user cancels the close-dirty dialog", () => {
+    skillRef.current = {
+      id: "s1",
+      name: "Test",
+      content: "body",
+      createdAt: 0,
+      updatedAt: 0,
+      source: "custom",
+    } as never
+    useSkillsStore.getState().openSkillInEditor("s1", "body")
+    useSkillsStore.getState().updateDraftContent("main", "modified body")
+    render(<SkillEditorWorkspace />)
+    fireEvent.click(screen.getAllByLabelText("closeTab:" + JSON.stringify({ path: "SKILL.md" }))[0])
+    fireEvent.click(screen.getByText("closeDirtyKeep"))
+    expect(useSkillsStore.getState().editorWorkspace.openFiles).toHaveLength(1)
   })
 })

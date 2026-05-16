@@ -33,6 +33,23 @@ describe("PlatformBadge", () => {
     expect(screen.getByTitle("lark")).toBeInTheDocument()
   })
 
+  it("uses the shadcn Badge primitive (ghost variant)", () => {
+    render(<PlatformBadge platform="telegram" />)
+    const badge = screen.getByTestId("platform-badge-telegram")
+    expect(badge).toHaveAttribute("data-slot", "badge")
+    expect(badge).toHaveAttribute("data-variant", "ghost")
+  })
+
+  it("applies the platform colour class", () => {
+    render(<PlatformBadge platform="telegram" />)
+    expect(screen.getByTestId("platform-badge-telegram")).toHaveClass("text-sky-500")
+  })
+
+  it("merges a user-supplied className", () => {
+    render(<PlatformBadge platform="telegram" className="extra-class" />)
+    expect(screen.getByTestId("platform-badge-telegram")).toHaveClass("extra-class")
+  })
+
   it("renders all 14 platform kinds without crashing", () => {
     const PLATFORMS = [
       "telegram",

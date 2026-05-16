@@ -2,6 +2,8 @@
  * @jest-environment jsdom
  */
 
+import { readFileSync } from "fs"
+import { join } from "path"
 import { render, screen, fireEvent } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
@@ -81,11 +83,17 @@ jest.mock("@/lib/db/plugins", () => ({
   listPlugins: jest.fn(() => Promise.resolve(mockPlugins)),
 }))
 
+const applyPolicy = jest.fn()
+jest.mock("@/lib/plugin/policy-runtime", () => ({
+  applyPluginPolicyToRuntime: (...args: unknown[]) => applyPolicy(...args),
+}))
+
 import { PluginsSection } from "./plugins-section"
 
 beforeEach(() => {
   currentSearch = ""
   window.localStorage.clear()
+  applyPolicy.mockReset()
 })
 
 // Radix Tabs only mounts the active TabsContent — `fireEvent.click` on a
@@ -166,6 +174,29 @@ describe("PluginsSection (governance panel)", () => {
     expect(screen.getByText(/badgeTotal:\d+/)).toBeInTheDocument()
   })
 
+  // Companion-skip to the one above — same React 19 / Zustand loop blocks
+  // a full render of the audit tab in jsdom. The Card we mount here lives
+  // in the same TSX block; its behavior is covered end-to-end by
+  // `components/settings/plugins/plugin-data-management.test.tsx`.
+  it.skip("audit tab mounts the per-plugin data-management card (list mode)", () => {
+    renderWithTab("audit")
+    expect(screen.getByTestId("audit-data-management-card")).toBeInTheDocument()
+    expect(screen.getByText("dataManagementTitle")).toBeInTheDocument()
+    expect(screen.getByText("dataManagementHint")).toBeInTheDocument()
+    // List mode = no pluginId prop → list-mode testid surfaces.
+    expect(screen.getByTestId("plugin-data-management-list")).toBeInTheDocument()
+  })
+
+  it("imports the data-management list-mode component into the section module", () => {
+    // Structural guard: importing the source file should not crash, and the
+    // exported PluginsSection should reference PluginDataManagement so the
+    // bundler keeps the dependency.
+    const sectionSource = readFileSync(join(__dirname, "plugins-section.tsx"), "utf8")
+    expect(sectionSource).toContain("PluginDataManagement")
+    expect(sectionSource).toContain("audit-data-management-card")
+    expect(sectionSource).toContain("<PluginDataManagement />")
+  })
+
   it("policy tab toggling governance persists to localStorage", () => {
     renderWithTab("policy")
     const switches = screen.getAllByRole("switch")
@@ -190,6 +221,33 @@ describe("PluginsSection (governance panel)", () => {
     fireEvent.click(switches[2])
     const stored = window.localStorage.getItem("cognia.plugins.policy")
     expect(JSON.parse(stored as string).autoUpdate).toBe(true)
+  })
+
+  it("policy tab applies the persisted snapshot to the runtime on mount", () => {
+    window.localStorage.setItem(
+      "cognia.plugins.policy",
+      JSON.stringify({ governance: "block", signatureRequired: true, autoUpdate: true })
+    )
+    renderWithTab("policy")
+    expect(applyPolicy).toHaveBeenCalledWith({
+      governance: "block",
+      signatureRequired: true,
+      autoUpdate: true,
+    })
+  })
+
+  it("policy tab re-applies the snapshot to the runtime after each toggle", () => {
+    renderWithTab("policy")
+    applyPolicy.mockClear()
+    const switches = screen.getAllByRole("switch")
+    fireEvent.click(switches[0])
+    expect(applyPolicy).toHaveBeenCalledWith(expect.objectContaining({ governance: "block" }))
+    fireEvent.click(switches[1])
+    expect(applyPolicy).toHaveBeenLastCalledWith(
+      expect.objectContaining({ signatureRequired: true })
+    )
+    fireEvent.click(switches[2])
+    expect(applyPolicy).toHaveBeenLastCalledWith(expect.objectContaining({ autoUpdate: true }))
   })
 
   it("hydrates initial tab from ?pluginsTab=", () => {

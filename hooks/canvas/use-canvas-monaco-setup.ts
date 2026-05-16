@@ -34,7 +34,12 @@ export function useCanvasMonacoSetup(opts: UseCanvasMonacoSetupOptions = {}) {
 
   const getEditorOptions = useCanvasSettingsStore((s) => s.getEditorOptions)
   const editorSettings = useCanvasSettingsStore((s) => s.settings.editor)
-  const editorOptions = useMemo(() => getEditorOptions(), [getEditorOptions, editorSettings])
+  const editorOptions = useMemo(() => {
+    // editorSettings drives Monaco option regeneration; reading it inside the
+    // body satisfies exhaustive-deps without an extra reference.
+    void editorSettings
+    return getEditorOptions()
+  }, [getEditorOptions, editorSettings])
 
   const onMount = useCallback(
     (editor: MonacoEditor.IStandaloneCodeEditor, monaco: typeof import("monaco-editor")) => {

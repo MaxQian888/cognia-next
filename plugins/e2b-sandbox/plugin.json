@@ -18,7 +18,7 @@
       "availability": "blocked",
       "hint": "Requires npx to spawn @e2b/mcp-server — desktop only."
     },
-    "desktop": {
+    "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
     }

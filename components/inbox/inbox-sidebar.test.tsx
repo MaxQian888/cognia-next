@@ -85,6 +85,24 @@ jest.mock("@/components/ui/sidebar", () => ({
   SidebarMenuItem: ({ children }: { children: React.ReactNode }) => <li>{children}</li>,
 }))
 
+// Tooltip primitives are mocked as passthroughs — the real Radix tooltip
+// requires a portal + provider that adds complexity without value in unit
+// tests. We only need the trigger child to render and receive its props.
+jest.mock("@/components/ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({
+    children,
+    asChild: _asChild,
+  }: {
+    children: React.ReactNode
+    asChild?: boolean
+  }) => <>{children}</>,
+  TooltipContent: ({ children }: { children: React.ReactNode }) => (
+    <span data-testid="tooltip-content">{children}</span>
+  ),
+  TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -218,5 +236,38 @@ describe("InboxSidebar", () => {
     fireEvent.click(screen.getByTestId("adapter-section-a1"))
 
     expect(mockPush).toHaveBeenCalledWith("/inbox/adapter/a1")
+  })
+
+  it("expand toggle is rendered as a shadcn Button (ghost icon)", () => {
+    mockQueryResult = [makeAdapter("a1", "Bot Alpha")]
+
+    render(<InboxSidebar view="by-adapter" />)
+    const toggle = screen.getByTestId("adapter-section-toggle-a1")
+    expect(toggle).toHaveAttribute("data-slot", "button")
+    expect(toggle).toHaveAttribute("data-variant", "ghost")
+    expect(toggle).toHaveAttribute("data-size", "icon")
+    // Translated aria-label is interpolated with the adapter name (en.json mock).
+    expect(toggle).toHaveAccessibleName(/Bot Alpha/i)
+  })
+
+  it("nested recent-conversation links use responsive touch-target sizing", () => {
+    mockQueryResult = [makeAdapter("a1", "Bot Alpha")]
+    mockRecentByAdapter.set("a1", [
+      {
+        id: "s1",
+        title: "Hello world",
+        platformBinding: { adapterId: "a1", conversationKey: "ck1" },
+        updatedAt: 2000,
+      },
+    ])
+
+    render(<InboxSidebar view="by-adapter" />)
+    fireEvent.click(screen.getByTestId("adapter-section-toggle-a1"))
+
+    const link = screen.getByTestId("adapter-recent-a1-s1")
+    // 44 px on mobile, compact 24 px on md+.
+    expect(link).toHaveClass("min-h-11")
+    expect(link).toHaveClass("md:min-h-0")
+    expect(link).toHaveClass("md:py-1")
   })
 })

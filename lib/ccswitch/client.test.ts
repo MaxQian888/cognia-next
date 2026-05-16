@@ -21,6 +21,7 @@ import {
   ccswitchListSkills,
   ccswitchStatus,
   writeClaudeSettingsEnv,
+  writeCodexAuthEnv,
 } from "./client"
 
 const mInvoke = invoke as jest.Mock
@@ -79,6 +80,17 @@ describe("ccswitch IPC wrappers", () => {
     expect(out.path).toBe("/u/.claude/settings.json")
   })
 
+  it("writeCodexAuthEnv forwards the env-updates payload to write_codex_auth_env", async () => {
+    mInvoke.mockResolvedValue({ path: "/u/.codex/auth.json" })
+    const out = await writeCodexAuthEnv({
+      OPENAI_API_KEY: "sk-openai",
+    })
+    expect(mInvoke).toHaveBeenCalledWith("write_codex_auth_env", {
+      envUpdates: { OPENAI_API_KEY: "sk-openai" },
+    })
+    expect(out.path).toBe("/u/.codex/auth.json")
+  })
+
   it("rejects every wrapper when not running in Tauri", async () => {
     mIsTauri.mockReturnValue(false)
     await expect(ccswitchStatus()).rejects.toThrow(/Tauri/)
@@ -87,6 +99,7 @@ describe("ccswitch IPC wrappers", () => {
     await expect(ccswitchListPrompts()).rejects.toThrow(/Tauri/)
     await expect(ccswitchListSkills()).rejects.toThrow(/Tauri/)
     await expect(writeClaudeSettingsEnv({})).rejects.toThrow(/Tauri/)
+    await expect(writeCodexAuthEnv({})).rejects.toThrow(/Tauri/)
     expect(mInvoke).not.toHaveBeenCalled()
   })
 })

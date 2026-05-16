@@ -39,6 +39,10 @@ interface PairResponseBody {
   device_id: string
   device_jwt: string
   server_version: string
+  /** ADR-0021 — optional for legacy desktops without WebRTC support. */
+  rendezvous_id?: string
+  /** ADR-0021 — 32-byte HMAC secret, URL-safe base64 (unpadded). */
+  rendezvous_secret?: string
 }
 
 export interface PairStepProps {
@@ -197,12 +201,19 @@ export function PairStep({
       if (serverFingerprint) {
         config.serverFingerprint = serverFingerprint
       }
+      // ADR-0021 — opt the device into the WebRTC tier when the desktop
+      // returns a rendezvous tuple. Legacy desktops omit both fields, in
+      // which case the transport stays on HTTPS+WS only.
+      if (body.rendezvous_id && body.rendezvous_secret) {
+        config.rendezvousId = body.rendezvous_id
+        config.rendezvousSecret = body.rendezvous_secret
+      }
       await saveCompanionConfig(config)
       onPaired(config)
     } catch (err) {
       setPhase({ kind: "error", message: describeNetworkError(err) })
     }
-  }, [baseUrl, pairJwt, serverFingerprint, onPaired])
+  }, [baseUrl, pairJwt, serverFingerprint, onPaired, t])
 
   const isPairing = phase.kind === "pairing"
 

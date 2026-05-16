@@ -176,6 +176,12 @@ export function ProviderSwitchDialog({
                   const checked = selectedAgents.includes(a.id)
                   const patch = plan.agentChanges.find((p) => p.agentId === a.id)
                   const unsupported = patch?.unsupported ?? false
+                  // Codex agent: we write OPENAI_API_KEY but cannot
+                  // propagate baseUrl (see lib/ccswitch/switch.ts notes).
+                  // Surface that so the user isn't surprised when the
+                  // alt-endpoint URL doesn't take effect.
+                  const codexBaseUrlNotPropagated =
+                    a.id === "codex" && checked && !unsupported && !!provider?.baseUrl?.trim()
                   return (
                     <label
                       key={a.id}
@@ -192,6 +198,11 @@ export function ProviderSwitchDialog({
                           {unsupported && checked && (
                             <Badge variant="outline" className="text-[10px]">
                               {t("dialog.notYetSupported")}
+                            </Badge>
+                          )}
+                          {codexBaseUrlNotPropagated && (
+                            <Badge variant="outline" className="text-[10px]">
+                              {t("dialog.codexBaseUrlNotPropagated")}
                             </Badge>
                           )}
                         </div>
@@ -289,7 +300,13 @@ function ApplyResultPanel({ result }: { result: ApplyResult }) {
                     {r.path}
                   </div>
                 )}
-                {r.error && <div className="text-[11px] text-destructive break-all">{r.error}</div>}
+                {r.error === "drift_detected" ? (
+                  <div className="text-[11px] text-destructive break-words">
+                    {t("dialog.driftAbort")}
+                  </div>
+                ) : r.error ? (
+                  <div className="text-[11px] text-destructive break-all">{r.error}</div>
+                ) : null}
               </div>
             </li>
           ))}

@@ -56,12 +56,22 @@ export function MobileSkillSheet({ skill, open, onOpenChange }: Props) {
           <SheetTitle>{skill.name}</SheetTitle>
         </SheetHeader>
         <Tabs defaultValue="overview" className="flex h-full flex-col">
-          <TabsList className="mx-4 mt-2">
-            <TabsTrigger value="overview">{t("tabOverview")}</TabsTrigger>
-            <TabsTrigger value="edit">{t("tabEdit")}</TabsTrigger>
-            <TabsTrigger value="resources">{t("tabResources")}</TabsTrigger>
-            <TabsTrigger value="validation">{t("tabValidation")}</TabsTrigger>
-          </TabsList>
+          <div className="mx-2 mt-2 overflow-x-auto sm:mx-4">
+            <TabsList>
+              <TabsTrigger value="overview" className="whitespace-nowrap">
+                {t("tabOverview")}
+              </TabsTrigger>
+              <TabsTrigger value="edit" className="whitespace-nowrap">
+                {t("tabEdit")}
+              </TabsTrigger>
+              <TabsTrigger value="resources" className="whitespace-nowrap">
+                {t("tabResources")}
+              </TabsTrigger>
+              <TabsTrigger value="validation" className="whitespace-nowrap">
+                {t("tabValidation")}
+              </TabsTrigger>
+            </TabsList>
+          </div>
           <TabsContent value="overview" className="flex-1 overflow-y-auto px-4 py-3">
             <motion.div
               role="list"

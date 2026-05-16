@@ -2,17 +2,32 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
+const mockBack = jest.fn()
+const mockPush = jest.fn()
+
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
+  useRouter: () => ({ push: mockPush, replace: jest.fn(), back: mockBack }),
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => "/inbox",
   redirect: jest.fn(),
+}))
+
+jest.mock("@/components/ui/sidebar", () => ({
+  SidebarTrigger: ({
+    className,
+    "data-testid": testId,
+    "aria-label": ariaLabel,
+  }: {
+    className?: string
+    "data-testid"?: string
+    "aria-label"?: string
+  }) => <button type="button" data-testid={testId} aria-label={ariaLabel} className={className} />,
 }))
 
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
@@ -64,6 +79,8 @@ const EMPTY_POLICY: TriggerPolicy = {
 beforeEach(() => {
   ;(isTauri as jest.Mock).mockReturnValue(false)
   mockUseCharacter.mockReturnValue(undefined)
+  mockBack.mockReset()
+  mockPush.mockReset()
 })
 
 describe("ConversationHeader", () => {
@@ -181,5 +198,71 @@ describe("ConversationHeader", () => {
       />
     )
     expect(screen.queryByTestId("conversation-character-chip")).not.toBeInTheDocument()
+  })
+
+  it("renders the mobile back button and the mobile sidebar trigger", () => {
+    render(
+      <ConversationHeader
+        conversationKey="ck8"
+        sessionId="s8"
+        title="Mobile chrome"
+        platform="telegram"
+        currentMode="auto"
+        policy={EMPTY_POLICY}
+      />
+    )
+    const back = screen.getByTestId("conversation-header-back")
+    const trigger = screen.getByTestId("conversation-header-open-sidebar")
+    expect(back).toBeInTheDocument()
+    expect(trigger).toBeInTheDocument()
+    expect(back).toHaveClass("md:hidden")
+    expect(trigger).toHaveClass("md:hidden")
+    expect(back).toHaveAccessibleName(/back to list/i)
+    expect(trigger).toHaveAccessibleName(/open adapters/i)
+  })
+
+  it("back button calls router.back() when history has more than one entry", () => {
+    // jsdom defaults to history.length === 1 — push an extra state so back()
+    // is the chosen branch.
+    window.history.pushState({}, "", "/inbox/c/ck-prev")
+    expect(window.history.length).toBeGreaterThan(1)
+
+    render(
+      <ConversationHeader
+        conversationKey="ck9"
+        sessionId="s9"
+        title="Back test"
+        platform="telegram"
+        currentMode="auto"
+        policy={EMPTY_POLICY}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("conversation-header-back"))
+    expect(mockBack).toHaveBeenCalledTimes(1)
+    expect(mockPush).not.toHaveBeenCalled()
+  })
+
+  it("back button falls back to router.push('/inbox') when no history is available", () => {
+    // Spy on history.length to force the fallback branch — directly setting
+    // window.history.length isn't reliable across jsdom versions.
+    const lengthSpy = jest.spyOn(window.history, "length", "get").mockReturnValue(1)
+
+    render(
+      <ConversationHeader
+        conversationKey="ck10"
+        sessionId="s10"
+        title="Deep-link test"
+        platform="telegram"
+        currentMode="auto"
+        policy={EMPTY_POLICY}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("conversation-header-back"))
+    expect(mockPush).toHaveBeenCalledWith("/inbox")
+    expect(mockBack).not.toHaveBeenCalled()
+
+    lengthSpy.mockRestore()
   })
 })

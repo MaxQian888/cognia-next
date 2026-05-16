@@ -17,7 +17,7 @@ import {
 import { cn, formatVideoTime } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { downloadFromUrl } from "@/lib/files/download"
 import { loggers } from "@/lib/logger"
 
@@ -210,21 +210,17 @@ export const AudioBlock = memo(function AudioBlock({
 
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={handleSkipBack}
-                  disabled={isLoading}
-                  aria-label={t("skipBack")}
-                >
-                  <SkipBack className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("skipBack")}</TooltipContent>
-            </Tooltip>
+            <TooltipIconButton
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={handleSkipBack}
+              disabled={isLoading}
+              aria-label={t("skipBack")}
+              tooltip={t("skipBack")}
+            >
+              <SkipBack className="h-4 w-4" />
+            </TooltipIconButton>
 
             <Button
               variant="default"
@@ -236,39 +232,31 @@ export const AudioBlock = memo(function AudioBlock({
               {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 ml-0.5" />}
             </Button>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={handleSkipForward}
-                  disabled={isLoading}
-                  aria-label={t("skipForward")}
-                >
-                  <SkipForward className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("skipForward")}</TooltipContent>
-            </Tooltip>
+            <TooltipIconButton
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={handleSkipForward}
+              disabled={isLoading}
+              aria-label={t("skipForward")}
+              tooltip={t("skipForward")}
+            >
+              <SkipForward className="h-4 w-4" />
+            </TooltipIconButton>
           </div>
 
           <div className="flex items-center gap-1">
             <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={handleMuteToggle}
-                    aria-label={isMuted ? t("unmute") : t("mute")}
-                  >
-                    <VolumeIcon className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{isMuted ? t("unmute") : t("mute")}</TooltipContent>
-              </Tooltip>
+              <TooltipIconButton
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={handleMuteToggle}
+                aria-label={isMuted ? t("unmute") : t("mute")}
+                tooltip={isMuted ? t("unmute") : t("mute")}
+              >
+                <VolumeIcon className="h-4 w-4" />
+              </TooltipIconButton>
               <Slider
                 value={[isMuted ? 0 : volume]}
                 max={1}
@@ -278,36 +266,28 @@ export const AudioBlock = memo(function AudioBlock({
               />
             </div>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={cn("h-8 w-8", isLooping && "text-primary")}
-                  onClick={handleLoopToggle}
-                  aria-label={t("loop")}
-                >
-                  <Repeat className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("loop")}</TooltipContent>
-            </Tooltip>
+            <TooltipIconButton
+              variant="ghost"
+              size="icon"
+              className={cn("h-8 w-8", isLooping && "text-primary")}
+              onClick={handleLoopToggle}
+              aria-label={t("loop")}
+              tooltip={t("loop")}
+            >
+              <Repeat className="h-4 w-4" />
+            </TooltipIconButton>
 
             {showDownload && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={handleDownload}
-                    aria-label={t("download")}
-                  >
-                    <Download className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t("download")}</TooltipContent>
-              </Tooltip>
+              <TooltipIconButton
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={handleDownload}
+                aria-label={t("download")}
+                tooltip={t("download")}
+              >
+                <Download className="h-4 w-4" />
+              </TooltipIconButton>
             )}
           </div>
         </div>

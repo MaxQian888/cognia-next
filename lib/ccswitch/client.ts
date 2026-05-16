@@ -55,12 +55,41 @@ export async function ccswitchListSkills(): Promise<CcswitchSkill[]> {
  * switch into Claude Code so subsequent CLI invocations pick up the new key
  * + base URL. `null` removes a key (e.g., clearing `ANTHROPIC_BASE_URL` when
  * switching back to the official endpoint).
+ *
+ * The Rust side enforces a write-time mtime drift check; rejections come
+ * back as `drift_detected` so the renderer can re-read and retry without
+ * clobbering a parallel write by cc-switch itself.
  */
 export async function writeClaudeSettingsEnv(
   envUpdates: Record<string, string | null>
 ): Promise<{ path: string; backupPath?: string }> {
   ensureTauri()
   return invoke<{ path: string; backupPath?: string }>("write_claude_settings_env", {
+    envUpdates,
+  })
+}
+
+/**
+ * Patch the top-level `OPENAI_API_KEY` + `auth_mode` fields of
+ * `~/.codex/auth.json` (codex-cli's auth file). Mirrors the Claude variant
+ * for ccswitch's switch flow when the user opts to propagate to codex.
+ *
+ * Keys that map onto the auth file's recognised fields:
+ *   - `OPENAI_API_KEY` (with non-empty `value`) → sets the field and flips
+ *     `auth_mode` to `"ApiKey"`.
+ *   - `OPENAI_API_KEY` (with `null` / empty `value`) → removes the field
+ *     and clears `auth_mode` (so codex-cli falls back to ChatGPT mode if
+ *     the `tokens` block is still present).
+ *
+ * Other keys are accepted for forward-compatibility but are written to a
+ * top-level field of the JSON document verbatim — codex-cli ignores
+ * unknown top-level keys. Atomic write + mtime drift detection apply.
+ */
+export async function writeCodexAuthEnv(
+  envUpdates: Record<string, string | null>
+): Promise<{ path: string; backupPath?: string }> {
+  ensureTauri()
+  return invoke<{ path: string; backupPath?: string }>("write_codex_auth_env", {
     envUpdates,
   })
 }

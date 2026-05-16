@@ -23,8 +23,12 @@ interface Props {
   className?: string
   /** Optional className applied to the overflow popover. */
   overflowClassName?: string
-  /** Aria label for the overflow trigger. */
-  overflowLabel?: string
+  /**
+   * Localized aria-label for the overflow trigger. Required — callers supply
+   * a translation from their own i18n namespace so this primitive stays
+   * locale-agnostic.
+   */
+  overflowLabel: string
   /** Fallback rendered when there are no extensions registered. */
   fallback?: ReactNode
 }
@@ -34,7 +38,7 @@ export function PluginExtensionSlotWithOverflow({
   limit,
   className,
   overflowClassName,
-  overflowLabel = "More plugin actions",
+  overflowLabel,
   fallback,
 }: Props) {
   useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)

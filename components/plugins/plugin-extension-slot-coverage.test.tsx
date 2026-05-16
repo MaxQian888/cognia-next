@@ -49,7 +49,13 @@ describe("plugin slot coverage — every implemented extension point", () => {
     registerMockExtension("chat.input.actions", Second, { priority: 3 })
     registerMockExtension("chat.input.actions", Third, { priority: 2 })
     registerMockExtension("chat.input.actions", Fourth, { priority: 1 })
-    render(<PluginExtensionSlotWithOverflow point="chat.input.actions" limit={3} />)
+    render(
+      <PluginExtensionSlotWithOverflow
+        point="chat.input.actions"
+        limit={3}
+        overflowLabel="More plugin actions"
+      />
+    )
     expect(screen.getByTestId("ext-1")).toBeInTheDocument()
     expect(screen.getByTestId("ext-2")).toBeInTheDocument()
     expect(screen.getByTestId("ext-3")).toBeInTheDocument()
@@ -59,9 +65,28 @@ describe("plugin slot coverage — every implemented extension point", () => {
     expect(screen.getByTestId("plugin-extension-overflow-chat.input.actions")).toBeInTheDocument()
   })
 
+  it("the WithOverflow wrapper uses the caller-provided aria-label on the overflow trigger", () => {
+    const First = () => <span data-testid="ext-1">1</span>
+    const Second = () => <span data-testid="ext-2">2</span>
+    registerMockExtension("chat.input.actions", First, { priority: 2 })
+    registerMockExtension("chat.input.actions", Second, { priority: 1 })
+    render(
+      <PluginExtensionSlotWithOverflow
+        point="chat.input.actions"
+        limit={1}
+        overflowLabel="Custom localized label"
+      />
+    )
+    expect(screen.getByRole("button", { name: "Custom localized label" })).toBeInTheDocument()
+  })
+
   it("the WithOverflow wrapper renders nothing when no extensions registered", () => {
     const { container } = render(
-      <PluginExtensionSlotWithOverflow point="chat.input.actions" limit={3} />
+      <PluginExtensionSlotWithOverflow
+        point="chat.input.actions"
+        limit={3}
+        overflowLabel="More plugin actions"
+      />
     )
     expect(container.firstChild).toBeNull()
   })

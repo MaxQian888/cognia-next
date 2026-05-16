@@ -3,9 +3,12 @@
 import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
+import { motion, useReducedMotion } from "motion/react"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { StatusBadge } from "@/components/status-badge"
 import {
   listTwinDraftsByTwin,
   markTwinDraftAccepted,
@@ -39,8 +42,8 @@ function qualityKey(score?: number): QualityKey {
 
 export function TwinDraftsTab({ twinId }: { twinId: string }) {
   const t = useTranslations("twin.drafts")
-  const tStatus = useTranslations("twin.status")
   const tKind = useTranslations("twin.kind")
+  const prefersReducedMotion = useReducedMotion()
   const drafts = useLiveQuery(() => listTwinDraftsByTwin(twinId), [twinId], [])
   const sorted = [...drafts].sort((a, b) => {
     // Pending first; among pending, lowest qualityScore first.
@@ -59,8 +62,20 @@ export function TwinDraftsTab({ twinId }: { twinId: string }) {
         </Card>
       ) : (
         <ul className="flex flex-col gap-2">
-          {sorted.map((draft) => (
-            <DraftRow key={draft.id} draft={draft} t={t} tStatus={tStatus} tKind={tKind} />
+          {sorted.map((draft, index) => (
+            <motion.li
+              key={draft.id}
+              initial={prefersReducedMotion ? false : { opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{
+                duration: 0.15,
+                ease: "easeOut",
+                delay: prefersReducedMotion ? 0 : Math.min(index * 0.03, 0.15),
+              }}
+              className="list-none"
+            >
+              <DraftRow draft={draft} t={t} tKind={tKind} />
+            </motion.li>
           ))}
         </ul>
       )}
@@ -71,12 +86,10 @@ export function TwinDraftsTab({ twinId }: { twinId: string }) {
 function DraftRow({
   draft,
   t,
-  tStatus,
   tKind,
 }: {
   draft: TwinDraft
   t: ReturnType<typeof useTranslations>
-  tStatus: ReturnType<typeof useTranslations>
   tKind: ReturnType<typeof useTranslations>
 }) {
   const [busy, setBusy] = useState(false)
@@ -157,7 +170,12 @@ function DraftRow({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline">{tKind(draft.payload.kind)}</Badge>
-          <Badge variant={STATUS_VARIANT[draft.status]}>{tStatus(draft.status)}</Badge>
+          <StatusBadge
+            value={draft.status}
+            labelNamespace="twin.status"
+            variantMap={STATUS_VARIANT}
+            data-testid={`twin-draft-${draft.id}-status`}
+          />
           <Badge variant="outline">{t("qualityLabel", { label: qualityText })}</Badge>
           <span className="font-medium">{name}</span>
         </div>
@@ -166,9 +184,9 @@ function DraftRow({
         </span>
       </div>
       {description ? <p className="text-muted-foreground text-sm">{description}</p> : null}
-      <pre className="bg-muted max-h-48 overflow-auto rounded p-2 text-xs whitespace-pre-wrap">
-        {body || t("emptyBody")}
-      </pre>
+      <ScrollArea className="bg-muted max-h-48 rounded">
+        <pre className="p-2 text-xs whitespace-pre-wrap">{body || t("emptyBody")}</pre>
+      </ScrollArea>
       {draft.evaluation && draft.evaluation.concerns.length > 0 ? (
         <ul className="text-destructive list-disc pl-5 text-xs">
           {draft.evaluation.concerns.map((concern, i) => (

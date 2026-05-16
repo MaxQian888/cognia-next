@@ -1,6 +1,7 @@
 "use client"
 
 import { useTranslations } from "next-intl"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { DownloadIcon, PowerIcon, Trash2Icon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -8,6 +9,7 @@ import { toast } from "sonner"
 import { deleteSkill, listSkillsByIds, setSkillStatus } from "@/lib/db/skills"
 import { useSkillsStore } from "@/stores/skills"
 import { exportSkillsToDirWithFeedback } from "@/lib/skills/export-toast"
+import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { loggers } from "@/lib/logger"
 
 /**
@@ -20,8 +22,8 @@ export function SkillBatchActionsBar() {
   const tToasts = useTranslations("skills.toasts")
   const selection = useSkillsStore((s) => s.selection)
   const clear = useSkillsStore((s) => s.clearSelection)
+  const reduce = useReducedMotion()
   const count = selection.size
-  if (count === 0) return null
 
   const ids = Array.from(selection)
 
@@ -91,34 +93,58 @@ export function SkillBatchActionsBar() {
   }
 
   return (
-    <Card className="pointer-events-auto fixed bottom-4 left-1/2 z-30 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2 px-3 py-2 shadow-lg">
-      <span className="text-xs font-medium">{tCommon("selectedCount", { count })}</span>
-      <span className="h-4 w-px bg-border" />
-      <Button size="sm" variant="ghost" onClick={() => void handleEnable()}>
-        <PowerIcon className="mr-1.5 size-3.5" />
-        {t("enable")}
-      </Button>
-      <Button size="sm" variant="ghost" onClick={() => void handleDisable()}>
-        <PowerIcon className="mr-1.5 size-3.5 rotate-180" />
-        {t("disable")}
-      </Button>
-      <Button size="sm" variant="ghost" onClick={() => void handleExport()}>
-        <DownloadIcon className="mr-1.5 size-3.5" />
-        {tCommon("toolbar.exportAll")}
-      </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={() => void handleDelete()}
-        className="text-destructive hover:text-destructive"
-      >
-        <Trash2Icon className="mr-1.5 size-3.5" />
-        {t("delete")}
-      </Button>
-      <span className="h-4 w-px bg-border" />
-      <Button size="icon" variant="ghost" onClick={clear} className="size-7">
-        <XIcon className="size-3.5" />
-      </Button>
-    </Card>
+    <AnimatePresence>
+      {count > 0 && (
+        <motion.div
+          key="batch-bar"
+          initial={reduce ? false : { opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={reduce ? undefined : { opacity: 0, y: 24 }}
+          transition={
+            reduce ? { duration: 0 } : { duration: MOBILE_DURATION.normal, ease: MOBILE_EASE }
+          }
+          className="pointer-events-none fixed bottom-4 left-1/2 z-30 -translate-x-1/2"
+        >
+          <Card
+            className="pointer-events-auto flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-1.5 px-3 py-2 shadow-lg"
+            data-testid="skill-batch-actions-bar"
+          >
+            <span className="text-xs font-medium">{tCommon("selectedCount", { count })}</span>
+            <span className="hidden h-4 w-px bg-border sm:inline-block" />
+            <Button size="sm" variant="ghost" onClick={() => void handleEnable()}>
+              <PowerIcon className="size-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">{t("enable")}</span>
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => void handleDisable()}>
+              <PowerIcon className="size-3.5 rotate-180 sm:mr-1.5" />
+              <span className="hidden sm:inline">{t("disable")}</span>
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => void handleExport()}>
+              <DownloadIcon className="size-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">{tCommon("toolbar.exportAll")}</span>
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void handleDelete()}
+              className="text-destructive hover:text-destructive"
+            >
+              <Trash2Icon className="size-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">{t("delete")}</span>
+            </Button>
+            <span className="hidden h-4 w-px bg-border sm:inline-block" />
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={clear}
+              className="size-7"
+              aria-label={tCommon("filter.clear")}
+            >
+              <XIcon className="size-3.5" />
+            </Button>
+          </Card>
+        </motion.div>
+      )}
+    </AnimatePresence>
   )
 }

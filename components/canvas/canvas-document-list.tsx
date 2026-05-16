@@ -6,6 +6,7 @@
 
 import { memo, useState, useMemo, useDeferredValue } from "react"
 import { useTranslations } from "next-intl"
+import { AnimatePresence, motion } from "motion/react"
 import {
   FileCode,
   FileText,
@@ -27,6 +28,13 @@ import type { DocumentSortField, DocumentSortOrder } from "@/types/canvas/panel"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
+import {
+  MOBILE_DURATION,
+  MOBILE_EASE,
+  STAGGER_CHILD,
+  STAGGER_CONTAINER,
+  useReducedMotionTransition,
+} from "@/lib/ui/motion"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -50,6 +58,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
+import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
 import { formatRelativeDate, countLines } from "@/lib/canvas/utils"
 import { LANGUAGE_OPTIONS } from "@/lib/canvas/constants"
@@ -164,6 +173,14 @@ export const CanvasDocumentList = memo(function CanvasDocumentList({
     setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"))
   }
 
+  // Single transition reused for every card so reduced-motion only collapses
+  // it once per render; MOBILE_EASE keeps card hover/tap in sync with the
+  // rest of the canvas motion vocabulary.
+  const cardTransition = useReducedMotionTransition({
+    duration: MOBILE_DURATION.fast,
+    ease: MOBILE_EASE,
+  })
+
   return (
     <>
       <div className={cn("flex flex-col h-full", className)}>
@@ -230,102 +247,122 @@ export const CanvasDocumentList = memo(function CanvasDocumentList({
         {/* Document list */}
         <ScrollArea className="flex-1">
           {filteredDocuments.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center px-4">
-              <FolderOpen className="h-12 w-12 text-muted-foreground/50" />
-              <p className="mt-4 text-sm text-muted-foreground">
-                {searchQuery ? t("noDocumentsFound") : t("noDocuments")}
-              </p>
+            <Empty className="border-0">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <FolderOpen />
+                </EmptyMedia>
+                <EmptyTitle>{searchQuery ? t("noDocumentsFound") : t("noDocuments")}</EmptyTitle>
+              </EmptyHeader>
               {!searchQuery && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="mt-4"
-                  data-testid="canvas-doc-create-first-button"
-                  onClick={() => setCreateDialogOpen(true)}
-                >
-                  <Plus className="h-4 w-4 mr-1" />
-                  {t("createFirst")}
-                </Button>
+                <EmptyContent>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    data-testid="canvas-doc-create-first-button"
+                    onClick={() => setCreateDialogOpen(true)}
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    {t("createFirst")}
+                  </Button>
+                </EmptyContent>
               )}
-            </div>
+            </Empty>
           ) : (
-            <div className="p-2 space-y-1">
-              {filteredDocuments.map((doc) => (
-                <Card
-                  key={doc.id}
-                  className={cn(
-                    "group cursor-pointer transition-colors py-3",
-                    doc.id === activeDocumentId
-                      ? "bg-primary/10 border-primary/30"
-                      : "hover:bg-muted/50"
-                  )}
-                  onClick={() => onSelectDocument(doc.id)}
-                >
-                  <CardContent className="p-2">
-                    <div className="flex items-center gap-2">
-                      {doc.type === "code" ? (
-                        <FileCode className="h-4 w-4 text-muted-foreground shrink-0" />
-                      ) : (
-                        <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+            <motion.div
+              className="p-2 space-y-1"
+              variants={STAGGER_CONTAINER}
+              initial="initial"
+              animate="animate"
+            >
+              <AnimatePresence initial={false}>
+                {filteredDocuments.map((doc) => (
+                  <motion.div
+                    key={doc.id}
+                    layout
+                    variants={STAGGER_CHILD}
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.99 }}
+                    transition={cardTransition}
+                    data-testid={`canvas-doc-card-motion-${doc.id}`}
+                  >
+                    <Card
+                      className={cn(
+                        "group cursor-pointer transition-colors py-3",
+                        doc.id === activeDocumentId
+                          ? "bg-primary/10 border-primary/30"
+                          : "hover:bg-muted/50"
                       )}
-                      <div className="flex-1 min-w-0">
+                      onClick={() => onSelectDocument(doc.id)}
+                    >
+                      <CardContent className="p-2">
                         <div className="flex items-center gap-2">
-                          <span className="font-medium text-sm truncate">{doc.title}</span>
-                          <Badge variant="secondary" className="text-[10px] shrink-0">
-                            {doc.language}
-                          </Badge>
+                          {doc.type === "code" ? (
+                            <FileCode className="h-4 w-4 text-muted-foreground shrink-0" />
+                          ) : (
+                            <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-sm truncate">{doc.title}</span>
+                              <Badge variant="secondary" className="text-[10px] shrink-0">
+                                {doc.language}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <Clock className="h-3 w-3" />
+                              <span>{formatDate(doc.updatedAt)}</span>
+                              <span className="mx-1">•</span>
+                              <span>{t("linesCount", { count: countLines(doc.content) })}</span>
+                            </div>
+                          </div>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => handleStartRename(doc)}>
+                                <Edit2 className="h-4 w-4 mr-2" />
+                                {t("rename")}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => onDuplicateDocument(doc.id)}>
+                                <Copy className="h-4 w-4 mr-2" />
+                                {t("duplicate")}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => onDeleteDocument(doc.id)}
+                                className="text-destructive focus:text-destructive"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                {t("delete")}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
-                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                          <Clock className="h-3 w-3" />
-                          <span>{formatDate(doc.updatedAt)}</span>
-                          <span className="mx-1">•</span>
-                          <span>
-                            {countLines(doc.content)} {t("lines")}
-                          </span>
-                        </div>
-                      </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleStartRename(doc)}>
-                            <Edit2 className="h-4 w-4 mr-2" />
-                            {t("rename")}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => onDuplicateDocument(doc.id)}>
-                            <Copy className="h-4 w-4 mr-2" />
-                            {t("duplicate")}
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onClick={() => onDeleteDocument(doc.id)}
-                            className="text-destructive focus:text-destructive"
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            {t("delete")}
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </motion.div>
           )}
         </ScrollArea>
 
         {/* Footer stats */}
         <div className="p-2 border-t text-xs text-muted-foreground text-center">
-          {filteredDocuments.length} {t("documents")}
-          {searchQuery && ` (${t("filtered")})`}
+          {t("documentsCount", { count: filteredDocuments.length })}
+          {searchQuery && ` ${t("filteredSuffix")}`}
         </div>
       </div>
 

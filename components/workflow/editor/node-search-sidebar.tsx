@@ -58,16 +58,16 @@ export function NodeSearchSidebar({
     getPluginCatalogSnapshot,
     getServerSnapshot
   )
-  const groups = useMemo(
-    () => (query.trim() ? null : groupedCatalog()),
+  const groups = useMemo(() => {
     // pluginEntries is read indirectly through groupedCatalog; tracking its
     // identity here forces the recompute when the plugin catalog mutates.
-    [query, pluginEntries]
-  )
-  const flatResults = useMemo(
-    () => (query.trim() ? searchCatalog(query) : null),
-    [query, pluginEntries]
-  )
+    void pluginEntries
+    return query.trim() ? null : groupedCatalog()
+  }, [query, pluginEntries])
+  const flatResults = useMemo(() => {
+    void pluginEntries
+    return query.trim() ? searchCatalog(query) : null
+  }, [query, pluginEntries])
 
   return (
     <aside

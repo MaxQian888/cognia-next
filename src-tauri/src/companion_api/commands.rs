@@ -116,6 +116,23 @@ pub async fn companion_server_start(
     // for app-layer attestation against the QR-pinned value.
     super::set_tls_fingerprint(tls_material.fingerprint_sha256.clone());
 
+    // ADR-0021 — wire the WebRTC signaling hub to the live SharedState now
+    // that it exists. Idempotent across restarts: `bind()` replaces the
+    // stored binding so reconfigured clients pick up the fresh state on
+    // their next reconnect.
+    {
+        use tauri::Manager as _;
+        let app = shared
+            .app_handle
+            .as_ref()
+            .expect("app_handle present");
+        if let Some(hub) =
+            app.try_state::<std::sync::Arc<super::signaling::SignalingHub>>()
+        {
+            hub.bind(Arc::clone(&shared), app.clone());
+        }
+    }
+
     state.start(port, bind_loopback_only, tls_material, shared).await
 }
 

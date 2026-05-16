@@ -32,10 +32,16 @@ import { DEFAULT_TWIN_RUNTIME_SETTINGS } from "@/types/twin"
 
 const log = loggers.scheduler
 
-interface UseTwinWorkerStatus {
+export type TwinWorkerReason = "noTwinSelected" | "disabled" | "incompleteConfig"
+
+export interface UseTwinWorkerStatus {
   active: boolean
-  /** Plain reason string surfaced in the UI when the worker isn't running. */
-  reason?: string
+  /**
+   * i18n key (under `twin.workerStatus`) describing why the worker isn't
+   * running. Components translate it at the call site so the hook stays
+   * free of `useTranslations`.
+   */
+  reasonKey?: TwinWorkerReason
 }
 
 function deriveVectorStoreConfig(settings: TwinRuntimeSettings): VectorStoreConfig | null {
@@ -179,16 +185,12 @@ export function useTwinWorker(twinId: string | null): UseTwinWorkerStatus {
   // and set-state-in-effect linters stay quiet. The reason strings stay in
   // sync with the gating order in the `config` memo above.
   return useMemo<UseTwinWorkerStatus>(() => {
-    if (!twinId) return { active: false, reason: "No twin selected" }
+    if (!twinId) return { active: false, reasonKey: "noTwinSelected" }
     if (!settings.workerEnabled) {
-      return { active: false, reason: "Auto-worker disabled in settings" }
+      return { active: false, reasonKey: "disabled" }
     }
     if (!config) {
-      return {
-        active: false,
-        reason:
-          "Vector store, embedding, or LLM config is incomplete — open Settings to fill them in",
-      }
+      return { active: false, reasonKey: "incompleteConfig" }
     }
     return { active: true }
   }, [twinId, settings.workerEnabled, config])

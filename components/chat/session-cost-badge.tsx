@@ -15,6 +15,7 @@ import { useTranslations } from "next-intl"
 import { CircleDollarSignIcon } from "lucide-react"
 import { useLiveQuery } from "dexie-react-hooks"
 
+import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { listUsageForSession, type SessionUsageRow } from "@/lib/db/session-usage"
 import type { UsageInfo } from "@/lib/claude/adapter"
@@ -45,23 +46,25 @@ export function SessionCostBadge({ sessionId, inMemoryUsage, tokensLabel }: Prop
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           className={cn(
-            "hidden items-center gap-1 rounded px-1 py-0.5 text-xs text-muted-foreground sm:flex",
-            "hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none"
+            "hidden h-auto items-center gap-1 px-1 py-0.5 text-xs font-normal text-muted-foreground sm:inline-flex",
+            "hover:bg-muted/50 focus-visible:bg-muted/50"
           )}
           aria-label={t("trigger")}
           data-testid="session-cost-trigger"
         >
           <CircleDollarSignIcon className="size-3.5" />
-          <span title={`Input ${inputs} · Output ${outputs}`}>
+          <span title={t("tokensTitle", { input: inputs, output: outputs })}>
             {tokensLabel(formatTokens(inputs), formatTokens(outputs))}
           </span>
           {cost > 0 && <span className="font-mono">· ${cost.toFixed(4)}</span>}
-        </button>
+        </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-72 space-y-3 text-xs">
+      <PopoverContent align="end" className="w-72 max-w-[calc(100vw-2rem)] space-y-3 text-xs">
         <div className="space-y-1">
           <p className="text-sm font-medium">{t("title")}</p>
           <p className="text-muted-foreground">{t("description")}</p>
@@ -79,8 +82,8 @@ export function SessionCostBadge({ sessionId, inMemoryUsage, tokensLabel }: Prop
             <>
               <dt className="text-muted-foreground">{t("cache")}</dt>
               <dd className="text-right font-mono">
-                w {formatTokens(breakdown.cacheCreationTokens)} / r{" "}
-                {formatTokens(breakdown.cacheReadTokens)}
+                {t("cacheWriteShort")} {formatTokens(breakdown.cacheCreationTokens)} /{" "}
+                {t("cacheReadShort")} {formatTokens(breakdown.cacheReadTokens)}
               </dd>
             </>
           )}

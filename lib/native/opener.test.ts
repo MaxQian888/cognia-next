@@ -29,7 +29,7 @@ describe("openUrl", () => {
 
   test("falls through to window.open when the Tauri plugin throws", async () => {
     mockIsTauri.mockReturnValue(true)
-    pluginOpenUrl.mockRejectedValueOnce(new Error("plugin missing"))
+    jest.mocked(pluginOpenUrl).mockRejectedValueOnce(new Error("plugin missing"))
     const open = jest.spyOn(window, "open").mockReturnValue(null)
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
 
@@ -80,7 +80,7 @@ describe("openPath", () => {
 
   test("falls back to window.open when the Tauri plugin rejects", async () => {
     mockIsTauri.mockReturnValue(true)
-    pluginOpenPath.mockRejectedValueOnce(new Error("nope"))
+    jest.mocked(pluginOpenPath).mockRejectedValueOnce(new Error("nope"))
     const open = jest.spyOn(window, "open").mockReturnValue(null)
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
 

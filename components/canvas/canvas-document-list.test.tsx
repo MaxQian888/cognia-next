@@ -130,7 +130,7 @@ jest.mock("@/components/ui/dialog", () => ({
 }))
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => {
+  useTranslations: () => (key: string, params?: Record<string, unknown>) => {
     const translations: Record<string, string> = {
       // Component switched from t("searchDocuments") to t("search") in commit 5
       // (existing canvas.search key covers the same intent).
@@ -142,11 +142,14 @@ jest.mock("next-intl", () => ({
       sortByName: "Sort by Name",
       sortByLanguage: "Sort by Language",
       documents: "documents",
+      documentsCount: `${params?.count} documents`,
       filtered: "filtered",
+      filteredSuffix: "(filtered)",
       noDocuments: "No documents yet",
       noDocumentsFound: "No documents found",
       createFirst: "Create your first document",
       lines: "lines",
+      linesCount: `${params?.count} lines`,
       rename: "Rename",
       duplicate: "Duplicate",
       delete: "Delete",
@@ -298,6 +301,37 @@ describe("CanvasDocumentList", () => {
         <CanvasDocumentList documents={mockDocuments} activeDocumentId="doc-1" {...mockHandlers} />
       )
       expect(screen.getByText("Sort by Date")).toBeInTheDocument()
+    })
+  })
+
+  describe("Motion wrappers", () => {
+    it("wraps each card in a motion container with a stable testid", () => {
+      render(
+        <CanvasDocumentList documents={mockDocuments} activeDocumentId="doc-1" {...mockHandlers} />
+      )
+      expect(screen.getByTestId("canvas-doc-card-motion-doc-1")).toBeInTheDocument()
+      expect(screen.getByTestId("canvas-doc-card-motion-doc-2")).toBeInTheDocument()
+    })
+
+    it("removes the card's motion wrapper when the document is filtered out", () => {
+      render(
+        <CanvasDocumentList documents={mockDocuments} activeDocumentId="doc-1" {...mockHandlers} />
+      )
+      const searchInput = screen.getByPlaceholderText("Search documents")
+      fireEvent.change(searchInput, { target: { value: "Python" } })
+      // Only the Python doc survives the filter.
+      expect(screen.queryByTestId("canvas-doc-card-motion-doc-1")).not.toBeInTheDocument()
+      expect(screen.getByTestId("canvas-doc-card-motion-doc-2")).toBeInTheDocument()
+    })
+
+    it("still routes the card click through onSelectDocument with motion wrapping in place", () => {
+      render(
+        <CanvasDocumentList documents={mockDocuments} activeDocumentId="doc-1" {...mockHandlers} />
+      )
+      const card = screen.getByText("Python Script").closest('[data-testid="card"]')
+      expect(card).toBeTruthy()
+      if (card) fireEvent.click(card)
+      expect(mockHandlers.onSelectDocument).toHaveBeenCalledWith("doc-2")
     })
   })
 })

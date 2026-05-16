@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ScheduledTasksSection } from "./scheduled-tasks-section"
 import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
 

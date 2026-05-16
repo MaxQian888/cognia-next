@@ -19,7 +19,7 @@
       "entrypoint": "src/index.ts",
       "hint": "Browser builds prompt for getDisplayMedia permission; some browsers gate this behind HTTPS."
     },
-    "desktop": {
+    "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
     }

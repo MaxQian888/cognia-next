@@ -64,7 +64,7 @@ export function SkillCard({
   return (
     <Card
       className={cn(
-        "group relative flex flex-col gap-2 p-3 transition-colors hover:border-primary/40",
+        "group relative flex flex-col gap-2 p-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md motion-reduce:transform-none motion-reduce:transition-none",
         selected && "border-primary",
         status === "disabled" && "opacity-60"
       )}
@@ -74,7 +74,7 @@ export function SkillCard({
           checked={selected}
           onCheckedChange={() => onToggleSelect(skill.id)}
           className="mt-0.5"
-          aria-label={`Select ${skill.name}`}
+          aria-label={t("card.selectAria", { name: skill.name })}
         />
         <div
           className={cn(
@@ -95,8 +95,8 @@ export function SkillCard({
             <Button
               variant="ghost"
               size="icon"
-              className="size-7 opacity-0 group-hover:opacity-100"
-              aria-label={`Actions for ${skill.name}`}
+              className="size-7 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+              aria-label={t("card.actionsAria", { name: skill.name })}
             >
               <MoreHorizontalIcon className="size-3.5" />
             </Button>

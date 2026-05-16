@@ -51,7 +51,7 @@ export function IconSelector({ value, onChange }: IconSelectorProps) {
               onChange={(e) => setSearch(e.target.value)}
             />
             <ScrollArea className="h-[200px] border rounded-md p-2">
-              <div className="grid grid-cols-8 gap-1">
+              <div className="grid grid-cols-6 gap-1 sm:grid-cols-8">
                 {filteredIcons.map((iconName) => {
                   const Icon = (LucideIcons[iconName] as LucideIcon) || Bot
                   const isSelected = value === iconName

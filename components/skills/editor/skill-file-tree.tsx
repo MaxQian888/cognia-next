@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "next-intl"
 import { FileCodeIcon, FileTextIcon, ImageIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Skill, SkillResource, SkillResourceKind } from "@/lib/claude/types"
@@ -24,6 +25,7 @@ const KIND_LABEL: Record<SkillResourceKind, string> = {
 const KIND_ORDER: SkillResourceKind[] = ["script", "reference", "asset"]
 
 export function SkillFileTree({ skill, resources, activeFileId, onSelect }: Props) {
+  const t = useTranslations("skills.editor")
   const grouped = KIND_ORDER.map((kind) => ({
     kind,
     items: resources.filter((r) => r.kind === kind),
@@ -34,7 +36,7 @@ export function SkillFileTree({ skill, resources, activeFileId, onSelect }: Prop
       data-testid="skill-file-tree"
       data-skill-id={skill.id}
       className="space-y-2 px-2 py-3 text-xs"
-      aria-label="Skill files"
+      aria-label={t("fileTreeAria")}
     >
       <TreeRow
         active={activeFileId === "main"}

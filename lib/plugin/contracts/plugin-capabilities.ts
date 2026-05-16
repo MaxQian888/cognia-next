@@ -438,8 +438,11 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     hostBindings: [
       "lib/plugin/registries/native-anthropic-tool-registry.ts",
       "lib/claude/build-options.ts",
+      "lib/claude/computer-use-tools.ts",
       "sidecar/dispatch/anthropic.mjs",
-      "sidecar/dispatch/native-tool-loop.mjs",
+      "plugins/computer-use/rust/src/commands.rs",
+      "plugins/computer-use/rust/src/translator.rs",
+      "src-tauri/src/automation/commands.rs",
     ],
     typescriptSdk: [
       "plugin-sdk/typescript/src/api/native-anthropic-tool.ts",
@@ -448,7 +451,11 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py", "plugin-sdk/python/src/cognia/types.py"],
     builtinContributionPaths: ["plugins/computer-use/src/index.ts"],
     docs: "docs/features/plugin-development.md#capabilities",
-    requiredTests: ["lib/plugin/registries/native-anthropic-tool-registry.test.ts"],
+    requiredTests: [
+      "lib/plugin/registries/native-anthropic-tool-registry.test.ts",
+      "plugin-sdk/typescript/src/api/native-anthropic-tool.test.ts",
+      "plugin-sdk/typescript/src/context/extended.test.ts",
+    ],
   },
 ] as const
 

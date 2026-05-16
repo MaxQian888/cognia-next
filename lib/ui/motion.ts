@@ -1,25 +1,26 @@
 "use client"
 
 /**
- * Mobile motion tokens.
+ * Shared UI motion tokens.
  *
- * Single source of truth for the animation curves used by Sheet/Drawer
- * overrides, swipe-row, pull-to-refresh, and the per-feature stagger lists
- * introduced by the mobile-layout sweep. Anything that animates on the
- * mobile surface should pull from here rather than hand-writing a duration
- * or easing inline.
+ * Single source of truth for the animation curves used across the app —
+ * Sheet/Drawer overrides, swipe-row, pull-to-refresh, the per-feature
+ * stagger lists from the mobile-layout sweep, and the desktop Skills /
+ * Settings surfaces. Anything that animates should pull from here rather
+ * than hand-writing a duration or easing inline.
  *
  * The values match the system spring used by iOS UIKit (cubic ease-out at
- * ~280 ms). They also feel reasonable on Android — long enough to register
- * but short enough that the surface stays responsive under repeated
- * gestures.
+ * ~280 ms). They feel reasonable on Android and on desktop pointer input —
+ * long enough to register but short enough that the surface stays responsive
+ * under repeated interaction. The `MOBILE_*` export prefixes are retained
+ * for backwards compatibility but the tokens are cross-surface.
  */
 
 import type { Transition, Variants } from "motion/react"
 import { useReducedMotion } from "motion/react"
 
 /** iOS-style cubic-bezier ease. Use for translations, slides, sheets. */
-export const MOBILE_EASE = [0.32, 0.72, 0, 1] as const
+export const MOBILE_EASE = [0.32, 0.72, 0, 1] as [number, number, number, number]
 
 /** Durations in seconds (motion/react convention). */
 export const MOBILE_DURATION = {
@@ -55,7 +56,7 @@ export const STAGGER_CONTAINER: Variants = {
 export function mobileTransition(durationKey: MobileDurationKey = "normal"): Transition {
   return {
     duration: MOBILE_DURATION[durationKey],
-    ease: MOBILE_EASE as unknown as number[],
+    ease: MOBILE_EASE,
   }
 }
 

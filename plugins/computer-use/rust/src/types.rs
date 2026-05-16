@@ -93,6 +93,7 @@ pub enum TextEditorAction {
     Create { path: String, file_text: String },
     StrReplace { path: String, old_str: String, new_str: String },
     Insert { path: String, insert_line: usize, new_str: String },
+    UndoEdit { path: String },
 }
 
 #[derive(Debug, Clone, Serialize)]

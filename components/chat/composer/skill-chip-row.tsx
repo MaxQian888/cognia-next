@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { SparklesIcon, XIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { listSkillsByIds } from "@/lib/db/skills"
 
 interface Props {
@@ -28,14 +29,16 @@ export function SkillChipRow({ ids, onRemove }: Props) {
             <Badge key={s.id} variant="secondary" className="gap-1">
               <SparklesIcon className="size-3" />
               <span>{s.name}</span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 aria-label={t("removeChip", { name: s.name })}
-                className="ml-1 rounded hover:bg-destructive/20"
+                className="ml-1 size-4 rounded p-0 hover:bg-destructive/20"
                 onClick={() => onRemove(s.id)}
               >
                 <XIcon className="size-3" />
-              </button>
+              </Button>
             </Badge>
           )
       )}

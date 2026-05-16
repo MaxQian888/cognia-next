@@ -22,6 +22,8 @@ jest.mock("next-intl", () => ({
       comments: "Comments",
       addComment: "Add Comment",
       lines: "Lines",
+      linesRange: `Lines ${params?.start}-${params?.end}`,
+      commentsCount: `${params?.count} comments`,
       hideResolved: "Hide Resolved",
       showResolved: "Show Resolved",
       noComments: "No comments yet",
@@ -116,6 +118,32 @@ describe("CommentPanel", () => {
     await userEvent.click(button)
 
     expect(screen.getByText("No comments yet")).toBeInTheDocument()
+  })
+
+  it("renders the no-comments state inside an Empty primitive (not a bare <p>)", async () => {
+    render(<CommentPanel {...defaultProps} />)
+
+    const button = screen.getByText("Comments")
+    await userEvent.click(button)
+
+    // The Empty primitive emits data-slot="empty" / data-slot="empty-description"
+    // so we can prove the surface uses the shared component rather than a stub.
+    const empty = document.querySelector('[data-slot="empty"]')
+    expect(empty).toBeTruthy()
+    const description = document.querySelector('[data-slot="empty-description"]')
+    expect(description).toBeTruthy()
+    expect(description?.textContent).toBe("No comments yet")
+  })
+
+  it("opens the Sheet at the new responsive width (min(90vw,480px))", async () => {
+    render(<CommentPanel {...defaultProps} />)
+    const button = screen.getByText("Comments")
+    await userEvent.click(button)
+    const sheets = document.querySelectorAll('[data-slot="sheet-content"]')
+    const open = Array.from(sheets).find((el) => el.getAttribute("data-state") === "open")
+    expect(open).toBeTruthy()
+    expect(open?.className).toMatch(/sm:w-\[min\(90vw,480px\)\]/)
+    expect(open?.className).not.toMatch(/sm:w-\[400px\]/)
   })
 
   it("should call addComment when submitting new comment", async () => {

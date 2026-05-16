@@ -841,7 +841,7 @@ export function LogPanel({
             onClose={() => filters.setShowDetailPanel(false)}
             onToggleBookmark={filters.toggleBookmark}
             onSelectRelated={(log) => filters.setSelectedLog(log)}
-            className="w-[350px] lg:w-[400px] shrink-0"
+            className="w-[350px] lg:w-[400px] xl:w-[440px] shrink-0"
           />
         )}
 
@@ -855,7 +855,7 @@ export function LogPanel({
           >
             <SheetContent
               side="bottom"
-              className="h-[80vh] p-0 flex flex-col"
+              className="h-[85vh] md:h-[75vh] lg:h-[80vh] p-0 flex flex-col"
               data-testid="log-detail-sheet"
             >
               <SheetHeader className="sr-only">

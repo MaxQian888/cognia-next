@@ -157,5 +157,62 @@ describe("CanvasShell", () => {
       await userEvent.setup().click(screen.getByRole("button", { name: /Open tools/i }))
       expect(useCanvasLayoutStore.getState().mobileRightOpen).toBe(true)
     })
+
+    it("uses a responsive width on the left mobile Sheet (no hardcoded 280px)", async () => {
+      renderWithProviders(<CanvasShell />)
+      await userEvent.setup().click(screen.getByRole("button", { name: /Open documents/i }))
+      // SheetContent is portaled into document.body; query the whole document.
+      const sheets = document.querySelectorAll('[data-slot="sheet-content"]')
+      const left = Array.from(sheets).find((el) => el.getAttribute("data-state") === "open")
+      expect(left).toBeTruthy()
+      expect(left?.className).toMatch(/w-\[min\(85vw,360px\)\]/)
+      expect(left?.className).not.toMatch(/w-\[280px\]/)
+    })
+
+    it("uses a responsive width on the right mobile Sheet (no hardcoded 320px)", async () => {
+      renderWithProviders(<CanvasShell />)
+      await userEvent.setup().click(screen.getByRole("button", { name: /Open tools/i }))
+      const sheets = document.querySelectorAll('[data-slot="sheet-content"]')
+      const right = Array.from(sheets).find((el) => el.getAttribute("data-state") === "open")
+      expect(right).toBeTruthy()
+      expect(right?.className).toMatch(/w-\[min\(85vw,360px\)\]/)
+      expect(right?.className).not.toMatch(/w-\[320px\]/)
+    })
+  })
+
+  describe("desktop collapse motion wrappers", () => {
+    it("renders the left rail inside a motion wrapper with the layout prop", () => {
+      renderWithProviders(<CanvasShell />)
+      const wrapper = screen.getByTestId("canvas-left-wrapper")
+      expect(wrapper).toBeInTheDocument()
+      // framer-motion serializes the inline style; opacity stays at 1 by default.
+      expect(wrapper).toHaveStyle({ opacity: "1" })
+    })
+
+    it("renders the right rail inside a motion wrapper with the layout prop", () => {
+      renderWithProviders(<CanvasShell />)
+      const wrapper = screen.getByTestId("canvas-right-wrapper")
+      expect(wrapper).toBeInTheDocument()
+      expect(wrapper).toHaveStyle({ opacity: "1" })
+    })
+
+    it("targets opacity:0 on the wrapper when left rail is collapsed", () => {
+      act(() => {
+        useCanvasLayoutStore.getState().setLeftCollapsed(true)
+      })
+      renderWithProviders(<CanvasShell />)
+      const wrapper = screen.getByTestId("canvas-left-wrapper")
+      // motion.div writes the animate target into the inline style synchronously.
+      expect(wrapper).toHaveStyle({ opacity: "0" })
+    })
+
+    it("targets opacity:0 on the wrapper when right rail is collapsed", () => {
+      act(() => {
+        useCanvasLayoutStore.getState().setRightCollapsed(true)
+      })
+      renderWithProviders(<CanvasShell />)
+      const wrapper = screen.getByTestId("canvas-right-wrapper")
+      expect(wrapper).toHaveStyle({ opacity: "0" })
+    })
   })
 })

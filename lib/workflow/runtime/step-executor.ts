@@ -6,7 +6,6 @@
 
 import type {
   StepExecutionContext,
-  StepExecutionResult,
   TriggerEvent,
   VisualWorkflow,
   WorkflowNode,

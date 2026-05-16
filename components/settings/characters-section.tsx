@@ -649,16 +649,15 @@ function CharacterEditor({
         </div>
         <div className="flex items-center justify-between gap-3">
           <div className="space-y-0.5">
-            <Label className="cursor-pointer text-xs">Enable Computer Use</Label>
+            <Label className="cursor-pointer text-xs">{t("computerUseToggle.label")}</Label>
             <p className="text-[10px] text-muted-foreground">
-              Attaches the registered Anthropic native tools (computer / bash / text_editor) to
-              every send. Honours Settings → Automation → Permissions.
+              {t("computerUseToggle.description")}
             </p>
           </div>
           <Switch
             checked={s.enableComputerUse}
             onCheckedChange={(v) => setS({ ...s, enableComputerUse: v })}
-            aria-label="Enable Computer Use"
+            aria-label={t("computerUseToggle.aria")}
           />
         </div>
       </div>

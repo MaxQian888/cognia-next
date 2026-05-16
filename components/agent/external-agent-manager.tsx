@@ -49,6 +49,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Select,
   SelectContent,
@@ -416,14 +417,14 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                       className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
                     >
                       <ExternalLink className="h-3 w-3" />
-                      Official Docs
+                      {tManager("officialDocs")}
                     </a>
                   )}
                 </div>
                 {currentPreset.setupHint && <p>{currentPreset.setupHint}</p>}
                 {relatedOfficialSurfaces.length > 0 && (
                   <div className="space-y-1">
-                    <p className="font-medium">Other Official Surfaces</p>
+                    <p className="font-medium">{tManager("otherOfficialSurfaces")}</p>
                     {relatedOfficialSurfaces.map((surface) => (
                       <div key={surface.id} className="rounded-sm border bg-muted/40 px-2 py-1.5">
                         <div className="flex items-center gap-2">
@@ -655,9 +656,9 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="retryOnErrors">{tSettings("retryErrorPatterns")}</Label>
-              <textarea
+              <Textarea
                 id="retryOnErrors"
-                className="min-h-20 rounded-md border border-input bg-transparent px-3 py-2 text-sm"
+                className="min-h-20 text-sm"
                 value={formData.retryOnErrors}
                 onChange={(e) => setFormData({ ...formData, retryOnErrors: e.target.value })}
                 placeholder={tSettings("retryErrorPatternsPlaceholder")}
@@ -695,6 +696,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
   const t = useTranslations("externalAgent")
   const tSettings = useTranslations("externalAgent.settings")
   const tManager = useTranslations("externalAgent.manager")
+  const tDiag = useTranslations("externalAgent.manager.diagnostics")
   const tCommon = useTranslations("common")
   const refreshSessionsFailedMessage = tManager("refreshSessionsFailed")
   const [addDialogOpen, setAddDialogOpen] = useState(false)
@@ -867,7 +869,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
     activeAgentValidity?.canonicalReason ||
     activeAgentValidity?.lastBranchReason ||
     activeAgentBlockedReason ||
-    "No blocking reason recorded."
+    tDiag("noBlockingReason")
   const branchOutcome = activeAgentValidity?.branchOutcome || "external"
   const recoveryHints = activeAgentValidity?.recoveryHints || []
   const activeEcosystem =
@@ -1131,15 +1133,13 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
           </div>
           {!isActiveAgentExecutable ? (
             <p className="text-xs text-amber-700 dark:text-amber-400">
-              {activeAgentBlockedReason || "Agent is currently non-executable."}
+              {activeAgentBlockedReason || tDiag("notExecutable")}
             </p>
           ) : !isActiveAgentConnected ? (
-            <p className="text-xs text-muted-foreground">
-              Connect the agent to list or manage ACP sessions.
-            </p>
+            <p className="text-xs text-muted-foreground">{tDiag("connectAgentToList")}</p>
           ) : listSupport?.state === "unsupported" ? (
             <p className="text-xs text-amber-700 dark:text-amber-400">
-              {listSupport.reason || "Session listing is unsupported by this ACP endpoint."}
+              {listSupport.reason || tDiag("sessionListingUnsupported")}
             </p>
           ) : sessionList.length === 0 ? (
             <p className="text-xs text-muted-foreground">{tManager("noResumableSessions")}</p>
@@ -1195,14 +1195,16 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
             <div className="mt-2 space-y-1 text-[11px] text-amber-700 dark:text-amber-400">
               {resumeSupport?.state === "unsupported" && (
                 <p>
-                  Resume unsupported:{" "}
-                  {resumeSupport.reason || "This endpoint does not support session/resume."}
+                  {tDiag("resumeUnsupported", {
+                    reason: resumeSupport.reason || tDiag("resumeUnsupportedDefault"),
+                  })}
                 </p>
               )}
               {forkSupport?.state === "unsupported" && (
                 <p>
-                  Fork unsupported:{" "}
-                  {forkSupport.reason || "This endpoint does not support session/fork."}
+                  {tDiag("forkUnsupported", {
+                    reason: forkSupport.reason || tDiag("forkUnsupportedDefault"),
+                  })}
                 </p>
               )}
             </div>
@@ -1213,54 +1215,88 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
       {/* Runtime Diagnostics */}
       {activeAgent && (
         <div className="rounded-md border p-3 text-xs" data-testid="external-agent-diagnostics">
-          <div className="mb-2 text-sm font-medium">Runtime Diagnostics</div>
+          <div className="mb-2 text-sm font-medium">{tDiag("runtimeDiagnostics")}</div>
           <div className="grid gap-1 text-muted-foreground">
             <p>
-              Protocol/Transport: {activeAgent.config.protocol.toUpperCase()} via{" "}
-              {activeAgent.config.transport}
+              {tDiag("protocolTransport", {
+                protocol: activeAgent.config.protocol.toUpperCase(),
+                transport: activeAgent.config.transport,
+              })}
             </p>
             <p>
-              Executable: {isActiveAgentExecutable ? "yes" : "no"}
               {activeAgentValidity?.blockingReasonCode
-                ? ` (${activeAgentValidity.blockingReasonCode})`
-                : ""}
-            </p>
-            <p>Health: {activeAgentValidity?.healthStatus || "unknown"}</p>
-            <p>Auth Required: {activeAgentValidity?.negotiation?.authRequired ? "yes" : "no"}</p>
-            <p>
-              Auth Methods:{" "}
-              {activeAgentValidity?.negotiation?.authMethods?.length
-                ? activeAgentValidity.negotiation.authMethods.map((method) => method.id).join(", ")
-                : "none"}
+                ? tDiag("executableWithCode", {
+                    value: isActiveAgentExecutable ? tDiag("yes") : tDiag("no"),
+                    code: activeAgentValidity.blockingReasonCode,
+                  })
+                : tDiag("executable", {
+                    value: isActiveAgentExecutable ? tDiag("yes") : tDiag("no"),
+                  })}
             </p>
             <p>
-              Session Support: list={listSupport?.state || "unknown"} / fork=
-              {forkSupport?.state || "unknown"} / resume={resumeSupport?.state || "unknown"}
+              {tDiag("health", {
+                value: activeAgentValidity?.healthStatus || tDiag("unknown"),
+              })}
             </p>
-            {activeEcosystem?.adapterName && <p>Adapter: {activeEcosystem.adapterName}</p>}
-            {activeEcosystem?.surfaceName && <p>Surface: {activeEcosystem.surfaceName}</p>}
-            {activeEcosystem?.supportTier && <p>Support Tier: {activeEcosystem.supportTier}</p>}
-            {activeEcosystem?.prerequisiteStatus && (
-              <p>Prerequisite Status: {activeEcosystem.prerequisiteStatus}</p>
+            <p>
+              {tDiag("authRequired", {
+                value: activeAgentValidity?.negotiation?.authRequired ? tDiag("yes") : tDiag("no"),
+              })}
+            </p>
+            <p>
+              {tDiag("authMethods", {
+                methods: activeAgentValidity?.negotiation?.authMethods?.length
+                  ? activeAgentValidity.negotiation.authMethods
+                      .map((method) => method.id)
+                      .join(", ")
+                  : tDiag("none"),
+              })}
+            </p>
+            <p>
+              {tDiag("sessionSupport", {
+                list: listSupport?.state || tDiag("unknown"),
+                fork: forkSupport?.state || tDiag("unknown"),
+                resume: resumeSupport?.state || tDiag("unknown"),
+              })}
+            </p>
+            {activeEcosystem?.adapterName && (
+              <p>{tDiag("adapter", { name: activeEcosystem.adapterName })}</p>
             )}
-            <p>Contract Version: v{contractVersion}</p>
-            <p>Lifecycle Stage: {lifecycleStage}</p>
-            {blockedStage && <p>Blocked Stage: {blockedStage}</p>}
-            <p>Branch Outcome: {branchOutcome}</p>
+            {activeEcosystem?.surfaceName && (
+              <p>{tDiag("surface", { name: activeEcosystem.surfaceName })}</p>
+            )}
+            {activeEcosystem?.supportTier && (
+              <p>{tDiag("supportTier", { tier: activeEcosystem.supportTier })}</p>
+            )}
+            {activeEcosystem?.prerequisiteStatus && (
+              <p>{tDiag("prerequisiteStatus", { status: activeEcosystem.prerequisiteStatus })}</p>
+            )}
+            <p>{tDiag("contractVersion", { version: contractVersion })}</p>
+            <p>{tDiag("lifecycleStage", { stage: lifecycleStage })}</p>
+            {blockedStage && <p>{tDiag("blockedStage", { stage: blockedStage })}</p>}
+            <p>{tDiag("branchOutcome", { outcome: branchOutcome })}</p>
             <p>
-              Canonical Reason: {canonicalReasonCode}
-              {canonicalReason ? ` - ${canonicalReason}` : ""}
+              {canonicalReason
+                ? tDiag("canonicalReasonWithText", {
+                    code: canonicalReasonCode,
+                    reason: canonicalReason,
+                  })
+                : tDiag("canonicalReason", { code: canonicalReasonCode })}
             </p>
             {(correlationSessionId || correlationTurnId) && (
               <p>
-                Correlation: session={correlationSessionId || "n/a"} / turn=
-                {correlationTurnId || "n/a"}
+                {tDiag("correlation", {
+                  session: correlationSessionId || tDiag("naLabel"),
+                  turn: correlationTurnId || tDiag("naLabel"),
+                })}
               </p>
             )}
             {activeLastRunSnapshot && (
               <div className="rounded border p-2 text-foreground">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span>{`Latest run: ${activeLastRunSnapshot.terminalOutcome}`}</span>
+                  <span>
+                    {tDiag("latestRun", { outcome: activeLastRunSnapshot.terminalOutcome })}
+                  </span>
                   <Badge variant="outline" className="text-[10px]">
                     {activeLastRunSnapshot.branchReasonCode}
                   </Badge>
@@ -1271,7 +1307,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
                 </p>
                 {activeLastRunSnapshot.linkedTraceId && (
                   <p className="text-muted-foreground">
-                    Trace: {activeLastRunSnapshot.linkedTraceId}
+                    {tDiag("trace", { trace: activeLastRunSnapshot.linkedTraceId })}
                   </p>
                 )}
                 {activeLastRunSnapshot.diagnosticText && (
@@ -1279,19 +1315,25 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
                 )}
                 {activeLastRunSnapshot.linkedSessionId && (
                   <p className="text-muted-foreground">
-                    Session: {activeLastRunSnapshot.linkedSessionId}
+                    {tDiag("session", { session: activeLastRunSnapshot.linkedSessionId })}
                   </p>
                 )}
               </div>
             )}
             {activeAgentBlockedReason && (
               <p className="text-amber-700 dark:text-amber-400">
-                Blocking reason: {activeAgentBlockedReason}
+                {tDiag("blockingReason", { reason: activeAgentBlockedReason })}
               </p>
             )}
-            {recoveryHints.length > 0 && <p>Recovery Hints: {recoveryHints.join(" | ")}</p>}
+            {recoveryHints.length > 0 && (
+              <p>{tDiag("recoveryHints", { hints: recoveryHints.join(" | ") })}</p>
+            )}
             {activeEcosystem?.recommendedActions?.length ? (
-              <p>Recommended Actions: {activeEcosystem.recommendedActions.join(" | ")}</p>
+              <p>
+                {tDiag("recommendedActions", {
+                  actions: activeEcosystem.recommendedActions.join(" | "),
+                })}
+              </p>
             ) : null}
           </div>
         </div>
@@ -1303,9 +1345,9 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
           className="rounded-md border p-3 text-xs"
           data-testid="external-agent-benchmark-adaptation"
         >
-          <div className="mb-2 text-sm font-medium">Benchmark Adaptation</div>
+          <div className="mb-2 text-sm font-medium">{tDiag("benchmarkAdaptation")}</div>
           {benchmarkEntries.length === 0 ? (
-            <p className="text-muted-foreground">No benchmark adaptation entries yet.</p>
+            <p className="text-muted-foreground">{tDiag("noBenchmarkAdaptation")}</p>
           ) : (
             <div className="space-y-2">
               {benchmarkEntries.map((entry) => (
@@ -1316,26 +1358,34 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
                       {entry.status}
                     </Badge>
                   </div>
-                  <p className="text-muted-foreground">Gap: {entry.gapGrade}</p>
-                  <p className="text-muted-foreground">Target: {entry.adaptationTarget}</p>
+                  <p className="text-muted-foreground">{tDiag("gap", { grade: entry.gapGrade })}</p>
+                  <p className="text-muted-foreground">
+                    {tDiag("target", { target: entry.adaptationTarget })}
+                  </p>
                   {entry.status === "validated" && (
                     <p className="text-muted-foreground">
-                      Evidence:{" "}
-                      {entry.evidence.length > 0
-                        ? entry.evidence.map((item) => item.reference).join(", ")
-                        : "missing"}
+                      {tDiag("evidence", {
+                        evidence:
+                          entry.evidence.length > 0
+                            ? entry.evidence.map((item) => item.reference).join(", ")
+                            : tDiag("evidenceMissing"),
+                      })}
                     </p>
                   )}
                   {entry.status === "intentional-deviation" && entry.deviation && (
                     <div className="space-y-1 text-amber-700 dark:text-amber-400">
-                      <p>Rationale: {entry.deviation.rationale}</p>
-                      <p>Trade-off: {entry.deviation.tradeOff}</p>
-                      <p>User Impact: {entry.deviation.userImpact}</p>
+                      <p>{tDiag("rationale", { rationale: entry.deviation.rationale })}</p>
+                      <p>{tDiag("tradeOff", { tradeOff: entry.deviation.tradeOff })}</p>
+                      <p>{tDiag("userImpact", { impact: entry.deviation.userImpact })}</p>
                       <p>
-                        Review: {entry.deviation.review.reviewedBy}
                         {entry.deviation.review.reviewLink
-                          ? ` (${entry.deviation.review.reviewLink})`
-                          : ""}
+                          ? tDiag("reviewWithLink", {
+                              reviewedBy: entry.deviation.review.reviewedBy,
+                              link: entry.deviation.review.reviewLink,
+                            })
+                          : tDiag("review", {
+                              reviewedBy: entry.deviation.review.reviewedBy,
+                            })}
                       </p>
                     </div>
                   )}

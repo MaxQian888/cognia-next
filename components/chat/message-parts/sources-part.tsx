@@ -7,6 +7,7 @@
  * markdown footnote.
  */
 
+import { useTranslations } from "next-intl"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
@@ -26,6 +27,7 @@ const ORIGIN_LABEL: Record<SourcesPartItem["origin"], string> = {
 }
 
 export function SourcesPart({ part, className, defaultOpen = false }: SourcesPartProps) {
+  const t = useTranslations("chat.sourcesPart")
   if (!part.sources || part.sources.length === 0) return null
 
   return (
@@ -35,7 +37,7 @@ export function SourcesPart({ part, className, defaultOpen = false }: SourcesPar
       defaultOpen={defaultOpen}
     >
       <CollapsibleTrigger className="flex items-center gap-2" data-testid="sources-part-trigger">
-        <p className="font-medium">Used {part.sources.length} sources</p>
+        <p className="font-medium">{t("usedSources", { count: part.sources.length })}</p>
         <ChevronDownIcon className="h-4 w-4" />
       </CollapsibleTrigger>
       <CollapsibleContent

@@ -43,6 +43,7 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { usePlatform } from "@/hooks/use-platform"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   detectTrigger,
@@ -748,10 +749,10 @@ function ComposerInner(props: InnerProps) {
         </div>
 
         <div className="relative flex-1 self-center">
-          <textarea
+          <Textarea
             aria-label={t("ariaMessage")}
             className={cn(
-              "field-sizing-content block min-h-6 w-full resize-none bg-transparent px-1 py-1.5 pr-10 text-sm leading-6 outline-none placeholder:text-muted-foreground"
+              "field-sizing-content block min-h-6 w-full resize-none border-0 bg-transparent px-1 py-1.5 pr-10 text-sm leading-6 shadow-none outline-none ring-0 placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
             )}
             disabled={props.disabled}
             name="message"
@@ -777,14 +778,14 @@ function ComposerInner(props: InnerProps) {
             <TooltipTrigger asChild>
               {hasPendingDrafts ? (
                 <Button
-                  aria-label="Edit draft"
+                  aria-label={t("editDraftAria")}
                   className="h-9 rounded-full px-3 text-xs"
                   disabled={props.disabled}
                   onClick={() => void submit()}
                   type="button"
                   variant="secondary"
                 >
-                  Edit draft
+                  {t("editDraftTooltip")}
                 </Button>
               ) : (
                 <Button
@@ -813,7 +814,11 @@ function ComposerInner(props: InnerProps) {
               )}
             </TooltipTrigger>
             <TooltipContent>
-              {hasPendingDrafts ? "Edit draft" : isStreaming ? t("stopTooltip") : t("sendTooltip")}
+              {hasPendingDrafts
+                ? t("editDraftTooltip")
+                : isStreaming
+                  ? t("stopTooltip")
+                  : t("sendTooltip")}
             </TooltipContent>
           </Tooltip>
         </div>
@@ -905,6 +910,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const tMemory = useTranslations("chat.composer.memory")
   const tAttach = useTranslations("chat.composer.attachments")
   const tWebSearch = useTranslations("webSearchToggle")
+  const tDraftReview = useTranslations("chat.composer.draftReview")
   const status = useChatStore((s) => s.status)
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
   const appendMessage = useChatStore((s) => s.appendMessage)
@@ -1201,13 +1207,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
       {/* Draft review dialog — shown when the session has pending connector drafts */}
       <Dialog open={draftDialogOpen} onOpenChange={setDraftDialogOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg sm:max-w-lg max-w-[calc(100vw-2rem)]">
           <DialogHeader>
-            <DialogTitle>Review platform drafts</DialogTitle>
+            <DialogTitle>{tDraftReview("title")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
             {pendingDrafts.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No pending drafts.</p>
+              <p className="text-sm text-muted-foreground">{tDraftReview("noPendingDrafts")}</p>
             ) : (
               pendingDrafts.map((draft) => (
                 <div key={draft.id} className="rounded-md border p-3 text-sm">
@@ -1222,10 +1228,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                       variant="outline"
                       onClick={() => void handleRejectDraft(draft)}
                     >
-                      Reject
+                      {tDraftReview("reject")}
                     </Button>
                     <Button size="sm" onClick={() => void handleApproveDraft(draft)}>
-                      Approve
+                      {tDraftReview("approve")}
                     </Button>
                   </DialogFooter>
                 </div>

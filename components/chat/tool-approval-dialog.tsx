@@ -28,7 +28,7 @@ export function ToolApprovalDialog({ approval, onRespond }: Props) {
         // The Claude side blocks until we respond — preventing close avoids
         // an "X" button that would orphan the pending Promise.
         showCloseButton={false}
-        className="max-w-xl"
+        className="max-w-xl max-w-[calc(100vw-2rem)] sm:max-w-xl"
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

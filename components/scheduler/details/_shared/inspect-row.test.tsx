@@ -8,9 +8,10 @@ describe("InspectRow", () => {
     const { container } = render(<InspectRow label="Cron" value="0 9 * * *" />)
     expect(screen.getByText("Cron")).toBeInTheDocument()
     expect(screen.getByText("0 9 * * *")).toBeInTheDocument()
-    // 2-column grid: label + value
+    // 2-column grid: fixed-width label column + flexible value column so long
+    // values get the rest of the row instead of being capped at 2/3 width.
     const row = container.firstElementChild as HTMLElement
-    expect(row.className).toContain("grid-cols-[1fr_2fr]")
+    expect(row.className).toContain("grid-cols-[minmax(120px,180px)_1fr]")
   })
 
   it("renders a placeholder dash when value is an empty string", () => {

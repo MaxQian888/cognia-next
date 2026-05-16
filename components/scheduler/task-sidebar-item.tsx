@@ -109,6 +109,11 @@ const taskTypeConfig: Record<
     bg: "bg-teal-500/10",
     color: "text-teal-500",
   },
+  twin: {
+    icon: <Sparkles className="h-3.5 w-3.5" />,
+    bg: "bg-rose-500/10",
+    color: "text-rose-500",
+  },
   "connection:scheduled:digest": {
     icon: <Send className="h-3.5 w-3.5" />,
     bg: "bg-cyan-500/10",

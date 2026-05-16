@@ -54,7 +54,8 @@ function ShareTargetPageInner() {
   const [busyId, setBusyId] = useState<string | null>(null)
   const keyboard = useKeyboardInsets()
 
-  const sessions = useLiveQuery<ChatSession[]>(() => listSessions(), []) ?? []
+  const sessionsRaw = useLiveQuery<ChatSession[]>(() => listSessions(), [])
+  const sessions = useMemo(() => sessionsRaw ?? [], [sessionsRaw])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()

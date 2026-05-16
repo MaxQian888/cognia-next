@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useState } from "react"
+import { useTranslations } from "next-intl"
 import {
   Artifact as ArtifactShell,
   ArtifactActions,
@@ -39,6 +40,7 @@ interface ArtifactPartProps {
 }
 
 export function ArtifactPart({ part, className }: ArtifactPartProps) {
+  const t = useTranslations("chat.artifactPart")
   const artifact = useArtifactStore((s) => s.artifacts[part.artifactId])
   const [open, setOpen] = useState(part.defaultOpen !== false)
   const { copy, copied } = useCopy()
@@ -76,7 +78,7 @@ export function ArtifactPart({ part, className }: ArtifactPartProps) {
         <FileWarningIcon className="size-3.5" aria-hidden="true" />
         <span>
           {part.title}
-          <span className="ml-2 opacity-70">(已清理)</span>
+          <span className="ml-2 opacity-70">{t("cleared")}</span>
         </span>
       </div>
     )
@@ -95,22 +97,22 @@ export function ArtifactPart({ part, className }: ArtifactPartProps) {
         </div>
         <ArtifactActions>
           <ArtifactAction
-            tooltip={copied ? "Copied" : "Copy"}
-            label="Copy artifact content"
+            tooltip={copied ? t("copied") : t("copy")}
+            label={t("copyAria")}
             icon={CopyIcon}
             onClick={handleCopy}
             data-testid="artifact-part-copy"
           />
           <ArtifactAction
-            tooltip="Download"
-            label="Download artifact"
+            tooltip={t("download")}
+            label={t("downloadAria")}
             icon={DownloadIcon}
             onClick={handleDownload}
             data-testid="artifact-part-download"
           />
           <ArtifactAction
-            tooltip="Open in Canvas"
-            label="Open in Canvas"
+            tooltip={t("openInCanvas")}
+            label={t("openInCanvasAria")}
             icon={ExternalLinkIcon}
             onClick={handleOpenInCanvas}
             data-testid="artifact-part-open-canvas"
@@ -121,7 +123,7 @@ export function ArtifactPart({ part, className }: ArtifactPartProps) {
             className="size-8 p-0 text-muted-foreground hover:text-foreground"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
-            aria-label={open ? "Collapse artifact" : "Expand artifact"}
+            aria-label={open ? t("collapse") : t("expand")}
             data-testid="artifact-part-toggle"
             type="button"
           >

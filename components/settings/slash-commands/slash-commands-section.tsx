@@ -144,10 +144,9 @@ export function SlashCommandsSection() {
 
   const pluginCmds = useMemo<SlashCommandDefinition[]>(
     () => listSlashCommands().filter((c) => c.source === "plugin"),
-    // listSlashCommands reads a module-scoped registry; only re-evaluate on
-    // component mount or filter changes (no producer side-effects to subscribe
-    // to in this surface).
-    [filter]
+    // listSlashCommands reads a module-scoped registry; recompute once per
+    // mount — there are no producer side-effects to subscribe to here.
+    []
   )
 
   const filteredBuiltin = useMemo(

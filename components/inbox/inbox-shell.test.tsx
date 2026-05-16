@@ -44,6 +44,13 @@ jest.mock("dexie-react-hooks", () => ({
 
 jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn() }))
 
+// Mock the project-level mobile-viewport hook so each test can drive the
+// single-pane stacking rule deterministically without touching matchMedia.
+const mockUseIsMobile = jest.fn().mockReturnValue(false)
+jest.mock("@/hooks/ui", () => ({
+  useIsMobile: () => mockUseIsMobile(),
+}))
+
 // Sidebar primitives — the full Radix implementation needs a host environment
 // that is difficult to reproduce in jsdom; stub them to render children directly.
 jest.mock("@/components/ui/sidebar", () => ({
@@ -91,6 +98,10 @@ import { InboxShell } from "./inbox-shell"
 // ---------------------------------------------------------------------------
 
 describe("InboxShell", () => {
+  beforeEach(() => {
+    mockUseIsMobile.mockReturnValue(false)
+  })
+
   it("renders the sidebar, conversation-list pane, and detail pane", () => {
     render(<InboxShell view="all" />)
 
@@ -114,13 +125,53 @@ describe("InboxShell", () => {
     expect(screen.getByText("Select a conversation to start")).toBeInTheDocument()
   })
 
-  it("middle pane uses responsive Tailwind widths (tablet → desktop)", () => {
+  it("middle pane uses responsive Tailwind widths (mobile → tablet → desktop)", () => {
     render(<InboxShell view="all" />)
     const middle = screen.getByTestId("inbox-conversation-list-pane")
-    // Tablet (≥ 768) widens from w-56 → w-64; desktop (≥ 1024) widens to w-72.
-    expect(middle.className).toContain("w-56")
+    // < 768 px: full-width single-pane (`w-full`); md+ uses w-64, lg+ w-72.
+    expect(middle.className).toContain("w-full")
     expect(middle.className).toContain("md:w-64")
     expect(middle.className).toContain("lg:w-72")
+  })
+
+  it("middle pane uses the RTL-safe logical border (border-e, not border-r)", () => {
+    render(<InboxShell view="all" />)
+    const middle = screen.getByTestId("inbox-conversation-list-pane")
+    expect(middle.className).toContain("border-e")
+    expect(middle.className).not.toMatch(/(^|\s)border-r(\s|$)/)
+  })
+
+  it("desktop viewport renders both panes regardless of conversationKey", () => {
+    mockUseIsMobile.mockReturnValue(false)
+    render(<InboxShell view="conversation" conversationKey="ck1" />)
+
+    const middle = screen.getByTestId("inbox-conversation-list-pane")
+    const detail = screen.getByTestId("inbox-detail-pane")
+    expect(middle.className).not.toMatch(/(^|\s)hidden(\s|$)/)
+    expect(detail.className).not.toMatch(/(^|\s)hidden(\s|$)/)
+  })
+
+  it("mobile viewport with no conversation key shows the list only", () => {
+    mockUseIsMobile.mockReturnValue(true)
+    render(<InboxShell view="all" />)
+
+    const middle = screen.getByTestId("inbox-conversation-list-pane")
+    const detail = screen.getByTestId("inbox-detail-pane")
+    // List visible by default on mobile, detail hidden until md+.
+    expect(middle.className).not.toMatch(/(^|\s)hidden(\s|$)/)
+    expect(detail.className).toContain("hidden")
+    expect(detail.className).toContain("md:flex")
+  })
+
+  it("mobile viewport with a conversation key shows the detail only", () => {
+    mockUseIsMobile.mockReturnValue(true)
+    render(<InboxShell view="conversation" conversationKey="ck-mobile" />)
+
+    const middle = screen.getByTestId("inbox-conversation-list-pane")
+    const detail = screen.getByTestId("inbox-detail-pane")
+    expect(middle.className).toContain("hidden")
+    expect(middle.className).toContain("md:flex")
+    expect(detail.className).not.toMatch(/(^|\s)hidden(\s|$)/)
   })
 
   it("subscribes to matchMedia at mount and detects tablet viewport", () => {

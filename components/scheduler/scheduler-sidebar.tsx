@@ -170,12 +170,17 @@ export function SchedulerSidebar({
     <Sidebar collapsible="icon" className="border-r">
       {/* Header */}
       <SidebarHeader>
-        <div className="flex items-center gap-2 px-3 py-2">
+        <div className="flex items-center gap-2 px-3 py-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
           <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="flex-1 text-sm font-semibold">{t("title")}</span>
+          <span className="flex-1 text-sm font-semibold group-data-[collapsible=icon]:hidden">
+            {t("title")}
+          </span>
           <span
             data-testid="scheduler-status-dot"
-            className={cn("h-2 w-2 shrink-0 rounded-full", schedulerDotClass)}
+            className={cn(
+              "h-2 w-2 shrink-0 rounded-full group-data-[collapsible=icon]:hidden",
+              schedulerDotClass
+            )}
           />
         </div>
       </SidebarHeader>
@@ -233,7 +238,7 @@ export function SchedulerSidebar({
       )}
 
       {/* Task lists */}
-      <SidebarContent>
+      <SidebarContent className="group-data-[collapsible=icon]:hidden">
         {showEmptyState && <TaskListEmptyState onCreate={onCreate} />}
 
         {showFilteredEmpty && (
@@ -246,50 +251,50 @@ export function SchedulerSidebar({
         {/* Unified groups by kind — preferred path when unified data is supplied. */}
         {groupedUnified && !showEmptyState && !showFilteredEmpty && (
           <>
-            {(["app", "workflow", "backup", "plugin", "system"] as ScheduledItemKind[]).map(
-              (kind) => {
-                const items = groupedUnified[kind]
-                if (items.length === 0) return null
-                return (
-                  <SidebarGroup key={kind}>
-                    <SidebarGroupLabel className="flex items-center gap-2">
-                      {t(`kindFilter.${kind}`) || kind}
-                      <Badge variant="secondary" className="ml-auto text-[10px]">
-                        {items.length}
-                      </Badge>
-                    </SidebarGroupLabel>
-                    <SidebarGroupContent>
-                      <SidebarMenu>
-                        {items.map((item, idx) => (
-                          <SidebarMenuItem key={item.unifiedId}>
-                            <UnifiedTaskSidebarItem
-                              item={item}
-                              isActive={item.kind === "app" && selectedTaskId === item.sourceId}
-                              isHighlighted={item.kind === "app" && idx === highlightedIndex}
-                              isSelected={selectedUnifiedIds?.includes(item.unifiedId)}
-                              onToggleSelect={onToggleUnifiedSelection}
-                              onClick={(clickedItem) => {
-                                if (clickedItem.kind === "app") {
-                                  onSelectTask(clickedItem.sourceId)
-                                } else if (clickedItem.kind === "system") {
-                                  onSelectSystemTask?.(clickedItem.sourceId)
-                                } else {
-                                  onSelectUnifiedItem?.(clickedItem)
-                                }
-                              }}
-                              onRunNow={onUnifiedRunNow}
-                              onPause={onUnifiedPause}
-                              onResume={onUnifiedResume}
-                              onDelete={onUnifiedDelete}
-                            />
-                          </SidebarMenuItem>
-                        ))}
-                      </SidebarMenu>
-                    </SidebarGroupContent>
-                  </SidebarGroup>
-                )
-              }
-            )}
+            {(
+              ["app", "workflow", "backup", "plugin", "system", "connector"] as ScheduledItemKind[]
+            ).map((kind) => {
+              const items = groupedUnified[kind]
+              if (items.length === 0) return null
+              return (
+                <SidebarGroup key={kind}>
+                  <SidebarGroupLabel className="flex items-center gap-2">
+                    {t(`kindFilter.${kind}`) || kind}
+                    <Badge variant="secondary" className="ml-auto text-[10px]">
+                      {items.length}
+                    </Badge>
+                  </SidebarGroupLabel>
+                  <SidebarGroupContent>
+                    <SidebarMenu>
+                      {items.map((item, idx) => (
+                        <SidebarMenuItem key={item.unifiedId}>
+                          <UnifiedTaskSidebarItem
+                            item={item}
+                            isActive={item.kind === "app" && selectedTaskId === item.sourceId}
+                            isHighlighted={item.kind === "app" && idx === highlightedIndex}
+                            isSelected={selectedUnifiedIds?.includes(item.unifiedId)}
+                            onToggleSelect={onToggleUnifiedSelection}
+                            onClick={(clickedItem) => {
+                              if (clickedItem.kind === "app") {
+                                onSelectTask(clickedItem.sourceId)
+                              } else if (clickedItem.kind === "system") {
+                                onSelectSystemTask?.(clickedItem.sourceId)
+                              } else {
+                                onSelectUnifiedItem?.(clickedItem)
+                              }
+                            }}
+                            onRunNow={onUnifiedRunNow}
+                            onPause={onUnifiedPause}
+                            onResume={onUnifiedResume}
+                            onDelete={onUnifiedDelete}
+                          />
+                        </SidebarMenuItem>
+                      ))}
+                    </SidebarMenu>
+                  </SidebarGroupContent>
+                </SidebarGroup>
+              )
+            })}
           </>
         )}
 
@@ -329,7 +334,7 @@ export function SchedulerSidebar({
       </SidebarContent>
 
       {/* Footer stats */}
-      <SidebarFooter>
+      <SidebarFooter className="group-data-[collapsible=icon]:hidden">
         <div className="grid grid-cols-3 gap-1 px-3 py-2 text-center">
           <div>
             <p className="text-[11px] font-semibold text-green-500">{activeCount}</p>

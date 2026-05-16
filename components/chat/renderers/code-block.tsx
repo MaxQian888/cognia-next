@@ -5,9 +5,8 @@ import { useTranslations } from "next-intl"
 import { codeToHtml, type BundledLanguage } from "shiki"
 import { Copy, Check, Download, Maximize2, WrapText, Hash } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { downloadFile } from "@/lib/files/download"
 import { loggers } from "@/lib/logger"
@@ -200,84 +199,62 @@ export const CodeBlock = memo(function CodeBlock({
           </div>
 
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={() => setLocalShowLineNumbers(!localShowLineNumbers)}
-                  aria-label={localShowLineNumbers ? t("hideLinesAria") : t("showLinesAria")}
-                  aria-pressed={localShowLineNumbers}
-                >
-                  <Hash className="h-3 w-3" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {localShowLineNumbers ? t("hideLines") : t("showLines")}
-              </TooltipContent>
-            </Tooltip>
+            <TooltipIconButton
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={() => setLocalShowLineNumbers(!localShowLineNumbers)}
+              aria-label={localShowLineNumbers ? t("hideLinesAria") : t("showLinesAria")}
+              aria-pressed={localShowLineNumbers}
+              tooltip={localShowLineNumbers ? t("hideLines") : t("showLines")}
+            >
+              <Hash className="h-3 w-3" />
+            </TooltipIconButton>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={() => setWordWrap(!wordWrap)}
-                  aria-label={wordWrap ? t("unwrapAria") : t("wrapAria")}
-                  aria-pressed={wordWrap}
-                >
-                  <WrapText className="h-3 w-3" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{wordWrap ? t("unwrap") : t("wrap")}</TooltipContent>
-            </Tooltip>
+            <TooltipIconButton
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={() => setWordWrap(!wordWrap)}
+              aria-label={wordWrap ? t("unwrapAria") : t("wrapAria")}
+              aria-pressed={wordWrap}
+              tooltip={wordWrap ? t("unwrap") : t("wrap")}
+            >
+              <WrapText className="h-3 w-3" />
+            </TooltipIconButton>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={handleCopy}
-                  aria-label={t("copyAria")}
-                >
-                  {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("copy")}</TooltipContent>
-            </Tooltip>
+            <TooltipIconButton
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={handleCopy}
+              aria-label={t("copyAria")}
+              tooltip={t("copy")}
+            >
+              {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+            </TooltipIconButton>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={handleDownload}
-                  aria-label={t("downloadAria")}
-                >
-                  <Download className="h-3 w-3" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("download")}</TooltipContent>
-            </Tooltip>
+            <TooltipIconButton
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={handleDownload}
+              aria-label={t("downloadAria")}
+              tooltip={t("download")}
+            >
+              <Download className="h-3 w-3" />
+            </TooltipIconButton>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={() => setIsFullscreen(true)}
-                  aria-label={t("fullscreenAria")}
-                >
-                  <Maximize2 className="h-3 w-3" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("fullscreen")}</TooltipContent>
-            </Tooltip>
+            <TooltipIconButton
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={() => setIsFullscreen(true)}
+              aria-label={t("fullscreenAria")}
+              tooltip={t("fullscreen")}
+            >
+              <Maximize2 className="h-3 w-3" />
+            </TooltipIconButton>
           </div>
         </div>
 
@@ -291,68 +268,46 @@ export const CodeBlock = memo(function CodeBlock({
               <span>{language || t("defaultLabel")}</span>
               {filename && <span className="text-muted-foreground font-normal">— {filename}</span>}
               <div className="flex items-center gap-1 ml-auto">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => setLocalShowLineNumbers(!localShowLineNumbers)}
-                      aria-label={localShowLineNumbers ? t("hideLinesAria") : t("showLinesAria")}
-                    >
-                      <Hash className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {localShowLineNumbers ? t("hideLines") : t("showLines")}
-                  </TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => setWordWrap(!wordWrap)}
-                      aria-label={wordWrap ? t("unwrapAria") : t("wrapAria")}
-                    >
-                      <WrapText className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{wordWrap ? t("unwrap") : t("wrap")}</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={handleCopy}
-                      aria-label={t("copyAria")}
-                    >
-                      {copied ? (
-                        <Check className="h-3.5 w-3.5" />
-                      ) : (
-                        <Copy className="h-3.5 w-3.5" />
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("copy")}</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={handleDownload}
-                      aria-label={t("downloadAria")}
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("download")}</TooltipContent>
-                </Tooltip>
+                <TooltipIconButton
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => setLocalShowLineNumbers(!localShowLineNumbers)}
+                  aria-label={localShowLineNumbers ? t("hideLinesAria") : t("showLinesAria")}
+                  tooltip={localShowLineNumbers ? t("hideLines") : t("showLines")}
+                >
+                  <Hash className="h-3.5 w-3.5" />
+                </TooltipIconButton>
+                <TooltipIconButton
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => setWordWrap(!wordWrap)}
+                  aria-label={wordWrap ? t("unwrapAria") : t("wrapAria")}
+                  tooltip={wordWrap ? t("unwrap") : t("wrap")}
+                >
+                  <WrapText className="h-3.5 w-3.5" />
+                </TooltipIconButton>
+                <TooltipIconButton
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={handleCopy}
+                  aria-label={t("copyAria")}
+                  tooltip={t("copy")}
+                >
+                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                </TooltipIconButton>
+                <TooltipIconButton
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={handleDownload}
+                  aria-label={t("downloadAria")}
+                  tooltip={t("download")}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                </TooltipIconButton>
               </div>
             </DialogTitle>
           </DialogHeader>

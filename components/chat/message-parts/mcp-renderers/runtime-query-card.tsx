@@ -1,5 +1,6 @@
 "use client"
 
+import { useTranslations } from "next-intl"
 import { BotIcon, BrainCircuitIcon, PuzzleIcon, SparklesIcon, UsersIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 import { McpCardShell, useParsedOutput } from "./common"
@@ -28,6 +29,7 @@ const ICON_BY_KIND: Record<string, typeof BotIcon> = {
 }
 
 export function RuntimeQueryCard({ part }: { part: ToolUIPart }) {
+  const t = useTranslations("chat.mcp.runtimeQuery")
   const parsed = useParsedOutput<RuntimeQueryOutput>(part.output)
   if (!parsed || !Array.isArray(parsed.entities)) return null
 
@@ -41,7 +43,7 @@ export function RuntimeQueryCard({ part }: { part: ToolUIPart }) {
       testId="mcp-runtime-query-card"
     >
       {parsed.entities.length === 0 ? (
-        <p className="text-muted-foreground">None found.</p>
+        <p className="text-muted-foreground">{t("noneFound")}</p>
       ) : (
         <ul className="space-y-1">
           {parsed.entities.map((e, i) => (

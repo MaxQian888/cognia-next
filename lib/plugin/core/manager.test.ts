@@ -1680,6 +1680,30 @@ describe("PluginManager", () => {
         ).validateHookDeclarations("hook-plugin", hooks)
       ).toThrow(/blocked by plugin point governance mode/i)
     })
+
+    it("setPluginPointGovernanceMode updates the live mode without a restart", () => {
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        pluginPointGovernanceMode: "warn",
+      })
+      expect(manager.getPluginPointGovernanceMode()).toBe("warn")
+
+      manager.setPluginPointGovernanceMode("block")
+      expect(manager.getPluginPointGovernanceMode()).toBe("block")
+
+      const manifest: PluginManifest = {
+        ...createManifest("toggled-activation"),
+        activationEvents: ["onLanguage:typescript"],
+      }
+      expect(() =>
+        (
+          manager as unknown as { parseActivationSpec: (m: PluginManifest) => unknown }
+        ).parseActivationSpec(manifest)
+      ).toThrow(/blocked by plugin point governance mode/i)
+
+      manager.setPluginPointGovernanceMode("warn")
+      expect(manager.getPluginPointGovernanceMode()).toBe("warn")
+    })
   })
 
   describe("resolveGovernanceMode", () => {

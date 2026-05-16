@@ -340,7 +340,7 @@ export function HookHistoryPane() {
 export function ProfilerPane() {
   const t = useTranslations("plugins.devtoolsPanel.profiler")
   const plugins = useLiveQuery(() => listPlugins(), [])
-  const pluginRows = plugins ?? []
+  const pluginRows = useMemo(() => plugins ?? [], [plugins])
   const [pluginId, setPluginId] = useState<string>("")
   const [stats, setStats] = useState<ReturnType<typeof getPerformanceStats> | null>(null)
 

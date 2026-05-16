@@ -40,6 +40,9 @@ export function LocaleGate({ children }: { children: React.ReactNode }) {
   const pluginVersion = useSyncExternalStore(subscribeToPluginI18n, getPluginI18nSnapshot, () => 0)
 
   const messages = useMemo(() => {
+    // pluginVersion is the invalidation trigger — read it inside the body so
+    // ESLint sees the dependency, and so the React compiler doesn't elide it.
+    void pluginVersion
     const host = allMessages[locale]
     const merged = getMergedPluginMessages()
     const pluginFlat = merged[locale]
@@ -50,9 +53,6 @@ export function LocaleGate({ children }: { children: React.ReactNode }) {
     // the plugin registry stores before merging.
     const pluginNested = inflateFlatKeys(pluginFlat)
     return { ...host, ...pluginNested } as typeof host
-    // pluginVersion is the trigger — value is unused but its identity drives
-    // the memo invalidation. Reading it inside the deps array keeps eslint
-    // (and the React compiler) happy without an extra reference.
   }, [locale, pluginVersion])
 
   return (

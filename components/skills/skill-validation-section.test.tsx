@@ -43,4 +43,11 @@ describe("SkillValidationSection", () => {
     const groups = screen.getAllByRole("group")
     expect(groups).toHaveLength(2)
   })
+
+  it("renders the localized unfielded label for errors with no field", () => {
+    render(<SkillValidationSection errors={[{ code: "unknown", message: "Something broke." }]} />)
+    // The next-intl mock echoes the key, so "unfielded" appears verbatim.
+    expect(screen.getByText("unfielded")).toBeInTheDocument()
+    expect(screen.queryByText("(general)")).not.toBeInTheDocument()
+  })
 })

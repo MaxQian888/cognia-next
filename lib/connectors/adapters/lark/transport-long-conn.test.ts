@@ -111,7 +111,7 @@ describe("startLarkLongConn", () => {
         _heartbeatIntervalMs: 100_000, // prevent timer fires during test
         _backoffBaseMs: 1,
       })) {
-        yielded.push(envelope.event.message.message_id)
+        yielded.push(envelope.event.message!.message_id)
         if (yielded.length >= 2) break
       }
     })()
@@ -144,7 +144,7 @@ describe("startLarkLongConn", () => {
         _heartbeatIntervalMs: 100_000,
         _backoffBaseMs: 1,
       })) {
-        yielded.push(envelope.event.message.message_id)
+        yielded.push(envelope.event.message!.message_id)
         break
       }
     })()
