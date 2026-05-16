@@ -22,12 +22,14 @@ import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CheckCircle2Icon, CloudUploadIcon, DownloadIcon, ImportIcon } from "lucide-react"
+import { motion, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Item, ItemContent, ItemDescription, ItemMedia } from "@/components/ui/item"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -37,6 +39,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { writeFile } from "@/lib/capacitor/filesystem"
 import { ensureChannel, schedule as scheduleLocalNotif } from "@/lib/capacitor/local-notifications"
@@ -88,6 +91,7 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
 
   const history = useLiveQuery<BackupHistoryRow[]>(() => listBackupHistory(), []) ?? []
   const passphraseValid = passphrase.length >= MIN_PASSPHRASE_LENGTH
+  const reduce = useReducedMotion()
 
   const runExport = async () => {
     const pkg = await buildBackupPackage({
@@ -362,30 +366,40 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
           {history.length === 0 ? (
             <p className="text-xs text-muted-foreground">{t("historyEmpty")}</p>
           ) : (
-            <ul className="flex flex-col gap-2">
+            <motion.ul
+              role="list"
+              aria-label={t("historyHeader")}
+              className="flex flex-col gap-1"
+              initial={reduce ? false : "initial"}
+              animate="animate"
+              variants={STAGGER_CONTAINER}
+            >
               {history.slice(0, 8).map((row) => (
-                <li
-                  key={row.id}
-                  className="flex items-center gap-2 text-xs"
-                  data-testid={`backup-history-${row.id}`}
-                >
-                  <CheckCircle2Icon
-                    className={cn(
-                      "size-3.5",
-                      row.success ? "text-emerald-500" : "text-destructive"
-                    )}
-                  />
-                  <span className="text-muted-foreground">
-                    {new Date(row.completedAt).toLocaleString()}
-                  </span>
-                  {!row.success ? (
-                    <Badge variant="outline" className="text-[10px]">
-                      {row.errorMessage ?? t("historyFailedLabel")}
-                    </Badge>
-                  ) : null}
-                </li>
+                <motion.li key={row.id} variants={STAGGER_CHILD}>
+                  <Item size="sm" className="px-0 py-1" data-testid={`backup-history-${row.id}`}>
+                    <ItemMedia className="bg-transparent">
+                      <CheckCircle2Icon
+                        aria-hidden="true"
+                        className={cn(
+                          "size-3.5",
+                          row.success ? "text-emerald-500" : "text-destructive"
+                        )}
+                      />
+                    </ItemMedia>
+                    <ItemContent>
+                      <ItemDescription className="text-xs">
+                        {new Date(row.completedAt).toLocaleString()}
+                      </ItemDescription>
+                    </ItemContent>
+                    {!row.success ? (
+                      <Badge variant="destructive" className="text-[10px]">
+                        {row.errorMessage ?? t("historyFailedLabel")}
+                      </Badge>
+                    ) : null}
+                  </Item>
+                </motion.li>
               ))}
-            </ul>
+            </motion.ul>
           )}
         </CardContent>
       </Card>
