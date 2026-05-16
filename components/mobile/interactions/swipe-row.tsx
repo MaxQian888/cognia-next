@@ -15,7 +15,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { useReducedMotion } from "motion/react"
 
+import { Button } from "@/components/ui/button"
 import { impact } from "@/lib/capacitor/haptics"
 import { cn } from "@/lib/utils"
 
@@ -57,6 +59,7 @@ export function SwipeRow({
   const [translate, setTranslate] = useState(0)
   const [openSide, setOpenSide] = useState<Side>(null)
   const [isDragging, setIsDragging] = useState(false)
+  const reduce = useReducedMotion()
 
   const startXRef = useRef<number | null>(null)
   const startTranslateRef = useRef(0)
@@ -127,26 +130,26 @@ export function SwipeRow({
   }, [openSide, close])
 
   const renderAction = (action: SwipeAction) => (
-    <button
+    <Button
       key={action.id}
       type="button"
+      variant={action.destructive ? "destructive" : "secondary"}
       onClick={() => {
         action.onSelect()
         close()
       }}
       data-testid={`swipe-action-${action.id}`}
       className={cn(
-        "flex h-full flex-col items-center justify-center text-xs font-medium",
-        action.destructive
-          ? "bg-destructive text-destructive-foreground"
-          : "bg-muted text-foreground",
+        // Override Button's default `inline-flex items-center` to a
+        // vertical icon+label stack that fills the swipe-row reveal.
+        "h-full flex-col items-center justify-center gap-0.5 rounded-none text-xs font-medium",
         action.className
       )}
       style={{ width: `${actionWidth}px` }}
     >
-      {action.icon ? <span className="mb-0.5">{action.icon}</span> : null}
+      {action.icon ? <span aria-hidden="true">{action.icon}</span> : null}
       <span>{action.label}</span>
-    </button>
+    </Button>
   )
 
   return (
@@ -177,7 +180,9 @@ export function SwipeRow({
         className="relative bg-background"
         style={{
           transform: `translateX(${translate}px)`,
-          transition: isDragging ? "none" : "transform 200ms ease-out",
+          // Snap (no animation) while dragging OR when the OS asks for
+          // reduced motion; otherwise ease back / open over 200 ms.
+          transition: isDragging || reduce ? "none" : "transform 200ms ease-out",
           touchAction: "pan-y",
         }}
         onPointerDown={onPointerDown}

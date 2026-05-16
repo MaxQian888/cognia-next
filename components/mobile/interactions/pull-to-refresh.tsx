@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Loader2Icon } from "lucide-react"
+import { useReducedMotion } from "motion/react"
 
 import { impact } from "@/lib/capacitor/haptics"
 import { cn } from "@/lib/utils"
@@ -46,6 +47,7 @@ export function PullToRefresh({
   const containerRef = useRef<HTMLDivElement | null>(null)
   const firedHapticRef = useRef(false)
   const liveTranslateRef = useRef(0)
+  const reduce = useReducedMotion()
 
   const finish = useCallback(
     async (commit: boolean) => {
@@ -128,7 +130,9 @@ export function PullToRefresh({
         className="pointer-events-none absolute inset-x-0 -top-12 flex h-12 items-end justify-center text-muted-foreground"
         style={{
           transform: `translateY(${refreshing ? maxPx : translate}px)`,
-          transition: isDragging ? "none" : "transform 200ms ease-out",
+          // Snap during drag OR when reduced-motion is requested by
+          // the OS; otherwise the spring-back is a 200 ms ease-out.
+          transition: isDragging || reduce ? "none" : "transform 200ms ease-out",
         }}
         aria-hidden={!refreshing && translate === 0}
       >
@@ -139,7 +143,9 @@ export function PullToRefresh({
       <div
         style={{
           transform: `translateY(${refreshing ? triggerPx : translate}px)`,
-          transition: isDragging ? "none" : "transform 200ms ease-out",
+          // Snap during drag OR when reduced-motion is requested by
+          // the OS; otherwise the spring-back is a 200 ms ease-out.
+          transition: isDragging || reduce ? "none" : "transform 200ms ease-out",
         }}
       >
         {children}
