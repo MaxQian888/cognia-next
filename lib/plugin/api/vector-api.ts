@@ -49,28 +49,22 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
     )
     const embeddingDefaults = DEFAULT_EMBEDDING_MODELS[embeddingProvider]
 
+    const provider = vectorSettings.provider || "native"
+    // ADR-0022: cloud providers are addressed by configId only. The
+    // actual secrets live in the OS keyring.
+    const configId =
+      provider === "native"
+        ? undefined
+        : (vectorSettings as unknown as Record<string, string | undefined>)[`${provider}ConfigId`]
     store = createVectorStore({
-      provider: vectorSettings.provider || "native",
+      provider,
       embeddingConfig: {
         provider: embeddingProvider,
         model: vectorSettings.embeddingModel || embeddingDefaults.model,
         dimensions: embeddingDefaults.dimensions,
       },
       embeddingApiKey,
-      chromaMode: vectorSettings.mode,
-      chromaServerUrl: vectorSettings.serverUrl,
-      pineconeApiKey: vectorSettings.pineconeApiKey,
-      pineconeIndexName: vectorSettings.pineconeIndexName,
-      pineconeNamespace: vectorSettings.pineconeNamespace,
-      weaviateUrl: vectorSettings.weaviateUrl,
-      weaviateApiKey: vectorSettings.weaviateApiKey,
-      qdrantUrl: vectorSettings.qdrantUrl,
-      qdrantApiKey: vectorSettings.qdrantApiKey,
-      milvusAddress: vectorSettings.milvusAddress,
-      milvusToken: vectorSettings.milvusToken,
-      milvusUsername: vectorSettings.milvusUsername,
-      milvusPassword: vectorSettings.milvusPassword,
-      milvusSsl: vectorSettings.milvusSsl,
+      configId,
       native: {},
     })
 
