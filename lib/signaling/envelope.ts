@@ -43,6 +43,11 @@ function base64UrlToBytes(input: string): Uint8Array {
   if (!URL_SAFE_RE.test(input)) {
     throw new Error("base64url: invalid characters")
   }
+  // A base64url string's length mod 4 must be 0, 2, or 3 — a tail of 1 char
+  // encodes 6 bits which can never round-trip from a whole byte.
+  if (input.length % 4 === 1) {
+    throw new Error("base64url: invalid length")
+  }
   const padded = input + "=".repeat((4 - (input.length % 4)) % 4)
   const bin = atob(padded.replace(/-/g, "+").replace(/_/g, "/"))
   const out = new Uint8Array(bin.length)
@@ -73,6 +78,13 @@ function canonicalise(value: unknown): unknown {
   if (typeof value === "number") {
     if (!Number.isFinite(value)) {
       throw new TypeError("canonicalJson: non-finite number not supported")
+    }
+    // Floats serialise differently between JS (`JSON.stringify(1.0)` → `"1"`)
+    // and Rust (`serde_json::Number::from_f64(1.0)` → `"1.0"`). Reject
+    // non-integers outright so the canonical encoding stays byte-identical
+    // across the TS and Rust implementations of the envelope.
+    if (!Number.isInteger(value)) {
+      throw new TypeError("canonicalJson: non-integer number not supported")
     }
     return value
   }
@@ -167,7 +179,11 @@ export interface VerifyOutcome {
 }
 export interface VerifyFailure {
   ok: false
-  reason: "shape" | "version" | "clock_skew" | "mac_mismatch" | "replayed_seq" | "replayed_nonce"
+  // Replay detection lives in `ReplayWindow.observe` (boolean return), not in
+  // this function — so no `replayed_*` reasons here. A malformed `mac` (bad
+  // base64url chars or length) is reported as `mac_mismatch` to keep the wire
+  // contract opaque to attackers.
+  reason: "shape" | "version" | "clock_skew" | "mac_mismatch"
 }
 export type VerifyResult = VerifyOutcome | VerifyFailure
 
@@ -190,7 +206,12 @@ export async function verifySignedEnvelope(raw: unknown, args: VerifyArgs): Prom
   const now = args.nowMs ?? Date.now()
   const skew = args.clockSkewMs ?? REPLAY_CLOCK_SKEW_MS
   if (Math.abs(raw.ts - now) > skew) return { ok: false, reason: "clock_skew" }
-  const presented = base64UrlToBytes(raw.mac)
+  let presented: Uint8Array
+  try {
+    presented = base64UrlToBytes(raw.mac)
+  } catch {
+    return { ok: false, reason: "mac_mismatch" }
+  }
   const expected = await macFor({ ...raw, mac: "" } as Envelope, args.rendezvousSecret)
   if (!constantTimeEquals(presented, expected)) {
     return { ok: false, reason: "mac_mismatch" }

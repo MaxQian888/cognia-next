@@ -58,6 +58,39 @@ pub const REPLAY_CLOCK_SKEW_MS: i64 = 5 * 60 * 1000;
 /// Per-room replay protection LRU capacity. Mirrors `REPLAY_LRU_CAPACITY`.
 pub const REPLAY_LRU_CAPACITY: usize = 256;
 
+/// Typed peer role used by [`ReplayWindow`]. Mirrors
+/// `lib/signaling/types.ts:PeerRole` and `signaling-server/src/proto.rs:PeerRole`.
+/// Kept as a local enum to avoid a crate-level dependency on the standalone
+/// signaling-server (this module is part of the Tauri desktop binary). The two
+/// enums agree by inspection; the `as_str()` outputs are the LRU key prefix and
+/// MUST match the TypeScript `PeerRole` literals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PeerRole {
+    Desktop,
+    Mobile,
+}
+
+impl PeerRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PeerRole::Desktop => "desktop",
+            PeerRole::Mobile => "mobile",
+        }
+    }
+
+    /// Parse a role string off the wire. Anything other than `"desktop"` or
+    /// `"mobile"` is rejected — the signaling server only routes those two
+    /// values, so an unknown role on the client side is a protocol violation
+    /// that the caller must drop rather than try to scope.
+    pub fn from_wire(s: &str) -> Option<PeerRole> {
+        match s {
+            "desktop" => Some(PeerRole::Desktop),
+            "mobile" => Some(PeerRole::Mobile),
+            _ => None,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
@@ -118,21 +151,34 @@ pub fn encode_base64_url(bytes: &[u8]) -> String {
 // ---------------------------------------------------------------------------
 
 /// Produce a deterministic JSON encoding of `value` with all object keys
-/// sorted lexicographically (UTF-16 codepoint order = byte order for ASCII).
-/// Arrays preserve their input order. Output has no whitespace and uses
-/// `serde_json`'s default escaping rules so the bytes are identical to the
-/// TS counterpart at `lib/signaling/envelope.ts:canonicalJson`.
-pub fn canonical_json(value: &Value) -> String {
+/// sorted by **UTF-16 code-unit order** (matching JavaScript's default
+/// `Object.keys(...).sort()`). Arrays preserve their input order. Output has
+/// no whitespace and uses `serde_json`'s default string-escape rules so the
+/// bytes are identical to the TS counterpart at
+/// `lib/signaling/envelope.ts:canonicalJson`.
+///
+/// `Number` values that are floats (`Value::Number::is_f64() == true`) are
+/// rejected — `serde_json` formats `1.0` as `"1.0"` while `JSON.stringify(1.0)`
+/// emits `"1"`, which would silently drift the MAC. The two implementations
+/// agree on integer-only bodies.
+pub fn canonical_json(value: &Value) -> Result<String, EnvelopeError> {
     let mut out = String::new();
-    write_canonical(value, &mut out);
-    out
+    write_canonical(value, &mut out)?;
+    Ok(out)
 }
 
-fn write_canonical(value: &Value, out: &mut String) {
+fn write_canonical(value: &Value, out: &mut String) -> Result<(), EnvelopeError> {
     match value {
         Value::Null => out.push_str("null"),
         Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-        Value::Number(n) => out.push_str(&n.to_string()),
+        Value::Number(n) => {
+            if n.is_f64() {
+                return Err(EnvelopeError::Json(
+                    "non-integer number not supported in canonical JSON".to_string(),
+                ));
+            }
+            out.push_str(&n.to_string());
+        }
         Value::String(s) => {
             // serde_json::to_string always emits a valid JSON string literal.
             // Safe to unwrap — Strings always serialize successfully.
@@ -144,15 +190,21 @@ fn write_canonical(value: &Value, out: &mut String) {
                 if i > 0 {
                     out.push(',');
                 }
-                write_canonical(v, out);
+                write_canonical(v, out)?;
             }
             out.push(']');
         }
         Value::Object(obj) => {
-            // Collect & sort keys lexicographically. We sort by the &str
-            // representation, matching JS's default String.prototype < .
+            // Sort by UTF-16 code units to match JavaScript's default sort.
+            // Native `&str` ordering would sort by UTF-8 bytes, which diverges
+            // for non-ASCII keys — e.g. "é" (U+00E9) sorts AFTER "z" (U+007A)
+            // in UTF-16 but BEFORE "z" when compared as UTF-8 bytes.
             let mut keys: Vec<&String> = obj.keys().collect();
-            keys.sort();
+            keys.sort_by(|a, b| {
+                let au: Vec<u16> = a.encode_utf16().collect();
+                let bu: Vec<u16> = b.encode_utf16().collect();
+                au.cmp(&bu)
+            });
             out.push('{');
             for (i, k) in keys.iter().enumerate() {
                 if i > 0 {
@@ -162,11 +214,12 @@ fn write_canonical(value: &Value, out: &mut String) {
                     &serde_json::to_string(k.as_str()).expect("string serialization"),
                 );
                 out.push(':');
-                write_canonical(&obj[k.as_str()], out);
+                write_canonical(&obj[k.as_str()], out)?;
             }
             out.push('}');
         }
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -186,7 +239,7 @@ fn compute_mac(envelope: &Envelope, secret: &[u8]) -> Result<Vec<u8>, EnvelopeEr
         return Err(EnvelopeError::InvalidSecret);
     }
     let canonical_value = envelope_to_value(envelope, "")?;
-    let canonical = canonical_json(&canonical_value);
+    let canonical = canonical_json(&canonical_value)?;
     let mut mac =
         HmacSha256::new_from_slice(secret).map_err(|e| EnvelopeError::Hmac(e.to_string()))?;
     mac.update(canonical.as_bytes());
@@ -304,13 +357,19 @@ impl ReplayWindow {
 
     /// Returns `Ok(())` if the tuple is fresh and was inserted; returns
     /// `Err(EnvelopeError::Replay)` if either the seq or nonce has been
-    /// seen for this role.
-    pub fn observe(&mut self, role: &str, seq: u64, nonce: &str) -> Result<(), EnvelopeError> {
-        let seq_key = format!("{role}|{seq}");
+    /// seen for this role. The `role` parameter is typed to prevent silent
+    /// mis-scoping from a stringly-typed call site — see [`PeerRole`].
+    pub fn observe(
+        &mut self,
+        role: PeerRole,
+        seq: u64,
+        nonce: &str,
+    ) -> Result<(), EnvelopeError> {
+        let seq_key = format!("{}|{seq}", role.as_str());
         if self.seq_set.contains(&seq_key) {
             return Err(EnvelopeError::Replay);
         }
-        let nonce_key = format!("{role}|{nonce}");
+        let nonce_key = format!("{}|{nonce}", role.as_str());
         if self.nonce_set.contains(&nonce_key) {
             return Err(EnvelopeError::Replay);
         }
@@ -360,25 +419,87 @@ mod tests {
 
     const SECRET: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 
+    /// Cross-implementation MAC pin — must equal
+    /// `EXPECTED_MAC_VECTOR_V1` in `lib/signaling/envelope.test.ts`. Computed
+    /// from the TS canonical-JSON path via `scripts/compute-mac-vector.mjs`
+    /// for the fixed envelope tuple below. If this assertion ever fails,
+    /// either side has drifted on canonical encoding, HMAC computation, or
+    /// base64url framing — investigate before changing the constant.
+    const EXPECTED_MAC_VECTOR_V1: &str = "gCsrVgz1X_cWBTd4LR01XEjWzNmIauI8yMrdn5QlLx4";
+
     #[test]
     fn canonical_json_sorts_object_keys_recursively() {
         let v = json!({"b": 1, "a": {"z": 2, "y": 3}});
-        assert_eq!(canonical_json(&v), r#"{"a":{"y":3,"z":2},"b":1}"#);
+        assert_eq!(
+            canonical_json(&v).unwrap(),
+            r#"{"a":{"y":3,"z":2},"b":1}"#
+        );
     }
 
     #[test]
     fn canonical_json_preserves_array_order() {
         let v = json!({"x": [3, 1, 2]});
-        assert_eq!(canonical_json(&v), r#"{"x":[3,1,2]}"#);
+        assert_eq!(canonical_json(&v).unwrap(), r#"{"x":[3,1,2]}"#);
     }
 
     #[test]
     fn canonical_json_handles_nested_arrays_of_objects() {
         let v = json!({"a": [{"b": 1, "a": 2}, {"d": 4, "c": 3}]});
         assert_eq!(
-            canonical_json(&v),
+            canonical_json(&v).unwrap(),
             r#"{"a":[{"a":2,"b":1},{"c":3,"d":4}]}"#
         );
+    }
+
+    #[test]
+    fn canonical_json_sorts_non_ascii_keys_by_utf16_to_match_js() {
+        // `é` (U+00E9) > `z` (U+007A) in UTF-16, so `z` comes first. Native
+        // `&str` ordering would do the opposite (UTF-8 bytes: `z`=0x7A vs
+        // `é`=0xC3 0xA9). Both implementations MUST produce the same
+        // canonical bytes.
+        let v = json!({"é": 1, "z": 2});
+        assert_eq!(canonical_json(&v).unwrap(), r#"{"z":2,"é":1}"#);
+        // Astral codepoint U+1F600 encodes as the surrogate pair (0xD83D,
+        // 0xDE00), which sorts after every BMP codepoint when compared as
+        // u16 sequences.
+        let v = json!({"\u{1f600}": 1, "a": 2});
+        assert_eq!(canonical_json(&v).unwrap(), r#"{"a":2,"😀":1}"#);
+    }
+
+    #[test]
+    fn canonical_json_handles_null_and_string_escapes() {
+        let v = json!({"body": null});
+        assert_eq!(canonical_json(&v).unwrap(), r#"{"body":null}"#);
+        // serde_json escapes control chars and quotes identically to
+        // JSON.stringify; both ` ` and `` are emitted as the JSON
+        // unicode escape (not raw bytes).
+        let v = json!({"s": "\u{0000}\u{001f}\\\""});
+        assert_eq!(
+            canonical_json(&v).unwrap(),
+            r#"{"s":" \\\""}"#
+        );
+    }
+
+    #[test]
+    fn canonical_json_rejects_float_numbers() {
+        // `serde_json::Number::from_f64(1.5)` is f64-stored and would
+        // serialise as `1.5` here but `JSON.stringify(1.5)` also emits `1.5`
+        // — so 1.5 alone doesn't prove divergence. But `from_f64(1.0)` emits
+        // `1.0` here while JS emits `1`. We reject all floats to stay safe.
+        let v = json!({"x": 1.5});
+        assert!(matches!(
+            canonical_json(&v),
+            Err(EnvelopeError::Json(_))
+        ));
+        // `1.0` from json! is parsed as f64 too.
+        let v = json!({"x": 1.0});
+        assert!(matches!(
+            canonical_json(&v),
+            Err(EnvelopeError::Json(_))
+        ));
+        // Integer u64 / i64 are accepted as before.
+        let v = json!({"x": 1, "y": -2_i64});
+        assert!(canonical_json(&v).is_ok());
     }
 
     #[test]
@@ -401,6 +522,37 @@ mod tests {
         assert_eq!(env.ver, 1);
         assert!(!env.mac.is_empty());
         verify_signed_envelope(&env, SECRET, None).expect("verify");
+    }
+
+    /// Cross-implementation MAC pin. The Rust output for the deterministic
+    /// envelope tuple below MUST match `EXPECTED_MAC_VECTOR_V1` in
+    /// `lib/signaling/envelope.test.ts` — byte-for-byte agreement on
+    /// canonical-JSON encoding, HMAC computation, and base64url framing.
+    ///
+    /// If this assertion ever fails, one side has drifted. Recompute via
+    /// `scripts/compute-mac-vector.mjs` ONLY after intentionally re-cutting
+    /// the canonical layout (and bumping `ver`); otherwise treat it as a
+    /// regression that would break every production envelope exchange.
+    #[test]
+    fn mac_matches_cross_implementation_vector_v1() {
+        let env = build_signed_envelope_with(
+            42,
+            EnvelopeKind::RtcOffer,
+            json!({"sdp": "v=0\r\nmock"}),
+            SECRET,
+            1_700_000_000_000,
+            "nonce-abcdef".to_string(),
+        )
+        .expect("build");
+        assert_eq!(
+            env.mac, EXPECTED_MAC_VECTOR_V1,
+            "Rust MAC drifted from TS pin — see comment on EXPECTED_MAC_VECTOR_V1"
+        );
+        // The pinned envelope must also pass standard verification under
+        // a clock window straddling the fixed `ts` — otherwise the MAC
+        // pin holds but the round-trip path is broken.
+        verify_signed_envelope(&env, SECRET, Some(1_700_000_000_000))
+            .expect("pinned envelope verifies");
     }
 
     #[test]
@@ -462,9 +614,9 @@ mod tests {
     #[test]
     fn replay_window_accepts_fresh_then_rejects_repeat() {
         let mut w = ReplayWindow::default();
-        w.observe("mobile", 1, "n1").expect("first ok");
+        w.observe(PeerRole::Mobile, 1, "n1").expect("first ok");
         assert!(matches!(
-            w.observe("mobile", 1, "n2"),
+            w.observe(PeerRole::Mobile, 1, "n2"),
             Err(EnvelopeError::Replay)
         ));
     }
@@ -472,9 +624,9 @@ mod tests {
     #[test]
     fn replay_window_rejects_repeated_nonce() {
         let mut w = ReplayWindow::default();
-        w.observe("mobile", 1, "n1").expect("first ok");
+        w.observe(PeerRole::Mobile, 1, "n1").expect("first ok");
         assert!(matches!(
-            w.observe("mobile", 2, "n1"),
+            w.observe(PeerRole::Mobile, 2, "n1"),
             Err(EnvelopeError::Replay)
         ));
     }
@@ -482,27 +634,88 @@ mod tests {
     #[test]
     fn replay_window_scopes_per_role() {
         let mut w = ReplayWindow::default();
-        w.observe("mobile", 1, "n1").expect("mobile ok");
-        w.observe("desktop", 1, "n1").expect("desktop ok — different scope");
+        w.observe(PeerRole::Mobile, 1, "n1").expect("mobile ok");
+        w.observe(PeerRole::Desktop, 1, "n1")
+            .expect("desktop ok — different scope");
     }
 
     #[test]
     fn replay_window_evicts_lru() {
         let mut w = ReplayWindow::with_capacity(2);
-        w.observe("mobile", 1, "n1").unwrap();
-        w.observe("mobile", 2, "n2").unwrap();
-        w.observe("mobile", 3, "n3").unwrap();
+        w.observe(PeerRole::Mobile, 1, "n1").unwrap();
+        w.observe(PeerRole::Mobile, 2, "n2").unwrap();
+        w.observe(PeerRole::Mobile, 3, "n3").unwrap();
         // seq=1 has been evicted, so the same tuple is accepted again.
-        w.observe("mobile", 1, "n4").unwrap();
+        w.observe(PeerRole::Mobile, 1, "n4").unwrap();
     }
 
     #[test]
-    fn ts_compat_known_vector() {
-        // Sanity vector — ensures the canonical JSON layout doesn't drift
-        // away from the TS implementation. Computed by running the TS
-        // sign function with the same inputs and capturing the resulting
-        // mac. Update this vector intentionally when the canonical layout
-        // changes; both sides must change together.
+    fn replay_window_evicts_strictly_oldest_on_overflow() {
+        let mut w = ReplayWindow::with_capacity(3);
+        w.observe(PeerRole::Mobile, 1, "n1").unwrap();
+        w.observe(PeerRole::Mobile, 2, "n2").unwrap();
+        w.observe(PeerRole::Mobile, 3, "n3").unwrap();
+        // Capacity = 3. Fourth push evicts seq=1 (oldest).
+        w.observe(PeerRole::Mobile, 4, "n4").unwrap();
+        // seq=1 fresh again; 2, 3, 4 still present.
+        w.observe(PeerRole::Mobile, 1, "n1b").unwrap();
+        assert!(matches!(
+            w.observe(PeerRole::Mobile, 3, "n3b"),
+            Err(EnvelopeError::Replay)
+        ));
+        assert!(matches!(
+            w.observe(PeerRole::Mobile, 4, "n4b"),
+            Err(EnvelopeError::Replay)
+        ));
+    }
+
+    #[test]
+    fn replay_window_role_scoping_does_not_imply_per_role_capacity() {
+        // The global LRU keeps the two roles from colliding on key, but it
+        // does NOT reserve half-capacity per role. Mobile pushes can still
+        // evict desktop entries once the window is full — the 5-minute
+        // clock-skew window is what bounds the attacker's replay reach.
+        let mut w = ReplayWindow::with_capacity(2);
+        w.observe(PeerRole::Desktop, 1, "d1").unwrap();
+        w.observe(PeerRole::Mobile, 1, "m1").unwrap();
+        // Distinct keys, but the window is full. Immediate desktop replay
+        // is still rejected.
+        assert!(matches!(
+            w.observe(PeerRole::Desktop, 1, "d1-replay-immediate"),
+            Err(EnvelopeError::Replay)
+        ));
+        // Next push evicts desktop|1 (the oldest tuple).
+        w.observe(PeerRole::Mobile, 2, "m2").unwrap();
+        w.observe(PeerRole::Desktop, 1, "d1-replay-after-evict")
+            .expect("desktop|1 was evicted; fresh again");
+    }
+
+    #[test]
+    fn peer_role_from_wire_round_trips_canonical_strings() {
+        assert_eq!(PeerRole::from_wire("desktop"), Some(PeerRole::Desktop));
+        assert_eq!(PeerRole::from_wire("mobile"), Some(PeerRole::Mobile));
+        assert_eq!(PeerRole::from_wire("DESKTOP"), None);
+        assert_eq!(PeerRole::from_wire(""), None);
+        assert_eq!(PeerRole::from_wire("server"), None);
+        assert_eq!(PeerRole::Desktop.as_str(), "desktop");
+        assert_eq!(PeerRole::Mobile.as_str(), "mobile");
+    }
+
+    #[test]
+    fn decode_secret_rejects_non_base64_characters() {
+        assert!(matches!(
+            decode_secret("!!!!"),
+            Err(EnvelopeError::Base64(_))
+        ));
+    }
+
+    #[test]
+    fn mac_vector_matches_ts() {
+        // Cross-implementation pin: the same fixed envelope tuple, signed
+        // through the Rust path, must produce the exact MAC the TypeScript
+        // path emits for that input. The expected value was minted via
+        // `scripts/compute-mac-vector.mjs` (which uses the same Web Crypto
+        // primitives the TS production code uses).
         let env = build_signed_envelope_with(
             42,
             EnvelopeKind::RtcOffer,
@@ -513,9 +726,8 @@ mod tests {
         )
         .unwrap();
 
-        // The canonical body is deterministic; assert by re-verifying.
         verify_signed_envelope(&env, SECRET, Some(1_700_000_000_000)).expect("verify");
-        // Mac length: HMAC-SHA256 = 32 bytes → base64url unpadded = 43 chars.
-        assert_eq!(env.mac.len(), 43);
+        assert_eq!(env.mac.len(), 43, "HMAC-SHA256 base64url-unpadded length");
+        assert_eq!(env.mac, EXPECTED_MAC_VECTOR_V1);
     }
 }

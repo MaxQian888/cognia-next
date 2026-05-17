@@ -35,7 +35,7 @@ use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use super::dispatch::spawn as spawn_dispatcher;
 use super::envelope::{
     build_signed_envelope, decode_secret, encode_base64_url, fresh_nonce, now_ms,
-    verify_signed_envelope, Envelope, EnvelopeKind, EnvelopeError, ReplayWindow,
+    verify_signed_envelope, Envelope, EnvelopeError, EnvelopeKind, PeerRole, ReplayWindow,
 };
 use super::peer::{PeerCallbacks, PeerSession};
 use super::{DeviceTier, TierWriter};
@@ -502,7 +502,18 @@ async fn handle_relay(
         );
         return Ok(());
     }
-    if let Err(e) = replay.observe(from_role, envelope.seq, &envelope.nonce) {
+    let Some(typed_role) = PeerRole::from_wire(from_role) else {
+        // The signaling server only routes `"desktop"` and `"mobile"` values
+        // (signaling-server/src/proto.rs::PeerRole). Anything else is a
+        // protocol violation — drop the frame rather than scoping replay
+        // under an attacker-controlled string.
+        log::warn!(
+            "signaling::client[{}]: dropping envelope from unknown role {from_role:?}",
+            config.device_id
+        );
+        return Ok(());
+    };
+    if let Err(e) = replay.observe(typed_role, envelope.seq, &envelope.nonce) {
         log::warn!(
             "signaling::client[{}]: replay detected: {e}",
             config.device_id
