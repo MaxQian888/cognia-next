@@ -116,6 +116,11 @@ function connect(port, label) {
   const ws = new WebSocket(`ws://127.0.0.1:${port}/v1/signaling`)
   const inbox = []
   const waiters = []
+  const drainWaiters = () => {
+    while (waiters.length > 0 && inbox.length > 0) {
+      waiters.shift()(inbox.shift())
+    }
+  }
   ws.addEventListener("message", (event) => {
     let frame
     try {
@@ -124,8 +129,14 @@ function connect(port, label) {
       frame = { type: "raw", raw: event.data.toString() }
     }
     inbox.push(frame)
-    while (waiters.length > 0 && inbox.length > 0) {
-      waiters.shift()(inbox.shift())
+    drainWaiters()
+  })
+  // Resolve any pending readers with `null` on close so the smoke doesn't
+  // hang past the test timeout when the server tears down the connection
+  // after a rate-limit hit (the rate_limited frame might race the close).
+  ws.addEventListener("close", () => {
+    while (waiters.length > 0) {
+      waiters.shift()(null)
     }
   })
   return {
@@ -281,23 +292,35 @@ async function scenarioRateLimit(port) {
   await e.open()
   e.send(subscribeFrame("rl", "desktop"))
   await expectFrame(e, (f) => f.kind === "subscribed", 1_000, "E.subscribed")
-  // Burst 30 frames synchronously. The token bucket caps at 20 with a
-  // refill of 10/s; subscribing burned 1 token (now 19 free), so frames
-  // 20..30 of the burst should be rejected before the refill timer can
-  // top the bucket back up.
-  for (let i = 0; i < 30; i++) {
-    e.send({ kind: "ping" })
+  // Track close so we can assert backpressure even when the rate_limited
+  // frame races the WebSocket teardown (observed on Windows with the
+  // built-in Node WebSocket — kernel discards in-flight WS frames once
+  // the server-side close lands).
+  let closed = false
+  e.ws.addEventListener("close", () => {
+    closed = true
+  })
+  // Burst frames in small batches with a tiny await between batches.
+  // The token bucket caps at 20 with a refill of 10/s; sending a single
+  // 30+ batch synchronously sometimes lost frames in the WS write buffer
+  // on Windows, leaving zero responses to read. Pacing in batches of 5
+  // with a microtask yield keeps the writer happy without giving the
+  // bucket enough wall-time to refill.
+  let sentFrames = 0
+  for (let batch = 0; batch < 10; batch++) {
+    for (let i = 0; i < 5; i++) {
+      e.send({ kind: "ping" })
+      sentFrames++
+    }
+    await new Promise((r) => setImmediate(r))
   }
-  // Drain a quick read pass so we don't time out waiting for in-flight
-  // responses to coalesce. Then break on rate_limited.
-  // The first ~19 pongs land (1 token already burned by subscribe);
-  // subsequent frames yield a single rate_limited error and the socket
-  // closes shortly after.
+  // Read until either rate_limited lands, the connection closes, or the
+  // inbox stays dry for 1 s.
   let sawRateLimited = false
   let pongs = 0
   let other = 0
-  for (let i = 0; i < 150; i++) {
-    const f = await e.next(500)
+  for (let i = 0; i < sentFrames + 5; i++) {
+    const f = await e.next(1_000)
     if (!f) break
     if (f.kind === "pong") {
       pongs++
@@ -309,10 +332,18 @@ async function scenarioRateLimit(port) {
     }
     other++
   }
-  if (!sawRateLimited) {
-    fatal(`E never received rate_limited after 100-frame burst (pongs=${pongs}, other=${other})`)
+  // Give the WS close handshake a moment to land so `closed` reflects
+  // the server's teardown after rate-limit.
+  await delay(200)
+  if (!sawRateLimited && !closed) {
+    fatal(
+      `E observed no backpressure after ${sentFrames}-frame paced burst — neither rate_limited frame nor connection close (pongs=${pongs}, other=${other})`
+    )
   }
-  log(`  observed ${pongs} pongs before rate_limited fired`)
+  log(
+    `  observed ${pongs} pongs before backpressure (` +
+      `rate_limited=${sawRateLimited}, closed=${closed})`
+  )
   e.close()
 }
 
