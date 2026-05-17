@@ -80,6 +80,11 @@ const settingsSchema = z.object({
     .min(1)
     .max(24 * 60 * 60_000),
   concurrency: z.number().int().min(1).max(100),
+  /**
+   * Per ADR-0022 §3.7. Max in-flight nodes WITHIN a single run for the
+   * orchestrator's ready-set scheduler. Optional; orchestrator defaults to 1.
+   */
+  maxConcurrency: z.number().int().min(0).max(100).optional(),
   retryDefaults: retryPolicySchema,
   timezone: z.string().optional(),
 })
