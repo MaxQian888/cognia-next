@@ -3,14 +3,12 @@
 /**
  * Vector backend settings store.
  *
- * The plugin Vector API needs to know which vector backend to use and
- * how to authenticate against it. cognia-next persists these in
- * `AppSettings` long-term, but a small in-memory cache here lets the
- * plugin runtime read them synchronously without awaiting Dexie.
- *
- * Defaults: native (sqlite-vec) backend in Tauri, openai embeddings.
- * Web mode forces a cloud backend in the Twin settings; the plugin
- * Vector API consults this store before falling back to the cloud.
+ * Per-provider credentials (API keys, URLs, tokens) moved to the OS
+ * keyring via the Rust side after ADR-0022 — this store now only holds
+ * the provider selection, embedding config, and per-provider `configId`
+ * pointers. The actual secrets are addressed by `configId` and resolved
+ * server-side. See lib/vector/migrations/credential-migration.ts for the
+ * one-shot upgrade path from the pre-ADR-0022 cleartext layout.
  */
 
 import { create } from "zustand"
@@ -22,29 +20,13 @@ export interface VectorSettings {
   embeddingProvider: "openai" | "google" | "cohere" | "mistral"
   embeddingModel?: string
 
-  // ChromaDB
-  mode?: "embedded" | "server"
-  serverUrl?: string
-
-  // Pinecone
-  pineconeApiKey?: string
-  pineconeIndexName?: string
-  pineconeNamespace?: string
-
-  // Weaviate
-  weaviateUrl?: string
-  weaviateApiKey?: string
-
-  // Qdrant
-  qdrantUrl?: string
-  qdrantApiKey?: string
-
-  // Milvus / Zilliz
-  milvusAddress?: string
-  milvusToken?: string
-  milvusUsername?: string
-  milvusPassword?: string
-  milvusSsl?: boolean
+  // ADR-0022: per-provider config_id pointers into the OS keyring.
+  // The actual secrets (api_key, url, token, …) are NOT persisted here.
+  pineconeConfigId?: string
+  qdrantConfigId?: string
+  chromaConfigId?: string
+  milvusConfigId?: string
+  weaviateConfigId?: string
 }
 
 export interface VectorStoreState {
@@ -65,6 +47,12 @@ export const useVectorStore = create<VectorStoreState>()(
       setSettings: (patch) => set((state) => ({ settings: { ...state.settings, ...patch } })),
       reset: () => set({ settings: { ...DEFAULTS } }),
     }),
-    { name: "cognia-vector-settings" }
+    {
+      name: "cognia-vector-settings",
+      // Bump on every credential-layout migration so the one-shot
+      // credential-migration script can detect pre-ADR-0022 state and
+      // run exactly once.
+      version: 2,
+    }
   )
 )

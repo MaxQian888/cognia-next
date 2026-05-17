@@ -11,21 +11,11 @@ const internalHost = process.env.TAURI_DEV_HOST || "localhost"
 // Relative path: Turbopack on Windows rejects absolute paths in resolveAlias.
 const browserStub = "./lib/browser-stubs/empty.js"
 
-// Vector DB SDKs and their transitive server-only dependencies. All four
-// backend client files (pinecone-client, qdrant-client, chroma-client,
-// milvus-client) import these statically, so they must be aliased to an empty
-// stub before the browser bundler resolves them.
+// Server-only packages aliased to an empty stub for the browser bundle.
+// Per ADR-0022, the 5 vector cloud SDKs are gone — their wire formats are
+// implemented in Rust under src-tauri/src/vector/backends/. Only simple-git
+// remains here; the Tauri code-repo importer is its sole user.
 const SERVER_ONLY_PACKAGES = [
-  // Vector DB SDKs
-  "@pinecone-database/pinecone",
-  "@qdrant/js-client-rest",
-  "chromadb",
-  "@zilliz/milvus2-sdk-node",
-  // gRPC / Parquet transitive deps of milvus2-sdk-node
-  "@grpc/grpc-js",
-  "@dsnp/parquetjs",
-  "thrift",
-  "node-int64",
   // simple-git shells out — only the Tauri code-repo importer uses it,
   // alias to the empty stub so the mobile / web bundle stays clean.
   "simple-git",
@@ -78,14 +68,9 @@ const nextConfig: NextConfig = {
   },
   // Configure assetPrefix or else the server won't properly resolve your assets.
   assetPrefix: isProd ? undefined : `http://${internalHost}:3000`,
-  // Prevent these packages from being server-bundled (loaded via require() at runtime).
-  serverExternalPackages: [
-    "@zilliz/milvus2-sdk-node",
-    "@grpc/grpc-js",
-    "@pinecone-database/pinecone",
-    "@qdrant/js-client-rest",
-    "chromadb",
-  ],
+  // No server-external packages currently — the 5 vector cloud SDKs that
+  // used to live here are now Rust-side (ADR-0022).
+  serverExternalPackages: [],
   // Turbopack (pnpm dev): alias server-only packages + Node.js built-ins to the
   // empty stub so none of their transitive deps enter the browser bundle.
   turbopack: {
