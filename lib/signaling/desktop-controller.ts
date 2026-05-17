@@ -28,6 +28,7 @@ import { liveQuery, type Subscription } from "dexie"
 import { isTauri, transport } from "@/lib/tauri"
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { getSettings } from "@/lib/db/settings"
+import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials"
 
 interface DeviceRegistration {
   deviceId: string
@@ -104,13 +105,22 @@ export function installDesktopSignalingController(
 
   const settingsSub: Subscription = liveQuery(() => getSettings()).subscribe({
     next: (settings) => {
-      const patch: SignalingConfigPatch = {
-        enabled: settings.webrtcEnabled ?? true,
-        signalingUrl: settings.signalingUrl ?? DEFAULT_SIGNALING_URL,
-        iceServers: normalizeServers(settings.iceServers) ?? DEFAULT_STUN,
-        turnServers: normalizeServers(settings.turnServers) ?? [],
-      }
-      void transport.call<void>("companion_signaling_configure", { patch }).catch((err) => {
+      // Resolve any `"kr:<keyId>"` sentinels in turnServers into real
+      // credentials by reading from the OS keyring. The Rust hub
+      // expects plaintext username + credential — the keyring lookup
+      // is the only place we ever hold the secret in renderer memory.
+      void (async () => {
+        const turn = settings.turnServers
+          ? await resolveTurnServerCredentials(settings.turnServers)
+          : []
+        const patch: SignalingConfigPatch = {
+          enabled: settings.webrtcEnabled ?? true,
+          signalingUrl: settings.signalingUrl ?? DEFAULT_SIGNALING_URL,
+          iceServers: normalizeServers(settings.iceServers) ?? DEFAULT_STUN,
+          turnServers: normalizeServers(turn) ?? [],
+        }
+        await transport.call<void>("companion_signaling_configure", { patch })
+      })().catch((err) => {
         console.warn("companion_signaling_configure failed", err)
       })
     },

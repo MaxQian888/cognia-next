@@ -22,6 +22,7 @@ import { liveQuery, type Subscription } from "dexie"
 import { isCapacitor, transport } from "@/lib/tauri"
 import { CompanionTransport, hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
 import { getSettings } from "@/lib/db/settings"
+import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials"
 import type { AppSettings } from "@/lib/claude/types"
 
 const DEFAULT_SIGNALING_URL = "wss://signaling.cognia.app/v1/signaling"
@@ -96,13 +97,18 @@ export function applySettings(tx: CompanionTransport, settings: AppSettings): vo
     tx.disableWebRtcTier()
     return
   }
-  const iceServers: RTCIceServer[] = [...ice, ...turn]
-  void tx
-    .enableWebRtcTier({
+  // Resolve any keyring-backed TURN credentials before handing them to
+  // `RTCPeerConnection`. The fetch is async; `enableWebRtcTier` is
+  // already fire-and-forget, so we wrap it in the same self-invoking
+  // chain.
+  void (async () => {
+    const resolvedTurn = await resolveTurnServerCredentials(turn)
+    const iceServers: RTCIceServer[] = [...ice, ...resolvedTurn]
+    await tx.enableWebRtcTier({
       signalingUrl,
       rtcConfiguration: { iceServers },
     })
-    .catch((err) => {
-      console.warn("mobile-signaling-controller: enableWebRtcTier failed", err)
-    })
+  })().catch((err) => {
+    console.warn("mobile-signaling-controller: enableWebRtcTier failed", err)
+  })
 }

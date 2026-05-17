@@ -42,6 +42,13 @@ import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { isTauri, transport } from "@/lib/tauri"
+import {
+  KEYRING_CREDENTIAL_PREFIX,
+  freshCredentialKeyId,
+  migrateTurnServersToKeyring,
+  resolveTurnServerCredentials,
+  saveTurnCredential,
+} from "@/lib/credentials/turn-credentials"
 
 const DEFAULT_SIGNALING_URL = "wss://signaling.cognia.app/v1/signaling"
 const DEFAULT_STUN_SERVERS: RTCIceServer[] = [
@@ -92,22 +99,41 @@ export function WebRtcCard() {
   const [pollFailureCount, setPollFailureCount] = useState(0)
   const [pollFailureMessage, setPollFailureMessage] = useState<string | null>(null)
 
-  // Hydrate from Dexie on mount.
+  // Hydrate from Dexie on mount. Also performs the silent migration
+  // of any legacy plaintext TURN credentials into the OS keyring so the
+  // user never has to re-enter them.
   useEffect(() => {
     let cancelled = false
-    void getSettings()
-      .then((s) => {
+    void (async () => {
+      try {
+        const s = await getSettings()
+        if (cancelled) return
+        const rawTurn = s.turnServers ?? []
+        // S1 silent migration: plaintext → keyring. The result still
+        // carries the same URL list, but `credential` is now a
+        // `kr:<keyId>` sentinel. Persist back so the next hydrate is a
+        // no-op.
+        const { migrated: migratedTurn, didMigrate } = await migrateTurnServersToKeyring(rawTurn)
+        if (didMigrate && !cancelled) {
+          await saveSettings({ turnServers: migratedTurn })
+        }
+        // For display in the textarea we resolve sentinels back to
+        // plaintext credentials — the textarea has always shown the
+        // user the values it persists, and shipping a feature where
+        // "TURN credentials disappear after save" would be a usability
+        // regression.
+        const displayTurn = await resolveTurnServerCredentials(migratedTurn)
         if (cancelled) return
         setForm({
           enabled: s.webrtcEnabled ?? true,
           signalingUrl: s.signalingUrl ?? DEFAULT_SIGNALING_URL,
           iceServersText: stringifyServers(s.iceServers ?? DEFAULT_STUN_SERVERS),
-          turnServersText: stringifyServers(s.turnServers ?? []),
+          turnServersText: stringifyServers(displayTurn),
         })
-      })
-      .catch(() => {
+      } catch {
         // Dexie unavailable (SSR / first load) — keep INITIAL.
-      })
+      }
+    })()
     return () => {
       cancelled = true
     }
@@ -159,11 +185,44 @@ export function WebRtcCard() {
       for (const bad of [...invalidIce, ...invalidTurn]) {
         toast.warning(t("invalidIceServer", { value: bad }))
       }
+      // S1: TURN credentials never reach Dexie in plaintext. Each
+      // entry's username + credential go straight to the OS keyring;
+      // Dexie keeps only the URL list and a keyring sentinel. Existing
+      // sentinels (the user didn't change credentials between saves)
+      // are detected by `parseServers` returning the `kr:...` value
+      // verbatim — we then leave them alone.
+      const turnPersisted: RTCIceServer[] = []
+      for (const entry of turn) {
+        const credential = typeof entry.credential === "string" ? entry.credential : ""
+        if (credential.startsWith(KEYRING_CREDENTIAL_PREFIX)) {
+          // Already a sentinel — pass through. Migration handles the
+          // legacy plaintext path on hydrate; this branch covers a
+          // round-trip where the textarea string isn't resolved by
+          // the time the user clicks Save.
+          turnPersisted.push(entry)
+          continue
+        }
+        if (!entry.username || !credential) {
+          // Auth-less TURN entry (rare; usually invalid). Persist
+          // without touching the keyring.
+          turnPersisted.push(entry)
+          continue
+        }
+        const keyId = freshCredentialKeyId()
+        await saveTurnCredential(keyId, {
+          username: entry.username,
+          credential,
+        })
+        turnPersisted.push({
+          urls: entry.urls,
+          credential: `${KEYRING_CREDENTIAL_PREFIX}${keyId}`,
+        })
+      }
       await saveSettings({
         webrtcEnabled: form.enabled,
         signalingUrl: url,
         iceServers: ice.length > 0 ? ice : undefined,
-        turnServers: turn.length > 0 ? turn : undefined,
+        turnServers: turnPersisted.length > 0 ? turnPersisted : undefined,
       })
       toast.success(t("saved"))
     } catch (err) {
