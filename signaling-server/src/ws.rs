@@ -115,10 +115,16 @@ async fn handle_socket(state: AppState, socket: WebSocket) {
                     Ok(f) => f,
                     Err(e) => {
                         state.metrics.frame_rejected(RejectReason::Malformed);
+                        // Keep the verbose serde error in the server log only —
+                        // returning it verbatim to the client gives an attacker
+                        // free protocol fingerprinting (field names, byte
+                        // offsets) without source access. Issue a stable
+                        // human-readable string instead.
+                        debug!(target: "signaling", peer_id, error = %e, "malformed inbound frame");
                         let _ = tx
                             .send(ServerFrame::Error {
                                 code: "malformed_frame".into(),
-                                message: e.to_string(),
+                                message: "frame did not match expected schema".into(),
                             })
                             .await;
                         continue;

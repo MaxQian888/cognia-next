@@ -945,33 +945,44 @@ describe("transport tier", () => {
 })
 
 describe("reconnectRtc()", () => {
-  it("returns false when no WebRTC tier is active", () => {
+  it("returns 'no-tier' when no WebRTC tier is active", () => {
     transport = new CompanionTransport()
-    expect(transport.reconnectRtc()).toBe(false)
+    expect(transport.reconnectRtc()).toBe("no-tier")
   })
 
-  it("delegates to TransportRtc.reconnectNow when the tier is active", async () => {
+  it("returns 'ok' when TransportRtc.reconnectNow fires", async () => {
     await setConfig()
     transport = new CompanionTransport()
-    const calls: number[] = []
     const fakeRtc = {
       getState: () => "open" as const,
       onStateChange: () => () => undefined,
       connect: async () => undefined,
       close: () => undefined,
-      reconnectNow: () => calls.push(Date.now()),
+      reconnectNow: () => true,
       getSelectedCandidateKind: async () => "host" as const,
       call: async () => undefined,
       subscribe: () => () => undefined,
       getSeqCursor: () => ({}),
     }
-    // Inject the fake by pretending the WebRTC tier upgrade succeeded.
-    // CompanionTransport stores the rtc on `this.rtc`; we reach in via
-    // an unsafe cast scoped to this test to avoid leaking a private
-    // setter into the production surface.
     ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    expect(transport.reconnectRtc()).toBe("ok")
+  })
 
-    expect(transport.reconnectRtc()).toBe(true)
-    expect(calls.length).toBe(1)
+  it("returns 'throttled' when TransportRtc.reconnectNow is suppressed", async () => {
+    await setConfig()
+    transport = new CompanionTransport()
+    const fakeRtc = {
+      getState: () => "open" as const,
+      onStateChange: () => () => undefined,
+      connect: async () => undefined,
+      close: () => undefined,
+      reconnectNow: () => false,
+      getSelectedCandidateKind: async () => "host" as const,
+      call: async () => undefined,
+      subscribe: () => () => undefined,
+      getSeqCursor: () => ({}),
+    }
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    expect(transport.reconnectRtc()).toBe("throttled")
   })
 })

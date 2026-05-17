@@ -287,11 +287,16 @@ function StatusBlock({ status, devices }: StatusBlockProps): React.JSX.Element {
         })
         toast.success(t("reconnectSuccess"))
       } catch (err) {
-        toast.error(
-          t("reconnectFailed", {
-            reason: err instanceof Error ? err.message : String(err),
-          })
-        )
+        const msg = err instanceof Error ? err.message : String(err)
+        // The Rust hub throttles repeated reconnects with an error
+        // string prefixed `reconnect_throttled:`; surface that as a
+        // warning instead of an error toast so the user understands
+        // the action wasn't a failure on the desktop side.
+        if (msg.startsWith("reconnect_throttled")) {
+          toast.warning(t("reconnectThrottled"))
+        } else {
+          toast.error(t("reconnectFailed", { reason: msg }))
+        }
       } finally {
         setPendingReconnect(null)
       }

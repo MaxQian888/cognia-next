@@ -432,16 +432,21 @@ export class CompanionTransport implements Transport {
 
   /**
    * Force a fresh WebRTC handshake. Wired to the "Reconnect WebRTC" button
-   * on the mobile settings panel. No-op when the tier isn't currently
-   * active — the user re-enables via the settings toggle in that case.
-   * Returns `false` if no RTC instance was reachable to reconnect.
+   * on the mobile settings panel.
+   *
+   * - `"ok"`         — handshake is being torn down + restarted.
+   * - `"no-tier"`    — no active RTC; user must re-enable via settings.
+   * - `"throttled"`  — called within 5 s of the previous successful call;
+   *                    defends against an XSS-driven flood. The UI maps
+   *                    this to a localised warning toast instead of an
+   *                    error toast so the user knows the action wasn't
+   *                    a real failure.
    */
-  public reconnectRtc(): boolean {
+  public reconnectRtc(): "ok" | "no-tier" | "throttled" {
     if (!this.rtc) {
-      return false
+      return "no-tier"
     }
-    this.rtc.reconnectNow()
-    return true
+    return this.rtc.reconnectNow() ? "ok" : "throttled"
   }
 
   /** Tear down the WebRTC tier explicitly. Called from `destroy()`. */

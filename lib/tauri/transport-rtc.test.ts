@@ -551,7 +551,7 @@ describe("TransportRtc", () => {
       await drivePeerOpen(sigs, pcs)
       await connect
 
-      rtc.reconnectNow()
+      expect(rtc.reconnectNow()).toBe(true)
       // Should NOT wait the 10s backoff; new peer is created immediately.
       await new Promise((r) => setTimeout(r, 5))
       expect(pcs.length).toBe(2)
@@ -567,7 +567,7 @@ describe("TransportRtc", () => {
       pcs[0].channels[0].close()
       expect(rtc.getState()).toBe("reconnecting")
 
-      rtc.reconnectNow()
+      expect(rtc.reconnectNow()).toBe(true)
       // Cycle 2 should start without waiting the 10s backoff.
       await new Promise((r) => setTimeout(r, 5))
       expect(pcs.length).toBe(2)
@@ -582,7 +582,7 @@ describe("TransportRtc", () => {
       pcs[0].channels[0].close()
       expect(rtc.getState()).toBe("failed")
 
-      rtc.reconnectNow()
+      expect(rtc.reconnectNow()).toBe(true)
       await new Promise((r) => setTimeout(r, 5))
       expect(pcs.length).toBe(2)
       expect(sigs.length).toBe(2)
@@ -595,12 +595,31 @@ describe("TransportRtc", () => {
       await new Promise((r) => setTimeout(r, 5))
       const pcsBefore = pcs.length
       const sigsBefore = sigs.length
-      rtc.reconnectNow()
+      // First call: throttle was empty, returns true but state guard
+      // keeps the existing cycle alive.
+      expect(rtc.reconnectNow()).toBe(true)
       await new Promise((r) => setTimeout(r, 5))
       // No fresh peer/signaling were created — the existing in-flight
       // attempt is allowed to settle.
       expect(pcs.length).toBe(pcsBefore)
       expect(sigs.length).toBe(sigsBefore)
+    })
+
+    it("reconnectNow() throttles repeated calls within the 5s window", async () => {
+      const { rtc, sigs, pcs } = makeReconnectable([10_000])
+      const connect = rtc.connect()
+      await drivePeerOpen(sigs, pcs)
+      await connect
+
+      // First call fires.
+      expect(rtc.reconnectNow()).toBe(true)
+      // Second call within the spacing window is rejected — no new peer
+      // beyond the one the first reconnect created.
+      expect(rtc.reconnectNow()).toBe(false)
+      await new Promise((r) => setTimeout(r, 10))
+      // The first reconnect produced cycle 2; the throttled call must
+      // not have started cycle 3.
+      expect(pcs.length).toBeLessThanOrEqual(2)
     })
 
     it("ICE failure mid-session triggers reconnect, not failed", async () => {

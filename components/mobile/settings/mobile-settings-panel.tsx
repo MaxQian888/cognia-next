@@ -254,7 +254,9 @@ export function TransportTierIndicator(): React.JSX.Element | null {
   }, [])
 
   const onReconnect = useCallback(() => {
-    const candidate = transport as unknown as { reconnectRtc?: () => boolean }
+    const candidate = transport as unknown as {
+      reconnectRtc?: () => "ok" | "no-tier" | "throttled"
+    }
     if (typeof candidate.reconnectRtc !== "function") {
       // Not on Capacitor build, or the singleton hasn't been upgraded —
       // refuse silently. The button only renders when `active`, which is
@@ -263,9 +265,11 @@ export function TransportTierIndicator(): React.JSX.Element | null {
     }
     setReconnecting(true)
     try {
-      const ok = candidate.reconnectRtc()
-      if (ok) {
+      const result = candidate.reconnectRtc()
+      if (result === "ok") {
         toast.success(t("reconnectSuccess"))
+      } else if (result === "throttled") {
+        toast.warning(t("reconnectThrottled"))
       } else {
         toast.warning(t("reconnectInactive"))
       }

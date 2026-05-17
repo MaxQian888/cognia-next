@@ -29,9 +29,19 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use webrtc::ice_transport::ice_server::RTCIceServer;
 
+use std::time::{Duration, Instant};
+
 use self::client::{spawn as spawn_client, ClientConfig, ClientHandle};
 use self::envelope::now_ms;
 use crate::companion_api::SharedState;
+
+/// Minimum spacing between two `reconnect_device` calls for the same
+/// rendezvous id. Enforces an in-process throttle so a renderer-side XSS
+/// can't churn the WebRTC handshake by spamming the Tauri command. Tuned
+/// to 5s — short enough that a genuine "I clicked twice" user gesture
+/// still works on the second press; long enough that an XSS can't burn
+/// the mobile peer's battery in a tight loop.
+const RECONNECT_DEVICE_MIN_SPACING: Duration = Duration::from_secs(5);
 
 /// Default signaling URL when the renderer hasn't pushed an override yet.
 /// Matches `AppSettings.signalingUrl` default in `lib/claude/types.ts`.
@@ -62,6 +72,10 @@ pub struct SignalingHub {
     /// handed to each client task can update it concurrently without
     /// holding the `HubInner` lock.
     tiers: Arc<Mutex<HashMap<String, DeviceTierEntry>>>,
+    /// Throttle map for [`Self::reconnect_device`]. Keyed by
+    /// `rendezvous_id`; tracks the most recent successful call so a flood
+    /// of XSS-driven reconnect invocations gets cheaply rejected.
+    reconnect_throttle: Mutex<HashMap<String, Instant>>,
 }
 
 struct HubInner {
@@ -96,6 +110,7 @@ impl SignalingHub {
                 pending_devices: Vec::new(),
             }),
             tiers: Arc::new(Mutex::new(HashMap::new())),
+            reconnect_throttle: Mutex::new(HashMap::new()),
         })
     }
 
@@ -283,7 +298,8 @@ impl SignalingHub {
 
     /// Force-restart the signaling client task for one paired device. Used
     /// by the "Reconnect" button on the desktop WebRTC card. Idempotent —
-    /// returns `Err` only when the device id is unknown.
+    /// returns `Err` only when the device id is unknown or when the
+    /// in-process throttle rejects the call.
     ///
     /// Implementation: cancel the existing client (which drops its
     /// `PeerSession`), then re-spawn against the cached
@@ -291,7 +307,29 @@ impl SignalingHub {
     /// fresh. The hub's tier entry is replaced; consumers polling
     /// [`devices_status`](Self::devices_status) will see the row flicker
     /// through `Offline → Awaiting → …` again.
+    ///
+    /// **Throttle:** at most one successful reconnect per `rendezvous_id`
+    /// every [`RECONNECT_DEVICE_MIN_SPACING`]. Calls that arrive sooner
+    /// return a `"reconnect_throttled"` error so a renderer-side XSS
+    /// can't churn the handshake in a tight loop.
     pub fn reconnect_device(&self, rendezvous_id: &str) -> Result<(), String> {
+        // Check + update the throttle BEFORE any state mutation so a
+        // rejected call doesn't even cancel the existing client. We
+        // overwrite the timestamp only once we've cleared the throttle.
+        let now = Instant::now();
+        {
+            let throttle = self.reconnect_throttle.lock();
+            if let Some(prev) = throttle.get(rendezvous_id) {
+                let since = now.duration_since(*prev);
+                if since < RECONNECT_DEVICE_MIN_SPACING {
+                    return Err(format!(
+                        "reconnect_throttled: try again in {}s",
+                        (RECONNECT_DEVICE_MIN_SPACING - since).as_secs() + 1
+                    ));
+                }
+            }
+        }
+
         let (binding, enabled, registration) = {
             let inner = self.inner.lock();
             let registration = inner
@@ -306,6 +344,12 @@ impl SignalingHub {
                 "reconnect_device: rendezvous id {rendezvous_id} not found"
             ));
         };
+        // Stamp the throttle now — *before* the work — so a slow respawn
+        // doesn't widen the window for a follow-up call.
+        self.reconnect_throttle
+            .lock()
+            .insert(rendezvous_id.to_string(), now);
+
         // Cancel + drop the existing client. `cancel_one` also evicts the
         // tier entry so the UI immediately reads "device offline" between
         // the cancel and the respawn.
@@ -327,6 +371,14 @@ impl SignalingHub {
             registration.device_id,
         );
         Ok(())
+    }
+
+    /// **Test-only** — reset the reconnect throttle so the same
+    /// `rendezvous_id` can be re-tested without waiting the full spacing
+    /// window. Not exposed to the renderer.
+    #[cfg(test)]
+    pub fn reset_reconnect_throttle(&self) {
+        self.reconnect_throttle.lock().clear();
     }
 
     /// Build a [`TierWriter`] handle scoped to the given device. The handle
@@ -362,6 +414,7 @@ impl Default for SignalingHub {
                 pending_devices: Vec::new(),
             }),
             tiers: Arc::new(Mutex::new(HashMap::new())),
+            reconnect_throttle: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -800,6 +853,67 @@ mod tests {
         // Unknown ids surface "not found" regardless of bind state.
         let err = hub.reconnect_device("r-nope").unwrap_err();
         assert!(err.contains("not found"));
+    }
+
+    #[test]
+    fn reconnect_device_throttle_rejects_immediate_repeat() {
+        // Use a disabled hub so the call short-circuits on the
+        // success-path without needing a Tauri binding; the throttle
+        // map is updated either way.
+        let hub = SignalingHub::new();
+        hub.configure(false, DEFAULT_SIGNALING_URL.to_string(), vec![]);
+        hub.sync_devices(vec![DeviceRegistration {
+            device_id: "d1".into(),
+            rendezvous_id: "r1".into(),
+            rendezvous_secret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
+        }]);
+        // First call: clears the throttle (empty map), succeeds.
+        assert!(hub.reconnect_device("r1").is_ok());
+        // Second call within the spacing window: must be rejected with
+        // a `reconnect_throttled` error so a renderer-side caller can
+        // surface the right toast.
+        let err = hub.reconnect_device("r1").unwrap_err();
+        assert!(
+            err.starts_with("reconnect_throttled"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn reconnect_device_throttle_independent_per_rendezvous_id() {
+        let hub = SignalingHub::new();
+        hub.configure(false, DEFAULT_SIGNALING_URL.to_string(), vec![]);
+        hub.sync_devices(vec![
+            DeviceRegistration {
+                device_id: "d1".into(),
+                rendezvous_id: "r1".into(),
+                rendezvous_secret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
+            },
+            DeviceRegistration {
+                device_id: "d2".into(),
+                rendezvous_id: "r2".into(),
+                rendezvous_secret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
+            },
+        ]);
+        assert!(hub.reconnect_device("r1").is_ok());
+        // A different rendezvous id must NOT inherit r1's throttle.
+        assert!(hub.reconnect_device("r2").is_ok());
+        // …but r1's own throttle stays armed.
+        assert!(hub.reconnect_device("r1").is_err());
+    }
+
+    #[test]
+    fn reset_reconnect_throttle_allows_immediate_repeat() {
+        let hub = SignalingHub::new();
+        hub.configure(false, DEFAULT_SIGNALING_URL.to_string(), vec![]);
+        hub.sync_devices(vec![DeviceRegistration {
+            device_id: "d1".into(),
+            rendezvous_id: "r1".into(),
+            rendezvous_secret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
+        }]);
+        assert!(hub.reconnect_device("r1").is_ok());
+        hub.reset_reconnect_throttle();
+        assert!(hub.reconnect_device("r1").is_ok());
     }
 
     #[test]

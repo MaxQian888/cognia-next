@@ -8903,6 +8903,7 @@
         "noDevices": "No paired devices with WebRTC enabled yet. Pair a phone running the latest mobile build to populate this list.",
         "reconnectButton": "Reconnect",
         "reconnectSuccess": "Reconnect requested.",
+        "reconnectThrottled": "Slow down — wait a few seconds between reconnects.",
         "reconnectFailed": "Reconnect failed ({reason})."
       },
       "pushTokenFailed": "Couldn't tell the desktop about this phone's push token ({reason})."
@@ -9103,6 +9104,7 @@
       "reconnectButton": "Reconnect WebRTC",
       "reconnectSuccess": "Reconnect requested.",
       "reconnectInactive": "WebRTC tier isn't active right now.",
+      "reconnectThrottled": "Slow down — wait a few seconds between reconnects.",
       "reconnectFailed": "Reconnect failed ({reason})."
     },
     "connectionState": {

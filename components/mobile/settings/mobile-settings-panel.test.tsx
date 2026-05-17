@@ -47,6 +47,7 @@ jest.mock("@/lib/db/mobile-outbound-queue", () => ({
 // the tier indicator stays hidden unless a test explicitly opts in.
 type TierHandler = (tier: string) => void
 const tierHandlers: Set<TierHandler> = new Set()
+type ReconnectResult = "ok" | "no-tier" | "throttled"
 const transportMock: {
   isCapacitor: jest.Mock<boolean, []>
   tier: string
@@ -54,7 +55,7 @@ const transportMock: {
   subscribe: jest.Mock
   getActiveTier: jest.Mock<string, []>
   onTierChange: jest.Mock<() => void, [TierHandler]>
-  reconnectRtc: jest.Mock<boolean, []>
+  reconnectRtc: jest.Mock<ReconnectResult, []>
 } = {
   isCapacitor: jest.fn(() => false),
   tier: "offline",
@@ -68,7 +69,7 @@ const transportMock: {
       tierHandlers.delete(h)
     }
   }),
-  reconnectRtc: jest.fn(() => true),
+  reconnectRtc: jest.fn<ReconnectResult, []>(() => "ok"),
 }
 
 // Getter form — `transportMock` is declared above but jest.mock factories
@@ -295,7 +296,7 @@ describe("<MobileSettingsPanel /> — transport tier indicator", () => {
     transportMock.isCapacitor.mockReturnValue(true)
     transportMock.tier = "rtc-direct"
     transportMock.reconnectRtc.mockClear()
-    transportMock.reconnectRtc.mockReturnValue(true)
+    transportMock.reconnectRtc.mockReturnValue("ok")
     render(<MobileSettingsPanel />)
     const btn = screen.getByTestId("mobile-transport-tier-reconnect")
     fireEvent.click(btn)
@@ -306,14 +307,23 @@ describe("<MobileSettingsPanel /> — transport tier indicator", () => {
     expect(btn).toBeDisabled()
   })
 
-  it("warns when reconnectRtc() returns false (tier not active)", () => {
+  it("surfaces 'no-tier' as a warning toast when transport reports it", () => {
     transportMock.isCapacitor.mockReturnValue(true)
     transportMock.tier = "rtc-direct"
-    transportMock.reconnectRtc.mockReturnValue(false)
+    transportMock.reconnectRtc.mockReturnValue("no-tier")
     render(<MobileSettingsPanel />)
     // Even though tier is rtc-direct in the indicator, the underlying
     // transport may have torn down right before the click — we surface a
     // warning toast instead of pretending success.
+    fireEvent.click(screen.getByTestId("mobile-transport-tier-reconnect"))
+    expect(transportMock.reconnectRtc).toHaveBeenCalled()
+  })
+
+  it("surfaces 'throttled' separately so the user knows it's not an error", () => {
+    transportMock.isCapacitor.mockReturnValue(true)
+    transportMock.tier = "rtc-direct"
+    transportMock.reconnectRtc.mockReturnValue("throttled")
+    render(<MobileSettingsPanel />)
     fireEvent.click(screen.getByTestId("mobile-transport-tier-reconnect"))
     expect(transportMock.reconnectRtc).toHaveBeenCalled()
   })

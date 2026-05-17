@@ -8903,6 +8903,7 @@
         "noDevices": "暂无启用 WebRTC 的已配对设备。用最新版移动端重新配对一台手机，这里就会出现。",
         "reconnectButton": "重连",
         "reconnectSuccess": "已发起重连。",
+        "reconnectThrottled": "操作过于频繁，请稍等几秒再试。",
         "reconnectFailed": "重连失败（{reason}）。"
       },
       "pushTokenFailed": "未能向桌面端上报本机推送 token（{reason}）。"
@@ -9103,6 +9104,7 @@
       "reconnectButton": "重连 WebRTC",
       "reconnectSuccess": "已发起重连。",
       "reconnectInactive": "WebRTC 通道当前未启用。",
+      "reconnectThrottled": "操作过于频繁，请稍等几秒再试。",
       "reconnectFailed": "重连失败（{reason}）。"
     },
     "connectionState": {

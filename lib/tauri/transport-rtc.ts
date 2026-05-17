@@ -59,6 +59,18 @@ export const RECONNECT_BACKOFF_MS: readonly number[] = [
   1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 60_000,
 ]
 
+/**
+ * Minimum spacing between two manual `reconnectNow()` invocations from
+ * the same `TransportRtc` instance. Defends against an XSS in the mobile
+ * webview spamming the public surface in a tight loop — each manual
+ * reconnect tears down + reopens the peer connection, which is cheap on
+ * paper but burns mobile battery, signaling-server quota, and the home
+ * desktop's `webrtc-rs` resources at scale. Mirrors the desktop's
+ * `RECONNECT_DEVICE_MIN_SPACING` in
+ * `src-tauri/src/companion_api/signaling/mod.rs`.
+ */
+export const RECONNECT_NOW_MIN_SPACING_MS = 5_000
+
 export interface RtcMessage {
   id: string
   method: string
@@ -173,6 +185,13 @@ export class TransportRtc {
   private reconnectAttempt = 0
   /** Pending timer for the next reconnect attempt; null when none scheduled. */
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  /**
+   * Wall-clock timestamp (ms) of the most recent `reconnectNow()` call.
+   * Used by the throttle in `reconnectNow()` so XSS-driven floods are
+   * rejected. Initialised to `0` so the first manual reconnect always
+   * fires.
+   */
+  private lastManualReconnectMs = 0
 
   constructor(opts: TransportRtcOptions) {
     this.opts = {
@@ -313,7 +332,17 @@ export class TransportRtc {
    * - From `signaling-connecting` / `negotiating` / `closing`: no-op; an
    *   action is already in flight.
    */
-  reconnectNow(): void {
+  reconnectNow(): boolean {
+    // Throttle: defend against XSS or runaway UI loops calling this in a
+    // tight cycle. Genuine user double-taps land within ~300 ms so the
+    // 5 s window doesn't block them on the first click; subsequent
+    // accidental clicks are silently dropped.
+    const now = Date.now()
+    if (now - this.lastManualReconnectMs < RECONNECT_NOW_MIN_SPACING_MS) {
+      return false
+    }
+    this.lastManualReconnectMs = now
+
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -329,13 +358,14 @@ export class TransportRtc {
       this.state === "negotiating" ||
       this.state === "closing"
     ) {
-      return
+      return true
     }
 
     void this.connect().catch((err) => {
       // Surface via state transitions; nothing else to do here.
       console.warn("TransportRtc.reconnectNow: connect rejected", err)
     })
+    return true
   }
 
   /** Send an RPC; resolves with the result payload. */
