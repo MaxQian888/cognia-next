@@ -214,6 +214,42 @@ export async function runTeamLifecycle(
       })
     )
 
+    // Per ADR-0022 §2.2 / §4.6. Non-blocking teammate-fix gate: the run
+    // continues on the remaining teammates; the user can rejoin the
+    // disqualified one (or skip permanently) via the modal.
+    subs.push(
+      pool.onTeammateDisqualified((teammateId, reason) => {
+        if (ac.signal.aborted) return
+        const tm = workers.find((w) => w.id === teammateId)
+        notifier.notify({
+          level: "critical",
+          title: `Teammate disqualified: ${tm?.name ?? teammateId}`,
+          body: `Reason: ${reason}. Fix configuration and rejoin, or skip.`,
+          runId,
+          teamId,
+          openApproval: {
+            scope: "agent-team-teammate-fix",
+            id: `${runId}:${teammateId}`,
+          },
+          dedupeKey: `teammate-fix:${runId}:${teammateId}`,
+        })
+        void waitForDecision(
+          { scope: "agent-team-teammate-fix", id: `${runId}:${teammateId}` },
+          ac.signal
+        )
+          .then((decision) => {
+            if (decision.outcome === "approve") {
+              const action = (decision.plan as { action?: "rejoin" | "skip_permanently" })?.action
+              if (action === "rejoin") pool.rejoin(teammateId)
+            }
+            // reject: leave disqualified; run keeps going on the rest.
+          })
+          .catch(() => {
+            // signal aborted while waiting — no-op
+          })
+      })
+    )
+
     let budgetResolverActive = false
     subs.push(
       budget.on("pause_for_review", () => {
@@ -296,6 +332,9 @@ export async function runTeamLifecycle(
       approveBus({ scope: "agent-team-budget", id: runId })
       rejectBus({ scope: "agent-team-deadlock", id: runId })
       rejectBus({ scope: "agent-team-budget", id: runId })
+      for (const w of workers) {
+        rejectBus({ scope: "agent-team-teammate-fix", id: `${runId}:${w.id}` })
+      }
     }
   } finally {
     inflightControllers.delete(teamId)

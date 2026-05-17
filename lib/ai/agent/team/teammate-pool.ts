@@ -58,6 +58,29 @@ const DEFAULT_BREAKER_OPTIONS: Partial<CircuitBreakerOptions> = {
   closeOnSuccessCount: 1,
 }
 
+/**
+ * Per ADR-0022 §2.5. Classify a failure to decide how to advance the
+ * teammate's lifecycle.
+ *
+ *  - catastrophic (401/403/404/auth/config): teammate is disqualified;
+ *    requires user rejoin via the teammate-fix gate.
+ *  - rate_limited (429): breaker opens IMMEDIATELY (bypasses sliding window
+ *    so we don't keep hammering the rate-limited provider). Cooldown still
+ *    recovers automatically.
+ *  - empty_output / refusal: ordinary path — sliding-window breaker.
+ *  - ordinary: standard sliding-window breaker.
+ */
+export function classifyError(err: unknown): TeammateFailureKind {
+  const msg = err instanceof Error ? err.message : String(err)
+  if (/EMPTY_OUTPUT/.test(msg)) return "empty_output"
+  if (/REFUSAL_DETECTED/.test(msg)) return "refusal"
+  if (/\b429\b|rate.?limit/i.test(msg)) return "rate_limited"
+  if (/\b40[134]\b|unauthor(ized|ised)|invalid.{0,5}key|forbidden/i.test(msg)) {
+    return "catastrophic"
+  }
+  return "ordinary"
+}
+
 export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool {
   const buildBreaker = (): CircuitBreaker =>
     createCircuitBreaker({
@@ -127,11 +150,33 @@ export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool {
       e.breaker.recordSuccess()
       checkAllUnavailableEdge()
     },
-    recordFailure: (teammateId, _error) => {
+    recordFailure: (teammateId, error) => {
       const e = entries.get(teammateId)
       if (!e) return
-      // PR 6 inserts classifyError() here. For v1, all failures are ordinary.
-      e.breaker.recordFailure()
+      const kind = classifyError(error)
+      switch (kind) {
+        case "catastrophic":
+          if (!e.disqualified) {
+            e.disqualified = true
+            for (const fn of disqualListeners) {
+              try {
+                fn(teammateId, "catastrophic")
+              } catch (err) {
+                console.warn("TeammatePool onTeammateDisqualified listener threw:", err)
+              }
+            }
+          }
+          break
+        case "rate_limited":
+          // Force the breaker open by recording enough failures to exceed the
+          // configured threshold (the default sliding window would otherwise
+          // wait for minEvents). 100 is a high-enough safety margin to trip
+          // any sensible configuration in a single call.
+          for (let i = 0; i < 100; i += 1) e.breaker.recordFailure()
+          break
+        default:
+          e.breaker.recordFailure()
+      }
       checkAllUnavailableEdge()
     },
     availableCount: () => {

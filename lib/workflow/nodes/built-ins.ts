@@ -1290,37 +1290,15 @@ registerNodeExecutor({
       teamCtx.team.config?.defaultSystemPrompt?.trim() ||
       "You are a focused, helpful agent teammate. Stay on-task and produce concrete output."
 
+    // Phase 1: executeAgent — single try/catch records exactly one failure
+    // on the breaker if the LLM call throws.
+    let result: Awaited<ReturnType<typeof executeAgent>>
     try {
-      const result = await executeAgent(prompt, {
+      result = await executeAgent(prompt, {
         systemPrompt,
         ...(modelPref.modelHint ? { model: modelPref.modelHint } : {}),
         abortSignal: combinedSignal,
       })
-      const text = (result.text ?? "").toString()
-      teamCtx.pool.recordSuccess(teammate.id)
-      const usage = (
-        result as unknown as {
-          usage?: { promptTokens: number; completionTokens: number; totalTokens: number }
-        }
-      ).usage
-      if (usage) teamCtx.budget.add(usage)
-      teamCtx.storeWriter.addMessage({
-        teamId: teamCtx.teamId,
-        senderId: teammate.id,
-        type: "result_share",
-        content: text.length > 1200 ? `${text.slice(0, 1199)}…` : text,
-        taskId: params.taskId,
-      })
-      teamCtx.storeWriter.setTaskStatus(params.taskId, "completed", text)
-      return {
-        output: {
-          text,
-          teammateId: teammate.id,
-          teammateName: teammate.name,
-          tokenUsage: usage,
-          attempt: 1,
-        },
-      }
     } catch (err) {
       teamCtx.pool.recordFailure(teammate.id, err)
       teamCtx.storeWriter.setTaskStatus(
@@ -1330,6 +1308,53 @@ registerNodeExecutor({
         err instanceof Error ? err.message : String(err)
       )
       throw err
+    }
+
+    // Phase 2: output validation (ADR-0022 §2 Layer 1.5). Validation failures
+    // record exactly one failure (no double-count via outer catch) and throw
+    // retryable so workflow runStep rotates to a different teammate.
+    const text = (result.text ?? "").toString()
+    const trimmed = text.trim()
+    if (trimmed.length === 0) {
+      const empty = new Error("EMPTY_OUTPUT: teammate returned empty response")
+      teamCtx.pool.recordFailure(teammate.id, empty)
+      teamCtx.storeWriter.setTaskStatus(params.taskId, "failed", undefined, empty.message)
+      throw empty
+    }
+    const minChars = teamCtx.team.config.minOutputChars ?? 0
+    if (minChars > 0 && trimmed.length < minChars) {
+      const short = new Error(
+        `EMPTY_OUTPUT: output below minOutputChars=${minChars} (got ${trimmed.length})`
+      )
+      teamCtx.pool.recordFailure(teammate.id, short)
+      teamCtx.storeWriter.setTaskStatus(params.taskId, "failed", undefined, short.message)
+      throw short
+    }
+
+    // Phase 3: success path.
+    teamCtx.pool.recordSuccess(teammate.id)
+    const usage = (
+      result as unknown as {
+        usage?: { promptTokens: number; completionTokens: number; totalTokens: number }
+      }
+    ).usage
+    if (usage) teamCtx.budget.add(usage)
+    teamCtx.storeWriter.addMessage({
+      teamId: teamCtx.teamId,
+      senderId: teammate.id,
+      type: "result_share",
+      content: text.length > 1200 ? `${text.slice(0, 1199)}…` : text,
+      taskId: params.taskId,
+    })
+    teamCtx.storeWriter.setTaskStatus(params.taskId, "completed", text)
+    return {
+      output: {
+        text,
+        teammateId: teammate.id,
+        teammateName: teammate.name,
+        tokenUsage: usage,
+        attempt: 1,
+      },
     }
   },
 })

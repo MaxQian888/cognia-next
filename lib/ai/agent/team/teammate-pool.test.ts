@@ -136,10 +136,65 @@ describe("TeammatePool (v1 baseline)", () => {
     pool.recordFailure("a", new Error("e2"))
     expect(fn).not.toHaveBeenCalled()
   })
+})
 
-  // PR 6 extensions — placeholders so the surface is visible from PR 2 onward.
-  it.todo("PR 6: classifies 401 as catastrophic → disqualified")
-  it.todo("PR 6: classifies 429 as rate_limited → immediate breaker open")
-  it.todo("PR 6: rejoin clears disqualified")
-  it.todo("PR 6: onTeammateDisqualified edge-triggered per teammate")
+describe("TeammatePool — error classification (PR 6)", () => {
+  it("classifies 401 as catastrophic → disqualified, no auto-recovery", () => {
+    const a = tm("a")
+    const b = tm("b")
+    const pool = createTeammatePool({ teammates: [a, b] })
+    pool.recordFailure("a", new Error("401 Unauthorized: invalid API key"))
+    expect(pool.isDisqualified("a")).toBe(true)
+    expect(pool.availableCount()).toBe(1)
+    expect(pool.claim("t1")?.id).toBe("b")
+  })
+
+  it("classifies 429 as rate_limited → breaker opens immediately", () => {
+    const a = tm("a")
+    const b = tm("b")
+    const pool = createTeammatePool({
+      teammates: [a, b],
+      breakerOptions: { minEvents: 100 }, // sliding window would never trip
+    })
+    pool.recordFailure("a", new Error("429 Too Many Requests"))
+    expect(pool.availableCount()).toBe(1)
+    expect(pool.isDisqualified("a")).toBe(false)
+  })
+
+  it("rejoin clears disqualified and resets breaker", () => {
+    const a = tm("a")
+    const pool = createTeammatePool({ teammates: [a] })
+    pool.recordFailure("a", new Error("401 Unauthorized"))
+    expect(pool.isDisqualified("a")).toBe(true)
+    pool.rejoin("a")
+    expect(pool.isDisqualified("a")).toBe(false)
+    expect(pool.claim("t1")?.id).toBe("a")
+  })
+
+  it("onTeammateDisqualified edge-triggered per teammate", () => {
+    const a = tm("a")
+    const b = tm("b")
+    const fn = jest.fn()
+    const pool = createTeammatePool({ teammates: [a, b] })
+    pool.onTeammateDisqualified(fn)
+    pool.recordFailure("a", new Error("401"))
+    pool.recordFailure("a", new Error("403"))
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(fn).toHaveBeenCalledWith("a", "catastrophic")
+    pool.recordFailure("b", new Error("404"))
+    expect(fn).toHaveBeenCalledTimes(2)
+    expect(fn).toHaveBeenLastCalledWith("b", "catastrophic")
+  })
+
+  it("EMPTY_OUTPUT and REFUSAL_DETECTED treated as ordinary", () => {
+    const a = tm("a")
+    const pool = createTeammatePool({
+      teammates: [a],
+      breakerOptions: { minEvents: 2, failureThresholdPct: 50 },
+    })
+    pool.recordFailure("a", new Error("EMPTY_OUTPUT"))
+    pool.recordFailure("a", new Error("REFUSAL_DETECTED"))
+    expect(pool.availableCount()).toBe(0)
+    expect(pool.isDisqualified("a")).toBe(false)
+  })
 })

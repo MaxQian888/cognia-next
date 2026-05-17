@@ -45,6 +45,19 @@ export interface TeamNotifierDeps {
   toast?: (msg: string, opts?: { description?: string }) => void
   osNotify?: (opts: { title: string; body?: string }) => Promise<void>
   log?: (level: "info" | "warn" | "error", message: string, payload?: unknown) => Promise<void>
+  /**
+   * Per ADR-0022 §3.4 — when a critical notification carries `openApproval`,
+   * push it into a UI store so the team workspace can render a modal.
+   * Optional so tests can omit it.
+   */
+  openGate?: (gate: {
+    key: ApprovalKey
+    title: string
+    body?: string
+    runId: string
+    teamId: string
+    taskId?: string
+  }) => void
   now?: () => number
 }
 
@@ -114,6 +127,20 @@ export function createTeamNotifier(
       if (p.level === "critical") {
         if (deps.osNotify) {
           callSafely(() => deps.osNotify!({ title: p.title, body: p.body }), "osNotify")
+        }
+        if (p.openApproval && deps.openGate) {
+          callSafely(
+            () =>
+              deps.openGate!({
+                key: p.openApproval!,
+                title: p.title,
+                body: p.body,
+                runId: p.runId,
+                teamId: p.teamId,
+                taskId: p.taskId,
+              }),
+            "openGate"
+          )
         }
       }
     },

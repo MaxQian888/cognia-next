@@ -12,6 +12,7 @@
 
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { usePendingGatesStore, gateTypeFromScope } from "@/stores/agent/pending-gates-store"
 import { executeAgent as defaultExecuteAgent } from "./agent-executor"
 import type { LeadPlanResult, RunTeamLifecycleDeps } from "./agent-team-runtime"
 import type { TeamNotifierDeps } from "./team/team-notifier"
@@ -123,8 +124,39 @@ export function buildAgentTeamRuntimeDeps(
     return { planText: result.text ?? "" }
   }
 
+  // Default notifierDeps wires the UI channels: sonner toast (lazy-loaded so
+  // the dep isn't required in node test environments), Tauri OS notify, and
+  // the PendingGatesStore for HITL modals. Callers can override entirely via
+  // `opts.notifierDeps` for tests.
+  const defaultNotifierDeps: TeamNotifierDeps = {
+    toast: (msg, options) => {
+      // Lazy import keeps sonner out of the SSR / test path unless used.
+      void import("sonner").then(({ toast }) => toast(msg, options))
+    },
+    osNotify: async (options) => {
+      const { notify } = await import("@/lib/tauri/notification")
+      await notify(options)
+    },
+    log: async (level, message, payload) => {
+      if (level === "error") console.error("team:", message, payload)
+      else if (level === "warn") console.warn("team:", message, payload)
+      else console.info("team:", message, payload)
+    },
+    openGate: (gate) => {
+      usePendingGatesStore.getState().open({
+        key: gate.key,
+        gateType: gateTypeFromScope(gate.key.scope),
+        title: gate.title,
+        body: gate.body,
+        runId: gate.runId,
+        teamId: gate.teamId,
+        taskId: gate.taskId,
+      })
+    },
+  }
+
   return {
     runLeadPlanning,
-    ...(opts.notifierDeps ? { notifierDeps: opts.notifierDeps } : {}),
+    notifierDeps: opts.notifierDeps ?? defaultNotifierDeps,
   }
 }
