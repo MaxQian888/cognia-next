@@ -89,40 +89,19 @@ function classifyVectorError(
 }
 
 function validateVectorConfig(config: VectorStoreConfig): string | null {
-  switch (config.provider) {
-    case "native":
-      if (!isTauri()) {
-        return "Native vector store requires Tauri runtime"
-      }
-      return null
-    case "chroma":
-      if (config.chromaMode === "server" && !config.chromaServerUrl?.trim()) {
-        return "Chroma server URL is required in server mode"
-      }
-      return null
-    case "pinecone":
-      if (!config.pineconeApiKey?.trim() || !config.pineconeIndexName?.trim()) {
-        return "Pinecone API key and index name are required"
-      }
-      return null
-    case "weaviate":
-      if (!config.weaviateUrl?.trim()) {
-        return "Weaviate URL is required"
-      }
-      return null
-    case "qdrant":
-      if (!config.qdrantUrl?.trim()) {
-        return "Qdrant URL is required"
-      }
-      return null
-    case "milvus":
-      if (!config.milvusAddress?.trim()) {
-        return "Milvus address is required"
-      }
-      return null
-    default:
-      return "Unsupported vector provider"
+  if (config.provider === "native") {
+    if (!isTauri()) {
+      return "Native vector store requires Tauri runtime"
+    }
+    return null
   }
+  // All cloud providers post-ADR-0022 require a configId pointing at a
+  // keyring-stored credential. Per-provider URL/key/etc. validation moved
+  // into the Rust resolver layer.
+  if (!config.configId?.trim()) {
+    return `${config.provider} provider requires configId (configure credentials first)`
+  }
+  return null
 }
 
 function finalizeVectorReadiness(

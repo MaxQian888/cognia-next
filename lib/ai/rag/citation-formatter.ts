@@ -13,7 +13,7 @@
  */
 
 import type { RerankResult } from "./reranker"
-import type { SearchResult } from "@/lib/vector/chroma-client"
+import type { VectorSearchResult as SearchResult } from "@/lib/vector"
 
 export type CitationStyle = "apa" | "mla" | "chicago" | "harvard" | "ieee" | "simple"
 
@@ -290,7 +290,11 @@ function formatCitation(
   // Add relevance score if requested
   if (options.includeRelevanceScore) {
     const score =
-      "rerankScore" in result ? result.rerankScore : "similarity" in result ? result.similarity : 0
+      "rerankScore" in result
+        ? result.rerankScore
+        : "score" in result
+          ? (result as SearchResult).score
+          : 0
     citation.relevanceScore = score
   }
 

@@ -13,7 +13,7 @@
  */
 
 import type { RerankResult } from "./reranker"
-import type { SearchResult } from "@/lib/vector/chroma-client"
+import type { VectorSearchResult as SearchResult } from "@/lib/vector"
 
 export interface ContextManagerConfig {
   maxTokens: number
@@ -154,7 +154,7 @@ export class DynamicContextManager {
       id: r.id,
       content: r.content,
       metadata: r.metadata,
-      score: "rerankScore" in r ? r.rerankScore : (r as SearchResult).similarity || 0,
+      score: "rerankScore" in r ? r.rerankScore : (r as SearchResult).score || 0,
       tokens: this.estimateTokens(r.content),
     }))
 
