@@ -40,6 +40,7 @@ import {
   selectionBounds,
   type ClipboardEnvelope,
 } from "./clipboard"
+import type { PerformanceTier } from "./performance-tier"
 
 export interface EditorStateSnapshot {
   nodes: RFWorkflowNode[]
@@ -54,6 +55,26 @@ export interface EditorStateSnapshot {
  * a green/red/spinning ring on each node as the run progresses.
  */
 export type NodeRunStatus = "idle" | "running" | "succeeded" | "failed" | "skipped" | "waiting"
+
+/**
+ * Snapshot of the nearest snap-eligible target handle while the user is
+ * dragging an edge from a source handle.
+ */
+export interface ConnectionCandidate {
+  nodeId: string
+  handleId: string | null
+  /** Flow-space distance from the pointer to the candidate handle. */
+  distance: number
+}
+
+export interface ConnectionState {
+  sourceId: string
+  sourceHandle: string | null
+  /** Nearest compatible target handle within snap radius, or null. */
+  candidate: ConnectionCandidate | null
+  /** Latest pointer position in flow space, or null at drag-start. */
+  pointer: { x: number; y: number } | null
+}
 
 export interface EditorState extends EditorStateSnapshot {
   /** The persisted workflow envelope; `nodes`/`edges`/`viewport` live above. */
@@ -72,6 +93,98 @@ export interface EditorState extends EditorStateSnapshot {
    */
   validationByStepId: Record<string, NodeValidationResult>
 
+  // ── editor preferences (ephemeral; not undoable) ──────────────────────────
+  /**
+   * Visual workflow editor performance tier — controls minimap, alignment
+   * guides, inspector live-query, and motion. `"auto"` is the default and
+   * the resolver picks based on `prefers-reduced-motion` + node count. See
+   * `lib/workflow/editor/performance-tier.ts`. Hydrated on mount from
+   * `loadPerformanceTierPref` and persisted through `savePerformanceTierPref`.
+   */
+  performanceTier: PerformanceTier
+  setPerformanceTier: (tier: PerformanceTier) => void
+  /**
+   * Whether any node is currently being dragged. Set by the canvas's
+   * `onNodeDragStart` / `onNodeDragStop` handlers. Consumers degrade
+   * gracefully while this is true (minimap loses listeners, inspector
+   * live-query pauses).
+   */
+  isDraggingAny: boolean
+  setIsDraggingAny: (v: boolean) => void
+  /**
+   * Whether `<ReactFlow>` should snap node positions to the grid. Mirrors
+   * the React Flow `snapToGrid` prop. Defaults to `true`.
+   */
+  snapToGrid: boolean
+  setSnapToGrid: (v: boolean) => void
+  /**
+   * Node currently being hovered (set by the unified node component).
+   * Drives the floating mini toolbar and downstream affordances.
+   */
+  hoveredNodeId: string | null
+  setHoveredNode: (id: string | null) => void
+  /** Edge currently being hovered (smart-edge endpoint highlighting). */
+  hoveredEdgeId: string | null
+  setHoveredEdge: (id: string | null) => void
+  /** Node id whose label is being edited inline (right-click → Rename). */
+  editingNodeIdInline: string | null
+  setEditingNodeIdInline: (id: string | null) => void
+  /** Edge id whose label is being edited inline (double-click). */
+  editingEdgeIdInline: string | null
+  setEditingEdgeIdInline: (id: string | null) => void
+  /**
+   * Flow-space position where the command palette should drop the next added
+   * node. Set by the context menu's "Add node here…" item and consumed
+   * (then cleared) when the palette dispatches an add.
+   */
+  palettePrefillPosition: { x: number; y: number } | null
+  setPalettePrefillPosition: (pos: { x: number; y: number } | null) => void
+  /**
+   * Transient pulse target — set by Spotlight search after `setViewport` so
+   * the node renderer can apply a brief ring highlight. Auto-clears after
+   * `durationMs` via `pulseNode`.
+   */
+  spotlightedNodeId: string | null
+  setSpotlightedNodeId: (id: string | null) => void
+  pulseNode: (id: string, durationMs: number) => void
+  /**
+   * Live state of an in-flight edge drag (Flowith-style "drag silk"). Set
+   * by canvas on `onConnectStart`, updated on pointermove with the nearest
+   * compatible candidate handle, cleared on `onConnectEnd`. Node renderers
+   * read this to ring compatible handles green / incompatible red.
+   */
+  connectionState: ConnectionState | null
+  beginConnection: (source: { sourceId: string; sourceHandle: string | null }) => void
+  updateConnectionPointer: (
+    pointer: { x: number; y: number } | null,
+    candidate: ConnectionCandidate | null
+  ) => void
+  endConnection: () => void
+  /**
+   * Out-of-band signal from the mini toolbar's "More" button → canvas.
+   * The canvas subscribes and opens the F1 context menu anchored at
+   * `screenAnchor` for the supplied target kind. Cleared by the canvas
+   * after the menu opens (or on next click anywhere).
+   */
+  requestedContextMenu: {
+    target: { kind: "node"; nodeId: string } | { kind: "edge"; edgeId: string }
+    screenAnchor: { x: number; y: number }
+  } | null
+  requestContextMenu: (
+    target: { kind: "node"; nodeId: string } | { kind: "edge"; edgeId: string },
+    screenAnchor: { x: number; y: number }
+  ) => void
+  clearRequestedContextMenu: () => void
+  /**
+   * Signal from mini-toolbar / context-menu → canvas to start a "Run from
+   * here" run rooted at this node id. The canvas subscribes, executes
+   * `runWorkflow({ workflow, trigger, startStepId })`, and clears the
+   * field once the run starts.
+   */
+  requestedRunFromStepId: string | null
+  requestRunFromStep: (stepId: string) => void
+  clearRequestedRunFromStep: () => void
+
   // ── mutators (graph) ──────────────────────────────────────────────────────
   setNodes: (nodes: RFWorkflowNode[]) => void
   setEdges: (edges: RFWorkflowEdge[]) => void
@@ -89,6 +202,15 @@ export interface EditorState extends EditorStateSnapshot {
     sourceHandle?: string
     targetHandle?: string
   }) => string
+  /** Update an edge's `data` field (undoable). Returns true if the edge existed. */
+  updateEdgeData: (id: string, patch: Record<string, unknown>) => boolean
+  /**
+   * Replace an edge in place (undoable). Returns true if found. Used by the
+   * "Reverse direction" context-menu item, which needs to swap source/target.
+   */
+  replaceEdge: (id: string, next: Partial<RFWorkflowEdge>) => boolean
+  /** Remove the given edges (undoable). */
+  removeEdges: (ids: string[]) => void
 
   // ── mutators (selection) ──────────────────────────────────────────────────
   setSelectedNodes: (ids: string[]) => void
@@ -199,6 +321,81 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         savedAt: initial.updatedAt > 0 ? initial.updatedAt : null,
         runStatusByStepId: {},
         validationByStepId: {},
+        performanceTier: "auto",
+        isDraggingAny: false,
+        snapToGrid: true,
+        hoveredNodeId: null,
+        hoveredEdgeId: null,
+        editingNodeIdInline: null,
+        editingEdgeIdInline: null,
+        palettePrefillPosition: null,
+        spotlightedNodeId: null,
+        connectionState: null,
+        requestedContextMenu: null,
+        requestedRunFromStepId: null,
+
+        setPerformanceTier: (performanceTier) => set({ performanceTier }),
+        setIsDraggingAny: (isDraggingAny) => set({ isDraggingAny }),
+        setSnapToGrid: (snapToGrid) => set({ snapToGrid }),
+        setHoveredNode: (id) => {
+          if (get().hoveredNodeId === id) return
+          set({ hoveredNodeId: id })
+        },
+        setHoveredEdge: (id) => {
+          if (get().hoveredEdgeId === id) return
+          set({ hoveredEdgeId: id })
+        },
+        setEditingNodeIdInline: (id) => set({ editingNodeIdInline: id }),
+        setEditingEdgeIdInline: (id) => set({ editingEdgeIdInline: id }),
+        setPalettePrefillPosition: (pos) => set({ palettePrefillPosition: pos }),
+        setSpotlightedNodeId: (id) => set({ spotlightedNodeId: id }),
+        pulseNode: (id, durationMs) => {
+          set({ spotlightedNodeId: id })
+          if (durationMs <= 0) {
+            set({ spotlightedNodeId: null })
+            return
+          }
+          setTimeout(() => {
+            if (get().spotlightedNodeId === id) {
+              set({ spotlightedNodeId: null })
+            }
+          }, durationMs)
+        },
+        beginConnection: (source) =>
+          set({
+            connectionState: {
+              sourceId: source.sourceId,
+              sourceHandle: source.sourceHandle,
+              candidate: null,
+              pointer: null,
+            },
+          }),
+        updateConnectionPointer: (pointer, candidate) => {
+          const cur = get().connectionState
+          if (!cur) return
+          // Skip no-op writes so node renderers don't churn on every
+          // pointermove when neither pointer nor candidate has shifted.
+          const prevCand = cur.candidate
+          const sameCand =
+            (prevCand?.nodeId === candidate?.nodeId &&
+              prevCand?.handleId === candidate?.handleId) ||
+            (prevCand === null && candidate === null)
+          const samePointer = cur.pointer?.x === pointer?.x && cur.pointer?.y === pointer?.y
+          if (sameCand && samePointer) return
+          set({
+            connectionState: {
+              ...cur,
+              candidate,
+              pointer,
+            },
+          })
+        },
+        endConnection: () => set({ connectionState: null }),
+        requestContextMenu: (target, screenAnchor) =>
+          set({ requestedContextMenu: { target, screenAnchor } }),
+        clearRequestedContextMenu: () => set({ requestedContextMenu: null }),
+        requestRunFromStep: (stepId) => set({ requestedRunFromStepId: stepId }),
+        clearRequestedRunFromStep: () => set({ requestedRunFromStepId: null }),
 
         setNodes: (nodes) => set({ nodes, dirty: true }),
         setEdges: (edges) => set({ edges, dirty: true }),
@@ -255,6 +452,39 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           }
           set({ edges: [...get().edges, edge], dirty: true })
           return id
+        },
+
+        updateEdgeData: (id, patch) => {
+          const edges = get().edges
+          const idx = edges.findIndex((e) => e.id === id)
+          if (idx < 0) return false
+          const target = edges[idx]
+          const nextData = { ...((target.data as Record<string, unknown>) ?? {}), ...patch }
+          const next: RFWorkflowEdge = { ...target, data: nextData }
+          const arr = [...edges]
+          arr[idx] = next
+          set({ edges: arr, dirty: true })
+          return true
+        },
+
+        replaceEdge: (id, patch) => {
+          const edges = get().edges
+          const idx = edges.findIndex((e) => e.id === id)
+          if (idx < 0) return false
+          const arr = [...edges]
+          arr[idx] = { ...edges[idx], ...patch, id }
+          set({ edges: arr, dirty: true })
+          return true
+        },
+
+        removeEdges: (ids) => {
+          if (ids.length === 0) return
+          const idSet = new Set(ids)
+          set({
+            edges: get().edges.filter((e) => !idSet.has(e.id)),
+            selectedEdgeIds: get().selectedEdgeIds.filter((eId) => !idSet.has(eId)),
+            dirty: true,
+          })
         },
 
         setSelectedNodes: (ids) => set({ selectedNodeIds: ids }),

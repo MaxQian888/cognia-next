@@ -38,15 +38,7 @@ jest.mock("@/lib/logger", () => ({
 }))
 
 // Stub Dialog + RadioGroup + Label to render inline.
-jest.mock("@/components/ui/dialog", () => ({
-  Dialog: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
-    open ? <div role="dialog">{children}</div> : null,
-  DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogHeader: ({ children }: { children: React.ReactNode }) => <header>{children}</header>,
-  DialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
-  DialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
-  DialogFooter: ({ children }: { children: React.ReactNode }) => <footer>{children}</footer>,
-}))
+jest.mock("@/components/ui/dialog")
 
 jest.mock("@/components/ui/radio-group", () => ({
   RadioGroup: ({
@@ -77,9 +69,7 @@ jest.mock("@/components/ui/radio-group", () => ({
   RadioGroupItem: () => <input type="radio" />,
 }))
 
-jest.mock("@/components/ui/label", () => ({
-  Label: ({ children }: { children: React.ReactNode }) => <label>{children}</label>,
-}))
+jest.mock("@/components/ui/label")
 
 import { ExportTasksDialog, ImportTasksDialog } from "./import-export-dialog"
 

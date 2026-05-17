@@ -8,15 +8,7 @@ jest.mock("next-intl", () => ({
 }))
 
 // Stub Sheet primitives to render inline so we can assert on contents.
-jest.mock("@/components/ui/sheet", () => ({
-  Sheet: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
-    open ? <div role="dialog">{children}</div> : null,
-  SheetContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SheetHeader: ({ children }: { children: React.ReactNode }) => <header>{children}</header>,
-  SheetTitle: ({ children, ...rest }: { children: React.ReactNode }) => (
-    <h2 {...rest}>{children}</h2>
-  ),
-}))
+jest.mock("@/components/ui/sheet")
 
 jest.mock("@/components/workflow/runs/run-status-pill", () => ({
   RunStatusPill: ({ status }: { status: string }) => <span data-testid="stub-pill">{status}</span>,

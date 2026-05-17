@@ -49,6 +49,19 @@ function readVersionInfo() {
 
 // ---- IO helpers -----------------------------------------------------------
 
+// Verbose logging gate. Set COGNIA_SIDECAR_VERBOSE=1 (or "true") in the Tauri
+// parent's env to bump the sidecar's stderr verbosity. Honoured by `logv`
+// below; the JSON-line protocol on stdout is unaffected.
+const VERBOSE = (() => {
+  const raw = process.env.COGNIA_SIDECAR_VERBOSE
+  return raw === "1" || raw === "true"
+})()
+
+function logv(message) {
+  if (!VERBOSE) return
+  process.stderr.write(`[sidecar:verbose] ${message}\n`)
+}
+
 function emit(payload) {
   try {
     process.stdout.write(JSON.stringify(payload) + "\n")
@@ -257,4 +270,5 @@ if (process.argv.includes("--smoke")) {
 
   const { sdkVersion, sidecarVersion } = readVersionInfo()
   emit({ type: "ready", sdkVersion, sidecarVersion })
+  logv(`ready sdk=${sdkVersion ?? "?"} sidecar=${sidecarVersion ?? "?"}`)
 }

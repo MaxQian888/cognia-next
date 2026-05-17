@@ -9,13 +9,7 @@ jest.mock("next-intl", () => ({
 }))
 
 // Stub Sheet primitives to render inline.
-jest.mock("@/components/ui/sheet", () => ({
-  Sheet: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
-    open ? <div role="dialog">{children}</div> : null,
-  SheetContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SheetHeader: ({ children }: { children: React.ReactNode }) => <header>{children}</header>,
-  SheetTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
-}))
+jest.mock("@/components/ui/sheet")
 
 import { SystemTaskInspectSheet } from "./system-task-inspect-sheet"
 import type { SystemTask } from "@/types/scheduler"

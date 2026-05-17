@@ -8,7 +8,7 @@ excludes `/sidecar/` in `jest.config.ts`) and are consumed by:
 
 1. **Sidecar runtime tests** (Phase M1+) via `pnpm sidecar:test` — Node's
    built-in `--test` runner picks them up from
-   `sidecars/vscode-ext-host/tests/`.
+   `sidecar/vscode-ext-host/tests/`.
 2. **Renderer tests** (Phase M0+) that import the `package.json` directly to
    exercise the manifest adapter against realistic shapes.
 

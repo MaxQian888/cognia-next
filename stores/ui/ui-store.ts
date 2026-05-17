@@ -45,6 +45,25 @@ interface UIState {
   setSidebarCollapsed: (collapsed: boolean) => void
 
   /**
+   * Desktop left guild rail (feature switcher) collapse. Persisted across
+   * reloads. Driven by the View menu and exposed for plugins that need to
+   * reserve the leftmost column on demand.
+   */
+  guildRailCollapsed: boolean
+  toggleGuildRail: () => void
+  setGuildRailCollapsed: (collapsed: boolean) => void
+
+  /**
+   * Desktop bottom status bar collapse. Persisted across reloads. The
+   * status bar carries permission-mode, zoom and locale controls — hiding it
+   * recovers ~28px of vertical space without losing them (theme/zoom/locale
+   * are also reachable from the title-bar View menu).
+   */
+  statusBarCollapsed: boolean
+  toggleStatusBar: () => void
+  setStatusBarCollapsed: (collapsed: boolean) => void
+
+  /**
    * Per-team-session collapsed state for the Shared notes (scratchpad) panel
    * in the right rail. Default expanded; persisted so the choice sticks.
    */
@@ -70,6 +89,23 @@ interface UIState {
   pendingSettingsRequest: { tab?: string; nonce: number } | null
   requestOpenSettings: (tab?: string) => void
   clearPendingSettings: () => void
+
+  /**
+   * One-shot "open the create-X dialog" signal. Same nonce-bump pattern as
+   * `pendingSettingsRequest` — consumers (workflow library, agent-teams
+   * page, settings characters tab) observe `kind` matching their domain and
+   * call `clearPendingCreate()` after opening their dialog.
+   *
+   * Drives the File menu's "New Workflow / Agent Team / Character" items.
+   * Without this, those items only navigate — the destination page can't
+   * tell the navigation was initiated to create something.
+   */
+  pendingCreateRequest: {
+    kind: "workflow" | "agentTeam" | "character"
+    nonce: number
+  } | null
+  requestCreate: (kind: "workflow" | "agentTeam" | "character") => void
+  clearPendingCreate: () => void
 }
 
 function memberKey(teamSessionId: string, characterId: string) {
@@ -115,6 +151,14 @@ export const useUIStore = create<UIState>()(
         set({ sidebarCollapsed: collapsed })
         getPluginEventHooks().dispatchSidebarToggle(!collapsed)
       },
+
+      guildRailCollapsed: false,
+      toggleGuildRail: () => set((s) => ({ guildRailCollapsed: !s.guildRailCollapsed })),
+      setGuildRailCollapsed: (collapsed) => set({ guildRailCollapsed: collapsed }),
+
+      statusBarCollapsed: false,
+      toggleStatusBar: () => set((s) => ({ statusBarCollapsed: !s.statusBarCollapsed })),
+      setStatusBarCollapsed: (collapsed) => set({ statusBarCollapsed: collapsed }),
 
       scratchpadCollapsed: {},
       setScratchpadCollapsed: (sessionId, collapsed) =>
@@ -168,6 +212,16 @@ export const useUIStore = create<UIState>()(
           },
         })),
       clearPendingSettings: () => set({ pendingSettingsRequest: null }),
+
+      pendingCreateRequest: null,
+      requestCreate: (kind) =>
+        set((s) => ({
+          pendingCreateRequest: {
+            kind,
+            nonce: (s.pendingCreateRequest?.nonce ?? 0) + 1,
+          },
+        })),
+      clearPendingCreate: () => set({ pendingCreateRequest: null }),
     }),
     {
       name: "cognia-ui",
@@ -179,6 +233,8 @@ export const useUIStore = create<UIState>()(
         showMemberList: s.showMemberList,
         scratchpadCollapsed: s.scratchpadCollapsed,
         sidebarCollapsed: s.sidebarCollapsed,
+        guildRailCollapsed: s.guildRailCollapsed,
+        statusBarCollapsed: s.statusBarCollapsed,
       }),
     }
   )

@@ -30,6 +30,18 @@ jest.mock("@tauri-apps/plugin-fs", () => ({
   readTextFile: jest.fn(),
 }))
 
+jest.mock("@tauri-apps/api/core", () => ({
+  invoke: jest.fn(),
+}))
+
+jest.mock("../security/signature", () => ({
+  getPluginSignatureVerifier: jest.fn(),
+}))
+
+jest.mock("../contracts/diagnostics-store", () => ({
+  recordSilentFailure: jest.fn(),
+}))
+
 const { isTauri } = jest.requireMock("@/lib/native/utils") as {
   isTauri: jest.Mock
 }
@@ -37,6 +49,19 @@ const { exists, readDir, readTextFile } = jest.requireMock("@tauri-apps/plugin-f
   exists: jest.Mock
   readDir: jest.Mock
   readTextFile: jest.Mock
+}
+const { invoke: mockInvoke } = jest.requireMock("@tauri-apps/api/core") as {
+  invoke: jest.Mock
+}
+const { getPluginSignatureVerifier: mockGetSignatureVerifier } = jest.requireMock(
+  "../security/signature"
+) as {
+  getPluginSignatureVerifier: jest.Mock
+}
+const { recordSilentFailure: mockRecordSilentFailure } = jest.requireMock(
+  "../contracts/diagnostics-store"
+) as {
+  recordSilentFailure: jest.Mock
 }
 
 describe("PluginMarketplace", () => {
@@ -365,6 +390,117 @@ describe("PluginMarketplace", () => {
       // Web environment: install/update is blocked without desktop runtime.
       expect(stages).toContain("error")
       expect(stages).not.toContain("complete")
+    })
+
+    describe("Signature verification (ADR 0016 P0-3)", () => {
+      const goodPluginPayload = {
+        id: "trusted-plugin",
+        name: "Trusted Plugin",
+        manifest: {
+          id: "trusted-plugin",
+          name: "Trusted Plugin",
+          version: "1.0.0",
+          type: "frontend",
+          capabilities: [],
+          main: "index.js",
+          author: { name: "Test" },
+        },
+      }
+
+      const seedDesktopFetches = () => {
+        mockFetch
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(goodPluginPayload),
+          })
+          // getVersions in desktop mode falls back to fetch only when invoke
+          // rejects, but the install path also calls getVersions through fetch
+          // first via `plugin.manifest`. Stub the versions endpoint just in
+          // case the implementation walks fetch.
+          .mockResolvedValue({
+            ok: true,
+            json: () => Promise.resolve([{ version: "1.0.0", downloadUrl: "url" }]),
+          })
+      }
+
+      beforeEach(() => {
+        isTauri.mockReturnValue(true)
+        mockInvoke.mockImplementation(async (cmd: string) => {
+          if (cmd === "plugin_marketplace_versions") {
+            return [{ version: "1.0.0", downloadUrl: "url" }]
+          }
+          if (cmd === "plugin_get_directory") {
+            return "/plugins"
+          }
+          if (cmd === "plugin_download_version") {
+            return { success: true, pluginId: "trusted-plugin", version: "1.0.0" }
+          }
+          if (cmd === "plugin_install") {
+            return undefined
+          }
+          throw new Error(`unexpected invoke: ${cmd}`)
+        })
+      })
+
+      it("(a) valid signature + toggle on → install succeeds", async () => {
+        seedDesktopFetches()
+        const verify = jest.fn().mockResolvedValue({
+          valid: true,
+          pluginId: "trusted-plugin",
+          version: "1.0.0",
+          warnings: [],
+        })
+        mockGetSignatureVerifier.mockReturnValue({ verify })
+
+        const result = await marketplace.installPlugin("trusted-plugin", "1.0.0")
+
+        if (!result.success) console.warn("install failed:", result.error)
+        expect(verify).toHaveBeenCalledWith("/plugins/trusted-plugin")
+        expect(result.success).toBe(true)
+        expect(mockRecordSilentFailure).not.toHaveBeenCalled()
+      })
+
+      it("(b) invalid signature + toggle on → install rejects with signature_invalid", async () => {
+        seedDesktopFetches()
+        const verify = jest.fn().mockResolvedValue({
+          valid: false,
+          pluginId: "trusted-plugin",
+          version: "1.0.0",
+          reason: "Cryptographic verification failed",
+          warnings: [],
+        })
+        mockGetSignatureVerifier.mockReturnValue({ verify })
+
+        const result = await marketplace.installPlugin("trusted-plugin", "1.0.0")
+
+        expect(result.success).toBe(false)
+        expect(result.errorCategory).toBe("signature_invalid")
+        expect(result.retryable).toBe(false)
+        expect(result.error).toContain("Cryptographic verification failed")
+      })
+
+      it("(c) valid + warnings (signature toggle off / unsigned bundle) → install proceeds + records bypass", async () => {
+        seedDesktopFetches()
+        const verify = jest.fn().mockResolvedValue({
+          valid: true,
+          pluginId: "trusted-plugin",
+          version: "1.0.0",
+          warnings: ["Plugin is not signed"],
+        })
+        mockGetSignatureVerifier.mockReturnValue({ verify })
+
+        const result = await marketplace.installPlugin("trusted-plugin", "1.0.0")
+
+        expect(result.success).toBe(true)
+        expect(mockRecordSilentFailure).toHaveBeenCalledWith(
+          "trusted-plugin",
+          expect.objectContaining({
+            site: "marketplace.signatureBypass",
+            expected: false,
+          }),
+          expect.any(Error)
+        )
+      })
     })
   })
 

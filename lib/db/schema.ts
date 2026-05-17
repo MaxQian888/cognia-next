@@ -165,6 +165,13 @@ export class CogniaDB extends Dexie {
   // is the lifecycle audit trail driving the Activity tab + History view.
   chatGoals!: Table<Goal, string>
   chatGoalEvents!: Table<GoalEvent, string>
+  /**
+   * v35 — Visual workflow editor viewport bookmarks. One row per saved view,
+   * scoped to a workflow. The `[workflowId+createdAt]` compound index drives
+   * the "Views" dropdown's newest-first listing. Pure additive; no upgrade
+   * hook needed.
+   */
+  workflowViewportBookmarks!: Table<WorkflowViewportBookmarkRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -1026,6 +1033,15 @@ export class CogniaDB extends Dexie {
           })
         }
       })
+
+    // v35 — Visual workflow editor viewport bookmarks (Phase 3 of the
+    // editor's Flowith-inspired feature track). Indexed columns:
+    //   • `&id`                       — primary key (`vb_` + nanoid).
+    //   • `workflowId`                — scope filter.
+    //   • `[workflowId+createdAt]`    — newest-first dropdown listing.
+    this.version(35).stores({
+      workflowViewportBookmarks: "&id, workflowId, [workflowId+createdAt]",
+    })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -1154,6 +1170,20 @@ export interface TrustedPublisherRow {
   lastSeenAt: number
   /** Counter — number of distinct plugins installed by this author. */
   installCount: number
+}
+
+/**
+ * Per-workflow viewport bookmark. Persists the user-saved `{x, y, zoom}` so
+ * the "Views" dropdown can restore it later with a smooth tween.
+ */
+export interface WorkflowViewportBookmarkRow {
+  /** `vb_` + nanoid. */
+  id: string
+  workflowId: string
+  /** User-supplied label (defaults to "View at NN%" in the UI). */
+  name: string
+  viewport: { x: number; y: number; zoom: number }
+  createdAt: number
 }
 
 let _db: CogniaDB | null = null

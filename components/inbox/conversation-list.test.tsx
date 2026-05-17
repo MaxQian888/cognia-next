@@ -29,9 +29,7 @@ jest.mock("./unread-pill", () => ({
     count > 0 ? <span data-testid="unread-pill">{count}</span> : null,
 }))
 
-jest.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+jest.mock("@/components/ui/scroll-area")
 
 // SidebarTrigger requires a SidebarProvider ancestor that isn't mounted in
 // these unit tests. Stub it to a plain button so the trigger surface can still

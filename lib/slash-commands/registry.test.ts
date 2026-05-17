@@ -146,6 +146,15 @@ describe("slash-command registry (lib/slash-commands/registry)", () => {
       expect(list).toHaveLength(1)
       expect(list[0].description).toBe("Clear chat (updated)")
     })
+
+    it("forwards the optional category and defaults to 'chat'", () => {
+      seedBuiltinSlashCommands([
+        { name: "status", description: "Diagnostics", category: "diagnostics" },
+        { name: "clear", description: "Clear chat" },
+      ])
+      expect(getSlashCommand("status")?.category).toBe("diagnostics")
+      expect(getSlashCommand("clear")?.category).toBe("chat")
+    })
   })
 })
 

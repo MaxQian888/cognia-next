@@ -56,10 +56,7 @@ jest.mock("@/components/ui/button", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  ScrollBar: () => <div />,
-}))
+jest.mock("@/components/ui/scroll-area")
 
 const mockTabsOnValueChange = { current: null as ((v: string) => void) | null }
 jest.mock("@/components/ui/tabs", () => ({
@@ -97,11 +94,7 @@ jest.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
 
-jest.mock("@/components/ui/tooltip", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  TooltipContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  TooltipTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+jest.mock("@/components/ui/tooltip")
 
 jest.mock("@/components/ui/dialog", () => ({
   Dialog: ({ children, open }: { children: React.ReactNode; open?: boolean }) =>

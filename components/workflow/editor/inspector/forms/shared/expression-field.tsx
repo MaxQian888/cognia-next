@@ -19,7 +19,12 @@
 
 import { useEffect, useMemo, useRef } from "react"
 import { useShallow } from "zustand/react/shallow"
-import { useLiveQuery } from "dexie-react-hooks"
+import { useGatedLiveQuery } from "@/hooks/workflow/use-gated-live-query"
+import {
+  flagsForTier,
+  resolveEffectiveTier,
+  type PerformanceTier,
+} from "@/lib/workflow/editor/performance-tier"
 import { EditorState, Compartment } from "@codemirror/state"
 import {
   EditorView,
@@ -62,9 +67,19 @@ interface ExpressionFieldProps {
   "aria-label"?: string
 }
 
-/** Read the most recent successful run's per-step output map for this workflow. */
-function useLatestRunOutputs(workflowId: string | undefined) {
-  return useLiveQuery(
+/**
+ * Read the most recent successful run's per-step output map for this workflow.
+ *
+ * `enabled` gates the Dexie liveQuery — when false (e.g. a node is being
+ * dragged on the canvas, or the resolved performance tier is `reduced`), we
+ * short-circuit to the previously resolved value instead of re-evaluating
+ * the query on every `workflowRunEvents` write.
+ */
+function useLatestRunOutputs(
+  workflowId: string | undefined,
+  enabled: boolean
+): Record<string, unknown> {
+  return useGatedLiveQuery<Record<string, unknown>>(
     async () => {
       if (!workflowId) return {}
       const rows = await getDb()
@@ -91,7 +106,8 @@ function useLatestRunOutputs(workflowId: string | undefined) {
       return out
     },
     [workflowId],
-    {} as Record<string, unknown>
+    {} as Record<string, unknown>,
+    enabled
   )
 }
 
@@ -126,12 +142,37 @@ export function ExpressionField({
   const shallowSelector = useShallow((s: WfEditorState) => ({
     nodes: s.nodes,
     workflowId: s.baseWorkflow.id,
+    isDraggingAny: s.isDraggingAny,
+    performanceTier: s.performanceTier as PerformanceTier,
   }))
   const editorState = store?.(shallowSelector)
   const nodes = useMemo(() => editorState?.nodes ?? [], [editorState?.nodes])
   const workflowId = editorState?.workflowId
+  const isDraggingAny = editorState?.isDraggingAny ?? false
+  // Gate the live-query on the resolved tier's `liveQueryWhileDragging` flag.
+  // Tests / headless renders without a store fall back to "always enabled"
+  // so they keep the previous behavior.
+  const userChoice = editorState?.performanceTier ?? "auto"
+  const liveQueryEnabled = useMemo(() => {
+    if (!store) return true
+    // node count + reduced-motion influence `auto`; without DOM matchMedia
+    // we assume reduce-motion is off (matches the SSR fallback in
+    // `use-effective-perf-tier`).
+    const prefersReducedMotion =
+      typeof window !== "undefined" && window.matchMedia
+        ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        : false
+    const effective = resolveEffectiveTier(userChoice, {
+      nodeCount: nodes.length,
+      prefersReducedMotion,
+    })
+    const flags = flagsForTier(effective)
+    if (!flags.liveQueryWhileDragging && isDraggingAny) return false
+    if (!flags.inspectorLiveValidation) return false
+    return true
+  }, [store, userChoice, nodes.length, isDraggingAny])
 
-  const upstreamOutputs = useLatestRunOutputs(workflowId)
+  const upstreamOutputs = useLatestRunOutputs(workflowId, liveQueryEnabled)
 
   // Build a stable compartment so completions can be reconfigured live.
   const completionCompartment = useMemo(() => new Compartment(), [])

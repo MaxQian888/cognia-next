@@ -32,47 +32,11 @@ jest.mock("@/components/ui/input", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/button", () => ({
-  Button: ({
-    children,
-    onClick,
-    disabled,
-    ...rest
-  }: React.ButtonHTMLAttributes<HTMLButtonElement> & { children?: React.ReactNode }) => (
-    <button data-testid="button" onClick={onClick} disabled={disabled} {...rest}>
-      {children}
-    </button>
-  ),
-}))
+jest.mock("@/components/ui/button")
 
-jest.mock("@/components/ui/badge", () => ({
-  Badge: ({ children }: { children: React.ReactNode }) => (
-    <span data-testid="badge">{children}</span>
-  ),
-}))
+jest.mock("@/components/ui/badge")
 
-jest.mock("@/components/ui/switch", () => ({
-  Switch: ({
-    checked,
-    onCheckedChange,
-    "aria-label": ariaLabel,
-    ...rest
-  }: {
-    checked?: boolean
-    onCheckedChange?: (v: boolean) => void
-    "aria-label"?: string
-    [key: string]: unknown
-  }) => (
-    <input
-      type="checkbox"
-      data-testid="switch"
-      aria-label={ariaLabel}
-      checked={checked}
-      onChange={(e) => onCheckedChange?.(e.target.checked)}
-      {...rest}
-    />
-  ),
-}))
+jest.mock("@/components/ui/switch")
 
 // ── Test data ─────────────────────────────────────────────────────────────────
 

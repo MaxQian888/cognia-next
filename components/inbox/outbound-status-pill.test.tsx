@@ -8,12 +8,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 // Mocks
 // ---------------------------------------------------------------------------
 
-jest.mock("@/components/ui/tooltip", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  TooltipTrigger: ({ children, asChild }: { children: React.ReactNode; asChild?: boolean }) =>
-    asChild ? <>{children}</> : <div>{children}</div>,
-  TooltipContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+jest.mock("@/components/ui/tooltip")
 
 const mockDbUpdate = jest.fn().mockResolvedValue(1)
 const mockDbGet = jest.fn()

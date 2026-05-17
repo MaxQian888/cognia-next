@@ -5,31 +5,113 @@ use tauri::{
     App, Emitter, Manager,
 };
 
-/// Build the application menu (File / Edit / View / Window / Help) and route
-/// menu events to the frontend as `menu://<id>` events.
+/// Authoritative list of every custom menu id this module dispatches. Kept in
+/// lock-step with `lib/desktop/menu-actions.ts:MENU_ACTION_IDS`. When you add
+/// or remove an id here, update the renderer side and its tests too.
+///
+/// `reload` and `toggle-devtools` are intercepted in `on_menu_event` and
+/// handled directly by Rust — they're listed because they're menu ids, but
+/// they never reach the renderer as `menu://reload` events. Everything else
+/// is forwarded transparently.
+pub const MENU_IDS: &[&str] = &[
+    // File
+    "new-chat",
+    "new-workflow",
+    "new-agent-team",
+    "new-character",
+    "open-workspace",
+    "open-settings",
+    "open-logs",
+    // Edit — predefined items (no custom ids)
+    // View
+    "command-palette",
+    "toggle-sidebar",
+    "toggle-guild-rail",
+    "toggle-status-bar",
+    "reload",
+    "toggle-devtools",
+    "toggle-reduce-motion",
+    "theme-light",
+    "theme-dark",
+    "theme-system",
+    "language-en",
+    "language-zh-cn",
+    // Go
+    "go-inbox",
+    "go-workflows",
+    "go-twin",
+    "go-skills",
+    "go-plugins",
+    "go-agent-teams",
+    "go-scheduler",
+    "go-discover",
+    "go-a2ui",
+    "go-dms",
+    "go-canvas",
+    "go-logs",
+    "go-settings",
+    // Tools
+    "automation-kill-switch",
+    "manage-connectors",
+    "manage-mcp-server",
+    "plugin-devtools",
+    "sidecar-restart",
+    "clear-cache",
+    // Help
+    "keyboard-shortcuts",
+    "documentation",
+];
+
+/// Build the application menu (File / Edit / View / Go / Tools / Window /
+/// Help) and route menu events to the frontend as `menu://<id>` events.
 ///
 /// On macOS the standard `App` submenu (about, services, hide, quit) is
 /// inserted automatically by the predefined items used here.
 pub fn install(app: &App) -> tauri::Result<()> {
     let handle = app.handle();
 
-    // File
+    // -------------------- File --------------------
     let new_chat = MenuItemBuilder::new("New Chat")
         .id("new-chat")
         .accelerator("CmdOrCtrl+N")
+        .build(handle)?;
+    let new_workflow = MenuItemBuilder::new("New Workflow")
+        .id("new-workflow")
+        .accelerator("CmdOrCtrl+Shift+N")
+        .build(handle)?;
+    let new_agent_team = MenuItemBuilder::new("New Agent Team")
+        .id("new-agent-team")
+        .build(handle)?;
+    let new_character = MenuItemBuilder::new("New Character")
+        .id("new-character")
         .build(handle)?;
     let open_workspace = MenuItemBuilder::new("Open Workspace…")
         .id("open-workspace")
         .accelerator("CmdOrCtrl+O")
         .build(handle)?;
+    let open_settings = MenuItemBuilder::new("Settings…")
+        .id("open-settings")
+        .accelerator("CmdOrCtrl+,")
+        .build(handle)?;
+    let open_logs_file = MenuItemBuilder::new("Open Log Panel")
+        .id("open-logs")
+        .accelerator("CmdOrCtrl+Shift+L")
+        .build(handle)?;
     let file = SubmenuBuilder::new(handle, "File")
         .item(&new_chat)
+        .item(&new_workflow)
+        .item(&new_agent_team)
+        .item(&new_character)
+        .separator()
         .item(&open_workspace)
+        .item(&open_settings)
+        .item(&open_logs_file)
         .separator()
         .item(&PredefinedMenuItem::quit(handle, None)?)
         .build()?;
 
-    // Edit — predefined items adapt per-platform.
+    // -------------------- Edit --------------------
+    // Predefined items adapt per-platform.
     let edit = SubmenuBuilder::new(handle, "Edit")
         .item(&PredefinedMenuItem::undo(handle, None)?)
         .item(&PredefinedMenuItem::redo(handle, None)?)
@@ -40,7 +122,40 @@ pub fn install(app: &App) -> tauri::Result<()> {
         .item(&PredefinedMenuItem::select_all(handle, None)?)
         .build()?;
 
-    // View
+    // -------------------- View --------------------
+    let command_palette = MenuItemBuilder::new("Command Palette…")
+        .id("command-palette")
+        .accelerator("CmdOrCtrl+Shift+P")
+        .build(handle)?;
+    let toggle_sidebar = MenuItemBuilder::new("Toggle Sidebar")
+        .id("toggle-sidebar")
+        .accelerator("CmdOrCtrl+B")
+        .build(handle)?;
+    let toggle_guild_rail = MenuItemBuilder::new("Toggle Guild Rail")
+        .id("toggle-guild-rail")
+        .build(handle)?;
+    let toggle_status_bar = MenuItemBuilder::new("Toggle Status Bar")
+        .id("toggle-status-bar")
+        .build(handle)?;
+    let theme_light = MenuItemBuilder::new("Light").id("theme-light").build(handle)?;
+    let theme_dark = MenuItemBuilder::new("Dark").id("theme-dark").build(handle)?;
+    let theme_system = MenuItemBuilder::new("System").id("theme-system").build(handle)?;
+    let theme_submenu = SubmenuBuilder::new(handle, "Theme")
+        .item(&theme_light)
+        .item(&theme_dark)
+        .item(&theme_system)
+        .build()?;
+    let language_en = MenuItemBuilder::new("English").id("language-en").build(handle)?;
+    let language_zh = MenuItemBuilder::new("简体中文")
+        .id("language-zh-cn")
+        .build(handle)?;
+    let language_submenu = SubmenuBuilder::new(handle, "Language")
+        .item(&language_en)
+        .item(&language_zh)
+        .build()?;
+    let reduce_motion = MenuItemBuilder::new("Reduce Motion")
+        .id("toggle-reduce-motion")
+        .build(handle)?;
     let reload = MenuItemBuilder::new("Reload")
         .id("reload")
         .accelerator("CmdOrCtrl+R")
@@ -49,27 +164,123 @@ pub fn install(app: &App) -> tauri::Result<()> {
         .id("toggle-devtools")
         .accelerator("CmdOrCtrl+Alt+I")
         .build(handle)?;
-    let open_logs = MenuItemBuilder::new("Open Log Panel")
-        .id("open-logs")
-        .accelerator("CmdOrCtrl+Shift+L")
-        .build(handle)?;
     let view = SubmenuBuilder::new(handle, "View")
+        .item(&command_palette)
+        .item(&toggle_sidebar)
+        .item(&toggle_guild_rail)
+        .item(&toggle_status_bar)
+        .separator()
+        .item(&theme_submenu)
+        .item(&language_submenu)
+        .item(&reduce_motion)
+        .separator()
         .item(&reload)
         .item(&toggle_devtools)
-        .separator()
-        .item(&open_logs)
-        .separator()
         .item(&PredefinedMenuItem::fullscreen(handle, None)?)
         .build()?;
 
-    // Window
+    // -------------------- Go --------------------
+    let go_inbox = MenuItemBuilder::new("Inbox")
+        .id("go-inbox")
+        .accelerator("CmdOrCtrl+1")
+        .build(handle)?;
+    let go_workflows = MenuItemBuilder::new("Workflows")
+        .id("go-workflows")
+        .accelerator("CmdOrCtrl+2")
+        .build(handle)?;
+    let go_twin = MenuItemBuilder::new("Twin Workbench")
+        .id("go-twin")
+        .accelerator("CmdOrCtrl+3")
+        .build(handle)?;
+    let go_skills = MenuItemBuilder::new("Skills")
+        .id("go-skills")
+        .accelerator("CmdOrCtrl+4")
+        .build(handle)?;
+    let go_plugins = MenuItemBuilder::new("Plugins")
+        .id("go-plugins")
+        .accelerator("CmdOrCtrl+5")
+        .build(handle)?;
+    let go_agent_teams = MenuItemBuilder::new("Agent Teams")
+        .id("go-agent-teams")
+        .accelerator("CmdOrCtrl+6")
+        .build(handle)?;
+    let go_scheduler = MenuItemBuilder::new("Scheduler")
+        .id("go-scheduler")
+        .accelerator("CmdOrCtrl+7")
+        .build(handle)?;
+    let go_discover = MenuItemBuilder::new("Discover")
+        .id("go-discover")
+        .accelerator("CmdOrCtrl+8")
+        .build(handle)?;
+    let go_a2ui = MenuItemBuilder::new("Mini-Apps").id("go-a2ui").build(handle)?;
+    let go_dms = MenuItemBuilder::new("Direct Messages").id("go-dms").build(handle)?;
+    let go_canvas = MenuItemBuilder::new("Canvas").id("go-canvas").build(handle)?;
+    let go_logs = MenuItemBuilder::new("Logs").id("go-logs").build(handle)?;
+    let go_settings = MenuItemBuilder::new("Settings").id("go-settings").build(handle)?;
+    let go = SubmenuBuilder::new(handle, "Go")
+        .item(&go_inbox)
+        .item(&go_workflows)
+        .item(&go_twin)
+        .item(&go_skills)
+        .item(&go_plugins)
+        .item(&go_agent_teams)
+        .item(&go_scheduler)
+        .item(&go_discover)
+        .separator()
+        .item(&go_a2ui)
+        .item(&go_dms)
+        .item(&go_canvas)
+        .separator()
+        .item(&go_logs)
+        .item(&go_settings)
+        .build()?;
+
+    // -------------------- Tools --------------------
+    let tools_command_palette = MenuItemBuilder::new("Command Palette…")
+        .id("command-palette")
+        .build(handle)?;
+    let automation_kill = MenuItemBuilder::new("Automation Kill-Switch")
+        .id("automation-kill-switch")
+        .accelerator("CmdOrCtrl+Alt+K")
+        .build(handle)?;
+    let manage_connectors = MenuItemBuilder::new("Manage Connectors…")
+        .id("manage-connectors")
+        .build(handle)?;
+    let manage_mcp = MenuItemBuilder::new("Manage MCP Server…")
+        .id("manage-mcp-server")
+        .build(handle)?;
+    let plugin_devtools = MenuItemBuilder::new("Plugin DevTools")
+        .id("plugin-devtools")
+        .build(handle)?;
+    let sidecar_restart = MenuItemBuilder::new("Restart Sidecar")
+        .id("sidecar-restart")
+        .build(handle)?;
+    let clear_cache = MenuItemBuilder::new("Clear Cache…")
+        .id("clear-cache")
+        .build(handle)?;
+    let tools = SubmenuBuilder::new(handle, "Tools")
+        .item(&tools_command_palette)
+        .separator()
+        .item(&automation_kill)
+        .item(&manage_connectors)
+        .item(&manage_mcp)
+        .separator()
+        .item(&plugin_devtools)
+        .item(&sidecar_restart)
+        .item(&clear_cache)
+        .build()?;
+
+    // -------------------- Window --------------------
     let window_menu = SubmenuBuilder::new(handle, "Window")
         .item(&PredefinedMenuItem::minimize(handle, None)?)
         .item(&PredefinedMenuItem::maximize(handle, None)?)
         .item(&PredefinedMenuItem::close_window(handle, None)?)
         .build()?;
 
-    // Help
+    // -------------------- Help --------------------
+    let keyboard_shortcuts = MenuItemBuilder::new("Keyboard Shortcuts…")
+        .id("keyboard-shortcuts")
+        .build(handle)?;
     let documentation = MenuItemBuilder::new("Documentation")
         .id("documentation")
         .build(handle)?;
@@ -84,18 +295,23 @@ pub fn install(app: &App) -> tauri::Result<()> {
         ),
     )?;
     let help = SubmenuBuilder::new(handle, "Help")
+        .item(&keyboard_shortcuts)
+        .separator()
         .item(&documentation)
         .item(&about)
         .build()?;
 
     let menu = MenuBuilder::new(handle)
-        .items(&[&file, &edit, &view, &window_menu, &help])
+        .items(&[&file, &edit, &view, &go, &tools, &window_menu, &help])
         .build()?;
 
     app.set_menu(menu)?;
 
     // Route all custom menu items through `menu://<id>` events. Predefined
     // items (cut/copy/paste/quit/etc.) are handled by the OS directly.
+    // `reload` and `toggle-devtools` are handled inline here because they
+    // need direct webview access and there's no useful renderer-side
+    // equivalent.
     app.on_menu_event(|app, event| {
         let id = event.id().0.as_str();
         log::info!("menu event: {id}");
@@ -123,4 +339,55 @@ pub fn install(app: &App) -> tauri::Result<()> {
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every documented id is unique and uses only kebab-case + lowercase
+    /// letters / digits. Catches accidental duplicates or accidental
+    /// underscores that would make the `menu://<id>` event names diverge
+    /// from the renderer's expectations.
+    #[test]
+    fn menu_ids_are_kebab_case_and_unique() {
+        let mut seen = std::collections::HashSet::new();
+        for id in MENU_IDS {
+            assert!(seen.insert(*id), "duplicate menu id: {id}");
+            assert!(
+                id.chars()
+                    .all(|c| c == '-' || c.is_ascii_lowercase() || c.is_ascii_digit()),
+                "non kebab-case id: {id}"
+            );
+            assert!(!id.is_empty(), "empty menu id");
+        }
+    }
+
+    /// Sanity: the renderer-side `MENU_ACTION_IDS` list in
+    /// `lib/desktop/menu-actions.ts` includes a few well-known ids. Hard-
+    /// coding the canary set in the test rather than re-parsing the TS
+    /// keeps cargo test self-contained, but spot-checks the contract.
+    #[test]
+    fn menu_ids_include_canonical_set() {
+        let required: &[&str] = &[
+            "new-chat",
+            "open-workspace",
+            "open-settings",
+            "open-logs",
+            "command-palette",
+            "toggle-sidebar",
+            "go-inbox",
+            "go-twin",
+            "go-settings",
+            "automation-kill-switch",
+            "manage-mcp-server",
+            "sidecar-restart",
+            "clear-cache",
+            "keyboard-shortcuts",
+            "documentation",
+        ];
+        for id in required {
+            assert!(MENU_IDS.contains(id), "MENU_IDS is missing: {id}");
+        }
+    }
 }

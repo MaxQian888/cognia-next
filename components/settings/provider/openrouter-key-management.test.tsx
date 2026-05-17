@@ -48,28 +48,11 @@ jest.mock("@/lib/ai/providers/openrouter", () => ({
 }))
 
 // Mock UI components
-jest.mock("@/components/ui/button", () => ({
-  Button: ({
-    children,
-    onClick,
-    disabled,
-    ...props
-  }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
-    <button onClick={onClick} disabled={disabled} data-testid="button" {...props}>
-      {children}
-    </button>
-  ),
-}))
+jest.mock("@/components/ui/button")
 
-jest.mock("@/components/ui/input", () => ({
-  Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => (
-    <input {...props} data-testid="input" />
-  ),
-}))
+jest.mock("@/components/ui/input")
 
-jest.mock("@/components/ui/label", () => ({
-  Label: ({ children }: { children: React.ReactNode }) => <label>{children}</label>,
-}))
+jest.mock("@/components/ui/label")
 
 jest.mock("@/components/ui/select", () => ({
   Select: ({
@@ -93,40 +76,11 @@ jest.mock("@/components/ui/select", () => ({
   SelectValue: () => <span>Value</span>,
 }))
 
-jest.mock("@/components/ui/dialog", () => ({
-  Dialog: ({ children, open }: { children: React.ReactNode; open?: boolean }) =>
-    open ? <div data-testid="dialog">{children}</div> : null,
-  DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
-  DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
-  DialogTrigger: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="dialog-trigger">{children}</div>
-  ),
-  DialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+jest.mock("@/components/ui/dialog")
 
-jest.mock("@/components/ui/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuItem: ({
-    children,
-    onClick,
-  }: {
-    children: React.ReactNode
-    onClick?: () => void
-  }) => <button onClick={onClick}>{children}</button>,
-  DropdownMenuSeparator: () => <hr />,
-  DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+jest.mock("@/components/ui/dropdown-menu")
 
-jest.mock("@/components/ui/card", () => ({
-  Card: ({ children }: { children: React.ReactNode }) => <div data-testid="card">{children}</div>,
-  CardContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  CardDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
-  CardHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  CardTitle: ({ children }: { children: React.ReactNode }) => <h3>{children}</h3>,
-}))
+jest.mock("@/components/ui/card")
 
 jest.mock("@/components/ui/table", () => ({
   Table: ({ children }: { children: React.ReactNode }) => (
@@ -139,11 +93,7 @@ jest.mock("@/components/ui/table", () => ({
   TableRow: ({ children }: { children: React.ReactNode }) => <tr>{children}</tr>,
 }))
 
-jest.mock("@/components/ui/badge", () => ({
-  Badge: ({ children }: { children: React.ReactNode }) => (
-    <span data-testid="badge">{children}</span>
-  ),
-}))
+jest.mock("@/components/ui/badge")
 
 describe("OpenRouterKeyManagement", () => {
   beforeEach(() => {

@@ -14,10 +14,19 @@ const buildBundleMock = jest.fn(
 )
 const isCrashRelevantMock = jest.fn((..._a: unknown[]) => true)
 
+const serializeBundleMock = jest.fn(
+  (_bundle: unknown, format: "bundle" | "json" | "text" = "bundle") => ({
+    filename: `cognia-crash-${format}-2026-04-29.json`,
+    content: "{}",
+    mimeType: "application/json",
+  })
+)
+
 jest.mock("@/lib/logger/crash-log", () => ({
   buildCrashLogExportBundle: (...a: unknown[]) => buildBundleMock(...a),
   buildCrashLogItems: (...a: unknown[]) => buildItemsMock(...a),
   isCrashRelevantLogEntry: (...a: unknown[]) => isCrashRelevantMock(...a),
+  serializeCrashLogBundle: (...a: unknown[]) => serializeBundleMock(...(a as [unknown, never])),
   summarizeCrashLogItems: (...a: unknown[]) => summarizeMock(...a),
 }))
 

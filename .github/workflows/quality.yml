@@ -71,6 +71,9 @@ jobs:
       - name: Plugin extension slot audit
         run: pnpm audit:slots
 
+      - name: Plugin silent-failure flag audit (ADR 0016 T4)
+        run: pnpm audit:silent-flags
+
       - name: i18n lint (key parity + hardcoded-string baseline)
         run: pnpm lint:i18n
 

@@ -1,0 +1,282 @@
+/**
+ * Monaco workbench primitive — the load-bearing wire between any Monaco
+ * surface (Canvas / Skills / Artifact / future) and the VS Code reuse
+ * layer at `lib/plugin/vscode-shim/monaco-bridge`.
+ *
+ * Why this exists:
+ *   - Real LSP support requires every Monaco editor in cognia-next to
+ *     register itself with the bridge so VS Code extensions can see it
+ *     as `vscode.window.activeTextEditor` and bind providers (completion,
+ *     hover, diagnostics, code actions, formatting, go-to-def, …) to
+ *     stable document URIs.
+ *   - The bridge exposes raw notify* functions; this primitive packages
+ *     the URI construction, model lifecycle, focus/content/selection
+ *     listener wiring, and dispose into one call site.
+ *   - The existing `bindMonacoEditorContext` (snippets / outline registry)
+ *     keeps working in parallel — this primitive calls it too.
+ *
+ * URI scheme convention:
+ *   - canvas:///{sessionId}/{documentId}.{ext}
+ *   - skill:///{skillId}/{file or documentId}.{ext}
+ *   - artifact:///{documentId}.{ext}
+ *   - any other surface → {surface}:///{documentId}.{ext}
+ */
+
+import { bindMonacoEditorContext } from "./monaco-context-binding"
+import type { MonacoContextBinding } from "./monaco-context-binding"
+import {
+  notifyEditorMounted,
+  notifyEditorUnmounted,
+  notifyActiveEditorChanged,
+  notifyContentChanged,
+  notifySelectionChanged,
+  type MonacoEditor as BridgeMonacoEditor,
+  type MonacoTextModel as BridgeMonacoTextModel,
+} from "@/lib/plugin/vscode-shim/monaco-bridge"
+import { getFileExtension } from "@/lib/canvas/utils"
+
+// ────────────────────────────────────────────────────────────────────────
+// Minimal real-monaco interface shapes (decoupled from monaco-editor pkg).
+// ────────────────────────────────────────────────────────────────────────
+
+export interface IDisposable {
+  dispose(): void
+}
+
+export interface IMonacoUri {
+  toString(): string
+  scheme?: string
+  path?: string
+}
+
+export interface IMonacoModel {
+  uri: IMonacoUri
+  getLanguageId(): string
+  getValue(): string
+  setValue(value: string): void
+  getLineCount(): number
+  getLineContent(line: number): string
+  isDisposed(): boolean
+  onDidChangeContent(listener: () => void): IDisposable
+}
+
+export interface IMonacoPosition {
+  lineNumber: number
+  column: number
+}
+
+export interface IMonacoRange {
+  startLineNumber: number
+  startColumn: number
+  endLineNumber: number
+  endColumn: number
+}
+
+export interface IMonacoEditor {
+  getId(): string
+  getModel(): IMonacoModel | null
+  setModel(model: IMonacoModel | null): void
+  getPosition(): IMonacoPosition | null
+  getSelection(): IMonacoRange | null
+  onDidFocusEditorWidget(listener: () => void): IDisposable
+  onDidBlurEditorWidget(listener: () => void): IDisposable
+  onDidChangeCursorSelection(listener: () => void): IDisposable
+  executeEdits(source: string | null, edits: unknown[]): boolean
+  deltaDecorations(oldIds: string[], newDecorations: unknown[]): string[]
+}
+
+export interface MonacoNamespace {
+  Uri: {
+    parse(value: string): IMonacoUri
+  }
+  editor: {
+    createModel(value: string, language: string, uri?: IMonacoUri): IMonacoModel
+    getModel(uri: IMonacoUri): IMonacoModel | null
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Workbench API
+// ────────────────────────────────────────────────────────────────────────
+
+export type WorkbenchSurface = "canvas" | "skill" | "artifact" | (string & {})
+
+export interface MonacoWorkbenchSpec {
+  /** Surface identifier — keys the URI scheme. */
+  surface: WorkbenchSurface
+  /** Stable id of the open document on the surface. */
+  documentId: string
+  /** Canvas session id, embedded in the canvas:/// URI path. */
+  sessionId?: string
+  /** Skill id, embedded in the skill:/// URI path. */
+  skillId?: string
+  /** Optional path segments for skill / artifact / future surfaces. */
+  pathSegments?: string[]
+  /** Monaco language id (e.g. "typescript", "python"). */
+  language: string
+  /** Content used only when no existing model is found at the URI. */
+  initialContent: string
+}
+
+export interface MonacoWorkbenchHandle {
+  /** Stable URI the bridge / VS Code extensions see for this document. */
+  uri: string
+  /** Tear down listeners, unregister with the bridge. */
+  dispose(): void
+}
+
+/**
+ * Build the stable URI for a workbench document. Scheme is `surface`.
+ * Path encodes the identity an extension needs to address the document.
+ */
+export function buildWorkbenchUri(spec: MonacoWorkbenchSpec): string {
+  const ext = getFileExtension(spec.language)
+  switch (spec.surface) {
+    case "canvas": {
+      const session = spec.sessionId ?? "default"
+      return `canvas:///${session}/${spec.documentId}.${ext}`
+    }
+    case "skill": {
+      const skill = spec.skillId ?? spec.documentId
+      const file =
+        spec.pathSegments && spec.pathSegments.length > 0
+          ? spec.pathSegments.join("/")
+          : `${spec.documentId}.${ext}`
+      return `skill:///${skill}/${file}`
+    }
+    case "artifact": {
+      return `artifact:///${spec.documentId}.${ext}`
+    }
+    default: {
+      return `${spec.surface}:///${spec.documentId}.${ext}`
+    }
+  }
+}
+
+/**
+ * Adapter from a real monaco editor (@monaco-editor/react onMount instance)
+ * to the bridge's minimal `MonacoEditor` shape. The bridge uses this to
+ * track active-editor identity and read selection / model state without
+ * pulling the full `monaco-editor` package into its dependency graph.
+ */
+function adaptEditorForBridge(editor: IMonacoEditor): BridgeMonacoEditor {
+  return {
+    id: editor.getId(),
+    getModel: () => {
+      const m = editor.getModel()
+      if (!m) return null
+      const adapted: BridgeMonacoTextModel = {
+        uri: m.uri.toString(),
+        language: m.getLanguageId(),
+        getValue: () => m.getValue(),
+        setValue: (v) => m.setValue(v),
+        getLineCount: () => m.getLineCount(),
+        getLineContent: (line: number) => m.getLineContent(line),
+        isDisposed: () => m.isDisposed(),
+      }
+      return adapted
+    },
+    getPosition: () => editor.getPosition(),
+    getSelection: () => {
+      const s = editor.getSelection()
+      if (!s) return null
+      return {
+        startLineNumber: s.startLineNumber,
+        startColumn: s.startColumn,
+        endLineNumber: s.endLineNumber,
+        endColumn: s.endColumn,
+      }
+    },
+    applyEdits: (edits) => {
+      editor.executeEdits("workbench", edits as unknown[])
+    },
+    setDecorations: (typeId, decorations) => {
+      // Bridge issues one decoration set per typeId; the workbench
+      // forwards each batch as a fresh deltaDecorations call. The
+      // bridge's lifecycle owns dedup / cleanup.
+      void typeId
+      editor.deltaDecorations([], decorations as unknown[])
+    },
+  }
+}
+
+/**
+ * Mount a Monaco editor into the workbench.
+ *
+ * Side effects:
+ *   1. Ensures the editor's model has the URI dictated by `spec`,
+ *      creating a fresh model with `initialContent` if no model exists
+ *      at the URI yet, or reusing the cached one if it does.
+ *   2. Binds the editor to the snippets/outline registry via
+ *      `bindMonacoEditorContext` (preserves existing behavior).
+ *   3. Notifies the vscode-shim bridge so LSP providers can address
+ *      this editor as `vscode.window.activeTextEditor` and bind
+ *      providers to its URI.
+ *   4. Wires focus / blur / content / selection listeners and forwards
+ *      them to the bridge.
+ *
+ * The returned `dispose()` tears down 2 + 3 + 4. It deliberately does
+ * NOT dispose the model — Monaco models can be reused across remounts
+ * (e.g., tab switches), and the parent component owns the model
+ * lifecycle.
+ */
+export function mountMonacoWorkbench(
+  editor: IMonacoEditor,
+  monaco: MonacoNamespace,
+  spec: MonacoWorkbenchSpec
+): MonacoWorkbenchHandle {
+  const uriString = buildWorkbenchUri(spec)
+  const uri = monaco.Uri.parse(uriString)
+
+  // Reuse the model if one already exists at the URI (preserves undo
+  // history across remounts). Otherwise create a fresh one with the
+  // provided initial content.
+  let model: IMonacoModel | null = monaco.editor.getModel(uri)
+  if (!model) {
+    model = monaco.editor.createModel(spec.initialContent, spec.language, uri)
+  }
+  if (editor.getModel() !== model) {
+    editor.setModel(model)
+  }
+
+  // Step 2 — existing light registry binding (snippets / outline).
+  const lightBinding: MonacoContextBinding = bindMonacoEditorContext({
+    editorId: editor.getId(),
+    documentId: spec.documentId,
+    language: spec.language,
+    getValue: () => editor.getModel()?.getValue() ?? "",
+  })
+
+  // Step 3 — vscode-shim bridge notification.
+  const bridgeEditor = adaptEditorForBridge(editor)
+  notifyEditorMounted(bridgeEditor)
+
+  // Step 4 — focus / content / selection listener wiring.
+  const focusDisposable = editor.onDidFocusEditorWidget(() => {
+    notifyActiveEditorChanged(editor.getId())
+  })
+  const blurDisposable = editor.onDidBlurEditorWidget(() => {
+    notifyActiveEditorChanged(null)
+  })
+  const contentDisposable = model.onDidChangeContent(() => {
+    notifyContentChanged(editor.getId())
+  })
+  const selectionDisposable = editor.onDidChangeCursorSelection(() => {
+    notifySelectionChanged(editor.getId())
+  })
+
+  let disposed = false
+  return {
+    uri: uriString,
+    dispose: () => {
+      if (disposed) return
+      disposed = true
+      focusDisposable.dispose()
+      blurDisposable.dispose()
+      contentDisposable.dispose()
+      selectionDisposable.dispose()
+      notifyEditorUnmounted(editor.getId())
+      lightBinding.dispose()
+    },
+  }
+}

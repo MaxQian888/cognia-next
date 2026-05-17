@@ -426,6 +426,35 @@ describe("createPluginContext", () => {
       const context = createPluginContext(plugin, mockManager)
       expect(context.python).toBeDefined()
     })
+
+    it("routes python.import failures through recordSilentFailure (ADR 0016 T1)", async () => {
+      const { recordSilentFailure } = jest.requireMock("../contracts/diagnostics-store") as {
+        recordSilentFailure: jest.Mock
+      }
+      recordSilentFailure.mockClear()
+
+      const hybridManifest = { ...mockManifest, type: "hybrid" as const }
+      const plugin = createMockPlugin({ manifest: hybridManifest })
+      const context = createPluginContext(plugin, mockManager)
+      const invokeMock = invoke as jest.Mock
+      invokeMock.mockRejectedValueOnce(new Error("python runtime missing"))
+
+      await expect(context.python!.import("os")).rejects.toThrow("python runtime missing")
+
+      expect(recordSilentFailure).toHaveBeenCalledWith(
+        plugin.manifest.id,
+        expect.objectContaining({
+          site: "python.import",
+          message: expect.stringContaining("os"),
+        }),
+        expect.any(Error)
+      )
+      // expected flag should be !isTauri() because the Python handler is
+      // deferred to ADR 0017 — the gate at scripts/check-silent-failure-flags
+      // will flip this to false once that handler ships.
+      const ctxArg = recordSilentFailure.mock.calls[0][1] as { expected: boolean }
+      expect(ctxArg.expected).toBe(true) // isTauri mock returns false
+    })
   })
 
   describe("network api", () => {

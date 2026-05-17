@@ -75,6 +75,20 @@
       "args": ["build"]
     },
     {
+      "label": "tauri:dev",
+      "type": "shell",
+      "isBackground": true,
+      "command": "pnpm",
+      "args": ["tauri:dev"],
+      "options": {
+        "env": {
+          "RUST_LOG": "cognia=debug,tauri=info",
+          "COGNIA_SIDECAR_VERBOSE": "1"
+        }
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "typecheck",
       "type": "shell",
       "command": "pnpm",

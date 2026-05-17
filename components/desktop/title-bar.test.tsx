@@ -38,8 +38,26 @@ jest.mock("@/lib/logger", () => ({
 }))
 
 const isTauriMock = jest.fn()
+const transportCall = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => isTauriMock(),
+  transport: { call: (...args: unknown[]) => transportCall(...args) },
+}))
+
+const setTheme = jest.fn()
+const themeRef = { value: "system" as "light" | "dark" | "system" }
+jest.mock("next-themes", () => ({
+  useTheme: () => ({ theme: themeRef.value, setTheme }),
+}))
+
+const killSwitch = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/automation/client", () => ({
+  desktop: { killSwitch: () => killSwitch() },
+}))
+
+const openVsxClear = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/db/schema", () => ({
+  getDb: () => ({ openVsxCache: { clear: openVsxClear } }),
 }))
 
 const minimize = jest.fn().mockResolvedValue(undefined)
@@ -81,15 +99,24 @@ jest.mock("@/lib/tauri/webview-zoom", () => {
 import * as webviewZoom from "@/lib/tauri/webview-zoom"
 const applyZoom = webviewZoom.applyZoom as jest.Mock
 
-const settingsRef = { webviewZoom: 1.0 as number | undefined }
+const settingsRef = {
+  webviewZoom: 1.0 as number | undefined,
+  language: "en" as string,
+  reduceMotion: false as boolean,
+}
 const settingsSave = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/stores/settings", () => {
+  const buildSettings = () => ({
+    webviewZoom: settingsRef.webviewZoom,
+    language: settingsRef.language,
+    reduceMotion: settingsRef.reduceMotion,
+  })
   const useSettingsStore: ((s: (state: unknown) => unknown) => unknown) & {
     getState: () => unknown
   } = Object.assign(
     (selector: (s: unknown) => unknown) =>
-      selector({ settings: { webviewZoom: settingsRef.webviewZoom }, save: settingsSave }),
-    { getState: () => ({ save: settingsSave }) }
+      selector({ settings: buildSettings(), save: settingsSave }),
+    { getState: () => ({ save: settingsSave, settings: buildSettings() }) }
   )
   return { useSettingsStore }
 })
@@ -100,6 +127,7 @@ jest.mock("@/lib/tauri/opener", () => ({
 }))
 
 const chatClear = jest.fn()
+const setActiveSession = jest.fn()
 const chatStateRef = {
   activeSessionId: null as string | null,
   status: "idle" as "idle" | "streaming" | "awaiting_approval" | "error",
@@ -111,29 +139,48 @@ jest.mock("@/stores/chat/chat-store", () => ({
         activeSessionId: chatStateRef.activeSessionId,
         status: chatStateRef.status,
       }),
-    { getState: () => ({ clear: chatClear }) }
+    { getState: () => ({ clear: chatClear, setActiveSession }) }
   ),
 }))
 
 const setSelectedGuild = jest.fn()
 const toggleSidebar = jest.fn()
-jest.mock("@/stores/ui/ui-store", () => ({
-  useUIStore: Object.assign(
-    (
-      selector: (s: {
-        setSelectedGuild: typeof setSelectedGuild
-        toggleSidebar: typeof toggleSidebar
-      }) => unknown
-    ) => selector({ setSelectedGuild, toggleSidebar }),
-    { getState: () => ({ setSelectedGuild, toggleSidebar }) }
-  ),
-}))
+const toggleGuildRail = jest.fn()
+const toggleStatusBar = jest.fn()
+const requestCreate = jest.fn()
+const uiStateRef = {
+  sidebarCollapsed: false,
+  guildRailCollapsed: false,
+  statusBarCollapsed: false,
+}
+jest.mock("@/stores/ui/ui-store", () => {
+  const buildState = () => ({
+    setSelectedGuild,
+    toggleSidebar,
+    toggleGuildRail,
+    toggleStatusBar,
+    requestCreate,
+    sidebarCollapsed: uiStateRef.sidebarCollapsed,
+    guildRailCollapsed: uiStateRef.guildRailCollapsed,
+    statusBarCollapsed: uiStateRef.statusBarCollapsed,
+  })
+  return {
+    useUIStore: Object.assign(
+      (selector: (s: ReturnType<typeof buildState>) => unknown) => selector(buildState()),
+      { getState: buildState }
+    ),
+  }
+})
 
 const sessionRef = {
   value: undefined as undefined | { id: string; title: string; characterId?: string },
 }
 const characterRef = { value: undefined as undefined | { id: string; name: string } }
-jest.mock("@/lib/db/sessions", () => ({ getSession: jest.fn() }))
+const listSessionsMock = jest.fn().mockResolvedValue([])
+jest.mock("@/lib/db/sessions", () => ({
+  getSession: jest.fn(),
+  listSessions: (...args: unknown[]) => listSessionsMock(...args),
+}))
 jest.mock("@/lib/db/characters", () => ({ getCharacter: jest.fn() }))
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: (factory: () => Promise<unknown> | unknown) => {
@@ -175,6 +222,16 @@ beforeAll(() => {
     writable: true,
     value: jest.fn().mockReturnValue(true),
   })
+  // Tools → Clear Cache touches the Service Worker `caches` API. JSDOM
+  // doesn't ship it; we provide a no-op so the action resolves cleanly in
+  // tests that exercise it.
+  if (typeof (globalThis as { caches?: unknown }).caches === "undefined") {
+    Object.defineProperty(globalThis, "caches", {
+      configurable: true,
+      writable: true,
+      value: { keys: async () => [], delete: async () => true },
+    })
+  }
 })
 
 import { TitleBar } from "./title-bar"
@@ -197,14 +254,29 @@ beforeEach(() => {
   applyZoom.mockReset().mockImplementation(async (n: number) => Math.round(n * 20) / 20)
   openExternal.mockClear().mockResolvedValue(undefined)
   chatClear.mockClear()
+  setActiveSession.mockClear()
   setSelectedGuild.mockReset()
   toggleSidebar.mockReset()
+  toggleGuildRail.mockReset()
+  toggleStatusBar.mockReset()
+  requestCreate.mockReset()
   routerPush.mockClear()
+  setTheme.mockClear()
+  killSwitch.mockClear().mockResolvedValue(undefined)
+  openVsxClear.mockClear().mockResolvedValue(undefined)
+  transportCall.mockClear().mockResolvedValue(undefined)
+  listSessionsMock.mockClear().mockResolvedValue([])
   chatStateRef.activeSessionId = null
   chatStateRef.status = "idle"
   sessionRef.value = undefined
   characterRef.value = undefined
   settingsRef.webviewZoom = 1.0
+  settingsRef.language = "en"
+  settingsRef.reduceMotion = false
+  themeRef.value = "system"
+  uiStateRef.sidebarCollapsed = false
+  uiStateRef.guildRailCollapsed = false
+  uiStateRef.statusBarCollapsed = false
   narrowState.matches = false
 })
 
@@ -987,4 +1059,334 @@ test("double-click is suppressed when target is a button or menu trigger", async
   toggleMaximize.mockClear()
   fireEvent.doubleClick(screen.getByLabelText("desktop.titleBar.minimize"))
   expect(toggleMaximize).not.toHaveBeenCalled()
+})
+
+// ---------------------------------------------------------------------------
+// Extended File menu (New Workflow / Agent Team / Character + Recent Sessions)
+// ---------------------------------------------------------------------------
+
+test("File > New Workflow signals create + routes to /workflows", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.file.label"))
+  await user.click(await screen.findByText("desktop.menu.file.newWorkflow"))
+  expect(requestCreate).toHaveBeenCalledWith("workflow")
+  await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/workflows"))
+})
+
+test("File > New Agent Team signals create + routes to /agent-teams", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.file.label"))
+  await user.click(await screen.findByText("desktop.menu.file.newAgentTeam"))
+  expect(requestCreate).toHaveBeenCalledWith("agentTeam")
+  await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/agent-teams"))
+})
+
+test("File > New Character signals create + routes to settings characters tab", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.file.label"))
+  await user.click(await screen.findByText("desktop.menu.file.newCharacter"))
+  expect(requestCreate).toHaveBeenCalledWith("character")
+  await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/settings?section=characters"))
+})
+
+test("File > Recent Sessions submenu lists loaded sessions and routes on click", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  listSessionsMock.mockResolvedValueOnce([
+    { id: "s1", title: "Latest chat", kind: "direct", createdAt: 1, updatedAt: 1 },
+    { id: "s2", title: "Older chat", kind: "direct", createdAt: 1, updatedAt: 0 },
+  ])
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.file.label"))
+  // Radix submenu opens via keyboard ArrowRight on the focused trigger.
+  // jsdom pointer events aren't reliable enough for hover/click.
+  const subTrigger = await screen.findByText("desktop.menu.file.recentSessions")
+  subTrigger.focus()
+  await user.keyboard("{ArrowRight}")
+  await user.click(await screen.findByText("Latest chat"))
+  expect(setActiveSession).toHaveBeenCalledWith("s1")
+  expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+  await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/"))
+})
+
+test("File > Recent Sessions shows the empty-state row when there are no sessions", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  listSessionsMock.mockResolvedValueOnce([])
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.file.label"))
+  const subTrigger = await screen.findByText("desktop.menu.file.recentSessions")
+  subTrigger.focus()
+  await user.keyboard("{ArrowRight}")
+  expect(await screen.findByText("desktop.menu.file.recentSessionsEmpty")).toBeInTheDocument()
+})
+
+test("File > Recent Sessions tolerates a listSessions failure", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  listSessionsMock.mockRejectedValueOnce(new Error("disk"))
+  render(<TitleBar />)
+  await waitFor(() =>
+    expect(logWarn).toHaveBeenCalledWith(
+      "title-bar load recent-sessions failed",
+      expect.objectContaining({ error: "disk" })
+    )
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Extended View menu (toggles, theme submenu, language submenu, reduce motion)
+// ---------------------------------------------------------------------------
+
+test("View > Toggle Guild Rail calls toggleGuildRail", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.view.label"))
+  await user.click(await screen.findByText("desktop.menu.view.toggleGuildRail"))
+  expect(toggleGuildRail).toHaveBeenCalled()
+})
+
+test("View > Toggle Status Bar calls toggleStatusBar", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.view.label"))
+  await user.click(await screen.findByText("desktop.menu.view.toggleStatusBar"))
+  expect(toggleStatusBar).toHaveBeenCalled()
+})
+
+test("View > Theme submenu sets the chosen theme and persists it", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.view.label"))
+  const themeTrigger = await screen.findByText("desktop.menu.view.theme")
+  themeTrigger.focus()
+  await user.keyboard("{ArrowRight}")
+  const darkItem = await screen.findByRole("menuitemradio", {
+    name: "desktop.menu.view.themeDark",
+  })
+  await user.click(darkItem)
+  await waitFor(() => expect(setTheme).toHaveBeenCalledWith("dark"))
+  await waitFor(() => expect(settingsSave).toHaveBeenCalledWith({ theme: "dark" }))
+})
+
+test("View > Language submenu persists the chosen locale", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.view.label"))
+  const langTrigger = await screen.findByText("desktop.menu.view.language")
+  langTrigger.focus()
+  await user.keyboard("{ArrowRight}")
+  const zhItem = await screen.findByRole("menuitemradio", {
+    name: "desktop.menu.view.languageChinese",
+  })
+  await user.click(zhItem)
+  await waitFor(() => expect(settingsSave).toHaveBeenCalledWith({ language: "zh-CN" }))
+})
+
+test("View > Reduce Motion flips the persisted boolean", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.view.label"))
+  await user.click(await screen.findByText("desktop.menu.view.reduceMotion"))
+  await waitFor(() => expect(settingsSave).toHaveBeenCalledWith({ reduceMotion: true }))
+})
+
+// ---------------------------------------------------------------------------
+// Extended Go menu — every new top-level destination
+// ---------------------------------------------------------------------------
+
+test.each([
+  ["go.inbox", "/inbox/all"],
+  ["go.workflows", "/workflows"],
+  ["go.skills", "/skills"],
+  ["go.plugins", "/plugins"],
+  ["go.agentTeams", "/agent-teams"],
+  ["go.scheduler", "/scheduler"],
+  ["go.discover", "/discover"],
+  ["go.a2ui", "/a2ui"],
+])("Go > %s routes to %s", async (key, route) => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.go.label"))
+  await user.click(await screen.findByText(`desktop.menu.${key}`))
+  await waitFor(() => expect(routerPush).toHaveBeenCalledWith(route))
+})
+
+// ---------------------------------------------------------------------------
+// Tools menu
+// ---------------------------------------------------------------------------
+
+test("Tools > Command Palette dispatches Ctrl+K", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const seen: KeyboardEvent[] = []
+  const listener = (e: Event) => seen.push(e as KeyboardEvent)
+  window.addEventListener("keydown", listener)
+  try {
+    const user = userEvent.setup()
+    render(<TitleBar />)
+    await user.click(await screen.findByText("desktop.menu.tools.label"))
+    await user.click(await screen.findByText("desktop.menu.tools.commandPalette"))
+    expect(seen.some((e) => e.key === "k" && e.ctrlKey)).toBe(true)
+  } finally {
+    window.removeEventListener("keydown", listener)
+  }
+})
+
+test("Tools > Automation Kill-Switch invokes the automation client", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.tools.label"))
+  await user.click(await screen.findByText("desktop.menu.tools.automationKillSwitch"))
+  await waitFor(() => expect(killSwitch).toHaveBeenCalled())
+})
+
+test("Tools > Automation Kill-Switch logs warning when the call throws", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  killSwitch.mockRejectedValueOnce(new Error("denied"))
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.tools.label"))
+  await user.click(await screen.findByText("desktop.menu.tools.automationKillSwitch"))
+  await waitFor(() =>
+    expect(logWarn).toHaveBeenCalledWith(
+      "title-bar tools automation-kill-switch failed",
+      expect.objectContaining({ error: "denied" })
+    )
+  )
+})
+
+test("Tools > Manage Connectors routes to the connections settings tab", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.tools.label"))
+  await user.click(await screen.findByText("desktop.menu.tools.manageConnectors"))
+  await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/settings?section=connections"))
+})
+
+test("Tools > Manage MCP Server routes to external-bridge settings", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.tools.label"))
+  await user.click(await screen.findByText("desktop.menu.tools.manageMcpServer"))
+  await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/settings?section=external-bridge"))
+})
+
+test("Tools > Plugin DevTools routes to the plugins settings tab", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.tools.label"))
+  await user.click(await screen.findByText("desktop.menu.tools.pluginDevtools"))
+  await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/settings?section=plugins"))
+})
+
+test("Tools > Restart Sidecar invokes claude_restart_sidecar", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.tools.label"))
+  await user.click(await screen.findByText("desktop.menu.tools.sidecarRestart"))
+  await waitFor(() => expect(transportCall).toHaveBeenCalledWith("claude_restart_sidecar", {}))
+})
+
+test("Tools > Restart Sidecar logs warning when invoke fails", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  transportCall.mockRejectedValueOnce(new Error("offline"))
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.tools.label"))
+  await user.click(await screen.findByText("desktop.menu.tools.sidecarRestart"))
+  await waitFor(() =>
+    expect(logWarn).toHaveBeenCalledWith(
+      "title-bar tools sidecar-restart failed",
+      expect.objectContaining({ error: "offline" })
+    )
+  )
+})
+
+test("Tools > Clear Cache wipes the openVsxCache table", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.tools.label"))
+  await user.click(await screen.findByText("desktop.menu.tools.clearCache"))
+  await waitFor(() => expect(openVsxClear).toHaveBeenCalled())
+})
+
+test("Tools > Clear Cache logs warning when the cache wipe rejects", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  openVsxClear.mockRejectedValueOnce(new Error("io"))
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.tools.label"))
+  await user.click(await screen.findByText("desktop.menu.tools.clearCache"))
+  await waitFor(() =>
+    expect(logWarn).toHaveBeenCalledWith(
+      "title-bar tools clear-cache failed",
+      expect.objectContaining({ error: expect.stringContaining("openVsxCache") })
+    )
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Help → Keyboard Shortcuts dialog
+// ---------------------------------------------------------------------------
+
+test("Help > Keyboard Shortcuts opens the shortcuts dialog", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.help.label"))
+  await user.click(await screen.findByText("desktop.menu.help.keyboardShortcuts"))
+  await waitFor(() => expect(screen.getByTestId("keyboard-shortcuts-dialog")).toBeInTheDocument())
+  // Spot-check one shortcut row.
+  expect(screen.getByText("desktop.menu.shortcut.cmdOrCtrlShiftP")).toBeInTheDocument()
+})
+
+// ---------------------------------------------------------------------------
+// Wide Menubar: ensure every new top-level trigger is rendered
+// ---------------------------------------------------------------------------
+
+test("wide menubar exposes Tools as a top-level trigger", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  render(<TitleBar />)
+  await waitFor(() => expect(screen.getByText("desktop.menu.tools.label")).toBeInTheDocument())
 })

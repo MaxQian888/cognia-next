@@ -22,6 +22,7 @@ import {
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { useSettingsStore } from "@/stores"
 import { isTauri } from "@/lib/utils"
+import { recordSilentFailure } from "../contracts/diagnostics-store"
 import type { PluginManager } from "../core/manager"
 
 // =============================================================================
@@ -987,6 +988,27 @@ async function withMediaAITimeout<T>(
   })
 }
 
+async function runImageAi(
+  pluginId: string,
+  site: string,
+  runner: () => Promise<ImageData>
+): Promise<ImageData> {
+  try {
+    return await runner()
+  } catch (error) {
+    recordSilentFailure(
+      pluginId,
+      {
+        site,
+        message: `Image AI call failed: ${site}`,
+        expected: false,
+      },
+      error
+    )
+    throw error
+  }
+}
+
 async function executeProviderImageEdit(
   prompt: string,
   imageData: ImageData,
@@ -1448,16 +1470,20 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
 
     ai: {
       upscale: async (imageData: ImageData, factor: 2 | 4): Promise<ImageData> => {
-        return executeProviderImageEdit(
-          `Upscale this image by ${factor}x while preserving composition, colors, and fine details.`,
-          imageData
+        return runImageAi(pluginId, "ai.upscale", () =>
+          executeProviderImageEdit(
+            `Upscale this image by ${factor}x while preserving composition, colors, and fine details.`,
+            imageData
+          )
         )
       },
 
       removeBackground: async (imageData: ImageData): Promise<ImageData> => {
-        return executeProviderImageEdit(
-          "Remove the background from this image and keep the main subject cleanly isolated.",
-          imageData
+        return runImageAi(pluginId, "ai.removeBackground", () =>
+          executeProviderImageEdit(
+            "Remove the background from this image and keep the main subject cleanly isolated.",
+            imageData
+          )
         )
       },
 
@@ -1465,18 +1491,22 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         imageData: ImageData,
         type: "denoise" | "sharpen" | "restore"
       ): Promise<ImageData> => {
-        return executeProviderImageEdit(
-          `Enhance this image with a ${type} pass while preserving the original subject and composition.`,
-          imageData
+        return runImageAi(pluginId, "ai.enhanceImage", () =>
+          executeProviderImageEdit(
+            `Enhance this image with a ${type} pass while preserving the original subject and composition.`,
+            imageData
+          )
         )
       },
 
       generateVariation: async (imageData: ImageData, prompt?: string): Promise<ImageData> => {
-        return executeProviderImageEdit(
-          prompt
-            ? `Create a variation of this image. ${prompt}`
-            : "Create a faithful variation of this image while preserving the core subject.",
-          imageData
+        return runImageAi(pluginId, "ai.generateVariation", () =>
+          executeProviderImageEdit(
+            prompt
+              ? `Create a variation of this image. ${prompt}`
+              : "Create a faithful variation of this image while preserving the core subject.",
+            imageData
+          )
         )
       },
 
@@ -1485,10 +1515,12 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         mask: ImageData,
         prompt: string
       ): Promise<ImageData> => {
-        return executeProviderImageEdit(
-          `Modify only the masked region of this image. ${prompt}`,
-          imageData,
-          mask
+        return runImageAi(pluginId, "ai.inpaint", () =>
+          executeProviderImageEdit(
+            `Modify only the masked region of this image. ${prompt}`,
+            imageData,
+            mask
+          )
         )
       },
     },

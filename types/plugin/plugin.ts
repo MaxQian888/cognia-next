@@ -69,6 +69,7 @@ export type PluginCapability =
   | "connectors" // Provides Platform Connector adapters (Task 110)
   | "workflow" // Contributes custom workflow node executors (ADR 0017)
   | "workflow-trigger" // Contributes custom workflow trigger sources (ADR 0017)
+  | "tray" // Contributes items to the desktop system tray menu (ADR-pending)
 
 /**
  * Plugin status in the lifecycle
@@ -366,7 +367,7 @@ export interface PluginManifest {
    * Entry point for a VS Code extension (relative path to the bundle inside
    * the unpacked `.vsix`, e.g. `extension/out/extension.js`). Required when
    * `type === "vscode-extension"`. The Node sidecar
-   * (`sidecars/vscode-ext-host/`) loads this via a `vm.createContext`
+   * (`sidecar/vscode-ext-host/`) loads this via a `vm.createContext`
    * sandbox after the `require("vscode")` hook is installed.
    */
   vscodeMain?: string
@@ -1082,6 +1083,13 @@ export interface PluginContext {
   /** Context Menu API */
   contextMenu: PluginContextMenuAPI
 
+  /**
+   * System Tray API — register / unregister tray menu items. Available
+   * only when the plugin declares the `"tray"` capability in its manifest;
+   * otherwise the API is a no-op (every method returns a disposed handle).
+   */
+  tray: PluginTrayAPI
+
   /** Window API */
   window: PluginWindowAPI
 
@@ -1570,6 +1578,37 @@ export interface ShortcutRegistration {
   shortcut: string
   callback: () => void
   options?: ShortcutOptions
+}
+
+/**
+ * Tray menu item contributed by a plugin. Mirrors `ContextMenuItem` but
+ * targets the system-tray surface rather than the right-click context menu.
+ */
+export interface PluginTrayItemInput {
+  /** Local id — the host prefixes it with the plugin id before recording. */
+  id: string
+  label: string
+  /** Optional Lucide icon name; resolved by the renderer. */
+  icon?: string
+  /** Optional `when` expression evaluated by `lib/tray/when.ts`. */
+  when?: string
+  /** Free-form category used by `lib/tray/all-commands.ts` for grouping. */
+  category?: string
+  /** Optional accelerator hint, cosmetic. */
+  accelerator?: string
+  /** Click handler — invoked by the renderer when the tray dispatches. */
+  onClick: () => void
+}
+
+/**
+ * System tray API surfaced via `ctx.tray`. Mirrors the context-menu shape
+ * (`PluginContextMenuAPI`) so plugin authors learn one pattern.
+ */
+export interface PluginTrayAPI {
+  /** Register one tray item. Returns a disposer that unregisters it. */
+  register: (item: PluginTrayItemInput) => () => void
+  /** Convenience for multiple items; the returned disposer drops all of them. */
+  registerMany: (items: PluginTrayItemInput[]) => () => void
 }
 
 /**

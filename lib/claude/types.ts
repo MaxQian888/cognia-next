@@ -660,6 +660,13 @@ export interface AppSettings {
   /** Disable non-essential animations and transitions. */
   reduceMotion?: boolean
   /**
+   * Visual workflow editor performance tier — user-facing knob in the editor
+   * toolbar's perf popover. `undefined` is treated as `"auto"` (the resolver
+   * picks the best tier from `prefers-reduced-motion` + workflow node count).
+   * See `lib/workflow/editor/performance-tier.ts` for the resolution table.
+   */
+  workflowEditorPerformanceTier?: import("@/lib/workflow/editor/performance-tier").PerformanceTier
+  /**
    * Tauri webview zoom level (1.0 = 100%). Persisted across launches and
    * applied at boot via `<WebviewZoomBootstrap />`. Range 0.5..2.0.
    */

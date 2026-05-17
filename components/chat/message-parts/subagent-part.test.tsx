@@ -14,18 +14,7 @@ jest.mock("next-intl", () => ({
 }))
 
 // Stub Collapsible primitives so children always render in tests.
-jest.mock("@/components/ui/collapsible", () => ({
-  Collapsible: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  CollapsibleTrigger: ({
-    children,
-    ...rest
-  }: { children: React.ReactNode } & Record<string, unknown>) => (
-    <button type="button" {...rest}>
-      {children}
-    </button>
-  ),
-  CollapsibleContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+jest.mock("@/components/ui/collapsible")
 
 const basePart: SubagentPartType = {
   type: "subagent",

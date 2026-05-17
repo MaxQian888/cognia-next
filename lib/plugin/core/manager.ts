@@ -512,6 +512,18 @@ export class PluginManager {
     // Initialize store with plugin directory
     await store.initialize(this.config.pluginDirectory)
 
+    // ADR 0016 P1-8 — rewrite legacy permission names (`fs:read` →
+    // `filesystem:read`, etc.) in the persisted plugin_permissions table.
+    // Idempotent. Runs before scanPlugins so manifest validation sees the
+    // canonical names when re-discovery happens against existing rows.
+    try {
+      const { migrateLegacyPermissionNames } =
+        await import("@/lib/plugin/security/permission-migration")
+      await migrateLegacyPermissionNames()
+    } catch (error) {
+      loggers.manager.warn("[manager] permission migration failed:", error)
+    }
+
     // Initialize Python runtime if enabled
     if (this.config.enablePython) {
       await this.initializePythonRuntime()
@@ -1965,6 +1977,19 @@ export class PluginManager {
     unregisterNativeAnthropicToolsByPlugin(pluginId)
     unregisterSkillsByPlugin(pluginId)
     unregisterExternalAgentPresetsByPlugin(pluginId)
+
+    // System-tray cleanup — drops any items the plugin contributed via
+    // `ctx.tray.register(...)`. Mirrors the slash-command teardown above so
+    // the disable lifecycle stays uniform across registries.
+    try {
+      const trayModule = await import("@/lib/tray/registry")
+      trayModule.unregisterTrayItemsByPlugin(pluginId)
+      // Bulk-drop the Rust-side records as well so a re-enable starts fresh.
+      const { invoke } = await import("@tauri-apps/api/core")
+      await invoke("plugin_tray_item_unregister_by_plugin", { pluginId }).catch(() => {})
+    } catch {
+      // optional dep — non-Tauri builds and tests without the modules wired
+    }
 
     // VS Code shim cleanup — lm provider registrations + chat participants.
     // For non-vscode-extension plugins these are no-ops (the maps will be

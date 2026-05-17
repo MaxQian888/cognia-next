@@ -9,6 +9,8 @@ import { isTauri } from "@/lib/tauri"
 import { useChatStore } from "@/stores/chat"
 import { useUIStore } from "@/stores/ui"
 import { useSettingsStore } from "@/stores/settings"
+import { dispatchTrayClick, dispatchShortcut } from "@/lib/tray/dispatcher"
+import type { TrayActionPayload } from "@/lib/tray/types"
 
 interface ParsedDeepLink {
   kind: "chat" | "settings" | "workspace" | "unknown"
@@ -169,6 +171,25 @@ export function useTauriEvents(): void {
         else handleDeepLinks([String(urls)])
       })
 
+      // Unified tray-click event — the source-of-truth dispatch channel for
+      // both built-in actions (slash + plugin commands) and items pinned by
+      // the user. Native actions (show / new-chat / settings / open-logs /
+      // automation-kill) ALSO fire their legacy events above, so this is
+      // additive — `dispatchTrayClick` no-ops for the `kind: "native"` case.
+      const trayItemClicked = await listen<{ id: string; payload?: TrayActionPayload }>(
+        "tray://item-clicked",
+        (event) => {
+          void dispatchTrayClick(event.payload?.payload)
+        }
+      )
+
+      // Unified shortcut event — routed by `ShortcutRegistry::dispatch` in
+      // Rust. Built-in `tray.*` ids are no-ops here (Rust ran the action),
+      // renderer-bound ids hit `executeCommand`.
+      const shortcutTriggered = await listen<{ id: string }>("shortcut://triggered", (event) => {
+        if (event.payload?.id) void dispatchShortcut(event.payload.id)
+      })
+
       if (cancelled) {
         trayNewChat()
         traySettings()
@@ -180,6 +201,8 @@ export function useTauriEvents(): void {
         cliMatches()
         cliSecondInstance()
         deepLink()
+        trayItemClicked()
+        shortcutTriggered()
         return
       }
 
@@ -193,7 +216,9 @@ export function useTauriEvents(): void {
         unlistenDocs,
         cliMatches,
         cliSecondInstance,
-        deepLink
+        deepLink,
+        trayItemClicked,
+        shortcutTriggered
       )
     }
 

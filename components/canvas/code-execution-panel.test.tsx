@@ -12,11 +12,7 @@ import userEvent from "@testing-library/user-event"
 import { CodeExecutionPanel } from "./code-execution-panel"
 import type { CodeSandboxExecutionResult } from "@/hooks/canvas/use-code-execution"
 
-jest.mock("@/components/ui/tooltip", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}))
+jest.mock("@/components/ui/tooltip")
 
 const mockCopy = jest.fn().mockResolvedValue(undefined)
 let mockIsCopying = false

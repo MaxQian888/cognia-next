@@ -20,25 +20,7 @@ jest.mock("@/lib/db/conversation-overrides", () => ({
   upsertByConversationKey: jest.fn().mockResolvedValue({}),
 }))
 
-jest.mock("@/components/ui/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuTrigger: ({ children, asChild }: { children: React.ReactNode; asChild?: boolean }) =>
-    asChild ? <>{children}</> : <div>{children}</div>,
-  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuItem: ({
-    children,
-    onClick,
-    ...rest
-  }: {
-    children: React.ReactNode
-    onClick?: () => void
-    [k: string]: unknown
-  }) => (
-    <button onClick={onClick} {...rest}>
-      {children}
-    </button>
-  ),
-}))
+jest.mock("@/components/ui/dropdown-menu")
 
 // ---------------------------------------------------------------------------
 // Subject + imported mocks (after mocks are registered)

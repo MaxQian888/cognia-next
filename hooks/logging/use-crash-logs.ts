@@ -4,12 +4,14 @@ import {
   buildCrashLogExportBundle,
   buildCrashLogItems,
   isCrashRelevantLogEntry,
+  serializeCrashLogBundle,
   summarizeCrashLogItems,
   type CrashDiagnosticsSnapshot,
   type CrashLogItem,
   type CrashLogLevelFilter,
   type CrashLogSourceFilter,
 } from "@/lib/logger/crash-log"
+import { downloadFile } from "@/lib/files/download"
 import { getIndexedDBTransport } from "@/lib/logger"
 import {
   clearRecentErrorLogs,
@@ -35,16 +37,6 @@ function matchesSearch(item: CrashLogItem, query: string): boolean {
   return [item.title, item.summary, item.module, item.traceId, item.logEntry?.message]
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .some((value) => value.toLowerCase().includes(normalized))
-}
-
-function downloadTextFile(filename: string, content: string, mimeType: string): void {
-  const blob = new Blob([content], { type: mimeType })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement("a")
-  anchor.href = url
-  anchor.download = filename
-  anchor.click()
-  URL.revokeObjectURL(url)
 }
 
 function deriveRelatedLogs(items: CrashLogItem[], selectedItem: CrashLogItem | null) {
@@ -268,39 +260,8 @@ export function useCrashLogs(): UseCrashLogsResult {
           search,
         },
       })
-
-      if (format === "json") {
-        downloadTextFile(
-          `cognia-crash-logs-${new Date().toISOString().slice(0, 10)}.json`,
-          JSON.stringify(
-            bundle.items.map((item) => item.logEntry ?? item),
-            null,
-            2
-          ),
-          "application/json"
-        )
-        return
-      }
-
-      if (format === "text") {
-        downloadTextFile(
-          `cognia-crash-logs-${new Date().toISOString().slice(0, 10)}.txt`,
-          bundle.items
-            .map(
-              (item) =>
-                `${item.timestamp} [${item.level.toUpperCase()}] ${item.module} ${item.title}`
-            )
-            .join("\n"),
-          "text/plain"
-        )
-        return
-      }
-
-      downloadTextFile(
-        `cognia-crash-bundle-${new Date().toISOString().slice(0, 10)}.json`,
-        JSON.stringify(bundle, null, 2),
-        "application/json"
-      )
+      const serialized = serializeCrashLogBundle(bundle, format)
+      downloadFile(serialized.filename, serialized.content, serialized.mimeType)
     },
     [diagnostics, filteredItems, levelFilter, search, sourceFilter]
   )

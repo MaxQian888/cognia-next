@@ -1,0 +1,79 @@
+// Chord-normalisation, key-event capture, and platform-aware formatting.
+// Extracted from `stores/canvas/keybinding-store.ts` so both the canvas
+// keybinding UI and the new unified shortcut panel can share one
+// implementation. Behaviour is intentionally identical to the original
+// canvas helpers — see `lib/shortcuts/utils.test.ts` for the ported
+// regression cases.
+
+import type { Chord } from "./types"
+
+const MODIFIER_ORDER = ["ctrl", "alt", "shift", "meta"] as const
+
+/**
+ * Canonicalises a chord string so equivalent expressions compare equal:
+ *   - whitespace stripped
+ *   - lowercase
+ *   - modifiers sorted in `ctrl → alt → shift → meta` order
+ *   - non-modifier keys sorted lexicographically among themselves
+ *
+ * Returns the chord joined with `+`. Identity for chords already in
+ * canonical form.
+ */
+export function normalizeKeyCombo(keyCombo: string): Chord {
+  return keyCombo
+    .split("+")
+    .map((key) => key.trim().toLowerCase())
+    .sort((a, b) => {
+      const aIdx = MODIFIER_ORDER.indexOf(a as (typeof MODIFIER_ORDER)[number])
+      const bIdx = MODIFIER_ORDER.indexOf(b as (typeof MODIFIER_ORDER)[number])
+      if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx
+      if (aIdx !== -1) return -1
+      if (bIdx !== -1) return 1
+      return a.localeCompare(b)
+    })
+    .join("+")
+}
+
+/**
+ * Reads a `KeyboardEvent` and returns a chord string in the same shape the
+ * settings UI persists. `Ctrl` and `Meta` are folded together so a single
+ * binding works on both Windows/Linux and macOS — the renderer treats them
+ * as the platform-canonical "command" modifier.
+ */
+export function parseKeyEvent(event: KeyboardEvent): Chord {
+  const parts: string[] = []
+
+  if (event.ctrlKey || event.metaKey) parts.push("Ctrl")
+  if (event.altKey) parts.push("Alt")
+  if (event.shiftKey) parts.push("Shift")
+
+  const key = event.key.length === 1 ? event.key.toUpperCase() : event.key
+  if (!["Control", "Alt", "Shift", "Meta"].includes(key)) {
+    parts.push(key)
+  }
+
+  return parts.join("+")
+}
+
+/**
+ * Renders a stored chord using platform-appropriate glyphs. On macOS the
+ * modifiers collapse to symbols (`⌘ ⌥ ⇧`) with no `+` separator, matching
+ * the OS menu-bar convention; everywhere else the `+`-separated form is
+ * kept.
+ */
+export function formatKeybinding(keyCombo: Chord): string {
+  const isMac = typeof navigator !== "undefined" && navigator.platform.includes("Mac")
+
+  return keyCombo
+    .split("+")
+    .map((key) => {
+      const lower = key.toLowerCase()
+      if (isMac) {
+        if (lower === "ctrl") return "⌘"
+        if (lower === "alt") return "⌥"
+        if (lower === "shift") return "⇧"
+      }
+      return key
+    })
+    .join(isMac ? "" : "+")
+}

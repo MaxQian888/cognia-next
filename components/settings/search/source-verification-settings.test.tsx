@@ -83,15 +83,9 @@ jest.mock("@/components/ui/select", () => ({
   SelectValue: () => null,
 }))
 
-jest.mock("@/components/ui/collapsible", () => ({
-  Collapsible: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  CollapsibleTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  CollapsibleContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
-
-jest.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+// Shared stubs: components/ui/__mocks__/{collapsible,scroll-area}.tsx
+jest.mock("@/components/ui/collapsible")
+jest.mock("@/components/ui/scroll-area")
 
 import { SourceVerificationSettings } from "./source-verification-settings"
 

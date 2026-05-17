@@ -11,6 +11,20 @@ jest.mock("@/lib/network/proxy-fetch", () => ({
     (global.fetch as jest.MockedFunction<typeof fetch>)(...(args as Parameters<typeof fetch>)),
 }))
 
+// ADR 0016 P0-3 — install path now invokes the signature verifier. This test
+// is about the descriptor shape after a successful install, not about
+// signature semantics, so stub the verifier to always accept.
+jest.mock("../security/signature", () => ({
+  getPluginSignatureVerifier: () => ({
+    verify: jest.fn().mockResolvedValue({
+      valid: true,
+      pluginId: "test-plugin",
+      version: "1.0.0",
+      warnings: [],
+    }),
+  }),
+}))
+
 import { invoke } from "@tauri-apps/api/core"
 import { PluginMarketplace } from "./marketplace"
 

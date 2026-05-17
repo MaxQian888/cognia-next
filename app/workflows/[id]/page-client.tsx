@@ -11,12 +11,9 @@
  */
 
 import { use, useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { notFound } from "next/navigation"
 import { toast } from "sonner"
-import { WorkflowIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { WorkflowEditorCanvas } from "@/components/workflow/editor/canvas"
 import { WorkflowGraphViewer } from "@/components/mobile/workflow/workflow-graph-viewer"
 import { usePlatform } from "@/hooks/use-platform"
@@ -28,7 +25,6 @@ interface PageProps {
 }
 
 export function WorkflowEditorPageClient({ params }: PageProps) {
-  const router = useRouter()
   const platform = usePlatform()
   const { id } = use(params)
   const [workflow, setWorkflow] = useState<WorkflowRow | null | undefined>(undefined)
@@ -55,22 +51,7 @@ export function WorkflowEditorPageClient({ params }: PageProps) {
   }
 
   if (workflow === null) {
-    return (
-      <Empty className="mx-auto max-w-md py-20">
-        <EmptyHeader>
-          <EmptyMedia>
-            <WorkflowIcon className="size-8" aria-hidden="true" />
-          </EmptyMedia>
-        </EmptyHeader>
-        <EmptyTitle>Workflow not found</EmptyTitle>
-        <EmptyDescription>
-          The workflow you tried to open doesn’t exist or has been deleted.
-        </EmptyDescription>
-        <Button onClick={() => router.push("/workflows")} className="mt-2">
-          Back to library
-        </Button>
-      </Empty>
-    )
+    notFound()
   }
 
   if (platform === "mobile") {

@@ -79,7 +79,7 @@ export class PluginLoader {
 
   /**
    * Load a VS Code extension. The Node sidecar lives in
-   * `sidecars/vscode-ext-host/` and is managed by Tauri; this loader is
+   * `sidecar/vscode-ext-host/` and is managed by Tauri; this loader is
    * a thin IPC client mirror of `loadWasmModule`. See
    * `lib/plugin/core/vscode-loader.ts` for the IPC contract.
    */

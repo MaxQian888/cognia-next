@@ -20,6 +20,7 @@
     "---Technical reference---",
     "adr",
     "connectors",
-    "plugins"
+    "plugins",
+    "audits"
   ]
 }

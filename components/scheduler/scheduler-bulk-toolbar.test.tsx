@@ -9,30 +9,7 @@ jest.mock("next-intl", () => ({
 }))
 
 // Stub AlertDialog so we don't need its full Radix machinery.
-jest.mock("@/components/ui/alert-dialog", () => ({
-  AlertDialog: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
-    open ? <div role="alertdialog">{children}</div> : null,
-  AlertDialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  AlertDialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  AlertDialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
-  AlertDialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
-  AlertDialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  AlertDialogCancel: ({ children }: { children: React.ReactNode }) => (
-    <button type="button">{children}</button>
-  ),
-  AlertDialogAction: ({
-    children,
-    onClick,
-    ...rest
-  }: {
-    children: React.ReactNode
-    onClick?: () => void
-  } & React.HTMLAttributes<HTMLButtonElement>) => (
-    <button type="button" onClick={onClick} {...rest}>
-      {children}
-    </button>
-  ),
-}))
+jest.mock("@/components/ui/alert-dialog")
 
 function makeItem(overrides: Partial<UnifiedScheduledItem> = {}): UnifiedScheduledItem {
   return {

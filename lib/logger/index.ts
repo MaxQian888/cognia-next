@@ -155,6 +155,7 @@ export const loggers = {
   shell: createLogger("shell"),
   canvas: createLogger("canvas"),
   a2ui: createLogger("a2ui"),
+  tray: createLogger("tray"),
 }
 
 /**

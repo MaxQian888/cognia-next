@@ -17,11 +17,7 @@ jest.mock("@/lib/utils", () => ({
   cn: (...args: Array<string | undefined | false | null>) => args.filter(Boolean).join(" "),
 }))
 
-jest.mock("@/components/ui/badge", () => ({
-  Badge: ({ children }: { children: React.ReactNode }) => (
-    <span data-testid="badge">{children}</span>
-  ),
-}))
+jest.mock("@/components/ui/badge")
 
 describe("ProviderHealthStatus", () => {
   beforeEach(() => {

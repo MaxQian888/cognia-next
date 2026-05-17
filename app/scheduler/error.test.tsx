@@ -9,12 +9,20 @@ jest.mock("next-intl", () => ({
 }))
 
 const errorMock = jest.fn()
-jest.mock("@/lib/logger", () => ({
-  loggers: {
-    scheduler: {
-      error: (...args: unknown[]) => errorMock(...args),
+jest.mock("@/lib/logger", () => {
+  const stub = () => jest.fn()
+  return {
+    loggers: {
+      scheduler: { error: (...a: unknown[]) => errorMock(...a), debug: stub(), fatal: stub() },
+      app: { error: stub(), debug: stub(), fatal: stub() },
+      ui: { error: stub(), debug: stub(), fatal: stub() },
+      native: { error: stub(), debug: stub(), fatal: stub() },
     },
-  },
+  }
+})
+
+jest.mock("@/lib/logger/crash-log", () => ({
+  exportCrashLogBundleNow: jest.fn(),
 }))
 
 import SchedulerError from "./error"
@@ -24,28 +32,32 @@ beforeEach(() => {
 })
 
 describe("SchedulerError", () => {
-  it("renders the localized title, the stack trace, and a retry button", () => {
+  it("renders the localized title + description from the scheduler namespace and delegates to ErrorPage", () => {
     const reset = jest.fn()
     const err = Object.assign(new Error("boom"), { stack: "Error: boom\n  at fn" })
     render(<SchedulerError error={err} reset={reset} />)
 
     expect(screen.getByText("errorTitle")).toBeInTheDocument()
     expect(screen.getByText("errorDescription")).toBeInTheDocument()
-    expect(screen.getByText(/Error: boom/)).toBeInTheDocument()
-
-    expect(errorMock).toHaveBeenCalledWith("Scheduler page error", err)
-
-    fireEvent.click(screen.getByRole("button", { name: /retry/i }))
-    expect(reset).toHaveBeenCalled()
+    expect(screen.getByTestId("error-page")).toHaveAttribute("data-variant", "error")
   })
 
-  it("falls back to name + message when stack is missing", () => {
+  it("logs the boundary trip against loggers.scheduler.error with the variant in metadata", () => {
     const reset = jest.fn()
-    const err = new Error("plain")
-    err.stack = undefined as unknown as string
+    const err = Object.assign(new Error("boom"), { digest: "abc", stack: "Error: boom" })
     render(<SchedulerError error={err} reset={reset} />)
 
-    // The fallback joins error.name and error.message with ": ".
-    expect(screen.getByText(/Error: plain/)).toBeInTheDocument()
+    expect(errorMock).toHaveBeenCalledWith(
+      "Route boundary tripped",
+      err,
+      expect.objectContaining({ variant: "error", digest: "abc" })
+    )
+  })
+
+  it("retry button is wired to the reset callback supplied by Next's error boundary", () => {
+    const reset = jest.fn()
+    render(<SchedulerError error={new Error("boom")} reset={reset} />)
+    fireEvent.click(screen.getByTestId("error-page-retry"))
+    expect(reset).toHaveBeenCalledTimes(1)
   })
 })

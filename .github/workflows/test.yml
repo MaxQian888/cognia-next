@@ -64,6 +64,12 @@ jobs:
       - name: Run tests with coverage
         run: pnpm test:coverage
 
+      - name: Install sidecar dependencies
+        run: pnpm sidecars:install
+
+      - name: Run sidecar tests (Claude + VS Code ext host)
+        run: pnpm sidecars:test
+
       - name: Generate coverage summary
         if: always()
         run: |

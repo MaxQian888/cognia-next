@@ -99,12 +99,7 @@ jest.mock("@/components/ui/button", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/tooltip", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  TooltipContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  TooltipProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  TooltipTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+jest.mock("@/components/ui/tooltip")
 
 describe("OAuthLoginButton", () => {
   beforeEach(() => {

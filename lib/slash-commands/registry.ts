@@ -52,6 +52,13 @@ export interface SlashCommandDefinition {
   source?: "builtin" | "plugin"
   /** Plugin id when `source === "plugin"`. */
   pluginId?: string
+  /**
+   * Grouping key consumed by surfaces that list commands by section — most
+   * notably the tray's "All Commands ▶" submenu. Free-form; the tray uses
+   * the canonical buckets `chat | diagnostics | system | goal | template |
+   * help | plugins`. Defaults to `"chat"` when absent.
+   */
+  category?: string
 }
 
 const registry = new Map<string, SlashCommandDefinition>()
@@ -146,6 +153,7 @@ export function seedBuiltinSlashCommands(
     description: string
     argumentHint?: string
     disabled?: boolean
+    category?: string
   }>
 ): void {
   for (const cmd of builtins) {
@@ -156,6 +164,7 @@ export function seedBuiltinSlashCommands(
       description: cmd.description,
       shortcut: cmd.argumentHint ?? null,
       source: "builtin",
+      category: cmd.category ?? "chat",
       handler: () => ({
         message: `'/${cmd.name}' is a built-in chat command — run it from the chat composer to access its full context.`,
       }),

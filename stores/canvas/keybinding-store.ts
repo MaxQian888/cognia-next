@@ -5,6 +5,12 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import { loggers } from "@/lib/logger"
+import {
+  normalizeKeyCombo,
+  parseKeyEvent as parseKeyEventShared,
+  formatKeybinding as formatKeybindingShared,
+} from "@/lib/shortcuts/utils"
+import { findConflicts } from "@/lib/shortcuts/conflict"
 
 export const DEFAULT_KEYBINDINGS: Record<string, string> = {
   "canvas.save": "Ctrl+S",
@@ -62,22 +68,6 @@ interface KeybindingState {
   getActionByKeybinding: (keyCombo: string) => string | undefined
   checkConflicts: () => Record<string, string[]>
   isModified: (action: string) => boolean
-}
-
-function normalizeKeyCombo(keyCombo: string): string {
-  return keyCombo
-    .split("+")
-    .map((key) => key.trim().toLowerCase())
-    .sort((a, b) => {
-      const order = ["ctrl", "alt", "shift", "meta"]
-      const aIdx = order.indexOf(a)
-      const bIdx = order.indexOf(b)
-      if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx
-      if (aIdx !== -1) return -1
-      if (bIdx !== -1) return 1
-      return a.localeCompare(b)
-    })
-    .join("+")
 }
 
 export const useKeybindingStore = create<KeybindingState>()(
@@ -159,24 +149,7 @@ export const useKeybindingStore = create<KeybindingState>()(
       },
 
       checkConflicts: () => {
-        const bindings = get().bindings
-        const keyToActions: Record<string, string[]> = {}
-
-        for (const [action, keyCombo] of Object.entries(bindings)) {
-          const normalized = normalizeKeyCombo(keyCombo)
-          if (!keyToActions[normalized]) {
-            keyToActions[normalized] = []
-          }
-          keyToActions[normalized].push(action)
-        }
-
-        const conflicts: Record<string, string[]> = {}
-        for (const [keyCombo, actions] of Object.entries(keyToActions)) {
-          if (actions.length > 1) {
-            conflicts[keyCombo] = actions
-          }
-        }
-
+        const conflicts = findConflicts(get().bindings)
         set({ conflicts })
         return conflicts
       },
@@ -195,36 +168,10 @@ export const useKeybindingStore = create<KeybindingState>()(
   )
 )
 
-export function parseKeyEvent(event: KeyboardEvent): string {
-  const parts: string[] = []
-
-  if (event.ctrlKey || event.metaKey) parts.push("Ctrl")
-  if (event.altKey) parts.push("Alt")
-  if (event.shiftKey) parts.push("Shift")
-
-  const key = event.key.length === 1 ? event.key.toUpperCase() : event.key
-  if (!["Control", "Alt", "Shift", "Meta"].includes(key)) {
-    parts.push(key)
-  }
-
-  return parts.join("+")
-}
-
-export function formatKeybinding(keyCombo: string): string {
-  const isMac = typeof navigator !== "undefined" && navigator.platform.includes("Mac")
-
-  return keyCombo
-    .split("+")
-    .map((key) => {
-      const lower = key.toLowerCase()
-      if (isMac) {
-        if (lower === "ctrl") return "⌘"
-        if (lower === "alt") return "⌥"
-        if (lower === "shift") return "⇧"
-      }
-      return key
-    })
-    .join(isMac ? "" : "+")
-}
+// Re-exported from `lib/shortcuts/utils.ts` so existing canvas imports keep
+// working without forcing a rename across the repo. The shared module is
+// the source of truth — see Phase A.2 of the system-tray plan.
+export const parseKeyEvent = parseKeyEventShared
+export const formatKeybinding = formatKeybindingShared
 
 export default useKeybindingStore

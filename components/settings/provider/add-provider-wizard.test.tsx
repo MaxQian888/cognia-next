@@ -11,19 +11,7 @@ jest.mock("next-intl", () => ({
 }))
 
 // Mock Dialog components
-jest.mock("@/components/ui/dialog", () => ({
-  Dialog: ({ children, open }: { children: React.ReactNode; open?: boolean }) =>
-    open ? <div data-testid="dialog">{children}</div> : null,
-  DialogContent: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="dialog-content">{children}</div>
-  ),
-  DialogHeader: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="dialog-header">{children}</div>
-  ),
-  DialogTitle: ({ children }: { children: React.ReactNode }) => (
-    <h2 data-testid="dialog-title">{children}</h2>
-  ),
-}))
+jest.mock("@/components/ui/dialog")
 
 // Mock Button
 jest.mock("@/components/ui/button", () => ({
@@ -45,29 +33,7 @@ jest.mock("@/components/ui/button", () => ({
 }))
 
 // Mock Input
-jest.mock("@/components/ui/input", () => ({
-  Input: ({
-    value,
-    onChange,
-    placeholder,
-    type,
-    "data-testid": testId,
-  }: {
-    value?: string
-    onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void
-    placeholder?: string
-    type?: string
-    "data-testid"?: string
-  }) => (
-    <input
-      data-testid={testId || "input"}
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
-      type={type}
-    />
-  ),
-}))
+jest.mock("@/components/ui/input")
 
 // Mock Checkbox
 jest.mock("@/components/ui/checkbox", () => ({

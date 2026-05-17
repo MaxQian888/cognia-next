@@ -6,9 +6,9 @@ import { __resetGoalRuntimeForTesting, getGoalRuntime } from "@/lib/goal/runtime
 import type { Goal } from "@/types/goal"
 import { GoalStatusPill } from "./goal-status-pill"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}))
+// next-intl is globally mocked in jest.setup.ts (key-resolving translator backed by
+// i18n/messages/en.json). Inline override removed — this suite asserts on goal fixture
+// fields (objective, status), not translation strings.
 
 const baseGoal: Goal = {
   id: "g1",

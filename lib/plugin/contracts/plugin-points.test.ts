@@ -286,7 +286,7 @@ describe("plugin point contracts", () => {
       )
       expect(vscodeContracts).toHaveLength(vscodePatterns.length)
       for (const contract of vscodeContracts) {
-        expect(contract.binding).toBe("sidecars/vscode-ext-host/src/host.ts:handleActivationEvent")
+        expect(contract.binding).toBe("sidecar/vscode-ext-host/src/host.ts:handleActivationEvent")
       }
     })
   })

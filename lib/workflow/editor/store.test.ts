@@ -144,6 +144,276 @@ describe("editor store — loadWorkflow", () => {
     expect(useStore.getState().selectedNodeIds).toEqual([])
     expect(useStore.getState().dirty).toBe(false)
   })
+
+  it("preserves performanceTier across loadWorkflow (it is a user-level preference)", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().setPerformanceTier("reduced")
+    expect(useStore.getState().performanceTier).toBe("reduced")
+
+    const fresh = emptyWorkflow()
+    fresh.id = "wf_other"
+    useStore.getState().loadWorkflow(fresh)
+
+    expect(useStore.getState().performanceTier).toBe("reduced")
+  })
+})
+
+describe("editor store — performance tier", () => {
+  it("defaults to 'auto'", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    expect(useStore.getState().performanceTier).toBe("auto")
+  })
+
+  it("setPerformanceTier flips the value", () => {
+    const useStore = createEditorStore(emptyWorkflow()) as ReturnType<typeof createEditorStore>
+    useStore.getState().setPerformanceTier("balanced")
+    expect(useStore.getState().performanceTier).toBe("balanced")
+    useStore.getState().setPerformanceTier("high")
+    expect(useStore.getState().performanceTier).toBe("high")
+  })
+
+  it("setPerformanceTier does not push entries onto the undo history", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const before = useStore.temporal.getState().pastStates.length
+    useStore.getState().setPerformanceTier("balanced")
+    useStore.getState().setPerformanceTier("high")
+    useStore.getState().setPerformanceTier("reduced")
+    expect(useStore.temporal.getState().pastStates.length).toBe(before)
+  })
+})
+
+describe("editor store — drag flag + snap-to-grid", () => {
+  it("defaults isDraggingAny to false and snapToGrid to true", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    expect(useStore.getState().isDraggingAny).toBe(false)
+    expect(useStore.getState().snapToGrid).toBe(true)
+  })
+
+  it("setIsDraggingAny / setSnapToGrid flip their values", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().setIsDraggingAny(true)
+    expect(useStore.getState().isDraggingAny).toBe(true)
+    useStore.getState().setIsDraggingAny(false)
+    expect(useStore.getState().isDraggingAny).toBe(false)
+
+    useStore.getState().setSnapToGrid(false)
+    expect(useStore.getState().snapToGrid).toBe(false)
+  })
+
+  it("toggling either flag does not push undo history entries", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const before = useStore.temporal.getState().pastStates.length
+    useStore.getState().setIsDraggingAny(true)
+    useStore.getState().setSnapToGrid(false)
+    useStore.getState().setIsDraggingAny(false)
+    expect(useStore.temporal.getState().pastStates.length).toBe(before)
+  })
+})
+
+describe("editor store — ephemeral hover/edit/spotlight slices", () => {
+  it("setHoveredNode / setHoveredEdge skip no-op writes", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().setHoveredNode("n_a")
+    useStore.getState().setHoveredNode("n_a") // duplicate
+    expect(useStore.getState().hoveredNodeId).toBe("n_a")
+    useStore.getState().setHoveredNode(null)
+    expect(useStore.getState().hoveredNodeId).toBeNull()
+
+    useStore.getState().setHoveredEdge("e_1")
+    expect(useStore.getState().hoveredEdgeId).toBe("e_1")
+    useStore.getState().setHoveredEdge(null)
+    expect(useStore.getState().hoveredEdgeId).toBeNull()
+  })
+
+  it("setEditingNodeIdInline / setEditingEdgeIdInline track string ids", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().setEditingNodeIdInline("n_a")
+    expect(useStore.getState().editingNodeIdInline).toBe("n_a")
+    useStore.getState().setEditingEdgeIdInline("e_1")
+    expect(useStore.getState().editingEdgeIdInline).toBe("e_1")
+  })
+
+  it("setPalettePrefillPosition stores then clears the position", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().setPalettePrefillPosition({ x: 10, y: 20 })
+    expect(useStore.getState().palettePrefillPosition).toEqual({ x: 10, y: 20 })
+    useStore.getState().setPalettePrefillPosition(null)
+    expect(useStore.getState().palettePrefillPosition).toBeNull()
+  })
+
+  it("pulseNode sets spotlightedNodeId immediately and clears after the timeout", () => {
+    jest.useFakeTimers()
+    try {
+      const useStore = createEditorStore(emptyWorkflow())
+      useStore.getState().pulseNode("n_a", 1500)
+      expect(useStore.getState().spotlightedNodeId).toBe("n_a")
+      jest.advanceTimersByTime(1500)
+      expect(useStore.getState().spotlightedNodeId).toBeNull()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("pulseNode with durationMs = 0 sets and clears synchronously", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().pulseNode("n_a", 0)
+    expect(useStore.getState().spotlightedNodeId).toBeNull()
+  })
+
+  it("ephemeral slices do not pollute undo history", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const before = useStore.temporal.getState().pastStates.length
+    useStore.getState().setHoveredNode("n_a")
+    useStore.getState().setHoveredEdge("e_1")
+    useStore.getState().setEditingNodeIdInline("n_a")
+    useStore.getState().setEditingEdgeIdInline("e_1")
+    useStore.getState().setPalettePrefillPosition({ x: 0, y: 0 })
+    useStore.getState().setSpotlightedNodeId("n_a")
+    expect(useStore.temporal.getState().pastStates.length).toBe(before)
+  })
+})
+
+describe("editor store — edge mutators", () => {
+  it("updateEdgeData merges into the existing edge's data field (undoable)", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const aId = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const bId = useStore.getState().addNode("ai.prompt", { x: 200, y: 0 })
+    const eId = useStore.getState().connect({ source: aId, target: bId })
+
+    expect(useStore.getState().updateEdgeData(eId, { kind: "then" })).toBe(true)
+    const edge = useStore.getState().edges.find((e) => e.id === eId)
+    expect((edge?.data as Record<string, unknown> | undefined)?.kind).toBe("then")
+
+    // Existing data is preserved on subsequent patches.
+    useStore.getState().updateEdgeData(eId, { label: "ok" })
+    const edge2 = useStore.getState().edges.find((e) => e.id === eId)
+    expect((edge2?.data as Record<string, unknown> | undefined)?.kind).toBe("then")
+    expect((edge2?.data as Record<string, unknown> | undefined)?.label).toBe("ok")
+  })
+
+  it("updateEdgeData returns false for unknown ids", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    expect(useStore.getState().updateEdgeData("missing", { kind: "then" })).toBe(false)
+  })
+
+  it("replaceEdge swaps source/target (powers Reverse Direction)", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const aId = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const bId = useStore.getState().addNode("ai.prompt", { x: 200, y: 0 })
+    const eId = useStore.getState().connect({ source: aId, target: bId })
+
+    expect(useStore.getState().replaceEdge(eId, { source: bId, target: aId })).toBe(true)
+    const edge = useStore.getState().edges.find((e) => e.id === eId)
+    expect(edge?.source).toBe(bId)
+    expect(edge?.target).toBe(aId)
+    // id remains stable.
+    expect(edge?.id).toBe(eId)
+  })
+
+  it("removeEdges drops by id and updates the selection list", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const aId = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const bId = useStore.getState().addNode("ai.prompt", { x: 200, y: 0 })
+    const eId = useStore.getState().connect({ source: aId, target: bId })
+    useStore.getState().setSelectedEdges([eId])
+
+    useStore.getState().removeEdges([eId])
+    expect(useStore.getState().edges).toHaveLength(0)
+    expect(useStore.getState().selectedEdgeIds).toEqual([])
+  })
+
+  it("removeEdges is a no-op for empty input", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const before = useStore.temporal.getState().pastStates.length
+    useStore.getState().removeEdges([])
+    expect(useStore.temporal.getState().pastStates.length).toBe(before)
+  })
+})
+
+describe("editor store — connectionState (drag silk)", () => {
+  it("starts as null", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    expect(useStore.getState().connectionState).toBeNull()
+  })
+
+  it("beginConnection seeds source + null candidate/pointer", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().beginConnection({ sourceId: "n_a", sourceHandle: "out" })
+    expect(useStore.getState().connectionState).toEqual({
+      sourceId: "n_a",
+      sourceHandle: "out",
+      candidate: null,
+      pointer: null,
+    })
+  })
+
+  it("updateConnectionPointer merges candidate + pointer", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().beginConnection({ sourceId: "n_a", sourceHandle: null })
+    useStore
+      .getState()
+      .updateConnectionPointer({ x: 10, y: 20 }, { nodeId: "n_b", handleId: null, distance: 14 })
+    const cs = useStore.getState().connectionState!
+    expect(cs.pointer).toEqual({ x: 10, y: 20 })
+    expect(cs.candidate?.nodeId).toBe("n_b")
+  })
+
+  it("updateConnectionPointer skips no-op writes (same candidate + pointer)", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().beginConnection({ sourceId: "n_a", sourceHandle: null })
+    useStore
+      .getState()
+      .updateConnectionPointer({ x: 10, y: 20 }, { nodeId: "n_b", handleId: null, distance: 14 })
+    const first = useStore.getState().connectionState
+    useStore
+      .getState()
+      .updateConnectionPointer({ x: 10, y: 20 }, { nodeId: "n_b", handleId: null, distance: 14 })
+    expect(useStore.getState().connectionState).toBe(first)
+  })
+
+  it("updateConnectionPointer is a no-op when no connection is in flight", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().updateConnectionPointer({ x: 1, y: 2 }, null)
+    expect(useStore.getState().connectionState).toBeNull()
+  })
+
+  it("endConnection clears the slice", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().beginConnection({ sourceId: "n_a", sourceHandle: null })
+    useStore.getState().endConnection()
+    expect(useStore.getState().connectionState).toBeNull()
+  })
+
+  it("connection lifecycle does not push undo history entries", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const before = useStore.temporal.getState().pastStates.length
+    useStore.getState().beginConnection({ sourceId: "n_a", sourceHandle: null })
+    useStore.getState().updateConnectionPointer({ x: 1, y: 1 }, null)
+    useStore.getState().endConnection()
+    expect(useStore.temporal.getState().pastStates.length).toBe(before)
+  })
+})
+
+describe("editor store — requestedContextMenu signal", () => {
+  it("requestContextMenu stores the target + anchor; clear returns it to null", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    expect(useStore.getState().requestedContextMenu).toBeNull()
+    useStore.getState().requestContextMenu({ kind: "node", nodeId: "n_a" }, { x: 100, y: 200 })
+    expect(useStore.getState().requestedContextMenu).toEqual({
+      target: { kind: "node", nodeId: "n_a" },
+      screenAnchor: { x: 100, y: 200 },
+    })
+    useStore.getState().clearRequestedContextMenu()
+    expect(useStore.getState().requestedContextMenu).toBeNull()
+  })
+
+  it("requestContextMenu is ephemeral (no undo history entries)", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const before = useStore.temporal.getState().pastStates.length
+    useStore.getState().requestContextMenu({ kind: "edge", edgeId: "e_1" }, { x: 0, y: 0 })
+    useStore.getState().clearRequestedContextMenu()
+    expect(useStore.temporal.getState().pastStates.length).toBe(before)
+  })
 })
 
 describe("editor store — productivity actions", () => {

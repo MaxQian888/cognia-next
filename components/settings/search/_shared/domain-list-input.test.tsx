@@ -1,11 +1,8 @@
 import { render, screen, fireEvent } from "@testing-library/react"
 import { DomainListInput } from "./domain-list-input"
 
-jest.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="scroll-area">{children}</div>
-  ),
-}))
+// Shared stub: components/ui/__mocks__/scroll-area.tsx
+jest.mock("@/components/ui/scroll-area")
 
 describe("DomainListInput", () => {
   it("renders string label as Label and renders existing domains", () => {

@@ -15,25 +15,7 @@ jest.mock("next-intl", () => ({
 }))
 
 // Stub Radix DropdownMenu to render inline so menu items are queryable.
-jest.mock("@/components/ui/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuTrigger: ({ children, asChild }: { children: React.ReactNode; asChild?: boolean }) =>
-    asChild ? <>{children}</> : <div>{children}</div>,
-  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuItem: ({
-    children,
-    onClick,
-  }: {
-    children: React.ReactNode
-    onClick?: (e: React.MouseEvent) => void
-    variant?: string
-  }) => (
-    <button type="button" onClick={onClick}>
-      {children}
-    </button>
-  ),
-  DropdownMenuSeparator: () => <hr />,
-}))
+jest.mock("@/components/ui/dropdown-menu")
 
 // formatNextRun is exercised inside; mock it to a stable string.
 jest.mock("@/lib/scheduler/format-utils", () => ({

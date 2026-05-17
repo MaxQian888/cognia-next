@@ -25,44 +25,11 @@ jest.mock("@/components/ui/button", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/badge", () => ({
-  Badge: ({ children }: { children: React.ReactNode }) => (
-    <span data-testid="badge">{children}</span>
-  ),
-}))
+jest.mock("@/components/ui/badge")
 
-jest.mock("@/components/ui/switch", () => ({
-  Switch: ({
-    checked,
-    onCheckedChange,
-  }: {
-    checked?: boolean
-    onCheckedChange?: (checked: boolean) => void
-  }) => (
-    <input
-      type="checkbox"
-      data-testid="switch"
-      checked={checked}
-      onChange={(e) => onCheckedChange?.(e.target.checked)}
-    />
-  ),
-}))
+jest.mock("@/components/ui/switch")
 
-jest.mock("@/components/ui/card", () => ({
-  Card: ({ children }: { children: React.ReactNode }) => <div data-testid="card">{children}</div>,
-  CardHeader: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="card-header">{children}</div>
-  ),
-  CardTitle: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="card-title">{children}</div>
-  ),
-  CardDescription: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="card-description">{children}</div>
-  ),
-  CardContent: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="card-content">{children}</div>
-  ),
-}))
+jest.mock("@/components/ui/card")
 
 const mockProvider: CustomProvider = {
   id: "custom-1",

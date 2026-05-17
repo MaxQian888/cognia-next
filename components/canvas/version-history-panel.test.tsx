@@ -6,12 +6,7 @@ import { render, screen } from "@testing-library/react"
 import { VersionHistoryPanel } from "./version-history-panel"
 
 // Bypass TooltipProvider context (production wraps the app at layout.tsx).
-jest.mock("@/components/ui/tooltip", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}))
+jest.mock("@/components/ui/tooltip")
 
 // Mock stores
 const mockSaveCanvasVersion = jest.fn()
@@ -40,21 +35,11 @@ jest.mock("@/stores", () => ({
 }))
 
 // Mock UI components
-jest.mock("@/components/ui/button", () => ({
-  Button: ({ children, onClick, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
-    <button onClick={onClick} {...props}>
-      {children}
-    </button>
-  ),
-}))
+jest.mock("@/components/ui/button")
 
-jest.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+jest.mock("@/components/ui/scroll-area")
 
-jest.mock("@/components/ui/badge", () => ({
-  Badge: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
-}))
+jest.mock("@/components/ui/badge")
 
 jest.mock("@/components/ui/sheet", () => ({
   Sheet: ({ children, open }: { children: React.ReactNode; open?: boolean }) => (
@@ -74,29 +59,9 @@ jest.mock("@/components/ui/sheet", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/collapsible", () => ({
-  Collapsible: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  CollapsibleContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  CollapsibleTrigger: ({ children }: { children: React.ReactNode }) => <button>{children}</button>,
-}))
+jest.mock("@/components/ui/collapsible")
 
-jest.mock("@/components/ui/alert-dialog", () => ({
-  AlertDialog: ({ children, open }: { children: React.ReactNode; open?: boolean }) =>
-    open ? <div data-testid="alert-dialog">{children}</div> : null,
-  AlertDialogAction: ({
-    children,
-    onClick,
-  }: {
-    children: React.ReactNode
-    onClick?: () => void
-  }) => <button onClick={onClick}>{children}</button>,
-  AlertDialogCancel: ({ children }: { children: React.ReactNode }) => <button>{children}</button>,
-  AlertDialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  AlertDialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
-  AlertDialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  AlertDialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  AlertDialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
-}))
+jest.mock("@/components/ui/alert-dialog")
 
 jest.mock("@/components/ui/dialog", () => ({
   Dialog: ({ children, open }: { children: React.ReactNode; open?: boolean }) =>
@@ -110,9 +75,7 @@ jest.mock("@/components/ui/dialog", () => ({
   DialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
 }))
 
-jest.mock("@/components/ui/input", () => ({
-  Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
-}))
+jest.mock("@/components/ui/input")
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, params?: Record<string, unknown>) => {

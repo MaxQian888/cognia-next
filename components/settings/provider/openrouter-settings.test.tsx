@@ -99,40 +99,13 @@ jest.mock("@/components/ui/button", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/input", () => ({
-  Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => (
-    <input {...props} data-testid="input" />
-  ),
-}))
+jest.mock("@/components/ui/input")
 
-jest.mock("@/components/ui/label", () => ({
-  Label: ({ children }: { children: React.ReactNode }) => <label>{children}</label>,
-}))
+jest.mock("@/components/ui/label")
 
-jest.mock("@/components/ui/switch", () => ({
-  Switch: ({
-    checked,
-    onCheckedChange,
-  }: {
-    checked?: boolean
-    onCheckedChange?: (v: boolean) => void
-  }) => (
-    <button
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onCheckedChange?.(!checked)}
-      data-testid="switch"
-    >
-      Switch
-    </button>
-  ),
-}))
+jest.mock("@/components/ui/switch")
 
-jest.mock("@/components/ui/textarea", () => ({
-  Textarea: (props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => (
-    <textarea {...props} data-testid="textarea" />
-  ),
-}))
+jest.mock("@/components/ui/textarea")
 
 jest.mock("@/components/ui/select", () => ({
   Select: ({ children }: { children: React.ReactNode }) => (
@@ -146,44 +119,15 @@ jest.mock("@/components/ui/select", () => ({
   SelectValue: () => <span>Value</span>,
 }))
 
-jest.mock("@/components/ui/collapsible", () => ({
-  Collapsible: ({ children, open }: { children: React.ReactNode; open?: boolean }) => (
-    <div data-testid="collapsible" data-open={open}>
-      {children}
-    </div>
-  ),
-  CollapsibleContent: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="collapsible-content">{children}</div>
-  ),
-  CollapsibleTrigger: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="collapsible-trigger">{children}</div>
-  ),
-}))
+jest.mock("@/components/ui/collapsible")
 
-jest.mock("@/components/ui/card", () => ({
-  Card: ({ children }: { children: React.ReactNode }) => <div data-testid="card">{children}</div>,
-  CardContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  CardDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
-  CardHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  CardTitle: ({ children }: { children: React.ReactNode }) => <h3>{children}</h3>,
-}))
+jest.mock("@/components/ui/card")
 
-jest.mock("@/components/ui/tooltip", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipContent: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
-  TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}))
+jest.mock("@/components/ui/tooltip")
 
-jest.mock("@/components/ui/badge", () => ({
-  Badge: ({ children }: { children: React.ReactNode }) => (
-    <span data-testid="badge">{children}</span>
-  ),
-}))
+jest.mock("@/components/ui/badge")
 
-jest.mock("@/components/ui/separator", () => ({
-  Separator: () => <hr />,
-}))
+jest.mock("@/components/ui/separator")
 
 describe("OpenRouterSettings", () => {
   beforeEach(() => {

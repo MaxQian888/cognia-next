@@ -41,11 +41,7 @@ jest.mock("next-intl", () => ({
 
 // ── UI mocks ──────────────────────────────────────────────────────────────────
 
-jest.mock("@/components/ui/input", () => ({
-  Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => (
-    <input data-testid="input" {...props} />
-  ),
-}))
+jest.mock("@/components/ui/input")
 
 jest.mock("@/components/ui/button", () => ({
   Button: ({
@@ -59,25 +55,7 @@ jest.mock("@/components/ui/button", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/switch", () => ({
-  Switch: ({
-    checked,
-    onCheckedChange,
-    ...rest
-  }: {
-    checked?: boolean
-    onCheckedChange?: (v: boolean) => void
-    [key: string]: unknown
-  }) => (
-    <input
-      type="checkbox"
-      data-testid="switch"
-      checked={checked}
-      onChange={(e) => onCheckedChange?.(e.target.checked)}
-      {...rest}
-    />
-  ),
-}))
+jest.mock("@/components/ui/switch")
 
 jest.mock("@/components/ui/select", () => ({
   Select: ({
@@ -139,15 +117,9 @@ jest.mock("@/components/ui/collapsible", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/label", () => ({
-  Label: ({ children }: { children: React.ReactNode }) => (
-    <label data-testid="label">{children}</label>
-  ),
-}))
+jest.mock("@/components/ui/label")
 
-jest.mock("@/components/ui/separator", () => ({
-  Separator: () => <hr data-testid="separator" />,
-}))
+jest.mock("@/components/ui/separator")
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 

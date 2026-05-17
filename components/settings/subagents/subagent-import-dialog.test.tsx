@@ -71,27 +71,7 @@ jest.mock("@/lib/claude/subagent-importers/apply", () => ({
 }))
 
 // Replace heavy shadcn primitives with thin stubs so jsdom can drive them.
-jest.mock("@/components/ui/dialog", () => {
-  const Dialog = ({
-    open,
-    children,
-  }: {
-    open: boolean
-    onOpenChange?: (v: boolean) => void
-    children: React.ReactNode
-  }) => (open ? <div role="dialog">{children}</div> : null)
-  const Pass = ({ children, ...rest }: React.PropsWithChildren<Record<string, unknown>>) => (
-    <div {...rest}>{children}</div>
-  )
-  return {
-    Dialog,
-    DialogContent: Pass,
-    DialogHeader: Pass,
-    DialogTitle: Pass,
-    DialogDescription: Pass,
-    DialogFooter: Pass,
-  }
-})
+jest.mock("@/components/ui/dialog")
 
 jest.mock("@/components/ui/radio-group", () => {
   const RadioGroup = ({
@@ -159,44 +139,16 @@ jest.mock("@/components/ui/checkbox", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children, ...rest }: React.PropsWithChildren<Record<string, unknown>>) => (
-    <div {...rest}>{children}</div>
-  ),
-}))
+// Shared stub: components/ui/__mocks__/scroll-area.tsx
+jest.mock("@/components/ui/scroll-area")
 
-jest.mock("@/components/ui/separator", () => ({
-  Separator: () => <hr />,
-}))
+jest.mock("@/components/ui/separator")
 
-jest.mock("@/components/ui/badge", () => ({
-  Badge: ({ children, ...rest }: React.PropsWithChildren<Record<string, unknown>>) => (
-    <span {...rest}>{children}</span>
-  ),
-}))
+jest.mock("@/components/ui/badge")
 
-jest.mock("@/components/ui/label", () => ({
-  Label: ({ children, ...rest }: React.PropsWithChildren<Record<string, unknown>>) => (
-    <label {...rest}>{children}</label>
-  ),
-}))
+jest.mock("@/components/ui/label")
 
-jest.mock("@/components/ui/button", () => ({
-  Button: ({
-    children,
-    onClick,
-    disabled,
-    ...rest
-  }: React.PropsWithChildren<{
-    onClick?: () => void
-    disabled?: boolean
-  }> &
-    Record<string, unknown>) => (
-    <button onClick={onClick} disabled={!!disabled} {...rest}>
-      {children}
-    </button>
-  ),
-}))
+jest.mock("@/components/ui/button")
 
 // ---- Tests --------------------------------------------------------------
 

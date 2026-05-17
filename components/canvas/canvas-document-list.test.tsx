@@ -37,62 +37,17 @@ const mockHandlers = {
 }
 
 // Mock UI components
-jest.mock("@/components/ui/button", () => ({
-  Button: ({
-    children,
-    onClick,
-    className,
-    ...props
-  }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
-    <button onClick={onClick} className={className} {...props}>
-      {children}
-    </button>
-  ),
-}))
+jest.mock("@/components/ui/button")
 
-jest.mock("@/components/ui/input", () => ({
-  Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
-}))
+jest.mock("@/components/ui/input")
 
-jest.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+jest.mock("@/components/ui/scroll-area")
 
-jest.mock("@/components/ui/badge", () => ({
-  Badge: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
-}))
+jest.mock("@/components/ui/badge")
 
-jest.mock("@/components/ui/card", () => ({
-  Card: ({
-    children,
-    onClick,
-    className,
-  }: {
-    children: React.ReactNode
-    onClick?: () => void
-    className?: string
-  }) => (
-    <div onClick={onClick} className={className} data-testid="card">
-      {children}
-    </div>
-  ),
-  CardHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  CardContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+jest.mock("@/components/ui/card")
 
-jest.mock("@/components/ui/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuItem: ({
-    children,
-    onClick,
-  }: {
-    children: React.ReactNode
-    onClick?: () => void
-  }) => <button onClick={onClick}>{children}</button>,
-  DropdownMenuSeparator: () => <hr />,
-  DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+jest.mock("@/components/ui/dropdown-menu")
 
 jest.mock("@/components/ui/select", () => ({
   Select: ({

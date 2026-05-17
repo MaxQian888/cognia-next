@@ -81,7 +81,11 @@ export class PluginSignatureVerifier {
 
   constructor(config: Partial<SignatureConfig> = {}) {
     this.config = {
-      requireSignatures: false,
+      // ADR 0016 P0-3 (2026-05-17) — default-on. Production installs require a
+      // verified signature unless the user explicitly disables the policy via
+      // Settings → Plugins → Policy. Tests can opt out by passing
+      // `requireSignatures: false` explicitly.
+      requireSignatures: true,
       allowUntrusted: true,
       trustedPublishersOnly: false,
       verifyOnLoad: true,

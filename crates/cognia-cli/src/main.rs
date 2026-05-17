@@ -1,21 +1,41 @@
-//! cognia — author-facing CLI for `type: "wasm"` plugins.
+//! cognia — author-facing CLI for cognia plugins.
 //!
-//! Provides the five sub-commands the M3 plan calls out:
+//! Subcommands:
 //!
-//!   cognia plugin new <name>    — stamp a fresh template into a new dir
-//!   cognia plugin build         — run cargo-component + package zip
-//!   cognia plugin sign <bundle> — Ed25519 sign the bundle bytes
-//!   cognia plugin verify <bundle> — verify a `<bundle>.sig` against pubkey
-//!   cognia plugin dev           — watch + rebuild + notify a running cognia
+//!   cognia plugin new <name> [--kind wasm|ts]
+//!     Stamp a starter project (Rust WASM by default, TypeScript with --kind ts).
 //!
-//! Plus a couple of utility commands that authors need at least once:
+//!   cognia plugin lint [--path .] [--json]
+//!     Validate plugin.json against the host's manifest schema. Run by
+//!     `build` implicitly; standalone for editor integration.
 //!
-//!   cognia plugin keygen        — produce a fresh Ed25519 keypair
-//!   cognia plugin embed-version — inject `cognia:api-version` custom section
+//!   cognia plugin build [--path .] [--out target.zip] [--skip-build]
+//!     Validate, then run the type-appropriate build (cargo-component
+//!     for wasm, esbuild for frontend) and pack the bundle.
 //!
-//! The CLI is deliberately small — the heavy lifting (cargo build, zip,
-//! signature math) is delegated to existing crates so it's a thin glue
-//! layer rather than its own build system.
+//!   cognia plugin info <bundle.zip>
+//!     Inspect a built bundle: manifest, files, signature, api-version.
+//!
+//!   cognia plugin sign <bundle> --key <path>
+//!     Ed25519-sign the bundle bytes; writes `<bundle>.sig`.
+//!
+//!   cognia plugin verify <bundle> [--public-key <b64>] [--signature <path>]
+//!     Verify a `.sig` against the manifest's `author.publicKey` (or override).
+//!
+//!   cognia plugin keygen [--out-dir .cognia]
+//!     Generate a fresh Ed25519 keypair.
+//!
+//!   cognia plugin install <bundle.zip>
+//!     Install a bundle into a running cognia desktop (via CLI bridge).
+//!
+//!   cognia plugin uninstall <plugin-id> [--purge-data]
+//!     Uninstall a plugin from a running cognia desktop.
+//!
+//!   cognia plugin dev [--reload-url URL]
+//!     Watch the crate, rebuild on save, and ping a running cognia.
+//!
+//!   cognia plugin embed-version <wasm> <ver>
+//!     Manually inject the api-version custom section (normally automatic).
 
 use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine as _;
@@ -23,12 +43,18 @@ use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod build_ts;
 mod cmd_build;
 mod cmd_dev;
+mod cmd_info;
+mod cmd_install;
 mod cmd_keygen;
+mod cmd_lint;
 mod cmd_new;
 mod cmd_sign;
+mod cmd_uninstall;
 mod cmd_verify;
+mod http_client;
 mod packaging;
 mod signing;
 mod template;
@@ -51,16 +77,27 @@ enum TopCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum PluginCommand {
-    /// Scaffold a new plugin from the bundled template.
+    /// Scaffold a new plugin from a bundled template.
     New {
-        /// Name of the plugin (becomes the crate name and plugin.json id).
+        /// Name of the plugin (becomes the crate/package name and plugin.json id).
         name: String,
         /// Directory to create. Defaults to ./<name>.
         #[arg(long)]
         dir: Option<PathBuf>,
+        /// Template kind: `wasm` (default) or `ts` (frontend TypeScript).
+        #[arg(long, default_value = "wasm")]
+        kind: String,
     },
-    /// Build the plugin via `cargo component build --release` and package
-    /// the artifact into a `.zip` bundle.
+    /// Validate plugin.json against the host's manifest schema.
+    Lint {
+        /// Path to the plugin crate. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+        /// Emit a machine-readable JSON report instead of human prose.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Build the plugin and package the artifact into a `.zip` bundle.
     Build {
         /// Path to the plugin crate. Defaults to the current directory.
         #[arg(long, default_value = ".")]
@@ -68,13 +105,17 @@ pub(crate) enum PluginCommand {
         /// Output bundle path. Defaults to `target/cognia/<id>-<version>.zip`.
         #[arg(long)]
         out: Option<PathBuf>,
-        /// Skip the cargo-component build step (use an existing artifact).
+        /// Skip the build step (use an existing artifact).
         #[arg(long)]
         skip_build: bool,
     },
+    /// Inspect a built bundle.
+    Info {
+        /// Bundle to inspect.
+        bundle: PathBuf,
+    },
     /// Sign a bundle with an Ed25519 private key, producing `<bundle>.sig`.
     Sign {
-        /// Bundle to sign.
         bundle: PathBuf,
         /// Path to the private key file (32 raw bytes, base64-encoded one
         /// line). Use `cognia plugin keygen` to generate one.
@@ -103,8 +144,21 @@ pub(crate) enum PluginCommand {
         #[arg(long, default_value = ".cognia")]
         out_dir: PathBuf,
     },
+    /// Install a bundle into a running cognia desktop instance.
+    Install {
+        /// Built bundle to install.
+        bundle: PathBuf,
+    },
+    /// Uninstall a plugin from a running cognia desktop instance.
+    Uninstall {
+        /// Plugin id to remove.
+        plugin_id: String,
+        /// Also delete the plugin's stored data (Dexie tables, secrets, etc.).
+        #[arg(long)]
+        purge_data: bool,
+    },
     /// Watch the plugin crate for changes, rebuild on save, and (when
-    /// passed `--reload-url`) ping a running cognia instance.
+    /// a running cognia is discoverable) ping it to hot-reload in place.
     Dev {
         #[arg(long, default_value = ".")]
         path: PathBuf,
@@ -133,13 +187,22 @@ fn main() -> Result<()> {
 
 fn dispatch_plugin(command: PluginCommand) -> Result<()> {
     match command {
-        PluginCommand::New { name, dir } => cmd_new::run(name, dir),
+        PluginCommand::New { name, dir, kind } => {
+            let kind = template::TemplateKind::parse(&kind)?;
+            cmd_new::run(name, dir, kind)
+        }
+        PluginCommand::Lint { path, json } => cmd_lint::run(path, json),
         PluginCommand::Build { path, out, skip_build } => cmd_build::run(path, out, skip_build),
+        PluginCommand::Info { bundle } => cmd_info::run(bundle),
         PluginCommand::Sign { bundle, key, out } => cmd_sign::run(bundle, key, out),
         PluginCommand::Verify { bundle, public_key, signature } => {
             cmd_verify::run(bundle, public_key, signature)
         }
         PluginCommand::Keygen { out_dir } => cmd_keygen::run(out_dir),
+        PluginCommand::Install { bundle } => cmd_install::run(bundle),
+        PluginCommand::Uninstall { plugin_id, purge_data } => {
+            cmd_uninstall::run(plugin_id, purge_data)
+        }
         PluginCommand::Dev { path, reload_url } => cmd_dev::run(path, reload_url),
         PluginCommand::EmbedVersion { wasm, version, out } => {
             cmd_embed_version(wasm, version, out)

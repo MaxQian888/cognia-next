@@ -102,6 +102,82 @@ describe("runMarketplaceInstall", () => {
     expect(opts.requestConflictReview).toHaveBeenCalledTimes(1)
   })
 
+  // -- ADR 0016 P1-6 — ConflictDetector wired into install pipeline ------------
+
+  it("surfaces a command-conflict when an installed plugin owns the same command id", async () => {
+    listPlugins.mockResolvedValue([
+      {
+        id: "other-plugin",
+        manifest: makeManifest({
+          id: "other-plugin",
+          version: "1.0.0",
+          commands: [{ id: "duplicate.command", title: "Dup" }],
+        } as never),
+      },
+    ])
+    const client = {
+      getPlugin: jest.fn().mockResolvedValue({
+        manifest: makeManifest({
+          id: "demo-plugin",
+          commands: [{ id: "duplicate.command", title: "Dup" }],
+        } as never),
+        name: "Demo",
+      }),
+      installPlugin: jest.fn(),
+    }
+    const requestConflictReview = jest.fn().mockResolvedValue("cancel")
+    const opts = makeOpts({ client, requestConflictReview })
+
+    const result = await runMarketplaceInstall(opts)
+
+    expect(result).toEqual({ status: "cancelled", stage: "conflict" })
+    expect(requestConflictReview).toHaveBeenCalledTimes(1)
+    const conflictArg = requestConflictReview.mock.calls[0][0] as {
+      reasons: Array<{ severity: string; message: string }>
+    }
+    expect(conflictArg.reasons.some((r) => r.message.startsWith("command:"))).toBe(true)
+    expect(client.installPlugin).not.toHaveBeenCalled()
+  })
+
+  it("surfaces a shortcut-conflict alongside id-collision when both occur", async () => {
+    listPlugins.mockResolvedValue([
+      {
+        id: "other-plugin",
+        manifest: makeManifest({
+          id: "other-plugin",
+          version: "1.0.0",
+          commands: [{ id: "other.cmd", title: "Other", shortcut: "ctrl+shift+x" }],
+        } as never),
+      },
+      {
+        id: "demo-plugin",
+        version: "0.9.0",
+        manifest: makeManifest({ id: "demo-plugin", version: "0.9.0" }),
+      },
+    ])
+    const client = {
+      getPlugin: jest.fn().mockResolvedValue({
+        manifest: makeManifest({
+          id: "demo-plugin",
+          commands: [{ id: "demo.cmd", title: "Demo", shortcut: "ctrl+shift+x" }],
+        } as never),
+        name: "Demo",
+      }),
+      installPlugin: jest.fn().mockResolvedValue({ success: true }),
+    }
+    const requestConflictReview = jest.fn().mockResolvedValue("continue")
+    const opts = makeOpts({ client, requestConflictReview })
+
+    await runMarketplaceInstall(opts)
+
+    const conflictArg = requestConflictReview.mock.calls[0][0] as {
+      reasons: Array<{ severity: string; message: string }>
+    }
+    const messages = conflictArg.reasons.map((r) => r.message)
+    expect(messages.some((m) => m.startsWith("alreadyInstalled:"))).toBe(true)
+    expect(messages.some((m) => m.startsWith("shortcut:"))).toBe(true)
+  })
+
   it("requests permission review when manifest declares permissions and cancels there", async () => {
     const client = {
       getPlugin: jest.fn().mockResolvedValue({

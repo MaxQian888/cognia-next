@@ -84,23 +84,7 @@ jest.mock("@/components/ui/input", () => ({
   }) => <input data-testid="search-input" placeholder={placeholder} onChange={onChange} />,
 }))
 
-jest.mock("@/components/ui/button", () => ({
-  Button: ({
-    children,
-    onClick,
-    disabled,
-    className,
-  }: {
-    children: React.ReactNode
-    onClick?: () => void
-    disabled?: boolean
-    className?: string
-  }) => (
-    <button data-testid="button" onClick={onClick} disabled={disabled} className={className}>
-      {children}
-    </button>
-  ),
-}))
+jest.mock("@/components/ui/button")
 
 jest.mock("@/components/ui/checkbox", () => ({
   Checkbox: ({
@@ -119,17 +103,9 @@ jest.mock("@/components/ui/checkbox", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/badge", () => ({
-  Badge: ({ children }: { children: React.ReactNode }) => (
-    <span data-testid="badge">{children}</span>
-  ),
-}))
+jest.mock("@/components/ui/badge")
 
-jest.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="scroll-area">{children}</div>
-  ),
-}))
+jest.mock("@/components/ui/scroll-area")
 
 jest.mock("@/components/ui/tabs", () => ({
   Tabs: ({

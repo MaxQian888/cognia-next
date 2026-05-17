@@ -1,6 +1,6 @@
 //! VS Code extension host (Rust side).
 //!
-//! Spawns the Node sidecar (`sidecars/vscode-ext-host/dist/host.cjs`) per
+//! Spawns the Node sidecar (`sidecar/vscode-ext-host/dist/host.js`) per
 //! extension, mediates `child_process`, file, and network capability
 //! grants, and routes JSON-RPC frames between the renderer and the
 //! sidecar.

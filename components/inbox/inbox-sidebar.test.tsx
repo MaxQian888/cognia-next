@@ -88,20 +88,7 @@ jest.mock("@/components/ui/sidebar", () => ({
 // Tooltip primitives are mocked as passthroughs — the real Radix tooltip
 // requires a portal + provider that adds complexity without value in unit
 // tests. We only need the trigger child to render and receive its props.
-jest.mock("@/components/ui/tooltip", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipTrigger: ({
-    children,
-    asChild: _asChild,
-  }: {
-    children: React.ReactNode
-    asChild?: boolean
-  }) => <>{children}</>,
-  TooltipContent: ({ children }: { children: React.ReactNode }) => (
-    <span data-testid="tooltip-content">{children}</span>
-  ),
-  TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}))
+jest.mock("@/components/ui/tooltip")
 
 // ---------------------------------------------------------------------------
 // Helpers

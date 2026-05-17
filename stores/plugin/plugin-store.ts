@@ -65,15 +65,24 @@ function resolvePluginPointGovernanceMode(): PluginPointGovernanceMode {
  * details (the policy panel writes to the same key but is mounted
  * later).
  */
+// ADR 0016 P0-3 (2026-05-17) — `signatureRequired` is default-on; users can
+// disable via Settings → Plugins → Policy. `autoUpdate` stays default-off.
+const PLUGIN_POLICY_DEFAULTS: Record<"signatureRequired" | "autoUpdate", boolean> = {
+  signatureRequired: true,
+  autoUpdate: false,
+}
+
 function resolvePluginPolicyFlag(field: "signatureRequired" | "autoUpdate"): boolean {
-  if (typeof window === "undefined") return false
+  const fallback = PLUGIN_POLICY_DEFAULTS[field]
+  if (typeof window === "undefined") return fallback
   try {
     const raw = window.localStorage.getItem(PLUGIN_POLICY_STORAGE_KEY)
-    if (!raw) return false
+    if (!raw) return fallback
     const parsed = JSON.parse(raw) as Record<string, unknown>
-    return !!parsed?.[field]
+    if (typeof parsed?.[field] === "boolean") return parsed[field] as boolean
+    return fallback
   } catch {
-    return false
+    return fallback
   }
 }
 

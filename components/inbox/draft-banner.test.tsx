@@ -19,13 +19,7 @@ jest.mock("@/lib/db/connector-drafts", () => ({
   rejectDraft: jest.fn().mockResolvedValue(undefined),
 }))
 
-jest.mock("@/components/ui/sheet", () => ({
-  Sheet: ({ children, open }: { children: React.ReactNode; open?: boolean }) =>
-    open ? <div data-testid="sheet">{children}</div> : null,
-  SheetContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SheetHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SheetTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
-}))
+jest.mock("@/components/ui/sheet")
 
 let mockPendingDrafts: unknown[] = []
 
