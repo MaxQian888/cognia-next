@@ -1157,10 +1157,11 @@ registerNodeExecutor({
 })
 
 // ── action.team.run ───────────────────────────────────────────────────────
-// Kicks off a team lifecycle. The runtime deps are constructed via
-// `buildAgentTeamRuntimeDeps` + a Dexie-backed store so the executor stays
-// independent of the chat UI's component tree. Returns the lifecycle's
-// terminal report once the team finishes (or the abort signal fires).
+// Per ADR-0022 §5 PR 4. Kicks off a team lifecycle via the F-path synthesizer.
+// Wires storeReader/storeWriter from the live Zustand store; the runtime
+// itself synthesizes a child VisualWorkflow and runs it through workflow
+// runtime. Returns the team-run id (the inner workflowRuns row) so the UI
+// can navigate.
 registerNodeExecutor({
   kind: "action.team.run",
   typeVersion: 1,
@@ -1168,46 +1169,58 @@ registerNodeExecutor({
     const params = ctx.params as { teamId?: string; goal?: string }
     const teamId = params.teamId?.trim()
     if (!teamId) throw nonRetryable("action.team.run requires 'teamId'")
-    const goal = params.goal ?? ""
-    if (!goal.trim()) throw nonRetryable("action.team.run requires non-empty 'goal'")
 
-    const [{ getTeam }, { runTeamLifecycle }, { buildAgentTeamRuntimeDeps }] = await Promise.all([
-      import("@/lib/db/teams"),
-      import("@/lib/ai/agent/agent-team-runtime"),
-      import("@/lib/ai/agent/agent-team-runtime-deps"),
-    ])
+    const [{ useAgentTeamStore }, { runTeamLifecycle }, { buildAgentTeamRuntimeDeps }] =
+      await Promise.all([
+        import("@/stores/agent/agent-team-store"),
+        import("@/lib/ai/agent/agent-team-runtime"),
+        import("@/lib/ai/agent/agent-team-runtime-deps"),
+      ])
 
-    const team = await getTeam(teamId)
+    const store = useAgentTeamStore.getState()
+    const team = store.getTeam(teamId)
     if (!team) throw nonRetryable(`team ${teamId} not found`)
 
     const partial = buildAgentTeamRuntimeDeps()
-    // Minimal in-memory store snapshot — the runtime mutates it during the
-    // run. We seed it with the requested team and wire `getTeam` to look up.
     const deps = {
       ...partial,
-      store: {
-        getTeam: (id: string) => (id === teamId ? team : undefined),
-        // The runtime calls these to record progress; persist to Dexie so the
-        // user can inspect the report later.
+      storeReader: {
+        getTeam: (id: string) => useAgentTeamStore.getState().getTeam(id),
+        getTeammates: (id: string) => useAgentTeamStore.getState().getTeammates(id),
+        getTeamTasks: (id: string) => useAgentTeamStore.getState().getTeamTasks(id),
+      },
+      storeWriter: {
+        addMessage: (
+          input: Parameters<typeof useAgentTeamStore.getState>[never] extends never
+            ? never
+            : Parameters<ReturnType<typeof useAgentTeamStore.getState>["addMessage"]>[0]
+        ) => useAgentTeamStore.getState().addMessage(input),
+        setTaskStatus: (
+          taskId: string,
+          status: Parameters<ReturnType<typeof useAgentTeamStore.getState>["setTaskStatus"]>[1],
+          result?: string,
+          error?: string
+        ) => useAgentTeamStore.getState().setTaskStatus(taskId, status, result, error),
+        updateTeammate: (
+          teammateId: string,
+          updates: Parameters<ReturnType<typeof useAgentTeamStore.getState>["updateTeammate"]>[1]
+        ) => useAgentTeamStore.getState().updateTeammate(teammateId, updates),
+      },
+    }
 
-        recordCheckpoint: async () => {},
-
-        recordTeammateTask: async () => {},
-      } as unknown as Parameters<typeof runTeamLifecycle>[1]["store"],
-    } as Parameters<typeof runTeamLifecycle>[1]
-
-    const report = await runTeamLifecycle(teamId, deps, ctx.signal).catch((err: unknown) => {
+    const result = await runTeamLifecycle(teamId, deps, ctx.signal).catch((err: unknown) => {
       const message = err instanceof Error ? err.message : String(err)
       const wrapped = new Error(`action.team.run: ${message}`) as Error & { retryable?: boolean }
       wrapped.retryable = false
       throw wrapped
     })
+
     return {
       output: {
         teamId,
-        status: report.status,
-        reportId: (report as unknown as { id?: string }).id,
-        checkpoints: report.checkpoints?.length ?? 0,
+        teamRunId: result.runId,
+        status: result.status,
+        reason: result.reason,
       },
     }
   },

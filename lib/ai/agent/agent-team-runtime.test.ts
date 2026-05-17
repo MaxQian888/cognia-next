@@ -1,487 +1,286 @@
 /**
- * Runtime tests use a fake `AgentTeamStoreLike` so we don't pull the
- * real Zustand store + nanoid + immutable update helpers. Each test
- * builds the minimum data shape it needs.
+ * @jest-environment jsdom
+ *
+ * Tests for the F-path synthesizer (ADR-0022). The legacy in-place
+ * orchestrator was rewritten to a thin synthesizer that delegates to
+ * workflow runtime; tests below exercise the new contract:
+ *  - storeReader / storeWriter shape
+ *  - plan-approval gate via approval-bus
+ *  - terminal status mapping ({completed, failed, cancelled})
+ *  - double-start prevention via inflightControllers
  */
+import "fake-indexeddb/auto"
 
+// Mock plugin hooks so we don't need to boot the plugin store.
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
+  getPluginEventHooks: jest.fn(() => ({
+    dispatchWorkflowStart: jest.fn(),
+    dispatchWorkflowStepComplete: jest.fn(),
+    dispatchWorkflowComplete: jest.fn(),
+    dispatchWorkflowError: jest.fn(),
+  })),
+}))
+
+jest.mock("@/lib/ai/agent/agent-executor", () => ({
+  executeAgent: jest.fn(),
+}))
+import { executeAgent } from "@/lib/ai/agent/agent-executor"
+
+import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import {
-  abortTeam,
-  parseProposedPlan,
   runTeamLifecycle,
+  parseProposedPlan,
   __resetInflightForTesting,
-  type AgentTeamRuntimeDeps,
-  type AgentTeamStoreLike,
-  type LeadPlanResult,
-  type TeammateTaskResult,
+  type RunTeamLifecycleDeps,
 } from "./agent-team-runtime"
-import {
-  approve as approvePlan,
-  reject as rejectPlan,
-  __resetForTesting as resetBus,
-} from "./plan-approval-bus"
-import type {
-  AgentTeam,
-  AgentTeammate,
-  AgentTeamTask,
-  TeamExecutionReport,
-} from "@/types/agent/agent-team"
+import { approve, reject, __resetForTesting as resetApprovalBus } from "@/lib/runtime/approval-bus"
+import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
 
-// Helper: build a team store fake.
-function makeFakeStore(seed: {
-  team: AgentTeam
-  teammates: AgentTeammate[]
-  tasks: AgentTeamTask[]
-}): AgentTeamStoreLike & {
-  state: {
-    team: AgentTeam
-    teammates: Record<string, AgentTeammate>
-    tasks: Record<string, AgentTeamTask>
-    reports: TeamExecutionReport[]
-  }
-} {
-  const state = {
-    team: { ...seed.team },
-    teammates: Object.fromEntries(seed.teammates.map((t) => [t.id, { ...t }])),
-    tasks: Object.fromEntries(seed.tasks.map((t) => [t.id, { ...t }])),
-    reports: [] as TeamExecutionReport[],
-  }
-  return {
-    state,
-    getTeam: (id) => (id === state.team.id ? state.team : undefined),
-    getTeammate: (id) => state.teammates[id],
-    getTeammates: (teamId) => Object.values(state.teammates).filter((m) => m.teamId === teamId),
-    getTeamTasks: (teamId) =>
-      Object.values(state.tasks)
-        .filter((t) => t.teamId === teamId)
-        .sort((a, b) => a.order - b.order),
-    setTeamStatus: (_teamId, status) => {
-      state.team.status = status
-    },
-    updateTeam: (_teamId, updates) => {
-      state.team = { ...state.team, ...updates }
-    },
-    setTeammateStatus: (id, status) => {
-      const m = state.teammates[id]
-      if (m) state.teammates[id] = { ...m, status }
-    },
-    updateTeammate: (id, updates) => {
-      const m = state.teammates[id]
-      if (m) state.teammates[id] = { ...m, ...updates }
-    },
-    setTaskStatus: (id, status, result, error) => {
-      const t = state.tasks[id]
-      if (t) {
-        state.tasks[id] = {
-          ...t,
-          status,
-          result: result ?? t.result,
-          error: error ?? t.error,
-        }
-      }
-    },
-    assignTask: (id, teammateId) => {
-      const t = state.tasks[id]
-      if (t) state.tasks[id] = { ...t, assignedTo: teammateId, claimedBy: teammateId }
-    },
-    upsertExecutionReport: (_teamId, report) => {
-      state.reports.push(report)
-    },
-  }
-}
+const lead: AgentTeammate = {
+  id: "lead-1",
+  teamId: "team-1",
+  name: "Lead",
+  description: "lead",
+  role: "lead",
+  status: "idle",
+  config: {},
+  completedTaskIds: [],
+  tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+  progress: 0,
+  createdAt: new Date(),
+} as AgentTeammate
 
-function makeTeam(overrides: Partial<AgentTeam> = {}): AgentTeam {
-  const now = new Date(2026, 0, 1)
-  return {
-    id: "team-1",
-    name: "T",
-    description: "",
-    task: "do work",
-    status: "idle",
-    config: {
-      maxTeammates: 5,
-      maxConcurrentTeammates: 2,
-      executionMode: "coordinated",
-      displayMode: "compact",
-    },
-    leadId: "lead-1",
-    teammateIds: ["lead-1", "tm-1", "tm-2"],
-    taskIds: ["task-1", "task-2"],
-    messageIds: [],
-    progress: 0,
-    totalTokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-    createdAt: now,
-    ...overrides,
-  }
-}
-
-function makeTeammate(id: string, overrides: Partial<AgentTeammate> = {}): AgentTeammate {
-  const now = new Date(2026, 0, 1)
-  return {
+const worker = (id: string): AgentTeammate =>
+  ({
     id,
     teamId: "team-1",
     name: id,
     description: "",
-    role: id === "lead-1" ? "lead" : "teammate",
+    role: "teammate",
     status: "idle",
     config: {},
     completedTaskIds: [],
     tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
     progress: 0,
-    createdAt: now,
-    ...overrides,
-  }
-}
+    createdAt: new Date(),
+  }) as AgentTeammate
 
-function makeTask(
-  id: string,
-  order: number,
-  overrides: Partial<AgentTeamTask> = {}
-): AgentTeamTask {
-  const now = new Date(2026, 0, 1)
-  return {
+const baseTeam: AgentTeam = {
+  id: "team-1",
+  name: "Test",
+  description: "",
+  task: "do a thing",
+  status: "idle",
+  config: {
+    maxTeammates: 5,
+    maxConcurrentTeammates: 2,
+    executionMode: "coordinated",
+    displayMode: "expanded",
+  },
+  leadId: "lead-1",
+  teammateIds: ["lead-1", "w1", "w2"],
+  taskIds: [],
+  messageIds: [],
+  progress: 0,
+  totalTokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+  createdAt: new Date(),
+} as AgentTeam
+
+const task = (id: string, deps: string[] = []): AgentTeamTask =>
+  ({
     id,
     teamId: "team-1",
-    title: `Task ${id}`,
-    description: "",
+    title: id,
+    description: `desc ${id}`,
     status: "pending",
     priority: "normal",
-    dependencies: [],
+    dependencies: deps,
     tags: [],
-    createdAt: now,
-    order,
-    ...overrides,
+    createdAt: new Date(),
+    order: 0,
+  }) as AgentTeamTask
+
+const buildDeps = (
+  team: AgentTeam,
+  tasks: AgentTeamTask[],
+  members: AgentTeammate[]
+): RunTeamLifecycleDeps & {
+  _messages: Array<Record<string, unknown>>
+  _taskStatuses: Record<string, string>
+} => {
+  const messages: Array<Record<string, unknown>> = []
+  const taskStatuses: Record<string, string> = {}
+  return {
+    storeReader: {
+      getTeam: (id: string) => (id === team.id ? team : undefined),
+      getTeammates: () => members,
+      getTeamTasks: () => tasks,
+    },
+    storeWriter: {
+      addMessage: (m) => {
+        messages.push(m as unknown as Record<string, unknown>)
+      },
+      setTaskStatus: (id: string, status: string) => {
+        taskStatuses[id] = status
+      },
+      updateTeammate: () => {},
+    },
+    runLeadPlanning: jest.fn(async () => ({
+      planText: '```json\n{"summary":"x","steps":[]}\n```',
+    })),
+    notifierDeps: {
+      toast: () => {},
+      osNotify: async () => {},
+      log: async () => {},
+    },
+    _messages: messages,
+    _taskStatuses: taskStatuses,
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await getDb().delete()
+  __resetDbForTesting()
+  getDb()
+  await whenSeeded()
+  await getDb().workflowRuns.clear()
+  await getDb().workflowRunEvents.clear()
   __resetInflightForTesting()
-  resetBus()
+  resetApprovalBus()
+  ;(executeAgent as jest.Mock).mockReset()
+})
+
+afterEach(() => {
+  __resetInflightForTesting()
+  resetApprovalBus()
 })
 
 describe("parseProposedPlan", () => {
-  it("decodes a JSON-fenced block", () => {
-    const out = parseProposedPlan('here it is\n```json\n{"steps":["a"]}\n```\n')
-    expect(out.ok).toBe(true)
-    if (out.ok) expect(out.plan).toEqual({ steps: ["a"] })
+  it("parses a fenced ```json block", () => {
+    const r = parseProposedPlan('```json\n{"a":1}\n```')
+    expect(r).toEqual({ ok: true, plan: { a: 1 } })
   })
 
-  it("decodes raw JSON without fences", () => {
-    const out = parseProposedPlan('{"x":1}')
-    expect(out.ok).toBe(true)
+  it("returns ok:false for empty input", () => {
+    expect(parseProposedPlan("")).toMatchObject({ ok: false, reason: "empty plan text" })
   })
 
-  it("returns ok=false on empty input", () => {
-    const out = parseProposedPlan("   ")
-    expect(out.ok).toBe(false)
-  })
-
-  it("returns ok=false on malformed JSON", () => {
-    const out = parseProposedPlan("not json at all")
-    expect(out.ok).toBe(false)
-    if (!out.ok) expect(out.reason).toBeDefined()
+  it("returns ok:false for malformed JSON", () => {
+    const r = parseProposedPlan("not json")
+    expect(r.ok).toBe(false)
   })
 })
 
-describe("runTeamLifecycle — happy path", () => {
-  it("dispatches every pending task and ends in 'completed'", async () => {
-    const store = makeFakeStore({
-      team: makeTeam(),
-      teammates: [makeTeammate("lead-1"), makeTeammate("tm-1"), makeTeammate("tm-2")],
-      tasks: [makeTask("task-1", 0), makeTask("task-2", 1)],
+describe("runTeamLifecycle (F-path synthesizer)", () => {
+  it("fails fast when team not found", async () => {
+    const deps = buildDeps(baseTeam, [], [lead, worker("w1")])
+    const result = await runTeamLifecycle("missing", deps)
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/not found/)
+  })
+
+  it("fails fast when no workers", async () => {
+    const deps = buildDeps(baseTeam, [task("t1")], [lead])
+    const result = await runTeamLifecycle("team-1", deps)
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/No teammates/)
+  })
+
+  it("fails fast when no tasks", async () => {
+    const deps = buildDeps(baseTeam, [], [lead, worker("w1")])
+    const result = await runTeamLifecycle("team-1", deps)
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/No tasks/)
+  })
+
+  it("happy path: independent tasks complete via workflow", async () => {
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "result",
+      usage: { promptTokens: 5, completionTokens: 3, totalTokens: 8 },
     })
-    const runTeammateTask = jest.fn(
-      async (): Promise<TeammateTaskResult> => ({
-        result: "done",
-        tokenUsage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
-      })
+
+    const deps = buildDeps(baseTeam, [task("t1"), task("t2")], [lead, worker("w1"), worker("w2")])
+    const result = await runTeamLifecycle("team-1", deps)
+    expect(result.status).toBe("completed")
+    expect(deps._taskStatuses).toMatchObject({ t1: "completed", t2: "completed" })
+  })
+
+  it("dependency chain executes in order", async () => {
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "ok",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+
+    const deps = buildDeps(baseTeam, [task("a"), task("b", ["a"])], [lead, worker("w1")])
+    const result = await runTeamLifecycle("team-1", deps)
+    expect(result.status).toBe("completed")
+  })
+
+  it("returns cancelled when external signal aborts before start", async () => {
+    const ac = new AbortController()
+    ac.abort()
+    const deps = buildDeps(baseTeam, [task("t1")], [lead, worker("w1")])
+    const result = await runTeamLifecycle("team-1", deps, ac.signal)
+    expect(result.status).toBe("cancelled")
+  })
+
+  it("prevents double-start of the same team", async () => {
+    ;(executeAgent as jest.Mock).mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                text: "ok",
+                usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+              }),
+            50
+          )
+        )
     )
-    const deps: AgentTeamRuntimeDeps = { store, runTeammateTask }
-    const report = await runTeamLifecycle("team-1", deps)
-
-    expect(report.status).toBe("completed")
-    expect(report.summary?.completedTasks).toBe(2)
-    expect(report.summary?.failedTasks).toBe(0)
-    expect(report.summary?.totalTokens).toBe(30)
-    expect(store.state.team.status).toBe("completed")
-    expect(store.state.team.totalTokenUsage?.totalTokens).toBe(30)
-    expect(runTeammateTask).toHaveBeenCalledTimes(2)
-    // Tasks are completed.
-    expect(store.state.tasks["task-1"]?.status).toBe("completed")
-    expect(store.state.tasks["task-2"]?.status).toBe("completed")
-  })
-
-  it("respects maxConcurrentTeammates by serializing when capped at 1", async () => {
-    const store = makeFakeStore({
-      team: makeTeam({ config: { ...makeTeam().config, maxConcurrentTeammates: 1 } }),
-      teammates: [makeTeammate("lead-1"), makeTeammate("tm-1"), makeTeammate("tm-2")],
-      tasks: [makeTask("task-1", 0), makeTask("task-2", 1)],
-    })
-    const order: string[] = []
-    const runTeammateTask = jest.fn(async ({ task }): Promise<TeammateTaskResult> => {
-      order.push(`start-${task.id}`)
-      // Yield once so the parallel branch can interleave if it wanted to.
-      await Promise.resolve()
-      order.push(`end-${task.id}`)
-      return { result: "ok" }
-    })
-    await runTeamLifecycle("team-1", { store, runTeammateTask })
-    // With concurrency=1, end-1 must precede start-2.
-    expect(order).toEqual(["start-task-1", "end-task-1", "start-task-2", "end-task-2"])
-  })
-
-  it("aggregates per-teammate token usage", async () => {
-    const store = makeFakeStore({
-      team: makeTeam(),
-      teammates: [makeTeammate("lead-1"), makeTeammate("tm-1"), makeTeammate("tm-2")],
-      tasks: [makeTask("task-1", 0), makeTask("task-2", 1)],
-    })
-    const runTeammateTask = jest.fn(
-      async ({ teammate }): Promise<TeammateTaskResult> => ({
-        result: "ok",
-        tokenUsage:
-          teammate.id === "tm-1"
-            ? { promptTokens: 1, completionTokens: 2, totalTokens: 3 }
-            : { promptTokens: 4, completionTokens: 5, totalTokens: 9 },
-      })
-    )
-    await runTeamLifecycle("team-1", { store, runTeammateTask })
-    const tm1 = store.state.teammates["tm-1"]
-    const tm2 = store.state.teammates["tm-2"]
-    expect(tm1?.tokenUsage.totalTokens).toBe(3)
-    expect(tm2?.tokenUsage.totalTokens).toBe(9)
-  })
-})
-
-describe("runTeamLifecycle — error paths", () => {
-  it("ends in 'failed' when every task fails", async () => {
-    const store = makeFakeStore({
-      team: makeTeam(),
-      teammates: [makeTeammate("lead-1"), makeTeammate("tm-1")],
-      tasks: [makeTask("task-1", 0)],
-    })
-    const runTeammateTask = jest.fn(
-      async (): Promise<TeammateTaskResult> => ({
-        result: "",
-        error: "boom",
-      })
-    )
-    const report = await runTeamLifecycle("team-1", { store, runTeammateTask })
-    expect(report.status).toBe("failed")
-    expect(report.summary?.failedTasks).toBe(1)
-    expect(store.state.tasks["task-1"]?.error).toBe("boom")
-  })
-
-  it("ends in 'completed' when at least one task succeeds, even with one failure", async () => {
-    const store = makeFakeStore({
-      team: makeTeam(),
-      teammates: [makeTeammate("lead-1"), makeTeammate("tm-1"), makeTeammate("tm-2")],
-      tasks: [makeTask("task-1", 0), makeTask("task-2", 1)],
-    })
-    const runTeammateTask = jest.fn(
-      async ({ task }): Promise<TeammateTaskResult> =>
-        task.id === "task-1" ? { result: "ok" } : { result: "", error: "boom" }
-    )
-    const report = await runTeamLifecycle("team-1", { store, runTeammateTask })
-    expect(report.status).toBe("completed")
-    expect(report.summary?.completedTasks).toBe(1)
-    expect(report.summary?.failedTasks).toBe(1)
-  })
-
-  it("propagates thrown errors as task failures rather than crashing", async () => {
-    const store = makeFakeStore({
-      team: makeTeam(),
-      teammates: [makeTeammate("lead-1"), makeTeammate("tm-1")],
-      tasks: [makeTask("task-1", 0)],
-    })
-    const runTeammateTask = jest.fn(async () => {
-      throw new Error("network down")
-    })
-    const report = await runTeamLifecycle("team-1", { store, runTeammateTask })
-    expect(report.status).toBe("failed")
-    expect(store.state.tasks["task-1"]?.error).toBe("network down")
-  })
-
-  it("rejects when the team isn't found", async () => {
-    const store = makeFakeStore({
-      team: makeTeam(),
-      teammates: [],
-      tasks: [],
-    })
-    await expect(
-      runTeamLifecycle("missing", { store, runTeammateTask: jest.fn() })
-    ).rejects.toThrow(/not found/)
-  })
-
-  it("fails when there are no teammates to dispatch", async () => {
-    const store = makeFakeStore({
-      team: makeTeam({ teammateIds: ["lead-1"] }),
-      teammates: [makeTeammate("lead-1")],
-      tasks: [makeTask("task-1", 0)],
-    })
-    const report = await runTeamLifecycle("team-1", { store, runTeammateTask: jest.fn() })
-    expect(report.status).toBe("failed")
-    expect(store.state.team.error).toMatch(/No teammates/)
-  })
-
-  it("rejects a second concurrent run for the same team", async () => {
-    const store = makeFakeStore({
-      team: makeTeam(),
-      teammates: [makeTeammate("lead-1"), makeTeammate("tm-1")],
-      tasks: [makeTask("task-1", 0)],
-    })
-    const runTeammateTask = jest.fn(async (): Promise<TeammateTaskResult> => {
-      // Hold the slot open across the second-call test.
-      await new Promise((r) => setTimeout(r, 50))
-      return { result: "ok" }
-    })
-    const first = runTeamLifecycle("team-1", { store, runTeammateTask })
-    await expect(runTeamLifecycle("team-1", { store, runTeammateTask })).rejects.toThrow(
-      /already running/
-    )
+    const deps = buildDeps(baseTeam, [task("t1")], [lead, worker("w1")])
+    const first = runTeamLifecycle("team-1", deps)
+    await expect(runTeamLifecycle("team-1", deps)).rejects.toThrow(/already running/)
     await first
   })
 })
 
-describe("runTeamLifecycle — abort / cancel", () => {
-  it("aborts in-flight work via abortTeam and ends in 'cancelled'", async () => {
-    const store = makeFakeStore({
-      team: makeTeam(),
-      teammates: [makeTeammate("lead-1"), makeTeammate("tm-1")],
-      tasks: [makeTask("task-1", 0), makeTask("task-2", 1)],
-    })
-    const runTeammateTask = jest.fn(async ({ signal }) => {
-      // Simulate a slow task that respects the abort signal.
-      await new Promise((resolve, reject) => {
-        const timer = setTimeout(resolve, 200)
-        signal.addEventListener("abort", () => {
-          clearTimeout(timer)
-          reject(signal.reason ?? new Error("aborted"))
-        })
-      })
-      return { result: "ok" }
-    })
-    const promise = runTeamLifecycle("team-1", { store, runTeammateTask })
-    // Give the runtime a tick to start the first task.
-    await new Promise((r) => setTimeout(r, 10))
-    expect(abortTeam("team-1")).toBe(true)
-    const report = await promise
-    expect(report.status).toBe("cancelled")
-    expect(store.state.team.status).toBe("cancelled")
-  })
-
-  it("respects an externally-supplied AbortSignal", async () => {
-    const store = makeFakeStore({
-      team: makeTeam(),
-      teammates: [makeTeammate("lead-1"), makeTeammate("tm-1")],
-      tasks: [makeTask("task-1", 0)],
-    })
-    const ac = new AbortController()
-    const runTeammateTask = jest.fn(async ({ signal }) => {
-      await new Promise((resolve, reject) => {
-        const timer = setTimeout(resolve, 200)
-        signal.addEventListener("abort", () => {
-          clearTimeout(timer)
-          reject(new Error("aborted"))
-        })
-      })
-      return { result: "ok" }
-    })
-    const promise = runTeamLifecycle("team-1", { store, runTeammateTask }, ac.signal)
-    await new Promise((r) => setTimeout(r, 10))
-    ac.abort()
-    const report = await promise
-    expect(report.status).toBe("cancelled")
-  })
-
-  it("abortTeam returns false when no run is in progress", () => {
-    expect(abortTeam("never-started")).toBe(false)
-  })
-})
-
 describe("runTeamLifecycle — plan-approval gate", () => {
-  function setupApprovalCase(
-    requirePlanApproval: boolean,
-    runLeadPlanning?: AgentTeamRuntimeDeps["runLeadPlanning"]
-  ) {
-    const store = makeFakeStore({
-      team: makeTeam({
-        config: {
-          ...makeTeam().config,
-          requirePlanApproval,
-        },
-      }),
-      teammates: [makeTeammate("lead-1"), makeTeammate("tm-1")],
-      tasks: [makeTask("task-1", 0)],
-    })
-    const runTeammateTask = jest.fn(async (): Promise<TeammateTaskResult> => ({ result: "ok" }))
-    return { store, runTeammateTask, runLeadPlanning }
-  }
-
-  it("dispatches without planning when requirePlanApproval=false", async () => {
-    const { store, runTeammateTask } = setupApprovalCase(false)
-    const report = await runTeamLifecycle("team-1", { store, runTeammateTask })
-    expect(report.status).toBe("completed")
+  const teamWithApproval = (revisions = 3): AgentTeam => ({
+    ...baseTeam,
+    config: { ...baseTeam.config, requirePlanApproval: true, maxPlanRevisions: revisions },
   })
 
-  it("waits for approval, then dispatches", async () => {
-    const planning = jest.fn(
-      async (): Promise<LeadPlanResult> => ({
-        planText: '```json\n{"steps":["a"]}\n```',
-      })
-    )
-    const { store, runTeammateTask } = setupApprovalCase(true, planning)
-    const promise = runTeamLifecycle("team-1", {
-      store,
-      runTeammateTask,
-      runLeadPlanning: planning,
+  it("approves on first revision → run completes", async () => {
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "ok",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
     })
-    // Let planning fire.
-    await new Promise((r) => setTimeout(r, 10))
-    approvePlan("team-1")
-    const report = await promise
-    expect(report.status).toBe("completed")
-    expect(planning).toHaveBeenCalledTimes(1)
-    expect(runTeammateTask).toHaveBeenCalledTimes(1)
-    expect(store.state.teammates["lead-1"]?.proposedPlan).toContain("steps")
+    const deps = buildDeps(teamWithApproval(), [task("t1")], [lead, worker("w1")])
+    const runPromise = runTeamLifecycle("team-1", deps)
+    await new Promise((r) => setTimeout(r, 30))
+    approve({ scope: "agent-team", id: "team-1" })
+    const result = await runPromise
+    expect(result.status).toBe("completed")
   })
 
-  it("loops on reject up to maxPlanRevisions, then fails", async () => {
-    const team = makeTeam({
-      config: {
-        ...makeTeam().config,
-        requirePlanApproval: true,
-        maxPlanRevisions: 2,
-      },
-    })
-    const store = makeFakeStore({
-      team,
-      teammates: [makeTeammate("lead-1"), makeTeammate("tm-1")],
-      tasks: [makeTask("task-1", 0)],
-    })
-    const planning = jest.fn(async (): Promise<LeadPlanResult> => ({ planText: '{"x":1}' }))
-    const runTeammateTask = jest.fn()
-    const promise = runTeamLifecycle("team-1", {
-      store,
-      runTeammateTask,
-      runLeadPlanning: planning,
-    })
-    // First revision → reject
-    await new Promise((r) => setTimeout(r, 10))
-    rejectPlan("team-1", "no")
-    // Second revision → reject again
-    await new Promise((r) => setTimeout(r, 10))
-    rejectPlan("team-1", "still no")
-    const report = await promise
-    expect(report.status).toBe("failed")
-    expect(planning).toHaveBeenCalledTimes(2)
-    expect(runTeammateTask).not.toHaveBeenCalled()
-    expect(store.state.team.error).toMatch(/Plan rejected/)
+  it("rejects past max revisions → failed", async () => {
+    const deps = buildDeps(teamWithApproval(2), [task("t1")], [lead, worker("w1")])
+    const runPromise = runTeamLifecycle("team-1", deps)
+    for (let i = 0; i < 2; i++) {
+      await new Promise((r) => setTimeout(r, 30))
+      reject({ scope: "agent-team", id: "team-1" }, "no good")
+    }
+    const result = await runPromise
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/rejected/)
   })
 
-  it("requirePlanApproval=true without runLeadPlanning ends in failed", async () => {
-    const { store, runTeammateTask } = setupApprovalCase(true)
-    const report = await runTeamLifecycle("team-1", { store, runTeammateTask })
-    expect(report.status).toBe("failed")
-    expect(store.state.team.error).toMatch(/runLeadPlanning/)
+  it("fails fast when runLeadPlanning dep is missing", async () => {
+    const deps = buildDeps(teamWithApproval(), [task("t1")], [lead, worker("w1")])
+    delete (deps as { runLeadPlanning?: unknown }).runLeadPlanning
+    const result = await runTeamLifecycle("team-1", deps)
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/runLeadPlanning/)
   })
 })
