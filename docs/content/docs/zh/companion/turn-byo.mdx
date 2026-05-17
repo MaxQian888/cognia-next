@@ -1,0 +1,122 @@
+---
+title: 自带 TURN 凭据
+description: 当 ICE 直连失败时如何给 WebRTC 通道接一个 TURN 服务器。ADR-0021 故意不内置 TURN——用户自带凭据。
+---
+
+# 自带 TURN 凭据
+
+Cognia 的 WebRTC 通道（ADR-0021）会尝试在移动应用和家里桌面之间打开
+直连 DataChannel。在常见 NAT 拓扑（全锥、限制锥、端口限制锥）下，
+基于 STUN 的打洞就够用了。在**对称 NAT** 下——蜂窝运营商和酒店访客
+Wi-Fi 上最常见——STUN 打不动洞，通道会回退到 Cloudflared 或 LAN。
+
+如果你经常碰到对称 NAT（出差用蜂窝、某些公司 VPN、大学 Wi-Fi），
+接一个 TURN 服务器能拿到一条 WebRTC 中继路径，仍然避开 Cloudflared
+隧道。
+
+## 你需要
+
+- 一个有 `username` + `credential` 的 TURN 服务器。Cognia 不内置，
+  自己选一个。下面列三种比较合适的。
+- 设置 → Mobile companion → WebRTC 卡片 → "TURN servers" 文本框。
+  一行一条，格式 `turn:host:port?transport=udp|user|cred`。
+
+## Twilio Network Traversal Service（付费、按量）
+
+1. 注册 Twilio 账号，拿到 Account SID 与 Auth Token。
+2. 通过 Twilio REST API 生成短期凭据：
+
+   ```bash
+   curl -X POST "https://api.twilio.com/2010-04-01/Accounts/$ACCOUNT_SID/Tokens.json" \
+        -u "$ACCOUNT_SID:$AUTH_TOKEN"
+   ```
+
+3. 响应里包含 `username`、`password` 与一个 `ice_servers` 列表。把
+   TURN URL（优先 transport=udp）粘到 "TURN servers" 文本框：
+
+   ```text
+   turn:global.turn.twilio.com:3478?transport=udp|<username>|<password>
+   turn:global.turn.twilio.com:3478?transport=tcp|<username>|<password>
+   ```
+
+4. Twilio 凭据有时效（默认 24h）。Cognia 不会自动续期——过期了重新粘，
+   或者切到下面自建方案。
+
+## Cloudflare Calls TURN（免费档可用）
+
+1. Cloudflare 控制台 → Calls → TURN servers。
+2. 新建一个 TURN application，复制下发的 key ID + API token。
+3. 在每次会话开始前用 `curl`（或 Cloudflare SDK）签发凭据——流程
+   和 Twilio 同构：
+
+   ```bash
+   curl -X POST "https://rtc.live.cloudflare.com/v1/turn/keys/$KEY_ID/credentials/generate" \
+        -H "Authorization: Bearer $API_TOKEN" \
+        -d '{ "ttl": 86400 }'
+   ```
+
+4. 把返回的 URL 粘到 "TURN servers" 文本框，格式与 Twilio 相同。
+
+## 自建 coturn（免费、需要一台 VPS）
+
+1. 一台有公网 IP 的 VPS（Hetzner / DigitalOcean / Linode 等），装
+   `coturn`：
+
+   ```bash
+   sudo apt install coturn
+   ```
+
+2. 编辑 `/etc/turnserver.conf`：
+
+   ```text
+   listening-port=3478
+   tls-listening-port=5349
+   external-ip=<你的公网IP>
+   relay-ip=<你的公网IP>
+   realm=cognia.example.com
+   fingerprint
+   lt-cred-mech
+   user=cognia-mobile:<一个强密码>
+   no-multicast-peers
+   no-tlsv1
+   no-tlsv1_1
+   ```
+
+3. 在 VPS 防火墙上放开 UDP/TCP 3478（以及 TLS 用的 5349）。如果用云上
+   托管防火墙，把中继端口段（默认 49152–65535）也放开，或者用
+   `min-port` / `max-port` 在 `turnserver.conf` 里收紧。
+
+4. `sudo systemctl enable --now coturn`。
+
+5. 粘到 Cognia "TURN servers" 文本框：
+
+   ```text
+   turn:turn.example.com:3478?transport=udp|cognia-mobile|<一个强密码>
+   turn:turn.example.com:3478?transport=tcp|cognia-mobile|<一个强密码>
+   turns:turn.example.com:5349?transport=tcp|cognia-mobile|<一个强密码>
+   ```
+
+## 怎么验证生效
+
+保存后，在桌面 WebRTC 卡片对受影响的设备点 "重连"。通道应当依次走过
+`awaiting → negotiating → connected`。移动 Transport 一行的标签应当
+变成 `WebRTC（TURN 中继）`——这表明确实在用中继路径。
+
+如果还是停在 `ws-tunnel` 或 `offline`，按
+[companion/webrtc-verification](./webrtc-verification#%E6%AD%A5%E9%AA%A4-4--%E5%AF%B9%E7%A7%B0-nat--turn)
+里的系统化诊断走一遍。
+
+## 凭据轮转
+
+Cognia 把 TURN 凭据明文存在 Dexie（与其它 `AppSettings` 同等保护
+等级）。短时效供应商（Twilio、Cloudflare）请手动刷新并重新粘贴；
+ADR-0021 明确把基于时效的凭据轮转推到 Wave 3。
+
+## 参考
+
+- [ADR 0021 — WebRTC DataChannel WAN 通道](../adr/0021-webrtc-datachannel-wan-transport)
+- [companion/webrtc-verification](./webrtc-verification) — 验证 TURN
+  是不是真的生效。
+- [Twilio NTS 定价](https://www.twilio.com/en-us/sip-trunking/turn)
+- [Cloudflare Calls 文档](https://developers.cloudflare.com/calls/turn/)
+- [coturn 项目](https://github.com/coturn/coturn)

@@ -1,0 +1,103 @@
+---
+title: WebRTC 真机验证清单
+description: WebRTC 移动端 ↔ 桌面端通道（ADR-0021）真机烟测清单。涉及 SDP/ICE 握手、信令信封格式、配对流程的改动都应该跑一遍。
+---
+
+# WebRTC 真机验证清单
+
+任何可能影响 WebRTC 通道端到端的改动（信令信封 schema、SDP/ICE 握手、
+配对流程、汇合点升级、`TransportRtc` 状态机）落地后请走一遍本清单。
+自动化的 `pnpm webrtc:smoke` 只覆盖汇合点服务器自身——这份清单跑完整的
+移动端（Capacitor）↔ 桌面端（Tauri）路径。
+
+## 准备
+
+需要：
+
+- 一台跑着最新 `pnpm tauri dev` 的桌面机器。
+- 一部装好对应移动端构建（`pnpm mobile:sync` + Xcode / Android Studio）
+  的手机。
+- 手机切到**蜂窝网络**（与桌面不同 Wi-Fi）——这样才能强制 WebRTC 通道
+  做真实的 NAT 打洞，而不是落在 `ws-lan`。
+- 桌面打开 `chrome://webrtc-internals`，两端打开 Cognia 应用的
+  设置 → Mobile companion → WebRTC 卡片以便观察。
+
+## 步骤 1 — 配对并观察通道展开
+
+1. 在桌面端点击 设置 → Mobile companion → Pair device → Generate QR
+   生成配对二维码。
+2. 在手机上跑应用内配对流程：发现 → 配对 → 扫码。手机通过
+   `POST /api/v1/auth/pair` 兑换 JWT，返回的响应包含 `rendezvousId` 与
+   `rendezvousSecret`。
+3. 大约 5 秒内，桌面 WebRTC 卡片应当显示新设备依次经过
+   **offline → awaiting → negotiating → connected**。
+4. 移动端的设置面板上，Transport 一行应当落在
+   `WebRTC（直连）`，"重连 WebRTC" 按钮可见。
+
+如果一分钟后通道仍停在 `ws-tunnel`（Cloudflared）或 `offline`，跳到
+[步骤 4](#%E6%AD%A5%E9%AA%A4-4--%E5%AF%B9%E7%A7%B0-nat--turn)。
+
+## 步骤 2 — 已选中的 ICE 候选类型
+
+1. DataChannel 打开后，在桌面打开 `chrome://webrtc-internals`。
+2. 找到 `RTCDataChannel:cognia.v1` 那一行 → 展开父 PeerConnection →
+   `RTCIceCandidatePair` → 查看**本地候选**的 `type` 字段。
+3. 期望值：`host`（同局域网；如果你在蜂窝网络上不该出现）或 `srflx`
+   （典型蜂窝情况）。`prflx` 也算可接受。如果是 `relay`，
+   见[步骤 4](#%E6%AD%A5%E9%AA%A4-4--%E5%AF%B9%E7%A7%B0-nat--turn)。
+4. 给 PR 描述截一张这一行的图。
+
+## 步骤 3 — 会话中断后的重连
+
+1. DataChannel 已打开的情况下，把手机切到飞行模式。
+2. 桌面 WebRTC 卡片应当在 ~5 秒内从 `connected` 闪过 `failed`。
+3. 关掉飞行模式。在 `1 秒 + 第一档退避（1 秒）` 内，那一行应当
+   再次走过 `awaiting → negotiating → connected`。这一步验证
+   `lib/tauri/transport-rtc.ts:RECONNECT_BACKOFF_MS` 的 TS 侧中断重连。
+4. 再用移动设置面板上的"重连 WebRTC"按钮跑一次——它应当立刻
+   （零退避）发起重握手并弹出 "已发起重连" toast。
+
+## 步骤 4 — 对称 NAT 与 TURN
+
+如果[步骤 1](#%E6%AD%A5%E9%AA%A4-1--%E9%85%8D%E5%AF%B9%E5%B9%B6%E8%A7%82%E5%AF%9F%E9%80%9A%E9%81%93%E5%B1%95%E5%BC%80)
+卡在 `ws-tunnel`，或者[步骤 2](#%E6%AD%A5%E9%AA%A4-2--%E5%B7%B2%E9%80%89%E4%B8%AD%E7%9A%84-ice-%E5%80%99%E9%80%89%E7%B1%BB%E5%9E%8B)
+在没配 TURN 的情况下出现 `relay`，那运营商在做对称 NAT，STUN 打不动洞。
+两种结果可接受：
+
+- **配了 TURN。** 通道应当落在 `WebRTC（TURN 中继）`。延迟比直连稍高，
+  但仍然绕开了 Cloudflared 隧道。
+- **没配 TURN。** 通道退回到 `ws-tunnel`（Cloudflared）或者
+  `ws-lan`（如果隧道没起）。这就是文档承诺的降级路径——没回归，只是没
+  拿到额外的胜利。
+
+跟随 [companion/turn-byo](./turn-byo) 接入 Twilio / Cloudflare TURN
+凭据，重跑[步骤 1](#%E6%AD%A5%E9%AA%A4-1--%E9%85%8D%E5%AF%B9%E5%B9%B6%E8%A7%82%E5%AF%9F%E9%80%9A%E9%81%93%E5%B1%95%E5%BC%80)。
+
+## 步骤 5 — 信令汇合点健康度
+
+DataChannel 打开期间，curl 你正在用的汇合点：
+
+```bash
+curl -s https://signaling.cognia.app/healthz
+# → { "ok": true, "rooms": >=1, "peers": >=2, "uptimeSeconds": ..., "version": ... }
+
+curl -s https://signaling.cognia.app/metrics | grep -E "signaling_(rooms|peers|frames_in)_"
+# → 计数器非零；尤其是 signaling_rooms_active >= 1 与
+#   signaling_peers_active >= 2 在房间存活期间都应满足。
+```
+
+## 提交
+
+每个动到 WebRTC 通道的 PR，把以下东西贴到 PR 描述里：
+
+- 步骤 2 的 `chrome://webrtc-internals` 截图。
+- 步骤 3 观察到的通道状态变化日志。
+- 如果你跑了线上汇合点，贴一份步骤 5 的数值输出；否则注明你跑的是
+  本地 `pnpm webrtc:smoke`。
+
+## 参考
+
+- [ADR 0021 — WebRTC DataChannel WAN 通道](../adr/0021-webrtc-datachannel-wan-transport)
+- [companion/turn-byo](./turn-byo) — TURN 凭据来源
+- `lib/tauri/transport-rtc.ts` — TS 状态机
+- `src-tauri/src/companion_api/signaling/` — Rust peer / hub / client

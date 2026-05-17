@@ -237,6 +237,48 @@ with desktop on home Wi-Fi without cloudflared; `claude_send` traverses
 WebRTC; switching mobile to Wi-Fi restores LAN; toggling
 `webrtcEnabled = false` forces cloudflared.
 
+## Operational verification (Wave 2.5 addendum, 2026-05-17)
+
+The Wave 1–2 implementation has been hardened with mid-session reconnect
+on the TS side, a per-device "Reconnect" affordance on both desktop and
+mobile, and observability on the standalone rendezvous. The verification
+loop is split into two halves:
+
+- **Automated:** `pnpm webrtc:smoke` boots a local
+  `cognia-signaling-server` on an ephemeral port and exercises
+  subscribe → relay → unsubscribe, malformed-frame, rate-limited burst,
+  and the `/healthz` + `/metrics` shape. Pure server smoke — does not
+  exercise the application-layer envelope (covered by
+  `lib/signaling/envelope.test.ts`).
+- **Manual real-device:** the public-NAT smoke checklist lives in
+  [companion/webrtc-verification](../companion/webrtc-verification). Run
+  the checklist after every change that touches the SDP/ICE handshake or
+  the signaling envelope schema.
+
+### Production observability
+
+The signaling rendezvous now exposes:
+
+- `GET /healthz` — JSON probe used by fly.io's `[[http_service.checks]]`.
+  Returns `{ ok, rooms, peers, uptimeSeconds, version }`.
+- `GET /metrics` — Prometheus 0.0.4 text exposition. Counters:
+  `signaling_frames_in_total`, `signaling_frames_relayed_total`,
+  `signaling_frames_rejected_total{reason="…"}` (replay / hmac /
+  malformed / rate / not_subscribed), `signaling_rooms_active`,
+  `signaling_peers_active`, `signaling_uptime_seconds`.
+
+Both endpoints are cheap (lock-free counters; no Dexie/DB touch) and
+safe to scrape at 30 s intervals. The fly.io probe is wired in
+`signaling-server/fly.toml`.
+
+### TURN credentials
+
+Wave 1 deliberately ships without bundled TURN. Users on symmetric NAT
+should follow [companion/turn-byo](../companion/turn-byo) to plug in
+Twilio Network Traversal Service, Cloudflare Calls TURN, or a self-hosted
+coturn. Credentials are stored unencrypted in Dexie — bring keys you can
+rotate.
+
 ## References
 
 - [ADR-0014: Capacitor mobile shell](./0014-capacitor-mobile-shell.md)

@@ -1,0 +1,131 @@
+---
+title: BYO TURN credentials
+description: How to plug a TURN server into the WebRTC tier when ICE direct connection fails. ADR-0021 deliberately ships without bundled TURN — users bring their own.
+---
+
+# BYO TURN credentials
+
+Cognia's WebRTC tier (ADR-0021) tries to open a direct DataChannel
+between the mobile app and the home desktop. On the common NAT
+topologies (full-cone, restricted-cone, port-restricted) STUN-based
+hole punching is enough. On **symmetric NAT** — most commonly seen on
+cellular carriers and hotel guest networks — STUN can't get through and
+the tier falls back to cloudflared or LAN.
+
+If you regularly hit symmetric NAT (cellular while travelling, certain
+office VPNs, university Wi-Fi), plugging a TURN server gets you a
+WebRTC-relayed path that still avoids the cloudflared tunnel.
+
+## What you need
+
+- A TURN server with `username` + `credential`. Cognia does not bundle
+  one; pick a provider. Three good options below.
+- Settings → Mobile companion → WebRTC card → "TURN servers" textarea.
+  One line per server, format `turn:host:port?transport=udp|user|cred`.
+
+## Twilio Network Traversal Service (paid, pay-as-you-go)
+
+1. Create a Twilio account and get an Account SID + Auth Token.
+2. Generate ephemeral credentials via the Twilio REST API:
+
+   ```bash
+   curl -X POST "https://api.twilio.com/2010-04-01/Accounts/$ACCOUNT_SID/Tokens.json" \
+        -u "$ACCOUNT_SID:$AUTH_TOKEN"
+   ```
+
+3. The response contains `username`, `password`, and a list of
+   `ice_servers`. Paste the TURN URLs (transport=udp first) into the
+   "TURN servers" textarea:
+
+   ```text
+   turn:global.turn.twilio.com:3478?transport=udp|<username>|<password>
+   turn:global.turn.twilio.com:3478?transport=tcp|<username>|<password>
+   ```
+
+4. Twilio credentials are time-limited (default 24h). The Cognia UI does
+   not refresh them automatically — re-paste when they expire, or move
+   to a self-hosted server below.
+
+## Cloudflare Calls TURN (free tier available)
+
+1. In the Cloudflare dashboard, navigate to Calls → TURN servers.
+2. Create a TURN application; copy the issued key ID + API token.
+3. Use `curl` (or the Cloudflare SDK) to mint credentials at start of
+   each session — the workflow is identical in shape to Twilio:
+
+   ```bash
+   curl -X POST "https://rtc.live.cloudflare.com/v1/turn/keys/$KEY_ID/credentials/generate" \
+        -H "Authorization: Bearer $API_TOKEN" \
+        -d '{ "ttl": 86400 }'
+   ```
+
+4. Paste the returned URLs into the "TURN servers" textarea, same
+   format as Twilio.
+
+## Self-hosted coturn (free, requires a VPS)
+
+1. On a public-IP VPS (Hetzner / DigitalOcean / Linode), install
+   `coturn`:
+
+   ```bash
+   sudo apt install coturn
+   ```
+
+2. Edit `/etc/turnserver.conf`:
+
+   ```text
+   listening-port=3478
+   tls-listening-port=5349
+   external-ip=<YOUR_PUBLIC_IP>
+   relay-ip=<YOUR_PUBLIC_IP>
+   realm=cognia.example.com
+   fingerprint
+   lt-cred-mech
+   user=cognia-mobile:<a-strong-password>
+   no-multicast-peers
+   no-tlsv1
+   no-tlsv1_1
+   ```
+
+3. Open UDP/TCP 3478 (and 5349 for TLS) in your VPS firewall. If your
+   VPS uses cloud-managed firewalls, allow the relay-port range too
+   (default 49152–65535) or restrict via `min-port` / `max-port` in
+   `turnserver.conf`.
+
+4. `sudo systemctl enable --now coturn`.
+
+5. Paste into the Cognia "TURN servers" textarea:
+
+   ```text
+   turn:turn.example.com:3478?transport=udp|cognia-mobile|<a-strong-password>
+   turn:turn.example.com:3478?transport=tcp|cognia-mobile|<a-strong-password>
+   turns:turn.example.com:5349?transport=tcp|cognia-mobile|<a-strong-password>
+   ```
+
+## Verifying it works
+
+After saving, in the desktop WebRTC card click "Reconnect" on the
+affected device. The tier should transition through
+`awaiting → negotiating → connected`. On the mobile Transport row,
+the label should now read `WebRTC (TURN relay)` — confirming the relay
+path is in use.
+
+If it's still parking on `ws-tunnel` or `offline`, see
+[companion/webrtc-verification](./webrtc-verification#step-4--symmetric-nat--turn) for
+the systematic diagnostic.
+
+## Credential rotation
+
+Cognia stores the TURN credentials in Dexie unencrypted (same level as
+the rest of `AppSettings`). For short-lived providers (Twilio,
+Cloudflare), refresh manually and re-paste; ADR-0021 explicitly defers
+time-based credential rotation to Wave 3.
+
+## References
+
+- [ADR 0021 — WebRTC DataChannel WAN transport](../adr/0021-webrtc-datachannel-wan-transport)
+- [companion/webrtc-verification](./webrtc-verification) — verifying TURN actually
+  kicks in.
+- [Twilio NTS pricing](https://www.twilio.com/en-us/sip-trunking/turn)
+- [Cloudflare Calls docs](https://developers.cloudflare.com/calls/turn/)
+- [coturn project](https://github.com/coturn/coturn)

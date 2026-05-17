@@ -1,0 +1,115 @@
+---
+title: WebRTC verification checklist
+description: Real-device smoke test for the WebRTC mobile↔desktop tier (ADR-0021). Run after every change that touches the SDP/ICE handshake, the signaling envelope schema, or the pair flow.
+---
+
+# WebRTC verification checklist
+
+Use this checklist after any change that could affect the WebRTC tier
+end-to-end: signaling envelope schema, SDP/ICE handshake, pair-flow
+mints, rendezvous-server upgrades, or the `TransportRtc` state machine.
+The automated `pnpm webrtc:smoke` covers the rendezvous-server side only —
+this checklist exercises the full mobile (Capacitor) ↔ desktop (Tauri)
+path.
+
+## Setup
+
+You need:
+
+- A desktop machine with the latest `pnpm tauri dev` build.
+- A phone with the matching mobile build (`pnpm mobile:sync` + Xcode /
+  Android Studio).
+- The phone on **cellular** (not the same Wi-Fi as the desktop) — that
+  forces the WebRTC tier to do real NAT traversal rather than landing on
+  `ws-lan`.
+- A scratch room for diagnostics: open `chrome://webrtc-internals` on
+  the desktop, and the Cognia app's Settings → Mobile companion →
+  WebRTC card on both sides.
+
+## Step 1 — Pair and observe tier rollup
+
+1. From the desktop, generate a pair QR (Settings → Mobile companion →
+   Pair device → Generate QR).
+2. On the phone, run the in-app pair flow: Discover → Pair → scan the
+   QR. The phone redeems `POST /api/v1/auth/pair`; this returns
+   `rendezvousId` + `rendezvousSecret`.
+3. Within ~5 seconds the desktop's WebRTC card should show the new
+   device transitioning **offline → awaiting → negotiating → connected**.
+4. On the mobile Settings panel, the Transport row should land on
+   `WebRTC (direct)`. The "Reconnect WebRTC" button is visible.
+
+If the tier stays on `ws-tunnel` (i.e. cloudflared) or `offline` after a
+minute, jump to [Step 4](#step-4--symmetric-nat--turn).
+
+## Step 2 — Selected ICE candidate type
+
+1. With the DataChannel open, open `chrome://webrtc-internals` on the
+   desktop.
+2. Find the `RTCDataChannel:cognia.v1` row → expand the parent peer
+   connection → `RTCIceCandidatePair` → look at the **local candidate's**
+   `type`.
+3. Expected: `host` (same LAN; you shouldn't be on cellular if so) or
+   `srflx` (typical cellular). `prflx` is also fine. If the type is
+   `relay`, see [Step 4](#step-4--symmetric-nat--turn).
+4. Screenshot this row for the PR description.
+
+## Step 3 — Mid-session reconnect
+
+1. With the DataChannel open, put the phone in airplane mode.
+2. The desktop WebRTC card should flicker `connected → failed` within ~5
+   seconds.
+3. Turn airplane mode off. Within `~1s + first backoff tier (1s)`, the
+   row should transition `awaiting → negotiating → connected` again.
+   This exercises the TS-side mid-session reconnect from
+   `lib/tauri/transport-rtc.ts:RECONNECT_BACKOFF_MS`.
+4. Repeat once with the explicit "Reconnect WebRTC" button on the
+   mobile settings panel — it should re-handshake immediately (zero
+   backoff) and surface a `Reconnect requested` toast.
+
+## Step 4 — Symmetric NAT / TURN
+
+If [Step 1](#step-1--pair-and-observe-tier-rollup) parks on `ws-tunnel`
+or [Step 2](#step-2--selected-ice-candidate-type) shows `relay` without
+TURN configured, the carrier is doing symmetric NAT and STUN alone can't
+punch a hole. Two outcomes are acceptable:
+
+- **TURN is configured.** Tier should land on `WebRTC (TURN relay)`.
+  Slightly higher latency than direct but still avoids the cloudflared
+  tunnel.
+- **TURN is not configured.** The tier falls back to `ws-tunnel`
+  (cloudflared) or `ws-lan` if a tunnel isn't running. This is the
+  documented degradation path — no regression, just no win.
+
+Follow [companion/turn-byo](./turn-byo) to plug in Twilio /
+Cloudflare TURN credentials and rerun [Step 1](#step-1--pair-and-observe-tier-rollup).
+
+## Step 5 — Signaling rendezvous health
+
+While the DataChannel is open, curl the rendezvous you're hitting:
+
+```bash
+curl -s https://signaling.cognia.app/healthz
+# → { "ok": true, "rooms": >=1, "peers": >=2, "uptimeSeconds": ..., "version": ... }
+
+curl -s https://signaling.cognia.app/metrics | grep -E "signaling_(rooms|peers|frames_in)_"
+# → non-zero counters; specifically `signaling_rooms_active >= 1` and
+#   `signaling_peers_active >= 2` while the room is live.
+```
+
+## Reporting
+
+For every PR that touches the WebRTC tier, attach to the PR description:
+
+- `chrome://webrtc-internals` screenshot from [Step 2](#step-2--selected-ice-candidate-type).
+- A log of the tier transitions observed during
+  [Step 3](#step-3--mid-session-reconnect).
+- The numeric output of [Step 5](#step-5--signaling-rendezvous-health) if you ran against the deployed
+  rendezvous; otherwise note that you ran the local `pnpm webrtc:smoke`
+  instead.
+
+## References
+
+- [ADR 0021 — WebRTC DataChannel WAN transport](../adr/0021-webrtc-datachannel-wan-transport)
+- [companion/turn-byo](./turn-byo) — TURN credential providers
+- `lib/tauri/transport-rtc.ts` — TS state machine
+- `src-tauri/src/companion_api/signaling/` — Rust peer / hub / client
