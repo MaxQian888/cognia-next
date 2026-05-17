@@ -16,7 +16,8 @@
 import type { TeamNotifier } from "./team-notifier"
 import type { ConcurrencyController } from "@/lib/workflow/runtime/concurrency-controller"
 import type { ModelPreferenceController } from "@/lib/workflow/runtime/model-preference-controller"
-import type { SubAgentTokenUsage, TeamBudgetEscalationAction } from "@/types/agent/agent-team"
+import type { TeamBudgetEscalationAction } from "@/types/agent/agent-team"
+import type { SubAgentTokenUsage } from "@/types/agent/sub-agent"
 
 export type BudgetEventName =
   | "warning_crossed"

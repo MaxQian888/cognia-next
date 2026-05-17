@@ -29,7 +29,7 @@ const task = (id: string, deps: string[] = [], order = 0): AgentTeamTask =>
     title: id,
     description: `desc ${id}`,
     status: "pending",
-    priority: "medium",
+    priority: "normal",
     dependencies: deps,
     tags: [],
     createdAt: new Date(),

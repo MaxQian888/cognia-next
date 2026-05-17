@@ -1213,6 +1213,114 @@ registerNodeExecutor({
   },
 })
 
+// ── action.team.task.dispatch ─────────────────────────────────────────────
+// Per ADR-0022 §3.6. Synthesizer-emitted node: one per AgentTeamTask. Looks
+// up the per-run TeamRunContext from a module-scope WeakMap (registered by
+// the synthesizer before runWorkflow), claims a teammate from the pool,
+// dispatches via executeAgent under a combined abort signal (ctx.signal +
+// per-task timeout), and records pool/budget on success/failure.
+//
+// Retryable: true → workflow runStep retries on transient failures, and
+// each retry re-claims from the pool, naturally rotating to a different
+// teammate. The hardening passes in PR 6 add output validation + error
+// classification before recordFailure.
+registerNodeExecutor({
+  kind: "action.team.task.dispatch",
+  typeVersion: 1,
+  retryable: true,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      teamId?: string
+      taskId?: string
+      title?: string
+      description?: string
+      expectedOutput?: string
+    }
+    if (!params.teamId || !params.taskId) {
+      throw nonRetryable("action.team.task.dispatch requires 'teamId' and 'taskId'")
+    }
+    const [{ getTeamRunContext }, { executeAgent }, { buildTeammatePrompt }] = await Promise.all([
+      import("@/lib/ai/agent/team/team-run-context"),
+      import("@/lib/ai/agent/agent-executor"),
+      import("@/lib/ai/agent/agent-team-runtime-deps"),
+    ])
+    const teamCtx = getTeamRunContext(ctx.runId)
+    if (!teamCtx) {
+      throw nonRetryable(
+        `action.team.task.dispatch: no TeamRunContext registered for runId=${ctx.runId}`
+      )
+    }
+    const teammate = teamCtx.pool.claim(params.taskId)
+    if (!teammate) {
+      // Retryable — workflow runStep will back off; pool may free up.
+      throw new Error("action.team.task.dispatch: no available teammate")
+    }
+
+    const perTaskTimeoutMs =
+      typeof teamCtx.team.config?.defaultTimeout === "number" &&
+      teamCtx.team.config.defaultTimeout > 0
+        ? teamCtx.team.config.defaultTimeout
+        : 600_000
+    const combinedSignal = AbortSignal.any([ctx.signal, AbortSignal.timeout(perTaskTimeoutMs)])
+
+    const task = {
+      id: params.taskId,
+      title: params.title ?? params.taskId,
+      description: params.description ?? "",
+      expectedOutput: params.expectedOutput,
+    } as Parameters<typeof buildTeammatePrompt>[2]
+
+    const prompt = buildTeammatePrompt(teamCtx.team, teammate, task)
+    const modelPref = teamCtx.modelPref.get()
+    const systemPrompt =
+      teammate.config?.systemPrompt?.trim() ||
+      teamCtx.team.config?.defaultSystemPrompt?.trim() ||
+      "You are a focused, helpful agent teammate. Stay on-task and produce concrete output."
+
+    try {
+      const result = await executeAgent(prompt, {
+        systemPrompt,
+        ...(modelPref.modelHint ? { model: modelPref.modelHint } : {}),
+        abortSignal: combinedSignal,
+      })
+      const text = (result.text ?? "").toString()
+      teamCtx.pool.recordSuccess(teammate.id)
+      const usage = (
+        result as unknown as {
+          usage?: { promptTokens: number; completionTokens: number; totalTokens: number }
+        }
+      ).usage
+      if (usage) teamCtx.budget.add(usage)
+      teamCtx.storeWriter.addMessage({
+        teamId: teamCtx.teamId,
+        senderId: teammate.id,
+        type: "result_share",
+        content: text.length > 1200 ? `${text.slice(0, 1199)}…` : text,
+        taskId: params.taskId,
+      })
+      teamCtx.storeWriter.setTaskStatus(params.taskId, "completed", text)
+      return {
+        output: {
+          text,
+          teammateId: teammate.id,
+          teammateName: teammate.name,
+          tokenUsage: usage,
+          attempt: 1,
+        },
+      }
+    } catch (err) {
+      teamCtx.pool.recordFailure(teammate.id, err)
+      teamCtx.storeWriter.setTaskStatus(
+        params.taskId,
+        "failed",
+        undefined,
+        err instanceof Error ? err.message : String(err)
+      )
+      throw err
+    }
+  },
+})
+
 // ── action.twin.rag ───────────────────────────────────────────────────────
 // Vector-search the twin's chunks. Returns the top-K chunks with score and
 // source metadata. Degrades gracefully when the vector store / embedding
