@@ -85,6 +85,16 @@
       },
       // task for the `beforeBuildCommand` if used, must be configured in `.vscode/tasks.json`
       "preLaunchTask": "ui:build"
+    },
+    {
+      "name": "Tauri Dev (with sidecar logs)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "pnpm tauri:dev",
+      "env": {
+        "RUST_LOG": "cognia=debug,tauri=info",
+        "COGNIA_SIDECAR_VERBOSE": "1"
+      }
     }
   ]
 }

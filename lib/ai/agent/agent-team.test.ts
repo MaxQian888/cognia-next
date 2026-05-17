@@ -111,12 +111,11 @@ describe("agentTeamManager (real facade)", () => {
       progress: 0,
       createdAt: new Date(),
     })
-    configureAgentTeamRuntime({
-      runTeammateTask: jest.fn(async () => ({ result: "ok" })),
-    })
+    configureAgentTeamRuntime({})
     await agentTeamManager.start("t1")
-    // Empty task queue → runtime resolves and team is "completed".
-    expect(useAgentTeamStore.getState().teams["t1"]?.status).toBe("completed")
+    // Empty task queue → F-path synthesizer returns status=failed (no tasks
+    // to dispatch). The facade mirrors result.status onto the team row.
+    expect(useAgentTeamStore.getState().teams["t1"]?.status).toBe("failed")
   })
 
   it("pause() marks the team as paused", async () => {

@@ -11,6 +11,6 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": ["fs:read", "fs:write"],
+  "permissions": ["filesystem:read", "filesystem:write"],
   "activationEvents": ["onStartup"]
 }

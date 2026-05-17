@@ -77,3 +77,4 @@ coverage_output.txt
 # local lint / verification dumps
 .lint-output.*
 batch-final-verify-*.png
+dist

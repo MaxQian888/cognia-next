@@ -28,9 +28,11 @@ import { TitleBar } from "@/components/desktop/title-bar"
 import { WindowFocusTracker } from "@/components/desktop/window-focus-tracker"
 import { WindowResizeEdges } from "@/components/desktop/window-resize-edges"
 import { ZoomShortcuts } from "@/components/desktop/zoom-shortcuts"
+import { useMenuEventRouter } from "@/hooks/desktop/use-menu-event-router"
 import { usePlatform } from "@/hooks/use-platform"
 import { whenSeeded } from "@/lib/db/schema"
 import { loggers } from "@/lib/logger"
+import { useUIStore } from "@/stores/ui/ui-store"
 
 const log = loggers.shell
 
@@ -48,6 +50,17 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
 
   const bypass = isShellBypassRoute(pathname)
   const isMobile = platform === "mobile"
+
+  // View menu collapse toggles. Both default to `false` (visible). Persisted
+  // by the ui-store so the choice sticks across reloads.
+  const guildRailCollapsed = useUIStore((s) => s.guildRailCollapsed)
+  const statusBarCollapsed = useUIStore((s) => s.statusBarCollapsed)
+
+  // Bridge native-menu `menu://<id>` events into renderer actions. Must run
+  // even when the in-app Menubar would render in its hamburger form so the
+  // OS menu / global shortcuts still work everywhere except bypass routes
+  // (where the desktop chrome is suppressed on purpose).
+  useMenuEventRouter()
 
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
@@ -85,11 +98,13 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
       <ZoomShortcuts />
       <TitleBar />
       <div className="flex flex-1 overflow-hidden">
-        <GuildRail onCreateTeam={handleCreateTeam} onOpenSettings={() => handleOpenSettings()} />
+        {!guildRailCollapsed && (
+          <GuildRail onCreateTeam={handleCreateTeam} onOpenSettings={() => handleOpenSettings()} />
+        )}
         <div className="flex min-w-0 flex-1 overflow-hidden">{children}</div>
       </div>
       {mounted && <CommandPalette onOpenSettings={handleOpenSettings} />}
-      <StatusBar />
+      {!statusBarCollapsed && <StatusBar />}
     </div>
   )
 }

@@ -46,6 +46,13 @@ beforeEach(() => {
   proxyStore.resetApplyProxyDedupeForTesting()
 })
 
+afterEach(() => {
+  // `clearMocks: true` (jest.config.ts:16) only clears call history. Without this teardown
+  // the console.warn / console.debug spies installed in beforeEach leak into other suites
+  // running in the same Jest worker — the pattern mirrors stores/settings/settings-store.test.ts:80-82.
+  jest.restoreAllMocks()
+})
+
 describe("useProxyStore (legacy shape)", () => {
   it("reports disabled when no settings are loaded", () => {
     const state = proxyStore.useProxyStore.getState()

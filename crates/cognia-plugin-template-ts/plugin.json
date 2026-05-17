@@ -1,0 +1,41 @@
+{
+  "id": "cognia-plugin-template-ts",
+  "name": "Cognia Plugin Template TS",
+  "version": "0.1.0",
+  "description": "Frontend TypeScript plugin template — registers one tool and one slash command. Replace this manifest with your own plugin's metadata.",
+  "type": "frontend",
+  "capabilities": ["tools", "commands"],
+  "main": "dist/index.js",
+  "author": {
+    "name": "Your Name"
+  },
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": [],
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "dist/index.js"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "dist/index.js"
+    }
+  },
+  "commands": [
+    {
+      "id": "template-greet",
+      "name": "Template Greet",
+      "description": "Print a greeting back to the chat. Replace with your own command."
+    }
+  ],
+  "tools": [
+    {
+      "name": "template_echo",
+      "description": "Echo the supplied message back to the agent. Replace with your own tool."
+    }
+  ]
+}

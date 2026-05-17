@@ -5,13 +5,7 @@ import React from "react"
 import { render, screen } from "@testing-library/react"
 import { ProviderStatusBadge, getProviderStatus } from "./provider-status-badge"
 
-jest.mock("@/components/ui/badge", () => ({
-  Badge: ({ children, className }: { children: React.ReactNode; className?: string }) => (
-    <span data-testid="badge" className={className}>
-      {children}
-    </span>
-  ),
-}))
+jest.mock("@/components/ui/badge")
 
 describe("ProviderStatusBadge", () => {
   it("renders testing status with loader", () => {

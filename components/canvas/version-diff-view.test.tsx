@@ -17,21 +17,9 @@ jest.mock("next-intl", () => ({
 }))
 
 // Mock UI components
-jest.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children, className }: { children: React.ReactNode; className?: string }) => (
-    <div className={className} data-testid="scroll-area">
-      {children}
-    </div>
-  ),
-}))
+jest.mock("@/components/ui/scroll-area")
 
-jest.mock("@/components/ui/badge", () => ({
-  Badge: ({ children, className }: { children: React.ReactNode; className?: string }) => (
-    <span className={className} data-testid="badge">
-      {children}
-    </span>
-  ),
-}))
+jest.mock("@/components/ui/badge")
 
 describe("VersionDiffView", () => {
   it("renders without crashing", () => {

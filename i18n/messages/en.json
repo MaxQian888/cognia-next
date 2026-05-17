@@ -2614,6 +2614,37 @@
       "tauriDocs": "Tauri docs",
       "loadFailed": "Failed to load desktop info."
     },
+    "tray": {
+      "title": "Tray",
+      "description": "Customise the items shown in the system tray menu.",
+      "desktopOnly": "The system tray is only available in the desktop build.",
+      "addItem": "Add item",
+      "remove": "Remove",
+      "rename": "Rename",
+      "reset": "Reset",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "hide": "Hide",
+      "show": "Show",
+      "separator": "separator",
+      "pin": "Pin",
+      "pickCommand": "Pick a command",
+      "pickHint": "Choose a slash command or plugin command to pin to the tray menu.",
+      "emptyPicker": "No commands available — install plugins or start a chat."
+    },
+    "shortcuts": {
+      "title": "Global shortcuts",
+      "description": "Rebind the global hot-keys. Recording captures the next key combo you press.",
+      "desktopOnly": "Global shortcuts are only available in the desktop build.",
+      "record": "Record",
+      "cancel": "Cancel",
+      "save": "Save",
+      "pressKey": "Press any key…",
+      "conflictWith": "Conflicts with",
+      "conflictBlocked": "Chord already bound",
+      "bindFailed": "Failed to bind shortcut",
+      "resetItem": "Reset to default"
+    },
     "characters": {
       "title": "Characters",
       "description": "Reusable personas. Each character carries its own system prompt, model, MCP subset, and skills. Pick one when you start a new chat.",
@@ -3310,6 +3341,7 @@
         "diagnostics": {
           "title": "Plugin runtime diagnostics",
           "hint": "Live signals from governance, silent failures, and runtime checks. Errors expand by default; warning-only groups stay collapsed.",
+          "severityFilterAria": "Filter diagnostics by severity",
           "filterAll": "All",
           "filterErrors": "Errors",
           "filterWarnings": "Warnings",
@@ -5148,7 +5180,30 @@
     }
   },
   "tray": {
-    "openLogs": "Open Log Panel"
+    "openLogs": "Open Log Panel",
+    "show": "Show Cognia",
+    "newChat": "New Chat",
+    "settings": "Settings",
+    "quit": "Quit",
+    "automationKill": "🛑 Engage automation kill switch",
+    "quickGoal": "/goal …",
+    "allCommands": "All Commands",
+    "categories": {
+      "chat": "Chat",
+      "diagnostics": "Diagnostics",
+      "system": "System",
+      "goal": "Goal",
+      "template": "Templates",
+      "help": "Help",
+      "plugins": "Plugins",
+      "other": "Other"
+    },
+    "iconState": {
+      "idle": "Idle",
+      "busy": "Busy",
+      "error": "Error",
+      "muted": "Muted"
+    }
   },
   "menu": {
     "view": {
@@ -5820,6 +5875,38 @@
   },
   "agentTeam": {
     "defaultTeamLeadName": "Team Lead",
+    "approvalGate": {
+      "approve": "Approve",
+      "reject": "Reject",
+      "cancel": "Cancel",
+      "budget": {
+        "title": "Token budget critical",
+        "body": "This run has reached the configured token budget. Approve to continue with extra budget.",
+        "extraTokensLabel": "Additional tokens",
+        "extraTokensPlaceholder": "e.g., 50000"
+      },
+      "deadlock": {
+        "title": "All teammates unavailable",
+        "body": "Every teammate has been quarantined by repeated failures. Choose recovery action.",
+        "resetAll": "Reset all teammates",
+        "resetSelected": "Reset selected teammates"
+      },
+      "plan": {
+        "title": "Plan awaiting approval",
+        "body": "Review the lead's proposed plan."
+      },
+      "teammateFix": {
+        "title": "Teammate disqualified",
+        "body": "A teammate failed catastrophically. Fix the configuration and rejoin, or skip.",
+        "rejoin": "Rejoin",
+        "skip": "Skip permanently"
+      }
+    },
+    "runs": {
+      "empty": "No runs yet",
+      "startedAt": "Started",
+      "completedAt": "Completed"
+    },
     "status": {
       "idle": "Idle",
       "planning": "Planning",
@@ -6902,9 +6989,14 @@
       "file": {
         "label": "File",
         "newChat": "New Chat",
+        "newWorkflow": "New Workflow",
+        "newAgentTeam": "New Agent Team",
+        "newCharacter": "New Character",
         "openWorkspace": "Open Workspace…",
         "openSettings": "Settings…",
         "openLogs": "Open Logs",
+        "recentSessions": "Recent Sessions",
+        "recentSessionsEmpty": "No recent sessions",
         "quit": "Quit Cognia"
       },
       "edit": {
@@ -6921,7 +7013,18 @@
         "label": "View",
         "commandPalette": "Command Palette…",
         "toggleSidebar": "Toggle Sidebar",
+        "toggleGuildRail": "Toggle Guild Rail",
+        "toggleStatusBar": "Toggle Status Bar",
+        "reduceMotion": "Reduce Motion",
+        "theme": "Theme",
+        "themeLight": "Light",
+        "themeDark": "Dark",
+        "themeSystem": "System",
+        "language": "Language",
+        "languageEnglish": "English",
+        "languageChinese": "简体中文",
         "reload": "Reload",
+        "toggleDevtools": "Toggle Developer Tools",
         "openLogs": "Open Logs",
         "toggleFullscreen": "Toggle Full Screen",
         "zoomIn": "Zoom In",
@@ -6932,9 +7035,34 @@
         "label": "Go",
         "dms": "Direct Messages",
         "canvas": "Canvas",
+        "inbox": "Inbox",
+        "workflows": "Workflows",
         "twin": "Twin Workbench",
+        "skills": "Skills",
+        "plugins": "Plugins",
+        "agentTeams": "Agent Teams",
+        "scheduler": "Scheduler",
+        "discover": "Discover",
+        "a2ui": "Mini-Apps",
         "logs": "Logs",
         "settings": "Settings"
+      },
+      "tools": {
+        "label": "Tools",
+        "commandPalette": "Command Palette…",
+        "automationKillSwitch": "Automation Kill-Switch",
+        "automationKillSwitchToastDone": "Automation halted.",
+        "automationKillSwitchToastFail": "Kill-switch failed: {message}",
+        "manageConnectors": "Manage Connectors…",
+        "manageMcpServer": "Manage MCP Server…",
+        "pluginDevtools": "Plugin DevTools",
+        "sidecarRestart": "Restart Sidecar",
+        "sidecarRestartToastDone": "Sidecar restarted.",
+        "sidecarRestartToastFail": "Sidecar restart failed: {message}",
+        "clearCache": "Clear Cache…",
+        "clearCacheConfirm": "Clear cached search results, TTS audio, and request snapshots? Settings and conversations are untouched.",
+        "clearCacheToastDone": "Cache cleared.",
+        "clearCacheToastFail": "Clear cache failed: {message}"
       },
       "window": {
         "label": "Window",
@@ -6946,11 +7074,16 @@
       },
       "help": {
         "label": "Help",
+        "keyboardShortcuts": "Keyboard Shortcuts…",
+        "keyboardShortcutsTitle": "Keyboard Shortcuts",
+        "keyboardShortcutsDescription": "All shortcuts surfaced by the Cognia desktop chrome.",
+        "keyboardShortcutsClose": "Close",
         "documentation": "Documentation",
         "about": "About Cognia"
       },
       "shortcut": {
         "cmdOrCtrlN": "Ctrl+N",
+        "cmdOrCtrlShiftN": "Ctrl+Shift+N",
         "cmdOrCtrlO": "Ctrl+O",
         "cmdOrCtrlR": "Ctrl+R",
         "cmdOrCtrlComma": "Ctrl+,",
@@ -6959,6 +7092,16 @@
         "cmdOrCtrlPlus": "Ctrl+=",
         "cmdOrCtrlMinus": "Ctrl+-",
         "cmdOrCtrl0": "Ctrl+0",
+        "cmdOrCtrl1": "Ctrl+1",
+        "cmdOrCtrl2": "Ctrl+2",
+        "cmdOrCtrl3": "Ctrl+3",
+        "cmdOrCtrl4": "Ctrl+4",
+        "cmdOrCtrl5": "Ctrl+5",
+        "cmdOrCtrl6": "Ctrl+6",
+        "cmdOrCtrl7": "Ctrl+7",
+        "cmdOrCtrl8": "Ctrl+8",
+        "cmdOrCtrlAltI": "Ctrl+Alt+I",
+        "ctrlAltK": "Ctrl+Alt+K",
         "cmdOrCtrlShiftL": "Ctrl+Shift+L",
         "cmdOrCtrlShiftP": "Ctrl+Shift+P",
         "f11": "F11"
@@ -9010,6 +9153,9 @@
     }
   },
   "workflows": {
+    "notFoundTitle": "Workflow not found",
+    "notFoundDescription": "The workflow you tried to open doesn't exist or has been deleted.",
+    "notFoundBackToLibrary": "Back to library",
     "canvasToast": {
       "savedOk": "Workflow saved",
       "saveFailed": "Failed to save workflow",
@@ -9038,6 +9184,100 @@
         "shortcuts": "Keyboard shortcuts (Ctrl+/)",
         "exportJson": "Export workflow as JSON",
         "importJson": "Import workflow JSON"
+      }
+    },
+    "editor": {
+      "performanceTier": {
+        "title": "Performance tier",
+        "description": "Tune canvas effects to match your device and workflow size.",
+        "effectiveLabel": "Effective: {tier}",
+        "auto": "Auto",
+        "high": "High",
+        "balanced": "Balanced",
+        "reduced": "Reduced",
+        "autoHint": "Pick the best tier from your system preference and workflow size.",
+        "highHint": "Everything on: minimap, animations, live inspector preview.",
+        "balancedHint": "Drop edge animations and pause inspector preview while dragging.",
+        "reducedHint": "Hide minimap, freeze animations, skip alignment guides."
+      },
+      "contextMenu": {
+        "pane": {
+          "paste": "Paste",
+          "addNode": "Add node here…",
+          "addSticky": "Add sticky note here",
+          "addGroup": "Add group here",
+          "resetView": "Reset view",
+          "toggleSnap": "Toggle grid snap"
+        },
+        "node": {
+          "runFrom": "Run from here",
+          "configure": "Configure",
+          "rename": "Rename",
+          "duplicate": "Duplicate",
+          "copy": "Copy",
+          "toGroup": "Convert to group",
+          "addStickyAbove": "Add sticky note above",
+          "disable": "Disable",
+          "enable": "Enable",
+          "delete": "Delete"
+        },
+        "edge": {
+          "editLabel": "Edit label",
+          "toConditional": "Convert to conditional",
+          "reverse": "Reverse direction",
+          "delete": "Delete edge"
+        }
+      },
+      "miniToolbar": {
+        "run": "Run from here",
+        "copy": "Copy node",
+        "configure": "Configure",
+        "delete": "Delete",
+        "more": "More actions",
+        "runDisabled": "Triggers and annotations can't be run from here"
+      },
+      "bookmarks": {
+        "label": "Views",
+        "saveCurrent": "Save current view…",
+        "dialogTitle": "Save view",
+        "dialogNameLabel": "Name",
+        "dialogNamePlaceholder": "e.g. \"Onboarding subgraph\"",
+        "save": "Save",
+        "cancel": "Cancel",
+        "delete": "Delete view",
+        "empty": "No saved views yet.",
+        "viewAt": "View at {zoom}%",
+        "savedToast": "View saved"
+      },
+      "breadcrumb": {
+        "untitledGroup": "Untitled group",
+        "fitAll": "Fit all"
+      },
+      "spotlight": {
+        "placeholder": "Search nodes on this canvas…",
+        "empty": "No matching nodes.",
+        "openShortcut": "Search nodes (Ctrl+F)",
+        "breadcrumbIn": "in {group}"
+      },
+      "lasso": {
+        "selected": "{count} nodes selected",
+        "hint": "Hold Alt and drag to lasso-select"
+      },
+      "edge": {
+        "edgeKind": {
+          "then": "then",
+          "else": "else",
+          "true": "true",
+          "false": "false",
+          "error": "on error"
+        },
+        "labelPlaceholder": "Edge label…",
+        "editLabelHint": "Double-click to edit label"
+      },
+      "connection": {
+        "incompatible": "Can't connect to this handle",
+        "compatible": "Drop to connect",
+        "snapHint": "Snapping to nearest handle"
       }
     },
     "empty": {
@@ -10645,5 +10885,36 @@
         }
       }
     }
+  },
+  "loading": {
+    "thinking": "Claude is thinking…",
+    "pageLoading": "Loading…",
+    "loading": "Loading…",
+    "page": {
+      "title": "Loading…",
+      "description": "Preparing your workspace"
+    }
+  },
+  "errorPage": {
+    "title": "Something went wrong",
+    "description": "An unexpected error occurred. The technical details below can help diagnose the issue.",
+    "traceTitle": "Error details",
+    "retry": "Try again",
+    "goHome": "Back to home",
+    "exportCrashLog": "Export crash log",
+    "exportingCrashLog": "Exporting…",
+    "exportCrashLogSuccess": "Crash log exported",
+    "exportCrashLogFailed": "Failed to export crash log",
+    "openLogs": "Open logs",
+    "errorIdLabel": "Error ID",
+    "copyErrorId": "Copy ID",
+    "copyErrorIdSuccess": "Error ID copied",
+    "globalTitle": "Cognia stopped working",
+    "globalDescription": "The application's main layout failed to load. Try recovering, or close the window using the title bar."
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "We couldn't find the page you were looking for. It may have been moved, renamed, or deleted.",
+    "goHome": "Back to home"
   }
 }

@@ -44,21 +44,9 @@ jest.mock("@/stores", () => ({
 }))
 
 // Mock UI components
-jest.mock("@/components/ui/button", () => ({
-  Button: ({ children, onClick }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
-    <button onClick={onClick}>{children}</button>
-  ),
-}))
+jest.mock("@/components/ui/button")
 
-jest.mock("@/components/ui/dialog", () => ({
-  Dialog: ({ children, open }: { children: React.ReactNode; open: boolean }) =>
-    open ? <div data-testid="dialog">{children}</div> : null,
-  DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
-  DialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogTitle: ({ children }: { children: React.ReactNode }) => <h3>{children}</h3>,
-}))
+jest.mock("@/components/ui/dialog")
 
 jest.mock("@/components/ui/alert", () => ({
   Alert: ({ children }: { children: React.ReactNode }) => <div role="alert">{children}</div>,
@@ -85,23 +73,11 @@ jest.mock("@/components/ui/checkbox", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/label", () => ({
-  Label: ({ children, htmlFor }: { children: React.ReactNode; htmlFor?: string }) => (
-    <label htmlFor={htmlFor}>{children}</label>
-  ),
-}))
+jest.mock("@/components/ui/label")
 
-jest.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="scroll-area">{children}</div>
-  ),
-}))
+jest.mock("@/components/ui/scroll-area")
 
-jest.mock("@/components/ui/badge", () => ({
-  Badge: ({ children }: { children: React.ReactNode }) => (
-    <span data-testid="badge">{children}</span>
-  ),
-}))
+jest.mock("@/components/ui/badge")
 
 jest.mock("@/components/ui/tabs", () => ({
   Tabs: ({ children }: { children: React.ReactNode }) => <div data-testid="tabs">{children}</div>,

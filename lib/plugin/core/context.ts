@@ -110,6 +110,7 @@ import { getPluginDebugger } from "../devtools/debugger"
 import { invokePluginApi, PluginGatewayError } from "./transport"
 import { isTauri } from "@/lib/native/utils"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
+import { createTrayAPI } from "@/lib/plugin/api/tray-api"
 
 /**
  * Full plugin context combining base and extended APIs.
@@ -150,6 +151,10 @@ export function createPluginContext(
     db: createDatabaseAPI(pluginId),
     shortcuts: createShortcutsAPI(pluginId),
     contextMenu: createContextMenuAPI(pluginId),
+    tray: createTrayAPI({
+      pluginId,
+      capabilities: plugin.manifest.capabilities ?? [],
+    }),
     window: createWindowAPI(pluginId),
     secrets: createSecretsAPI(pluginId),
     scheduler: createSchedulerAPI(pluginId),
@@ -650,10 +655,23 @@ function createPythonAPI(pluginId: string, _manager: PluginManager): PluginPytho
 
     import: async (moduleName: string) => {
       rateLimiter.check(pluginId, "python:import")
-      await invoke("plugin_python_import", {
-        pluginId,
-        moduleName,
-      })
+      try {
+        await invoke("plugin_python_import", {
+          pluginId,
+          moduleName,
+        })
+      } catch (error) {
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "python.import",
+            message: `Failed to import Python module: ${moduleName}`,
+            expected: !isTauri(),
+          },
+          error
+        )
+        throw error
+      }
 
       return {
         call: async <T>(functionName: string, ...args: unknown[]): Promise<T> => {

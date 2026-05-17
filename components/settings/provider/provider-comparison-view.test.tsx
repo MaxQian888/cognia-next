@@ -141,52 +141,15 @@ jest.mock("@/types/provider/built-in-provider-catalog", () => ({
 
 // ── UI component mocks ────────────────────────────────────────────────────────
 
-jest.mock("@/components/ui/button", () => ({
-  Button: ({
-    children,
-    onClick,
-    ...rest
-  }: React.ButtonHTMLAttributes<HTMLButtonElement> & { children?: React.ReactNode }) => (
-    <button onClick={onClick} {...rest}>
-      {children}
-    </button>
-  ),
-}))
+jest.mock("@/components/ui/button")
 
-jest.mock("@/components/ui/popover", () => ({
-  Popover: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  PopoverTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  PopoverContent: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="popover-content">{children}</div>
-  ),
-}))
+jest.mock("@/components/ui/popover")
 
-jest.mock("@/components/ui/checkbox", () => ({
-  Checkbox: ({
-    checked,
-    onCheckedChange,
-    id,
-  }: {
-    checked?: boolean
-    onCheckedChange?: (checked: boolean) => void
-    id?: string
-  }) => (
-    <input
-      type="checkbox"
-      id={id}
-      checked={checked ?? false}
-      onChange={(e) => onCheckedChange?.(e.target.checked)}
-    />
-  ),
-}))
+jest.mock("@/components/ui/checkbox")
 
-jest.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+jest.mock("@/components/ui/scroll-area")
 
-jest.mock("@/components/ui/badge", () => ({
-  Badge: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
-}))
+jest.mock("@/components/ui/badge")
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 

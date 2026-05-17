@@ -85,10 +85,10 @@ describe("PluginSignatureVerifier", () => {
   })
 
   describe("Configuration", () => {
-    it("should get default config", () => {
+    it("should get default config (ADR 0016 P0-3: requireSignatures default-on)", () => {
       const config = verifier.getConfig()
 
-      expect(config.requireSignatures).toBe(false)
+      expect(config.requireSignatures).toBe(true)
       expect(config.allowUntrusted).toBe(true)
       expect(config.verifyOnLoad).toBe(true)
       expect(config.cacheVerifications).toBe(true)

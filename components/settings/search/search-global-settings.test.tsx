@@ -107,11 +107,8 @@ jest.mock("@/components/ui/dialog", () => ({
   DialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
 
-jest.mock("@/components/ui/collapsible", () => ({
-  Collapsible: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  CollapsibleTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  CollapsibleContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+// Shared stub: components/ui/__mocks__/collapsible.tsx
+jest.mock("@/components/ui/collapsible")
 
 import { SearchGlobalSettings } from "./search-global-settings"
 

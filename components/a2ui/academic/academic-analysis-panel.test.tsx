@@ -36,34 +36,9 @@ jest.mock("lucide-react", () => {
   }
 })
 
-// Mock Collapsible to avoid Radix Primitive.span.SlotClone issues
-jest.mock("@/components/ui/collapsible", () => ({
-  Collapsible: ({
-    children,
-    open: _open,
-    onOpenChange: _onOpenChange,
-    ...props
-  }: React.HTMLAttributes<HTMLDivElement> & {
-    open?: boolean
-    onOpenChange?: (open: boolean) => void
-  }) => <div {...props}>{children}</div>,
-  CollapsibleTrigger: ({
-    children,
-    asChild,
-    ...props
-  }: React.HTMLAttributes<HTMLButtonElement> & { asChild?: boolean }) =>
-    asChild ? <>{children}</> : <button {...props}>{children}</button>,
-  CollapsibleContent: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-    <div {...props}>{children}</div>
-  ),
-}))
+jest.mock("@/components/ui/collapsible")
 
-// Mock ScrollArea
-jest.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-    <div {...props}>{children}</div>
-  ),
-}))
+jest.mock("@/components/ui/scroll-area")
 
 // Mock clipboard API
 Object.assign(navigator, {

@@ -19,6 +19,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import type {
+  PerformanceTier,
+  ResolvedPerformanceTier,
+} from "@/lib/workflow/editor/performance-tier"
+import { PerformanceTierPopover } from "./performance-tier-popover"
+import { ViewportBookmarks } from "./viewport-bookmarks"
+import type { Viewport } from "@xyflow/react"
 
 export interface EditorToolbarProps {
   workflowName: string
@@ -36,6 +43,17 @@ export interface EditorToolbarProps {
   onImportJson?: (json: string) => void
   onOpenCommandPalette?: () => void
   onOpenShortcuts?: () => void
+  /** User-selected performance tier (defaults to "auto"). */
+  performanceTier?: PerformanceTier
+  /** Effective tier after auto resolution (display-only when `performanceTier` is "auto"). */
+  effectivePerformanceTier?: ResolvedPerformanceTier
+  onPerformanceTierChange?: (tier: PerformanceTier) => void
+  /** Workflow id for the bookmarks dropdown. Omit to hide the control. */
+  workflowId?: string
+  /** Current canvas viewport, used as the "save current view" payload. */
+  currentViewport?: Viewport
+  /** Restore handler — typically wraps `reactFlowInstance.setViewport`. */
+  onRestoreViewport?: (viewport: Viewport) => void
 }
 
 export function EditorToolbar({
@@ -54,6 +72,12 @@ export function EditorToolbar({
   onImportJson,
   onOpenCommandPalette,
   onOpenShortcuts,
+  performanceTier,
+  effectivePerformanceTier,
+  onPerformanceTierChange,
+  workflowId,
+  currentViewport,
+  onRestoreViewport,
 }: EditorToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const t = useTranslations("workflows.toolbar")
@@ -182,6 +206,22 @@ export function EditorToolbar({
             </TooltipTrigger>
             <TooltipContent side="bottom">{t("tooltip.shortcuts")}</TooltipContent>
           </Tooltip>
+        ) : null}
+        {performanceTier !== undefined &&
+        effectivePerformanceTier !== undefined &&
+        onPerformanceTierChange ? (
+          <PerformanceTierPopover
+            value={performanceTier}
+            effective={effectivePerformanceTier}
+            onChange={onPerformanceTierChange}
+          />
+        ) : null}
+        {workflowId && currentViewport && onRestoreViewport ? (
+          <ViewportBookmarks
+            workflowId={workflowId}
+            currentViewport={currentViewport}
+            onRestore={onRestoreViewport}
+          />
         ) : null}
         {onExportJson ? (
           <Tooltip>

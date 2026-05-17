@@ -12,47 +12,9 @@ jest.mock("@/lib/a2ui/resolve-icon", () => ({
   resolveIcon: (iconName?: string) => mockResolveIcon(iconName),
 }))
 
-jest.mock("@/components/ui/button", () => ({
-  Button: ({
-    children,
-    onClick,
-    disabled,
-    className,
-  }: {
-    children: React.ReactNode
-    onClick?: () => void
-    disabled?: boolean
-    className?: string
-  }) => (
-    <button type="button" disabled={disabled} className={className} onClick={onClick}>
-      {children}
-    </button>
-  ),
-}))
+jest.mock("@/components/ui/button")
 
-jest.mock("@/components/ui/input", () => ({
-  Input: ({
-    value,
-    onChange,
-    onKeyDown,
-    placeholder,
-    className,
-  }: {
-    value: string
-    onChange: (event: React.ChangeEvent<HTMLInputElement>) => void
-    onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void
-    placeholder?: string
-    className?: string
-  }) => (
-    <input
-      value={value}
-      onChange={onChange}
-      onKeyDown={onKeyDown}
-      placeholder={placeholder}
-      className={className}
-    />
-  ),
-}))
+jest.mock("@/components/ui/input")
 
 jest.mock("@/components/ui/card", () => ({
   Card: ({
@@ -70,13 +32,7 @@ jest.mock("@/components/ui/card", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children, className }: { children: React.ReactNode; className?: string }) => (
-    <div data-testid="scroll-area" className={className}>
-      {children}
-    </div>
-  ),
-}))
+jest.mock("@/components/ui/scroll-area")
 
 jest.mock("lucide-react", () => ({
   Zap: ({ className }: { className?: string }) => (

@@ -18,25 +18,7 @@ jest.mock("@/lib/utils", () => ({
   cn: (...classes: Array<string | false | null | undefined>) => classes.filter(Boolean).join(" "),
 }))
 
-jest.mock("@/components/ui/button", () => ({
-  Button: ({
-    children,
-    onClick,
-    className,
-    title,
-    disabled,
-  }: {
-    children: React.ReactNode
-    onClick?: () => void
-    className?: string
-    title?: string
-    disabled?: boolean
-  }) => (
-    <button type="button" className={className} title={title} disabled={disabled} onClick={onClick}>
-      {children}
-    </button>
-  ),
-}))
+jest.mock("@/components/ui/button")
 
 jest.mock("@/components/ui/card", () => ({
   Card: ({ children, className }: { children: React.ReactNode; className?: string }) => (

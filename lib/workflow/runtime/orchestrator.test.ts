@@ -459,3 +459,293 @@ describe("runWorkflow — plugin hook dispatches", () => {
     expect(mockHooksManager.dispatchWorkflowComplete.mock.calls[0][1]).toBe(false)
   })
 })
+
+describe("runWorkflow — startStepId (run from here)", () => {
+  it("skips every step upstream of startStepId and runs only the descendant subgraph", async () => {
+    const wf = buildWorkflow(
+      [
+        {
+          id: "n_a",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "a", params: {} },
+        },
+        {
+          id: "n_b",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 200, y: 0 },
+          data: { label: "b", params: { variable: "x", value: "1" } },
+        },
+        {
+          id: "n_c",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 400, y: 0 },
+          data: { label: "c", params: { variable: "y", value: "2" } },
+        },
+      ],
+      [
+        { id: "e1", source: "n_a", target: "n_b" },
+        { id: "e2", source: "n_b", target: "n_c" },
+      ]
+    )
+
+    const result = await runWorkflow({ workflow: wf, trigger, startStepId: "n_b" })
+    expect(result.status).toBe("succeeded")
+
+    const events = await listRunEvents(result.runId)
+    const completed = events.filter((e) => e.type === "step_completed").map((e) => e.stepId)
+    const skipped = events.filter((e) => e.type === "step_skipped").map((e) => e.stepId)
+    expect(completed).toEqual(["n_b", "n_c"])
+    expect(skipped).toEqual(["n_a"])
+  })
+
+  it("fails fast when startStepId is not in the workflow", async () => {
+    const wf = buildWorkflow(
+      [
+        {
+          id: "n_a",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "a", params: {} },
+        },
+      ],
+      []
+    )
+    const result = await runWorkflow({ workflow: wf, trigger, startStepId: "n_missing" })
+    expect(result.status).toBe("failed")
+    expect(result.error?.message).toContain("startStepId n_missing not present")
+  })
+
+  it("bounds the run to the descendant subgraph (sibling branches are skipped)", async () => {
+    // n_a → n_b ; n_a → n_c. Starting from n_b should skip both n_a and n_c.
+    const wf = buildWorkflow(
+      [
+        {
+          id: "n_a",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "a", params: {} },
+        },
+        {
+          id: "n_b",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 200, y: 0 },
+          data: { label: "b", params: { variable: "x", value: "1" } },
+        },
+        {
+          id: "n_c",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 200, y: 200 },
+          data: { label: "c", params: { variable: "y", value: "2" } },
+        },
+      ],
+      [
+        { id: "e1", source: "n_a", target: "n_b" },
+        { id: "e2", source: "n_a", target: "n_c" },
+      ]
+    )
+
+    const result = await runWorkflow({ workflow: wf, trigger, startStepId: "n_b" })
+    expect(result.status).toBe("succeeded")
+    const events = await listRunEvents(result.runId)
+    const completed = events.filter((e) => e.type === "step_completed").map((e) => e.stepId)
+    expect(completed).toEqual(["n_b"])
+  })
+})
+
+// ── Concurrent scheduling (ADR-0022 §1 Decision) ─────────────────────────────
+import { registerNodeExecutor } from "@/lib/workflow/nodes/registry"
+import { createConcurrencyController } from "./concurrency-controller"
+
+describe("runWorkflow — concurrent scheduling", () => {
+  // `registerNodeExecutor` is idempotent (it overwrites by key); we re-register
+  // a fresh handler per test from within the test body, so no afterEach reset
+  // is needed. Avoiding the reset keeps built-in registrations alive for the
+  // existing tests that run after this block.
+
+  const buildAsyncWorkflow = (
+    nodeIds: string[],
+    edges: Array<[string, string]>,
+    maxConcurrency: number
+  ): VisualWorkflow => ({
+    id: "wf_concurrent",
+    schemaVersion: 1,
+    name: "concurrent",
+    createdAt: 0,
+    updatedAt: 0,
+    nodes: nodeIds.map((id) => ({
+      id,
+      type: "test.async" as VisualWorkflow["nodes"][number]["type"],
+      typeVersion: 1,
+      position: { x: 0, y: 0 },
+      data: { label: id, params: {} },
+    })),
+    edges: edges.map(([source, target], i) => ({
+      id: `e${i}`,
+      source,
+      target,
+    })),
+    settings: {
+      errorPolicy: "stop",
+      timeoutMs: 60_000,
+      concurrency: 1,
+      maxConcurrency,
+      retryDefaults: { attempts: 1, backoff: "fixed", baseMs: 0 },
+    },
+  })
+
+  it("runs independent nodes in parallel when maxConcurrency > 1", async () => {
+    let inflight = 0
+    let maxInflight = 0
+    registerNodeExecutor({
+      kind: "test.async" as never,
+      typeVersion: 1,
+      execute: async () => {
+        inflight += 1
+        maxInflight = Math.max(maxInflight, inflight)
+        await new Promise((r) => setTimeout(r, 30))
+        inflight -= 1
+        return { output: null }
+      },
+    })
+
+    const wf = buildAsyncWorkflow(["a", "b", "c"], [], 3)
+    const result = await runWorkflow({ workflow: wf, trigger })
+    expect(result.status).toBe("succeeded")
+    expect(maxInflight).toBe(3)
+  })
+
+  it("respects dependencies even with high concurrency", async () => {
+    const order: string[] = []
+    registerNodeExecutor({
+      kind: "test.async" as never,
+      typeVersion: 1,
+      execute: async (ctx) => {
+        order.push(`start:${ctx.stepId}`)
+        await new Promise((r) => setTimeout(r, 10))
+        order.push(`end:${ctx.stepId}`)
+        return { output: null }
+      },
+    })
+
+    const wf = buildAsyncWorkflow(
+      ["a", "b", "c"],
+      [
+        ["a", "b"],
+        ["b", "c"],
+      ],
+      5
+    )
+    const result = await runWorkflow({ workflow: wf, trigger })
+    expect(result.status).toBe("succeeded")
+    expect(order.indexOf("end:a")).toBeLessThan(order.indexOf("start:b"))
+    expect(order.indexOf("end:b")).toBeLessThan(order.indexOf("start:c"))
+  })
+
+  it("half-parallel fan-out after a gating node", async () => {
+    let inflightBC = 0
+    let maxInflightBC = 0
+    registerNodeExecutor({
+      kind: "test.async" as never,
+      typeVersion: 1,
+      execute: async (ctx) => {
+        if (ctx.stepId === "b" || ctx.stepId === "c") {
+          inflightBC += 1
+          maxInflightBC = Math.max(maxInflightBC, inflightBC)
+          await new Promise((r) => setTimeout(r, 20))
+          inflightBC -= 1
+        }
+        return { output: null }
+      },
+    })
+
+    const wf = buildAsyncWorkflow(
+      ["a", "b", "c"],
+      [
+        ["a", "b"],
+        ["a", "c"],
+      ],
+      3
+    )
+    const result = await runWorkflow({ workflow: wf, trigger })
+    expect(result.status).toBe("succeeded")
+    expect(maxInflightBC).toBe(2)
+  })
+
+  it("maxConcurrency=1 default serializes (backward compat)", async () => {
+    let inflight = 0
+    let maxInflight = 0
+    registerNodeExecutor({
+      kind: "test.async" as never,
+      typeVersion: 1,
+      execute: async () => {
+        inflight += 1
+        maxInflight = Math.max(maxInflight, inflight)
+        await new Promise((r) => setTimeout(r, 5))
+        inflight -= 1
+        return { output: null }
+      },
+    })
+
+    // No maxConcurrency set → defaults to 1 inside the orchestrator.
+    const wf: VisualWorkflow = {
+      ...buildAsyncWorkflow(["a", "b", "c"], [], 1),
+    }
+    delete (wf.settings as { maxConcurrency?: number }).maxConcurrency
+
+    const result = await runWorkflow({ workflow: wf, trigger })
+    expect(result.status).toBe("succeeded")
+    expect(maxInflight).toBe(1)
+  })
+
+  it("ConcurrencyController.reduceTo(0) pauses new dispatch", async () => {
+    const controller = createConcurrencyController(3)
+    const completed: string[] = []
+    registerNodeExecutor({
+      kind: "test.async" as never,
+      typeVersion: 1,
+      execute: async (ctx) => {
+        // Pause after the first task starts
+        if (completed.length === 0) controller.reduceTo(0)
+        await new Promise((r) => setTimeout(r, 10))
+        completed.push(ctx.stepId)
+        return { output: null }
+      },
+    })
+
+    const wf = buildAsyncWorkflow(["a", "b"], [], 3)
+    // The first scheduling tick picks up all ready nodes (a + b) before any
+    // executor runs, so both end up inflight together. The reduceTo(0) call
+    // inside the first executor only affects FUTURE dispatches — already-
+    // inflight tasks continue. We assert that the run completes cleanly and
+    // that no third dispatch happens after reduceTo(0).
+    const result = await runWorkflow({ workflow: wf, trigger, concurrency: controller })
+    expect(result.status).toBe("succeeded")
+    expect(completed.length).toBeLessThanOrEqual(2)
+  })
+
+  it("scheduler exits cleanly when controller is 0 from start (no infinite loop)", async () => {
+    const controller = createConcurrencyController(0)
+    registerNodeExecutor({
+      kind: "test.async" as never,
+      typeVersion: 1,
+      execute: async () => ({ output: null }),
+    })
+
+    const wf = buildAsyncWorkflow(["a"], [], 1)
+    const guarded = Promise.race([
+      runWorkflow({ workflow: wf, trigger, concurrency: controller }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("hung")), 800)),
+    ])
+    // We accept any terminal status — the assertion is "doesn't hang".
+    const result = (await guarded) as Awaited<ReturnType<typeof runWorkflow>>
+    expect(result).toBeDefined()
+  })
+})

@@ -32,30 +32,9 @@ jest.mock("lucide-react", () => ({
 }))
 
 // Mock tooltip provider
-jest.mock("@/components/ui/tooltip", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipTrigger: ({ children, asChild }: { children: React.ReactNode; asChild?: boolean }) =>
-    asChild ? <>{children}</> : <span>{children}</span>,
-  TooltipContent: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
-}))
+jest.mock("@/components/ui/tooltip")
 
-jest.mock("@/components/ui/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuTrigger: ({ children, asChild }: { children: React.ReactNode; asChild?: boolean }) =>
-    asChild ? <>{children}</> : <button>{children}</button>,
-  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="dropdown-content">{children}</div>
-  ),
-  DropdownMenuItem: ({
-    children,
-    onClick,
-  }: {
-    children: React.ReactNode
-    onClick?: () => void
-    className?: string
-  }) => <button onClick={onClick}>{children}</button>,
-  DropdownMenuSeparator: () => <hr />,
-}))
+jest.mock("@/components/ui/dropdown-menu")
 
 const createMockApp = (overrides: Partial<A2UIAppInstance> = {}): A2UIAppInstance => ({
   id: "test-app-1",

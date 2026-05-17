@@ -81,6 +81,14 @@ export interface SlashCommand {
    * Code's `user-invocable: false` and `disable-model-invocation: true`.
    */
   hiddenFromPicker?: boolean
+  /**
+   * Grouping key used by surfaces that list commands by section — currently
+   * the tray's "All Commands ▶" submenu (`lib/tray/all-commands.ts`).
+   * Free-form, but the tray groups by these canonical buckets:
+   * `chat | diagnostics | system | goal | template | help | plugins`.
+   * Defaults to `"chat"` when omitted.
+   */
+  category?: string
 }
 
 const HELP_BODY_HEADER =
@@ -110,6 +118,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     name: "clear",
     description: "Start a fresh chat session, archiving the current one.",
     scope: "builtin",
+    category: "chat",
     handler: async (ctx) => {
       await ctx.startNewSession()
     },
@@ -118,6 +127,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     name: "help",
     description: "List all available commands.",
     scope: "builtin",
+    category: "help",
     handler: (ctx) => {
       ctx.pushSystemMessage(buildHelpText(BUILTIN_SLASH_COMMANDS))
     },
@@ -126,24 +136,28 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     name: "model",
     description: "Switch the model for this session.",
     scope: "builtin",
+    category: "system",
     handler: (ctx) => ctx.openSettings("general"),
   },
   {
     name: "agents",
     description: "Open the characters / agents panel.",
     scope: "builtin",
+    category: "system",
     handler: (ctx) => ctx.openSettings("characters"),
   },
   {
     name: "mcp",
     description: "Manage MCP servers attached to this session.",
     scope: "builtin",
+    category: "system",
     handler: (ctx) => ctx.openSettings("mcp"),
   },
   {
     name: "permissions",
     description: "Cycle the permission mode (default → acceptEdits → plan → bypass).",
     scope: "builtin",
+    category: "system",
     handler: (ctx) => {
       const order: (PermissionMode | null)[] = [null, "acceptEdits", "plan", "bypassPermissions"]
       const idx = order.indexOf(ctx.currentPermissionMode)
@@ -155,6 +169,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     name: "init",
     description: "Have Claude generate or refresh CLAUDE.md from this codebase.",
     scope: "builtin",
+    category: "template",
     template:
       "Please analyse this repository and produce (or update) the CLAUDE.md " +
       "file at the project root. Cover: project overview, dev commands, " +
@@ -166,6 +181,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     name: "review",
     description: "Ask Claude to code-review the current changes.",
     scope: "builtin",
+    category: "template",
     argumentHint: "<focus area?>",
     template:
       "Please code-review the current uncommitted changes in this repo. " +
@@ -176,12 +192,14 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     name: "reset",
     description: "Alias of /clear — start a fresh session.",
     scope: "builtin",
+    category: "chat",
     handler: handleReset,
   },
   {
     name: "sessions",
     description: "List all sessions with their last-updated time.",
     scope: "builtin",
+    category: "chat",
     handler: handleSessions,
   },
   {
@@ -189,18 +207,21 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     description: "Switch to an existing session by id or title (substring match).",
     argumentHint: "<id or title>",
     scope: "builtin",
+    category: "chat",
     handler: handleResume,
   },
   {
     name: "status",
     description: "Show this session's effective config + sidecar / API key health.",
     scope: "builtin",
+    category: "diagnostics",
     handler: handleStatus,
   },
   {
     name: "cost",
     description: "Show cumulative token usage and cost for this session.",
     scope: "builtin",
+    category: "diagnostics",
     handler: handleCost,
   },
   {
@@ -210,6 +231,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
       "With no arg, cycles like /permissions.",
     argumentHint: "<mode?>",
     scope: "builtin",
+    category: "system",
     handler: (ctx) => {
       const arg = ctx.args.trim()
       if (!arg) {
@@ -242,6 +264,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
       "Grant the current session read access to an additional directory (absolute path).",
     argumentHint: "<absolute path>",
     scope: "builtin",
+    category: "system",
     handler: (ctx) => {
       const path = ctx.args.trim()
       if (!path) {
@@ -265,6 +288,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     name: "compact",
     description: "Ask the SDK to summarise older turns and free up the context window.",
     scope: "builtin",
+    category: "diagnostics",
     // The Claude Agent SDK intercepts `/compact` as a user message and emits a
     // `compact_boundary` event. We dispatch it as a regular template so the
     // existing send pipeline carries it to the sidecar verbatim.
@@ -274,18 +298,21 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     name: "context",
     description: "Show this session's local message + token totals.",
     scope: "builtin",
+    category: "diagnostics",
     handler: handleContext,
   },
   {
     name: "doctor",
     description: "Run a runtime + auth + MCP health check.",
     scope: "builtin",
+    category: "diagnostics",
     handler: handleDoctor,
   },
   {
     name: "export",
     description: "Open the data settings panel to back up or export this session.",
     scope: "builtin",
+    category: "system",
     handler: (ctx) => {
       ctx.pushSystemMessage(
         "Opened Settings → Data. Use the **Download** icon in the chat header for a per-session export."
@@ -298,6 +325,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     description:
       "Set a standing goal — the agent auto-continues toward it until done or stopped (ADR-0013).",
     scope: "builtin",
+    category: "goal",
     argumentHint: "<objective | status | pause | resume | stop | update <text> | show>",
     handler: async (ctx) => {
       const result = await dispatchGoalSubcommand(ctx)

@@ -10,37 +10,7 @@ jest.mock("next-intl", () => ({
 
 // Radix DropdownMenu portals its content; stub it to render children inline so
 // menu items are queryable directly.
-jest.mock("@/components/ui/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuTrigger: ({
-    children,
-    asChild,
-    ...rest
-  }: {
-    children: React.ReactNode
-    asChild?: boolean
-  } & React.HTMLAttributes<HTMLElement>) =>
-    asChild ? <>{children}</> : <button {...rest}>{children}</button>,
-  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuItem: ({
-    children,
-    onClick,
-    ...rest
-  }: React.HTMLAttributes<HTMLDivElement> & { onClick?: () => void }) => (
-    <div
-      role="menuitem"
-      onClick={onClick}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") onClick?.()
-      }}
-      tabIndex={0}
-      {...rest}
-    >
-      {children}
-    </div>
-  ),
-  DropdownMenuSeparator: () => <hr />,
-}))
+jest.mock("@/components/ui/dropdown-menu")
 
 jest.mock("./task-stats-cards", () => ({
   __esModule: true,

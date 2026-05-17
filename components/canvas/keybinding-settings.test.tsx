@@ -8,12 +8,7 @@ import userEvent from "@testing-library/user-event"
 import { KeybindingSettings } from "./keybinding-settings"
 
 // Bypass TooltipProvider context (production wraps the app at layout.tsx).
-jest.mock("@/components/ui/tooltip", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}))
+jest.mock("@/components/ui/tooltip")
 
 // Mock next-intl
 jest.mock("next-intl", () => ({

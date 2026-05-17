@@ -16,13 +16,7 @@ jest.mock("@/stores", () => ({
 }))
 
 // Mock UI components
-jest.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children, className }: { children: React.ReactNode; className?: string }) => (
-    <div className={className} data-testid="scroll-area">
-      {children}
-    </div>
-  ),
-}))
+jest.mock("@/components/ui/scroll-area")
 
 jest.mock("./suggestion-item", () => ({
   SuggestionItem: ({

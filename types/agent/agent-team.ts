@@ -201,6 +201,16 @@ export interface AgentTeamConfig {
   autoCleanSharedMemory?: boolean
   /** Maximum shared memory entries per team */
   maxSharedMemoryEntries?: number
+  /**
+   * Per ADR-0022 §2 Layer 1.5. Minimum non-whitespace characters required in
+   * a teammate's output before it is considered a success. Default 0 (only
+   * non-empty is enforced — empty/whitespace always retries).
+   */
+  minOutputChars?: number
+  /** Run optional refusal-pattern detection on teammate output. Default false. */
+  detectRefusal?: boolean
+  /** Patterns considered refusals when detectRefusal is true. */
+  refusalPatterns?: string[]
 }
 
 /**

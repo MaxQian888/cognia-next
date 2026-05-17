@@ -23,6 +23,14 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 anyhow = "1"
 notify = "6"
 wasmparser = "0.221"
+# Used by `install` / `uninstall` / `dev --reload-url` to talk to a
+# running cognia desktop's CLI bridge. Plain HTTP because the bridge
+# binds to 127.0.0.1 only — see src-tauri/src/cli_bridge/.
+ureq = { version = "2", default-features = false, features = ["json"] }
+directories = "5"
+parking_lot = "0.12"
 
 [dev-dependencies]
 tempfile = "3"
+# Tiny in-process mock HTTP server for cmd_install / cmd_uninstall tests.
+tiny_http = "0.12"

@@ -63,30 +63,9 @@ jest.mock("@/components/ui/select", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/switch", () => ({
-  Switch: ({
-    checked,
-    onCheckedChange,
-  }: {
-    checked?: boolean
-    onCheckedChange?: (v: boolean) => void
-  }) => (
-    <input
-      type="checkbox"
-      checked={!!checked}
-      onChange={(e) => onCheckedChange?.(e.target.checked)}
-    />
-  ),
-}))
+jest.mock("@/components/ui/switch")
 
-jest.mock("@/components/ui/collapsible", () => ({
-  Collapsible: ({ open, children }: { open: boolean; children: React.ReactNode }) => (
-    <div data-open={open}>{children}</div>
-  ),
-  CollapsibleTrigger: ({ children, asChild }: { children: React.ReactNode; asChild?: boolean }) =>
-    asChild ? <>{children}</> : <button>{children}</button>,
-  CollapsibleContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+jest.mock("@/components/ui/collapsible")
 
 jest.mock("@/components/scheduler/timezone-select", () => ({
   __esModule: true,

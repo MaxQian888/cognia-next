@@ -44,15 +44,7 @@ jest.mock("@/lib/scheduler/task-templates", () => ({
 }))
 
 // Stub Dialog + Tabs + ScrollArea to render inline.
-jest.mock("@/components/ui/dialog", () => ({
-  Dialog: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
-    open ? <div role="dialog">{children}</div> : null,
-  DialogTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogHeader: ({ children }: { children: React.ReactNode }) => <header>{children}</header>,
-  DialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
-  DialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
-}))
+jest.mock("@/components/ui/dialog")
 
 jest.mock("@/components/ui/tabs", () => ({
   Tabs: ({
@@ -83,9 +75,7 @@ jest.mock("@/components/ui/tabs", () => ({
   TabsContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
 
-jest.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+jest.mock("@/components/ui/scroll-area")
 
 import { TaskTemplateGallery } from "./task-template-gallery"
 

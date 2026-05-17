@@ -39,7 +39,6 @@
     "docs",
     "mobile",
     "sidecar",
-    "sidecars",
     "out",
     ".next",
     "tests/e2e",

@@ -21,10 +21,10 @@ const eslintConfig = defineConfig([
     ".claude/**",
     "sidecar/**",
     "node_modules/**",
-    // VS Code extension fixture under sidecars/vscode-ext-host — simulates
+    // VS Code extension fixture under sidecar/vscode-ext-host — simulates
     // a real CJS extension on purpose (require("vscode")), and the .js file
     // is a pre-built artifact checked in to skip a build step in tests.
-    "sidecars/vscode-ext-host/tests/fixtures/**",
+    "sidecar/vscode-ext-host/tests/fixtures/**",
     // Bundled Monaco assets copied from node_modules by
     // scripts/copy-monaco-assets.mjs — minified vendor JS, never authored here.
     "public/monaco/**",

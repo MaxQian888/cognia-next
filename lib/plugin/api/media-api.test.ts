@@ -40,6 +40,10 @@ import {
 } from "./media-api"
 import { invoke } from "@tauri-apps/api/core"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
+import {
+  clearAllPluginPointDiagnostics,
+  getPluginPointDiagnostics,
+} from "../contracts/diagnostics-store"
 
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn(),
@@ -681,6 +685,47 @@ describe("Media Registry", () => {
       await jest.advanceTimersByTimeAsync(30_000)
 
       await expectation
+    })
+
+    it("records a diagnostic when ai.upscale provider call rejects (ADR 0016 T1)", async () => {
+      clearAllPluginPointDiagnostics()
+      ;(proxyFetch as jest.Mock).mockRejectedValue(new Error("provider down"))
+      const api = createMediaAPI(testPluginId, {} as never)
+
+      await expect(api.ai.upscale(createTestImageData(), 4)).rejects.toThrow("provider down")
+
+      const diagnostics = getPluginPointDiagnostics(testPluginId)
+      expect(diagnostics).toHaveLength(1)
+      expect(diagnostics[0]).toMatchObject({
+        code: "plugin.silent-failure",
+        severity: "warning",
+        pointId: "ai.upscale",
+      })
+    })
+
+    it("records a diagnostic on the xAI mask-rejection path of ai.inpaint", async () => {
+      clearAllPluginPointDiagnostics()
+      mockUseSettingsStoreGetState.mockReturnValue({
+        defaultProvider: "xai",
+        providerSettings: {
+          xai: {
+            providerId: "xai",
+            apiKey: "sk-xai",
+            enabled: true,
+            defaultModel: "grok-2-image",
+          },
+        },
+        customProviders: [],
+      })
+      const api = createMediaAPI(testPluginId, {} as never)
+
+      await expect(
+        api.ai.inpaint(createTestImageData(), createTestImageData(), "replace the sky")
+      ).rejects.toMatchObject({ code: "PROVIDER_ERROR" })
+
+      const diagnostics = getPluginPointDiagnostics(testPluginId)
+      expect(diagnostics).toHaveLength(1)
+      expect(diagnostics[0]).toMatchObject({ pointId: "ai.inpaint" })
     })
   })
 })

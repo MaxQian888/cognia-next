@@ -38,6 +38,7 @@ pub mod permissions;
 pub mod process_ops;
 pub mod shortcut_ops;
 pub mod signature;
+pub mod tray_items;
 pub mod vscode;
 pub mod wasm;
 pub mod window_ops;
@@ -96,6 +97,10 @@ pub struct PluginRuntimeState {
     pub shortcuts: Arc<RwLock<HashMap<String, shortcut_ops::ShortcutRecord>>>,
     /// Registered context-menu items keyed by `<plugin_id>:<item.id>`.
     pub context_menus: Arc<RwLock<HashMap<String, context_menu::ContextMenuRecord>>>,
+    /// Registered tray items keyed by `<plugin_id>:<item.id>`. Mirrors the
+    /// context-menu pattern; the renderer merges these into the tray menu
+    /// under "All Commands ▶ Plugins".
+    pub tray_items: Arc<RwLock<HashMap<String, tray_items::TrayItemRecord>>>,
     /// Tracked spawned process IDs keyed by `process_id`.
     pub processes: Arc<RwLock<HashMap<String, process_ops::ProcessRecord>>>,
 }
@@ -113,6 +118,7 @@ impl PluginRuntimeState {
             fs_watchers: Arc::new(RwLock::new(HashMap::new())),
             shortcuts: Arc::new(RwLock::new(HashMap::new())),
             context_menus: Arc::new(RwLock::new(HashMap::new())),
+            tray_items: Arc::new(RwLock::new(HashMap::new())),
             processes: Arc::new(RwLock::new(HashMap::new())),
         }
     }

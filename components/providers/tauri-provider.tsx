@@ -13,6 +13,10 @@ import { isTauri } from "@/lib/tauri"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
+import { useTrayStore } from "@/lib/tray/store"
+import { useSyncTrayToRust } from "@/lib/tray/sync"
+import { useSyncShortcutsToRust } from "@/lib/shortcuts/sync"
+import { rasterizeAndRegisterTrayIcons } from "@/lib/tray/icon-builder"
 
 const PREF_TRAY_ON_CLOSE = "tray.minimize-on-close"
 
@@ -29,10 +33,26 @@ const PREF_TRAY_ON_CLOSE = "tray.minimize-on-close"
 export function TauriProvider({ children }: { children: React.ReactNode }) {
   useTauriEvents()
   useSessionNotifications()
+  // System-tray + global-shortcut sync hooks. Each mounts a single
+  // subscription and pushes via the debounced IPC bridge once the user's
+  // persisted layout / bindings have hydrated.
+  useSyncTrayToRust()
+  useSyncShortcutsToRust()
 
   useEffect(() => {
     if (!isTauri()) return
     void ensureNotificationPermission()
+
+    // Kick off tray-store hydration as soon as the provider mounts. The
+    // sync hook above only flushes once `hydrated === true`, so the user
+    // never sees the default-flash overwrite their customised layout.
+    void useTrayStore.getState().hydrate()
+
+    // Rasterize and register the four Lucide-based tray icons. Each PNG
+    // is built once via an offscreen canvas, pushed to Rust as raw bytes,
+    // and cached there keyed by state — subsequent state swaps reuse the
+    // cached image without crossing the IPC boundary.
+    void rasterizeAndRegisterTrayIcons()
 
     void (async () => {
       // Push the saved tray-on-close preference into Rust so the window's

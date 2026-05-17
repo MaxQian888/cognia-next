@@ -6,9 +6,11 @@ import {
   buildCrashLogExportBundle,
   buildCrashLogItems,
   isCrashRelevantLogEntry,
+  serializeCrashLogBundle,
   summarizeCrashLogItems,
   type CrashDiagnosticsSnapshot,
   type CrashLogItem,
+  type CrashLogExportBundle,
 } from "./crash-log"
 import type { StructuredLogEntry, LogLevel } from "./types"
 import type { NativeLoggingReadiness } from "@/lib/native/native-logging-readiness"
@@ -256,5 +258,63 @@ describe("buildCrashLogExportBundle", () => {
     expect(data.path).toBe("[REDACTED]")
     expect(data.url).toBe("[REDACTED]")
     expect(data.user).toBe("alice") // 'user' is not in SAFE_KEY_HINTS
+  })
+})
+
+describe("serializeCrashLogBundle", () => {
+  function makeBundle(items: CrashLogItem[] = []): CrashLogExportBundle {
+    return {
+      exportedAt: "2026-04-29T00:00:00.000Z",
+      filters: { source: "all", level: "all", search: "" },
+      diagnostics: null,
+      items,
+    }
+  }
+
+  const sampleItem: CrashLogItem = {
+    id: "x",
+    title: "Boom",
+    summary: "Boom at fn",
+    timestamp: "2026-04-29T01:02:03.000Z",
+    level: "error",
+    module: "test",
+    sources: ["recent"],
+    logEntry: makeEntry("x", "error", { message: "Boom" }),
+  }
+
+  it("defaults to the 'bundle' format with cognia-crash-bundle filename + full JSON payload", () => {
+    const result = serializeCrashLogBundle(makeBundle([sampleItem]))
+    expect(result.filename).toMatch(/^cognia-crash-bundle-\d{4}-\d{2}-\d{2}\.json$/)
+    expect(result.mimeType).toBe("application/json")
+    const parsed = JSON.parse(result.content)
+    expect(parsed.items[0].id).toBe("x")
+    expect(parsed.exportedAt).toBe("2026-04-29T00:00:00.000Z")
+  })
+
+  it("'json' format emits cognia-crash-logs JSON with logEntry payloads only", () => {
+    const result = serializeCrashLogBundle(makeBundle([sampleItem]), "json")
+    expect(result.filename).toMatch(/^cognia-crash-logs-\d{4}-\d{2}-\d{2}\.json$/)
+    expect(result.mimeType).toBe("application/json")
+    const parsed = JSON.parse(result.content) as Array<Record<string, unknown>>
+    expect(parsed[0].id).toBe("x")
+    expect(parsed[0].message).toBe("Boom")
+    expect(parsed[0]).not.toHaveProperty("sources")
+  })
+
+  it("'text' format emits a plain log-line summary", () => {
+    const result = serializeCrashLogBundle(makeBundle([sampleItem]), "text")
+    expect(result.filename).toMatch(/^cognia-crash-logs-\d{4}-\d{2}-\d{2}\.txt$/)
+    expect(result.mimeType).toBe("text/plain")
+    expect(result.content).toContain("[ERROR]")
+    expect(result.content).toContain("test")
+    expect(result.content).toContain("Boom")
+  })
+
+  it("handles items without a logEntry by falling back to the item itself in 'json'", () => {
+    const noLogEntryItem: CrashLogItem = { ...sampleItem, logEntry: undefined }
+    const result = serializeCrashLogBundle(makeBundle([noLogEntryItem]), "json")
+    const parsed = JSON.parse(result.content) as Array<Record<string, unknown>>
+    expect(parsed[0].id).toBe("x")
+    expect(parsed[0].title).toBe("Boom")
   })
 })

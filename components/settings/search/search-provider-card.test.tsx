@@ -49,17 +49,8 @@ jest.mock("@/lib/logger", () => ({
   }),
 }))
 
-jest.mock("@/components/ui/collapsible", () => ({
-  Collapsible: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  CollapsibleTrigger: ({
-    children,
-    onClick,
-  }: {
-    children: React.ReactNode
-    onClick?: () => void
-  }) => <div onClick={onClick}>{children}</div>,
-  CollapsibleContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+// Shared stub: components/ui/__mocks__/collapsible.tsx (production uses asChild)
+jest.mock("@/components/ui/collapsible")
 
 import { SearchProviderCard } from "./search-provider-card"
 

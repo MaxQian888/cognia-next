@@ -823,3 +823,247 @@ describe("action.skill.invoke", () => {
     expect(r.output).toEqual({ skills: [], markdown: "" })
   })
 })
+
+// ── action.team.task.dispatch (ADR-0022 §3.6) ────────────────────────────
+jest.mock("@/lib/ai/agent/agent-executor", () => ({
+  executeAgent: jest.fn(),
+}))
+
+describe("action.team.task.dispatch", () => {
+  const setupTeamCtx = async (params: {
+    runId: string
+    workers: { id: string; name: string }[]
+  }) => {
+    const { registerTeamRunContext, __resetTeamRunContextForTesting } =
+      await import("@/lib/ai/agent/team/team-run-context")
+    const { createTeammatePool } = await import("@/lib/ai/agent/team/teammate-pool")
+    const { createBudgetGuard } = await import("@/lib/ai/agent/team/budget-guard")
+    const { createTeamNotifier } = await import("@/lib/ai/agent/team/team-notifier")
+    const { createConcurrencyController } =
+      await import("@/lib/workflow/runtime/concurrency-controller")
+    const { createModelPreferenceController } =
+      await import("@/lib/workflow/runtime/model-preference-controller")
+    __resetTeamRunContextForTesting()
+    const teammates = params.workers.map((w) => ({
+      id: w.id,
+      name: w.name,
+      teamId: "team-1",
+      description: "",
+      role: "teammate" as const,
+      status: "idle" as const,
+      config: {},
+      completedTaskIds: [],
+      tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      progress: 0,
+      createdAt: new Date(),
+    }))
+    const notifier = createTeamNotifier({ runId: params.runId, teamId: "team-1" })
+    const messages: Array<Record<string, unknown>> = []
+    const taskStatuses: Array<Record<string, unknown>> = []
+    const concurrency = createConcurrencyController(3)
+    const modelPref = createModelPreferenceController()
+    const pool = createTeammatePool({ teammates })
+    const budget = createBudgetGuard({
+      runId: params.runId,
+      limit: 0,
+      onCritical: "notify",
+      notifier,
+      concurrencyCtrl: concurrency,
+      modelCtrl: modelPref,
+    })
+    const ctx = {
+      runId: params.runId,
+      teamId: "team-1",
+      team: {
+        id: "team-1",
+        name: "Test",
+        config: { defaultTimeout: 1_000 },
+      } as never,
+      pool,
+      budget,
+      notifier,
+      concurrency,
+      modelPref,
+      storeWriter: {
+        addMessage: (m: Record<string, unknown>) => messages.push(m),
+        setTaskStatus: (id: string, status: string, result?: string, error?: string) =>
+          taskStatuses.push({ id, status, result, error }),
+        updateTeammate: () => {},
+      },
+    }
+    registerTeamRunContext(ctx as never)
+    return { messages, taskStatuses, ctx }
+  }
+
+  beforeEach(async () => {
+    const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
+    ;(executeAgent as jest.Mock).mockReset()
+  })
+
+  it("dispatches via executeAgent and returns text + teammateId", async () => {
+    await setupTeamCtx({ runId: "run_dispatch_ok", workers: [{ id: "w1", name: "W1" }] })
+    const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "result",
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+    })
+    const ctx = makeCtx("action.team.task.dispatch", {
+      teamId: "team-1",
+      taskId: "t1",
+      title: "Title",
+      description: "Desc",
+    }) as StepExecutionContext<Record<string, unknown>>
+    ;(ctx as { runId: string }).runId = "run_dispatch_ok"
+    const r = await exec("action.team.task.dispatch", ctx)
+    expect((r.output as { text: string }).text).toBe("result")
+    expect((r.output as { teammateId: string }).teammateId).toBe("w1")
+  })
+
+  it("throws nonRetryable when TeamRunContext is missing", async () => {
+    const { __resetTeamRunContextForTesting } = await import("@/lib/ai/agent/team/team-run-context")
+    __resetTeamRunContextForTesting()
+    const ctx = makeCtx("action.team.task.dispatch", {
+      teamId: "team-1",
+      taskId: "t1",
+      title: "Title",
+      description: "Desc",
+    }) as StepExecutionContext<Record<string, unknown>>
+    ;(ctx as { runId: string }).runId = "run_no_ctx"
+    await expect(exec("action.team.task.dispatch", ctx)).rejects.toThrow(/no TeamRunContext/)
+  })
+
+  it("throws retryable when pool has no available teammate", async () => {
+    const { ctx: teamCtx } = await setupTeamCtx({
+      runId: "run_no_team",
+      workers: [{ id: "w1", name: "W1" }],
+    })
+    teamCtx.pool.recordFailure("w1", new Error("e1"))
+    teamCtx.pool.recordFailure("w1", new Error("e2"))
+    expect(teamCtx.pool.claim("anything")).toBeNull()
+    const ctx = makeCtx("action.team.task.dispatch", {
+      teamId: "team-1",
+      taskId: "t1",
+      title: "Title",
+      description: "Desc",
+    }) as StepExecutionContext<Record<string, unknown>>
+    ;(ctx as { runId: string }).runId = "run_no_team"
+    await expect(exec("action.team.task.dispatch", ctx)).rejects.toThrow(/no available teammate/)
+  })
+
+  it("records success in pool and accumulates budget on completion", async () => {
+    const { ctx: teamCtx } = await setupTeamCtx({
+      runId: "run_records",
+      workers: [{ id: "w1", name: "W1" }],
+    })
+    const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "ok",
+      usage: { promptTokens: 5, completionTokens: 3, totalTokens: 8 },
+    })
+    const ctx = makeCtx("action.team.task.dispatch", {
+      teamId: "team-1",
+      taskId: "t1",
+      title: "Title",
+      description: "Desc",
+    }) as StepExecutionContext<Record<string, unknown>>
+    ;(ctx as { runId: string }).runId = "run_records"
+    await exec("action.team.task.dispatch", ctx)
+    expect(teamCtx.budget.status().used).toBe(8)
+  })
+
+  it("records failure and rethrows when executeAgent throws", async () => {
+    await setupTeamCtx({ runId: "run_fail", workers: [{ id: "w1", name: "W1" }] })
+    const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
+    ;(executeAgent as jest.Mock).mockRejectedValue(new Error("LLM down"))
+    const ctx = makeCtx("action.team.task.dispatch", {
+      teamId: "team-1",
+      taskId: "t1",
+      title: "Title",
+      description: "Desc",
+    }) as StepExecutionContext<Record<string, unknown>>
+    ;(ctx as { runId: string }).runId = "run_fail"
+    await expect(exec("action.team.task.dispatch", ctx)).rejects.toThrow(/LLM down/)
+  })
+})
+
+// ── action.team.task.dispatch output validation (PR 6) ────────────────────
+describe("action.team.task.dispatch output validation", () => {
+  beforeEach(async () => {
+    const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
+    ;(executeAgent as jest.Mock).mockReset()
+  })
+
+  it("empty output triggers EMPTY_OUTPUT retry path", async () => {
+    const { ctx: teamCtx } = await (async () => {
+      const { registerTeamRunContext, __resetTeamRunContextForTesting } =
+        await import("@/lib/ai/agent/team/team-run-context")
+      __resetTeamRunContextForTesting()
+      const { createTeammatePool } = await import("@/lib/ai/agent/team/teammate-pool")
+      const { createBudgetGuard } = await import("@/lib/ai/agent/team/budget-guard")
+      const { createTeamNotifier } = await import("@/lib/ai/agent/team/team-notifier")
+      const { createConcurrencyController } =
+        await import("@/lib/workflow/runtime/concurrency-controller")
+      const { createModelPreferenceController } =
+        await import("@/lib/workflow/runtime/model-preference-controller")
+      const teammates = [
+        {
+          id: "w1",
+          name: "W1",
+          teamId: "team-1",
+          description: "",
+          role: "teammate" as const,
+          status: "idle" as const,
+          config: {},
+          completedTaskIds: [],
+          tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          progress: 0,
+          createdAt: new Date(),
+        },
+      ]
+      const notifier = createTeamNotifier({ runId: "run_empty", teamId: "team-1" })
+      const concurrency = createConcurrencyController(3)
+      const modelPref = createModelPreferenceController()
+      const pool = createTeammatePool({ teammates })
+      const budget = createBudgetGuard({
+        runId: "run_empty",
+        limit: 0,
+        onCritical: "notify",
+        notifier,
+        concurrencyCtrl: concurrency,
+        modelCtrl: modelPref,
+      })
+      const ctx = {
+        runId: "run_empty",
+        teamId: "team-1",
+        team: { id: "team-1", name: "Test", config: { defaultTimeout: 1_000 } } as never,
+        pool,
+        budget,
+        notifier,
+        concurrency,
+        modelPref,
+        storeWriter: {
+          addMessage: () => {},
+          setTaskStatus: () => {},
+          updateTeammate: () => {},
+        },
+      }
+      registerTeamRunContext(ctx as never)
+      return { ctx }
+    })()
+    const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "   \n  \t  ",
+      usage: { promptTokens: 1, completionTokens: 0, totalTokens: 1 },
+    })
+    const stepCtx = makeCtx("action.team.task.dispatch", {
+      teamId: "team-1",
+      taskId: "t1",
+      title: "T",
+      description: "D",
+    }) as StepExecutionContext<Record<string, unknown>>
+    ;(stepCtx as { runId: string }).runId = "run_empty"
+    await expect(exec("action.team.task.dispatch", stepCtx)).rejects.toThrow(/EMPTY_OUTPUT/)
+    // Verify pool recorded the failure
+    expect(teamCtx.pool.availableCount()).toBe(1) // single teammate still available (1 failure, no quarantine yet)
+  })
+})

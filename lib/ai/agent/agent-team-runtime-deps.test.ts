@@ -134,100 +134,19 @@ describe("buildLeadPlanningPrompt", () => {
   })
 })
 
-describe("runTeammateTask", () => {
-  it("posts broadcast then result_share in order on success", async () => {
-    const team = makeTeam()
-    const teammate = makeTeammate()
-    seedStore(team, [makeLead(), teammate])
-    const executeAgent = jest.fn(async () => ({ text: "Found 3 sources." }))
-    const { runTeammateTask } = buildAgentTeamRuntimeDeps({ executeAgent })
-
-    const out = await runTeammateTask({
-      team,
-      teammate,
-      task: makeTask(),
-      signal: new AbortController().signal,
-    })
-
-    expect(out).toEqual({ result: "Found 3 sources." })
-    const messages = useAgentTeamStore.getState().getTeamMessages("team-1")
-    expect(messages.map((m) => m.type)).toEqual(["broadcast", "result_share"])
-    expect(messages[0]?.content).toBe("Starting: Gather sources")
-    expect(messages[1]?.content).toBe("Found 3 sources.")
-  })
-
-  it("posts a system message and returns error on executeAgent rejection", async () => {
-    const team = makeTeam()
-    const teammate = makeTeammate()
-    seedStore(team, [makeLead(), teammate])
-    const executeAgent = jest.fn(async () => {
-      throw new Error("provider unreachable")
-    })
-    const { runTeammateTask } = buildAgentTeamRuntimeDeps({ executeAgent })
-
-    const out = await runTeammateTask({
-      team,
-      teammate,
-      task: makeTask(),
-      signal: new AbortController().signal,
-    })
-
-    expect(out.error).toBe("provider unreachable")
-    expect(out.result).toBe("")
-    const messages = useAgentTeamStore.getState().getTeamMessages("team-1")
-    expect(messages.map((m) => m.type)).toEqual(["broadcast", "system"])
-    expect(messages[1]?.content).toContain("provider unreachable")
-  })
-
-  it("posts shutdown and rethrows when the signal aborts", async () => {
-    const team = makeTeam()
-    const teammate = makeTeammate()
-    seedStore(team, [makeLead(), teammate])
-    const ac = new AbortController()
-    const executeAgent = jest.fn(async () => {
-      ac.abort(new Error("user-cancelled"))
-      const err = new Error("aborted")
-      ;(err as Error & { name: string }).name = "AbortError"
-      throw err
-    })
-    const { runTeammateTask } = buildAgentTeamRuntimeDeps({ executeAgent })
-
-    await expect(
-      runTeammateTask({ team, teammate, task: makeTask(), signal: ac.signal })
-    ).rejects.toThrow(/aborted/)
-
-    const messages = useAgentTeamStore.getState().getTeamMessages("team-1")
-    expect(messages.map((m) => m.type)).toEqual(["broadcast", "shutdown"])
-  })
-
-  it("truncates very long results before posting them", async () => {
-    const team = makeTeam()
-    const teammate = makeTeammate()
-    seedStore(team, [makeLead(), teammate])
-    const long = "x".repeat(2000)
-    const executeAgent = jest.fn(async () => ({ text: long }))
-    const { runTeammateTask } = buildAgentTeamRuntimeDeps({ executeAgent })
-
-    await runTeammateTask({
-      team,
-      teammate,
-      task: makeTask(),
-      signal: new AbortController().signal,
-    })
-
-    const messages = useAgentTeamStore.getState().getTeamMessages("team-1")
-    const resultMsg = messages.find((m) => m.type === "result_share")
-    expect(resultMsg?.content.length).toBeLessThanOrEqual(1200)
-    expect(resultMsg?.content.endsWith("…")).toBe(true)
-  })
-})
+// runTeammateTask was deleted in the PR 4 cutover (ADR-0022 §3.9).
+// Per-task dispatch now lives in the action.team.task.dispatch workflow node
+// executor; its tests are in lib/workflow/nodes/built-ins.test.ts.
 
 describe("runLeadPlanning", () => {
-  it("posts system + plan_approval messages and returns the plan text", async () => {
+  // After the PR 4 cutover (ADR-0022 §3.9) runLeadPlanning is silent — it
+  // returns planText from executeAgent and rethrows on failure. Message
+  // posting moves to the synthesizer / UI gate.
+
+  it("returns the plan text from executeAgent on success", async () => {
     const team = makeTeam()
     const lead = makeLead()
-    const teammate = makeTeammate()
-    seedStore(team, [lead, teammate])
+    seedStore(team, [lead, makeTeammate()])
     const planText = '```json\n{ "summary": "Plan", "steps": [] }\n```'
     const executeAgent = jest.fn(async () => ({ text: planText }))
     const { runLeadPlanning } = buildAgentTeamRuntimeDeps({ executeAgent })
@@ -240,12 +159,10 @@ describe("runLeadPlanning", () => {
     })
 
     expect(out.planText).toBe(planText)
-    const messages = useAgentTeamStore.getState().getTeamMessages("team-1")
-    expect(messages.map((m) => m.type)).toEqual(["system", "plan_approval"])
-    expect(messages[0]?.content).toBe("Drafting plan…")
+    expect(executeAgent).toHaveBeenCalledTimes(1)
   })
 
-  it("uses revision messaging when given feedback", async () => {
+  it("forwards feedback into the prompt during revisions", async () => {
     const team = makeTeam()
     const lead = makeLead()
     seedStore(team, [lead, makeTeammate()])
@@ -259,11 +176,13 @@ describe("runLeadPlanning", () => {
       signal: new AbortController().signal,
     })
 
-    const messages = useAgentTeamStore.getState().getTeamMessages("team-1")
-    expect(messages[0]?.content).toBe("Revising plan with reviewer feedback…")
+    const firstCall = (executeAgent as jest.Mock).mock.calls[0]
+    const prompt = firstCall?.[0] as string
+    expect(prompt).toContain("Add tests")
+    expect(prompt).toContain("Revise the plan accordingly")
   })
 
-  it("posts system on failure and rethrows", async () => {
+  it("rethrows executeAgent failures", async () => {
     const team = makeTeam()
     const lead = makeLead()
     seedStore(team, [lead, makeTeammate()])
@@ -280,9 +199,5 @@ describe("runLeadPlanning", () => {
         signal: new AbortController().signal,
       })
     ).rejects.toThrow("planning blew up")
-
-    const messages = useAgentTeamStore.getState().getTeamMessages("team-1")
-    expect(messages.map((m) => m.type)).toEqual(["system", "system"])
-    expect(messages[1]?.content).toContain("planning blew up")
   })
 })

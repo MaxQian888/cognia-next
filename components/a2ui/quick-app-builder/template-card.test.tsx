@@ -17,21 +17,7 @@ jest.mock("@/lib/utils", () => ({
   cn: (...classes: Array<string | false | null | undefined>) => classes.filter(Boolean).join(" "),
 }))
 
-jest.mock("@/components/ui/button", () => ({
-  Button: ({
-    children,
-    onClick,
-    className,
-  }: {
-    children: React.ReactNode
-    onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void
-    className?: string
-  }) => (
-    <button type="button" className={className} onClick={onClick}>
-      {children}
-    </button>
-  ),
-}))
+jest.mock("@/components/ui/button")
 
 jest.mock("@/components/ui/card", () => ({
   Card: ({
@@ -63,9 +49,7 @@ jest.mock("@/components/ui/card", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/badge", () => ({
-  Badge: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
-}))
+jest.mock("@/components/ui/badge")
 
 jest.mock("lucide-react", () => ({
   Plus: ({ className }: { className?: string }) => (

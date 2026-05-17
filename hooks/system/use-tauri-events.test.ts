@@ -102,6 +102,13 @@ jest.mock("@/lib/tauri/opener", () => ({
   openExternal: (...a: unknown[]) => openExternalMock(...a),
 }))
 
+const dispatchTrayClickMock = jest.fn()
+const dispatchShortcutMock = jest.fn()
+jest.mock("@/lib/tray/dispatcher", () => ({
+  dispatchTrayClick: (...a: unknown[]) => dispatchTrayClickMock(...a),
+  dispatchShortcut: (...a: unknown[]) => dispatchShortcutMock(...a),
+}))
+
 import { useTauriEvents } from "./use-tauri-events"
 
 beforeEach(() => {
@@ -121,6 +128,8 @@ beforeEach(() => {
   saveSettings.mockClear()
   openDialogMock.mockReset()
   openExternalMock.mockClear()
+  dispatchTrayClickMock.mockClear()
+  dispatchShortcutMock.mockClear()
 })
 
 async function flushPromises() {
@@ -270,6 +279,46 @@ describe("useTauriEvents", () => {
     it("non-array payload still flows through", async () => {
       await fireDeepLinks("cognia://chat/single")
       expect(setActiveSession).toHaveBeenCalledWith("single")
+    })
+  })
+
+  describe("unified tray / shortcut dispatch", () => {
+    it("subscribes to the new unified channels", async () => {
+      renderHook(() => useTauriEvents())
+      await flushPromises()
+      expect(listenHandlers["tray://item-clicked"]).toBeDefined()
+      expect(listenHandlers["shortcut://triggered"]).toBeDefined()
+    })
+
+    it("tray://item-clicked forwards the payload to dispatchTrayClick", async () => {
+      renderHook(() => useTauriEvents())
+      await flushPromises()
+      const payload = { kind: "slash", command: "goal" }
+      listenHandlers["tray://item-clicked"]?.({
+        payload: { id: "tray.quick-goal", payload },
+      })
+      expect(dispatchTrayClickMock).toHaveBeenCalledWith(payload)
+    })
+
+    it("tray://item-clicked tolerates a missing payload", async () => {
+      renderHook(() => useTauriEvents())
+      await flushPromises()
+      listenHandlers["tray://item-clicked"]?.({ payload: { id: "x" } })
+      expect(dispatchTrayClickMock).toHaveBeenCalledWith(undefined)
+    })
+
+    it("shortcut://triggered forwards the id to dispatchShortcut", async () => {
+      renderHook(() => useTauriEvents())
+      await flushPromises()
+      listenHandlers["shortcut://triggered"]?.({ payload: { id: "goal.pause" } })
+      expect(dispatchShortcutMock).toHaveBeenCalledWith("goal.pause")
+    })
+
+    it("shortcut://triggered ignores empty payloads", async () => {
+      renderHook(() => useTauriEvents())
+      await flushPromises()
+      listenHandlers["shortcut://triggered"]?.({ payload: { id: "" } })
+      expect(dispatchShortcutMock).not.toHaveBeenCalled()
     })
   })
 

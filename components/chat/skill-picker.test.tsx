@@ -2,9 +2,9 @@
  * @jest-environment jsdom
  */
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}))
+// next-intl is globally mocked in jest.setup.ts (key-resolving translator backed by
+// i18n/messages/en.json). Inline override removed — this suite asserts on fixture skill
+// names, not translation strings.
 
 const skillsRef: { current: import("@/lib/claude/types").Skill[] } = { current: [] }
 jest.mock("dexie-react-hooks", () => ({

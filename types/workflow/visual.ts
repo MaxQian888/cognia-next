@@ -32,6 +32,7 @@ export type WorkflowNodeKind =
   | "trigger.chat.message"
   | "trigger.webhook"
   | "trigger.github.webhook"
+  | "trigger.team"
   // Actions on cognia-next runtime entities
   | "action.character.send"
   | "action.character.create"
@@ -39,6 +40,7 @@ export type WorkflowNodeKind =
   | "action.team.run"
   | "action.team.create"
   | "action.team.update"
+  | "action.team.task.dispatch"
   | "action.skill.invoke"
   | "action.skill.upsert"
   | "action.twin.rag"
@@ -131,12 +133,14 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.chat.message",
   "trigger.webhook",
   "trigger.github.webhook",
+  "trigger.team",
   "action.character.send",
   "action.character.create",
   "action.character.update",
   "action.team.run",
   "action.team.create",
   "action.team.update",
+  "action.team.task.dispatch",
   "action.skill.invoke",
   "action.skill.upsert",
   "action.twin.rag",
@@ -285,6 +289,13 @@ export interface WorkflowSettings {
   timeoutMs: number
   /** How many runs of THIS workflow may execute concurrently. */
   concurrency: number
+  /**
+   * Per ADR-0022 §3.7. Max in-flight nodes WITHIN a single run for the
+   * ready-set scheduler. Optional and defaults to 1 in `runWorkflow` to
+   * preserve the legacy sequential behavior. NOT the same as `concurrency`
+   * (that field caps concurrent RUNS of the same workflow).
+   */
+  maxConcurrency?: number
   retryDefaults: WorkflowRetryPolicy
   /** Default cron timezone — falls back to AppSettings.timezone. */
   timezone?: string

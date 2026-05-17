@@ -17,6 +17,8 @@ import { buildExtensionDescriptor } from "../core/descriptor"
 import { validatePluginManifest } from "../core/validation"
 import { compareVersions, satisfiesConstraint } from "./dependency-resolver"
 import { resolvePluginIcon } from "../icon"
+import { getPluginSignatureVerifier } from "../security/signature"
+import { recordSilentFailure } from "../contracts/diagnostics-store"
 
 // =============================================================================
 // Types
@@ -135,6 +137,7 @@ export type MarketplaceErrorCategory =
   | "validation"
   | "unsupported_env"
   | "install_conflict"
+  | "signature_invalid"
   | "unknown"
 
 export interface MarketplaceOperationError {
@@ -928,10 +931,52 @@ export class PluginMarketplace {
           pluginDir,
         })
       }
+
+      // ADR 0016 P0-3 — Verify signature before promoting the install. The
+      // verifier's `config.requireSignatures` is wired to the user-visible
+      // Settings → Plugins → Policy toggle via `applyPluginPolicyToRuntime`,
+      // so this single call honours whichever stance the user has set.
+      // Default is strict-on (signature required); turning the toggle off
+      // still runs verification but records a bypass diagnostic so the
+      // Audit Panel surfaces the lowered guarantee.
+      const pluginPath = `${pluginDir}/${pluginId}`
+      const verificationResult = await getPluginSignatureVerifier().verify(pluginPath)
+      if (!verificationResult.valid) {
+        const reason = verificationResult.reason || "Signature verification failed"
+        this.emitProgress({
+          pluginId,
+          stage: "error",
+          progress: 0,
+          message: reason,
+          error: reason,
+        })
+        return {
+          success: false,
+          error: reason,
+          errorCategory: "signature_invalid",
+          retryable: false,
+        }
+      }
+      if (verificationResult.warnings.length > 0) {
+        // Verifier returned `valid: true` but downgraded the result to
+        // warning-only — happens when the user has disabled signatureRequired
+        // and the bundle is unsigned, or when the signer isn't in the
+        // trusted-publishers list. Surface every bypass in the Audit Panel.
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "marketplace.signatureBypass",
+            message: `Installed without strict signature enforcement: ${verificationResult.warnings.join(", ")}`,
+            expected: false,
+          },
+          new Error(verificationResult.warnings.join(", "))
+        )
+      }
+
       const descriptor = buildExtensionDescriptor({
         manifest: plugin.manifest,
         source: "marketplace",
-        path: `${pluginDir}/${pluginId}`,
+        path: pluginPath,
         pluginDirectory: pluginDir,
         installRootKind: "installed",
       })

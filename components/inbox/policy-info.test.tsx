@@ -5,14 +5,7 @@
 import { render, screen } from "@testing-library/react"
 
 // Tooltip stubbed — TooltipContent renders directly in DOM
-jest.mock("@/components/ui/tooltip", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  TooltipTrigger: ({ children, asChild }: { children: React.ReactNode; asChild?: boolean }) =>
-    asChild ? <>{children}</> : <div>{children}</div>,
-  TooltipContent: ({ children, ...rest }: { children: React.ReactNode; [k: string]: unknown }) => (
-    <div {...rest}>{children}</div>
-  ),
-}))
+jest.mock("@/components/ui/tooltip")
 
 import { PolicyInfo } from "./policy-info"
 import type { TriggerPolicy } from "@/types/connectors/policy"

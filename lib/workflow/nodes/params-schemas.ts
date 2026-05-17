@@ -329,12 +329,20 @@ export const PARAMS_SCHEMAS: Record<WorkflowNodeKind, z.ZodTypeAny> = {
   "trigger.chat.message": ChatMessageTriggerParams,
   "trigger.webhook": WebhookTriggerParams,
   "trigger.github.webhook": WebhookTriggerParams,
+  "trigger.team": z.object({}),
   // Actions: characters
   "action.character.send": CharacterSendParams,
   "action.character.create": CharacterCreateParams,
   "action.character.update": CharacterUpdateParams,
   // Actions: teams
   "action.team.run": TeamRunParams,
+  "action.team.task.dispatch": z.object({
+    teamId: requiredString,
+    taskId: requiredString,
+    title: requiredString,
+    description: requiredString,
+    expectedOutput: optionalString,
+  }),
   "action.team.create": TeamCreateParams,
   "action.team.update": TeamUpdateParams,
   // Actions: skills

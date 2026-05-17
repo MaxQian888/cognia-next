@@ -5,6 +5,7 @@ import {
   type LogLevel,
   type StructuredLogEntry,
 } from "./types"
+import { downloadFile } from "@/lib/files/download"
 
 // cognia-next has no window-diagnostics or local-runtime subsystems yet, so
 // the crash bundle treats these as semi-opaque shapes. They keep a small
@@ -340,4 +341,172 @@ export function buildCrashLogExportBundle(params: {
       : null,
     items: params.items.map((item) => sanitizeCrashLogItem(item)),
   }
+}
+
+export type CrashLogExportFormat = "bundle" | "json" | "text"
+
+export interface SerializedCrashLogExport {
+  filename: string
+  content: string
+  mimeType: string
+}
+
+/**
+ * Pure serializer shared by `useCrashLogs.exportBundle` and
+ * `exportCrashLogBundleNow`. Single source of truth for filename / mime / payload
+ * per format so the on-page "Export crash log" CTA produces byte-identical files
+ * to the Logs page export.
+ */
+export function serializeCrashLogBundle(
+  bundle: CrashLogExportBundle,
+  format: CrashLogExportFormat = "bundle"
+): SerializedCrashLogExport {
+  const datePart = new Date().toISOString().slice(0, 10)
+
+  if (format === "json") {
+    return {
+      filename: `cognia-crash-logs-${datePart}.json`,
+      content: JSON.stringify(
+        bundle.items.map((item) => item.logEntry ?? item),
+        null,
+        2
+      ),
+      mimeType: "application/json",
+    }
+  }
+
+  if (format === "text") {
+    return {
+      filename: `cognia-crash-logs-${datePart}.txt`,
+      content: bundle.items
+        .map(
+          (item) => `${item.timestamp} [${item.level.toUpperCase()}] ${item.module} ${item.title}`
+        )
+        .join("\n"),
+      mimeType: "text/plain",
+    }
+  }
+
+  return {
+    filename: `cognia-crash-bundle-${datePart}.json`,
+    content: JSON.stringify(bundle, null, 2),
+    mimeType: "application/json",
+  }
+}
+
+export interface ExportCrashLogBundleNowOptions {
+  /**
+   * Error that triggered the export (typically the `error` prop of an
+   * App-Router `error.tsx` / `global-error.tsx` boundary). When provided it is
+   * recorded into the in-memory recent-errors stream first so the assembled
+   * bundle includes this crash even if the renderer never ran the regular
+   * logger transport path.
+   */
+  triggerError?: Error & { digest?: string }
+  /** Logger module recorded against the synthetic trigger entry. Default "app". */
+  subsystem?: string
+  format?: CrashLogExportFormat
+  /** Override the auto-generated filename (extension preserved by caller). */
+  filename?: string
+}
+
+/**
+ * One-shot crash-log export for use inside route-level error boundaries.
+ *
+ * Mirrors `useCrashLogs.exportBundle` but without React state / subscriptions:
+ * gathers recent errors, persisted logs (via IndexedDB transport), and native
+ * diagnostics in a single async pass, then triggers a browser download via
+ * `lib/files/download.ts::downloadFile`. Browser-only.
+ */
+export async function exportCrashLogBundleNow(
+  opts: ExportCrashLogBundleNowOptions = {}
+): Promise<void> {
+  if (typeof window === "undefined") {
+    throw new Error("exportCrashLogBundleNow requires a browser environment")
+  }
+
+  // Lazy-load the runtime dependencies so this module remains tree-shakable for
+  // any consumer that only imports the pure helpers above.
+  const [
+    { getRecentErrorLogs, recordRecentErrorLog },
+    { getIndexedDBTransport },
+    { getNativeLoggingReadiness, getNativeLoggingReadinessSnapshot, getNativeLogDirectory },
+    { getLocalRuntimeDiagnostics },
+    { getWindowDiagnostics },
+  ] = await Promise.all([
+    import("./recent-errors"),
+    import("./bootstrap"),
+    import("@/lib/native/native-logging"),
+    import("@/lib/native/local-runtime"),
+    import("@/lib/native/window-diagnostics"),
+  ])
+
+  if (opts.triggerError) {
+    const nowIso = new Date().toISOString()
+    const message = opts.triggerError.message || opts.triggerError.name || "Route boundary error"
+    recordRecentErrorLog({
+      id: `crash-trigger:${opts.triggerError.digest ?? nowIso}`,
+      timestamp: nowIso,
+      level: "error",
+      module: opts.subsystem ?? "app",
+      message,
+      stack: opts.triggerError.stack,
+      origin: "frontend",
+      data: opts.triggerError.digest ? { digest: opts.triggerError.digest } : undefined,
+    })
+  }
+
+  const recentErrors = getRecentErrorLogs()
+
+  let persistedLogs: StructuredLogEntry[] = []
+  try {
+    const transport = getIndexedDBTransport()
+    if (transport) {
+      persistedLogs = await transport.getLogs({ limit: 400 })
+    }
+  } catch {
+    persistedLogs = []
+  }
+
+  let diagnostics: CrashDiagnosticsSnapshot | null = null
+  try {
+    await getNativeLoggingReadiness()
+    const [windowDiagnostics, localRuntimeDiagnostics, logDirectoryPath] = await Promise.all([
+      getWindowDiagnostics().catch(() => null),
+      getLocalRuntimeDiagnostics().catch(() => null),
+      getNativeLogDirectory().catch(() => null),
+    ])
+    diagnostics = {
+      capturedAt: new Date().toISOString(),
+      nativeLogging: getNativeLoggingReadinessSnapshot(),
+      windowDiagnostics,
+      localRuntimeDiagnostics,
+      logDirectoryPath,
+      diagnosticsError: null,
+    }
+  } catch (err) {
+    diagnostics = {
+      capturedAt: new Date().toISOString(),
+      nativeLogging: getNativeLoggingReadinessSnapshot(),
+      windowDiagnostics: null,
+      localRuntimeDiagnostics: null,
+      logDirectoryPath: null,
+      diagnosticsError: err instanceof Error ? err.message : String(err),
+    }
+  }
+
+  const items = buildCrashLogItems({
+    recentErrors,
+    persistedLogs: persistedLogs.filter(isCrashRelevantLogEntry),
+    diagnostics,
+  })
+  const bundle = buildCrashLogExportBundle({
+    items,
+    diagnostics,
+    exportedAt: new Date().toISOString(),
+    filters: { source: "all", level: "all", search: "" },
+  })
+
+  const serialized = serializeCrashLogBundle(bundle, opts.format ?? "bundle")
+  downloadFile(opts.filename ?? serialized.filename, serialized.content, serialized.mimeType)
 }

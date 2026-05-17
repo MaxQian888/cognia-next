@@ -363,9 +363,12 @@ interface PluginsPolicy {
   autoUpdate: boolean
 }
 
+// ADR 0016 P0-3 (2026-05-17) — `signatureRequired` is default-on. Toggle
+// stays user-overridable; the policy panel writes the explicit choice into
+// localStorage so users who opted out keep that preference.
 const DEFAULT_POLICY: PluginsPolicy = {
   governance: "warn",
-  signatureRequired: false,
+  signatureRequired: true,
   autoUpdate: false,
 }
 
@@ -377,7 +380,11 @@ function readPolicy(): PluginsPolicy {
     const parsed = JSON.parse(raw)
     return {
       governance: parsed.governance === "block" ? "block" : "warn",
-      signatureRequired: !!parsed.signatureRequired,
+      // Only respect an explicit `false`; missing/undefined keeps the new
+      // default-on behavior so users upgrading without ever opening Settings
+      // still get strict enforcement.
+      signatureRequired:
+        typeof parsed.signatureRequired === "boolean" ? parsed.signatureRequired : true,
       autoUpdate: !!parsed.autoUpdate,
     }
   } catch {

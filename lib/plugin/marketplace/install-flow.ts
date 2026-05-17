@@ -18,6 +18,7 @@
 
 import type { PluginManifest, PluginPermission } from "@/types/plugin"
 import { listPlugins, setPluginConfig } from "@/lib/db/plugins"
+import { ConflictDetector } from "@/lib/plugin/package/conflict-detector"
 
 // =============================================================================
 // Public types
@@ -91,23 +92,63 @@ export type RunMarketplaceInstallResult =
 // =============================================================================
 
 /**
- * Detect conflicts against the live plugin table. Today only id collisions
- * raise a conflict — additional rules (incompatible dependency, signing
- * required, etc.) can be folded in here without changing the orchestrator.
+ * Detect conflicts against the live plugin table. Surfaces:
+ * - id collision with an already-installed plugin (severity: high)
+ * - permission / command / shortcut / namespace overlaps with installed
+ *   plugins, detected via `ConflictDetector` (ADR 0016 P1-6, 2026-05-17).
+ *   Severity is mapped from the detector's `error`/`warning`/`info` band.
+ *
+ * Additional rules (signing required, incompatible dependency, etc.) can be
+ * folded in here without changing the orchestrator.
  */
-async function detectConflicts(pluginId: string): Promise<PreInstallConflict | null> {
+async function detectConflicts(
+  pluginId: string,
+  candidateManifest: PluginManifest | null
+): Promise<PreInstallConflict | null> {
   const installed = await listPlugins()
+  const reasons: PreInstallConflict["reasons"] = []
+
   const existing = installed.find((p) => p.id === pluginId)
-  if (!existing) return null
-  return {
-    pluginId,
-    reasons: [
-      {
-        severity: "high",
-        message: `alreadyInstalled:${existing.version}`,
-      },
-    ],
+  if (existing) {
+    reasons.push({
+      severity: "high",
+      message: `alreadyInstalled:${existing.version}`,
+    })
   }
+
+  if (candidateManifest) {
+    const detector = new ConflictDetector()
+
+    // ConflictDetector reads `commands` and `shortcuts` as top-level fields on
+    // PluginRegistration, not from manifest. Extract them from the manifest's
+    // `commands` block where each entry has an `id` and optional `shortcut`.
+    const extractRegistration = (manifest: PluginManifest) => {
+      const cmdDefs = (manifest.commands ?? []) as Array<{ id?: string; shortcut?: string }>
+      return {
+        manifest,
+        commands: cmdDefs.map((c) => c.id ?? "").filter(Boolean),
+        shortcuts: cmdDefs.map((c) => c.shortcut ?? "").filter(Boolean),
+      }
+    }
+
+    detector.setPlugins(
+      installed
+        .filter((row) => row.id !== pluginId)
+        .map((row) => extractRegistration(row.manifest as unknown as PluginManifest))
+    )
+    detector.registerPlugin(extractRegistration(candidateManifest))
+    const result = detector.detectForPlugin(pluginId)
+    const severityFor = (band: "error" | "warning" | "info"): "high" | "medium" | "low" =>
+      band === "error" ? "high" : band === "warning" ? "medium" : "low"
+    for (const conflict of [...result.errors, ...result.warnings, ...result.info]) {
+      reasons.push({
+        severity: severityFor(conflict.severity),
+        message: `${conflict.type}:${conflict.description}`,
+      })
+    }
+  }
+
+  return reasons.length > 0 ? { pluginId, reasons } : null
 }
 
 function hasConfigSchema(manifest: PluginManifest): boolean {
@@ -147,7 +188,7 @@ export async function runMarketplaceInstall(
   }
 
   // Step 1 — conflict review.
-  const conflict = await detectConflicts(pluginId)
+  const conflict = await detectConflicts(pluginId, manifest)
   if (conflict) {
     const decision = await opts.requestConflictReview(conflict)
     if (decision === "cancel") {

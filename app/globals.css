@@ -481,6 +481,41 @@ html[data-bg-preview="all"] [data-bg-target] {
   animation-delay: 0.6s;
 }
 
+/* Workflow editor — Spotlight search result pulse. Brief ring highlight on
+ * the node the user jumped to. Auto-clears after 3s via the store's
+ * `pulseNode(id, 3000)` timer; the static `ring-4 ring-primary` fallback
+ * for reduced-motion preserves visual locatability without animation. */
+@keyframes spotlight-pulse-ring {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 oklch(var(--primary) / 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 8px oklch(var(--primary) / 0);
+  }
+}
+
+.animate-pulse-ring {
+  animation: spotlight-pulse-ring 1.2s ease-out infinite;
+}
+
+/* Workflow editor — Connection-preview handle pulse. Compatible target
+ * handles emit a subtle outward ring while the user is dragging an edge
+ * from a source handle. Gated by the perf tier (reduced → static ring). */
+@keyframes pulse-handle {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 oklch(var(--primary) / 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 6px oklch(var(--primary) / 0);
+  }
+}
+
+.animate-pulse-handle {
+  animation: pulse-handle 1.2s ease-out infinite;
+}
+
 /* iOS auto-zoom prevention: any text input that's <16px on focus triggers
  * an unwanted zoom-in. Apply to every native form control globally so we
  * don't have to remember per-component. The visual size at the desktop's

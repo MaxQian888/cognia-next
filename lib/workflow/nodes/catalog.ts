@@ -85,6 +85,13 @@ const ENTRIES: Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | "categor
     keywords: ["github", "webhook", "pr", "issue", "push", "release"],
     desktopOnly: true,
   },
+  "trigger.team": {
+    label: "On team run start",
+    description:
+      "Internal trigger fired by the agent-team synthesizer when runTeamLifecycle starts a run. Not hand-authored.",
+    iconName: "Users",
+    keywords: ["team", "synthesized", "internal"],
+  },
   // ── Actions ───────────────────────────────────────────────────────────────
   "action.character.send": {
     label: "Send as character",
@@ -109,6 +116,13 @@ const ENTRIES: Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | "categor
     description: "Starts an agent team's lifecycle and waits for completion.",
     iconName: "Users",
     keywords: ["team", "agents", "multi", "supervisor"],
+  },
+  "action.team.task.dispatch": {
+    label: "Dispatch team task",
+    description:
+      "Internal node emitted by the agent-team synthesizer per ADR-0022. One node per AgentTeamTask; selects a teammate from the per-run TeammatePool. Not hand-authored.",
+    iconName: "Send",
+    keywords: ["team", "task", "dispatch", "synthesized", "internal"],
   },
   "action.team.create": {
     label: "Create team",

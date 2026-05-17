@@ -1,59 +1,21 @@
 /**
- * Agent Team runtime dependencies — production wiring.
+ * Agent Team runtime dependencies — production wiring (F-path).
  *
- * `runTeamLifecycle` (in `agent-team-runtime.ts`) is pure orchestration.
- * It needs two callbacks injected at app startup:
- *
- *  - `runTeammateTask` — runs a single teammate against a single task and
- *    returns its result. Production builds here go through `executeAgent`
- *    (the same path plugins use); tests inject a mock.
- *  - `runLeadPlanning` — asks the lead to draft a plan; the runtime
- *    suspends on `plan-approval-bus` until the user approves or rejects.
- *
- * Both callbacks ALSO post status messages into the team's chat stream
- * (`addMessage`) so the workspace Chat tab fills during a run instead
- * of staying empty. The runtime does not post messages — it only writes
- * to task / teammate / event / report state.
+ * Per ADR-0022 §3.9. Previously this module owned `runTeammateTask` (the
+ * per-task LLM dispatcher). Under the F-path, dispatch happens inside the
+ * `action.team.task.dispatch` workflow node executor; this module shrinks to
+ * prompt builders + the lead-planning provider + a notifierDeps factory.
  *
  * Kept side-effect free at module scope so `__resetAgentTeamRuntimeForTesting`
- * + `configureAgentTeamRuntime` in tests can swap deps without leaking
- * state between suites.
+ * + `configureAgentTeamRuntime` in tests can swap deps without leaking state.
  */
 
+import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import type {
-  AgentTeam,
-  AgentTeammate,
-  AgentTeamTask,
-  TeamMessageType,
-} from "@/types/agent/agent-team"
+import { usePendingGatesStore, gateTypeFromScope } from "@/stores/agent/pending-gates-store"
 import { executeAgent as defaultExecuteAgent } from "./agent-executor"
-import type { AgentTeamRuntimeDeps, TeammateTaskResult, LeadPlanResult } from "./agent-team-runtime"
-
-/** Truncate long LLM output before persisting it to the chat stream. */
-const MAX_CHAT_RESULT_CHARS = 1200
-
-function truncate(text: string, max: number = MAX_CHAT_RESULT_CHARS): string {
-  if (text.length <= max) return text
-  return `${text.slice(0, max - 1)}…`
-}
-
-/** Post a chat message via the live store — keeps senderName resolution in one place. */
-function postMessage(params: {
-  teamId: string
-  senderId: string
-  type: TeamMessageType
-  content: string
-  taskId?: string
-}): void {
-  useAgentTeamStore.getState().addMessage({
-    teamId: params.teamId,
-    senderId: params.senderId,
-    type: params.type,
-    content: params.content,
-    taskId: params.taskId,
-  })
-}
+import type { LeadPlanResult, RunTeamLifecycleDeps } from "./agent-team-runtime"
+import type { TeamNotifierDeps } from "./team/team-notifier"
 
 /** Build the prompt sent to a teammate for a specific task. */
 export function buildTeammatePrompt(
@@ -119,98 +81,35 @@ export function buildLeadPlanningPrompt(
   ].join("\n")
 }
 
-const TEAMMATE_SYSTEM_PROMPT =
-  "You are a focused, helpful agent teammate. Stay on-task and produce concrete output. Avoid filler."
-
 const LEAD_SYSTEM_PROMPT =
   "You are a planning lead. Always respond with a single ```json fenced block matching the requested shape. Do not add prose around the block."
 
 export interface BuildAgentTeamRuntimeDepsOptions {
   /** Override `executeAgent` for testing. */
   executeAgent?: typeof defaultExecuteAgent
+  /** Optional notifierDeps override (defaults to silent — UI wires real channels). */
+  notifierDeps?: TeamNotifierDeps
 }
 
 /**
- * Build the runtime deps that `configureAgentTeamRuntime` consumes.
- * Splits prompt construction from message posting from LLM dispatch so
- * each piece is testable in isolation.
+ * Build the runtime deps consumed by `agentTeamManager.start`.
+ *
+ * Returns `runLeadPlanning` (called by the synthesizer when
+ * `team.config.requirePlanApproval` is true) and optional `notifierDeps`
+ * (3-channel notifier wiring). storeReader/storeWriter are supplied by the
+ * facade because they bind to the live Zustand store.
  */
 export function buildAgentTeamRuntimeDeps(
   opts: BuildAgentTeamRuntimeDepsOptions = {}
-): Pick<AgentTeamRuntimeDeps, "runTeammateTask" | "runLeadPlanning"> {
+): Pick<RunTeamLifecycleDeps, "runLeadPlanning" | "notifierDeps"> {
   const executeAgent = opts.executeAgent ?? defaultExecuteAgent
 
-  const runTeammateTask: AgentTeamRuntimeDeps["runTeammateTask"] = async ({
-    team,
-    teammate,
-    task,
-    signal,
-  }): Promise<TeammateTaskResult> => {
-    postMessage({
-      teamId: team.id,
-      senderId: teammate.id,
-      type: "broadcast",
-      content: `Starting: ${task.title}`,
-      taskId: task.id,
-    })
-
-    const prompt = buildTeammatePrompt(team, teammate, task)
-    const systemPrompt =
-      teammate.config?.systemPrompt?.trim() ||
-      team.config?.defaultSystemPrompt?.trim() ||
-      TEAMMATE_SYSTEM_PROMPT
-
-    try {
-      const result = await executeAgent(prompt, {
-        systemPrompt,
-        abortSignal: signal,
-      })
-      const text = result.text ?? ""
-      postMessage({
-        teamId: team.id,
-        senderId: teammate.id,
-        type: "result_share",
-        content: truncate(text),
-        taskId: task.id,
-      })
-      return { result: text }
-    } catch (err) {
-      const aborted = signal.aborted || isAbortError(err)
-      const reason = err instanceof Error ? err.message : String(err)
-      if (aborted) {
-        postMessage({
-          teamId: team.id,
-          senderId: teammate.id,
-          type: "shutdown",
-          content: "Cancelled by operator",
-          taskId: task.id,
-        })
-        throw err
-      }
-      postMessage({
-        teamId: team.id,
-        senderId: teammate.id,
-        type: "system",
-        content: `Task failed: ${reason}`,
-        taskId: task.id,
-      })
-      return { result: "", error: reason }
-    }
-  }
-
-  const runLeadPlanning: NonNullable<AgentTeamRuntimeDeps["runLeadPlanning"]> = async ({
+  const runLeadPlanning: NonNullable<RunTeamLifecycleDeps["runLeadPlanning"]> = async ({
     team,
     lead,
     feedback,
     signal,
   }): Promise<LeadPlanResult> => {
-    postMessage({
-      teamId: team.id,
-      senderId: lead.id,
-      type: "system",
-      content: feedback?.trim() ? "Revising plan with reviewer feedback…" : "Drafting plan…",
-    })
-
     const workers = useAgentTeamStore
       .getState()
       .getTeammates(team.id)
@@ -221,46 +120,43 @@ export function buildAgentTeamRuntimeDeps(
       team.config?.defaultSystemPrompt?.trim() ||
       LEAD_SYSTEM_PROMPT
 
-    try {
-      const result = await executeAgent(prompt, {
-        systemPrompt,
-        abortSignal: signal,
-      })
-      const text = result.text ?? ""
-      postMessage({
-        teamId: team.id,
-        senderId: lead.id,
-        type: "plan_approval",
-        content: text,
-      })
-      return { planText: text }
-    } catch (err) {
-      const aborted = signal.aborted || isAbortError(err)
-      if (aborted) {
-        postMessage({
-          teamId: team.id,
-          senderId: lead.id,
-          type: "shutdown",
-          content: "Planning cancelled by operator",
-        })
-        throw err
-      }
-      const reason = err instanceof Error ? err.message : String(err)
-      postMessage({
-        teamId: team.id,
-        senderId: lead.id,
-        type: "system",
-        content: `Planning failed: ${reason}`,
-      })
-      throw err
-    }
+    const result = await executeAgent(prompt, { systemPrompt, abortSignal: signal })
+    return { planText: result.text ?? "" }
   }
 
-  return { runTeammateTask, runLeadPlanning }
-}
+  // Default notifierDeps wires the UI channels: sonner toast (lazy-loaded so
+  // the dep isn't required in node test environments), Tauri OS notify, and
+  // the PendingGatesStore for HITL modals. Callers can override entirely via
+  // `opts.notifierDeps` for tests.
+  const defaultNotifierDeps: TeamNotifierDeps = {
+    toast: (msg, options) => {
+      // Lazy import keeps sonner out of the SSR / test path unless used.
+      void import("sonner").then(({ toast }) => toast(msg, options))
+    },
+    osNotify: async (options) => {
+      const { notify } = await import("@/lib/tauri/notification")
+      await notify(options)
+    },
+    log: async (level, message, payload) => {
+      if (level === "error") console.error("team:", message, payload)
+      else if (level === "warn") console.warn("team:", message, payload)
+      else console.info("team:", message, payload)
+    },
+    openGate: (gate) => {
+      usePendingGatesStore.getState().open({
+        key: gate.key,
+        gateType: gateTypeFromScope(gate.key.scope),
+        title: gate.title,
+        body: gate.body,
+        runId: gate.runId,
+        teamId: gate.teamId,
+        taskId: gate.taskId,
+      })
+    },
+  }
 
-function isAbortError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false
-  const name = (err as { name?: unknown }).name
-  return name === "AbortError"
+  return {
+    runLeadPlanning,
+    notifierDeps: opts.notifierDeps ?? defaultNotifierDeps,
+  }
 }

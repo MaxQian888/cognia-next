@@ -79,51 +79,13 @@ jest.mock("@/types/provider/ollama", () => ({
 }))
 
 // Mock UI components
-jest.mock("@/components/ui/card", () => ({
-  Card: ({ children }: { children: React.ReactNode }) => <div data-testid="card">{children}</div>,
-  CardContent: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="card-content">{children}</div>
-  ),
-  CardDescription: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  CardHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  CardTitle: ({ children }: { children: React.ReactNode }) => <h3>{children}</h3>,
-}))
+jest.mock("@/components/ui/card")
 
-jest.mock("@/components/ui/input", () => ({
-  Input: ({
-    value,
-    onChange,
-    placeholder,
-    onKeyDown,
-  }: React.InputHTMLAttributes<HTMLInputElement>) => (
-    <input
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
-      onKeyDown={onKeyDown}
-      data-testid="input"
-    />
-  ),
-}))
+jest.mock("@/components/ui/input")
 
-jest.mock("@/components/ui/button", () => ({
-  Button: ({
-    children,
-    onClick,
-    disabled,
-    variant,
-  }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string }) => (
-    <button onClick={onClick} disabled={disabled} data-variant={variant}>
-      {children}
-    </button>
-  ),
-}))
+jest.mock("@/components/ui/button")
 
-jest.mock("@/components/ui/badge", () => ({
-  Badge: ({ children }: { children: React.ReactNode }) => (
-    <span data-testid="badge">{children}</span>
-  ),
-}))
+jest.mock("@/components/ui/badge")
 
 jest.mock("@/components/ui/progress", () => ({
   Progress: ({ value }: { value: number }) => <div data-testid="progress" data-value={value} />,
@@ -155,25 +117,9 @@ jest.mock("@/components/ui/alert-dialog", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/collapsible", () => ({
-  Collapsible: ({ children, open }: { children: React.ReactNode; open?: boolean }) => (
-    <div data-testid="collapsible" data-open={open}>
-      {children}
-    </div>
-  ),
-  CollapsibleContent: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="collapsible-content">{children}</div>
-  ),
-  CollapsibleTrigger: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="collapsible-trigger">{children}</div>
-  ),
-}))
+jest.mock("@/components/ui/collapsible")
 
-jest.mock("@/components/ui/tooltip", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  TooltipContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  TooltipTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+jest.mock("@/components/ui/tooltip")
 
 describe("OllamaModelManager", () => {
   const defaultProps = {

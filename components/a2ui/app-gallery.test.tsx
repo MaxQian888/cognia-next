@@ -66,12 +66,7 @@ jest.mock("@/lib/a2ui/thumbnail", () => ({
 }))
 
 // Mock tooltip
-jest.mock("@/components/ui/tooltip", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipTrigger: ({ children, asChild }: { children: React.ReactNode; asChild?: boolean }) =>
-    asChild ? <>{children}</> : <span>{children}</span>,
-  TooltipContent: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
-}))
+jest.mock("@/components/ui/tooltip")
 
 const mockUseA2UIAppBuilder = jest.requireMock("@/hooks/a2ui/use-app-builder").useA2UIAppBuilder
 

@@ -112,8 +112,8 @@ For payload schemas, see `types/plugin/plugin.ts:PluginHooks`.
 | `onAgentToolCall`         | same as above                                                                  |
 | `onAgentComplete`         | same as above                                                                  |
 | `onAgentError`            | same as above                                                                  |
-| `onAgentPlanCreate`       | future planner hook (currently unused)                                         |
-| `onAgentPlanStepComplete` | future planner hook                                                            |
+| `onAgentPlanCreate`       | **deprecated** (ADR 0016 P1-5, 2026-05-17) — moved to `DEPRECATED_HOOK_POINTS` |
+| `onAgentPlanStepComplete` | **deprecated** (ADR 0016 P1-5, 2026-05-17) — moved to `DEPRECATED_HOOK_POINTS` |
 
 ### Messages (5)
 
@@ -195,15 +195,15 @@ under the synthetic owner `__host:canvas__` (cap 30/sec, refill 30/sec).
 
 ### Artifact (7)
 
-| Hook                | Dispatched by     |
-| ------------------- | ----------------- |
-| `onArtifactCreate`  | artifact pipeline |
-| `onArtifactUpdate`  | artifact pipeline |
-| `onArtifactDelete`  | artifact pipeline |
-| `onArtifactOpen`    | artifact viewer   |
-| `onArtifactClose`   | artifact viewer   |
-| `onArtifactExecute` | artifact runner   |
-| `onArtifactExport`  | export pipeline   |
+| Hook                | Dispatched by                                                                                                                   |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `onArtifactCreate`  | artifact pipeline                                                                                                               |
+| `onArtifactUpdate`  | artifact pipeline                                                                                                               |
+| `onArtifactDelete`  | artifact pipeline                                                                                                               |
+| `onArtifactOpen`    | artifact viewer                                                                                                                 |
+| `onArtifactClose`   | artifact viewer                                                                                                                 |
+| `onArtifactExecute` | **deprecated** (ADR 0016 P1-5, 2026-05-17) — no artifact runner shipped; moved to `DEPRECATED_HOOK_POINTS`                      |
+| `onArtifactExport`  | **deprecated** (ADR 0016 P1-5, 2026-05-17) — artifact-specific export pipeline never shipped; moved to `DEPRECATED_HOOK_POINTS` |
 
 ### Export (3)
 

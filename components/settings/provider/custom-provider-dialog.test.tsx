@@ -43,20 +43,7 @@ jest.mock("@/lib/ai/infrastructure/api-test", () => ({
 }))
 
 // Mock UI components
-jest.mock("@/components/ui/button", () => ({
-  Button: ({
-    children,
-    onClick,
-    disabled,
-    type,
-    title,
-    "aria-label": ariaLabel,
-  }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
-    <button type={type} onClick={onClick} disabled={disabled} title={title} aria-label={ariaLabel}>
-      {children}
-    </button>
-  ),
-}))
+jest.mock("@/components/ui/button")
 
 jest.mock("@/components/ui/input", () => ({
   Input: ({
@@ -77,17 +64,9 @@ jest.mock("@/components/ui/input", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/label", () => ({
-  Label: ({ children, htmlFor }: { children: React.ReactNode; htmlFor?: string }) => (
-    <label htmlFor={htmlFor}>{children}</label>
-  ),
-}))
+jest.mock("@/components/ui/label")
 
-jest.mock("@/components/ui/badge", () => ({
-  Badge: ({ children }: { children: React.ReactNode }) => (
-    <span data-testid="badge">{children}</span>
-  ),
-}))
+jest.mock("@/components/ui/badge")
 
 jest.mock("@/components/ui/select", () => ({
   Select: ({ children, value }: { children: React.ReactNode; value?: string }) => (
@@ -101,15 +80,7 @@ jest.mock("@/components/ui/select", () => ({
   SelectValue: ({ placeholder }: { placeholder?: string }) => <>{placeholder}</>,
 }))
 
-jest.mock("@/components/ui/dialog", () => ({
-  Dialog: ({ children, open }: { children: React.ReactNode; open: boolean }) =>
-    open ? <div data-testid="dialog">{children}</div> : null,
-  DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
-  DialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogTitle: ({ children }: { children: React.ReactNode }) => <h3>{children}</h3>,
-}))
+jest.mock("@/components/ui/dialog")
 
 describe("CustomProviderDialog", () => {
   const defaultProps = {

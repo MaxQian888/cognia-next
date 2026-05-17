@@ -10,6 +10,7 @@
  */
 
 import { agentTeamManager } from "./agent-team"
+import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 
 export interface AgentTeamCompatDispatchOptions {
   teamId: string
@@ -36,6 +37,14 @@ export async function dispatchAgentTeam(
   }
   try {
     await agentTeamManager.start(options.teamId)
+    // F-path runtime mirrors terminal result onto team.status. Translate
+    // failed/cancelled into ok=false so legacy callers see the failure
+    // even though start() itself didn't throw.
+    const team = useAgentTeamStore.getState().getTeam(options.teamId)
+    if (!team) return { ok: false, reason: `team ${options.teamId} not found` }
+    if (team.status === "failed" || team.status === "cancelled") {
+      return { ok: false, reason: `run ended ${team.status}` }
+    }
     return { ok: true }
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : String(err) }

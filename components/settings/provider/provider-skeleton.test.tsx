@@ -12,19 +12,7 @@ jest.mock("@/components/ui/skeleton", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/card", () => ({
-  Card: ({ children, className }: { children: React.ReactNode; className?: string }) => (
-    <div data-testid="card" className={className}>
-      {children}
-    </div>
-  ),
-  CardContent: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="card-content">{children}</div>
-  ),
-  CardHeader: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="card-header">{children}</div>
-  ),
-}))
+jest.mock("@/components/ui/card")
 
 describe("ProviderSkeleton", () => {
   it("renders without crashing", () => {

@@ -34,6 +34,7 @@ const DEFAULTS: AppSettings = {
   fontScale: "md",
   language: "en",
   reduceMotion: false,
+  workflowEditorPerformanceTier: undefined,
   telemetryEnabled: false,
   sttLanguage: "en-US",
   selectedMicId: undefined,

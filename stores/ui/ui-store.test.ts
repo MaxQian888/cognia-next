@@ -9,6 +9,10 @@ const RESET = {
   scratchpadCollapsed: {},
   stopRequestedFor: {},
   pendingSettingsRequest: null,
+  pendingCreateRequest: null,
+  guildRailCollapsed: false,
+  statusBarCollapsed: false,
+  sidebarCollapsed: false,
 }
 
 describe("useUIStore", () => {
@@ -183,6 +187,8 @@ describe("useUIStore", () => {
         result.current.setSelectedGuild({ kind: "team", teamId: "t1" })
         result.current.setShowMemberList(false)
         result.current.setScratchpadCollapsed("ts1", true)
+        result.current.setGuildRailCollapsed(true)
+        result.current.setStatusBarCollapsed(true)
         // Transient fields — must NOT appear in localStorage
         result.current.setMemberStatus("ts1", "a", "thinking")
         result.current.requestStopMember("ts1", "a")
@@ -197,11 +203,93 @@ describe("useUIStore", () => {
         showMemberList: false,
         scratchpadCollapsed: { ts1: true },
         sidebarCollapsed: false,
+        guildRailCollapsed: true,
+        statusBarCollapsed: true,
       })
       // Transient fields explicitly excluded
       expect(parsed.state.memberStatus).toBeUndefined()
       expect(parsed.state.stopRequestedFor).toBeUndefined()
       expect(parsed.state.pendingSettingsRequest).toBeUndefined()
+    })
+  })
+
+  describe("guildRailCollapsed", () => {
+    it("defaults to false and toggles", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.guildRailCollapsed).toBe(false)
+      act(() => result.current.toggleGuildRail())
+      expect(result.current.guildRailCollapsed).toBe(true)
+      act(() => result.current.toggleGuildRail())
+      expect(result.current.guildRailCollapsed).toBe(false)
+    })
+
+    it("setGuildRailCollapsed sets the state directly", () => {
+      const { result } = renderHook(() => useUIStore())
+      act(() => result.current.setGuildRailCollapsed(true))
+      expect(result.current.guildRailCollapsed).toBe(true)
+      act(() => result.current.setGuildRailCollapsed(false))
+      expect(result.current.guildRailCollapsed).toBe(false)
+    })
+  })
+
+  describe("statusBarCollapsed", () => {
+    it("defaults to false and toggles", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.statusBarCollapsed).toBe(false)
+      act(() => result.current.toggleStatusBar())
+      expect(result.current.statusBarCollapsed).toBe(true)
+      act(() => result.current.toggleStatusBar())
+      expect(result.current.statusBarCollapsed).toBe(false)
+    })
+
+    it("setStatusBarCollapsed sets the state directly", () => {
+      const { result } = renderHook(() => useUIStore())
+      act(() => result.current.setStatusBarCollapsed(true))
+      expect(result.current.statusBarCollapsed).toBe(true)
+      act(() => result.current.setStatusBarCollapsed(false))
+      expect(result.current.statusBarCollapsed).toBe(false)
+    })
+  })
+
+  describe("pendingCreateRequest", () => {
+    it("defaults to null", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.pendingCreateRequest).toBeNull()
+    })
+
+    it("requestCreate bumps the nonce per call", () => {
+      const { result } = renderHook(() => useUIStore())
+      act(() => result.current.requestCreate("workflow"))
+      expect(result.current.pendingCreateRequest).toEqual({
+        kind: "workflow",
+        nonce: 1,
+      })
+      act(() => result.current.requestCreate("workflow"))
+      expect(result.current.pendingCreateRequest).toEqual({
+        kind: "workflow",
+        nonce: 2,
+      })
+      act(() => result.current.requestCreate("agentTeam"))
+      expect(result.current.pendingCreateRequest).toEqual({
+        kind: "agentTeam",
+        nonce: 3,
+      })
+    })
+
+    it("clearPendingCreate resets to null", () => {
+      const { result } = renderHook(() => useUIStore())
+      act(() => result.current.requestCreate("character"))
+      act(() => result.current.clearPendingCreate())
+      expect(result.current.pendingCreateRequest).toBeNull()
+    })
+
+    it("is not persisted across reloads", () => {
+      const { result } = renderHook(() => useUIStore())
+      act(() => result.current.requestCreate("workflow"))
+      const raw = window.localStorage.getItem("cognia-ui")
+      expect(raw).not.toBeNull()
+      const parsed = JSON.parse(raw as string) as { state: Record<string, unknown> }
+      expect(parsed.state.pendingCreateRequest).toBeUndefined()
     })
   })
 })

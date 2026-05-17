@@ -1,13 +1,19 @@
-//! `cognia plugin new <name>` — stamp the bundled template into a new dir.
+//! `cognia plugin new <name> [--kind wasm|ts]` — stamp the bundled template
+//! into a new directory.
+//!
+//! Two kinds ship today:
+//!   * `wasm` (default): Rust + cargo-component starter for a WASM
+//!     Component Model plugin.
+//!   * `ts`: TypeScript frontend plugin with esbuild + jest already wired.
 
 use anyhow::{bail, Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use crate::template;
+use crate::template::{files_for, next_steps, TemplateKind};
 
 const ID_PATTERN_HINT: &str = "lowercase alphanumeric plus -_.";
 
-pub fn run(name: String, dir: Option<PathBuf>) -> Result<()> {
+pub fn run(name: String, dir: Option<PathBuf>, kind: TemplateKind) -> Result<()> {
     validate_name(&name)?;
     let target_dir = dir.unwrap_or_else(|| PathBuf::from(&name));
     if target_dir.exists() {
@@ -16,43 +22,35 @@ pub fn run(name: String, dir: Option<PathBuf>) -> Result<()> {
             .map(|d| d.count())
             .unwrap_or(0);
         if entries > 0 {
-            bail!(
-                "{} already exists and is not empty",
-                target_dir.display()
-            );
+            bail!("{} already exists and is not empty", target_dir.display());
         }
     }
-    std::fs::create_dir_all(&target_dir).with_context(|| {
-        format!("create target dir {}", target_dir.display())
-    })?;
-    write_file(&target_dir, "Cargo.toml", &template::substitute_name(template::CARGO_TOML, &name))?;
-    write_file(
-        &target_dir.join("src"),
-        "lib.rs",
-        &template::substitute_name(template::SRC_LIB_RS, &name),
-    )?;
-    write_file(
-        &target_dir,
-        "plugin.json",
-        &template::substitute_name(template::PLUGIN_JSON, &name),
-    )?;
-    write_file(&target_dir.join("wit"), "world.wit", template::WIT_WORLD)?;
-    write_file(&target_dir, "README.md", template::README)?;
-    write_file(&target_dir, ".gitignore", template::GITIGNORE)?;
-    println!("Created plugin at {}", target_dir.display());
+    std::fs::create_dir_all(&target_dir)
+        .with_context(|| format!("create target dir {}", target_dir.display()))?;
+
+    for file in files_for(kind, &name) {
+        let dest = target_dir.join(&file.rel_path);
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("mkdir {}", parent.display()))?;
+        }
+        std::fs::write(&dest, file.content.as_bytes())
+            .with_context(|| format!("write {}", dest.display()))?;
+    }
+
+    println!(
+        "Created {} plugin at {}",
+        match kind {
+            TemplateKind::Wasm => "WASM",
+            TemplateKind::Ts => "frontend TypeScript",
+        },
+        target_dir.display()
+    );
     println!();
     println!("Next steps:");
-    println!("  cd {}", target_dir.display());
-    println!("  rustup target add wasm32-wasip2");
-    println!("  cargo install --locked cargo-component");
-    println!("  cognia plugin build");
-    Ok(())
-}
-
-fn write_file(dir: &Path, name: &str, content: &str) -> Result<()> {
-    std::fs::create_dir_all(dir).with_context(|| format!("mkdir {}", dir.display()))?;
-    let path = dir.join(name);
-    std::fs::write(&path, content).with_context(|| format!("write {}", path.display()))?;
+    for step in next_steps(kind, &target_dir) {
+        println!("  {step}");
+    }
     Ok(())
 }
 
@@ -98,10 +96,10 @@ mod tests {
     }
 
     #[test]
-    fn new_stamps_template_into_dir() {
+    fn new_stamps_wasm_template_by_default() {
         let parent = tempdir().unwrap();
         let target = parent.path().join("hello-wasm");
-        run("hello-wasm".into(), Some(target.clone())).unwrap();
+        run("hello-wasm".into(), Some(target.clone()), TemplateKind::Wasm).unwrap();
         for relpath in [
             "Cargo.toml",
             "src/lib.rs",
@@ -111,12 +109,35 @@ mod tests {
         ] {
             assert!(target.join(relpath).exists(), "missing: {relpath}");
         }
-        let cargo =
-            std::fs::read_to_string(target.join("Cargo.toml")).unwrap();
+        let cargo = std::fs::read_to_string(target.join("Cargo.toml")).unwrap();
         assert!(cargo.contains(r#"name = "hello-wasm""#));
-        let manifest =
-            std::fs::read_to_string(target.join("plugin.json")).unwrap();
+        let manifest = std::fs::read_to_string(target.join("plugin.json")).unwrap();
         assert!(manifest.contains(r#""id": "hello-wasm""#));
+    }
+
+    #[test]
+    fn new_stamps_ts_template_when_kind_ts() {
+        let parent = tempdir().unwrap();
+        let target = parent.path().join("hello-ts");
+        run("hello-ts".into(), Some(target.clone()), TemplateKind::Ts).unwrap();
+        for relpath in [
+            "package.json",
+            "tsconfig.json",
+            "jest.config.cjs",
+            "plugin.json",
+            "src/index.ts",
+            "src/index.test.ts",
+            "src/__shims__/types/plugin.ts",
+            "src/__shims__/lib/chat/slash-command-registry.ts",
+            "README.md",
+        ] {
+            assert!(target.join(relpath).exists(), "missing: {relpath}");
+        }
+        let pkg = std::fs::read_to_string(target.join("package.json")).unwrap();
+        assert!(pkg.contains(r#""name": "hello-ts""#));
+        let manifest = std::fs::read_to_string(target.join("plugin.json")).unwrap();
+        assert!(manifest.contains(r#""id": "hello-ts""#));
+        assert!(manifest.contains(r#""type": "frontend""#));
     }
 
     #[test]
@@ -125,7 +146,16 @@ mod tests {
         let target = parent.path().join("occupied");
         std::fs::create_dir_all(&target).unwrap();
         std::fs::write(target.join("seed"), "x").unwrap();
-        let err = run("occupied".into(), Some(target)).unwrap_err();
+        let err = run("occupied".into(), Some(target), TemplateKind::Wasm).unwrap_err();
         assert!(err.to_string().contains("not empty"));
+    }
+
+    #[test]
+    fn new_creates_target_dir_when_missing() {
+        let parent = tempdir().unwrap();
+        let target = parent.path().join("nested").join("dir").join("plugin");
+        run("plugin".into(), Some(target.clone()), TemplateKind::Ts).unwrap();
+        assert!(target.exists());
+        assert!(target.join("package.json").exists());
     }
 }

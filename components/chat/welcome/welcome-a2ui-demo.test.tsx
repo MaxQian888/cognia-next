@@ -38,13 +38,7 @@ jest.mock("@/components/a2ui", () => ({
 }))
 
 // Mock UI components
-jest.mock("@/components/ui/button", () => ({
-  Button: ({ children, onClick, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
-    <button onClick={onClick} {...props}>
-      {children}
-    </button>
-  ),
-}))
+jest.mock("@/components/ui/button")
 
 jest.mock("@/components/ui/dialog", () => ({
   Dialog: ({ children, open }: { children: React.ReactNode; open?: boolean }) => (

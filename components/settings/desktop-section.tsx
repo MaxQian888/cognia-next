@@ -16,6 +16,8 @@ import { getOsInfo, type OsInfo } from "@/lib/tauri/os"
 import { getPref, setPref } from "@/lib/tauri/store"
 import { invoke } from "@tauri-apps/api/core"
 import { loggers } from "@/lib/logger"
+import { TraySection } from "./tray-section"
+import { ShortcutsSection } from "./shortcuts-section"
 
 const PREF_TRAY_ON_CLOSE = "tray.minimize-on-close"
 
@@ -279,6 +281,14 @@ export function DesktopSection() {
             {t("tauriDocs")}
           </Button>
         </div>
+      </section>
+
+      <section className="space-y-3 rounded-md border p-4">
+        <TraySection />
+      </section>
+
+      <section className="space-y-3 rounded-md border p-4">
+        <ShortcutsSection />
       </section>
     </div>
   )

@@ -16,12 +16,12 @@ import {
   Background,
   BackgroundVariant,
   Controls,
-  MiniMap,
   ReactFlow,
   ReactFlowProvider,
   applyEdgeChanges,
   applyNodeChanges,
   addEdge,
+  useReactFlow,
   type Connection,
   type EdgeChange,
   type NodeChange,
@@ -51,6 +51,18 @@ import {
   type RectLike,
 } from "@/lib/workflow/editor/alignment-guides"
 import { AlignmentOverlay } from "./alignment-overlay"
+import { EditorStoreProvider } from "@/lib/workflow/editor/store-context"
+import { useDragSnapshot } from "@/hooks/workflow/use-drag-snapshot"
+import { useRafThrottle } from "@/hooks/workflow/use-raf-throttle"
+import { useEffectivePerfTier } from "@/hooks/workflow/use-effective-perf-tier"
+import { PerfMiniMap } from "./minimap-perf"
+import { CanvasContextMenu, type ContextTarget } from "./canvas-context-menu"
+import { ViewportBreadcrumb } from "./viewport-breadcrumb"
+import { SpotlightSearch } from "./spotlight-search"
+import { LassoOverlay } from "./lasso-overlay"
+import { SmartEdge } from "./edges/smart-edge"
+import { ConnectionLineGhostFactory, ConnectionPointerListener } from "./connection-overlay"
+import type { EdgeTypes } from "@xyflow/react"
 import { syncWorkflowTriggers } from "@/lib/workflow/runtime/webhook-bridge"
 import { validateConnection } from "@/lib/workflow/editor/connection-validator"
 import type { TriggerEvent } from "@/types/workflow/visual"
@@ -67,6 +79,11 @@ import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 
 const nodeTypes: NodeTypes = {
   workflowNode: WorkflowNodeComponent as unknown as NodeTypes[string],
+}
+
+const edgeTypes: EdgeTypes = {
+  default: SmartEdge as unknown as EdgeTypes[string],
+  smart: SmartEdge as unknown as EdgeTypes[string],
 }
 
 interface CanvasInnerProps {
@@ -88,6 +105,8 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     workflowId,
     runStatusByStepId,
     validationByStepId,
+    isDraggingAny,
+    snapToGrid,
     setNodes,
     setEdges,
     setViewport,
@@ -97,6 +116,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     markSaved,
     toWorkflow,
     revalidateAll,
+    setIsDraggingAny,
   } = useStore(
     useShallow((s: EditorState) => ({
       nodes: s.nodes,
@@ -107,6 +127,8 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       workflowId: s.baseWorkflow.id,
       runStatusByStepId: s.runStatusByStepId,
       validationByStepId: s.validationByStepId,
+      isDraggingAny: s.isDraggingAny,
+      snapToGrid: s.snapToGrid,
       setNodes: s.setNodes,
       setEdges: s.setEdges,
       setViewport: s.setViewport,
@@ -116,8 +138,17 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       markSaved: s.markSaved,
       toWorkflow: s.toWorkflow,
       revalidateAll: s.revalidateAll,
+      setIsDraggingAny: s.setIsDraggingAny,
     }))
   )
+
+  const perfTier = useEffectivePerfTier(useStore)
+  const rf = useReactFlow()
+
+  // Custom connection-line component is created once per store instance —
+  // its closure captures `useStore` so it can read connectionState while
+  // the user is drawing an edge.
+  const connectionLineGhost = useMemo(() => ConnectionLineGhostFactory(useStore), [useStore])
 
   // Wire the live run-status bridge so the canvas reflects what the
   // orchestrator is doing in real time.
@@ -158,6 +189,20 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   // Alignment guides — populated by `onNodeDrag` while a node is moving,
   // cleared on drag stop so the overlay doesn't linger.
   const [alignmentGuides, setAlignmentGuides] = useState<GuidesResult | null>(null)
+  // Canvas context menu state — driven by React Flow's pane/node/edge
+  // context-menu callbacks below.
+  const [ctxMenu, setCtxMenu] = useState<{
+    open: boolean
+    position: { x: number; y: number } | null
+    target: ContextTarget | null
+  }>({ open: false, position: null, target: null })
+  // The canvas wrapper element — Lasso overlay hooks pointerdown here so it
+  // can intercept Alt+drag without fighting React Flow's selection box.
+  const canvasWrapperRef = useRef<HTMLDivElement | null>(null)
+  const closeCtxMenu = useCallback(
+    () => setCtxMenu({ open: false, position: null, target: null }),
+    []
+  )
 
   // Track undo/redo availability so the toolbar can disable its buttons.
   const [canUndo, setCanUndo] = useState(false)
@@ -172,6 +217,21 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     update()
     return temporal.subscribe(update)
   }, [useStore])
+
+  // Mini-toolbar "More" signal → open the canvas context menu at the
+  // anchor coordinates the toolbar reported, then clear the request so the
+  // same click doesn't re-trigger on the next render.
+  const requestedContextMenu = useStore((s) => s.requestedContextMenu)
+  useEffect(() => {
+    if (!requestedContextMenu) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync requestedContextMenu (Zustand external state) into local UI state; intentional cascade.
+    setCtxMenu({
+      open: true,
+      position: requestedContextMenu.screenAnchor,
+      target: requestedContextMenu.target,
+    })
+    useStore.getState().clearRequestedContextMenu()
+  }, [requestedContextMenu, useStore])
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
@@ -226,32 +286,205 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
 
   const onMoveEnd = useCallback((_e: unknown, v: Viewport) => setViewport(v), [setViewport])
 
-  // Compute alignment guides while dragging. We rebuild the peer rect array
-  // from the latest `nodes` snapshot each frame; keep the cost minimal
-  // since it runs at pointer-move rate.
+  // Live viewport mirror — React Flow's `onMove` fires while the user is
+  // panning / zooming. The breadcrumb subscribes to this so its segment
+  // updates during the pan rather than only on settle.
+  const [liveViewport, setLiveViewport] = useState<Viewport | null>(null)
+  const onMove = useCallback((_e: unknown, v: Viewport) => setLiveViewport(v), [])
+
+  // Compute alignment guides while dragging. The peer rect map is captured
+  // ONCE on drag start (O(n)) and looked up via ref each frame — the per-
+  // pointer-move cost drops to O(p) for `computeAlignmentGuides` over peers,
+  // no longer paying an extra O(n) for snapshot construction every tick.
+  // rAF coalesces multiple pointermove events fired in the same frame.
+  const drag = useDragSnapshot()
+  const dragRectRef = useRef<{ width: number; height: number } | null>(null)
+
+  /* eslint-disable react-hooks/preserve-manual-memoization */
+  const dragComputeAndSet = useCallback(
+    (dragged: RectLike) => {
+      const map = drag.snapshot.current
+      if (!map) return
+      // Array.from keeps the original Map intact; the result is local to
+      // this rAF tick.
+      const peers: RectLike[] = Array.from(map.values())
+      setAlignmentGuides(computeAlignmentGuides(dragged, peers))
+    },
+    // drag.snapshot is a useRef object (stable identity); the callback reads
+    // .current freshly on each rAF tick. React Compiler can't statically prove
+    // the ref's mutability is safe here, so we disable the auto-memo check.
+    [drag.snapshot]
+  )
+  /* eslint-enable react-hooks/preserve-manual-memoization */
+  const dragThrottled = useRafThrottle(dragComputeAndSet)
+
+  const handleNodeDragStart = useCallback(
+    (
+      _e: unknown,
+      draggedNode: {
+        id: string
+        position: { x: number; y: number }
+        width?: number | null
+        height?: number | null
+      }
+    ) => {
+      setIsDraggingAny(true)
+      if (!perfTier.flags.alignmentGuides) {
+        dragRectRef.current = null
+        return
+      }
+      drag.capture(nodes, draggedNode.id)
+      // Snapshot the dragged node's own measured size up front so the per-
+      // frame handler doesn't fall back to defaults if `useReactFlow` hasn't
+      // measured yet.
+      const live = rf.getNode(draggedNode.id)
+      const w =
+        (live?.measured?.width as number | undefined) ??
+        (live?.width as number | undefined) ??
+        draggedNode.width ??
+        240
+      const h =
+        (live?.measured?.height as number | undefined) ??
+        (live?.height as number | undefined) ??
+        draggedNode.height ??
+        80
+      dragRectRef.current = { width: w, height: h }
+    },
+    [drag, nodes, perfTier.flags.alignmentGuides, rf, setIsDraggingAny]
+  )
+
   const handleNodeDrag = useCallback(
     (_e: unknown, draggedNode: { id: string; position: { x: number; y: number } }) => {
-      const peers: RectLike[] = nodes.map((n) => ({
-        id: n.id,
-        x: n.position.x,
-        y: n.position.y,
-        // React Flow doesn't track measured size on every snapshot — fall
-        // back to defaults that match `WorkflowNodeComponent`.
-        width: n.width ?? 240,
-        height: n.height ?? 80,
-      }))
-      const dragged: RectLike = {
+      if (!perfTier.flags.alignmentGuides) return
+      const cached = dragRectRef.current
+      const live = rf.getNode(draggedNode.id)
+      const w =
+        (live?.measured?.width as number | undefined) ??
+        (live?.width as number | undefined) ??
+        cached?.width ??
+        240
+      const h =
+        (live?.measured?.height as number | undefined) ??
+        (live?.height as number | undefined) ??
+        cached?.height ??
+        80
+      dragThrottled.call({
         id: draggedNode.id,
         x: draggedNode.position.x,
         y: draggedNode.position.y,
-        width: nodes.find((n) => n.id === draggedNode.id)?.width ?? 240,
-        height: nodes.find((n) => n.id === draggedNode.id)?.height ?? 80,
-      }
-      setAlignmentGuides(computeAlignmentGuides(dragged, peers))
+        width: w,
+        height: h,
+      })
     },
-    [nodes]
+    [dragThrottled, perfTier.flags.alignmentGuides, rf]
   )
-  const handleNodeDragStop = useCallback(() => setAlignmentGuides(null), [])
+
+  const handleNodeDragStop = useCallback(() => {
+    dragThrottled.cancel()
+    drag.release()
+    dragRectRef.current = null
+    setAlignmentGuides(null)
+    setIsDraggingAny(false)
+  }, [drag, dragThrottled, setIsDraggingAny])
+
+  // ── Context menu callbacks ──────────────────────────────────────────────
+  const handlePaneContextMenu = useCallback(
+    (event: React.MouseEvent | MouseEvent) => {
+      event.preventDefault()
+      const flowPos = reactFlowInstance
+        ? reactFlowInstance.screenToFlowPosition({
+            x: event.clientX,
+            y: event.clientY,
+          })
+        : { x: 0, y: 0 }
+      setCtxMenu({
+        open: true,
+        position: { x: event.clientX, y: event.clientY },
+        target: { kind: "pane", flowPos },
+      })
+    },
+    [reactFlowInstance]
+  )
+
+  const handleNodeContextMenu = useCallback((event: React.MouseEvent, node: { id: string }) => {
+    event.preventDefault()
+    setCtxMenu({
+      open: true,
+      position: { x: event.clientX, y: event.clientY },
+      target: { kind: "node", nodeId: node.id },
+    })
+  }, [])
+
+  const handleEdgeContextMenu = useCallback((event: React.MouseEvent, edge: { id: string }) => {
+    event.preventDefault()
+    setCtxMenu({
+      open: true,
+      position: { x: event.clientX, y: event.clientY },
+      target: { kind: "edge", edgeId: edge.id },
+    })
+  }, [])
+
+  // useState declarations hoisted above the callbacks that capture their
+  // setters — the React Compiler flags "access before declaration" otherwise.
+  // The matching declarations further down were removed; do not re-introduce.
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [spotlightOpen, setSpotlightOpen] = useState(false)
+
+  // Context-menu action thunks.
+  const ctxAddNodeAtPosition = useCallback(
+    (flowPos: { x: number; y: number }) => {
+      useStore.getState().setPalettePrefillPosition(flowPos)
+      setPaletteOpen(true)
+    },
+    [useStore]
+  )
+  const ctxResetView = useCallback(() => {
+    reactFlowInstance?.fitView({
+      duration: perfTier.flags.edgeAnimations ? 240 : 0,
+      padding: 0.2,
+    })
+  }, [perfTier.flags.edgeAnimations, reactFlowInstance])
+  const ctxConfigureNode = useCallback(
+    (nodeId: string) => setSelectedNodes([nodeId]),
+    [setSelectedNodes]
+  )
+  // Forward-declared via ref so the call sites below can reach the
+  // post-declaration `handleRun`. The ref is wired by a `useEffect` after
+  // handleRun is declared.
+  const handleRunRef = useRef<((options?: { startStepId?: string }) => Promise<void>) | null>(null)
+  const ctxRunFromNode = useCallback((nodeId: string) => {
+    void handleRunRef.current?.({ startStepId: nodeId })
+  }, [])
+  const ctxCopyNode = useCallback(
+    async (nodeId: string) => {
+      const state = useStore.getState()
+      const node = state.nodes.find((n) => n.id === nodeId)
+      if (!node) return
+      const envelope = buildClipboardEnvelope([node], [], [node.id])
+      try {
+        await navigator.clipboard.writeText(serializeClipboard(envelope))
+      } catch {
+        /* best effort */
+      }
+    },
+    [useStore]
+  )
+  const ctxEditEdgeLabel = useCallback(
+    (edgeId: string) => {
+      useStore.getState().setEditingEdgeIdInline(edgeId)
+    },
+    [useStore]
+  )
+  const ctxPaste = useCallback(async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      const envelope = parseClipboard(text)
+      if (envelope) useStore.getState().pasteFromEnvelope(envelope)
+    } catch {
+      /* best effort — Clipboard API may be unavailable */
+    }
+  }, [useStore])
 
   const handleSave = useCallback(async () => {
     if (saving) return
@@ -283,55 +516,85 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   }, [saving, toWorkflow, markSaved, t, tValidation, revalidateAll])
 
   const [running, setRunning] = useState(false)
-  const handleRun = useCallback(async () => {
-    if (running) return
-    // Block runs when validation issues exist. The toast surfaces the count;
-    // the inspector + node corner badges show the actual fields.
-    const issues = revalidateAll()
-    const issueCount = Object.keys(issues).length
-    if (issueCount > 0) {
-      toast.error(tValidation("blockedRunTitle"), {
-        description: tValidation("summary", { count: issueCount }),
-      })
-      return
-    }
-    setRunning(true)
-    let toastId: string | number | undefined
-    try {
-      // Save dirty changes first so the run executes against what the user sees.
-      if (dirty) {
-        await replaceWorkflow(toWorkflow())
-        markSaved()
+  const handleRun = useCallback(
+    async (options?: { startStepId?: string }) => {
+      if (running) return
+      // Block runs when validation issues exist. The toast surfaces the count;
+      // the inspector + node corner badges show the actual fields.
+      const issues = revalidateAll()
+      const issueCount = Object.keys(issues).length
+      if (issueCount > 0) {
+        toast.error(tValidation("blockedRunTitle"), {
+          description: tValidation("summary", { count: issueCount }),
+        })
+        return
       }
-      const wf = toWorkflow()
-      toastId = toast.loading(`${t("running")} ${wf.name}`)
-      const trigger: TriggerEvent = {
-        workflowId: wf.id,
-        kind: "trigger.manual",
-        payload: {},
-        originAt: Date.now(),
-      }
-      const result = await runWorkflow({ workflow: wf, trigger })
-      if (result.status === "succeeded") {
-        toast.success(t("completed"), { id: toastId })
-      } else {
-        toast.error(`${t("runFailed")}: ${result.error?.message ?? "unknown error"}`, {
+      setRunning(true)
+      let toastId: string | number | undefined
+      try {
+        // Save dirty changes first so the run executes against what the user sees.
+        if (dirty) {
+          await replaceWorkflow(toWorkflow())
+          markSaved()
+        }
+        const wf = toWorkflow()
+        toastId = toast.loading(`${t("running")} ${wf.name}`)
+        const trigger: TriggerEvent = {
+          workflowId: wf.id,
+          kind: "trigger.manual",
+          payload: {},
+          originAt: Date.now(),
+        }
+        const result = await runWorkflow({
+          workflow: wf,
+          trigger,
+          startStepId: options?.startStepId,
+        })
+        if (result.status === "succeeded") {
+          toast.success(t("completed"), { id: toastId })
+        } else {
+          toast.error(`${t("runFailed")}: ${result.error?.message ?? "unknown error"}`, {
+            id: toastId,
+          })
+        }
+        // The parent (e.g., the editor page) can hook in to navigate to /runs.
+        onRequestRun()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t("startFailed"), {
           id: toastId,
         })
+      } finally {
+        setRunning(false)
       }
-      // The parent (e.g., the editor page) can hook in to navigate to /runs.
-      onRequestRun()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("startFailed"), {
-        id: toastId,
-      })
-    } finally {
-      setRunning(false)
-    }
-  }, [running, dirty, toWorkflow, markSaved, onRequestRun, t, tValidation, revalidateAll])
+    },
+    [running, dirty, toWorkflow, markSaved, onRequestRun, t, tValidation, revalidateAll]
+  )
 
   const handleUndo = useCallback(() => useStore.temporal.getState().undo(), [useStore])
   const handleRedo = useCallback(() => useStore.temporal.getState().redo(), [useStore])
+
+  // Wire the forward-declared `handleRunRef` to the latest `handleRun`
+  // closure so the mini-toolbar / context-menu "Run from here" handlers
+  // declared earlier in the body can invoke it.
+  useEffect(() => {
+    handleRunRef.current = handleRun
+    return () => {
+      handleRunRef.current = null
+    }
+  }, [handleRun])
+
+  // Mini-toolbar "Run from here" signal → kicks off `handleRun` with a
+  // start step id so the orchestrator scopes the run to the descendant
+  // subgraph. Clearing the request before awaiting `handleRun` keeps the
+  // slot ready for a follow-up request from a different node.
+  const requestedRunFromStepId = useStore((s) => s.requestedRunFromStepId)
+  useEffect(() => {
+    if (!requestedRunFromStepId) return
+    const stepId = requestedRunFromStepId
+    useStore.getState().clearRequestedRunFromStep()
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- handleRun sets state internally; this is the intentional bridge from Zustand requestedRunFromStep into the local runner.
+    void handleRun({ startStepId: stepId })
+  }, [requestedRunFromStepId, useStore, handleRun])
 
   const handleAutoLayout = useCallback(async () => {
     const positions = await autoLayout(nodes, edges)
@@ -386,8 +649,6 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     [useStore, t]
   )
 
-  const [paletteOpen, setPaletteOpen] = useState(false)
-  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const handleAddFromPalette = useCallback(
     (kind: WorkflowNodeKind) => {
       const center = reactFlowInstance?.screenToFlowPosition({
@@ -443,6 +704,15 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       if (key === "k") {
         e.preventDefault()
         setPaletteOpen((v) => !v)
+        return
+      }
+      // Ctrl/Cmd+F → in-canvas Spotlight search. Skipped when typing into
+      // an inspector field so the browser's native find UI still works
+      // for `<input>` values.
+      if (key === "f" && !e.shiftKey) {
+        if (isEditableTarget(e.target)) return
+        e.preventDefault()
+        setSpotlightOpen((v) => !v)
         return
       }
       // Clipboard + selection family — do nothing while the user is typing
@@ -595,6 +865,16 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         onExportJson={handleExportJson}
         onImportJson={handleImportJson}
         onOpenCommandPalette={() => setPaletteOpen(true)}
+        performanceTier={perfTier.userChoice}
+        effectivePerformanceTier={perfTier.effective}
+        onPerformanceTierChange={perfTier.setUserChoice}
+        workflowId={workflowId}
+        currentViewport={viewport}
+        onRestoreViewport={(vp) =>
+          reactFlowInstance?.setViewport(vp, {
+            duration: perfTier.flags.edgeAnimations ? 400 : 0,
+          })
+        }
       />
       <input
         ref={importInputRef}
@@ -618,11 +898,24 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         </ResizablePrimitive.Separator>
         <ResizablePrimitive.Panel defaultSize="56%" minSize="30%">
           <div
+            ref={canvasWrapperRef}
             className="relative h-full w-full overflow-hidden bg-muted/30"
             data-testid="workflow-canvas"
             onDrop={handleDrop}
             onDragOver={handleDragOver}
           >
+            <ViewportBreadcrumb
+              store={useStore}
+              reactFlowInstance={reactFlowInstance}
+              liveViewport={liveViewport}
+            />
+            <LassoOverlay
+              containerRef={canvasWrapperRef}
+              reactFlowInstance={reactFlowInstance}
+              store={useStore}
+              enabled={true}
+            />
+            <ConnectionPointerListener store={useStore} />
             <ReactFlow
               nodes={decoratedNodes}
               edges={edges}
@@ -631,15 +924,30 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
               isValidConnection={isValidConnection}
+              onMove={onMove}
               onMoveEnd={onMoveEnd}
+              onNodeDragStart={handleNodeDragStart}
               onNodeDrag={handleNodeDrag}
               onNodeDragStop={handleNodeDragStop}
+              onPaneContextMenu={handlePaneContextMenu}
+              onNodeContextMenu={handleNodeContextMenu}
+              onEdgeContextMenu={handleEdgeContextMenu}
               onInit={setReactFlowInstance}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              connectionLineComponent={connectionLineGhost}
+              onConnectStart={(_e, params) => {
+                if (!params.nodeId) return
+                useStore.getState().beginConnection({
+                  sourceId: params.nodeId,
+                  sourceHandle: params.handleId ?? null,
+                })
+              }}
+              onConnectEnd={() => useStore.getState().endConnection()}
               fitView={false}
               minZoom={0.2}
               maxZoom={2}
-              snapToGrid
+              snapToGrid={snapToGrid}
               snapGrid={[16, 16]}
               deleteKeyCode={["Backspace", "Delete"]}
               multiSelectionKeyCode={["Shift", "Meta", "Control"]}
@@ -649,13 +957,13 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
             >
               <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
               <Controls position="bottom-left" />
-              <MiniMap
-                position="bottom-right"
-                pannable
-                zoomable
-                nodeColor={minimapNodeColor as unknown as () => string}
-                className="!rounded-md !border !bg-background"
-              />
+              {perfTier.flags.showMinimap ? (
+                <PerfMiniMap
+                  degraded={isDraggingAny || perfTier.flags.minimapDegraded}
+                  nodeColor={minimapNodeColor}
+                  className="!rounded-md !border !bg-background"
+                />
+              ) : null}
               <AlignmentOverlay guides={alignmentGuides} />
             </ReactFlow>
             {showEmpty ? <EditorEmptyState onAddNode={addManualTrigger} /> : null}
@@ -684,6 +992,27 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         onImportJsonRequest={handleImportRequest}
       />
       <ShortcutsCheatsheet open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <SpotlightSearch
+        open={spotlightOpen}
+        onOpenChange={setSpotlightOpen}
+        store={useStore}
+        reactFlowInstance={reactFlowInstance}
+        animationsEnabled={perfTier.flags.edgeAnimations}
+      />
+      <CanvasContextMenu
+        open={ctxMenu.open}
+        position={ctxMenu.position}
+        target={ctxMenu.target}
+        store={useStore}
+        onClose={closeCtxMenu}
+        onAddNodeAtPosition={ctxAddNodeAtPosition}
+        onResetView={ctxResetView}
+        onConfigureNode={ctxConfigureNode}
+        onRunFromNode={ctxRunFromNode}
+        onCopyNode={ctxCopyNode}
+        onEditEdgeLabel={ctxEditEdgeLabel}
+        onPaste={ctxPaste}
+      />
     </div>
   )
 }
@@ -707,7 +1036,9 @@ export function WorkflowEditorCanvas({ workflow, onRequestRun }: WorkflowEditorC
 
   return (
     <ReactFlowProvider>
-      <CanvasInner store={store} onRequestRun={onRequestRun ?? noop} />
+      <EditorStoreProvider store={store}>
+        <CanvasInner store={store} onRequestRun={onRequestRun ?? noop} />
+      </EditorStoreProvider>
     </ReactFlowProvider>
   )
 }

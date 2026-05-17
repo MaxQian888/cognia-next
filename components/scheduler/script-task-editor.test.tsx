@@ -45,21 +45,7 @@ jest.mock("@/components/ui/select", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/switch", () => ({
-  Switch: ({
-    checked,
-    onCheckedChange,
-  }: {
-    checked?: boolean
-    onCheckedChange?: (v: boolean) => void
-  }) => (
-    <input
-      type="checkbox"
-      checked={!!checked}
-      onChange={(e) => onCheckedChange?.(e.target.checked)}
-    />
-  ),
-}))
+jest.mock("@/components/ui/switch")
 
 jest.mock("@/components/ui/collapsible", () => ({
   Collapsible: ({

@@ -65,11 +65,22 @@ jest.mock("@/components/desktop/guild-rail", () => ({
     onCreateTeam: () => void
     onOpenSettings: () => void
   }) => (
-    <div>
+    <div data-testid="guild-rail-stub">
       <button data-testid="guild-create-team" onClick={onCreateTeam} />
       <button data-testid="guild-open-settings" onClick={onOpenSettings} />
     </div>
   ),
+}))
+jest.mock("@/hooks/desktop/use-menu-event-router", () => ({
+  useMenuEventRouter: jest.fn(),
+}))
+
+const uiStateRef = {
+  guildRailCollapsed: false,
+  statusBarCollapsed: false,
+}
+jest.mock("@/stores/ui/ui-store", () => ({
+  useUIStore: (selector: (s: typeof uiStateRef) => unknown) => selector(uiStateRef),
 }))
 
 import { DesktopAppShell, isShellBypassRoute } from "./desktop-app-shell"
@@ -81,6 +92,8 @@ beforeEach(() => {
   routerReplace.mockReset()
   pathname = "/"
   platformValue = "web"
+  uiStateRef.guildRailCollapsed = false
+  uiStateRef.statusBarCollapsed = false
 })
 
 test("renders TitleBar, StatusBar, GuildRail, CommandPalette, and resize edges", () => {
@@ -190,5 +203,39 @@ describe("isShellBypassRoute", () => {
     expect(isShellBypassRoute("/workflows")).toBe(false)
     expect(isShellBypassRoute("/canvas")).toBe(false)
     expect(isShellBypassRoute("/share-targeting")).toBe(false)
+  })
+})
+
+describe("collapse toggles from ui-store", () => {
+  test("hides guild rail when guildRailCollapsed is true", () => {
+    uiStateRef.guildRailCollapsed = true
+    render(
+      <DesktopAppShell>
+        <div data-testid="route-content" />
+      </DesktopAppShell>
+    )
+    expect(screen.queryByTestId("guild-rail-stub")).toBeNull()
+    expect(screen.getByTestId("route-content")).toBeInTheDocument()
+  })
+
+  test("hides status bar when statusBarCollapsed is true", () => {
+    uiStateRef.statusBarCollapsed = true
+    render(
+      <DesktopAppShell>
+        <div data-testid="route-content" />
+      </DesktopAppShell>
+    )
+    expect(screen.queryByTestId("status-bar")).toBeNull()
+    expect(screen.getByTestId("route-content")).toBeInTheDocument()
+  })
+
+  test("renders both when collapsed flags are false", () => {
+    render(
+      <DesktopAppShell>
+        <div data-testid="route-content" />
+      </DesktopAppShell>
+    )
+    expect(screen.getByTestId("guild-rail-stub")).toBeInTheDocument()
+    expect(screen.getByTestId("status-bar")).toBeInTheDocument()
   })
 })

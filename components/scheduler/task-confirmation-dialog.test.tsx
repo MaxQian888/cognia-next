@@ -49,9 +49,7 @@ jest.mock("@/components/ui/checkbox", () => ({
   ),
 }))
 
-jest.mock("@/components/ui/scroll-area", () => ({
-  ScrollArea: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}))
+jest.mock("@/components/ui/scroll-area")
 
 import { TaskConfirmationDialog, AdminElevationDialog } from "./task-confirmation-dialog"
 

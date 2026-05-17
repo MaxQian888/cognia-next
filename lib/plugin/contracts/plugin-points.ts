@@ -264,8 +264,10 @@ export const CANONICAL_HOOK_POINTS = [
   "onModelSwitch",
   "onChatModeSwitch",
   "onSystemPromptChange",
-  "onAgentPlanCreate",
-  "onAgentPlanStepComplete",
+  // onAgentPlanCreate, onAgentPlanStepComplete — demoted to
+  // DEPRECATED_HOOK_POINTS (ADR 0016 P1-5, 2026-05-17). Reason: no host
+  // event source exists; the agent planner is unimplemented. Dispatchers
+  // remain so existing plugins compile, but no host fires them.
   "onScheduledTaskStart",
   "onScheduledTaskComplete",
   "onScheduledTaskError",
@@ -290,8 +292,11 @@ export const CANONICAL_HOOK_POINTS = [
   "onArtifactDelete",
   "onArtifactOpen",
   "onArtifactClose",
-  "onArtifactExecute",
-  "onArtifactExport",
+  // onArtifactExecute, onArtifactExport — demoted to DEPRECATED_HOOK_POINTS
+  // (ADR 0016 P1-5, 2026-05-17). Reason: no artifact runner / export
+  // pipeline calls these. `extension-point-consumers.md` line 205-206
+  // referenced "artifact runner" / "export pipeline" as future consumers,
+  // neither shipped. Dispatchers remain but are not fired by any host.
   "onExportStart",
   "onExportComplete",
   "onExportTransform",
@@ -360,6 +365,12 @@ export const DEPRECATED_HOOK_POINTS = [
   "onThemeModeChange",
   "onColorPresetChange",
   "onCustomThemeActivate",
+  // ADR 0016 P1-5 (2026-05-17) — no host event source; documented as
+  // future hooks in extension-point-consumers.md but never wired.
+  "onAgentPlanCreate",
+  "onAgentPlanStepComplete",
+  "onArtifactExecute",
+  "onArtifactExport",
 ] as const
 
 export type DeprecatedHookPoint = (typeof DEPRECATED_HOOK_POINTS)[number]
@@ -759,7 +770,7 @@ const activationPatternContracts: Record<CanonicalActivationPattern, PluginPoint
       "No file-open runtime dispatch in Cognia; declare startup activation and filter inside the plugin.",
   },
   // VS Code activation patterns — handled by
-  // sidecars/vscode-ext-host (M0) and surfaced through the cognia plugin
+  // sidecar/vscode-ext-host (M0) and surfaced through the cognia plugin
   // manager. Bindings reference the activation pump in the sidecar to make
   // the contract registry honest about where dispatch happens.
   "onView:*": vscodeActivationContract("onView:*"),
@@ -792,7 +803,7 @@ function vscodeActivationContract(
     stability: "stable",
     status: "implemented",
     owner: "plugin-platform",
-    binding: "sidecars/vscode-ext-host/src/host.ts:handleActivationEvent",
+    binding: "sidecar/vscode-ext-host/src/host.ts:handleActivationEvent",
     docs: ACTIVATION_POINT_DOCS,
     requiredTests: ACTIVATION_POINT_TESTS,
     introducedIn: "0.5.0",

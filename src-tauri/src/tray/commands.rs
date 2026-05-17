@@ -1,0 +1,211 @@
+//! IPC commands the renderer uses to push tray state into the Rust process.
+//! The renderer is the source of truth (i18n, persistence, `when`-filtering)
+//! — these commands rebuild the OS-level menu / icon to reflect what the
+//! renderer just decided.
+//!
+//! Mobile (Android / iOS) builds stub every command with a clear error
+//! string; the tray UI is desktop-only by design but the command list must
+//! stay platform-uniform to keep `tauri::generate_handler!` simple.
+
+use std::sync::Arc;
+
+use tauri::{AppHandle, Runtime, State};
+
+use super::dto::{TrayIconState, TrayMenuItem};
+use super::TrayMenuStateStore;
+
+#[cfg(desktop)]
+use super::icon_state::{self, TrayIconStateStore};
+#[cfg(desktop)]
+use super::menu_builder::{build_menu, BuiltMenu};
+#[cfg(desktop)]
+use super::TRAY_ICON_ID;
+#[cfg(desktop)]
+use tauri::Manager;
+
+/// Replace the tray menu in one shot. Empty input wipes the menu down to
+/// just whatever predefined items the OS forces (typically nothing).
+#[tauri::command]
+pub async fn tray_set_menu<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, Arc<TrayMenuStateStore>>,
+    items: Vec<TrayMenuItem>,
+) -> Result<(), String> {
+    #[cfg(desktop)]
+    {
+        let BuiltMenu { menu, index } =
+            build_menu(&app, &items).map_err(|e| format!("build_menu: {e}"))?;
+
+        state.set_layout(items, index);
+
+        let tray = app
+            .tray_by_id(TRAY_ICON_ID)
+            .ok_or_else(|| format!("{TRAY_ICON_ID} not registered"))?;
+        tray.set_menu(Some(menu))
+            .map_err(|e| format!("set_menu: {e}"))?;
+        Ok(())
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, state, items);
+        Err("tray not available on this platform".into())
+    }
+}
+
+#[tauri::command]
+pub async fn tray_set_icon_state<R: Runtime>(
+    app: AppHandle<R>,
+    state: String,
+) -> Result<(), String> {
+    #[cfg(desktop)]
+    {
+        let parsed = TrayIconState::from_str(&state)
+            .ok_or_else(|| format!("unknown icon state: {state}"))?;
+        icon_state::apply(&app, parsed)
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, state);
+        Err("tray not available on this platform".into())
+    }
+}
+
+/// Cache PNG bytes for `state` so subsequent `tray_set_icon_state` calls
+/// can swap the rendered image without crossing IPC for every flip. The
+/// renderer pushes one buffer per state at boot (see
+/// `lib/tray/icon-builder.ts`). Bytes must be a complete PNG payload —
+/// `tauri::image::Image::from_bytes` decodes them on first apply.
+#[tauri::command]
+pub async fn tray_register_icon<R: Runtime>(
+    app: AppHandle<R>,
+    state: String,
+    png_bytes: Vec<u8>,
+) -> Result<(), String> {
+    #[cfg(desktop)]
+    {
+        let parsed = TrayIconState::from_str(&state)
+            .ok_or_else(|| format!("unknown icon state: {state}"))?;
+        if png_bytes.is_empty() {
+            return Err("png_bytes is empty".into());
+        }
+        // Quick sanity check: the bytes must look like a PNG (or ICO). We
+        // surface a clean error here rather than after `Image::from_bytes`
+        // fails three layers deep.
+        let looks_like_png = png_bytes.len() >= 8 && png_bytes[..8] == PNG_MAGIC;
+        let looks_like_ico = png_bytes.len() >= 4 && png_bytes[..4] == ICO_MAGIC;
+        if !looks_like_png && !looks_like_ico {
+            return Err("png_bytes is neither PNG nor ICO".into());
+        }
+        let store = app
+            .try_state::<Arc<TrayIconStateStore>>()
+            .ok_or_else(|| "tray icon-state store not managed".to_string())?;
+        store.register_raster(parsed, png_bytes);
+        // If the renderer just registered the icon for the currently-shown
+        // state, re-apply immediately so the new raster takes effect
+        // without waiting for the next `tray_set_icon_state` call.
+        if store.current() == parsed {
+            let _ = icon_state::apply(&app, parsed);
+        }
+        Ok(())
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, state, png_bytes);
+        Err("tray not available on this platform".into())
+    }
+}
+
+#[cfg(desktop)]
+const PNG_MAGIC: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+#[cfg(desktop)]
+const ICO_MAGIC: [u8; 4] = [0x00, 0x00, 0x01, 0x00];
+
+#[tauri::command]
+pub async fn tray_set_tooltip<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, Arc<TrayMenuStateStore>>,
+    text: String,
+) -> Result<(), String> {
+    #[cfg(desktop)]
+    {
+        let tray = app
+            .tray_by_id(TRAY_ICON_ID)
+            .ok_or_else(|| format!("{TRAY_ICON_ID} not registered"))?;
+        tray.set_tooltip(Some(text.as_str()))
+            .map_err(|e| format!("set_tooltip: {e}"))?;
+        state.set_tooltip(Some(text));
+        Ok(())
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, state, text);
+        Err("tray not available on this platform".into())
+    }
+}
+
+/// Snapshot the current items as the Rust side sees them — used by the
+/// renderer's hydration path to verify the bootstrap layout matches what it
+/// has persisted. Also useful for diagnostics.
+#[tauri::command]
+pub async fn tray_get_current_menu(
+    state: State<'_, Arc<TrayMenuStateStore>>,
+) -> Result<Vec<TrayMenuItem>, String> {
+    Ok(state.snapshot_items())
+}
+
+#[tauri::command]
+pub async fn tray_get_icon_state<R: Runtime>(
+    _app: AppHandle<R>,
+) -> Result<TrayIconState, String> {
+    #[cfg(desktop)]
+    {
+        if let Some(store) = _app.try_state::<Arc<TrayIconStateStore>>() {
+            return Ok(store.current());
+        }
+        Ok(TrayIconState::Idle)
+    }
+    #[cfg(not(desktop))]
+    {
+        Ok(TrayIconState::Idle)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tray::dto::TrayActionPayload;
+
+    #[test]
+    fn icon_state_parser_rejects_unknown_strings() {
+        assert!(TrayIconState::from_str("strobe").is_none());
+        assert!(TrayIconState::from_str("idle").is_some());
+        assert!(TrayIconState::from_str("BUSY").is_none()); // case-sensitive
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn menu_state_store_set_layout_writes_index() {
+        let store = TrayMenuStateStore::default();
+        let items = vec![TrayMenuItem::Action {
+            id: "a".into(),
+            label: "A".into(),
+            accelerator: None,
+            payload: TrayActionPayload::Slash {
+                command: "clear".into(),
+            },
+            disabled: None,
+        }];
+        let mut idx = std::collections::HashMap::new();
+        idx.insert(
+            "a".to_string(),
+            TrayActionPayload::Slash {
+                command: "clear".into(),
+            },
+        );
+        store.set_layout(items, idx);
+        assert!(matches!(
+            store.lookup_payload("a"),
+            Some(TrayActionPayload::Slash { ref command }) if command == "clear"
+        ));
+    }
+}

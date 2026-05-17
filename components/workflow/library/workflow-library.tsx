@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { PlusIcon, SearchIcon, WorkflowIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { listWorkflowsByUpdated } from "@/lib/db/workflows"
+import { useUIStore } from "@/stores/ui/ui-store"
 import { WorkflowCard } from "./workflow-card"
 import { WorkflowCreateDialog } from "./workflow-create-dialog"
 import { LibraryStatBar } from "./library-stat-bar"
@@ -18,6 +19,18 @@ export function WorkflowLibrary() {
   const workflows = useLiveQuery(() => listWorkflowsByUpdated(), [])
   const [query, setQuery] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
+
+  // Honor the File → New Workflow menu item: when the ui-store flags a
+  // workflow-create request, open the dialog and clear the flag.
+  const pendingCreate = useUIStore((s) => s.pendingCreateRequest)
+  const clearPendingCreate = useUIStore((s) => s.clearPendingCreate)
+  useEffect(() => {
+    if (pendingCreate?.kind === "workflow") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- WIP: deriving from pendingCreate would be cleaner; revisit when library stabilises.
+      setCreateOpen(true)
+      clearPendingCreate()
+    }
+  }, [pendingCreate, clearPendingCreate])
 
   const filtered = useMemo(() => {
     if (!workflows) return undefined

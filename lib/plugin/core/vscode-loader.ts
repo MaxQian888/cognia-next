@@ -1,7 +1,7 @@
 /**
  * VS Code extension loader (TS side).
  *
- * VS Code extensions execute in a Node.js sidecar (`sidecars/vscode-ext-host/`)
+ * VS Code extensions execute in a Node.js sidecar (`sidecar/vscode-ext-host/`)
  * managed by Tauri. This module is a thin IPC client: the heavy work
  * (subprocess lifecycle, capability gating, JSON-RPC plumbing) lives in Rust
  * under `src-tauri/src/plugin_api/vscode/`. We expose just enough to

@@ -8,8 +8,9 @@
  *   2. Validate (zod + graph integrity).
  *   3. Resolve secrets / credentials at the boundary.
  *   4. Topo-sort the graph; identify back-edges for loop/wait nodes.
- *   5. Step through the queue, gathering upstream outputs, calling the step
- *      executor, and routing on branch decisions.
+ *   5. Schedule ready nodes up to `maxConcurrency` (ADR-0022 §1 Decision).
+ *      Default `maxConcurrency=1` preserves the legacy sequential behavior;
+ *      higher values allow independent nodes to run concurrently.
  *   6. Persist the WorkflowRunRow + every WorkflowRunEventRow to Dexie.
  *   7. Mirror the run state to the Rust SQLite shadow (Tauri only — web mode
  *      uses Dexie alone for crash recovery).
@@ -41,6 +42,7 @@ import { topoSort, upstream as upstreamOf } from "./topo-sort"
 import { runStep } from "./step-executor"
 import { NoopSecretResolver, type SecretResolver } from "./secret-resolver"
 import { ackRunCompleted, persistRunState } from "./tauri-bridge"
+import { type ConcurrencyController, createConcurrencyController } from "./concurrency-controller"
 
 export interface RunWorkflowInput {
   workflow: VisualWorkflow
@@ -51,6 +53,23 @@ export interface RunWorkflowInput {
   secretResolver?: SecretResolver
   /** External AbortSignal to cancel mid-run. */
   signal?: AbortSignal
+  /**
+   * Start mid-graph from this step id (used by the editor's "Run from here"
+   * context-menu / mini-toolbar actions). Every node strictly upstream of
+   * `startStepId` is marked skipped before the topo loop begins; nodes that
+   * are neither upstream of nor reachable from `startStepId` are also
+   * skipped so the run is bounded to the descendant subgraph. The trigger
+   * payload still flows in; downstream nodes that depended on an upstream
+   * output see `undefined` in their `upstreamMap` for the skipped sources.
+   */
+  startStepId?: string
+  /**
+   * Per ADR-0022 §3.7. Dynamic concurrency cap consulted on each scheduling
+   * tick. When omitted, the orchestrator constructs one from
+   * `workflow.settings.maxConcurrency ?? 1`, making the change backward-
+   * compatible with existing call sites (sequential behavior preserved).
+   */
+  concurrency?: ConcurrencyController
 }
 
 export interface RunWorkflowResult {
@@ -130,10 +149,18 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
   const cache = await IdempotencyCache.hydrate(runId)
   const secretResolver = input.secretResolver ?? NoopSecretResolver
 
+  // Dynamic concurrency cap (ADR-0022 §3.7). Defaults to settings.maxConcurrency
+  // or 1, preserving sequential behavior for existing callers.
+  const concurrency =
+    input.concurrency ?? createConcurrencyController(validated.settings.maxConcurrency ?? 1)
+
   // 4. Topo-sort. If sort throws (cycles snuck past validation), fail loudly.
   let order: string[]
+  let backEdgeIds: Set<string>
   try {
-    order = topoSort(validated as VisualWorkflow).order
+    const sortResult = topoSort(validated as VisualWorkflow)
+    order = sortResult.order
+    backEdgeIds = new Set(sortResult.backEdges.map((e) => e.id))
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     await logger.runFailed({ message })
@@ -147,23 +174,101 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
     return { runId, status: "failed", error: { message } }
   }
 
-  // 5. Step through the queue.
+  // 5. Schedule.
   const skipped = new Set<string>()
+  const completed = new Set<string>()
   const stepOutputs = new Map<string, unknown>()
   const retryPolicy = validated.settings.retryDefaults
   let executedStepIndex = -1
+  let firstFailure: { stepId: string; err: unknown } | undefined
 
+  // Forward-edge dependency map for cheap ready checks.
+  const stepDeps = new Map<string, Set<string>>()
+  for (const n of validated.nodes) stepDeps.set(n.id, new Set())
+  for (const edge of validated.edges) {
+    if (backEdgeIds.has(edge.id)) continue
+    stepDeps.get(edge.target)?.add(edge.source)
+  }
+
+  // If "Run from here" was requested, mark every node that is NOT the
+  // start step OR a descendant of it as skipped before stepping. This
+  // bounds the run to the subgraph rooted at startStepId without changing
+  // the executor semantics (skipped steps emit `stepSkipped` events as
+  // usual). We use a BFS over forward edges from the start node.
+  if (input.startStepId) {
+    const wf = validated as VisualWorkflow
+    if (!wf.nodes.some((n) => n.id === input.startStepId)) {
+      const message = `startStepId ${input.startStepId} not present in workflow`
+      await logger.runFailed({ message })
+      runRow = { ...runRow, status: "failed", completedAt: Date.now(), error: { message } }
+      await getDb().workflowRuns.put(runRow)
+      await persistRunState({ runId, workflowId: workflow.id, status: "failed" })
+      getPluginEventHooks().dispatchWorkflowError(workflow.id, new Error(message))
+      getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
+      return { runId, status: "failed", error: { message } }
+    }
+    const reachable = new Set<string>([input.startStepId])
+    const queue: string[] = [input.startStepId]
+    while (queue.length > 0) {
+      const cur = queue.shift()!
+      for (const edge of wf.edges) {
+        if (edge.source === cur && !reachable.has(edge.target)) {
+          reachable.add(edge.target)
+          queue.push(edge.target)
+        }
+      }
+    }
+    for (const stepId of order) {
+      if (!reachable.has(stepId)) skipped.add(stepId)
+    }
+  }
+
+  // Eagerly log pre-skipped steps so the event log mirrors today's behavior.
+  // We also track which steps we've already logged-as-skipped so we don't
+  // double-emit when branch routing / disabled propagation grows the set.
+  const loggedSkips = new Set<string>()
   for (const stepId of order) {
     if (skipped.has(stepId)) {
       await logger.stepSkipped(stepId, "Skipped due to upstream branch decision or disabled flag")
-      continue
+      loggedSkips.add(stepId)
     }
-    const node = validated.nodes.find((n) => n.id === stepId)!
+  }
+
+  const flushNewSkipLogs = async (): Promise<void> => {
+    for (const stepId of order) {
+      if (skipped.has(stepId) && !loggedSkips.has(stepId)) {
+        await logger.stepSkipped(stepId, "Skipped due to upstream branch decision or disabled flag")
+        loggedSkips.add(stepId)
+      }
+    }
+  }
+
+  const inflight = new Map<string, Promise<void>>()
+
+  const isReady = (stepId: string): boolean => {
+    if (completed.has(stepId) || skipped.has(stepId)) return false
+    if (inflight.has(stepId)) return false
+    if (firstFailure) return false
+    const deps = stepDeps.get(stepId)
+    if (!deps) return false
+    for (const dep of deps) {
+      if (!completed.has(dep) && !skipped.has(dep)) return false
+    }
+    return true
+  }
+
+  const scheduleOne = (stepId: string): Promise<void> => {
+    const node = validated.nodes.find((n) => n.id === stepId)
+    if (!node) {
+      completed.add(stepId)
+      return Promise.resolve()
+    }
     if (node.data.disabled) {
-      await logger.stepSkipped(stepId, "Node is disabled")
-      // Disabled nodes should not block downstream — propagate skip.
-      propagateSkip(validated as VisualWorkflow, stepId, skipped)
-      continue
+      return (async () => {
+        await logger.stepSkipped(stepId, "Node is disabled")
+        // Disabled nodes should not block downstream — propagate skip.
+        propagateSkip(validated as VisualWorkflow, stepId, skipped)
+      })()
     }
 
     // Gather upstream outputs.
@@ -177,82 +282,130 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunWorkflowR
       }
     }
 
-    try {
-      const result = await runStep({
-        workflow: validated as VisualWorkflow,
-        node,
-        trigger,
-        upstream: upstreamMap,
-        runId,
-        signal: ac.signal,
-        cache,
-        retryPolicy,
-        secretResolver,
-        logger,
-      })
-      stepOutputs.set(stepId, result.output)
-      runRow = { ...runRow, lastCompletedStepId: stepId }
-      await persistRunState({
-        runId,
-        workflowId: workflow.id,
-        status: "running",
-        lastStepId: stepId,
-      })
-      // Plugin host hook: a step has completed. `executedStepIndex` counts
-      // executed (non-skipped) steps so plugins see a monotonically
-      // increasing 0-based counter even when branches skip nodes.
-      executedStepIndex += 1
-      getPluginEventHooks().dispatchWorkflowStepComplete(
-        workflow.id,
-        executedStepIndex,
-        result.output
-      )
+    return (async () => {
+      try {
+        const result = await runStep({
+          workflow: validated as VisualWorkflow,
+          node,
+          trigger,
+          upstream: upstreamMap,
+          runId,
+          signal: ac.signal,
+          cache,
+          retryPolicy,
+          secretResolver,
+          logger,
+        })
+        stepOutputs.set(stepId, result.output)
+        completed.add(stepId)
+        runRow = { ...runRow, lastCompletedStepId: stepId }
+        await persistRunState({
+          runId,
+          workflowId: workflow.id,
+          status: "running",
+          lastStepId: stepId,
+        })
+        // Plugin host hook: a step has completed. `executedStepIndex` counts
+        // executed (non-skipped) steps so plugins see a monotonically
+        // increasing 0-based counter even when branches skip nodes.
+        executedStepIndex += 1
+        getPluginEventHooks().dispatchWorkflowStepComplete(
+          workflow.id,
+          executedStepIndex,
+          result.output
+        )
 
-      // Branch routing — if a node returned `decision`, mark non-chosen
-      // outgoing edges' targets as skipped.
-      if (result.decision !== undefined) {
-        const decisions = Array.isArray(result.decision) ? result.decision : [result.decision]
-        const chosen = new Set(decisions)
-        for (const edge of validated.edges.filter((e) => e.source === stepId)) {
-          const label = edge.label ?? edge.sourceHandle ?? "default"
-          if (!chosen.has(label) && chosen.size > 0) {
-            propagateSkip(validated as VisualWorkflow, edge.target, skipped)
+        // Branch routing — if a node returned `decision`, mark non-chosen
+        // outgoing edges' targets as skipped.
+        if (result.decision !== undefined) {
+          const decisions = Array.isArray(result.decision) ? result.decision : [result.decision]
+          const chosen = new Set(decisions)
+          for (const edge of validated.edges.filter((e) => e.source === stepId)) {
+            const label = edge.label ?? edge.sourceHandle ?? "default"
+            if (!chosen.has(label) && chosen.size > 0) {
+              propagateSkip(validated as VisualWorkflow, edge.target, skipped)
+            }
           }
         }
+      } catch (err) {
+        if (!firstFailure) firstFailure = { stepId, err }
+        // Abort the run so any concurrent sibling tasks observing ac.signal
+        // can cancel early. Subsequent throws after firstFailure are ignored.
+        ac.abort(err instanceof Error ? err : new Error(String(err)))
       }
-    } catch (err) {
-      const baseMessage = err instanceof Error ? err.message : String(err)
-      const message = wallClockExpired
-        ? `Wall-clock timeout (${wallClockTimeoutMs}ms) exceeded — aborted at ${stepId}`
-        : baseMessage
-      if (timeoutHandle) clearTimeout(timeoutHandle)
-      await logger.runFailed({ message, nodeId: stepId })
-      // `RunStatus` does not (yet) carry a dedicated "timed_out" variant — we
-      // surface the wall-clock expiry through `error.code` so consumers can
-      // discriminate without parsing the message string.
-      const errorCode = wallClockExpired ? "timeout" : undefined
-      runRow = {
-        ...runRow,
-        status: "failed",
-        completedAt: Date.now(),
-        error: { message, nodeId: stepId, code: errorCode },
-      }
-      await getDb().workflowRuns.put(runRow)
-      await persistRunState({
-        runId,
-        workflowId: workflow.id,
-        status: "failed",
-        lastStepId: stepId,
-      })
-      // Plugin host hook: workflow failed. Fire both onWorkflowError
-      // (error variant) and onWorkflowComplete with success=false so
-      // plugins that listen to either get the same signal.
-      const failureError = err instanceof Error ? err : new Error(message)
-      getPluginEventHooks().dispatchWorkflowError(workflow.id, failureError)
-      getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
-      return { runId, status: "failed", error: { message, nodeId: stepId, code: errorCode } }
-    }
+    })()
   }
+
+  // Main scheduling loop. Continue while there is more work and no failure.
+  while (completed.size + skipped.size < validated.nodes.length) {
+    if (firstFailure) break
+    if (ac.signal.aborted && inflight.size === 0) break
+
+    let scheduledThisTick = 0
+    for (const stepId of order) {
+      if (inflight.size >= concurrency.get()) break
+      if (!isReady(stepId)) continue
+      const promise = scheduleOne(stepId).finally(() => {
+        inflight.delete(stepId)
+      })
+      inflight.set(stepId, promise)
+      scheduledThisTick += 1
+    }
+
+    if (inflight.size === 0) {
+      // Nothing scheduled this tick AND nothing in flight — either the run is
+      // done or the remaining nodes are unreachable (deps will never resolve).
+      // Either way, exit the loop; finalization decides terminal status.
+      if (scheduledThisTick === 0) break
+      // Disabled-only schedule that resolved synchronously without awaiting —
+      // loop again to pick up newly-skipped descendants.
+      await flushNewSkipLogs()
+      continue
+    }
+
+    await Promise.race(inflight.values())
+    await flushNewSkipLogs()
+  }
+
+  // Drain any still-pending tasks so we don't leak unresolved promises.
+  if (inflight.size > 0) {
+    await Promise.allSettled(inflight.values())
+  }
+
+  if (firstFailure) {
+    if (timeoutHandle) clearTimeout(timeoutHandle)
+    const { stepId, err } = firstFailure
+    const baseMessage = err instanceof Error ? err.message : String(err)
+    const message = wallClockExpired
+      ? `Wall-clock timeout (${wallClockTimeoutMs}ms) exceeded — aborted at ${stepId}`
+      : baseMessage
+    await logger.runFailed({ message, nodeId: stepId })
+    // `RunStatus` does not (yet) carry a dedicated "timed_out" variant — we
+    // surface the wall-clock expiry through `error.code` so consumers can
+    // discriminate without parsing the message string.
+    const errorCode = wallClockExpired ? "timeout" : undefined
+    runRow = {
+      ...runRow,
+      status: "failed",
+      completedAt: Date.now(),
+      error: { message, nodeId: stepId, code: errorCode },
+    }
+    await getDb().workflowRuns.put(runRow)
+    await persistRunState({
+      runId,
+      workflowId: workflow.id,
+      status: "failed",
+      lastStepId: stepId,
+    })
+    // Plugin host hook: workflow failed. Fire both onWorkflowError
+    // (error variant) and onWorkflowComplete with success=false so
+    // plugins that listen to either get the same signal.
+    const failureError = err instanceof Error ? err : new Error(message)
+    getPluginEventHooks().dispatchWorkflowError(workflow.id, failureError)
+    getPluginEventHooks().dispatchWorkflowComplete(workflow.id, false)
+    return { runId, status: "failed", error: { message, nodeId: stepId, code: errorCode } }
+  }
+
   if (timeoutHandle) clearTimeout(timeoutHandle)
 
   // 6. Wrap up. The "output" of a run is the output of its terminal node(s).

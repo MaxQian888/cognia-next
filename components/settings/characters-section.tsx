@@ -47,6 +47,7 @@ import { useTranslations } from "next-intl"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { createLogger } from "@/lib/logger"
 import { MODEL_PRESET_VALUES, PERMISSION_MODE_VALUES } from "@/lib/claude/model-presets"
+import { useUIStore } from "@/stores/ui/ui-store"
 
 const log = createLogger("settings.characters")
 
@@ -68,6 +69,18 @@ export function CharactersSection() {
   const mcpServers = useLiveQuery(() => listMcpServers(), []) ?? []
   const [editing, setEditing] = useState<Character | null>(null)
   const [creating, setCreating] = useState(false)
+
+  // Honor the File → New Character menu item: when the ui-store flags a
+  // character-create request, pop the creation form and clear the signal.
+  const pendingCreate = useUIStore((s) => s.pendingCreateRequest)
+  const clearPendingCreate = useUIStore((s) => s.clearPendingCreate)
+  useEffect(() => {
+    if (pendingCreate?.kind === "character") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- WIP: deriving from pendingCreate would be cleaner; revisit when this section stabilises.
+      setCreating(true)
+      clearPendingCreate()
+    }
+  }, [pendingCreate, clearPendingCreate])
 
   return (
     <div className="space-y-4">
