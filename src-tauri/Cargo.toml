@@ -79,6 +79,16 @@ webpki-roots = "0.26"
 futures-util = { version = "0.3", default-features = false }
 bytes = "1"
 
+# Vector cloud backends (ADR-0022) — port the 5 cloud vector providers from
+# the dead-coded JS layer into Rust so they actually execute in Tauri.
+# Qdrant: official client, verified 1.18.0 on crates.io 2026-05-17. REST mode
+# keeps TLS handling identical to our existing reqwest stack.
+qdrant-client = { version = "1.18", default-features = false, features = ["serde"] }
+# Milvus: deliberately NOT taking the `milvus-sdk-rust` 0.1.0 dep — its build
+# script panics without a local `protoc` install (verified 2026-05-17). We use
+# the HTTP `/v2/vectordb/*` API instead, which is the same reqwest path as
+# Pinecone/Chroma/Weaviate. See ADR-0022.
+
 # TTS support — provider key vault, Edge-TTS WebSocket bridge, and HTTP proxy.
 keyring = "3"
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-native-roots", "connect"] }
