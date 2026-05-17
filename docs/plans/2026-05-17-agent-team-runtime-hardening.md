@@ -56,6 +56,24 @@
 
 ---
 
+## Test framework note
+
+The project uses **Jest 30** (verified via `package.json:test = "jest"` and existing `*.test.ts` files such as `lib/connectors/circuit-breaker.test.ts`). Any code block in this plan that imports from `"vitest"` or calls `vi.fn` / `vi.mock` / `vi.mocked` was authored against the global default and **must be translated to Jest at implementation time**. The plan already applies the substitutions below globally; this section documents the mapping so reviewers see what was changed:
+
+| Vitest pattern (do NOT use)                          | Jest equivalent (USE this)                                                |
+| ---------------------------------------------------- | ------------------------------------------------------------------------- |
+| `import { describe, expect, it, ... } from "vitest"` | DELETE — Jest 30 provides these as globals                                |
+| `import { vi } from "vitest"`                        | DELETE — `jest` is global                                                 |
+| `jest.fn(...)`                                       | `jest.fn(...)`                                                            |
+| `jest.mock("path", factory)`                         | `jest.mock("path", factory)`                                              |
+| `jest.mocked(fn)`                                    | `jest.mocked(fn)`                                                         |
+| `jest.fn().mockReset()`                              | `jest.fn().mockReset()`                                                   |
+| `expect(x).toHaveBeenCalledExactlyOnceWith(arg)`     | `expect(x).toHaveBeenCalledTimes(1); expect(x).toHaveBeenCalledWith(arg)` |
+
+`renderHook` / `act` come from `@testing-library/react` in both frameworks — no change. Async timing helpers (`new Promise((r) => setTimeout(r, N))`) are framework-agnostic. `beforeEach` / `afterEach` are Jest globals — drop the import.
+
+---
+
 ## Coverage and verification baseline
 
 Per `CLAUDE.md`: every new file under `components/**`, `hooks/**`, `lib/**` requires a co-located `*.test.ts(x)` with ≥90% lines/branches/functions. Verify with `pnpm test:coverage`. Existing test commands:
@@ -90,7 +108,6 @@ Every commit message follows Conventional Commits with `Co-Authored-By: Claude O
 Create `lib/workflow/runtime/concurrency-controller.test.ts`:
 
 ```ts
-import { describe, expect, it, vi } from "vitest"
 import { createConcurrencyController } from "./concurrency-controller"
 
 describe("ConcurrencyController", () => {
@@ -132,15 +149,16 @@ describe("ConcurrencyController", () => {
 
   it("subscribe fires on actual change", () => {
     const c = createConcurrencyController(5)
-    const fn = vi.fn()
+    const fn = jest.fn()
     c.subscribe(fn)
     c.reduceTo(3)
-    expect(fn).toHaveBeenCalledExactlyOnceWith(3)
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(fn).toHaveBeenCalledWith(3)
   })
 
   it("subscribe does not fire when reduceTo is a no-op", () => {
     const c = createConcurrencyController(5)
-    const fn = vi.fn()
+    const fn = jest.fn()
     c.subscribe(fn)
     c.reduceTo(7)
     expect(fn).not.toHaveBeenCalled()
@@ -148,7 +166,7 @@ describe("ConcurrencyController", () => {
 
   it("unsubscribe stops notifications", () => {
     const c = createConcurrencyController(5)
-    const fn = vi.fn()
+    const fn = jest.fn()
     const unsub = c.subscribe(fn)
     unsub()
     c.reduceTo(3)
@@ -157,10 +175,10 @@ describe("ConcurrencyController", () => {
 
   it("isolates listener errors so other listeners still fire", () => {
     const c = createConcurrencyController(5)
-    const bad = vi.fn(() => {
+    const bad = jest.fn(() => {
       throw new Error("boom")
     })
-    const good = vi.fn()
+    const good = jest.fn()
     c.subscribe(bad)
     c.subscribe(good)
     c.reduceTo(3)
@@ -280,7 +298,6 @@ EOF
 Create `lib/workflow/runtime/model-preference-controller.test.ts`:
 
 ```ts
-import { describe, expect, it, vi } from "vitest"
 import { createModelPreferenceController } from "./model-preference-controller"
 
 describe("ModelPreferenceController", () => {
@@ -310,7 +327,7 @@ describe("ModelPreferenceController", () => {
 
   it("subscribe fires once on first downshift", () => {
     const c = createModelPreferenceController()
-    const fn = vi.fn()
+    const fn = jest.fn()
     c.subscribe(fn)
     c.downshift()
     c.downshift()
@@ -319,7 +336,7 @@ describe("ModelPreferenceController", () => {
 
   it("unsubscribe stops notifications", () => {
     const c = createModelPreferenceController()
-    const fn = vi.fn()
+    const fn = jest.fn()
     const unsub = c.subscribe(fn)
     unsub()
     c.downshift()
@@ -328,10 +345,10 @@ describe("ModelPreferenceController", () => {
 
   it("isolates listener errors", () => {
     const c = createModelPreferenceController()
-    const bad = vi.fn(() => {
+    const bad = jest.fn(() => {
       throw new Error("boom")
     })
-    const good = vi.fn()
+    const good = jest.fn()
     c.subscribe(bad)
     c.subscribe(good)
     c.downshift()
@@ -721,7 +738,6 @@ EOF
 Append to `orchestrator.test.ts`. Use the project's existing test helpers (`buildSimpleWorkflow`, `mockExecutor`, etc. — read the top of the file first to identify them; if absent, the test fixture below is self-contained):
 
 ```ts
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
 import { runWorkflow } from "./orchestrator"
 import { registerNodeExecutor, __resetRegistryForTesting } from "@/lib/workflow/nodes/registry"
 import { createConcurrencyController } from "./concurrency-controller"
@@ -1051,7 +1067,6 @@ EOF
 
 ```ts
 // lib/ai/agent/team/team-run-context.test.ts
-import { describe, expect, it, beforeEach } from "vitest"
 import {
   registerTeamRunContext,
   getTeamRunContext,
@@ -1235,7 +1250,6 @@ This task implements the v1 baseline: round-robin selection + circuit-breaker co
 
 ```ts
 // lib/ai/agent/team/teammate-pool.test.ts
-import { describe, expect, it, vi } from "vitest"
 import { createTeammatePool } from "./teammate-pool"
 import type { AgentTeammate } from "@/types/agent/agent-team"
 
@@ -1309,7 +1323,7 @@ describe("TeammatePool (v1 baseline)", () => {
 
   it("onAllUnavailable fires when last teammate is quarantined", () => {
     const a = tm("a")
-    const fn = vi.fn()
+    const fn = jest.fn()
     const pool = createTeammatePool({
       teammates: [a],
       breakerOptions: { minEvents: 2, failureThresholdPct: 50, cooldownMs: 60_000 },
@@ -1323,7 +1337,7 @@ describe("TeammatePool (v1 baseline)", () => {
 
   it("onAllUnavailable is edge-triggered (does not re-fire on subsequent failures)", () => {
     const a = tm("a")
-    const fn = vi.fn()
+    const fn = jest.fn()
     const pool = createTeammatePool({
       teammates: [a],
       breakerOptions: { minEvents: 2, failureThresholdPct: 50, cooldownMs: 60_000 },
@@ -1367,7 +1381,7 @@ describe("TeammatePool (v1 baseline)", () => {
 
   it("unsubscribe stops onAllUnavailable callbacks", () => {
     const a = tm("a")
-    const fn = vi.fn()
+    const fn = jest.fn()
     const pool = createTeammatePool({
       teammates: [a],
       breakerOptions: { minEvents: 2, failureThresholdPct: 50, cooldownMs: 60_000 },
@@ -1619,7 +1633,6 @@ EOF
 
 ```ts
 // lib/ai/agent/team/budget-guard.test.ts
-import { describe, expect, it, vi } from "vitest"
 import { createBudgetGuard } from "./budget-guard"
 import type { TeamNotifier } from "./team-notifier"
 import type { ConcurrencyController } from "@/lib/workflow/runtime/concurrency-controller"
@@ -1694,12 +1707,13 @@ describe("BudgetGuard", () => {
       onCritical: "notify",
       notifier,
     })
-    const fn = vi.fn()
+    const fn = jest.fn()
     g.on("warning_crossed", fn)
     g.add({ promptTokens: 70, completionTokens: 0, totalTokens: 70 })
     expect(fn).not.toHaveBeenCalled()
     g.add({ promptTokens: 11, completionTokens: 0, totalTokens: 11 })
-    expect(fn).toHaveBeenCalledExactlyOnceWith({ runId: "r1" })
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(fn).toHaveBeenCalledWith({ runId: "r1" })
     g.add({ promptTokens: 5, completionTokens: 0, totalTokens: 5 })
     expect(fn).toHaveBeenCalledTimes(1) // still one-shot
   })
@@ -1712,10 +1726,11 @@ describe("BudgetGuard", () => {
       onCritical: "notify",
       notifier,
     })
-    const fn = vi.fn()
+    const fn = jest.fn()
     g.on("critical_crossed", fn)
     g.add({ promptTokens: 96, completionTokens: 0, totalTokens: 96 })
-    expect(fn).toHaveBeenCalledExactlyOnceWith({ runId: "r1" })
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(fn).toHaveBeenCalledWith({ runId: "r1" })
     expect(g.status().level).toBe("critical")
     // notifier received a critical notify
     expect(notifier.calls.some((c) => (c as { kind: string }).kind === "notify")).toBe(true)
@@ -1729,10 +1744,11 @@ describe("BudgetGuard", () => {
       onCritical: "pause_for_review",
       notifier,
     })
-    const fn = vi.fn()
+    const fn = jest.fn()
     g.on("pause_for_review", fn)
     g.add({ promptTokens: 96, completionTokens: 0, totalTokens: 96 })
-    expect(fn).toHaveBeenCalledExactlyOnceWith({ runId: "r1" })
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(fn).toHaveBeenCalledWith({ runId: "r1" })
   })
 
   it("onCritical=reduce_concurrency calls concurrencyCtrl.reduceTo(1)", () => {
@@ -1761,7 +1777,7 @@ describe("BudgetGuard", () => {
       concurrencyCtrl: ctrl,
       modelCtrl: modelPref,
     })
-    const enteredBg = vi.fn()
+    const enteredBg = jest.fn()
     g.on("entered_background_mode", enteredBg)
     g.add({ promptTokens: 96, completionTokens: 0, totalTokens: 96 })
     expect(ctrl.reduced).toContain(1)
@@ -1777,8 +1793,8 @@ describe("BudgetGuard", () => {
       onCritical: "notify",
       notifier: fakeNotifier(),
     })
-    const warn = vi.fn()
-    const crit = vi.fn()
+    const warn = jest.fn()
+    const crit = jest.fn()
     g.on("warning_crossed", warn)
     g.on("critical_crossed", crit)
     g.add({ promptTokens: 96, completionTokens: 0, totalTokens: 96 })
@@ -1799,7 +1815,7 @@ describe("BudgetGuard", () => {
       onCritical: "notify",
       notifier: fakeNotifier(),
     })
-    const warn = vi.fn()
+    const warn = jest.fn()
     g.on("warning_crossed", warn)
     g.add({ promptTokens: 51, completionTokens: 0, totalTokens: 51 })
     expect(warn).toHaveBeenCalledTimes(1)
@@ -1812,7 +1828,7 @@ describe("BudgetGuard", () => {
       onCritical: "notify",
       notifier: fakeNotifier(),
     })
-    const fn = vi.fn()
+    const fn = jest.fn()
     const unsub = g.on("warning_crossed", fn)
     unsub()
     g.add({ promptTokens: 81, completionTokens: 0, totalTokens: 81 })
@@ -2018,13 +2034,12 @@ EOF
 
 ```ts
 // lib/ai/agent/team/team-notifier.test.ts
-import { describe, expect, it, vi } from "vitest"
 import { createTeamNotifier } from "./team-notifier"
 
 const setup = () => {
-  const toast = vi.fn()
-  const osNotify = vi.fn().mockResolvedValue(undefined)
-  const log = vi.fn().mockResolvedValue(undefined)
+  const toast = jest.fn()
+  const osNotify = jest.fn().mockResolvedValue(undefined)
+  const log = jest.fn().mockResolvedValue(undefined)
   let now = 0
   const notifier = createTeamNotifier(
     { runId: "r1", teamId: "t1" },
@@ -2323,7 +2338,6 @@ EOF
 
 ```ts
 // lib/ai/agent/team/synthesize-workflow.test.ts
-import { describe, expect, it } from "vitest"
 import { synthesizeTeamWorkflow, SynthesizeError } from "./synthesize-workflow"
 import type { AgentTeam, AgentTeamTask } from "@/types/agent/agent-team"
 
@@ -2635,7 +2649,6 @@ EOF
 Append to `lib/workflow/nodes/built-ins.test.ts`:
 
 ```ts
-import { describe, expect, it, vi, beforeEach } from "vitest"
 import { __resetRegistryForTesting, getExecutor } from "./registry"
 import {
   registerTeamRunContext,
@@ -2650,8 +2663,8 @@ import { createConcurrencyController } from "@/lib/workflow/runtime/concurrency-
 import { createModelPreferenceController } from "@/lib/workflow/runtime/model-preference-controller"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 
-vi.mock("@/lib/ai/agent/agent-executor", () => ({
-  executeAgent: vi.fn(),
+jest.mock("@/lib/ai/agent/agent-executor", () => ({
+  executeAgent: jest.fn(),
 }))
 import { executeAgent } from "@/lib/ai/agent/agent-executor"
 
@@ -2715,7 +2728,7 @@ describe("team.task.dispatch node", () => {
   beforeEach(() => {
     __resetRegistryForTesting()
     __resetTeamRunContextForTesting()
-    vi.mocked(executeAgent).mockReset()
+    jest.mocked(executeAgent).mockReset()
     // Re-register built-ins (idempotent import side-effect)
     return import("./built-ins")
   })
@@ -2723,7 +2736,7 @@ describe("team.task.dispatch node", () => {
   it("dispatches via executeAgent and returns text + teammateId", async () => {
     const ctx = buildCtx("run-1", [teammate("w1")])
     registerTeamRunContext(ctx)
-    vi.mocked(executeAgent).mockResolvedValue({
+    jest.mocked(executeAgent).mockResolvedValue({
       text: "result",
       usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
     } as Awaited<ReturnType<typeof executeAgent>>)
@@ -2808,7 +2821,7 @@ describe("team.task.dispatch node", () => {
   it("records success in pool and accumulates budget on completion", async () => {
     const ctx = buildCtx("run-2", [teammate("w1")])
     registerTeamRunContext(ctx)
-    vi.mocked(executeAgent).mockResolvedValue({
+    jest.mocked(executeAgent).mockResolvedValue({
       text: "ok",
       usage: { promptTokens: 5, completionTokens: 3, totalTokens: 8 },
     } as Awaited<ReturnType<typeof executeAgent>>)
@@ -2836,7 +2849,7 @@ describe("team.task.dispatch node", () => {
   it("records failure and rethrows when executeAgent throws", async () => {
     const ctx = buildCtx("run-3", [teammate("w1")])
     registerTeamRunContext(ctx)
-    vi.mocked(executeAgent).mockRejectedValue(new Error("LLM down"))
+    jest.mocked(executeAgent).mockRejectedValue(new Error("LLM down"))
     const exec = getExecutor("team.task.dispatch", 1)!
     await expect(
       exec.execute({
@@ -3636,13 +3649,12 @@ The previous tests targeted the in-line orchestrator. The new tests verify the s
 
 ````ts
 // lib/ai/agent/agent-team-runtime.test.ts
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
 import { runTeamLifecycle, __resetInflightForTesting } from "./agent-team-runtime"
 import { approve, reject } from "@/lib/runtime/approval-bus"
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
 
-vi.mock("@/lib/ai/agent/agent-executor", () => ({
-  executeAgent: vi.fn(),
+jest.mock("@/lib/ai/agent/agent-executor", () => ({
+  executeAgent: jest.fn(),
 }))
 import { executeAgent } from "@/lib/ai/agent/agent-executor"
 
@@ -3726,7 +3738,9 @@ const buildDeps = (team: AgentTeam, tasks: AgentTeamTask[], members: AgentTeamma
       },
       updateTeammate: () => {},
     },
-    runLeadPlanning: vi.fn(async () => ({ planText: '```json\n{"summary":"x","steps":[]}\n```' })),
+    runLeadPlanning: jest.fn(async () => ({
+      planText: '```json\n{"summary":"x","steps":[]}\n```',
+    })),
     notifierDeps: {
       toast: () => {},
       osNotify: async () => {},
@@ -3740,7 +3754,7 @@ const buildDeps = (team: AgentTeam, tasks: AgentTeamTask[], members: AgentTeamma
 describe("runTeamLifecycle (F-path synthesizer)", () => {
   beforeEach(() => {
     __resetInflightForTesting()
-    vi.mocked(executeAgent).mockReset()
+    jest.mocked(executeAgent).mockReset()
   })
 
   afterEach(() => {
@@ -3769,7 +3783,7 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
   })
 
   it("happy path: 2 independent tasks complete via workflow", async () => {
-    vi.mocked(executeAgent).mockResolvedValue({
+    jest.mocked(executeAgent).mockResolvedValue({
       text: "result",
       usage: { promptTokens: 5, completionTokens: 3, totalTokens: 8 },
     } as Awaited<ReturnType<typeof executeAgent>>)
@@ -3781,7 +3795,7 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
   })
 
   it("dependency chain executes in order", async () => {
-    vi.mocked(executeAgent).mockResolvedValue({
+    jest.mocked(executeAgent).mockResolvedValue({
       text: "ok",
       usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
     } as Awaited<ReturnType<typeof executeAgent>>)
@@ -3800,7 +3814,7 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
   })
 
   it("prevents double-start of the same team", async () => {
-    vi.mocked(executeAgent).mockImplementation(
+    jest.mocked(executeAgent).mockImplementation(
       () =>
         new Promise((resolve) =>
           setTimeout(
@@ -3820,7 +3834,7 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
   })
 
   it("plan-approval gate: approves on first revision", async () => {
-    vi.mocked(executeAgent).mockResolvedValue({
+    jest.mocked(executeAgent).mockResolvedValue({
       text: "ok",
       usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
     } as Awaited<ReturnType<typeof executeAgent>>)
@@ -3854,7 +3868,7 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
   })
 
   it("budget pause_for_review: approve continues", async () => {
-    vi.mocked(executeAgent).mockResolvedValue({
+    jest.mocked(executeAgent).mockResolvedValue({
       text: "ok",
       usage: { promptTokens: 50, completionTokens: 50, totalTokens: 100 },
     } as Awaited<ReturnType<typeof executeAgent>>)
@@ -4093,7 +4107,6 @@ Expected: clean (parity preserved).
 
 ```tsx
 // components/agent/approval-gate-dialog.test.tsx
-import { describe, expect, it, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { ApprovalGateDialog } from "./approval-gate-dialog"
@@ -4122,7 +4135,7 @@ describe("ApprovalGateDialog", () => {
   })
 
   it("calls onApprove with budget payload", () => {
-    const onApprove = vi.fn()
+    const onApprove = jest.fn()
     renderDialog({ gateType: "budget", onApprove })
     const input = screen.getByPlaceholderText(/50000/) as HTMLInputElement
     fireEvent.change(input, { target: { value: "50000" } })
@@ -4131,7 +4144,7 @@ describe("ApprovalGateDialog", () => {
   })
 
   it("calls onReject when reject clicked", () => {
-    const onReject = vi.fn()
+    const onReject = jest.fn()
     renderDialog({ gateType: "budget", onReject })
     fireEvent.click(screen.getByRole("button", { name: /Reject/i }))
     expect(onReject).toHaveBeenCalledTimes(1)
@@ -4318,7 +4331,6 @@ EOF
 
 ```tsx
 // components/agent/use-approval-gate.test.tsx
-import { describe, expect, it, vi, beforeEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { approve, __resetForTesting as resetApprovalBus } from "@/lib/runtime/approval-bus"
 import { useApprovalGate } from "./use-approval-gate"
@@ -4499,14 +4511,13 @@ export function TeamRunsList({ teamId }: TeamRunsListProps): React.ReactElement 
 
 ```tsx
 // components/agent/team-runs-list.test.tsx
-import { describe, expect, it, vi, beforeEach } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { TeamRunsList } from "./team-runs-list"
 import en from "@/i18n/messages/en.json"
 
-vi.mock("dexie-react-hooks", () => ({
-  useLiveQuery: vi.fn(),
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: jest.fn(),
 }))
 import { useLiveQuery } from "dexie-react-hooks"
 
@@ -4519,17 +4530,17 @@ const renderList = (teamId: string) =>
 
 describe("TeamRunsList", () => {
   beforeEach(() => {
-    vi.mocked(useLiveQuery).mockReset()
+    jest.mocked(useLiveQuery).mockReset()
   })
 
   it("renders empty state when no runs", () => {
-    vi.mocked(useLiveQuery).mockReturnValue([])
+    jest.mocked(useLiveQuery).mockReturnValue([])
     renderList("team-1")
     expect(screen.getByText(/No runs yet/i)).toBeInTheDocument()
   })
 
   it("renders a run row with status badge", () => {
-    vi.mocked(useLiveQuery).mockReturnValue([
+    jest.mocked(useLiveQuery).mockReturnValue([
       {
         id: "run-1",
         workflowId: "__team__:team-1:abc",
@@ -4546,7 +4557,7 @@ describe("TeamRunsList", () => {
   })
 
   it("renders failure with error message", () => {
-    vi.mocked(useLiveQuery).mockReturnValue([
+    jest.mocked(useLiveQuery).mockReturnValue([
       {
         id: "run-2",
         workflowId: "__team__:team-1:abc",
@@ -4564,7 +4575,7 @@ describe("TeamRunsList", () => {
   it("filters out runs from other teams", () => {
     // The component filters by teamId in its useLiveQuery callback; this test
     // mocks the post-filter result. The contract: mock returns only matching teams.
-    vi.mocked(useLiveQuery).mockReturnValue([])
+    jest.mocked(useLiveQuery).mockReturnValue([])
     renderList("team-1")
     expect(screen.getByText(/No runs yet/i)).toBeInTheDocument()
   })
@@ -4667,8 +4678,6 @@ EOF
 In `lib/ai/agent/team/teammate-pool.test.ts`, replace the four `it.todo` lines with:
 
 ```ts
-import { vi } from "vitest"
-
 describe("TeammatePool error classification (PR 6)", () => {
   it("classifies 401 as catastrophic → disqualified, never auto-recovers", () => {
     const a = tm("a")
@@ -4707,7 +4716,7 @@ describe("TeammatePool error classification (PR 6)", () => {
   it("onTeammateDisqualified edge-triggered per teammate", () => {
     const a = tm("a")
     const b = tm("b")
-    const fn = vi.fn()
+    const fn = jest.fn()
     const pool = createTeammatePool({ teammates: [a, b] })
     pool.onTeammateDisqualified(fn)
     pool.recordFailure("a", new Error("401"))
@@ -4823,14 +4832,14 @@ describe("team.task.dispatch output validation (PR 6)", () => {
   beforeEach(() => {
     __resetRegistryForTesting()
     __resetTeamRunContextForTesting()
-    vi.mocked(executeAgent).mockReset()
+    jest.mocked(executeAgent).mockReset()
     return import("./built-ins")
   })
 
   it("empty output triggers retry path", async () => {
     const ctx = buildCtx("run-emp", [teammate("w1")])
     registerTeamRunContext(ctx)
-    vi.mocked(executeAgent).mockResolvedValue({
+    jest.mocked(executeAgent).mockResolvedValue({
       text: "",
       usage: { promptTokens: 1, completionTokens: 0, totalTokens: 1 },
     } as Awaited<ReturnType<typeof executeAgent>>)
@@ -4859,7 +4868,7 @@ describe("team.task.dispatch output validation (PR 6)", () => {
   it("whitespace-only output is treated as empty", async () => {
     const ctx = buildCtx("run-ws", [teammate("w1")])
     registerTeamRunContext(ctx)
-    vi.mocked(executeAgent).mockResolvedValue({
+    jest.mocked(executeAgent).mockResolvedValue({
       text: "   \n  \t  ",
       usage: { promptTokens: 1, completionTokens: 0, totalTokens: 1 },
     } as Awaited<ReturnType<typeof executeAgent>>)
@@ -4993,7 +5002,7 @@ Append to `lib/ai/agent/agent-team-runtime.test.ts`:
 import { approve as approveGate } from "@/lib/runtime/approval-bus"
 
 it("catastrophic teammate is disqualified and run continues on others (non-blocking gate)", async () => {
-  vi.mocked(executeAgent).mockImplementation(async (_p, opts) => {
+  jest.mocked(executeAgent).mockImplementation(async (_p, opts) => {
     // First teammate (w1) gets 401; subsequent calls succeed
     const text = (opts as { systemPrompt?: string }).systemPrompt ?? ""
     if (text.includes("w1-marker")) {
@@ -5209,7 +5218,6 @@ function GateModal({
 Create `stores/agent/pending-gates-store.test.ts`:
 
 ```ts
-import { describe, expect, it, beforeEach } from "vitest"
 import { usePendingGatesStore } from "./pending-gates-store"
 
 describe("PendingGatesStore", () => {
