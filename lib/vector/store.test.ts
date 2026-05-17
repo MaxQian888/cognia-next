@@ -20,11 +20,14 @@ const mockConfig: VectorStoreConfig = {
   native: {},
 }
 
-// Mock Tauri invoke function
-const mockInvoke = jest.fn()
+// Mock Tauri invoke function. Canonical jest pattern — the factory uses
+// only literal `jest.fn()`, and we grab a typed handle afterwards via
+// `import` so assertions can target it.
 jest.mock("@tauri-apps/api/core", () => ({
-  invoke: mockInvoke,
+  invoke: jest.fn(),
 }))
+import { invoke as _mockedInvoke } from "@tauri-apps/api/core"
+const mockInvoke = _mockedInvoke as jest.MockedFunction<typeof _mockedInvoke>
 
 // Mock window.__TAURI_INTERNALS__ to simulate Tauri environment
 Object.defineProperty(window, "__TAURI_INTERNALS__", {

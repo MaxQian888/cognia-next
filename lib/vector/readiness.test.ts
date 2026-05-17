@@ -56,7 +56,9 @@ describe("verifyVectorBackendReadiness", () => {
       provider: "qdrant",
       embeddingConfig: { provider: "openai", model: "text-embedding-3-small" },
       embeddingApiKey: "embedding-key",
-      qdrantUrl: "http://localhost:6333",
+      // Post-ADR-0023: cloud providers are addressed by configId; the
+      // actual URL/api-key lives in the keyring on the Rust side.
+      configId: "test-qdrant",
     })
 
     expect(result.state).toBe("operational")
@@ -75,7 +77,7 @@ describe("verifyVectorBackendReadiness", () => {
       provider: "weaviate",
       embeddingConfig: { provider: "openai", model: "text-embedding-3-small" },
       embeddingApiKey: "embedding-key",
-      weaviateUrl: "http://localhost:8080",
+      configId: "test-weaviate",
     })
 
     expect(result.state).toBe("degraded")
@@ -89,8 +91,7 @@ describe("verifyVectorBackendReadiness", () => {
       provider: "milvus",
       embeddingConfig: { provider: "openai", model: "text-embedding-3-small" },
       embeddingApiKey: "embedding-key",
-      milvusAddress: "localhost:19530",
-      milvusToken: "bad-token",
+      configId: "test-milvus",
     })
 
     expect(result.state).toBe("configured")
