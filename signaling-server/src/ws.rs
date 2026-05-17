@@ -29,6 +29,7 @@ use tracing::{debug, info, warn};
 
 use crate::{
     limits::TokenBucket,
+    metrics::RejectReason,
     proto::{ClientFrame, PeerRole, PeerSnapshot, ServerFrame},
     room::{PeerHandle, PEER_OUTBOUND_BUFFER},
     AppState,
@@ -101,6 +102,7 @@ async fn handle_socket(state: AppState, socket: WebSocket) {
             Message::Text(text) => {
                 if !bucket.try_take() {
                     warn!(target: "signaling", peer_id, "rate limited");
+                    state.metrics.frame_rejected(RejectReason::Rate);
                     let _ = tx
                         .send(ServerFrame::Error {
                             code: "rate_limited".into(),
@@ -112,6 +114,7 @@ async fn handle_socket(state: AppState, socket: WebSocket) {
                 let frame: ClientFrame = match serde_json::from_str(&text) {
                     Ok(f) => f,
                     Err(e) => {
+                        state.metrics.frame_rejected(RejectReason::Malformed);
                         let _ = tx
                             .send(ServerFrame::Error {
                                 code: "malformed_frame".into(),
@@ -121,9 +124,11 @@ async fn handle_socket(state: AppState, socket: WebSocket) {
                         continue;
                     }
                 };
+                state.metrics.frame_in();
                 handle_frame(&state, peer_id, frame, &tx, &mut subscribed_rooms).await;
             }
             Message::Binary(_) => {
+                state.metrics.frame_rejected(RejectReason::Malformed);
                 let _ = tx
                     .send(ServerFrame::Error {
                         code: "binary_not_supported".into(),
@@ -253,6 +258,7 @@ async fn handle_frame(
             let Some((sender_role, others)) =
                 state.registry.others(&rendezvous_id, peer_id)
             else {
+                state.metrics.frame_rejected(RejectReason::NotSubscribed);
                 let _ = tx
                     .send(ServerFrame::Error {
                         code: "not_subscribed".into(),
@@ -261,6 +267,7 @@ async fn handle_frame(
                     .await;
                 return;
             };
+            let fanout = others.len() as u64;
             for sender in others {
                 let _ = sender
                     .send(ServerFrame::Relay {
@@ -270,6 +277,7 @@ async fn handle_frame(
                     })
                     .await;
             }
+            state.metrics.frame_relayed(fanout);
         }
         ClientFrame::Ping => {
             let _ = tx.send(ServerFrame::Pong).await;

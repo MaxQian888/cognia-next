@@ -5,6 +5,7 @@
 //! [`server::serve`] after parsing CLI args.
 
 pub mod limits;
+pub mod metrics;
 pub mod proto;
 pub mod room;
 pub mod server;

@@ -3,6 +3,7 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
+    response::IntoResponse,
     routing::{any, get},
     Json, Router,
 };
@@ -10,7 +11,7 @@ use serde_json::json;
 use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
 use tracing::info;
 
-use crate::{room::RoomRegistry, ws::ws_upgrade};
+use crate::{metrics::Metrics, room::RoomRegistry, ws::ws_upgrade};
 
 /// 8 KiB cap on every WS frame's HTTP body — pre-upgrade only; per-frame
 /// caps are enforced by `axum::extract::ws::WebSocket` defaults.
@@ -19,11 +20,13 @@ const MAX_BODY_BYTES: usize = 8 * 1024;
 #[derive(Clone)]
 pub struct AppState {
     pub registry: Arc<RoomRegistry>,
+    pub metrics: Arc<Metrics>,
 }
 
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/metrics", get(metrics_handler))
         .route("/v1/signaling", any(ws_upgrade))
         .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
         .layer(CorsLayer::permissive())
@@ -37,8 +40,19 @@ async fn healthz(axum::extract::State(state): axum::extract::State<AppState>) ->
         "ok": true,
         "rooms": stats.rooms,
         "peers": stats.peers,
+        "uptimeSeconds": state.metrics.uptime_seconds(),
         "version": env!("CARGO_PKG_VERSION"),
     }))
+}
+
+async fn metrics_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> impl IntoResponse {
+    let body = state.metrics.render_prometheus(state.registry.stats());
+    (
+        [("content-type", "text/plain; version=0.0.4; charset=utf-8")],
+        body,
+    )
 }
 
 /// Run the server in the current tokio runtime. Returns when the listener
@@ -46,6 +60,7 @@ async fn healthz(axum::extract::State(state): axum::extract::State<AppState>) ->
 pub async fn serve(addr: SocketAddr) -> anyhow::Result<()> {
     let state = AppState {
         registry: Arc::new(RoomRegistry::new()),
+        metrics: Arc::new(Metrics::new()),
     };
     let app = router(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -85,6 +100,7 @@ async fn shutdown_signal() {
 pub async fn serve_for_test() -> anyhow::Result<(std::net::SocketAddr, tokio::task::JoinHandle<()>)> {
     let state = AppState {
         registry: Arc::new(RoomRegistry::new()),
+        metrics: Arc::new(Metrics::new()),
     };
     let app = router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;

@@ -36,6 +36,7 @@
     "test:e2e:tauri": "cross-env PLAYWRIGHT_TAURI_DRIVER=1 playwright test --project=tauri-driver tests/e2e/tauri/",
     "test:e2e:install": "playwright install chromium webkit",
     "test:e2e:report": "playwright show-report",
+    "webrtc:smoke": "node scripts/signaling-smoke.mjs",
     "sidecar:install": "pnpm --dir sidecar install --ignore-workspace",
     "sidecar:start": "node sidecar/claude-host.mjs",
     "sidecar:smoke": "node sidecar/claude-host.mjs --smoke",
