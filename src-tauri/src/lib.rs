@@ -408,6 +408,7 @@ pub fn run() {
             vector::commands::vector_cloud_query,
             vector::commands::vector_cloud_scroll,
             vector::commands::vector_cloud_count,
+            vector::commands::vector_cloud_truncate,
             vector::commands::vector_cloud_health_check,
             a2ui_bridge::commands::a2ui_bridge_runtime_paths,
             wallpaper::commands::wallpaper_save,

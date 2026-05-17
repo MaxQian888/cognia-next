@@ -23,6 +23,10 @@ pub trait VectorBackend: Send + Sync + 'static {
     async fn upsert(&self, collection: &str, points: Vec<Point>) -> Result<()>;
     async fn delete_points(&self, collection: &str, ids: Vec<String>) -> Result<()>;
     async fn get_points(&self, collection: &str, ids: Vec<String>) -> Result<Vec<Point>>;
+    /// Delete every point in a collection without dropping the collection
+    /// itself. Returns the number of points deleted when the provider can
+    /// report it; otherwise 0.
+    async fn truncate(&self, collection: &str) -> Result<u64>;
     async fn query(
         &self,
         collection: &str,

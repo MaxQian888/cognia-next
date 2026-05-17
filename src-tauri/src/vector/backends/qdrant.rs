@@ -365,6 +365,23 @@ impl VectorBackend for QdrantBackend {
         })
     }
 
+    async fn truncate(&self, collection: &str) -> Result<u64> {
+        // Qdrant: drop + recreate is the cleanest truncate. We preserve
+        // the dimension by reading collection_info first.
+        let info = self.get_collection(collection).await?;
+        self.delete_collection(collection).await?;
+        self.create_collection(CreateCollectionRequest {
+            name: collection.to_string(),
+            dimension: info.dimension,
+            description: info.description,
+            embedding_model: info.embedding_model,
+            embedding_provider: info.embedding_provider,
+            metadata: info.metadata,
+        })
+        .await?;
+        Ok(0)
+    }
+
     async fn scroll(&self, collection: &str, opts: ScrollOptions) -> Result<ScrollPage> {
         let mut builder = ScrollPointsBuilder::new(collection)
             .limit(opts.limit as u32)

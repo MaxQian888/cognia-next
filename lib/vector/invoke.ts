@@ -188,6 +188,9 @@ export const vectorCloudInvoke = {
   count: (a: CloudArgs, collection: string, filter: FilterWire[] | undefined) =>
     invoke<number>("vector_cloud_count", { ...a, collection, filter }),
 
+  truncate: (a: CloudArgs, collection: string) =>
+    invoke<number>("vector_cloud_truncate", { ...a, collection }),
+
   // --- Health ---
   healthCheck: (a: CloudArgs) => invoke<HealthStatus>("vector_cloud_health_check", a),
 } as const

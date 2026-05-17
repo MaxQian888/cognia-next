@@ -67,6 +67,7 @@ impl ChromaBackend {
 struct CreateReq<'a> {
     name: &'a str,
     metadata: serde_json::Value,
+    get_or_create: bool,
 }
 
 #[derive(Deserialize)]
@@ -149,6 +150,9 @@ impl VectorBackend for ChromaBackend {
             .json(&CreateReq {
                 name: &req.name,
                 metadata: meta,
+                // Match the legacy TS `getOrCreateCollection` semantics —
+                // create_collection retries must succeed on existing.
+                get_or_create: true,
             })
             .send()
             .await
@@ -438,6 +442,42 @@ impl VectorBackend for ChromaBackend {
             limit: opts.limit,
             results,
         })
+    }
+
+    async fn truncate(&self, collection: &str) -> Result<u64> {
+        // Chroma: there's no native truncate; we delete all IDs via get-all
+        // then delete-by-ids. For collections >100k this is slow, but
+        // accurate.
+        let url = format!("{}/api/v1/collections/{collection}/get", self.base_url);
+        let resp = self
+            .client
+            .post(&url)
+            .json(&serde_json::json!({ "include": [] }))
+            .send()
+            .await
+            .map_err(|e| VectorError::Http {
+                status: 0,
+                message: e.to_string(),
+            })?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = read_body(resp).await.unwrap_or_default();
+            return Err(http_err(status, &body));
+        }
+        #[derive(serde::Deserialize)]
+        struct IdsResp {
+            ids: Vec<String>,
+        }
+        let body: IdsResp = resp.json().await.map_err(|e| VectorError::Http {
+            status: 0,
+            message: format!("decode get: {e}"),
+        })?;
+        if body.ids.is_empty() {
+            return Ok(0);
+        }
+        let n = body.ids.len() as u64;
+        self.delete_points(collection, body.ids).await?;
+        Ok(n)
     }
 
     async fn scroll(&self, _collection: &str, _opts: ScrollOptions) -> Result<ScrollPage> {

@@ -471,6 +471,29 @@ impl VectorBackend for PineconeBackend {
         })
     }
 
+    async fn truncate(&self, _collection: &str) -> Result<u64> {
+        // Pinecone: deleteAll on the namespace.
+        let host = self.host().await?;
+        let url = format!("{host}/vectors/delete");
+        let body = serde_json::json!({ "deleteAll": true, "namespace": self.namespace });
+        let resp = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| VectorError::Http {
+                status: 0,
+                message: e.to_string(),
+            })?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = read_body(resp).await.unwrap_or_default();
+            return Err(http_err(status, &body));
+        }
+        Ok(0)
+    }
+
     async fn scroll(&self, _collection: &str, _opts: ScrollOptions) -> Result<ScrollPage> {
         // Pinecone has no native scroll. Callers should use the JS-side
         // ID-tracking pagination instead.

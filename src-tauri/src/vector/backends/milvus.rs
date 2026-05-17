@@ -323,6 +323,18 @@ impl VectorBackend for MilvusBackend {
         })
     }
 
+    async fn truncate(&self, collection: &str) -> Result<u64> {
+        // Milvus: empty filter `id != ""` matches everything; the v2 API
+        // accepts a `filter` body and reports row count via /entities/query
+        // first if a precise count is needed.
+        let body = serde_json::json!({
+            "dbName": self.db_name,
+            "collectionName": collection,
+            "filter": "id != \"\"",
+        });
+        self.post("/v2/vectordb/entities/delete", &body).await.map(|_| 0)
+    }
+
     async fn scroll(&self, _collection: &str, _opts: ScrollOptions) -> Result<ScrollPage> {
         Err(VectorError::NotAvailable(
             "milvus scroll not implemented; use query".into(),

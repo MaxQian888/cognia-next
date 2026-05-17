@@ -631,6 +631,20 @@ pub async fn vector_cloud_count(
 }
 
 #[tauri::command]
+pub async fn vector_cloud_truncate(
+    registry: State<'_, VectorRegistry>,
+    provider: VectorProvider,
+    config_id: String,
+    collection: String,
+) -> Result<u64, String> {
+    let backend = resolve_cloud(&registry, provider, &config_id).await?;
+    backend
+        .truncate(&collection)
+        .await
+        .map_err(|e| map_cloud_err("truncate", e))
+}
+
+#[tauri::command]
 pub async fn vector_cloud_health_check(
     registry: State<'_, VectorRegistry>,
     provider: VectorProvider,
