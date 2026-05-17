@@ -430,6 +430,20 @@ export class CompanionTransport implements Transport {
     return this.rtcConnecting
   }
 
+  /**
+   * Force a fresh WebRTC handshake. Wired to the "Reconnect WebRTC" button
+   * on the mobile settings panel. No-op when the tier isn't currently
+   * active — the user re-enables via the settings toggle in that case.
+   * Returns `false` if no RTC instance was reachable to reconnect.
+   */
+  public reconnectRtc(): boolean {
+    if (!this.rtc) {
+      return false
+    }
+    this.rtc.reconnectNow()
+    return true
+  }
+
   /** Tear down the WebRTC tier explicitly. Called from `destroy()`. */
   public disableWebRtcTier(): void {
     if (this.rtcDetach) {

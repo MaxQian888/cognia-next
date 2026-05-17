@@ -3,7 +3,12 @@
  * so the negotiation/RPC/event paths are exercised deterministically.
  */
 
-import { TransportRtc, type RtcMessage, type RtcResponse } from "./transport-rtc"
+import {
+  RECONNECT_BACKOFF_MS,
+  TransportRtc,
+  type RtcMessage,
+  type RtcResponse,
+} from "./transport-rtc"
 import type {
   Envelope,
   PeerRole,
@@ -270,7 +275,12 @@ describe("TransportRtc", () => {
     jest.useRealTimers()
   })
 
-  it("ICE failure tears down to failed", async () => {
+  it("ICE failure mid-session schedules a reconnect (per ADR-0021 hardening)", async () => {
+    // Before W1, ICE failure mid-session went straight to `failed`. The
+    // mid-session-reconnect work changed that: the outer state machine
+    // now treats it as a transient disconnect and schedules a fresh
+    // handshake. The dedicated `mid-session reconnect` block below
+    // covers the rest of the lifecycle.
     const { rtc, sig, pcs } = makeRtc()
     const connect = rtc.connect()
     await new Promise((r) => setTimeout(r, 5))
@@ -279,7 +289,8 @@ describe("TransportRtc", () => {
     await connect
 
     pcs[0].setIceState("failed")
-    expect(rtc.getState()).toBe("failed")
+    expect(rtc.getState()).toBe("reconnecting")
+    rtc.close()
   })
 
   it("close() shuts down signaling and pending RPCs", async () => {
@@ -399,6 +410,235 @@ describe("TransportRtc", () => {
         },
       ]
       expect(await rtc.getSelectedCandidateKind()).toBe("unknown")
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Mid-session reconnect (ADR-0021 hardening) — W1
+  // ---------------------------------------------------------------------------
+
+  describe("mid-session reconnect", () => {
+    function makeReconnectable(reconnectBackoffMs: readonly number[] = [5, 10, 20]) {
+      const sigs: FakeSignaling[] = []
+      const pcs: FakePeerConnection[] = []
+      const rtc = new TransportRtc({
+        signalingUrl: "wss://signaling.test/v1/signaling",
+        rendezvousId: "room-1",
+        rendezvousSecret: SECRET,
+        deviceId: "dev-1",
+        role: "mobile",
+        reconnectBackoffMs,
+        peerConnectionFactory: () => {
+          const pc = new FakePeerConnection()
+          pcs.push(pc)
+          return pc as unknown as RTCPeerConnection
+        },
+        signalingClientFactory: () => {
+          const sig = new FakeSignaling()
+          sigs.push(sig)
+          return sig as unknown as SignalingClient
+        },
+      })
+      return { rtc, sigs, pcs }
+    }
+
+    async function drivePeerOpen(sigs: FakeSignaling[], pcs: FakePeerConnection[]): Promise<void> {
+      // queueMicrotask in FakeSignaling.connect + the offer/setLocalDescription
+      // awaits all flush within a short real-timer wait.
+      await new Promise((r) => setTimeout(r, 5))
+      const i = pcs.length - 1
+      sigs[sigs.length - 1].emitEnvelope(
+        envelope("rtc:answer", { sdp: "v=0\r\nmock-answer" } as RtcAnswerBody)
+      )
+      await new Promise((r) => setTimeout(r, 5))
+      pcs[i].channels[0].open()
+      await new Promise((r) => setTimeout(r, 0))
+    }
+
+    it("RECONNECT_BACKOFF_MS is monotonically increasing and caps at 60s", () => {
+      expect(RECONNECT_BACKOFF_MS.length).toBeGreaterThanOrEqual(5)
+      for (let i = 1; i < RECONNECT_BACKOFF_MS.length; i++) {
+        expect(RECONNECT_BACKOFF_MS[i]).toBeGreaterThan(RECONNECT_BACKOFF_MS[i - 1])
+      }
+      expect(RECONNECT_BACKOFF_MS[RECONNECT_BACKOFF_MS.length - 1]).toBe(60_000)
+      expect(RECONNECT_BACKOFF_MS[0]).toBe(1_000)
+    })
+
+    it("mid-session DataChannel.close transitions to 'reconnecting' (not 'failed')", async () => {
+      const { rtc, sigs, pcs } = makeReconnectable()
+      const connect = rtc.connect()
+      await drivePeerOpen(sigs, pcs)
+      await connect
+      expect(rtc.getState()).toBe("open")
+
+      pcs[0].channels[0].close()
+      expect(rtc.getState()).toBe("reconnecting")
+    })
+
+    it("schedules a fresh handshake after the configured backoff", async () => {
+      const { rtc, sigs, pcs } = makeReconnectable([10, 20])
+      const connect = rtc.connect()
+      await drivePeerOpen(sigs, pcs)
+      await connect
+
+      pcs[0].channels[0].close()
+      expect(rtc.getState()).toBe("reconnecting")
+      expect(pcs.length).toBe(1)
+      expect(sigs.length).toBe(1)
+
+      // Wait for first backoff (10ms) + microtask drain.
+      await new Promise((r) => setTimeout(r, 20))
+
+      // A new peer + signaling pair must have been created.
+      expect(pcs.length).toBe(2)
+      expect(sigs.length).toBe(2)
+      // The new cycle sent a fresh offer over the new signaling instance.
+      expect(sigs[1].sent.some((m) => m.kind === "rtc:offer")).toBe(true)
+    })
+
+    it("successful reconnect resets the attempt counter", async () => {
+      const { rtc, sigs, pcs } = makeReconnectable([5, 50, 500])
+      const connect = rtc.connect()
+      await drivePeerOpen(sigs, pcs)
+      await connect
+
+      // First drop → backoff tier 0 (5ms).
+      pcs[0].channels[0].close()
+      await new Promise((r) => setTimeout(r, 15))
+      // Second cycle's DC opens.
+      await drivePeerOpen(sigs, pcs)
+      expect(rtc.getState()).toBe("open")
+
+      // Second drop should again use tier 0 (5ms). If the counter had not
+      // reset, this drop would schedule for 50ms and the assertion below
+      // would fail.
+      pcs[1].channels[0].close()
+      await new Promise((r) => setTimeout(r, 15))
+      expect(pcs.length).toBe(3)
+    })
+
+    it("zero-length backoff schedule fails immediately on first drop", async () => {
+      const { rtc, sigs, pcs } = makeReconnectable([])
+      const connect = rtc.connect()
+      await drivePeerOpen(sigs, pcs)
+      await connect
+
+      pcs[0].channels[0].close()
+      expect(rtc.getState()).toBe("failed")
+    })
+
+    it("close() during reconnect cancels the backoff timer", async () => {
+      const { rtc, sigs, pcs } = makeReconnectable([200])
+      const connect = rtc.connect()
+      await drivePeerOpen(sigs, pcs)
+      await connect
+
+      pcs[0].channels[0].close()
+      expect(rtc.getState()).toBe("reconnecting")
+
+      rtc.close()
+      expect(rtc.getState()).toBe("closed")
+
+      // Wait past the would-be backoff and assert no new peer was created.
+      await new Promise((r) => setTimeout(r, 250))
+      expect(pcs.length).toBe(1)
+      expect(sigs.length).toBe(1)
+    })
+
+    it("reconnectNow() from 'open' state bypasses backoff and reopens", async () => {
+      const { rtc, sigs, pcs } = makeReconnectable([10_000])
+      const connect = rtc.connect()
+      await drivePeerOpen(sigs, pcs)
+      await connect
+
+      rtc.reconnectNow()
+      // Should NOT wait the 10s backoff; new peer is created immediately.
+      await new Promise((r) => setTimeout(r, 5))
+      expect(pcs.length).toBe(2)
+      expect(sigs.length).toBe(2)
+    })
+
+    it("reconnectNow() from 'reconnecting' state cancels the pending timer", async () => {
+      const { rtc, sigs, pcs } = makeReconnectable([10_000])
+      const connect = rtc.connect()
+      await drivePeerOpen(sigs, pcs)
+      await connect
+
+      pcs[0].channels[0].close()
+      expect(rtc.getState()).toBe("reconnecting")
+
+      rtc.reconnectNow()
+      // Cycle 2 should start without waiting the 10s backoff.
+      await new Promise((r) => setTimeout(r, 5))
+      expect(pcs.length).toBe(2)
+    })
+
+    it("reconnectNow() from 'failed' state restarts the connection", async () => {
+      const { rtc, sigs, pcs } = makeReconnectable([])
+      const connect = rtc.connect()
+      await drivePeerOpen(sigs, pcs)
+      await connect
+
+      pcs[0].channels[0].close()
+      expect(rtc.getState()).toBe("failed")
+
+      rtc.reconnectNow()
+      await new Promise((r) => setTimeout(r, 5))
+      expect(pcs.length).toBe(2)
+      expect(sigs.length).toBe(2)
+    })
+
+    it("reconnectNow() during in-flight negotiation is a no-op", async () => {
+      const { rtc, sigs, pcs } = makeReconnectable()
+      void rtc.connect()
+      // Wait just past queueMicrotask so state=negotiating.
+      await new Promise((r) => setTimeout(r, 5))
+      const pcsBefore = pcs.length
+      const sigsBefore = sigs.length
+      rtc.reconnectNow()
+      await new Promise((r) => setTimeout(r, 5))
+      // No fresh peer/signaling were created — the existing in-flight
+      // attempt is allowed to settle.
+      expect(pcs.length).toBe(pcsBefore)
+      expect(sigs.length).toBe(sigsBefore)
+    })
+
+    it("ICE failure mid-session triggers reconnect, not failed", async () => {
+      const { rtc, sigs, pcs } = makeReconnectable([1000])
+      const connect = rtc.connect()
+      await drivePeerOpen(sigs, pcs)
+      await connect
+
+      pcs[0].setIceState("failed")
+      expect(rtc.getState()).toBe("reconnecting")
+    })
+
+    it("ICE failure during negotiation goes to failed (not reconnect)", async () => {
+      const { rtc, sigs, pcs } = makeReconnectable()
+      // connect() will reject when fail() runs — swallow it so the
+      // unhandled-rejection guard doesn't fail the test.
+      const connect = rtc.connect().catch(() => undefined)
+      await new Promise((r) => setTimeout(r, 5))
+      // We are in 'negotiating' state — ICE failure here is a hard fail.
+      pcs[0].setIceState("failed")
+      expect(rtc.getState()).toBe("failed")
+      await connect
+      // No reconnect was scheduled (sigs/pcs counts unchanged after delay).
+      await new Promise((r) => setTimeout(r, 20))
+      expect(pcs.length).toBe(1)
+      expect(sigs.length).toBe(1)
+    })
+
+    it("pending RPCs reject with a 'reset' error when reconnecting", async () => {
+      const { rtc, sigs, pcs } = makeReconnectable([1000])
+      const connect = rtc.connect()
+      await drivePeerOpen(sigs, pcs)
+      await connect
+
+      const pending = rtc.call("never-replies")
+      pcs[0].channels[0].close()
+      await expect(pending).rejects.toThrow(/reset/i)
+      expect(rtc.getState()).toBe("reconnecting")
     })
   })
 })

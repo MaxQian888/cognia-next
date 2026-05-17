@@ -943,3 +943,35 @@ describe("transport tier", () => {
     }).not.toThrow()
   })
 })
+
+describe("reconnectRtc()", () => {
+  it("returns false when no WebRTC tier is active", () => {
+    transport = new CompanionTransport()
+    expect(transport.reconnectRtc()).toBe(false)
+  })
+
+  it("delegates to TransportRtc.reconnectNow when the tier is active", async () => {
+    await setConfig()
+    transport = new CompanionTransport()
+    const calls: number[] = []
+    const fakeRtc = {
+      getState: () => "open" as const,
+      onStateChange: () => () => undefined,
+      connect: async () => undefined,
+      close: () => undefined,
+      reconnectNow: () => calls.push(Date.now()),
+      getSelectedCandidateKind: async () => "host" as const,
+      call: async () => undefined,
+      subscribe: () => () => undefined,
+      getSeqCursor: () => ({}),
+    }
+    // Inject the fake by pretending the WebRTC tier upgrade succeeded.
+    // CompanionTransport stores the rtc on `this.rtc`; we reach in via
+    // an unsafe cast scoped to this test to avoid leaking a private
+    // setter into the production surface.
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+
+    expect(transport.reconnectRtc()).toBe(true)
+    expect(calls.length).toBe(1)
+  })
+})

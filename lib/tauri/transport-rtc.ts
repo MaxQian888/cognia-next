@@ -41,9 +41,23 @@ export type RtcState =
   | "signaling-connecting"
   | "negotiating"
   | "open"
+  | "reconnecting"
   | "closing"
   | "failed"
   | "closed"
+
+/**
+ * Outer negotiation-level reconnect schedule. Triggered when the DataChannel
+ * (or its enclosing peer/ICE) drops *after* it had already opened — i.e. a
+ * mid-session disconnect. The inner `SignalingClient` runs its own WSS-level
+ * reconnect; this schedule applies to the SDP/ICE handshake on top of it.
+ *
+ * Mirrors `signaling-server/src/...` / `src-tauri/.../signaling/client.rs:46`
+ * so the desktop and mobile retry at compatible cadences.
+ */
+export const RECONNECT_BACKOFF_MS: readonly number[] = [
+  1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 60_000,
+]
 
 export interface RtcMessage {
   id: string
@@ -100,6 +114,13 @@ export interface TransportRtcOptions {
    */
   negotiationTimeoutMs?: number
   /**
+   * Override for the reconnection backoff schedule (ms). Tests pass a
+   * short schedule (e.g. `[5, 10]`) to exercise exhaustion without
+   * sleeping. Production should leave this unset — the default mirrors
+   * the Rust desktop-side schedule.
+   */
+  reconnectBackoffMs?: readonly number[]
+  /**
    * Optional override for the global `RTCPeerConnection` constructor.
    * Tests inject a polyfill / mock.
    */
@@ -128,12 +149,13 @@ export class TransportRtc {
   private readonly opts: Required<
     Omit<
       TransportRtcOptions,
-      "rtcConfiguration" | "peerConnectionFactory" | "signalingClientFactory"
+      "rtcConfiguration" | "peerConnectionFactory" | "signalingClientFactory" | "reconnectBackoffMs"
     >
   > &
     Pick<TransportRtcOptions, "rtcConfiguration"> & {
       peerConnectionFactory: NonNullable<TransportRtcOptions["peerConnectionFactory"]>
       signalingClientFactory: NonNullable<TransportRtcOptions["signalingClientFactory"]>
+      reconnectBackoffMs: readonly number[]
     }
 
   private signaling: SignalingClient | null = null
@@ -147,6 +169,10 @@ export class TransportRtc {
   private channels: Map<string, Set<EventHandler>> = new Map()
   private highestSeq: Map<string, number> = new Map()
   private stateListeners: Set<(s: RtcState) => void> = new Set()
+  /** Index into [`RECONNECT_BACKOFF_MS`] for the next scheduled retry. */
+  private reconnectAttempt = 0
+  /** Pending timer for the next reconnect attempt; null when none scheduled. */
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(opts: TransportRtcOptions) {
     this.opts = {
@@ -157,6 +183,7 @@ export class TransportRtc {
       role: opts.role ?? "mobile",
       rtcConfiguration: opts.rtcConfiguration,
       negotiationTimeoutMs: opts.negotiationTimeoutMs ?? 8000,
+      reconnectBackoffMs: opts.reconnectBackoffMs ?? RECONNECT_BACKOFF_MS,
       peerConnectionFactory:
         opts.peerConnectionFactory ??
         ((config) => new RTCPeerConnection(config as RTCConfiguration | undefined)),
@@ -183,9 +210,16 @@ export class TransportRtc {
    */
   async connect(): Promise<void> {
     if (this.state === "open") return
-    if (this.state !== "idle" && this.state !== "closed" && this.state !== "failed") {
+    if (
+      this.state !== "idle" &&
+      this.state !== "closed" &&
+      this.state !== "failed" &&
+      this.state !== "reconnecting"
+    ) {
       throw new Error(`TransportRtc.connect: already in state ${this.state}`)
     }
+    // Entry from reconnect timer leaves resources cleared by
+    // `teardownPeer()`; from idle/closed/failed they're already null.
     this.negotiationSettled = false
     this.setState("signaling-connecting")
 
@@ -262,6 +296,46 @@ export class TransportRtc {
 
     signaling.connect()
     return opened
+  }
+
+  /**
+   * Force a fresh handshake immediately, regardless of current state. Wired
+   * to the "Reconnect WebRTC" button on the mobile settings panel and the
+   * desktop WebRTC card.
+   *
+   * - From `open`: tears down the current peer/data channel and starts a
+   *   new negotiation (treated as a mid-session disconnect with a zero-
+   *   length backoff because the user explicitly asked).
+   * - From `reconnecting`: cancels the pending backoff timer and tries
+   *   immediately; resets the attempt counter so subsequent automatic
+   *   retries start at the smallest delay again.
+   * - From `idle` / `closed` / `failed`: equivalent to calling `connect()`.
+   * - From `signaling-connecting` / `negotiating` / `closing`: no-op; an
+   *   action is already in flight.
+   */
+  reconnectNow(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    this.reconnectAttempt = 0
+
+    if (this.state === "open") {
+      this.teardownPeer()
+      this.setState("reconnecting")
+      // Fall through to the connect() below.
+    } else if (
+      this.state === "signaling-connecting" ||
+      this.state === "negotiating" ||
+      this.state === "closing"
+    ) {
+      return
+    }
+
+    void this.connect().catch((err) => {
+      // Surface via state transitions; nothing else to do here.
+      console.warn("TransportRtc.reconnectNow: connect rejected", err)
+    })
   }
 
   /** Send an RPC; resolves with the result payload. */
@@ -359,6 +433,10 @@ export class TransportRtc {
       clearTimeout(this.negotiationTimer)
       this.negotiationTimer = null
     }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
     for (const p of this.pending.values()) {
       if (p.timer) clearTimeout(p.timer)
       p.reject(new Error("TransportRtc: connection closing"))
@@ -404,12 +482,22 @@ export class TransportRtc {
     }
     pc.oniceconnectionstatechange = () => {
       if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "closed") {
-        this.fail(new Error(`ICE state ${pc.iceConnectionState}`))
+        const err = new Error(`ICE state ${pc.iceConnectionState}`)
+        if (this.state === "open") {
+          this.handleMidSessionDisconnect()
+        } else {
+          this.fail(err)
+        }
       }
     }
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "failed") {
-        this.fail(new Error("peer connection failed"))
+        const err = new Error("peer connection failed")
+        if (this.state === "open") {
+          this.handleMidSessionDisconnect()
+        } else {
+          this.fail(err)
+        }
       }
     }
 
@@ -462,21 +550,105 @@ export class TransportRtc {
     this.dc = dc
     dc.onopen = () => {
       this.setState("open")
+      // Successful (re)open clears the backoff so the next mid-session
+      // disconnect starts from the smallest delay again.
+      this.reconnectAttempt = 0
       const resolvers = this.onDcOpenResolvers
       this.onDcOpenResolvers = []
       for (const r of resolvers) r()
     }
     dc.onclose = () => {
       if (this.state === "open") {
-        this.fail(new Error("DataChannel closed"))
+        this.handleMidSessionDisconnect()
       }
     }
     dc.onerror = () => {
-      this.fail(new Error("DataChannel error"))
+      if (this.state === "open") {
+        this.handleMidSessionDisconnect()
+      } else {
+        this.fail(new Error("DataChannel error"))
+      }
     }
     dc.onmessage = (event: MessageEvent) => {
       this.handleDataChannelMessage(String(event.data))
     }
+  }
+
+  /**
+   * Tear down the current peer/dc/signaling triple without flipping to
+   * `failed`. Used by both auto-reconnect and `reconnectNow()` so the state
+   * machine can re-enter `connect()` cleanly.
+   */
+  private teardownPeer(): void {
+    if (this.negotiationTimer) {
+      clearTimeout(this.negotiationTimer)
+      this.negotiationTimer = null
+    }
+    for (const p of this.pending.values()) {
+      if (p.timer) clearTimeout(p.timer)
+      p.reject(new Error("TransportRtc: connection reset"))
+    }
+    this.pending.clear()
+    if (this.dc) {
+      try {
+        this.dc.close()
+      } catch {
+        /* ignored */
+      }
+      this.dc = null
+    }
+    if (this.pc) {
+      try {
+        this.pc.close()
+      } catch {
+        /* ignored */
+      }
+      this.pc = null
+    }
+    if (this.signaling) {
+      try {
+        this.signaling.close()
+      } catch {
+        /* ignored */
+      }
+      this.signaling = null
+    }
+    // Stale resolvers from any previous connect() call must not fire
+    // against a future cycle — clear them so each connect() gets fresh
+    // open/fail bridges.
+    this.onDcOpenResolvers = []
+    this.onDcFailResolvers = []
+  }
+
+  /**
+   * Schedule a reconnection attempt after the DataChannel dropped post-open.
+   * After exhausting [`RECONNECT_BACKOFF_MS`] we surface `failed` so the
+   * outer `CompanionTransport` drops its RTC reference and the UI falls
+   * back to HTTPS+WS.
+   */
+  private handleMidSessionDisconnect(): void {
+    if (this.state !== "open") return
+
+    const schedule = this.opts.reconnectBackoffMs
+    const willExhaust = this.reconnectAttempt >= schedule.length
+
+    // Set state BEFORE teardown so the synchronous `dc.close()` /
+    // `pc.close()` reentrancy through onclose/onicestatechange handlers
+    // hits the `if (this.state !== "open")` guard and bails out.
+    this.setState(willExhaust ? "failed" : "reconnecting")
+    this.teardownPeer()
+
+    if (willExhaust) return
+
+    const delay = schedule[this.reconnectAttempt]
+    this.reconnectAttempt += 1
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      if (this.state !== "reconnecting") return
+      void this.connect().catch((err) => {
+        console.warn("TransportRtc: scheduled reconnect rejected", err)
+      })
+    }, delay)
   }
 
   private handleDataChannelMessage(raw: string): void {
@@ -520,6 +692,10 @@ export class TransportRtc {
   private fail(err: Error): void {
     if (this.state === "failed" || this.state === "closed") return
     this.setState("failed")
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
     for (const p of this.pending.values()) {
       if (p.timer) clearTimeout(p.timer)
       p.reject(err)
