@@ -2614,6 +2614,37 @@
       "tauriDocs": "Tauri 文档",
       "loadFailed": "加载桌面信息失败。"
     },
+    "tray": {
+      "title": "系统托盘",
+      "description": "自定义系统托盘菜单中显示的项目。",
+      "desktopOnly": "系统托盘仅在桌面端可用。",
+      "addItem": "添加项目",
+      "remove": "移除",
+      "rename": "重命名",
+      "reset": "重置",
+      "moveUp": "上移",
+      "moveDown": "下移",
+      "hide": "隐藏",
+      "show": "显示",
+      "separator": "分隔符",
+      "pin": "钉到托盘",
+      "pickCommand": "选择一个命令",
+      "pickHint": "选择一个 slash 命令或插件命令钉到托盘菜单。",
+      "emptyPicker": "暂无可用命令——请安装插件或开启对话。"
+    },
+    "shortcuts": {
+      "title": "全局快捷键",
+      "description": "重新绑定全局快捷键。点击录制后按下你想要的键位组合。",
+      "desktopOnly": "全局快捷键仅在桌面端可用。",
+      "record": "录制",
+      "cancel": "取消",
+      "save": "保存",
+      "pressKey": "按下任意键…",
+      "conflictWith": "与之冲突：",
+      "conflictBlocked": "该组合键已被占用",
+      "bindFailed": "绑定快捷键失败",
+      "resetItem": "恢复默认"
+    },
     "characters": {
       "title": "角色",
       "description": "可复用的人设。每个角色携带自己的系统提示词、模型、MCP 子集与技能。新建会话时可以选择一个使用。",
@@ -3310,6 +3341,7 @@
         "diagnostics": {
           "title": "插件运行诊断",
           "hint": "来自治理、静默失败、运行时检查的实时信号。错误默认展开；仅含警告的分组保持折叠。",
+          "severityFilterAria": "按严重程度筛选诊断",
           "filterAll": "全部",
           "filterErrors": "错误",
           "filterWarnings": "警告",
@@ -5148,7 +5180,30 @@
     }
   },
   "tray": {
-    "openLogs": "打开日志面板"
+    "openLogs": "打开日志面板",
+    "show": "显示 Cognia",
+    "newChat": "新建对话",
+    "settings": "设置",
+    "quit": "退出",
+    "automationKill": "🛑 触发自动化中止开关",
+    "quickGoal": "/goal …",
+    "allCommands": "所有命令",
+    "categories": {
+      "chat": "对话",
+      "diagnostics": "诊断",
+      "system": "系统",
+      "goal": "目标",
+      "template": "模板",
+      "help": "帮助",
+      "plugins": "插件",
+      "other": "其它"
+    },
+    "iconState": {
+      "idle": "空闲",
+      "busy": "忙碌",
+      "error": "错误",
+      "muted": "静音"
+    }
   },
   "menu": {
     "view": {
@@ -5820,6 +5875,38 @@
   },
   "agentTeam": {
     "defaultTeamLeadName": "组长",
+    "approvalGate": {
+      "approve": "批准",
+      "reject": "拒绝",
+      "cancel": "取消",
+      "budget": {
+        "title": "Token 预算到达临界",
+        "body": "本次运行已用满预算。批准以追加预算继续运行。",
+        "extraTokensLabel": "追加 tokens",
+        "extraTokensPlaceholder": "例如：50000"
+      },
+      "deadlock": {
+        "title": "所有 teammate 被熔断",
+        "body": "全部 teammate 因连续失败而被熔断。请选择恢复操作。",
+        "resetAll": "重置全部 teammate",
+        "resetSelected": "仅重置选中的 teammate"
+      },
+      "plan": {
+        "title": "等待方案审批",
+        "body": "请审阅 lead 提出的方案。"
+      },
+      "teammateFix": {
+        "title": "Teammate 被禁用",
+        "body": "某个 teammate 出现严重错误。修复配置后重新加入，或跳过该成员。",
+        "rejoin": "重新加入",
+        "skip": "永久跳过"
+      }
+    },
+    "runs": {
+      "empty": "暂无运行记录",
+      "startedAt": "开始时间",
+      "completedAt": "完成时间"
+    },
     "status": {
       "idle": "空闲",
       "planning": "规划中",
@@ -6902,9 +6989,14 @@
       "file": {
         "label": "文件",
         "newChat": "新建对话",
+        "newWorkflow": "新建工作流",
+        "newAgentTeam": "新建智能体团队",
+        "newCharacter": "新建角色",
         "openWorkspace": "打开工作区…",
         "openSettings": "设置…",
         "openLogs": "打开日志",
+        "recentSessions": "最近会话",
+        "recentSessionsEmpty": "暂无最近会话",
         "quit": "退出 Cognia"
       },
       "edit": {
@@ -6921,7 +7013,18 @@
         "label": "视图",
         "commandPalette": "命令面板…",
         "toggleSidebar": "切换侧边栏",
+        "toggleGuildRail": "切换功能栏",
+        "toggleStatusBar": "切换状态栏",
+        "reduceMotion": "减弱动效",
+        "theme": "主题",
+        "themeLight": "浅色",
+        "themeDark": "深色",
+        "themeSystem": "跟随系统",
+        "language": "语言",
+        "languageEnglish": "English",
+        "languageChinese": "简体中文",
         "reload": "重新加载",
+        "toggleDevtools": "切换开发者工具",
         "openLogs": "打开日志",
         "toggleFullscreen": "切换全屏",
         "zoomIn": "放大",
@@ -6932,9 +7035,34 @@
         "label": "前往",
         "dms": "直接消息",
         "canvas": "Canvas",
+        "inbox": "收件箱",
+        "workflows": "工作流",
         "twin": "Twin 工作台",
+        "skills": "技能",
+        "plugins": "插件",
+        "agentTeams": "智能体团队",
+        "scheduler": "调度器",
+        "discover": "发现",
+        "a2ui": "迷你应用",
         "logs": "日志",
         "settings": "设置"
+      },
+      "tools": {
+        "label": "工具",
+        "commandPalette": "命令面板…",
+        "automationKillSwitch": "自动化紧急停止",
+        "automationKillSwitchToastDone": "已停止所有自动化操作。",
+        "automationKillSwitchToastFail": "紧急停止失败：{message}",
+        "manageConnectors": "管理连接器…",
+        "manageMcpServer": "管理 MCP 服务器…",
+        "pluginDevtools": "插件开发者工具",
+        "sidecarRestart": "重启 Sidecar",
+        "sidecarRestartToastDone": "Sidecar 已重启。",
+        "sidecarRestartToastFail": "Sidecar 重启失败：{message}",
+        "clearCache": "清除缓存…",
+        "clearCacheConfirm": "清除搜索结果、TTS 音频和请求快照的缓存？设置和会话不受影响。",
+        "clearCacheToastDone": "缓存已清除。",
+        "clearCacheToastFail": "清除缓存失败：{message}"
       },
       "window": {
         "label": "窗口",
@@ -6946,11 +7074,16 @@
       },
       "help": {
         "label": "帮助",
+        "keyboardShortcuts": "键盘快捷键…",
+        "keyboardShortcutsTitle": "键盘快捷键",
+        "keyboardShortcutsDescription": "Cognia 桌面外壳支持的全部快捷键。",
+        "keyboardShortcutsClose": "关闭",
         "documentation": "文档",
         "about": "关于 Cognia"
       },
       "shortcut": {
         "cmdOrCtrlN": "Ctrl+N",
+        "cmdOrCtrlShiftN": "Ctrl+Shift+N",
         "cmdOrCtrlO": "Ctrl+O",
         "cmdOrCtrlR": "Ctrl+R",
         "cmdOrCtrlComma": "Ctrl+,",
@@ -6959,6 +7092,16 @@
         "cmdOrCtrlPlus": "Ctrl+=",
         "cmdOrCtrlMinus": "Ctrl+-",
         "cmdOrCtrl0": "Ctrl+0",
+        "cmdOrCtrl1": "Ctrl+1",
+        "cmdOrCtrl2": "Ctrl+2",
+        "cmdOrCtrl3": "Ctrl+3",
+        "cmdOrCtrl4": "Ctrl+4",
+        "cmdOrCtrl5": "Ctrl+5",
+        "cmdOrCtrl6": "Ctrl+6",
+        "cmdOrCtrl7": "Ctrl+7",
+        "cmdOrCtrl8": "Ctrl+8",
+        "cmdOrCtrlAltI": "Ctrl+Alt+I",
+        "ctrlAltK": "Ctrl+Alt+K",
         "cmdOrCtrlShiftL": "Ctrl+Shift+L",
         "cmdOrCtrlShiftP": "Ctrl+Shift+P",
         "f11": "F11"
@@ -9010,6 +9153,9 @@
     }
   },
   "workflows": {
+    "notFoundTitle": "未找到工作流",
+    "notFoundDescription": "你要打开的工作流不存在或已被删除。",
+    "notFoundBackToLibrary": "返回工作流库",
     "canvasToast": {
       "savedOk": "工作流已保存",
       "saveFailed": "保存工作流失败",
@@ -9038,6 +9184,100 @@
         "shortcuts": "键盘快捷键（Ctrl+/）",
         "exportJson": "导出为 JSON",
         "importJson": "导入 JSON"
+      }
+    },
+    "editor": {
+      "performanceTier": {
+        "title": "性能档位",
+        "description": "按设备性能或工作流规模调整画布特性。",
+        "effectiveLabel": "当前：{tier}",
+        "auto": "自动",
+        "high": "高性能",
+        "balanced": "均衡",
+        "reduced": "低耗能",
+        "autoHint": "根据系统偏好与节点数量自动选择档位。",
+        "highHint": "开启所有效果：缩略图、动画、检查器实时预览。",
+        "balancedHint": "拖拽时关闭边动画与检查器实时预览。",
+        "reducedHint": "隐藏缩略图、关闭动画、跳过对齐辅助线。"
+      },
+      "contextMenu": {
+        "pane": {
+          "paste": "粘贴",
+          "addNode": "在此处添加节点…",
+          "addSticky": "在此处添加便签",
+          "addGroup": "在此处添加分组",
+          "resetView": "重置视图",
+          "toggleSnap": "切换网格对齐"
+        },
+        "node": {
+          "runFrom": "从此节点开始运行",
+          "configure": "配置",
+          "rename": "重命名",
+          "duplicate": "复制副本",
+          "copy": "拷贝",
+          "toGroup": "转为分组",
+          "addStickyAbove": "在上方添加便签",
+          "disable": "禁用",
+          "enable": "启用",
+          "delete": "删除"
+        },
+        "edge": {
+          "editLabel": "编辑标签",
+          "toConditional": "转为条件分支",
+          "reverse": "反转方向",
+          "delete": "删除连接"
+        }
+      },
+      "miniToolbar": {
+        "run": "从此运行",
+        "copy": "拷贝节点",
+        "configure": "配置",
+        "delete": "删除",
+        "more": "更多操作",
+        "runDisabled": "触发器与注释节点不能直接运行"
+      },
+      "bookmarks": {
+        "label": "视图",
+        "saveCurrent": "保存当前视图…",
+        "dialogTitle": "保存视图",
+        "dialogNameLabel": "名称",
+        "dialogNamePlaceholder": "例如：“引导子图”",
+        "save": "保存",
+        "cancel": "取消",
+        "delete": "删除视图",
+        "empty": "暂无保存的视图。",
+        "viewAt": "视图于 {zoom}%",
+        "savedToast": "已保存视图"
+      },
+      "breadcrumb": {
+        "untitledGroup": "未命名分组",
+        "fitAll": "适应全部"
+      },
+      "spotlight": {
+        "placeholder": "在画布上搜索节点…",
+        "empty": "未找到匹配的节点。",
+        "openShortcut": "搜索节点（Ctrl+F）",
+        "breadcrumbIn": "位于 {group}"
+      },
+      "lasso": {
+        "selected": "已选择 {count} 个节点",
+        "hint": "按住 Alt 拖动以套索选择"
+      },
+      "edge": {
+        "edgeKind": {
+          "then": "然后",
+          "else": "否则",
+          "true": "真",
+          "false": "假",
+          "error": "错误时"
+        },
+        "labelPlaceholder": "连接标签…",
+        "editLabelHint": "双击编辑标签"
+      },
+      "connection": {
+        "incompatible": "无法连接此端口",
+        "compatible": "松开以连接",
+        "snapHint": "已吸附到最近端口"
       }
     },
     "empty": {
@@ -10645,5 +10885,36 @@
         }
       }
     }
+  },
+  "loading": {
+    "thinking": "Claude 正在思考…",
+    "pageLoading": "加载中…",
+    "loading": "加载中…",
+    "page": {
+      "title": "加载中…",
+      "description": "正在准备你的工作区"
+    }
+  },
+  "errorPage": {
+    "title": "出错了",
+    "description": "发生了意外错误。下方的技术细节可以帮助诊断问题。",
+    "traceTitle": "错误详情",
+    "retry": "重试",
+    "goHome": "返回首页",
+    "exportCrashLog": "导出崩溃日志",
+    "exportingCrashLog": "导出中…",
+    "exportCrashLogSuccess": "崩溃日志已导出",
+    "exportCrashLogFailed": "导出崩溃日志失败",
+    "openLogs": "打开日志",
+    "errorIdLabel": "错误 ID",
+    "copyErrorId": "复制 ID",
+    "copyErrorIdSuccess": "错误 ID 已复制",
+    "globalTitle": "Cognia 已停止工作",
+    "globalDescription": "应用程序的主布局加载失败。可以尝试恢复，或通过标题栏关闭窗口。"
+  },
+  "notFound": {
+    "title": "页面未找到",
+    "description": "我们找不到你要访问的页面。它可能已被移动、重命名或删除。",
+    "goHome": "返回首页"
   }
 }
