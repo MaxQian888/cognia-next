@@ -8,11 +8,19 @@
 //! All payloads are flat (commit 2 of the plan flattens the JS side too) —
 //! no nested `{ payload: { ... } }` wrapper.
 
+use std::sync::Arc;
+
 use log::{debug, error, info};
 use tauri::State;
 
+use super::backend::VectorBackend;
+use super::credentials::{self, VectorCredentials};
 use super::db::{CollectionStats, ImportStats, ScrollPage};
-use super::types::{Collection, Filter, FilterMode, Point, SearchResponse};
+use super::registry::VectorRegistry;
+use super::types::{
+    Collection, CreateCollectionRequest, Filter, FilterMode, HealthStatus, Point, ScrollOptions,
+    SearchOptions, SearchResponse, VectorProvider,
+};
 use super::VectorState;
 
 #[tauri::command]
@@ -403,6 +411,236 @@ pub async fn vector_get_store_size(state: State<'_, VectorState>) -> Result<u64,
     }
     info!("vector_get_store_size ok: {} bytes", total);
     Ok(total)
+}
+
+// ============================================================================
+// Cloud backend commands (ADR-0022).
+//
+// Every command below takes `(provider, config_id)` and dispatches through
+// `VectorRegistry`. Naming convention: `vector_cloud_*` to keep the legacy
+// native command surface above untouched. Native operations continue to
+// route through `vector_*` (no provider arg) → `VectorState`.
+// ============================================================================
+
+async fn resolve_cloud(
+    registry: &VectorRegistry,
+    provider: VectorProvider,
+    config_id: &str,
+) -> Result<Arc<dyn VectorBackend>, String> {
+    registry.resolve(provider, config_id).await.map_err(|e| {
+        let s = format!("vector cloud resolve: {e}");
+        error!("{s}");
+        s
+    })
+}
+
+fn map_cloud_err<E: std::fmt::Display>(prefix: &str, e: E) -> String {
+    let s = format!("{prefix}: {e}");
+    error!("{s}");
+    s
+}
+
+#[tauri::command]
+pub async fn vector_save_credentials(
+    registry: State<'_, VectorRegistry>,
+    config_id: String,
+    credentials: VectorCredentials,
+) -> Result<(), String> {
+    debug!(
+        "vector_save_credentials: id={config_id}, provider={:?}",
+        credentials.provider()
+    );
+    super::credentials::save(&config_id, &credentials).map_err(|e| map_cloud_err("save_credentials", e))?;
+    registry.evict(&config_id);
+    info!("vector_save_credentials ok: {config_id}");
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn vector_delete_credentials(
+    registry: State<'_, VectorRegistry>,
+    provider: VectorProvider,
+    config_id: String,
+) -> Result<(), String> {
+    debug!("vector_delete_credentials: id={config_id}, provider={provider:?}");
+    credentials::delete(provider, &config_id)
+        .map_err(|e| map_cloud_err("delete_credentials", e))?;
+    registry.evict(&config_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn vector_list_configured_providers(
+    registry: State<'_, VectorRegistry>,
+) -> Result<Vec<String>, String> {
+    Ok(registry.known_config_ids())
+}
+
+#[tauri::command]
+pub async fn vector_cloud_create_collection(
+    registry: State<'_, VectorRegistry>,
+    provider: VectorProvider,
+    config_id: String,
+    request: CreateCollectionRequest,
+) -> Result<(), String> {
+    debug!(
+        "vector_cloud_create_collection: id={config_id}, name={}, dim={}",
+        request.name, request.dimension
+    );
+    let backend = resolve_cloud(&registry, provider, &config_id).await?;
+    backend
+        .create_collection(request)
+        .await
+        .map_err(|e| map_cloud_err("create_collection", e))
+}
+
+#[tauri::command]
+pub async fn vector_cloud_delete_collection(
+    registry: State<'_, VectorRegistry>,
+    provider: VectorProvider,
+    config_id: String,
+    name: String,
+) -> Result<(), String> {
+    let backend = resolve_cloud(&registry, provider, &config_id).await?;
+    backend
+        .delete_collection(&name)
+        .await
+        .map_err(|e| map_cloud_err("delete_collection", e))
+}
+
+#[tauri::command]
+pub async fn vector_cloud_list_collections(
+    registry: State<'_, VectorRegistry>,
+    provider: VectorProvider,
+    config_id: String,
+) -> Result<Vec<Collection>, String> {
+    let backend = resolve_cloud(&registry, provider, &config_id).await?;
+    backend
+        .list_collections()
+        .await
+        .map_err(|e| map_cloud_err("list_collections", e))
+}
+
+#[tauri::command]
+pub async fn vector_cloud_get_collection(
+    registry: State<'_, VectorRegistry>,
+    provider: VectorProvider,
+    config_id: String,
+    name: String,
+) -> Result<Collection, String> {
+    let backend = resolve_cloud(&registry, provider, &config_id).await?;
+    backend
+        .get_collection(&name)
+        .await
+        .map_err(|e| map_cloud_err("get_collection", e))
+}
+
+#[tauri::command]
+pub async fn vector_cloud_upsert(
+    registry: State<'_, VectorRegistry>,
+    provider: VectorProvider,
+    config_id: String,
+    collection: String,
+    points: Vec<Point>,
+) -> Result<(), String> {
+    debug!(
+        "vector_cloud_upsert: id={config_id}, collection={collection}, n_points={}",
+        points.len()
+    );
+    let backend = resolve_cloud(&registry, provider, &config_id).await?;
+    backend
+        .upsert(&collection, points)
+        .await
+        .map_err(|e| map_cloud_err("upsert", e))
+}
+
+#[tauri::command]
+pub async fn vector_cloud_delete_points(
+    registry: State<'_, VectorRegistry>,
+    provider: VectorProvider,
+    config_id: String,
+    collection: String,
+    ids: Vec<String>,
+) -> Result<(), String> {
+    let backend = resolve_cloud(&registry, provider, &config_id).await?;
+    backend
+        .delete_points(&collection, ids)
+        .await
+        .map_err(|e| map_cloud_err("delete_points", e))
+}
+
+#[tauri::command]
+pub async fn vector_cloud_get_points(
+    registry: State<'_, VectorRegistry>,
+    provider: VectorProvider,
+    config_id: String,
+    collection: String,
+    ids: Vec<String>,
+) -> Result<Vec<Point>, String> {
+    let backend = resolve_cloud(&registry, provider, &config_id).await?;
+    backend
+        .get_points(&collection, ids)
+        .await
+        .map_err(|e| map_cloud_err("get_points", e))
+}
+
+#[tauri::command]
+pub async fn vector_cloud_query(
+    registry: State<'_, VectorRegistry>,
+    provider: VectorProvider,
+    config_id: String,
+    collection: String,
+    query_vector: Vec<f32>,
+    options: SearchOptions,
+) -> Result<SearchResponse, String> {
+    let backend = resolve_cloud(&registry, provider, &config_id).await?;
+    backend
+        .query(&collection, query_vector, options)
+        .await
+        .map_err(|e| map_cloud_err("query", e))
+}
+
+#[tauri::command]
+pub async fn vector_cloud_scroll(
+    registry: State<'_, VectorRegistry>,
+    provider: VectorProvider,
+    config_id: String,
+    collection: String,
+    options: ScrollOptions,
+) -> Result<ScrollPage, String> {
+    let backend = resolve_cloud(&registry, provider, &config_id).await?;
+    backend
+        .scroll(&collection, options)
+        .await
+        .map_err(|e| map_cloud_err("scroll", e))
+}
+
+#[tauri::command]
+pub async fn vector_cloud_count(
+    registry: State<'_, VectorRegistry>,
+    provider: VectorProvider,
+    config_id: String,
+    collection: String,
+    filter: Option<Vec<Filter>>,
+) -> Result<u64, String> {
+    let backend = resolve_cloud(&registry, provider, &config_id).await?;
+    backend
+        .count(&collection, filter)
+        .await
+        .map_err(|e| map_cloud_err("count", e))
+}
+
+#[tauri::command]
+pub async fn vector_cloud_health_check(
+    registry: State<'_, VectorRegistry>,
+    provider: VectorProvider,
+    config_id: String,
+) -> Result<HealthStatus, String> {
+    let backend = resolve_cloud(&registry, provider, &config_id).await?;
+    backend
+        .health_check()
+        .await
+        .map_err(|e| map_cloud_err("health_check", e))
 }
 
 #[cfg(test)]

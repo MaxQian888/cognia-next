@@ -44,6 +44,18 @@ pub enum VectorError {
 
     #[error("Serialization error: {0}")]
     Serialization(String),
+
+    #[error("authentication / keyring error: {0}")]
+    Auth(String),
+
+    #[error("configuration error: {0}")]
+    Configuration(String),
+
+    #[error("upstream not found: {0}")]
+    NotFound(String),
+
+    #[error("HTTP error ({status}): {message}")]
+    Http { status: u16, message: String },
 }
 
 impl From<VectorError> for String {

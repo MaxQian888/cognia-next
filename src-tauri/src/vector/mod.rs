@@ -14,10 +14,14 @@
 //! commands operational but reporting `NotAvailable` — same posture as
 //! `scheduler::SchedulerState`'s `metadata_store`.
 
+pub mod backend;
+pub mod backends;
 pub mod commands;
+pub mod credentials;
 pub mod db;
 pub mod error;
 pub mod filters;
+pub mod registry;
 pub mod schema;
 pub mod types;
 
@@ -26,8 +30,10 @@ use std::path::PathBuf;
 use log::error;
 use parking_lot::Mutex;
 
-pub use db::VectorStore;
+pub use backend::VectorBackend;
+pub use db::{ScrollPage, VectorStore};
 pub use error::{Result, VectorError};
+pub use registry::VectorRegistry;
 #[allow(unused_imports)]
 pub use types::*;
 

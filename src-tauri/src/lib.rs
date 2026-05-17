@@ -14,6 +14,7 @@ mod external_agent;
 mod files;
 mod fs_atomic;
 mod hooks;
+mod keyring_secrets;
 mod logging;
 mod mcp_server;
 mod plugin_api;
@@ -30,10 +31,11 @@ mod wallpaper;
 mod workflow;
 
 mod window_behavior;
+mod window_utils;
 
 #[cfg(desktop)]
 mod menu;
-#[cfg(desktop)]
+mod shortcuts;
 mod tray;
 
 use api_key::ApiKeyState;
@@ -45,7 +47,7 @@ use window_behavior::WindowBehavior;
 use tauri::WindowEvent;
 
 #[cfg(all(desktop, not(any(target_os = "android", target_os = "ios"))))]
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::ShortcutState;
 
 #[cfg(desktop)]
 use tauri_plugin_deep_link::DeepLinkExt;
@@ -146,47 +148,17 @@ pub fn run() {
             .plugin(
                 tauri_plugin_global_shortcut::Builder::new()
                     .with_handler(|app, shortcut, event| {
-                        // Three chords share this handler:
-                        //   Ctrl+Shift+Space — toggle main window visibility
-                        //   Ctrl+Shift+L     — surface the window and emit
-                        //                       `tray://open-logs` so the renderer
-                        //                       navigates to /logs (same handler the
-                        //                       tray + View menu use).
-                        //   Ctrl+Alt+K       — engage the automation kill switch,
-                        //                       same effect as the tray menu item
-                        //                       and the renderer's Overview tab.
+                        // Every chord we own is registered into the unified
+                        // `ShortcutRegistry`. The handler delegates to its
+                        // `dispatch` method, which runs the built-in side
+                        // effect (window toggle / open logs / kill switch)
+                        // for the three pre-seeded ids and emits
+                        // `shortcut://triggered` for renderer-bound entries.
                         if event.state() != ShortcutState::Pressed {
                             return;
                         }
-                        let toggle_chord =
-                            Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
-                        let logs_chord =
-                            Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyL);
-                        let automation_kill_chord =
-                            Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyK);
-                        if shortcut == &toggle_chord {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let visible = window.is_visible().unwrap_or(false);
-                                let focused = window.is_focused().unwrap_or(false);
-                                if visible && focused {
-                                    let _ = window.hide();
-                                } else {
-                                    let _ = window.show();
-                                    let _ = window.set_focus();
-                                }
-                            }
-                        } else if shortcut == &logs_chord {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.unminimize();
-                                let _ = window.set_focus();
-                            }
-                            let _ = app.emit("tray://open-logs", serde_json::Value::Null);
-                        } else if shortcut == &automation_kill_chord {
-                            let state = app.state::<crate::automation::commands::AutomationState>();
-                            state.gate.engage_kill_switch();
-                            let _ = app.emit("automation:kill-switch", serde_json::Value::Null);
-                        }
+                        let registry = app.state::<std::sync::Arc<shortcuts::ShortcutRegistry>>();
+                        registry.dispatch(app, shortcut);
                     })
                     .build(),
             )
@@ -212,6 +184,7 @@ pub fn run() {
         .manage(claude::SidecarState::new())
         .manage(ApiKeyState::new())
         .manage(WindowBehavior::new())
+        .manage(std::sync::Arc::new(shortcuts::ShortcutRegistry::default()))
         .manage(connectors::ConnectorsState::new())
         .manage(connectors::commands::ConnectorsServer(std::sync::Arc::new(
             tokio::sync::Mutex::new(None),
@@ -246,6 +219,7 @@ pub fn run() {
         .manage(vector::VectorState::new(
             dirs::data_dir().map(|d| d.join("cognia").join("vectors.sqlite")),
         ))
+        .manage(vector::VectorRegistry::new())
         .manage(plugin_api::PluginRuntimeState::new(
             dirs::data_dir()
                 .map(|d| d.join("cognia").join("plugins"))
@@ -310,6 +284,20 @@ pub fn run() {
             canvas::python_exec::canvas_run_python,
             window_behavior::set_tray_on_close,
             window_behavior::get_tray_on_close,
+            tray::commands::tray_set_menu,
+            tray::commands::tray_set_icon_state,
+            tray::commands::tray_set_tooltip,
+            tray::commands::tray_get_current_menu,
+            tray::commands::tray_get_icon_state,
+            tray::commands::tray_register_icon,
+            shortcuts::commands::shortcut_bind,
+            shortcuts::commands::shortcut_unbind,
+            shortcuts::commands::shortcut_list,
+            shortcuts::commands::shortcut_check_conflict,
+            plugin_api::tray_items::plugin_tray_item_register,
+            plugin_api::tray_items::plugin_tray_item_unregister,
+            plugin_api::tray_items::plugin_tray_item_list,
+            plugin_api::tray_items::plugin_tray_item_unregister_by_plugin,
             files::read_text_file,
             files::write_text_file,
             files::ensure_dir,
@@ -406,6 +394,21 @@ pub fn run() {
             vector::commands::vector_rename_collection,
             vector::commands::vector_export_collection,
             vector::commands::vector_import_collection,
+            // Cloud vector backends (ADR-0022) — dispatch through VectorRegistry.
+            vector::commands::vector_save_credentials,
+            vector::commands::vector_delete_credentials,
+            vector::commands::vector_list_configured_providers,
+            vector::commands::vector_cloud_create_collection,
+            vector::commands::vector_cloud_delete_collection,
+            vector::commands::vector_cloud_list_collections,
+            vector::commands::vector_cloud_get_collection,
+            vector::commands::vector_cloud_upsert,
+            vector::commands::vector_cloud_delete_points,
+            vector::commands::vector_cloud_get_points,
+            vector::commands::vector_cloud_query,
+            vector::commands::vector_cloud_scroll,
+            vector::commands::vector_cloud_count,
+            vector::commands::vector_cloud_health_check,
             a2ui_bridge::commands::a2ui_bridge_runtime_paths,
             wallpaper::commands::wallpaper_save,
             wallpaper::commands::wallpaper_list,
@@ -622,29 +625,18 @@ pub fn run() {
                 }
             }
 
-            // Register the default global shortcuts. Routing logic lives in the
-            // plugin builder's handler above.
-            //   Ctrl+Shift+Space — show/hide main window
-            //   Ctrl+Shift+L     — open the Log Panel (/logs)
+            // Seed the unified shortcut registry with the three built-in
+            // bindings. The registry owns OS-level register/unregister so the
+            // renderer can rebind any of these at runtime without our help.
+            // Routing logic lives in the plugin builder's handler above
+            // (delegates to `ShortcutRegistry::dispatch`).
             #[cfg(all(desktop, not(any(target_os = "android", target_os = "ios"))))]
             {
-                let toggle_chord =
-                    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
-                if let Err(e) = app.global_shortcut().register(toggle_chord) {
-                    log::warn!("failed to register Ctrl+Shift+Space shortcut: {e}");
-                }
-                let logs_chord =
-                    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyL);
-                if let Err(e) = app.global_shortcut().register(logs_chord) {
-                    log::warn!("failed to register Ctrl+Shift+L (open logs) shortcut: {e}");
-                }
-                let automation_kill_chord =
-                    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyK);
-                if let Err(e) = app.global_shortcut().register(automation_kill_chord) {
-                    log::warn!(
-                        "failed to register Ctrl+Alt+K (automation kill switch) shortcut: {e}",
-                    );
-                }
+                let registry = app
+                    .state::<std::sync::Arc<shortcuts::ShortcutRegistry>>()
+                    .inner()
+                    .clone();
+                shortcuts::registry::seed_builtins(app.handle(), &registry);
             }
 
             // Deep-link runtime registration & event listener. On Linux/dev-Windows

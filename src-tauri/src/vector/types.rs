@@ -112,6 +112,84 @@ pub struct SearchResponse {
     pub limit: usize,
 }
 
+/// Identifier for the underlying vector store implementation. Drives the
+/// `VectorBackend` dispatcher in `registry.rs`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorProvider {
+    Native,
+    Pinecone,
+    Qdrant,
+    Chroma,
+    Milvus,
+    Weaviate,
+}
+
+/// Multi-field request for `VectorBackend::create_collection`. Cloud providers
+/// ignore the `embedding_*` fields (no server-side embedding); the native
+/// sqlite backend persists them in its collections table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateCollectionRequest {
+    pub name: String,
+    pub dimension: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+}
+
+/// Options for `VectorBackend::query`. Serde defaults match the existing
+/// JS-side payload shape (e.g. limit=10 when omitted).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SearchOptions {
+    #[serde(default = "default_limit")]
+    pub limit: usize,
+    #[serde(default)]
+    pub offset: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<Vec<Filter>>,
+    #[serde(default)]
+    pub filter_mode: FilterMode,
+    #[serde(default)]
+    pub include_payload: bool,
+    #[serde(default)]
+    pub include_content: bool,
+}
+
+fn default_limit() -> usize {
+    10
+}
+
+/// Options for `VectorBackend::scroll`. `cursor` is the opaque continuation
+/// token returned by the previous page (see `db::ScrollPage::next_cursor`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ScrollOptions {
+    #[serde(default = "default_limit")]
+    pub limit: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<Vec<Filter>>,
+    #[serde(default)]
+    pub filter_mode: FilterMode,
+}
+
+/// Result of `VectorBackend::health_check`. The cloud backends return
+/// `Unreachable` on network errors and `Degraded` on protocol-level
+/// problems (e.g. wrong index name); native always succeeds unless
+/// sqlite itself is sick.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HealthStatus {
+    Healthy,
+    Degraded { reason: String },
+    Unreachable { reason: String },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
