@@ -47,6 +47,69 @@ async fn metrics_returns_prometheus_text_exposition() {
 }
 
 #[tokio::test]
+async fn per_ip_cap_rejects_overflow_websocket_upgrades() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
+
+    // Cap=2 so we only need 3 sockets to provoke the limit.
+    let (addr, _handle) = cognia_signaling_server::serve_for_test_with(2)
+        .await
+        .expect("server boots");
+
+    // Open two long-lived raw TCP sockets and request the WS upgrade so
+    // the per-IP counter increments. We don't speak the WS frame
+    // protocol — just hold the connection so the server's `Acquired`
+    // guard stays alive.
+    async fn open_ws(addr: std::net::SocketAddr) -> TcpStream {
+        let mut s = TcpStream::connect(addr).await.expect("connect");
+        let req = format!(
+            "GET /v1/signaling HTTP/1.1\r\n\
+             Host: {addr}\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+             Sec-WebSocket-Version: 13\r\n\r\n"
+        );
+        s.write_all(req.as_bytes()).await.expect("write upgrade");
+        // Read enough of the response to be sure the upgrade landed
+        // (server has emitted "HTTP/1.1 101 Switching Protocols").
+        let mut buf = [0u8; 256];
+        let _n = s.read(&mut buf).await.expect("read upgrade response");
+        s
+    }
+
+    let _a = open_ws(addr).await;
+    let _b = open_ws(addr).await;
+    // Third upgrade must be rejected with 429.
+    let mut c = TcpStream::connect(addr).await.expect("connect 3");
+    let req = format!(
+        "GET /v1/signaling HTTP/1.1\r\n\
+         Host: {addr}\r\n\
+         Upgrade: websocket\r\n\
+         Connection: Upgrade\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+         Sec-WebSocket-Version: 13\r\n\r\n"
+    );
+    c.write_all(req.as_bytes()).await.expect("write");
+    let mut response = String::new();
+    let mut buf = vec![0u8; 1024];
+    loop {
+        let n = c.read(&mut buf).await.expect("read");
+        if n == 0 {
+            break;
+        }
+        response.push_str(std::str::from_utf8(&buf[..n]).unwrap_or(""));
+        if response.contains("\r\n\r\n") {
+            break;
+        }
+    }
+    assert!(
+        response.starts_with("HTTP/1.1 429"),
+        "expected 429 Too Many Requests, got:\n{response}"
+    );
+}
+
+#[tokio::test]
 async fn healthz_is_fast_under_a_short_timeout() {
     let (addr, _handle) = serve_for_test().await.expect("server boots");
     let url = format!("http://{addr}/healthz");

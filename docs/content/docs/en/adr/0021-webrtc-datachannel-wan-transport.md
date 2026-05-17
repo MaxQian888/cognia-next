@@ -271,6 +271,26 @@ Both endpoints are cheap (lock-free counters; no Dexie/DB touch) and
 safe to scrape at 30 s intervals. The fly.io probe is wired in
 `signaling-server/fly.toml`.
 
+### Defensive limits
+
+Two layers gate misbehaving clients:
+
+- **Per-connection token bucket** (`limits.rs`) — 20-frame capacity,
+  10-frame/sec refill. Bounds the rate at which one socket can flood a
+  room.
+- **Per-source connection cap** (`ip_limits.rs`) — at most
+  `SIGNALING_MAX_CONN_PER_IP` (default `50`) concurrent WebSocket
+  upgrades per client IP. Beyond that, the upgrade is rejected with
+  `429 Too Many Requests`. The cap is set at process boot from the
+  env var; behind a Fly.io / Cloudflare proxy the client IP is read
+  from `Fly-Client-IP` / `X-Forwarded-For` first, falling back to the
+  raw TCP peer when no proxy header is present.
+
+Malformed-frame error messages were also redacted to a static string
+(`"frame did not match expected schema"`) so an opportunistic client
+can't reverse-engineer the wire format from verbose serde output. The
+detailed parse error stays in the server-side trace log.
+
 ### TURN credentials
 
 Wave 1 deliberately ships without bundled TURN. Users on symmetric NAT

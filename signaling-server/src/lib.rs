@@ -4,6 +4,7 @@
 //! and the protocol types directly. The binary `src/main.rs` calls
 //! [`server::serve`] after parsing CLI args.
 
+pub mod ip_limits;
 pub mod limits;
 pub mod metrics;
 pub mod proto;
@@ -11,4 +12,4 @@ pub mod room;
 pub mod server;
 pub mod ws;
 
-pub use server::{router, serve, serve_for_test, AppState};
+pub use server::{router, serve, serve_for_test, serve_for_test_with, AppState};

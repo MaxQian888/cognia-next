@@ -13,14 +13,15 @@
 //! The signaling service is intentionally stateless beyond per-connection
 //! tracking: no auth, no quota DB, no observability beyond `tracing` logs.
 
+use std::net::SocketAddr;
 use std::time::Duration;
 
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
+        ConnectInfo, State,
     },
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::Response,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -28,6 +29,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 use crate::{
+    ip_limits::{extract_client_ip, AcquireOutcome, Acquired},
     limits::TokenBucket,
     metrics::RejectReason,
     proto::{ClientFrame, PeerRole, PeerSnapshot, ServerFrame},
@@ -46,12 +48,32 @@ const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(25);
 
 pub async fn ws_upgrade(
     State(state): State<AppState>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Result<Response, (StatusCode, &'static str)> {
-    Ok(ws.on_upgrade(move |socket| handle_socket(state, socket)))
+    let client_ip = extract_client_ip(peer_addr, &headers);
+    let acquired = match state.ip_limits.try_acquire(client_ip) {
+        AcquireOutcome::Accepted(guard) => guard,
+        AcquireOutcome::Rejected { current, max } => {
+            warn!(
+                target: "signaling",
+                %client_ip,
+                current,
+                max,
+                "rejecting WS upgrade — per-IP connection cap reached"
+            );
+            // 429 Too Many Requests communicates the cause without
+            // leaking the cap value to opportunistic clients.
+            return Err((StatusCode::TOO_MANY_REQUESTS, "per-ip connection cap"));
+        }
+    };
+    Ok(ws.on_upgrade(move |socket| handle_socket(state, socket, acquired)))
 }
 
-async fn handle_socket(state: AppState, socket: WebSocket) {
+async fn handle_socket(state: AppState, socket: WebSocket, _ip_guard: Acquired) {
+    // `_ip_guard` is held for the lifetime of this task; dropping it on
+    // function return (normal or panic) releases the per-IP slot.
     let peer_id = state.registry.next_peer_id();
     let (mut sink, mut stream) = socket.split();
     let (tx, mut rx) = mpsc::channel::<ServerFrame>(PEER_OUTBOUND_BUFFER);

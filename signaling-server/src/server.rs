@@ -11,7 +11,12 @@ use serde_json::json;
 use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
 use tracing::info;
 
-use crate::{metrics::Metrics, room::RoomRegistry, ws::ws_upgrade};
+use crate::{
+    ip_limits::{default_max_conn_per_ip, IpLimits},
+    metrics::Metrics,
+    room::RoomRegistry,
+    ws::ws_upgrade,
+};
 
 /// 8 KiB cap on every WS frame's HTTP body — pre-upgrade only; per-frame
 /// caps are enforced by `axum::extract::ws::WebSocket` defaults.
@@ -21,6 +26,7 @@ const MAX_BODY_BYTES: usize = 8 * 1024;
 pub struct AppState {
     pub registry: Arc<RoomRegistry>,
     pub metrics: Arc<Metrics>,
+    pub ip_limits: Arc<IpLimits>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -58,18 +64,31 @@ async fn metrics_handler(
 /// Run the server in the current tokio runtime. Returns when the listener
 /// stops accepting (e.g., SIGINT after `tokio::signal::ctrl_c`).
 pub async fn serve(addr: SocketAddr) -> anyhow::Result<()> {
+    let max_per_ip = default_max_conn_per_ip();
     let state = AppState {
         registry: Arc::new(RoomRegistry::new()),
         metrics: Arc::new(Metrics::new()),
+        ip_limits: IpLimits::new(max_per_ip),
     };
     let app = router(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let bound = listener.local_addr()?;
-    info!(target: "signaling", %bound, "listening");
+    info!(
+        target: "signaling",
+        %bound,
+        max_conn_per_ip = max_per_ip,
+        "listening"
+    );
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    // `into_make_service_with_connect_info` is required so the WS upgrade
+    // handler can extract `ConnectInfo<SocketAddr>` and pick up the
+    // tcp-layer peer address for the IpLimits gate.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
     Ok(())
 }
 
@@ -98,15 +117,29 @@ async fn shutdown_signal() {
 /// address + shutdown handle. Public because the integration test crate
 /// under `tests/` needs to call into it.
 pub async fn serve_for_test() -> anyhow::Result<(std::net::SocketAddr, tokio::task::JoinHandle<()>)> {
+    serve_for_test_with(default_max_conn_per_ip()).await
+}
+
+/// Like [`serve_for_test`] but lets the caller pick the per-IP cap.
+/// Used by the per-IP rate-limit integration test which would have to
+/// open 50+ sockets otherwise.
+pub async fn serve_for_test_with(
+    max_conn_per_ip: usize,
+) -> anyhow::Result<(std::net::SocketAddr, tokio::task::JoinHandle<()>)> {
     let state = AppState {
         registry: Arc::new(RoomRegistry::new()),
         metrics: Arc::new(Metrics::new()),
+        ip_limits: IpLimits::new(max_conn_per_ip),
     };
     let app = router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
     let handle = tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
     });
     Ok((addr, handle))
 }
