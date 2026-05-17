@@ -13,10 +13,10 @@ use std::sync::Arc;
 use log::{debug, error, info};
 use tauri::State;
 
-use super::backend::VectorBackend;
 use super::credentials::{self, VectorCredentials};
-use super::db::{CollectionStats, ImportStats, ScrollPage};
+use super::db::{CollectionStats, ImportStats};
 use super::registry::VectorRegistry;
+use super::{ScrollPage, VectorBackend};
 use super::types::{
     Collection, CreateCollectionRequest, Filter, FilterMode, HealthStatus, Point, ScrollOptions,
     SearchOptions, SearchResponse, VectorProvider,

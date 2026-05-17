@@ -423,4 +423,21 @@ mod tests {
         listed.sort();
         assert_eq!(listed, vec!["a", "b"]);
     }
+
+    #[test]
+    fn chord_for_id_returns_normalized_chord_or_none() {
+        let reg = ShortcutRegistry::default();
+        {
+            let mut g = reg.inner.lock();
+            g.id_to_chord
+                .insert("tray.show".into(), "ctrl+shift+space".into());
+            g.chord_to_id
+                .insert("ctrl+shift+space".into(), "tray.show".into());
+        }
+        assert_eq!(
+            reg.chord_for_id("tray.show"),
+            Some("ctrl+shift+space".to_string())
+        );
+        assert_eq!(reg.chord_for_id("unknown.id"), None);
+    }
 }

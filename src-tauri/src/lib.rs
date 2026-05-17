@@ -256,6 +256,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::greet,
+            commands::menu_action_ids,
             claude::commands::claude_send,
             claude::commands::claude_interrupt,
             claude::commands::claude_approve,
@@ -295,11 +296,13 @@ pub fn run() {
             tray::commands::tray_set_tooltip,
             tray::commands::tray_get_current_menu,
             tray::commands::tray_get_icon_state,
+            tray::commands::tray_get_tooltip,
             tray::commands::tray_register_icon,
             shortcuts::commands::shortcut_bind,
             shortcuts::commands::shortcut_unbind,
             shortcuts::commands::shortcut_list,
             shortcuts::commands::shortcut_check_conflict,
+            shortcuts::commands::shortcut_get_chord_for_id,
             plugin_api::tray_items::plugin_tray_item_register,
             plugin_api::tray_items::plugin_tray_item_unregister,
             plugin_api::tray_items::plugin_tray_item_list,
@@ -335,6 +338,10 @@ pub fn run() {
             tts::keyring::tts_keyring_set,
             tts::keyring::tts_keyring_delete,
             tts::keyring::tts_keyring_list_providers,
+            keyring_secrets::keyring_secret_get,
+            keyring_secrets::keyring_secret_set,
+            keyring_secrets::keyring_secret_clear,
+            cli_bridge::cli_bridge_status,
             tts::edge::tts_edge_synthesize,
             tts::proxy::tts_proxy_fetch,
             external_agent::commands::spawn_external_agent,
@@ -762,6 +769,16 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // Graceful teardown — stop the loopback CLI bridge before the
+            // process tears down its tokio runtime so the axum socket is
+            // released cleanly. `shutdown` is idempotent and safe to call
+            // even when the bridge was never spawned (mobile, init failures).
+            if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
+                let state = app_handle.state::<cli_bridge::CliBridgeServerState>();
+                cli_bridge::shutdown(state.inner());
+            }
+        });
 }

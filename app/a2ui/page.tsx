@@ -64,6 +64,7 @@ import { generateAppFromDescription } from "@/lib/a2ui/app-generator"
 import { appTemplates, getTemplatesByCategory, searchTemplates } from "@/lib/a2ui/templates"
 import { CATEGORY_KEYS, CATEGORY_I18N_MAP } from "@/lib/a2ui/constants"
 import { A2UIInlineSurface } from "@/components/a2ui/a2ui-surface"
+import { PageLoading } from "@/components/ui/loading-states"
 import { AppDetailDialog } from "@/components/a2ui/app-detail-dialog"
 import { DeleteConfirmDialog } from "@/components/a2ui/delete-confirm-dialog"
 import { TemplateCard } from "@/components/a2ui/quick-app-builder/template-card"
@@ -533,7 +534,7 @@ function A2UIPageContent() {
                       value={sortBy}
                       onValueChange={(value) => setSortBy(value as SortOption)}
                     >
-                      <SelectTrigger className="w-[140px]">
+                      <SelectTrigger className="w-auto min-w-[140px]">
                         <SortAsc className="mr-1 h-4 w-4" />
                         <SelectValue />
                       </SelectTrigger>
@@ -905,13 +906,7 @@ function A2UIPageContent() {
 
 export default function A2UIPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex h-full items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </div>
-      }
-    >
+    <Suspense fallback={<PageLoading />}>
       <A2UIPageContent />
     </Suspense>
   )

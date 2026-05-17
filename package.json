@@ -37,6 +37,8 @@
     "test:e2e:install": "playwright install chromium webkit",
     "test:e2e:report": "playwright show-report",
     "webrtc:smoke": "node scripts/signaling-smoke.mjs",
+    "sync:plugin-sdk-wit": "node scripts/sync-plugin-sdk-wit.mjs",
+    "lint:plugin-sdk-wit": "node scripts/check-plugin-sdk-wit.mjs",
     "sidecar:install": "pnpm --dir sidecar install --ignore-workspace",
     "sidecar:start": "node sidecar/claude-host.mjs",
     "sidecar:smoke": "node sidecar/claude-host.mjs --smoke",

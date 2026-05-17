@@ -8,10 +8,9 @@ use reqwest::{header, Client};
 use serde::{Deserialize, Serialize};
 
 use super::http_helpers::{build_client, http_err, read_body};
-use crate::vector::backend::VectorBackend;
-use crate::vector::db::ScrollPage;
 use crate::vector::error::{Result, VectorError};
 use crate::vector::types::*;
+use crate::vector::{ScrollPage, VectorBackend};
 
 pub struct WeaviateBackend {
     base_url: String,

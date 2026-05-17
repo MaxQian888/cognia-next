@@ -21,7 +21,7 @@ jest.mock("@/lib/db/goals", () => ({
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { invoke } = require("@tauri-apps/api/core") as { invoke: jest.Mock }
 
-import { useSyncTrayToRust, defaultSnapshot } from "./sync"
+import { useSyncTrayToRust, defaultSnapshot, getTrayTooltipFromRust } from "./sync"
 import { useTrayStore, __resetTrayStoreForTesting } from "./store"
 import { __resetTrayRegistryForTesting, registerTrayItem } from "./registry"
 import { DEFAULT_TRAY_ITEMS } from "./defaults"
@@ -110,5 +110,32 @@ describe("useSyncTrayToRust", () => {
     expect(invoke).toHaveBeenCalledWith("tray_set_tooltip", {
       text: "Cognia (busy)",
     })
+  })
+})
+
+describe("getTrayTooltipFromRust", () => {
+  it("returns the tooltip string Rust reports", async () => {
+    invoke.mockResolvedValueOnce("Cognia (idle)")
+    const tooltip = await getTrayTooltipFromRust()
+    expect(invoke).toHaveBeenCalledWith("tray_get_tooltip")
+    expect(tooltip).toBe("Cognia (idle)")
+  })
+
+  it("returns null when Rust has no tooltip stored", async () => {
+    invoke.mockResolvedValueOnce(null)
+    const tooltip = await getTrayTooltipFromRust()
+    expect(tooltip).toBeNull()
+  })
+
+  it("coerces non-string responses to null (defensive)", async () => {
+    invoke.mockResolvedValueOnce(42 as unknown)
+    const tooltip = await getTrayTooltipFromRust()
+    expect(tooltip).toBeNull()
+  })
+
+  it("returns null when the IPC layer rejects", async () => {
+    invoke.mockRejectedValueOnce(new Error("not managed"))
+    const tooltip = await getTrayTooltipFromRust()
+    expect(tooltip).toBeNull()
   })
 })

@@ -600,6 +600,15 @@ importers:
         specifier: ^7.0.0
         version: 7.6.3
 
+  plugin-sdk/typescript:
+    dependencies:
+      react:
+        specifier: ^19.0.0
+        version: 19.2.5
+      typescript:
+        specifier: '>=5.0.0'
+        version: 6.0.3
+
 packages:
 
   '@adobe/css-tools@4.4.4':

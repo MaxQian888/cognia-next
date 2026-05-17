@@ -26,6 +26,14 @@ interface ShortcutRegistryState {
   bind(binding: ShortcutBinding): Promise<{ ok: boolean; error?: string }>
   unbind(id: string): Promise<void>
   conflictFor(chord: Chord, ignoringId?: string): Promise<string | null>
+  /**
+   * Resolve the current normalised chord for `id`. Returns the cached value
+   * when the store has already hydrated; otherwise asks Rust directly via
+   * `shortcut_get_chord_for_id`. Useful for diagnostic surfaces and the
+   * settings UI's "current binding" label without forcing a full
+   * `hydrate()` pass.
+   */
+  chordFor(id: string): Promise<Chord | null>
 }
 
 export const useShortcutStore = create<ShortcutRegistryState>((set, get) => ({
@@ -94,6 +102,22 @@ export const useShortcutStore = create<ShortcutRegistryState>((set, get) => ({
       return owner ?? null
     } catch (err) {
       loggers.tray.warn("shortcut_check_conflict failed", { chord, error: String(err) })
+      return null
+    }
+  },
+
+  async chordFor(id: string): Promise<Chord | null> {
+    // Hydrated cache hit — return immediately without an IPC round-trip.
+    // The store is the authority once hydrated; the Rust getter is for
+    // pre-hydration callers and for diagnostic verification.
+    const cached = get().bindings[id]
+    if (cached) return cached
+    if (!isTauri()) return null
+    try {
+      const chord = await invoke<string | null>("shortcut_get_chord_for_id", { id })
+      return chord ?? null
+    } catch (err) {
+      loggers.tray.warn("shortcut_get_chord_for_id failed", { id, error: String(err) })
       return null
     }
   },

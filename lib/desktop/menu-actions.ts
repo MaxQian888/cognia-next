@@ -1,5 +1,7 @@
 "use client"
 
+import { invoke } from "@tauri-apps/api/core"
+
 /**
  * Pure action helpers for the desktop top-menu surface.
  *
@@ -89,6 +91,67 @@ export const MENU_ACTION_IDS = [
 ] as const
 
 export type MenuActionId = (typeof MENU_ACTION_IDS)[number]
+
+/**
+ * Report shape returned by {@link verifyMenuActionParity}. `missingInRust` /
+ * `missingInRenderer` are disjoint — an id only appears in one list. An
+ * empty report ({ missingInRust: [], missingInRenderer: [] }) means the two
+ * sides agree on every id (excluding the renderer-only `quit` / `about` /
+ * zoom / fullscreen ids that Rust handles via PredefinedMenuItem).
+ */
+export interface MenuActionParityReport {
+  missingInRust: string[]
+  missingInRenderer: string[]
+}
+
+/**
+ * Renderer-only menu ids — these are handled in-app (zoom via keyboard
+ * shortcuts, fullscreen via `getCurrentWindow().setFullscreen`, quit / about
+ * via the OS-provided predefined items). Rust's `MENU_IDS` deliberately
+ * omits them; the parity check below excludes them too.
+ */
+const RENDERER_ONLY_IDS: ReadonlySet<string> = new Set([
+  "quit",
+  "about",
+  "toggle-fullscreen",
+  "zoom-in",
+  "zoom-out",
+  "zoom-reset",
+])
+
+/**
+ * Compare {@link MENU_ACTION_IDS} against Rust's `menu_action_ids` command
+ * and return a diff. Boot-time hook can fail-fast on a non-empty diff so any
+ * Rust ↔ renderer drift is caught before a user clicks a menu item that
+ * silently no-ops.
+ *
+ * Returns `null` outside Tauri (web mode never builds the native menu) and
+ * on IPC failure — callers should treat both as "skip the check".
+ *
+ * Rust side: `src-tauri/src/commands.rs:menu_action_ids`.
+ */
+export async function verifyMenuActionParity(): Promise<MenuActionParityReport | null> {
+  try {
+    const rustIds = await invoke<string[]>("menu_action_ids")
+    if (!Array.isArray(rustIds)) return null
+    const rustSet = new Set<string>(rustIds)
+    const rendererSet = new Set<string>(MENU_ACTION_IDS)
+    const missingInRust: string[] = []
+    for (const id of rendererSet) {
+      if (RENDERER_ONLY_IDS.has(id)) continue
+      if (!rustSet.has(id)) missingInRust.push(id)
+    }
+    const missingInRenderer: string[] = []
+    for (const id of rustSet) {
+      if (!rendererSet.has(id)) missingInRenderer.push(id)
+    }
+    return { missingInRust, missingInRenderer }
+  } catch {
+    // Not in Tauri, or IPC layer unavailable — skip silently. The
+    // tauri-provider hook treats `null` as "no parity check ran".
+    return null
+  }
+}
 
 /** Static route map for every `go-*` navigation id. */
 export const GO_ROUTES: Record<string, string> = {

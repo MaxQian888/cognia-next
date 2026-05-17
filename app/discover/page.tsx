@@ -131,7 +131,7 @@ export default function DiscoverPage() {
         onValueChange={(v) => setTab(v as DiscoverTab)}
         className="flex flex-1 flex-col"
       >
-        <TabsList className="mx-4 mb-3 grid grid-cols-5">
+        <TabsList className="mx-4 mb-3 grid grid-cols-5 [&_button]:min-w-0 [&_button]:truncate [&_button]:px-1.5 [&_button]:text-xs sm:[&_button]:px-3 sm:[&_button]:text-sm">
           {TAB_IDS.map((id) => (
             <TabsTrigger key={id} value={id} data-testid={`discover-tab-${id}`}>
               {t(`tabs.${id}`)}

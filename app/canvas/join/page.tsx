@@ -17,10 +17,11 @@ import { Badge } from "@/components/ui/badge"
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react"
 import { useUIStore } from "@/stores/ui"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
+import { PageLoading } from "@/components/ui/loading-states"
 
 export default function CanvasJoinPage() {
   return (
-    <Suspense fallback={<JoinLoading />}>
+    <Suspense fallback={<PageLoading />}>
       <CanvasJoinInner />
     </Suspense>
   )
@@ -141,15 +142,6 @@ function CanvasJoinInner() {
           </div>
         </CardContent>
       </Card>
-    </div>
-  )
-}
-
-function JoinLoading() {
-  return (
-    <div className="flex min-h-svh items-center justify-center p-6 text-sm text-muted-foreground">
-      <Loader2 className="mr-2 size-4 animate-spin" />
-      Loading…
     </div>
   )
 }

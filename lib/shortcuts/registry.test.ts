@@ -82,4 +82,34 @@ describe("useShortcutStore", () => {
     })
     expect(owner).toBe("tray.show")
   })
+
+  it("chordFor returns the cached chord without an IPC call after hydrate", async () => {
+    invoke.mockResolvedValueOnce([{ id: "tray.show", chord: "ctrl+shift+space" }])
+    await useShortcutStore.getState().hydrate()
+    invoke.mockClear()
+    const chord = await useShortcutStore.getState().chordFor("tray.show")
+    expect(chord).toBe("ctrl+shift+space")
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it("chordFor falls back to shortcut_get_chord_for_id when the cache is empty", async () => {
+    invoke.mockResolvedValueOnce("ctrl+alt+k")
+    const chord = await useShortcutStore.getState().chordFor("tray.automation-kill")
+    expect(invoke).toHaveBeenCalledWith("shortcut_get_chord_for_id", {
+      id: "tray.automation-kill",
+    })
+    expect(chord).toBe("ctrl+alt+k")
+  })
+
+  it("chordFor returns null when the Rust side reports no binding", async () => {
+    invoke.mockResolvedValueOnce(null)
+    const chord = await useShortcutStore.getState().chordFor("unknown.id")
+    expect(chord).toBeNull()
+  })
+
+  it("chordFor swallows IPC errors and returns null", async () => {
+    invoke.mockRejectedValueOnce(new Error("ipc down"))
+    const chord = await useShortcutStore.getState().chordFor("tray.show")
+    expect(chord).toBeNull()
+  })
 })

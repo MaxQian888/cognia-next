@@ -10,10 +10,9 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 
 use super::http_helpers::{build_client, http_err, read_body};
-use crate::vector::backend::VectorBackend;
-use crate::vector::db::ScrollPage;
 use crate::vector::error::{Result, VectorError};
 use crate::vector::types::*;
+use crate::vector::{ScrollPage, VectorBackend};
 
 const CONTROL_PLANE: &str = "https://api.pinecone.io";
 

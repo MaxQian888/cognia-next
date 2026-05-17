@@ -197,7 +197,7 @@ function RunDetailInner({
             </div>
           </ScrollArea>
         </div>
-        <aside className="w-96 shrink-0 border-l bg-card/40">
+        <aside className="hidden w-96 shrink-0 border-l bg-card/40 lg:block">
           <RunStepDetail workflow={run.workflowSnapshot} events={events} stepId={selectedStepId} />
         </aside>
       </div>
@@ -221,7 +221,7 @@ function RunDetailSkeleton() {
             <Skeleton key={i} className="h-7 w-full" />
           ))}
         </div>
-        <Skeleton className="m-4 h-full w-96" />
+        <Skeleton className="m-4 hidden h-full w-96 lg:block" />
       </div>
     </div>
   )

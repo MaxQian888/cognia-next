@@ -122,6 +122,9 @@ pub fn post_json<R: for<'de> Deserialize<'de>>(
 mod tests {
     use super::*;
     use serde_json::json;
+    // `Read` is needed at the trait level for `req.as_reader().read_to_string()`;
+    // rustc's unused-import lint doesn't see through tiny_http's reader type.
+    #[allow(unused_imports)]
     use std::io::{Read, Write};
     use tempfile::NamedTempFile;
 

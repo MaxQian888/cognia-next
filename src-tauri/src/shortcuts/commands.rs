@@ -99,6 +99,26 @@ pub async fn shortcut_check_conflict(
     }
 }
 
+/// Reverse lookup: what chord (if any) is currently bound to `id`? The
+/// renderer's shortcut settings UI uses this to seed the "current binding"
+/// label without having to scan the full `shortcut_list` response. Returns
+/// the chord in its canonical normalized form (matches `normalize_chord`).
+#[tauri::command]
+pub async fn shortcut_get_chord_for_id(
+    state: State<'_, Arc<ShortcutRegistry>>,
+    id: String,
+) -> Result<Option<String>, String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        Ok(state.chord_for_id(&id))
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = (state, id);
+        Ok(None)
+    }
+}
+
 #[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
 mod tests {
     use super::*;

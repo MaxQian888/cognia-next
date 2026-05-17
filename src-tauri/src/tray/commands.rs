@@ -170,6 +170,18 @@ pub async fn tray_get_icon_state<R: Runtime>(
     }
 }
 
+/// Snapshot the tooltip Rust currently holds. The renderer hydration path
+/// in `lib/tray/tray-controller.ts` uses this on cold boot to avoid pushing
+/// a tooltip identical to the one set during the previous session — set the
+/// tooltip via `tray_set_tooltip` once on boot, then poll via this getter
+/// to keep the unified-event dashboard in sync.
+#[tauri::command]
+pub async fn tray_get_tooltip(
+    state: State<'_, Arc<TrayMenuStateStore>>,
+) -> Result<Option<String>, String> {
+    Ok(state.tooltip())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,5 +219,20 @@ mod tests {
             store.lookup_payload("a"),
             Some(TrayActionPayload::Slash { ref command }) if command == "clear"
         ));
+    }
+
+    /// Direct read of `TrayMenuStateStore::tooltip()` — the command body
+    /// is a one-line wrapper around this getter, so testing the getter
+    /// covers the command's only behaviour. Avoids spinning up a tauri
+    /// mock app (the project doesn't enable Tauri's `test` feature; see
+    /// `window_utils.rs:46`).
+    #[test]
+    fn tooltip_getter_round_trips_through_store() {
+        let store = TrayMenuStateStore::default();
+        assert!(store.tooltip().is_none());
+        store.set_tooltip(Some("Cognia (busy)".into()));
+        assert_eq!(store.tooltip().as_deref(), Some("Cognia (busy)"));
+        store.set_tooltip(None);
+        assert!(store.tooltip().is_none());
     }
 }

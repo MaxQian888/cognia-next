@@ -140,7 +140,7 @@ export function RunStepDetail({
         </div>
 
         {summary ? (
-          <div className="grid grid-cols-2 gap-2 rounded-md border bg-muted/30 p-3 text-xs">
+          <div className="grid grid-cols-1 gap-2 rounded-md border bg-muted/30 p-3 text-xs sm:grid-cols-2">
             <Stat label={t("duration")} value={formatDurationMs(summary.durationMs)} />
             <Stat label={t("statusLabel")} value={summary.terminalType.replace("step_", "")} />
             {startedEv ? (

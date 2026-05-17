@@ -8,6 +8,11 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(() => true),
 }))
 
+const invokeMock = jest.fn()
+jest.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => invokeMock(...args),
+}))
+
 const openExternal = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/tauri/opener", () => ({
   openExternal: (...args: unknown[]) => openExternal(...args),
@@ -114,12 +119,14 @@ import {
   clearCacheAction,
   documentationAction,
   aboutAction,
+  verifyMenuActionParity,
 } from "./menu-actions"
 
 const router = { push: jest.fn() } as unknown as Parameters<typeof goAction>[0]
 
 beforeEach(() => {
   transportCall.mockReset().mockResolvedValue(undefined)
+  invokeMock.mockReset()
   openExternal.mockClear().mockResolvedValue(undefined)
   openDialog.mockReset().mockResolvedValue(null)
   winClose.mockClear().mockResolvedValue(undefined)
@@ -429,4 +436,50 @@ test("documentationAction logs an error when the opener throws", async () => {
 test("aboutAction routes to settings about section", () => {
   aboutAction(router)
   expect(router.push).toHaveBeenCalledWith("/settings?section=about")
+})
+
+describe("verifyMenuActionParity", () => {
+  test("returns an empty diff when Rust returns every renderer id (sans renderer-only ones)", async () => {
+    const rustIds = MENU_ACTION_IDS.filter(
+      (id) =>
+        !["quit", "about", "toggle-fullscreen", "zoom-in", "zoom-out", "zoom-reset"].includes(id)
+    )
+    invokeMock.mockResolvedValueOnce(rustIds)
+    const report = await verifyMenuActionParity()
+    expect(invokeMock).toHaveBeenCalledWith("menu_action_ids")
+    expect(report).toEqual({ missingInRust: [], missingInRenderer: [] })
+  })
+
+  test("reports renderer ids missing on the Rust side", async () => {
+    // Rust list is missing `go-twin` (vs the renderer's MENU_ACTION_IDS).
+    const rustIds = MENU_ACTION_IDS.filter(
+      (id) =>
+        id !== "go-twin" &&
+        !["quit", "about", "toggle-fullscreen", "zoom-in", "zoom-out", "zoom-reset"].includes(id)
+    )
+    invokeMock.mockResolvedValueOnce(rustIds)
+    const report = await verifyMenuActionParity()
+    expect(report?.missingInRust).toEqual(["go-twin"])
+    expect(report?.missingInRenderer).toEqual([])
+  })
+
+  test("reports Rust ids the renderer hasn't learned yet", async () => {
+    const rustIds = [...MENU_ACTION_IDS, "future-rust-only-id"]
+    invokeMock.mockResolvedValueOnce(rustIds)
+    const report = await verifyMenuActionParity()
+    expect(report?.missingInRust).toEqual([])
+    expect(report?.missingInRenderer).toEqual(["future-rust-only-id"])
+  })
+
+  test("returns null when the IPC call rejects (skip-the-check signal)", async () => {
+    invokeMock.mockRejectedValueOnce(new Error("not in tauri"))
+    const report = await verifyMenuActionParity()
+    expect(report).toBeNull()
+  })
+
+  test("returns null when Rust returns a non-array (defensive)", async () => {
+    invokeMock.mockResolvedValueOnce({ not: "an array" } as unknown)
+    const report = await verifyMenuActionParity()
+    expect(report).toBeNull()
+  })
 })

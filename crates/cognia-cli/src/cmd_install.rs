@@ -15,7 +15,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::path::PathBuf;
 
-use crate::http_client::{load_endpoint, post_json};
+use crate::http_client::{load_endpoint, post_json, EndpointFile};
 
 const PATH: &str = "/api/v1/dev/plugins/install";
 
@@ -32,15 +32,22 @@ struct InstallResponse {
 }
 
 pub fn run(bundle: PathBuf) -> Result<()> {
+    let endpoint = load_endpoint()?;
+    run_with_endpoint(bundle, &endpoint)
+}
+
+/// Endpoint-injected variant. Used by tests so they don't race on the
+/// global `COGNIA_CLI_ENDPOINT_FILE` env var, and by future callers that
+/// already hold a resolved endpoint.
+pub fn run_with_endpoint(bundle: PathBuf, endpoint: &EndpointFile) -> Result<()> {
     let abs = bundle
         .canonicalize()
         .with_context(|| format!("resolve {}", bundle.display()))?;
     if !abs.exists() {
         anyhow::bail!("bundle not found: {}", abs.display());
     }
-    let endpoint = load_endpoint()?;
     let body = json!({ "bundle_path": abs.to_string_lossy() });
-    let resp: InstallResponse = post_json(&endpoint, PATH, &body)?;
+    let resp: InstallResponse = post_json(endpoint, PATH, &body)?;
     if !resp.ok {
         anyhow::bail!(
             "install rejected by cognia: {}",
@@ -58,13 +65,17 @@ pub fn run(bundle: PathBuf) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Read, Write};
+    // `Read` is needed at the trait level for `req.as_reader().read_to_string()`;
+    // rustc's unused-import lint doesn't see through tiny_http's reader type.
+    #[allow(unused_imports)]
+    use std::io::Read as _;
     use tempfile::NamedTempFile;
 
     /// End-to-end: CLI sends bundle path, mock server returns ok+pluginId.
+    /// Uses `run_with_endpoint` so the test doesn't race on the global
+    /// `COGNIA_CLI_ENDPOINT_FILE` env var with the http_client tests.
     #[test]
     fn install_happy_path_against_mock_bridge() {
-        // 1. Mock CLI bridge.
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
         let port = server.server_addr().to_ip().unwrap().port();
         let captured = std::sync::Arc::new(parking_lot::Mutex::new(None::<serde_json::Value>));
@@ -90,26 +101,15 @@ mod tests {
             }
         });
 
-        // 2. Endpoint file pointing at the mock.
-        let mut ep_file = NamedTempFile::new().unwrap();
-        write!(
-            ep_file,
-            r#"{{"baseUrl": "http://127.0.0.1:{port}", "devToken": "tok"}}"#
-        )
-        .unwrap();
-        std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", ep_file.path());
-
-        // 3. Real bundle file on disk (content irrelevant — the mock
-        //    server doesn't read it; only the path is forwarded).
+        let endpoint = EndpointFile {
+            base_url: format!("http://127.0.0.1:{port}"),
+            dev_token: "tok".into(),
+        };
         let bundle_file = NamedTempFile::new().unwrap();
-
-        // 4. Run.
-        let result = run(bundle_file.path().to_path_buf());
-        std::env::remove_var("COGNIA_CLI_ENDPOINT_FILE");
+        let result = run_with_endpoint(bundle_file.path().to_path_buf(), &endpoint);
         let _ = server_thread.join();
         assert!(result.is_ok(), "install should succeed: {result:?}");
 
-        // 5. Confirm payload shape.
         let payload = captured.lock().clone().expect("server captured request");
         let path_str = payload["bundle_path"].as_str().unwrap();
         assert!(
@@ -120,12 +120,13 @@ mod tests {
 
     #[test]
     fn install_fails_when_bundle_missing() {
-        std::env::set_var(
-            "COGNIA_CLI_ENDPOINT_FILE",
-            "/nowhere/that/should/never/exist.json",
-        );
-        let err = run(PathBuf::from("/definitely-not-a-real-bundle.zip")).unwrap_err();
-        std::env::remove_var("COGNIA_CLI_ENDPOINT_FILE");
+        let endpoint = EndpointFile {
+            base_url: "http://127.0.0.1:1".into(), // unreachable; we expect failure before contact
+            dev_token: "x".into(),
+        };
+        let err =
+            run_with_endpoint(PathBuf::from("/definitely-not-a-real-bundle.zip"), &endpoint)
+                .unwrap_err();
         // The path doesn't exist, so canonicalize fails first.
         assert!(
             err.to_string().contains("resolve") || err.to_string().contains("not found"),
@@ -153,17 +154,13 @@ mod tests {
             }
         });
 
-        let mut ep_file = NamedTempFile::new().unwrap();
-        write!(
-            ep_file,
-            r#"{{"baseUrl": "http://127.0.0.1:{port}", "devToken": "tok"}}"#
-        )
-        .unwrap();
-        std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", ep_file.path());
-
+        let endpoint = EndpointFile {
+            base_url: format!("http://127.0.0.1:{port}"),
+            dev_token: "tok".into(),
+        };
         let bundle = NamedTempFile::new().unwrap();
-        let err = run(bundle.path().to_path_buf()).unwrap_err();
-        std::env::remove_var("COGNIA_CLI_ENDPOINT_FILE");
+        let err =
+            run_with_endpoint(bundle.path().to_path_buf(), &endpoint).unwrap_err();
         let _ = server_thread.join();
         assert!(
             err.to_string().contains("manifest invalid: missing id"),

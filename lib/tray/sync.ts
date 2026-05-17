@@ -23,6 +23,28 @@ import type { TrayStateSnapshot } from "./types"
 const PUSH_DEBOUNCE_MS = 150
 
 /**
+ * Read the tooltip Rust currently has registered for the tray icon. Returns
+ * `null` outside Tauri (web mode never installs a tray) and on IPC failure.
+ *
+ * The renderer is the source of truth: `tray_set_tooltip` is the write
+ * path. This getter exists for diagnostic surfaces ("does Rust agree with
+ * the renderer right now?") and for hydration-time reconciliation when the
+ * app boots into a session where a prior tooltip was already applied.
+ *
+ * Rust side: `src-tauri/src/tray/commands.rs:tray_get_tooltip`.
+ */
+export async function getTrayTooltipFromRust(): Promise<string | null> {
+  if (!isTauri()) return null
+  try {
+    const tooltip = await invoke<string | null>("tray_get_tooltip")
+    return typeof tooltip === "string" ? tooltip : null
+  } catch (err) {
+    loggers.tray.warn("tray_get_tooltip failed", { error: String(err) })
+    return null
+  }
+}
+
+/**
  * Static fallback snapshot used by tests that don't mount a provider tree
  * and by the sync hook's first paint (before React commits the live
  * snapshot). Production paths use `useTrayStateSnapshot()` which reads

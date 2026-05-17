@@ -15,6 +15,7 @@ import { getDb } from "@/lib/db/schema"
 import type { ChatSession } from "@/lib/claude/types"
 import { InboxShell } from "@/components/inbox/inbox-shell"
 import { ConversationHeader } from "@/components/inbox/conversation-header"
+import { PageLoading } from "@/components/ui/loading-states"
 import { DraftBanner } from "@/components/inbox/draft-banner"
 import { ChatPane } from "@/components/chat/chat-view"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
@@ -31,7 +32,7 @@ export function ConversationPageClient({ params }: PageProps) {
   const conversationKey = decodeURIComponent(encodedKey)
 
   return (
-    <Suspense>
+    <Suspense fallback={<PageLoading />}>
       <ConversationPageInner conversationKey={conversationKey} />
     </Suspense>
   )
@@ -75,9 +76,7 @@ function ConversationPageInner({ conversationKey }: { conversationKey: string })
   if (session === undefined) {
     return (
       <InboxShell view="conversation" conversationKey={conversationKey}>
-        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-          {t("loading")}
-        </div>
+        <PageLoading title={t("loading")} />
       </InboxShell>
     )
   }

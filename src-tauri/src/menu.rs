@@ -5,62 +5,9 @@ use tauri::{
     App, Emitter, Manager,
 };
 
-/// Authoritative list of every custom menu id this module dispatches. Kept in
-/// lock-step with `lib/desktop/menu-actions.ts:MENU_ACTION_IDS`. When you add
-/// or remove an id here, update the renderer side and its tests too.
-///
-/// `reload` and `toggle-devtools` are intercepted in `on_menu_event` and
-/// handled directly by Rust — they're listed because they're menu ids, but
-/// they never reach the renderer as `menu://reload` events. Everything else
-/// is forwarded transparently.
-pub const MENU_IDS: &[&str] = &[
-    // File
-    "new-chat",
-    "new-workflow",
-    "new-agent-team",
-    "new-character",
-    "open-workspace",
-    "open-settings",
-    "open-logs",
-    // Edit — predefined items (no custom ids)
-    // View
-    "command-palette",
-    "toggle-sidebar",
-    "toggle-guild-rail",
-    "toggle-status-bar",
-    "reload",
-    "toggle-devtools",
-    "toggle-reduce-motion",
-    "theme-light",
-    "theme-dark",
-    "theme-system",
-    "language-en",
-    "language-zh-cn",
-    // Go
-    "go-inbox",
-    "go-workflows",
-    "go-twin",
-    "go-skills",
-    "go-plugins",
-    "go-agent-teams",
-    "go-scheduler",
-    "go-discover",
-    "go-a2ui",
-    "go-dms",
-    "go-canvas",
-    "go-logs",
-    "go-settings",
-    // Tools
-    "automation-kill-switch",
-    "manage-connectors",
-    "manage-mcp-server",
-    "plugin-devtools",
-    "sidecar-restart",
-    "clear-cache",
-    // Help
-    "keyboard-shortcuts",
-    "documentation",
-];
+// `MENU_IDS` lives in `crate::commands` so the `menu_action_ids` Tauri
+// command can be registered on every platform — see
+// `commands::MENU_IDS` and `commands::menu_action_ids`.
 
 /// Build the application menu (File / Edit / View / Go / Tools / Window /
 /// Help) and route menu events to the frontend as `menu://<id>` events.
@@ -341,53 +288,5 @@ pub fn install(app: &App) -> tauri::Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Every documented id is unique and uses only kebab-case + lowercase
-    /// letters / digits. Catches accidental duplicates or accidental
-    /// underscores that would make the `menu://<id>` event names diverge
-    /// from the renderer's expectations.
-    #[test]
-    fn menu_ids_are_kebab_case_and_unique() {
-        let mut seen = std::collections::HashSet::new();
-        for id in MENU_IDS {
-            assert!(seen.insert(*id), "duplicate menu id: {id}");
-            assert!(
-                id.chars()
-                    .all(|c| c == '-' || c.is_ascii_lowercase() || c.is_ascii_digit()),
-                "non kebab-case id: {id}"
-            );
-            assert!(!id.is_empty(), "empty menu id");
-        }
-    }
-
-    /// Sanity: the renderer-side `MENU_ACTION_IDS` list in
-    /// `lib/desktop/menu-actions.ts` includes a few well-known ids. Hard-
-    /// coding the canary set in the test rather than re-parsing the TS
-    /// keeps cargo test self-contained, but spot-checks the contract.
-    #[test]
-    fn menu_ids_include_canonical_set() {
-        let required: &[&str] = &[
-            "new-chat",
-            "open-workspace",
-            "open-settings",
-            "open-logs",
-            "command-palette",
-            "toggle-sidebar",
-            "go-inbox",
-            "go-twin",
-            "go-settings",
-            "automation-kill-switch",
-            "manage-mcp-server",
-            "sidecar-restart",
-            "clear-cache",
-            "keyboard-shortcuts",
-            "documentation",
-        ];
-        for id in required {
-            assert!(MENU_IDS.contains(id), "MENU_IDS is missing: {id}");
-        }
-    }
-}
+// Tests for `MENU_IDS` (uniqueness, kebab-case, canonical-set parity) live
+// in `crate::commands::tests` next to the constant they exercise.

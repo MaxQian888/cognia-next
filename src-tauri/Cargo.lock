@@ -1397,6 +1397,7 @@ version = "0.1.0"
 dependencies = [
  "aes",
  "aes-gcm",
+ "anyhow",
  "async-trait",
  "axum 0.8.9",
  "axum-server",
@@ -1407,6 +1408,7 @@ dependencies = [
  "clap",
  "cron",
  "dial9-tokio-telemetry",
+ "directories",
  "dirs 6.0.0",
  "ed25519-dalek",
  "enigo",
@@ -2225,6 +2227,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "directories"
+version = "5.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a49173b84e034382284f27f1af4dcbbd231ffa358c0fe316541a7337f376a35"
+dependencies = [
+ "dirs-sys 0.4.1",
+]
+
+[[package]]
 name = "dirs"
 version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2251,6 +2262,18 @@ dependencies = [
  "libc",
  "redox_users 0.4.6",
  "winapi",
+]
+
+[[package]]
+name = "dirs-sys"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "520f05a5cbd335fae5a99ff7a6ab8627577660ee5cfd6a94a6a929b52ff0321c"
+dependencies = [
+ "libc",
+ "option-ext",
+ "redox_users 0.4.6",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

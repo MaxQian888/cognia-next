@@ -1,132 +1,182 @@
 ---
 title: Packaging & Publishing
-description: How to build a .cognia-plugin archive, sign it, and publish to the marketplace.
+description: Build, sign, install, and distribute cognia plugins. Covers both WASM Component Model plugins and frontend TypeScript plugins.
 ---
 
-# Packaging & Publishing
+Cognia plugins are distributed as `.zip` bundles containing the manifest, code artifact, and any auxiliary assets. The `cognia` CLI (Rust crate at `crates/cognia-cli/`) builds, validates, signs, and installs them.
 
-Plugins are distributed as signed `.cognia-plugin` archives (ZIP files containing the manifest, source code, assets, and a signature).
+> **Install the CLI once:**
+>
+> ```bash
+> cargo install --locked --path crates/cognia-cli
+> cognia --help
+> ```
+>
+> The same binary handles both plugin kinds described below; sub-commands dispatch on the `type` field in `plugin.json`.
 
-## Building the archive
+## Scaffold
 
-### 1. Prepare the directory
-
-```
-my-plugin/
-  cognia-plugin.json    # manifest
-  main.js               # entry point
-  icon.svg              # optional icon
-  package.json          # optional: for npm dependencies
-  src/                  # optional: additional source files
-  assets/               # optional: static assets
-```
-
-### 2. Install dependencies
-
-If your plugin uses npm packages, run:
+Two starters ship with the CLI:
 
 ```bash
-cd my-plugin
-npm install
+# Rust + cargo-component WASM plugin
+cognia plugin new my-wasm-plugin
+# or
+cognia plugin new my-wasm-plugin --kind wasm
+
+# Frontend TypeScript plugin (esbuild + jest pre-wired)
+cognia plugin new my-ts-plugin --kind ts
 ```
 
-The bundler includes `node_modules` in the archive.
+What you get:
 
-### 3. Build and sign
+| Kind | Layout |
+|---|---|
+| **wasm** | `Cargo.toml`, `src/lib.rs`, `wit/world.wit`, `plugin.json`, `README.md`, `.gitignore` |
+| **ts** | `package.json`, `tsconfig.json`, `jest.config.cjs`, `plugin.json`, `src/index.ts`, `src/index.test.ts`, `src/__shims__/`, `README.md`, `.gitignore` |
 
-Use the Cognia CLI (bundled with the app in dev mode):
+Run the CLI's printed next-steps to get a green build on either kind.
+
+## Validate
+
+`cognia plugin lint` mirrors the host's [manifest validation](./manifest) rules in Rust so editors and CI can fail fast on a malformed `plugin.json`:
 
 ```bash
-cognia plugin build ./my-plugin --out ./my-plugin.cognia-plugin
+cognia plugin lint                 # human report, exit 1 on errors
+cognia plugin lint --json          # machine-readable diagnostics
 ```
 
-This:
+The lint runs implicitly during `cognia plugin build`; you almost never need to invoke it standalone outside an editor integration.
 
-1. Validates `cognia-plugin.json` against the Zod schema.
-2. Bundles all files into a ZIP archive.
-3. Generates a signature using your development key.
-4. Outputs `my-plugin.cognia-plugin`.
-
-### 4. Test locally
+## Build
 
 ```bash
-cognia plugin install ./my-plugin.cognia-plugin
+cognia plugin build                # uses ./plugin.json by default
+cognia plugin build --path my-plugin --out custom.zip
+cognia plugin build --skip-build   # repack an existing artifact without rebuilding
 ```
 
-Or use the devtools "Load unpacked plugin" feature for faster iteration.
+Dispatch is by `manifest.type`:
+
+| Type | Build pipeline | Output |
+|---|---|---|
+| `wasm` | `cargo component build --release` → embed `cognia:api-version` custom section → zip | `target/cognia/<id>-<version>.zip` |
+| `frontend` | `npx --no-install esbuild src/index.ts --bundle --format=cjs --platform=neutral --target=es2022 --outfile=dist/index.js` → zip | `target/cognia/<id>-<version>.zip` |
+
+For frontend plugins, **`plugin.json`'s `main` field must point at the bundled JS** (`dist/index.js` by default). The cognia host loads `<plugin_path>/<main>` at runtime via dynamic `import()` — it does not transpile TypeScript on the fly.
+
+Other plugin types (`python`, `hybrid`, `vscode-extension`) declared in the schema are not yet covered by `cognia plugin build`; for those, package the bundle manually until the corresponding pipeline ships.
+
+### Adding extra files to the bundle
+
+By default the bundle contains `plugin.json` plus the type-specific artifact (`<wasmMain>.wasm` or `dist/index.js`). Add `bundle_include` in `plugin.json` to ship more:
+
+```json
+{
+  "bundle_include": ["assets/icon.svg", "themes/dark.json", "README.md"]
+}
+```
+
+Paths are relative to `plugin.json`. Missing files surface as build errors.
+
+## Inspect
+
+`cognia plugin info <bundle.zip>` decompresses a bundle in memory and prints what the host would see at install time — manifest summary, declared capabilities + permissions, file list, signature status, public-key fingerprint, and (for WASM bundles) the embedded `cognia:api-version` section. Useful before shipping to confirm you packaged the right artifact.
+
+```bash
+cognia plugin info target/cognia/my-plugin-0.1.0.zip
+```
 
 ## Signing
 
-Plugins must be signed to be installed from the marketplace. During development, a self-signed key is auto-generated. For distribution:
+Plugins distributed outside a trusted channel should ship with an Ed25519 detached signature. The host displays the signing key's fingerprint on first install and auto-trusts subsequent updates from the same key.
 
-1. Generate a signing key:
-   ```bash
-   cognia plugin keygen --out ./signing-key.pem
-   ```
-2. Keep the key secure; it identifies your publisher identity.
-3. Pass it to build:
-   ```bash
-   cognia plugin build ./my-plugin --key ./signing-key.pem --out ./my-plugin.cognia-plugin
-   ```
+```bash
+# One-time, per author:
+cognia plugin keygen                                  # writes .cognia/plugin.private.b64 + .public.b64
+# Embed the printed public key in plugin.json:
+#   "author": { "name": "...", "publicKey": "<base64>" }
 
-## Publishing to the marketplace
+# Per release:
+cognia plugin sign target/cognia/<id>-<version>.zip --key .cognia/plugin.private.b64
+# → target/cognia/<id>-<version>.zip.sig
 
-The marketplace is a static JSON feed. To publish:
+cognia plugin verify target/cognia/<id>-<version>.zip
+# ✓ valid; public key: ...; fingerprint: ...
+```
 
-### Option A: Self-hosted feed
+`cognia plugin verify` reads `author.publicKey` from the bundle's manifest by default. Pass `--public-key <b64>` to override (useful when verifying a bundle whose manifest you don't yet trust).
 
-1. Host a JSON file at a URL:
-   ```json
-   {
-     "plugins": [
-       {
-         "id": "com.example.my-plugin",
-         "name": "My Plugin",
-         "version": "1.0.0",
-         "downloadUrl": "https://example.com/plugins/my-plugin-1.0.0.cognia-plugin",
-         "checksum": "sha256:abc123...",
-         "signature": "..."
-       }
-     ]
-   }
-   ```
-2. In Cognia Settings → Plugins → Marketplace, add your feed URL.
+## Install into a running cognia
 
-### Option B: Submit to the official marketplace
+`cognia plugin install` and `uninstall` drive a running cognia desktop instance over a loopback HTTP bridge — no need to walk through Settings → Plugins by hand:
 
-Contact the Cognia team with your signed archive for review. The review checks:
+```bash
+cognia plugin install target/cognia/<id>-<version>.zip
+cognia plugin uninstall <plugin-id>
+cognia plugin uninstall <plugin-id> --purge-data   # also drop the plugin's Dexie tables
+```
 
-- Manifest validity
-- Permission minimality
-- No malicious code patterns
-- Test coverage for contributed workflow nodes / connectors
+The CLI discovers the running cognia by reading `<config_dir>/cognia/cli-endpoint.json`, which cognia writes at startup. If no cognia is running, the CLI returns a clear "no running cognia detected" error rather than hanging.
+
+**Security model:** the bridge binds to `127.0.0.1` only and gates every request on a per-launch dev token in the endpoint file. The token rotates each time the desktop launches, so a stale file from a previous run can't talk to a fresh instance.
+
+## Dev loop (watch + auto-reload)
+
+```bash
+cognia plugin dev                         # rebuild on save, no reload
+cognia plugin dev --reload-url <URL>      # rebuild + POST to a running cognia to hot-reload
+```
+
+If a running cognia is discoverable via the endpoint file, `cognia plugin dev` auto-fills `--reload-url` so the rebuild → reload loop works out of the box. Watches `src/`, `wit/`, `dist/`, `Cargo.toml`, `package.json`, and `plugin.json`.
+
+## Manual / marketplace distribution
+
+The `.zip` bundle plus its `.zip.sig` are the unit of distribution. For self-hosted marketplaces, expose a JSON feed pointing at the bundle URL:
+
+```json
+{
+  "plugins": [
+    {
+      "id": "com.example.my-plugin",
+      "version": "1.0.0",
+      "downloadUrl": "https://example.com/my-plugin-1.0.0.zip",
+      "signatureUrl": "https://example.com/my-plugin-1.0.0.zip.sig",
+      "publicKey": "<base64 — must match plugin.json author.publicKey>"
+    }
+  ]
+}
+```
+
+In Cognia Settings → Plugins → Marketplace, add your feed URL.
 
 ## Versioning
 
-Use semantic versioning. The marketplace shows update availability when the feed version is newer than the installed version.
+Use semantic versioning. Bumps:
 
-| Change type | Version bump | Example |
-|-------------|--------------|---------|
-| Bug fix | Patch | `1.0.0` → `1.0.1` |
-| New feature | Minor | `1.0.0` → `1.1.0` |
-| Breaking change | Major | `1.0.0` → `2.0.0` |
+| Change | Bump | Example |
+|---|---|---|
+| Bug fix or non-breaking polish | Patch | `1.0.0` → `1.0.1` |
+| New capability / additive feature | Minor | `1.0.0` → `1.1.0` |
+| Renamed node kinds, removed permissions, changed connector interfaces, contract version bump | Major | `1.0.0` → `2.0.0` |
 
-Breaking changes include: renamed node kinds, removed permissions, changed connector interfaces.
+For WASM plugins, the WIT contract version lives in `wasm.apiVersion` and the CLI embeds it as a custom section in every `.wasm`. The host routes by that section, so old plugins keep loading after a host update unless the host explicitly drops the linker for their version.
 
-## Uninstallation behavior
+## Uninstall behavior
 
-By default, plugin data is retained when uninstalled (tables stay in Dexie). To purge data, the user selects "Delete data" in Settings → Plugins. Your plugin can clean up in `onDeactivate()`:
+By default, uninstalling preserves the plugin's data tables (Dexie). The user can select "Delete data" in Settings → Plugins, or pass `--purge-data` to `cognia plugin uninstall`. To clean up programmatically inside the plugin, hook `deactivate`:
 
 ```ts
 export async function onDeactivate(ctx) {
-  await ctx.api.storage.clear()
+  await ctx.storage.clear()
 }
 ```
 
 ## Related
 
 <Cards>
-  <Card title="Manifest" href="./manifest" description="Manifest format and validation." />
-  <Card title="Permissions" href="./permissions" description="What permissions to request." />
-  <Card title="Devtools" href="./devtools" description="Hot reload and debugging during development." />
+  <Card title="Manifest" href="./manifest" description="plugin.json structure and validation rules." />
+  <Card title="Permissions" href="./permissions" description="What permissions to request and why." />
+  <Card title="WASM Plugins" href="./wasm-plugins" description="End-to-end Rust + cargo-component flow." />
+  <Card title="Devtools" href="./devtools" description="Hot reload, debugger, and dev server." />
 </Cards>

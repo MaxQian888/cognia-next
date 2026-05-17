@@ -10,10 +10,9 @@ use qdrant_client::qdrant::{
 };
 use qdrant_client::{Payload, Qdrant};
 
-use crate::vector::backend::VectorBackend;
-use crate::vector::db::ScrollPage;
 use crate::vector::error::{Result, VectorError};
 use crate::vector::types::*;
+use crate::vector::{ScrollPage, VectorBackend};
 
 pub struct QdrantBackend {
     client: Qdrant,

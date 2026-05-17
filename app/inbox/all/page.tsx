@@ -8,10 +8,11 @@
 
 import { Suspense } from "react"
 import { InboxShell } from "@/components/inbox/inbox-shell"
+import { PageLoading } from "@/components/ui/loading-states"
 
 export default function InboxAllPage() {
   return (
-    <Suspense>
+    <Suspense fallback={<PageLoading />}>
       <InboxShell view="all" />
     </Suspense>
   )

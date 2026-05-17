@@ -13,7 +13,6 @@ use std::sync::Arc;
 use log::debug;
 use parking_lot::RwLock;
 
-use super::backend::VectorBackend;
 use super::backends::chroma::ChromaBackend;
 use super::backends::milvus::MilvusBackend;
 use super::backends::pinecone::PineconeBackend;
@@ -22,6 +21,7 @@ use super::backends::weaviate::WeaviateBackend;
 use super::credentials::{self, VectorCredentials};
 use super::error::{Result, VectorError};
 use super::types::VectorProvider;
+use super::VectorBackend;
 
 pub struct VectorRegistry {
     backends: RwLock<HashMap<String, Arc<dyn VectorBackend>>>,
@@ -57,6 +57,16 @@ impl VectorRegistry {
             ))
         })?;
         let backend = build_cloud_backend(creds).await?;
+        // The credential blob is provider-tagged, but the keyring lookup is
+        // keyed by `(provider, config_id)`. A mismatched pair would silently
+        // resolve to the wrong backend on subsequent calls, since the cache
+        // key is just `config_id`. Catch the divergence at first build time.
+        let constructed = backend.provider();
+        if constructed != provider {
+            return Err(VectorError::Configuration(format!(
+                "credential blob for {config_id} declares {constructed:?} but caller requested {provider:?}"
+            )));
+        }
         debug!("vector: instantiated {provider:?} backend for config_id={config_id}");
         self.backends
             .write()

@@ -8,7 +8,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::http_client::{load_endpoint, post_json};
+use crate::http_client::{load_endpoint, post_json, EndpointFile};
 
 const PATH: &str = "/api/v1/dev/plugins/uninstall";
 
@@ -21,12 +21,21 @@ struct UninstallResponse {
 }
 
 pub fn run(plugin_id: String, purge_data: bool) -> Result<()> {
+    let endpoint = load_endpoint()?;
+    run_with_endpoint(plugin_id, purge_data, &endpoint)
+}
+
+/// Endpoint-injected variant; mirrors [`crate::cmd_install::run_with_endpoint`].
+pub fn run_with_endpoint(
+    plugin_id: String,
+    purge_data: bool,
+    endpoint: &EndpointFile,
+) -> Result<()> {
     if plugin_id.trim().is_empty() {
         anyhow::bail!("plugin_id is empty");
     }
-    let endpoint = load_endpoint()?;
     let body = json!({ "plugin_id": plugin_id, "purge_data": purge_data });
-    let resp: UninstallResponse = post_json(&endpoint, PATH, &body)?;
+    let resp: UninstallResponse = post_json(endpoint, PATH, &body)?;
     if !resp.ok {
         anyhow::bail!(
             "uninstall rejected by cognia: {}",
@@ -43,8 +52,6 @@ pub fn run(plugin_id: String, purge_data: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
 
     #[test]
     fn uninstall_happy_path() {
@@ -70,16 +77,11 @@ mod tests {
             }
         });
 
-        let mut ep_file = NamedTempFile::new().unwrap();
-        write!(
-            ep_file,
-            r#"{{"baseUrl": "http://127.0.0.1:{port}", "devToken": "tok"}}"#
-        )
-        .unwrap();
-        std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", ep_file.path());
-
-        let result = run("cognia-hello".into(), true);
-        std::env::remove_var("COGNIA_CLI_ENDPOINT_FILE");
+        let endpoint = EndpointFile {
+            base_url: format!("http://127.0.0.1:{port}"),
+            dev_token: "tok".into(),
+        };
+        let result = run_with_endpoint("cognia-hello".into(), true, &endpoint);
         let _ = server_thread.join();
         assert!(result.is_ok(), "{result:?}");
 
@@ -90,7 +92,11 @@ mod tests {
 
     #[test]
     fn uninstall_rejects_empty_id() {
-        let err = run("".into(), false).unwrap_err();
+        let endpoint = EndpointFile {
+            base_url: "http://127.0.0.1:1".into(),
+            dev_token: "x".into(),
+        };
+        let err = run_with_endpoint("".into(), false, &endpoint).unwrap_err();
         assert!(err.to_string().contains("plugin_id is empty"));
     }
 
@@ -113,15 +119,11 @@ mod tests {
                 let _ = req.respond(resp);
             }
         });
-        let mut ep_file = NamedTempFile::new().unwrap();
-        write!(
-            ep_file,
-            r#"{{"baseUrl": "http://127.0.0.1:{port}", "devToken": "tok"}}"#
-        )
-        .unwrap();
-        std::env::set_var("COGNIA_CLI_ENDPOINT_FILE", ep_file.path());
-        let err = run("missing".into(), false).unwrap_err();
-        std::env::remove_var("COGNIA_CLI_ENDPOINT_FILE");
+        let endpoint = EndpointFile {
+            base_url: format!("http://127.0.0.1:{port}"),
+            dev_token: "tok".into(),
+        };
+        let err = run_with_endpoint("missing".into(), false, &endpoint).unwrap_err();
         let _ = server_thread.join();
         assert!(err.to_string().contains("plugin not installed"));
     }

@@ -403,7 +403,10 @@ mod tests {
     #[test]
     fn sig_path_for_appends_sig_suffix() {
         let p = sig_path_for(Path::new("/tmp/hello-0.1.0.zip"));
-        assert_eq!(p.to_string_lossy(), "/tmp/hello-0.1.0.zip.sig");
+        let s = p.to_string_lossy().to_string();
+        // Tolerant of \ vs / so the assertion passes on both Windows and unix.
+        let normalized = s.replace('\\', "/");
+        assert_eq!(normalized, "/tmp/hello-0.1.0.zip.sig");
     }
 
     #[test]

@@ -41,7 +41,85 @@ pub trait VectorBackend: Send + Sync + 'static {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use super::super::types::*;
+    use async_trait::async_trait;
+
+    /// Minimal mock — covers the trait's invariants so the
+    /// `VectorBackend::provider()` contract has a unit test that doesn't
+    /// require a live cloud account. Each call panics with a helpful
+    /// message so any accidental use of the unused methods surfaces.
+    struct MockBackend {
+        decl: VectorProvider,
+    }
+
+    #[async_trait]
+    impl VectorBackend for MockBackend {
+        fn provider(&self) -> VectorProvider {
+            self.decl
+        }
+
+        async fn create_collection(&self, _: CreateCollectionRequest) -> super::Result<()> {
+            unreachable!("MockBackend exercises provider() only")
+        }
+        async fn delete_collection(&self, _: &str) -> super::Result<()> {
+            unreachable!()
+        }
+        async fn list_collections(&self) -> super::Result<Vec<Collection>> {
+            unreachable!()
+        }
+        async fn get_collection(&self, _: &str) -> super::Result<Collection> {
+            unreachable!()
+        }
+        async fn upsert(&self, _: &str, _: Vec<Point>) -> super::Result<()> {
+            unreachable!()
+        }
+        async fn delete_points(&self, _: &str, _: Vec<String>) -> super::Result<()> {
+            unreachable!()
+        }
+        async fn get_points(&self, _: &str, _: Vec<String>) -> super::Result<Vec<Point>> {
+            unreachable!()
+        }
+        async fn truncate(&self, _: &str) -> super::Result<u64> {
+            unreachable!()
+        }
+        async fn query(
+            &self,
+            _: &str,
+            _: Vec<f32>,
+            _: SearchOptions,
+        ) -> super::Result<SearchResponse> {
+            unreachable!()
+        }
+        async fn scroll(
+            &self,
+            _: &str,
+            _: ScrollOptions,
+        ) -> super::Result<super::super::db::ScrollPage> {
+            unreachable!()
+        }
+        async fn count(&self, _: &str, _: Option<Vec<Filter>>) -> super::Result<u64> {
+            unreachable!()
+        }
+        async fn health_check(&self) -> super::Result<HealthStatus> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn provider_method_is_object_safe_and_returns_declared_variant() {
+        // Erasing through `Arc<dyn VectorBackend>` is exactly how the
+        // registry stores backends. The cast verifies the trait stays
+        // object-safe — adding an associated type or a generic method
+        // to the trait without the `dyn`-compat bounds would fail here.
+        let b: std::sync::Arc<dyn VectorBackend> =
+            std::sync::Arc::new(MockBackend { decl: VectorProvider::Qdrant });
+        assert_eq!(b.provider(), VectorProvider::Qdrant);
+
+        let b2: std::sync::Arc<dyn VectorBackend> =
+            std::sync::Arc::new(MockBackend { decl: VectorProvider::Chroma });
+        assert_eq!(b2.provider(), VectorProvider::Chroma);
+    }
 
     #[test]
     fn provider_round_trips_snake_case() {
