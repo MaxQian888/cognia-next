@@ -350,3 +350,115 @@ describe("WebRtcCard — poll-failure banner", () => {
     await waitFor(() => expect(screen.queryByTestId("webrtc-poll-error")).not.toBeInTheDocument())
   })
 })
+
+// ---------------------------------------------------------------------------
+// Per-device reconnect button (W2)
+// ---------------------------------------------------------------------------
+
+describe("WebRtcCard — per-device reconnect button", () => {
+  beforeEach(async () => {
+    try {
+      await getDb().delete()
+    } catch {
+      // db not yet created — fine
+    }
+    __resetDbForTesting()
+  })
+
+  function makeDevicesResponder(devices: DeviceTierEntry[]): void {
+    mockTransportCall.mockImplementation((name: string, params?: Record<string, unknown>) => {
+      if (name === "companion_signaling_status") {
+        return Promise.resolve({
+          enabled: true,
+          signalingUrl: "wss://signaling.cognia.app/v1/signaling",
+          registeredDevices: devices.map((d) => d.rendezvousId),
+        })
+      }
+      if (name === "companion_signaling_devices_status") {
+        return Promise.resolve(devices)
+      }
+      if (name === "companion_signaling_reconnect_device") {
+        // Record the rendezvousId param so the test can assert it.
+        ;(makeDevicesResponder as unknown as { lastReconnect?: unknown }).lastReconnect = params
+        return Promise.resolve()
+      }
+      return Promise.reject(new Error(`unexpected ${name}`))
+    })
+  }
+
+  it("renders one reconnect button per device row", async () => {
+    makeDevicesResponder([
+      {
+        deviceId: "device-apple-123456",
+        rendezvousId: "r1",
+        tier: "connected",
+        updatedAtMs: 1,
+      },
+      {
+        deviceId: "device-banana-7890",
+        rendezvousId: "r2",
+        tier: "failed",
+        lastError: "ICE failed",
+        updatedAtMs: 2,
+      },
+    ])
+    renderCard()
+    await screen.findByTestId("webrtc-device-tier-list")
+    expect(screen.getByTestId("webrtc-reconnect-device-apple-123456")).toBeInTheDocument()
+    expect(screen.getByTestId("webrtc-reconnect-device-banana-7890")).toBeInTheDocument()
+  })
+
+  it("clicking the button calls companion_signaling_reconnect_device with the rendezvousId", async () => {
+    makeDevicesResponder([
+      {
+        deviceId: "device-apple",
+        rendezvousId: "r-apple",
+        tier: "failed",
+        lastError: "previous attempt failed",
+        updatedAtMs: 1,
+      },
+    ])
+    renderCard()
+    const btn = await screen.findByTestId("webrtc-reconnect-device-apple")
+    await userEvent.click(btn)
+    await waitFor(() => {
+      const captured = (
+        makeDevicesResponder as unknown as { lastReconnect?: Record<string, unknown> }
+      ).lastReconnect
+      expect(captured).toEqual({ rendezvousId: "r-apple" })
+    })
+  })
+
+  it("surfaces the error message on failure as a toast.error", async () => {
+    const { toast } = await import("sonner")
+    mockTransportCall.mockImplementation((name: string) => {
+      if (name === "companion_signaling_status") {
+        return Promise.resolve({
+          enabled: true,
+          signalingUrl: "wss://signaling.cognia.app/v1/signaling",
+          registeredDevices: ["r1"],
+        })
+      }
+      if (name === "companion_signaling_devices_status") {
+        return Promise.resolve([
+          {
+            deviceId: "device-apple",
+            rendezvousId: "r1",
+            tier: "failed",
+            updatedAtMs: 1,
+          } as DeviceTierEntry,
+        ])
+      }
+      if (name === "companion_signaling_reconnect_device") {
+        return Promise.reject(new Error("rendezvous id r1 not found"))
+      }
+      return Promise.reject(new Error(`unexpected ${name}`))
+    })
+    renderCard()
+    const btn = await screen.findByTestId("webrtc-reconnect-device-apple")
+    await userEvent.click(btn)
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalled()
+    })
+  })
+})

@@ -54,6 +54,7 @@ const transportMock: {
   subscribe: jest.Mock
   getActiveTier: jest.Mock<string, []>
   onTierChange: jest.Mock<() => void, [TierHandler]>
+  reconnectRtc: jest.Mock<boolean, []>
 } = {
   isCapacitor: jest.fn(() => false),
   tier: "offline",
@@ -67,6 +68,7 @@ const transportMock: {
       tierHandlers.delete(h)
     }
   }),
+  reconnectRtc: jest.fn(() => true),
 }
 
 // Getter form — `transportMock` is declared above but jest.mock factories
@@ -231,9 +233,9 @@ describe("<MobileSettingsPanel /> — transport tier indicator", () => {
 
   it.each([
     ["rtc-direct", /WebRTC \(direct\)/],
-    ["rtc-relay", /WebRTC \(TURN\)/],
+    ["rtc-relay", /WebRTC \(TURN relay\)/],
     ["ws-lan", /LAN/],
-    ["ws-tunnel", /Cloudflared/],
+    ["ws-tunnel", /Tunnel \(HTTPS\)/],
     ["offline", /Offline/],
   ])("renders the label for tier=%s", (tier, expected) => {
     transportMock.isCapacitor.mockReturnValue(true)
@@ -261,5 +263,58 @@ describe("<MobileSettingsPanel /> — transport tier indicator", () => {
     expect(tierHandlers.size).toBe(1)
     unmount()
     expect(tierHandlers.size).toBe(0)
+  })
+
+  // ── Reconnect button (W2) ──────────────────────────────────────────────
+
+  it("renders the reconnect button only while on an RTC tier", () => {
+    transportMock.isCapacitor.mockReturnValue(true)
+
+    transportMock.tier = "rtc-direct"
+    const { unmount: unmount1 } = render(<MobileSettingsPanel />)
+    expect(screen.getByTestId("mobile-transport-tier-reconnect")).toBeInTheDocument()
+    unmount1()
+
+    transportMock.tier = "rtc-relay"
+    const { unmount: unmount2 } = render(<MobileSettingsPanel />)
+    expect(screen.getByTestId("mobile-transport-tier-reconnect")).toBeInTheDocument()
+    unmount2()
+
+    transportMock.tier = "ws-lan"
+    const { unmount: unmount3 } = render(<MobileSettingsPanel />)
+    expect(screen.queryByTestId("mobile-transport-tier-reconnect")).not.toBeInTheDocument()
+    unmount3()
+
+    transportMock.tier = "offline"
+    const { unmount: unmount4 } = render(<MobileSettingsPanel />)
+    expect(screen.queryByTestId("mobile-transport-tier-reconnect")).not.toBeInTheDocument()
+    unmount4()
+  })
+
+  it("clicking the reconnect button delegates to transport.reconnectRtc()", async () => {
+    transportMock.isCapacitor.mockReturnValue(true)
+    transportMock.tier = "rtc-direct"
+    transportMock.reconnectRtc.mockClear()
+    transportMock.reconnectRtc.mockReturnValue(true)
+    render(<MobileSettingsPanel />)
+    const btn = screen.getByTestId("mobile-transport-tier-reconnect")
+    fireEvent.click(btn)
+    expect(transportMock.reconnectRtc).toHaveBeenCalledTimes(1)
+    // The button enters a short busy window before falling back to live
+    // tier-driven visibility. The interim disabled-state is enough to
+    // verify here.
+    expect(btn).toBeDisabled()
+  })
+
+  it("warns when reconnectRtc() returns false (tier not active)", () => {
+    transportMock.isCapacitor.mockReturnValue(true)
+    transportMock.tier = "rtc-direct"
+    transportMock.reconnectRtc.mockReturnValue(false)
+    render(<MobileSettingsPanel />)
+    // Even though tier is rtc-direct in the indicator, the underlying
+    // transport may have torn down right before the click — we surface a
+    // warning toast instead of pretending success.
+    fireEvent.click(screen.getByTestId("mobile-transport-tier-reconnect"))
+    expect(transportMock.reconnectRtc).toHaveBeenCalled()
   })
 })

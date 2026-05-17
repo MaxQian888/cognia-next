@@ -8866,7 +8866,58 @@
         "blocked": "Revoke not completed ({reason}).",
         "successToast": "Device revoked."
       },
+      "webrtc": {
+        "title": "WebRTC remote access",
+        "enableLabel": "Enable WebRTC tier",
+        "enableHelp": "When on, the mobile app reaches this desktop directly via WebRTC after pairing — falling back to LAN or the cloudflared tunnel only when WebRTC can't open.",
+        "description": "Third transport tier (ADR-0021). Lets paired phones reach this desktop from anywhere without a tunnel, using a stateless rendezvous and HMAC-signed envelopes.",
+        "signalingUrlLabel": "Signaling server URL",
+        "signalingUrlPlaceholder": "wss://signaling.cognia.app/v1/signaling",
+        "signalingUrlHelp": "WebSocket endpoint for the public rendezvous. Self-hosted deployments swap this for their own URL.",
+        "iceServersLabel": "STUN servers",
+        "iceServersHelp": "One stun: URL per line. Public STUN is enough for most home networks; add more if NAT traversal stalls.",
+        "turnServersLabel": "TURN servers (optional)",
+        "turnServersPlaceholder": "turn:turn.example.com:3478|username|credential",
+        "turnServersHelp": "Required only for symmetric NAT. Format: one `turn:host:port|username|credential` per line. Credentials are stored in plain Dexie — bring your own (Twilio, Cloudflare, coturn).",
+        "saveButton": "Save WebRTC settings",
+        "savingButton": "Saving…",
+        "saved": "WebRTC settings saved.",
+        "invalidUrl": "Signaling URL must start with ws:// or wss://",
+        "invalidIceServer": "Skipping invalid ICE server entry: {value}",
+        "saveFailed": "Couldn't save WebRTC settings ({reason}).",
+        "pollFailed": "Couldn't read the signaling hub status ({reason}). The device list below may be stale.",
+        "deviceTier": {
+          "offline": "Offline",
+          "awaiting": "Awaiting peer",
+          "negotiating": "Negotiating",
+          "connected": "Connected",
+          "failed": "Failed",
+          "descriptions": {
+            "offline": "Signaling client is idle — usually between reconnect attempts.",
+            "awaiting": "Subscribed to the rendezvous, waiting for the mobile peer to join.",
+            "negotiating": "Mobile peer joined; exchanging SDP and ICE candidates.",
+            "connected": "DataChannel is open. The phone reaches the desktop directly.",
+            "failed": "Last session ended in error. The client task is backing off before its next attempt."
+          }
+        },
+        "noDevices": "No paired devices with WebRTC enabled yet. Pair a phone running the latest mobile build to populate this list.",
+        "reconnectButton": "Reconnect",
+        "reconnectSuccess": "Reconnect requested.",
+        "reconnectFailed": "Reconnect failed ({reason})."
+      },
       "pushTokenFailed": "Couldn't tell the desktop about this phone's push token ({reason})."
+    },
+    "transportTier": {
+      "rtcDirect": "WebRTC (direct)",
+      "rtcDirectDescription": "Direct DataChannel between this phone and the desktop. Lowest latency.",
+      "rtcRelay": "WebRTC (TURN relay)",
+      "rtcRelayDescription": "DataChannel routed through a TURN server because direct NAT traversal failed.",
+      "wsLan": "LAN (HTTPS)",
+      "wsLanDescription": "Same network as the desktop. No tunnel hop.",
+      "wsTunnel": "Tunnel (HTTPS)",
+      "wsTunnelDescription": "Public cloudflared tunnel to the desktop. Adds one hop.",
+      "offline": "Offline",
+      "offlineDescription": "Neither transport is reachable. Outgoing calls queue locally and retry."
     },
     "twinDraft": {
       "kindCharacter": "Character",
@@ -9047,7 +9098,12 @@
       "fontScaleLg": "L",
       "language": "Language",
       "defaultModel": "Default model",
-      "queueLabel": "Queued — desktop will apply this when online."
+      "queueLabel": "Queued — desktop will apply this when online.",
+      "transportTier": "Transport",
+      "reconnectButton": "Reconnect WebRTC",
+      "reconnectSuccess": "Reconnect requested.",
+      "reconnectInactive": "WebRTC tier isn't active right now.",
+      "reconnectFailed": "Reconnect failed ({reason})."
     },
     "connectionState": {
       "live": "Live",

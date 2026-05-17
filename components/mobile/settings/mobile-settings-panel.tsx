@@ -20,10 +20,12 @@
  * uses a stub transport that doesn't have a meaningful tier).
  */
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CircleIcon } from "lucide-react"
+import { CircleIcon, RefreshCwIcon } from "lucide-react"
+import { toast } from "sonner"
 
+import { Button } from "@/components/ui/button"
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
 import { Label } from "@/components/ui/label"
 import {
@@ -225,6 +227,7 @@ export function TransportTierIndicator(): React.JSX.Element | null {
   // will overwrite immediately on Capacitor.
   const [tier, setTier] = useState<TransportTier>("offline")
   const [active, setActive] = useState<boolean>(false)
+  const [reconnecting, setReconnecting] = useState(false)
 
   useEffect(() => {
     // The CompanionTransport singleton exposes `getActiveTier` /
@@ -250,9 +253,45 @@ export function TransportTierIndicator(): React.JSX.Element | null {
     return candidate.onTierChange((next) => setTier(next))
   }, [])
 
+  const onReconnect = useCallback(() => {
+    const candidate = transport as unknown as { reconnectRtc?: () => boolean }
+    if (typeof candidate.reconnectRtc !== "function") {
+      // Not on Capacitor build, or the singleton hasn't been upgraded —
+      // refuse silently. The button only renders when `active`, which is
+      // already a Capacitor-only flag, so this branch is defensive only.
+      return
+    }
+    setReconnecting(true)
+    try {
+      const ok = candidate.reconnectRtc()
+      if (ok) {
+        toast.success(t("reconnectSuccess"))
+      } else {
+        toast.warning(t("reconnectInactive"))
+      }
+    } catch (err) {
+      toast.error(
+        t("reconnectFailed", {
+          reason: err instanceof Error ? err.message : String(err),
+        })
+      )
+    } finally {
+      // `reconnectRtc` is fire-and-forget — the actual handshake runs
+      // asynchronously inside `TransportRtc`. We surface a short busy
+      // window so the button doesn't flicker, then fall back to the live
+      // tier indicator for visibility.
+      setTimeout(() => setReconnecting(false), 800)
+    }
+  }, [t])
+
   if (!active) return null
 
   const key = TIER_KEY[tier]
+  // Show the reconnect affordance only when an RTC tier is involved.
+  // For ws-* / offline the button would be a no-op (`reconnectRtc()`
+  // returns false), so we hide it instead of confusing the user.
+  const canReconnect = tier === "rtc-direct" || tier === "rtc-relay"
+
   return (
     <section
       className="flex flex-col gap-1 rounded border bg-card px-3 py-2 text-xs"
@@ -268,6 +307,23 @@ export function TransportTierIndicator(): React.JSX.Element | null {
         </span>
       </div>
       <p className="text-[11px] text-muted-foreground">{tt(`${key}Description`)}</p>
+      {canReconnect ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="self-end h-7 px-2 text-[11px]"
+          disabled={reconnecting}
+          onClick={onReconnect}
+          data-testid="mobile-transport-tier-reconnect"
+        >
+          <RefreshCwIcon
+            aria-hidden="true"
+            className={cn("size-3 mr-1", reconnecting && "animate-spin")}
+          />
+          {t("reconnectButton")}
+        </Button>
+      ) : null}
     </section>
   )
 }

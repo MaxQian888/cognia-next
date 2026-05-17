@@ -8866,7 +8866,58 @@
         "blocked": "解除配对未完成（{reason}）。",
         "successToast": "已解除该设备的配对。"
       },
+      "webrtc": {
+        "title": "WebRTC 远程访问",
+        "enableLabel": "启用 WebRTC 通道",
+        "enableHelp": "开启后，移动端在配对完成后会通过 WebRTC 直接连接到本桌面；只有在 WebRTC 无法打通时才会回退到 LAN 或 Cloudflared 隧道。",
+        "description": "第三层传输通道（ADR-0021）。基于无状态汇合点和 HMAC 签名信封，让已配对的手机在任意网络下都能直连本桌面，无需依赖隧道。",
+        "signalingUrlLabel": "信令服务器 URL",
+        "signalingUrlPlaceholder": "wss://signaling.cognia.app/v1/signaling",
+        "signalingUrlHelp": "公共汇合点的 WebSocket 接入地址。自部署时替换为你自己的 URL。",
+        "iceServersLabel": "STUN 服务器",
+        "iceServersHelp": "每行一个 stun: URL。多数家庭网络下公共 STUN 已经够用；NAT 打洞失败时再追加备用。",
+        "turnServersLabel": "TURN 服务器（可选）",
+        "turnServersPlaceholder": "turn:turn.example.com:3478|username|credential",
+        "turnServersHelp": "仅对对称 NAT 必要。格式：每行一条 `turn:host:port|username|credential`。凭据明文存于 Dexie——请自带（Twilio、Cloudflare、coturn 均可）。",
+        "saveButton": "保存 WebRTC 设置",
+        "savingButton": "保存中…",
+        "saved": "WebRTC 设置已保存。",
+        "invalidUrl": "信令 URL 必须以 ws:// 或 wss:// 开头",
+        "invalidIceServer": "跳过无效 ICE 服务器条目：{value}",
+        "saveFailed": "保存 WebRTC 设置失败（{reason}）。",
+        "pollFailed": "无法读取信令枢纽状态（{reason}）。下方设备列表可能过期。",
+        "deviceTier": {
+          "offline": "离线",
+          "awaiting": "等待对端",
+          "negotiating": "协商中",
+          "connected": "已连接",
+          "failed": "失败",
+          "descriptions": {
+            "offline": "信令客户端空闲——通常处于重连尝试之间。",
+            "awaiting": "已订阅到汇合点，等待移动端接入。",
+            "negotiating": "移动端已加入；正在交换 SDP 与 ICE 候选。",
+            "connected": "DataChannel 已打开，手机直连本桌面。",
+            "failed": "上一次会话以错误结束，客户端任务在下一次尝试前进入退避。"
+          }
+        },
+        "noDevices": "暂无启用 WebRTC 的已配对设备。用最新版移动端重新配对一台手机，这里就会出现。",
+        "reconnectButton": "重连",
+        "reconnectSuccess": "已发起重连。",
+        "reconnectFailed": "重连失败（{reason}）。"
+      },
       "pushTokenFailed": "未能向桌面端上报本机推送 token（{reason}）。"
+    },
+    "transportTier": {
+      "rtcDirect": "WebRTC（直连）",
+      "rtcDirectDescription": "手机与桌面之间的直连 DataChannel，延迟最低。",
+      "rtcRelay": "WebRTC（TURN 中继）",
+      "rtcRelayDescription": "因直连 NAT 打洞失败，DataChannel 经过 TURN 服务器转发。",
+      "wsLan": "局域网（HTTPS）",
+      "wsLanDescription": "与桌面同一局域网，无需隧道。",
+      "wsTunnel": "隧道（HTTPS）",
+      "wsTunnelDescription": "通过 Cloudflared 公共隧道访问桌面，多一跳。",
+      "offline": "离线",
+      "offlineDescription": "两条传输都不可达。外发请求会本地排队并自动重试。"
     },
     "twinDraft": {
       "kindCharacter": "角色",
@@ -9047,7 +9098,12 @@
       "fontScaleLg": "大",
       "language": "语言",
       "defaultModel": "默认模型",
-      "queueLabel": "已排队——桌面上线后会自动同步。"
+      "queueLabel": "已排队——桌面上线后会自动同步。",
+      "transportTier": "传输通道",
+      "reconnectButton": "重连 WebRTC",
+      "reconnectSuccess": "已发起重连。",
+      "reconnectInactive": "WebRTC 通道当前未启用。",
+      "reconnectFailed": "重连失败（{reason}）。"
     },
     "connectionState": {
       "live": "在线",

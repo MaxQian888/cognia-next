@@ -31,7 +31,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { CircleIcon, GlobeIcon } from "lucide-react"
+import { CircleIcon, GlobeIcon, RefreshCwIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -276,6 +276,28 @@ interface StatusBlockProps {
 
 function StatusBlock({ status, devices }: StatusBlockProps): React.JSX.Element {
   const t = useTranslations("mobile.companion.webrtc")
+  const [pendingReconnect, setPendingReconnect] = useState<string | null>(null)
+
+  const onReconnect = useCallback(
+    async (rendezvousId: string) => {
+      setPendingReconnect(rendezvousId)
+      try {
+        await transport.call<void>("companion_signaling_reconnect_device", {
+          rendezvousId,
+        })
+        toast.success(t("reconnectSuccess"))
+      } catch (err) {
+        toast.error(
+          t("reconnectFailed", {
+            reason: err instanceof Error ? err.message : String(err),
+          })
+        )
+      } finally {
+        setPendingReconnect(null)
+      }
+    },
+    [t]
+  )
 
   // Hub disabled (master toggle off) — render a single Offline row.
   if (!status.enabled) {
@@ -332,6 +354,24 @@ function StatusBlock({ status, devices }: StatusBlockProps): React.JSX.Element {
               {truncateError(d.lastError)}
             </span>
           ) : null}
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="ml-auto size-6 shrink-0"
+            disabled={pendingReconnect === d.rendezvousId}
+            onClick={() => {
+              void onReconnect(d.rendezvousId)
+            }}
+            aria-label={t("reconnectButton")}
+            title={t("reconnectButton")}
+            data-testid={`webrtc-reconnect-${d.deviceId}`}
+          >
+            <RefreshCwIcon
+              aria-hidden="true"
+              className={cn("size-3.5", pendingReconnect === d.rendezvousId && "animate-spin")}
+            />
+          </Button>
         </li>
       ))}
     </ul>

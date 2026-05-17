@@ -281,6 +281,54 @@ impl SignalingHub {
         self.inner.lock().clients.keys().cloned().collect()
     }
 
+    /// Force-restart the signaling client task for one paired device. Used
+    /// by the "Reconnect" button on the desktop WebRTC card. Idempotent —
+    /// returns `Err` only when the device id is unknown.
+    ///
+    /// Implementation: cancel the existing client (which drops its
+    /// `PeerSession`), then re-spawn against the cached
+    /// `DeviceRegistration` so the WSS subscribe / SDP offer cycle starts
+    /// fresh. The hub's tier entry is replaced; consumers polling
+    /// [`devices_status`](Self::devices_status) will see the row flicker
+    /// through `Offline → Awaiting → …` again.
+    pub fn reconnect_device(&self, rendezvous_id: &str) -> Result<(), String> {
+        let (binding, enabled, registration) = {
+            let inner = self.inner.lock();
+            let registration = inner
+                .pending_devices
+                .iter()
+                .find(|d| d.rendezvous_id == rendezvous_id)
+                .cloned();
+            (inner.bound.clone(), inner.enabled, registration)
+        };
+        let Some(registration) = registration else {
+            return Err(format!(
+                "reconnect_device: rendezvous id {rendezvous_id} not found"
+            ));
+        };
+        // Cancel + drop the existing client. `cancel_one` also evicts the
+        // tier entry so the UI immediately reads "device offline" between
+        // the cancel and the respawn.
+        self.cancel_one(rendezvous_id);
+        if !enabled {
+            // Mirror the `sync_devices` semantics — the user-facing toggle
+            // wins; a reconnect attempt while disabled is silently a no-op
+            // on the spawn side and the caller's tier table will stay
+            // empty until they flip the master switch.
+            return Ok(());
+        }
+        let Some(binding) = binding else {
+            return Err("reconnect_device: hub is not bound yet".to_string());
+        };
+        self.spawn_device_locked(
+            &binding,
+            registration.rendezvous_id,
+            registration.rendezvous_secret,
+            registration.device_id,
+        );
+        Ok(())
+    }
+
     /// Build a [`TierWriter`] handle scoped to the given device. The handle
     /// shares the hub's tier map by `Arc`, so concurrent updates from the
     /// client task land directly in the snapshot read by
@@ -528,6 +576,18 @@ pub mod commands {
     ) -> Result<Vec<DeviceTierEntry>, String> {
         Ok(hub.devices_status())
     }
+
+    /// Force-restart one device's signaling client. Powers the per-row
+    /// "Reconnect" button on the desktop WebRTC settings card. Returns
+    /// `Err` when `rendezvous_id` is unknown — that surfaces in the UI as
+    /// a `toast.error` so a stale row doesn't appear to work silently.
+    #[tauri::command]
+    pub async fn companion_signaling_reconnect_device(
+        hub: tauri::State<'_, Arc<SignalingHub>>,
+        rendezvous_id: String,
+    ) -> Result<(), String> {
+        hub.reconnect_device(&rendezvous_id)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -694,6 +754,52 @@ mod tests {
         assert_eq!(hub.devices_status().len(), 1);
         hub.cancel_one("r1");
         assert!(hub.devices_status().is_empty());
+    }
+
+    #[test]
+    fn reconnect_device_unknown_rendezvous_id_errors() {
+        let hub = SignalingHub::new();
+        let err = hub.reconnect_device("does-not-exist").unwrap_err();
+        assert!(err.contains("not found"));
+    }
+
+    #[test]
+    fn reconnect_device_returns_ok_when_disabled_with_known_id() {
+        // The renderer pushed the device before the master toggle was
+        // re-enabled, or the user just disabled it. Reconnect should
+        // succeed silently — flipping the toggle back on will re-spawn.
+        let hub = SignalingHub::new();
+        hub.configure(false, DEFAULT_SIGNALING_URL.to_string(), vec![]);
+        hub.sync_devices(vec![DeviceRegistration {
+            device_id: "d1".into(),
+            rendezvous_id: "r1".into(),
+            rendezvous_secret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
+        }]);
+        // Pre-condition: no clients spawned because hub is disabled.
+        assert!(hub.registered_rendezvous_ids().is_empty());
+        // The device is still in the pending_devices cache, so a
+        // reconnect call against it is a known id → Ok(()).
+        assert!(hub.reconnect_device("r1").is_ok());
+        // Still no client (hub disabled).
+        assert!(hub.registered_rendezvous_ids().is_empty());
+    }
+
+    #[test]
+    fn reconnect_device_unknown_rendezvous_id_errors_after_some_devices() {
+        let hub = SignalingHub::new();
+        hub.sync_devices(vec![DeviceRegistration {
+            device_id: "d1".into(),
+            rendezvous_id: "r1".into(),
+            rendezvous_secret: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
+        }]);
+        // r1 is in pending_devices but no `bind()` was called, so
+        // reconnect should surface the "hub not bound" condition rather
+        // than the "not found" condition.
+        let err = hub.reconnect_device("r1").unwrap_err();
+        assert!(err.contains("not bound"));
+        // Unknown ids surface "not found" regardless of bind state.
+        let err = hub.reconnect_device("r-nope").unwrap_err();
+        assert!(err.contains("not found"));
     }
 
     #[test]

@@ -7,6 +7,7 @@ mod automation;
 mod canvas;
 mod ccswitch;
 mod claude;
+mod cli_bridge;
 mod codex_subscription;
 mod commands;
 mod connectors;
@@ -198,6 +199,11 @@ pub fn run() {
         // instance; the renderer pushes device registrations via
         // `companion_signaling_sync_devices` after Dexie hydration completes.
         .manage(companion_api::signaling::SignalingHub::new())
+        // CLI bridge — loopback-only HTTP listener that `cognia-cli` talks
+        // to for `install`/`uninstall`/`reload`. Spawned at app boot in the
+        // setup hook below; this `.manage(...)` just registers the state
+        // wrapper so the handle survives for the app's lifetime.
+        .manage(cli_bridge::CliBridgeServerState::new())
         .setup(|app| {
             // Phase B follow-up — install the keyring-backed push credential
             // store before any push-related command can fire, then reinstate
@@ -443,6 +449,7 @@ pub fn run() {
             companion_api::signaling::commands::companion_signaling_configure,
             companion_api::signaling::commands::companion_signaling_status,
             companion_api::signaling::commands::companion_signaling_devices_status,
+            companion_api::signaling::commands::companion_signaling_reconnect_device,
             companion_api::commands::companion_push_configure_fcm,
             companion_api::commands::companion_push_configure_apns,
             companion_api::commands::companion_push_clear_fcm,
@@ -734,6 +741,21 @@ pub fn run() {
                             Ok(()) => log::info!("remote-control inbound listener started"),
                             Err(e) => log::warn!("remote-control auto-start skipped: {e}"),
                         }
+                    }
+                });
+            }
+
+            // CLI bridge auto-start (plugin-author tooling). Binds an
+            // ephemeral loopback port, writes the endpoint discovery file
+            // so `cognia plugin install` etc. can find us. Best-effort —
+            // failure is logged and the rest of the app keeps booting.
+            {
+                let app = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let bridge_state = app.state::<cli_bridge::CliBridgeServerState>();
+                    match cli_bridge::init(app.clone(), bridge_state.inner()).await {
+                        Ok(port) => log::info!("cli_bridge listening on 127.0.0.1:{port}"),
+                        Err(e) => log::warn!("cli_bridge auto-start failed: {e:#}"),
                     }
                 });
             }
