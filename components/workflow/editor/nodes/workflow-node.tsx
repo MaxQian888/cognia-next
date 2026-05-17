@@ -1,85 +1,27 @@
 "use client"
 
-import { memo } from "react"
+import { createElement, memo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import {
-  Webhook as WebhookIcon,
-  Clock as ClockIcon,
-  PlayCircle as PlayIcon,
-  Inbox as InboxIcon,
-  MessageSquare as MessageIcon,
-  Users as UsersIcon,
-  Sparkles as SparklesIcon,
-  Bot as BotIcon,
-  Brain as BrainIcon,
-  GitBranch as BranchIcon,
-  Workflow as WorkflowIcon,
-  Variable as VariableIcon,
-  Repeat as LoopIcon,
-  Timer as TimerIcon,
-  Code2 as CodeIcon,
-  FileText as TemplateIcon,
-  ArrowRightLeft as TransformIcon,
-  Globe as GlobeIcon,
-  StickyNote as NoteIcon,
-  Boxes as PluginIcon,
-  Network as McpIcon,
-  Send as SendIcon,
-  PencilLine as DraftIcon,
   Loader2 as LoadingIcon,
   CheckCircle2 as SuccessIcon,
   XCircle as FailedIcon,
   CircleDashed as SkippedIcon,
   AlertTriangle as WarnIcon,
-  type LucideIcon,
+  Timer as TimerIcon,
 } from "lucide-react"
+import { getNodeIcon } from "@/lib/workflow/editor/node-icons"
 import { useFormatter, useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { workflowNodeCategory, type WorkflowNodeKind } from "@/types/workflow/visual"
 import type { WorkflowNodeData } from "@/types/workflow/visual"
 import type { NodeRunStatus } from "@/lib/workflow/editor/store"
 import type { LastRunSummary } from "@/lib/workflow/runtime/last-run-summary"
-
-const ICONS: Partial<Record<WorkflowNodeKind, LucideIcon>> = {
-  "trigger.manual": PlayIcon,
-  "trigger.cron": ClockIcon,
-  "trigger.connector.inbound": InboxIcon,
-  "trigger.chat.message": MessageIcon,
-  "trigger.webhook": WebhookIcon,
-  "action.character.send": SendIcon,
-  "action.character.create": UsersIcon,
-  "action.character.update": UsersIcon,
-  "action.team.run": UsersIcon,
-  "action.team.create": UsersIcon,
-  "action.team.update": UsersIcon,
-  "action.skill.invoke": SparklesIcon,
-  "action.skill.upsert": SparklesIcon,
-  "action.twin.rag": BrainIcon,
-  "action.twin.ingest": BrainIcon,
-  "action.connector.send": SendIcon,
-  "action.connector.draft": DraftIcon,
-  "action.mcp.invokeTool": McpIcon,
-  "action.plugin.invoke": PluginIcon,
-  "ai.prompt": BotIcon,
-  "ai.classify": BotIcon,
-  "ai.extract": BotIcon,
-  "ai.embed": BotIcon,
-  "flow.branch": BranchIcon,
-  "flow.switch": BranchIcon,
-  "flow.split": WorkflowIcon,
-  "flow.join": WorkflowIcon,
-  "flow.loop": LoopIcon,
-  "flow.wait": TimerIcon,
-  "flow.set": VariableIcon,
-  "flow.subworkflow": WorkflowIcon,
-  "data.transform": TransformIcon,
-  "data.code": CodeIcon,
-  "data.template": TemplateIcon,
-  "io.http": GlobeIcon,
-  "io.webhook.respond": WebhookIcon,
-  "annotation.note": NoteIcon,
-  "annotation.group": NoteIcon,
-}
+import { useEditorStoreOrNull } from "@/lib/workflow/editor/store-context"
+import { useShallow } from "zustand/react/shallow"
+import { flagsForTier, resolveEffectiveTier } from "@/lib/workflow/editor/performance-tier"
+import { buildClipboardEnvelope, serializeClipboard } from "@/lib/workflow/editor/clipboard"
+import { NodeFloatingToolbar } from "./node-floating-toolbar"
 
 const CATEGORY_COLORS = {
   trigger: "border-emerald-500/40 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300",
@@ -207,18 +149,87 @@ function LastRunFooter({ lastRun }: { lastRun: LastRunSummary }) {
   )
 }
 
-export const WorkflowNodeComponent = memo(function WorkflowNodeComponent({
-  data,
-  selected,
-}: NodeProps & { data: WorkflowNodeRenderData }) {
+export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
+  props: NodeProps & { data: WorkflowNodeRenderData }
+) {
+  const { data, selected, id } = props
   const category = workflowNodeCategory(data.kind)
-  const Icon = ICONS[data.kind] ?? WorkflowIcon
+  // Icon is computed during render but rendered as <icon /> below to avoid
+  // the "components created during render" rule — React would otherwise
+  // treat each tick's <Icon> as a fresh component type and reset state.
+  const icon = getNodeIcon(data.kind)
   const isAnnotation = category === "annotation"
   const showInput = !data.kind.startsWith("trigger.")
   const showOutput = data.kind !== "annotation.note" && data.kind !== "annotation.group"
   const status: NodeRunStatus = data.runStatus ?? "idle"
   const errorCount = data.validationErrorCount ?? data.validationErrors?.length ?? 0
   const hasErrors = errorCount > 0
+
+  // Pull whatever store context we can — `null` in headless tests is fine.
+  const store = useEditorStoreOrNull()
+  // useShallow must be called unconditionally; extracting the selector keeps
+  // the optional store invocation without the linter flagging a conditional
+  // hook call.
+  const storeSelector = useShallow(
+    (
+      s: Parameters<NonNullable<typeof store>>[0] extends (state: infer S) => unknown ? S : never
+    ) => ({
+      hoveredNodeId: s.hoveredNodeId,
+      setHoveredNode: s.setHoveredNode,
+      setSelectedNodes: s.setSelectedNodes,
+      removeNodes: s.removeNodes,
+      performanceTier: s.performanceTier,
+      nodes: s.nodes,
+      edges: s.edges,
+      spotlightedNodeId: s.spotlightedNodeId,
+      hoveredEdgeId: s.hoveredEdgeId,
+      connectionState: s.connectionState,
+      requestContextMenu: s.requestContextMenu,
+      requestRunFromStep: s.requestRunFromStep,
+    })
+  )
+  const storeBits = store?.(storeSelector)
+  const isHovered = storeBits?.hoveredNodeId === id
+  const isSpotlit = storeBits?.spotlightedNodeId === id
+  const motionEnabled = storeBits
+    ? flagsForTier(
+        resolveEffectiveTier(storeBits.performanceTier, {
+          nodeCount: storeBits.nodes.length,
+          prefersReducedMotion:
+            typeof window !== "undefined" && window.matchMedia
+              ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+              : false,
+        })
+      ).nodeCardTransitions
+    : true
+
+  // Hovered-edge endpoint ring: when an edge in the workflow is being
+  // hovered and one of its endpoints is THIS node, draw a thin primary ring
+  // so the user sees which two nodes the edge connects.
+  const isHoveredEdgeEndpoint = (() => {
+    if (!storeBits?.hoveredEdgeId) return false
+    const edge = storeBits.edges.find((e) => e.id === storeBits.hoveredEdgeId)
+    return !!edge && (edge.source === id || edge.target === id)
+  })()
+
+  // Connection-state handle styling (Flowith drag silk). When a connection
+  // is in flight from another node, this node's target handle is rendered
+  // green (compatible) / red (incompatible) / thick primary (active
+  // candidate). The source node itself stays neutral so the user doesn't
+  // confuse the source with a candidate.
+  const cs = storeBits?.connectionState ?? null
+  const isConnectionSource = cs?.sourceId === id
+  let connectionRing: "compatible" | "incompatible" | null = null
+  let isActiveCandidate = false
+  if (cs && !isConnectionSource && showInput) {
+    isActiveCandidate = cs.candidate?.nodeId === id
+    const kindOk = !data.kind.startsWith("trigger.") && data.kind !== "annotation.note"
+    // Disallow self / multi-incoming-cycle creation cheaply; the canonical
+    // gate runs through `validateConnection` when the actual drop happens.
+    const wouldCycle =
+      storeBits!.edges.some((e) => e.source === id && e.target === cs.sourceId) === true
+    connectionRing = kindOk && !wouldCycle ? "compatible" : "incompatible"
+  }
 
   // The lastRun footer is suppressed while a run is actively in progress so
   // the user sees current-run state, not stale history.
@@ -241,21 +252,76 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent({
         // mid-run. Run status now lives in the corner badge below.
         selected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
         data.disabled && "opacity-50",
-        isAnnotation && "italic"
+        isAnnotation && "italic",
+        // Spotlight pulse (transient, 3s) — driven by the Spotlight search
+        // result jump. Suppressed when reduced-motion is active so the user
+        // gets a static thick ring instead of the pulse animation.
+        isSpotlit && motionEnabled && "animate-pulse-ring",
+        isSpotlit && !motionEnabled && "ring-4 ring-primary",
+        // Hovered-edge endpoint ring — see `hoveredEdgeId` in the store.
+        // Applied to both source and target nodes so the user sees the
+        // pair the hovered edge connects.
+        isHoveredEdgeEndpoint &&
+          !selected &&
+          "ring-2 ring-primary/40 ring-offset-1 ring-offset-background"
       )}
       data-testid={`wf-node-${data.kind}`}
       data-run-status={status}
+      data-spotlit={isSpotlit ? "true" : undefined}
+      data-hovered-endpoint={isHoveredEdgeEndpoint ? "true" : undefined}
+      data-connection-candidate={isActiveCandidate ? "true" : undefined}
+      onMouseEnter={() => storeBits?.setHoveredNode(id)}
+      onMouseLeave={() => storeBits?.setHoveredNode(null)}
     >
       <StatusCornerBadge status={status} />
+      {storeBits && !isAnnotation ? (
+        <NodeFloatingToolbar
+          nodeId={id}
+          kind={data.kind}
+          alwaysVisible={!!selected || isHovered}
+          motionEnabled={motionEnabled}
+          onRun={() => storeBits.requestRunFromStep(id)}
+          onCopy={async () => {
+            const node = storeBits.nodes.find((n) => n.id === id)
+            if (!node) return
+            const env = buildClipboardEnvelope([node], [], [node.id])
+            try {
+              await navigator.clipboard.writeText(serializeClipboard(env))
+            } catch {
+              /* best effort */
+            }
+          }}
+          onConfigure={() => storeBits.setSelectedNodes([id])}
+          onDelete={() => storeBits.removeNodes([id])}
+          onMore={(rect) => {
+            // Anchor the canvas context menu at the More button's screen
+            // position. The canvas subscribes to `requestedContextMenu` and
+            // opens the F1 menu at the given anchor.
+            storeBits.requestContextMenu(
+              { kind: "node", nodeId: id },
+              { x: rect.left + rect.width / 2, y: rect.bottom + 4 }
+            )
+          }}
+        />
+      ) : null}
       {showInput ? (
         <Handle
           type="target"
           position={Position.Left}
-          className="!h-3 !w-3 !rounded-full !border-2 !border-current !bg-background"
+          className={cn(
+            "!h-3 !w-3 !rounded-full !border-2 !border-current !bg-background transition-shadow",
+            // Connection-state rings (Flowith "drag silk" preview).
+            connectionRing === "compatible" && "ring-2 ring-emerald-500",
+            connectionRing === "incompatible" && "ring-2 ring-rose-500/60",
+            isActiveCandidate && "!ring-4 !ring-primary",
+            connectionRing === "compatible" && motionEnabled && "animate-pulse-handle"
+          )}
+          data-testid={`wf-node-handle-target-${id}`}
+          data-connection-ring={connectionRing ?? undefined}
         />
       ) : null}
       <div className="flex items-start gap-2 px-3 py-2.5">
-        <Icon className="size-4 shrink-0 mt-0.5" aria-hidden="true" />
+        {createElement(icon, { className: "size-4 shrink-0 mt-0.5", "aria-hidden": true })}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
             <div className="text-sm font-medium truncate text-foreground flex-1">{data.label}</div>

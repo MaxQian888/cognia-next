@@ -8,7 +8,7 @@
  * opens a Dialog and navigates to the workspace on success.
  */
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useLocale, useTranslations } from "next-intl"
 import {
@@ -68,6 +68,7 @@ import {
 import { toast } from "sonner"
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { useUIStore } from "@/stores/ui/ui-store"
 import { TEAM_STATUS_CONFIG, type AgentTeamTemplate } from "@/types/agent/agent-team"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import { createSampleTeam } from "@/lib/ai/agent/sample-team"
@@ -130,6 +131,20 @@ export default function AgentTeamsListPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState("")
   const [deletingTeam, setDeletingTeam] = useState<AgentTeam | null>(null)
+
+  // Honor the File → New Agent Team menu item: when the ui-store flags an
+  // agentTeam-create request, switch to the templates tab and pop the
+  // create dialog, then clear the signal.
+  const pendingCreate = useUIStore((s) => s.pendingCreateRequest)
+  const clearPendingCreate = useUIStore((s) => s.clearPendingCreate)
+  useEffect(() => {
+    if (pendingCreate?.kind === "agentTeam") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional bridge from Zustand pendingCreate signal to local Dialog state.
+      setCreateOpen(true)
+      setActiveTab("templates")
+      clearPendingCreate()
+    }
+  }, [pendingCreate, clearPendingCreate])
 
   /* ---- derived data ---- */
   const teamList = useMemo(() => {
