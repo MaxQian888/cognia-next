@@ -6,6 +6,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { EmbeddingModelConfig } from "./embedding"
 import { generateEmbedding, generateEmbeddings } from "./embedding"
+import { vectorCloudInvoke, type CloudProvider, type FilterOpWire, type FilterWire } from "./invoke"
 
 export type VectorStoreProvider =
   | "chroma"
@@ -33,6 +34,12 @@ export interface VectorStoreConfig {
   provider: VectorStoreProvider
   embeddingConfig: EmbeddingModelConfig
   embeddingApiKey: string
+  /**
+   * Cloud-provider credential id. Required for non-native providers; the
+   * actual secrets live in the OS keyring (see ADR-0022). Resolved at
+   * VectorStore construction time; missing on a cloud provider throws.
+   */
+  configId?: string
   // Chroma-specific
   chromaMode?: "embedded" | "server"
   chromaServerUrl?: string
@@ -1037,342 +1044,82 @@ export class NativeVectorStore implements IVectorStore {
   }
 }
 
-/**
- * Chroma Vector Store implementation
- */
-export class ChromaVectorStore implements IVectorStore {
-  readonly provider: VectorStoreProvider = "chroma"
-  private config: VectorStoreConfig
-  private chromaClient: import("chromadb").ChromaClient | null = null
+// ============================================================================
+// Cloud Vector Stores (ADR-0022)
+//
+// The 5 cloud providers (Chroma, Pinecone, Qdrant, Milvus, Weaviate) all
+// dispatch through Rust via `vectorCloudInvoke` (see `./invoke.ts`). The
+// JS side still owns:
+//   - Embedding generation (calls OpenAI/Google/Cohere/Mistral directly)
+//   - Post-filter for filter ops not natively supported by every provider
+//     (substring / null-checks etc.) via `applyUnifiedPostFilters`
+//   - Threshold-cutoff + offset/limit slicing via `applyThresholdAndPagination`
+//
+// `CloudVectorStore` is the shared base; each provider is a 3-line subclass
+// that just sets the `provider` discriminator.
+// ============================================================================
 
-  constructor(config: VectorStoreConfig) {
-    this.config = config
+abstract class CloudVectorStore implements IVectorStore {
+  abstract readonly provider: VectorStoreProvider
+
+  constructor(protected readonly config: VectorStoreConfig) {
+    if (!config.configId) {
+      throw new Error(
+        `${this.constructor.name} requires config.configId — cloud providers no longer accept inline credentials, configure via the credential form first`
+      )
+    }
   }
 
-  private async getClient(): Promise<import("chromadb").ChromaClient> {
-    if (!this.chromaClient) {
-      const { ChromaClient } = await import("chromadb")
-      if (this.config.chromaMode === "server" && this.config.chromaServerUrl) {
-        this.chromaClient = new ChromaClient({ path: this.config.chromaServerUrl })
-      } else {
-        this.chromaClient = new ChromaClient()
-      }
-    }
-    return this.chromaClient
+  protected get args(): { provider: CloudProvider; configId: string } {
+    return { provider: this.provider as CloudProvider, configId: this.config.configId! }
+  }
+
+  private filtersToWire(filters?: PayloadFilter[]): FilterWire[] | undefined {
+    if (!filters || filters.length === 0) return undefined
+    return filters.map((f) => ({
+      key: f.key,
+      value: f.value,
+      // FilterOperation snake_case strings are already wire-compatible.
+      operation: f.operation as FilterOpWire,
+    }))
   }
 
   async addDocuments(collectionName: string, documents: VectorDocument[]): Promise<void> {
-    const client = await this.getClient()
-    const collection = await client.getOrCreateCollection({ name: collectionName })
-
-    const { generateEmbeddings } = await import("./embedding")
-
-    const ids = documents.map((doc) => doc.id)
-    const contents = documents.map((doc) => doc.content)
-    const metadatas = documents.map((doc) => doc.metadata || {})
-
     const needsEmbedding = documents.some((doc) => !doc.embedding)
-    let embeddings: number[][] | undefined
-
+    let embeddings: number[][]
     if (needsEmbedding) {
       const textsToEmbed = documents.filter((doc) => !doc.embedding).map((doc) => doc.content)
-      if (textsToEmbed.length > 0) {
-        const result = await generateEmbeddings(
-          textsToEmbed,
-          this.config.embeddingConfig,
-          this.config.embeddingApiKey
-        )
-        let embeddingIndex = 0
-        embeddings = documents.map((doc) => {
-          if (doc.embedding) return doc.embedding
-          return result.embeddings[embeddingIndex++]
-        })
-      }
+      const result =
+        textsToEmbed.length > 0
+          ? await generateEmbeddings(
+              textsToEmbed,
+              this.config.embeddingConfig,
+              this.config.embeddingApiKey
+            )
+          : { embeddings: [] as number[][] }
+      let idx = 0
+      embeddings = documents.map((doc) => doc.embedding ?? result.embeddings[idx++])
     } else {
       embeddings = documents.map((doc) => doc.embedding!)
     }
-
-    await collection.add({
-      ids,
-      documents: contents,
-      metadatas: metadatas as import("chromadb").Metadata[],
-      embeddings,
-    })
-  }
-
-  async updateDocuments(collectionName: string, documents: VectorDocument[]): Promise<void> {
-    const client = await this.getClient()
-    const collection = await client.getCollection({ name: collectionName })
-
-    const { generateEmbeddings } = await import("./embedding")
-
-    const ids = documents.map((doc) => doc.id)
-    const contents = documents.map((doc) => doc.content)
-    const metadatas = documents.map((doc) => doc.metadata || {})
-
-    const result = await generateEmbeddings(
-      contents,
-      this.config.embeddingConfig,
-      this.config.embeddingApiKey
-    )
-
-    await collection.update({
-      ids,
-      documents: contents,
-      metadatas: metadatas as import("chromadb").Metadata[],
-      embeddings: result.embeddings,
-    })
-  }
-
-  async deleteDocuments(collectionName: string, ids: string[]): Promise<void> {
-    const client = await this.getClient()
-    const collection = await client.getCollection({ name: collectionName })
-    await collection.delete({ ids })
-  }
-
-  async searchDocuments(
-    collectionName: string,
-    query: string,
-    options: SearchOptions = {}
-  ): Promise<VectorSearchResult[]> {
-    const queryResult = await generateEmbedding(
-      query,
-      this.config.embeddingConfig,
-      this.config.embeddingApiKey
-    )
-    return this.searchByEmbedding(collectionName, queryResult.embedding, options)
-  }
-
-  async searchByEmbedding(
-    collectionName: string,
-    embedding: number[],
-    options: SearchOptions = {}
-  ): Promise<VectorSearchResult[]> {
-    const client = await this.getClient()
-    const collection = await client.getCollection({ name: collectionName })
-    const { topK = 5 } = options
-    const nativeWhere = options.filter as import("chromadb").Where | undefined
-
-    const results = await collection.query({
-      queryEmbeddings: [embedding],
-      nResults: topK,
-      where: nativeWhere,
-      include: ["documents", "metadatas", "distances"],
-    })
-
-    const searchResults: VectorSearchResult[] = []
-    const resultIds = results.ids[0] || []
-    const resultDocs = results.documents?.[0] || []
-    const resultMeta = results.metadatas?.[0] || []
-    const resultDist = results.distances?.[0] || []
-
-    for (let i = 0; i < resultIds.length; i++) {
-      const distance = resultDist[i] || 0
-      searchResults.push({
-        id: resultIds[i],
-        content: resultDocs[i] || "",
-        metadata: resultMeta[i] as Record<string, unknown> | undefined,
-        score: 1 - distance,
-      })
-    }
-
-    const postFiltered = applyUnifiedPostFilters(searchResults, options.filters, options.filterMode)
-    return applyThresholdAndPagination(postFiltered, options).results
-  }
-
-  async searchDocumentsWithTotal(
-    collectionName: string,
-    query: string,
-    options: SearchOptions = {}
-  ): Promise<SearchResponse> {
-    const queryResult = await generateEmbedding(
-      query,
-      this.config.embeddingConfig,
-      this.config.embeddingApiKey
-    )
-    const resultSet = await this.searchByEmbedding(collectionName, queryResult.embedding, {
-      ...options,
-      offset: 0,
-      limit: Math.max(
-        (options.offset ?? 0) + (options.limit ?? options.topK ?? 5),
-        options.topK ?? 5
-      ),
-    })
-    const response = applyThresholdAndPagination(resultSet, options)
-    const total = await this.countDocuments(collectionName, {
-      filter: options.filter,
-      filters: options.filters,
-      filterMode: options.filterMode,
-    }).catch(() => response.total)
-    return { ...response, total }
-  }
-
-  async getDocuments(collectionName: string, ids: string[]): Promise<VectorDocument[]> {
-    const client = await this.getClient()
-    const collection = await client.getCollection({ name: collectionName })
-    const results = await collection.get({ ids, include: ["documents", "metadatas", "embeddings"] })
-
-    return results.ids.map((id, i) => ({
-      id,
-      content: results.documents?.[i] || "",
-      metadata: results.metadatas?.[i] as Record<string, unknown> | undefined,
-      embedding: results.embeddings?.[i] as number[] | undefined,
-    }))
-  }
-
-  async createCollection(
-    name: string,
-    options?: { dimension?: number; metadata?: Record<string, unknown> }
-  ): Promise<void> {
-    const client = await this.getClient()
-    await client.getOrCreateCollection({
-      name,
-      metadata: options?.metadata as import("chromadb").CollectionMetadata,
-    })
-  }
-
-  async deleteCollection(name: string): Promise<void> {
-    const client = await this.getClient()
-    await client.deleteCollection({ name })
-  }
-
-  async listCollections(): Promise<VectorCollectionInfo[]> {
-    const client = await this.getClient()
-    const collections = await client.listCollections()
-    const infos: VectorCollectionInfo[] = []
-
-    for (const collectionItem of collections as unknown as Array<{ name?: string } | string>) {
-      const collectionName =
-        typeof collectionItem === "string" ? collectionItem : (collectionItem?.name ?? "")
-      if (!collectionName) continue
-      try {
-        const collection = await client.getCollection({ name: collectionName })
-        const count = await collection.count()
-        infos.push({ name: collectionName, documentCount: count })
-      } catch {
-        infos.push({ name: collectionName, documentCount: 0 })
-      }
-    }
-
-    return infos
-  }
-
-  async getCollectionInfo(name: string): Promise<VectorCollectionInfo> {
-    const client = await this.getClient()
-    const collection = await client.getCollection({ name })
-    const count = await collection.count()
-    return { name, documentCount: count }
-  }
-
-  async countDocuments(
-    collectionName: string,
-    options?: {
-      filter?: Record<string, unknown>
-      filters?: PayloadFilter[]
-      filterMode?: "and" | "or"
-    }
-  ): Promise<number> {
-    const client = await this.getClient()
-    const collection = await client.getCollection({ name: collectionName })
-    if (!options?.filter && (!options?.filters || options.filters.length === 0)) {
-      return collection.count()
-    }
-
-    const rows = await collection.get({
-      where: options?.filter as import("chromadb").Where | undefined,
-      include: ["metadatas"],
-    })
-    const docs: Array<{ metadata?: Record<string, unknown> }> = rows.ids.map((_, index) => ({
-      metadata: rows.metadatas?.[index] as Record<string, unknown> | undefined,
-    }))
-    return applyUnifiedPostFilters(docs, options?.filters, options?.filterMode).length
-  }
-}
-
-/**
- * Pinecone Vector Store implementation
- */
-export class PineconeVectorStore implements IVectorStore {
-  readonly provider: VectorStoreProvider = "pinecone"
-  private config: VectorStoreConfig
-  private index:
-    | import("@pinecone-database/pinecone").Index<
-        import("@pinecone-database/pinecone").RecordMetadata
-      >
-    | null = null
-
-  constructor(config: VectorStoreConfig) {
-    this.config = config
-  }
-
-  private assertServer(): void {
-    if (typeof window !== "undefined") {
-      throw new Error("Pinecone vector store is only available in server environments")
-    }
-  }
-
-  private resolveNamespace(collectionName?: string): string {
-    const namespace = this.config.pineconeNamespace ?? collectionName
-    if (!namespace || !namespace.trim()) {
-      return PINECONE_DEFAULT_NAMESPACE
-    }
-    return namespace
-  }
-
-  private getPineconeConfig(collectionName?: string) {
-    return {
-      apiKey: this.config.pineconeApiKey!,
-      indexName: this.config.pineconeIndexName!,
-      namespace: this.resolveNamespace(collectionName),
-      embeddingConfig: this.config.embeddingConfig,
-      embeddingApiKey: this.config.embeddingApiKey,
-    }
-  }
-
-  private async getIndex(): Promise<
-    import("@pinecone-database/pinecone").Index<
-      import("@pinecone-database/pinecone").RecordMetadata
-    >
-  > {
-    this.assertServer()
-    if (!this.index) {
-      const { getPineconeClient, getPineconeIndex } = await import("./pinecone-client")
-      const client = getPineconeClient(this.config.pineconeApiKey!)
-      this.index = getPineconeIndex(client, this.config.pineconeIndexName!)
-    }
-    return this.index
-  }
-
-  async addDocuments(collectionName: string, documents: VectorDocument[]): Promise<void> {
-    const index = await this.getIndex()
-    const { upsertDocuments } = await import("./pinecone-client")
-    const mappedDocs = documents.map((doc) => ({
+    const points = documents.map((doc, i) => ({
       id: doc.id,
-      content: doc.content,
-      metadata: sanitizePineconeMetadata(doc.metadata),
-      embedding: doc.embedding,
+      vector: embeddings[i],
+      payload: { ...(doc.metadata ?? {}), content: doc.content },
     }))
-    await upsertDocuments(index, mappedDocs, this.getPineconeConfig(collectionName))
+    await vectorCloudInvoke.upsert(this.args, collectionName, points)
   }
 
   async updateDocuments(collectionName: string, documents: VectorDocument[]): Promise<void> {
-    await this.addDocuments(collectionName, documents)
+    return this.addDocuments(collectionName, documents)
   }
 
   async deleteDocuments(collectionName: string, ids: string[]): Promise<void> {
-    const index = await this.getIndex()
-    const { deleteDocuments } = await import("./pinecone-client")
-    await deleteDocuments(index, ids, this.getPineconeConfig(collectionName).namespace)
+    await vectorCloudInvoke.deletePoints(this.args, collectionName, ids)
   }
 
   async deleteAllDocuments(collectionName: string): Promise<number> {
-    const index = await this.getIndex()
-    const { deleteAllDocuments, getIndexStats } = await import("./pinecone-client")
-    const stats = await getIndexStats(index)
-    const namespace = this.resolveNamespace(collectionName)
-    const before = stats.namespaces?.[namespace]?.vectorCount ?? 0
-    await deleteAllDocuments(index, namespace)
-    return before
+    return vectorCloudInvoke.truncate(this.args, collectionName)
   }
 
   async searchDocuments(
@@ -1380,12 +1127,12 @@ export class PineconeVectorStore implements IVectorStore {
     query: string,
     options: SearchOptions = {}
   ): Promise<VectorSearchResult[]> {
-    const queryResult = await generateEmbedding(
+    const { embedding } = await generateEmbedding(
       query,
       this.config.embeddingConfig,
       this.config.embeddingApiKey
     )
-    return this.searchByEmbedding(collectionName, queryResult.embedding, options)
+    return this.searchByEmbedding(collectionName, embedding, options)
   }
 
   async searchByEmbedding(
@@ -1393,37 +1140,23 @@ export class PineconeVectorStore implements IVectorStore {
     embedding: number[],
     options: SearchOptions = {}
   ): Promise<VectorSearchResult[]> {
-    const index = await this.getIndex()
-    const namespace = this.resolveNamespace(collectionName)
-    const ns = namespace ? index.namespace(namespace) : index
-    const { topK = 5 } = options
-
-    const { filter: mappedFilter, requiresPostFilter } = buildPineconeFilterFromUnified(
-      options.filters,
-      options.filterMode
-    )
-    const nativeFilter = options.filter
-    const effectiveFilter = nativeFilter ?? mappedFilter
-
-    const response = await ns.query({
-      vector: embedding,
-      topK,
-      filter: effectiveFilter,
-      includeMetadata: true,
+    const topK = options.topK ?? options.limit ?? 5
+    const offset = options.offset ?? 0
+    const resp = await vectorCloudInvoke.query(this.args, collectionName, embedding, {
+      limit: topK + offset,
+      offset: 0,
+      filter: this.filtersToWire(options.filters),
+      filter_mode: options.filterMode,
+      include_payload: true,
+      include_content: true,
     })
-
-    const mapped = (response.matches || []).map((match) => ({
-      id: match.id,
-      content: (match.metadata?.content as string) || "",
-      metadata: match.metadata as Record<string, unknown> | undefined,
-      score: match.score || 0,
+    const mapped: VectorSearchResult[] = resp.results.map((r) => ({
+      id: r.id,
+      content: r.content ?? "",
+      metadata: r.payload as Record<string, unknown> | undefined,
+      score: r.score,
     }))
-
-    const postFiltered =
-      !nativeFilter && requiresPostFilter
-        ? applyUnifiedPostFilters(mapped, options.filters, options.filterMode)
-        : mapped
-
+    const postFiltered = applyUnifiedPostFilters(mapped, options.filters, options.filterMode)
     return applyThresholdAndPagination(postFiltered, options).results
   }
 
@@ -1432,7 +1165,7 @@ export class PineconeVectorStore implements IVectorStore {
     query: string,
     options: SearchOptions = {}
   ): Promise<SearchResponse> {
-    const queryResult = await generateEmbedding(
+    const { embedding } = await generateEmbedding(
       query,
       this.config.embeddingConfig,
       this.config.embeddingApiKey
@@ -1441,7 +1174,7 @@ export class PineconeVectorStore implements IVectorStore {
       (options.offset ?? 0) + (options.limit ?? options.topK ?? 5),
       options.topK ?? 5
     )
-    const results = await this.searchByEmbedding(collectionName, queryResult.embedding, {
+    const results = await this.searchByEmbedding(collectionName, embedding, {
       ...options,
       topK: requested,
       offset: 0,
@@ -1457,60 +1190,56 @@ export class PineconeVectorStore implements IVectorStore {
   }
 
   async getDocuments(collectionName: string, ids: string[]): Promise<VectorDocument[]> {
-    const index = await this.getIndex()
-    const { fetchDocuments } = await import("./pinecone-client")
-    return fetchDocuments(index, ids, this.getPineconeConfig(collectionName).namespace)
+    const points = await vectorCloudInvoke.getPoints(this.args, collectionName, ids)
+    return points.map((p) => ({
+      id: p.id,
+      content: (p.payload?.content as string | undefined) ?? "",
+      metadata: p.payload as Record<string, unknown> | undefined,
+      embedding: p.vector.length > 0 ? p.vector : undefined,
+    }))
   }
 
   async createCollection(
     name: string,
-    options?: { dimension?: number; metadata?: Record<string, unknown>; description?: string }
+    options?: {
+      dimension?: number
+      metadata?: Record<string, unknown>
+      description?: string
+      embeddingModel?: string
+      embeddingProvider?: string
+    }
   ): Promise<void> {
-    const { createPineconeIndex } = await import("./pinecone-client")
-    const dimension = options?.dimension || this.config.embeddingConfig.dimensions || 1536
-    const client = (await import("./pinecone-client")).getPineconeClient(
-      this.config.pineconeApiKey!
-    )
-
-    await createPineconeIndex(client, this.config.pineconeIndexName!, dimension, {
-      suppressConflicts: true,
-      tags: options?.metadata as Record<string, string> | undefined,
+    await vectorCloudInvoke.createCollection(this.args, {
+      name,
+      dimension: options?.dimension ?? this.config.embeddingConfig.dimensions ?? 1536,
+      description: options?.description,
+      embedding_model: options?.embeddingModel,
+      embedding_provider: options?.embeddingProvider,
+      metadata: options?.metadata,
     })
-
-    // Pinecone collections are namespaces, no explicit creation needed.
-    void name
   }
 
   async deleteCollection(name: string): Promise<void> {
-    const index = await this.getIndex()
-    const { deleteAllDocuments } = await import("./pinecone-client")
-    await deleteAllDocuments(index, this.getPineconeConfig(name).namespace)
+    await vectorCloudInvoke.deleteCollection(this.args, name)
   }
 
   async listCollections(): Promise<VectorCollectionInfo[]> {
-    const index = await this.getIndex()
-    const { getIndexStats } = await import("./pinecone-client")
-    const stats = await getIndexStats(index)
-    return Object.entries(stats.namespaces || {}).map(([name, info]) => ({
-      name,
-      documentCount: info.vectorCount,
-      dimension: stats.dimension,
+    const list = await vectorCloudInvoke.listCollections(this.args)
+    return list.map((c) => ({
+      name: c.name,
+      documentCount: c.document_count,
+      dimension: c.dimension > 0 ? c.dimension : undefined,
+      description: c.description,
     }))
   }
 
   async getCollectionInfo(name: string): Promise<VectorCollectionInfo> {
-    const index = await this.getIndex()
-    const { describePineconeIndex, getIndexStats } = await import("./pinecone-client")
-    const info = await describePineconeIndex(
-      (await import("./pinecone-client")).getPineconeClient(this.config.pineconeApiKey!),
-      this.config.pineconeIndexName!
-    )
-    const stats = await getIndexStats(index)
-    const namespace = this.resolveNamespace(name)
+    const c = await vectorCloudInvoke.getCollection(this.args, name)
     return {
-      name: namespace,
-      documentCount: stats.namespaces?.[namespace]?.vectorCount ?? 0,
-      dimension: info.dimension,
+      name: c.name,
+      documentCount: c.document_count,
+      dimension: c.dimension > 0 ? c.dimension : undefined,
+      description: c.description,
     }
   }
 
@@ -1522,953 +1251,48 @@ export class PineconeVectorStore implements IVectorStore {
       filterMode?: "and" | "or"
     }
   ): Promise<number> {
-    const index = await this.getIndex()
-    const { getIndexStats } = await import("./pinecone-client")
+    // If no filters at all → cheap path through count endpoint.
     if (!options?.filter && (!options?.filters || options.filters.length === 0)) {
-      const stats = await getIndexStats(index)
-      const namespace = this.resolveNamespace(collectionName)
-      return stats.namespaces?.[namespace]?.vectorCount ?? 0
+      return vectorCloudInvoke.count(this.args, collectionName, undefined)
     }
-
-    const probeVector = new Array(this.config.embeddingConfig.dimensions || 1536).fill(0)
-    const results = await this.searchByEmbedding(collectionName, probeVector, {
+    // With filters: over-fetch via search probe then post-filter for ops
+    // the provider can't natively express. The probe vector is zero —
+    // results ranking doesn't matter, only post-filter cardinality.
+    const probe = new Array(this.config.embeddingConfig.dimensions ?? 1536).fill(0)
+    const rows = await this.searchByEmbedding(collectionName, probe, {
       topK: 10000,
       filter: options?.filter,
       filters: options?.filters,
       filterMode: options?.filterMode,
     })
-    return results.length
+    return rows.length
   }
 }
 
-/**
- * Weaviate Vector Store implementation
- */
-export class WeaviateVectorStore implements IVectorStore {
+export class ChromaVectorStore extends CloudVectorStore {
+  readonly provider: VectorStoreProvider = "chroma"
+}
+
+export class PineconeVectorStore extends CloudVectorStore {
+  readonly provider: VectorStoreProvider = "pinecone"
+}
+
+export class WeaviateVectorStore extends CloudVectorStore {
   readonly provider: VectorStoreProvider = "weaviate"
-  private config: VectorStoreConfig
-
-  constructor(config: VectorStoreConfig) {
-    this.config = config
-  }
-
-  private getWeaviateConfig(collectionName?: string) {
-    return {
-      url: this.config.weaviateUrl!,
-      apiKey: this.config.weaviateApiKey,
-      className: collectionName,
-      embeddingConfig: this.config.embeddingConfig,
-      embeddingApiKey: this.config.embeddingApiKey,
-    }
-  }
-
-  async addDocuments(collectionName: string, documents: VectorDocument[]): Promise<void> {
-    const { upsertWeaviateDocuments } = await import("./weaviate-client")
-    await upsertWeaviateDocuments(this.getWeaviateConfig(collectionName), documents)
-  }
-
-  async updateDocuments(collectionName: string, documents: VectorDocument[]): Promise<void> {
-    await this.addDocuments(collectionName, documents)
-  }
-
-  async deleteDocuments(collectionName: string, ids: string[]): Promise<void> {
-    const { deleteWeaviateDocuments } = await import("./weaviate-client")
-    await deleteWeaviateDocuments(this.getWeaviateConfig(collectionName), ids)
-  }
-
-  async searchDocuments(
-    collectionName: string,
-    query: string,
-    options: SearchOptions = {}
-  ): Promise<VectorSearchResult[]> {
-    const queryEmbedding = await generateEmbedding(
-      query,
-      this.config.embeddingConfig,
-      this.config.embeddingApiKey
-    )
-    return this.searchByEmbedding(collectionName, queryEmbedding.embedding, options)
-  }
-
-  async searchByEmbedding(
-    collectionName: string,
-    embedding: number[],
-    options: SearchOptions = {}
-  ): Promise<VectorSearchResult[]> {
-    const { queryWeaviate } = await import("./weaviate-client")
-    const mapped = await queryWeaviate(this.getWeaviateConfig(collectionName), "", {
-      ...options,
-      embedding,
-    })
-    const postFiltered = applyUnifiedPostFilters(mapped, options.filters, options.filterMode)
-    return applyThresholdAndPagination(postFiltered, options).results
-  }
-
-  async searchDocumentsWithTotal(
-    collectionName: string,
-    query: string,
-    options: SearchOptions = {}
-  ): Promise<SearchResponse> {
-    const queryEmbedding = await generateEmbedding(
-      query,
-      this.config.embeddingConfig,
-      this.config.embeddingApiKey
-    )
-    const requested = Math.max(
-      (options.offset ?? 0) + (options.limit ?? options.topK ?? 5),
-      options.topK ?? 5
-    )
-    const rows = await this.searchByEmbedding(collectionName, queryEmbedding.embedding, {
-      ...options,
-      topK: requested,
-      offset: 0,
-      limit: requested,
-    })
-    const paged = applyThresholdAndPagination(rows, options)
-    const total = await this.countDocuments(collectionName, {
-      filter: options.filter,
-      filters: options.filters,
-      filterMode: options.filterMode,
-    }).catch(() => paged.total)
-    return { ...paged, total }
-  }
-
-  async getDocuments(collectionName: string, ids: string[]): Promise<VectorDocument[]> {
-    const { getWeaviateDocuments } = await import("./weaviate-client")
-    return getWeaviateDocuments(this.getWeaviateConfig(collectionName), ids)
-  }
-
-  async createCollection(
-    name: string,
-    options?: { dimension?: number; metadata?: Record<string, unknown>; description?: string }
-  ): Promise<void> {
-    const { createWeaviateClass } = await import("./weaviate-client")
-    await createWeaviateClass(this.getWeaviateConfig(name), {
-      description: options?.description,
-      metadata: options?.metadata,
-      dimension: options?.dimension || this.config.embeddingConfig.dimensions,
-    })
-  }
-
-  async deleteCollection(name: string): Promise<void> {
-    const { deleteWeaviateClass } = await import("./weaviate-client")
-    await deleteWeaviateClass(this.getWeaviateConfig(name))
-  }
-
-  async listCollections(): Promise<VectorCollectionInfo[]> {
-    const { listWeaviateClasses } = await import("./weaviate-client")
-    return listWeaviateClasses(this.getWeaviateConfig()).then(
-      (classes: Array<{ name: string; description?: string; documentCount?: number }>) =>
-        classes.map((cls) => ({
-          name: cls.name,
-          documentCount: cls.documentCount ?? 0,
-          description: cls.description,
-        }))
-    )
-  }
-
-  async getCollectionInfo(name: string): Promise<VectorCollectionInfo> {
-    const { getWeaviateClassInfo } = await import("./weaviate-client")
-    const info = await getWeaviateClassInfo(this.getWeaviateConfig(name))
-    return { ...info, documentCount: info.documentCount ?? 0 }
-  }
-
-  async scrollDocuments(
-    collectionName: string,
-    options: ScrollOptions = {}
-  ): Promise<ScrollResponse> {
-    const { scrollWeaviateDocuments, countWeaviateDocuments } = await import("./weaviate-client")
-    const offset = options.offset ?? 0
-    const limit = options.limit ?? 100
-    const documents = await scrollWeaviateDocuments(this.getWeaviateConfig(collectionName), {
-      offset,
-      limit,
-      filter: options.filter as Record<string, unknown> | undefined,
-    })
-    const postFiltered = applyUnifiedPostFilters(documents, options.filters, options.filterMode)
-    const pagedDocs = postFiltered.slice(0, limit)
-    const total = options.filters?.length
-      ? postFiltered.length
-      : await countWeaviateDocuments(this.getWeaviateConfig(collectionName))
-    return {
-      documents: pagedDocs,
-      total,
-      offset,
-      limit,
-      hasMore: offset + pagedDocs.length < total,
-    }
-  }
-
-  async countDocuments(
-    collectionName: string,
-    options?: {
-      filter?: Record<string, unknown>
-      filters?: PayloadFilter[]
-      filterMode?: "and" | "or"
-    }
-  ): Promise<number> {
-    const { countWeaviateDocuments, scrollWeaviateDocuments } = await import("./weaviate-client")
-    if (!options?.filters || options.filters.length === 0) {
-      return countWeaviateDocuments(this.getWeaviateConfig(collectionName))
-    }
-
-    const docs = await scrollWeaviateDocuments(this.getWeaviateConfig(collectionName), {
-      offset: 0,
-      limit: 10000,
-      filter: options.filter,
-    })
-    return applyUnifiedPostFilters(docs, options.filters, options.filterMode).length
-  }
 }
 
-/**
- * Qdrant Vector Store implementation
- */
-export class QdrantVectorStore implements IVectorStore {
+export class QdrantVectorStore extends CloudVectorStore {
   readonly provider: VectorStoreProvider = "qdrant"
-  private config: VectorStoreConfig
-  private qdrantClient: import("@qdrant/js-client-rest").QdrantClient | null = null
-
-  constructor(config: VectorStoreConfig) {
-    this.config = config
-  }
-
-  private async getClient(): Promise<import("@qdrant/js-client-rest").QdrantClient> {
-    if (!this.qdrantClient) {
-      const { QdrantClient } = await import("@qdrant/js-client-rest")
-      this.qdrantClient = new QdrantClient({
-        url: this.config.qdrantUrl!,
-        apiKey: this.config.qdrantApiKey,
-      })
-    }
-    return this.qdrantClient
-  }
-
-  private buildQdrantFilter(options: {
-    filter?: Record<string, unknown>
-    filters?: PayloadFilter[]
-    filterMode?: "and" | "or"
-  }): { filter?: Record<string, unknown>; requiresPostFilter: boolean } {
-    if (options.filter) {
-      return {
-        filter: options.filter,
-        requiresPostFilter: Boolean(options.filters && options.filters.length > 0),
-      }
-    }
-    return toQdrantConditions(options.filters, options.filterMode)
-  }
-
-  private async queryByEmbedding(
-    collectionName: string,
-    embedding: number[],
-    options: SearchOptions = {}
-  ): Promise<VectorSearchResult[]> {
-    const client = await this.getClient()
-    const { topK = 5, threshold } = options
-    const { filter, requiresPostFilter } = this.buildQdrantFilter(options)
-
-    let rows: Array<{ id: string | number; payload?: Record<string, unknown>; score: number }> = []
-    try {
-      const response = await client.query(collectionName, {
-        query: embedding,
-        limit: topK,
-        offset: options.offset,
-        score_threshold: threshold,
-        filter,
-        with_payload: true,
-        with_vector: false,
-      } as any)
-      rows =
-        (
-          response as {
-            points?: Array<{
-              id: string | number
-              payload?: Record<string, unknown>
-              score: number
-            }>
-          }
-        ).points || []
-    } catch {
-      const fallback = await client.search(collectionName, {
-        vector: embedding,
-        limit: topK,
-        offset: options.offset,
-        score_threshold: threshold,
-        filter,
-        with_payload: true,
-      })
-      rows = fallback as Array<{
-        id: string | number
-        payload?: Record<string, unknown>
-        score: number
-      }>
-    }
-
-    const mapped = rows.map((result) => ({
-      id: String(result.id),
-      content: (result.payload?.content as string) || "",
-      metadata: result.payload as Record<string, unknown> | undefined,
-      score: result.score,
-    }))
-
-    const postFiltered = requiresPostFilter
-      ? applyUnifiedPostFilters(mapped, options.filters, options.filterMode)
-      : mapped
-
-    return applyThresholdAndPagination(postFiltered, options).results
-  }
-
-  async addDocuments(collectionName: string, documents: VectorDocument[]): Promise<void> {
-    const client = await this.getClient()
-
-    const { generateEmbeddings } = await import("./embedding")
-
-    const needsEmbedding = documents.some((doc) => !doc.embedding)
-    let embeddings: number[][] | undefined
-
-    if (needsEmbedding) {
-      const textsToEmbed = documents.filter((doc) => !doc.embedding).map((doc) => doc.content)
-      if (textsToEmbed.length > 0) {
-        const result = await generateEmbeddings(
-          textsToEmbed,
-          this.config.embeddingConfig,
-          this.config.embeddingApiKey
-        )
-        let embeddingIndex = 0
-        embeddings = documents.map((doc) => {
-          if (doc.embedding) return doc.embedding
-          return result.embeddings[embeddingIndex++]
-        })
-      }
-    } else {
-      embeddings = documents.map((doc) => doc.embedding!)
-    }
-
-    const points = documents.map((doc, i) => ({
-      id: doc.id,
-      vector: embeddings![i],
-      payload: { content: doc.content, ...doc.metadata },
-    }))
-
-    const batchSize = 100
-    for (let i = 0; i < points.length; i += batchSize) {
-      await client.upsert(collectionName, { wait: true, points: points.slice(i, i + batchSize) })
-    }
-  }
-
-  async updateDocuments(collectionName: string, documents: VectorDocument[]): Promise<void> {
-    await this.addDocuments(collectionName, documents)
-  }
-
-  async deleteDocuments(collectionName: string, ids: string[]): Promise<void> {
-    const client = await this.getClient()
-    await client.delete(collectionName, { wait: true, points: ids })
-  }
-
-  async deleteAllDocuments(collectionName: string): Promise<number> {
-    const before = await this.countDocuments(collectionName).catch(() => 0)
-    await this.deleteCollection(collectionName)
-    await this.createCollection(collectionName)
-    return before
-  }
-
-  async searchDocuments(
-    collectionName: string,
-    query: string,
-    options: SearchOptions = {}
-  ): Promise<VectorSearchResult[]> {
-    const queryResult = await generateEmbedding(
-      query,
-      this.config.embeddingConfig,
-      this.config.embeddingApiKey
-    )
-    return this.searchByEmbedding(collectionName, queryResult.embedding, options)
-  }
-
-  async searchByEmbedding(
-    collectionName: string,
-    embedding: number[],
-    options: SearchOptions = {}
-  ): Promise<VectorSearchResult[]> {
-    return this.queryByEmbedding(collectionName, embedding, options)
-  }
-
-  async searchDocumentsWithTotal(
-    collectionName: string,
-    query: string,
-    options: SearchOptions = {}
-  ): Promise<SearchResponse> {
-    const queryResult = await generateEmbedding(
-      query,
-      this.config.embeddingConfig,
-      this.config.embeddingApiKey
-    )
-    const requested = Math.max(
-      (options.offset ?? 0) + (options.limit ?? options.topK ?? 5),
-      options.topK ?? 5
-    )
-    const results = await this.searchByEmbedding(collectionName, queryResult.embedding, {
-      ...options,
-      topK: requested,
-      offset: 0,
-      limit: requested,
-    })
-    const paged = applyThresholdAndPagination(results, options)
-    const total = await this.countDocuments(collectionName, {
-      filter: options.filter,
-      filters: options.filters,
-      filterMode: options.filterMode,
-    }).catch(() => paged.total)
-    return { ...paged, total }
-  }
-
-  async getDocuments(collectionName: string, ids: string[]): Promise<VectorDocument[]> {
-    const client = await this.getClient()
-    const results = await client.retrieve(collectionName, {
-      ids,
-      with_payload: true,
-      with_vector: true,
-    })
-
-    return results.map((point) => ({
-      id: String(point.id),
-      content: (point.payload?.content as string) || "",
-      metadata: point.payload as Record<string, unknown> | undefined,
-      embedding: point.vector as number[] | undefined,
-    }))
-  }
-
-  async createCollection(
-    name: string,
-    options?: { dimension?: number; metadata?: Record<string, unknown> }
-  ): Promise<void> {
-    const client = await this.getClient()
-    await client.createCollection(name, {
-      vectors: {
-        size: options?.dimension || this.config.embeddingConfig.dimensions || 1536,
-        distance: "Cosine",
-      },
-    })
-  }
-
-  async deleteCollection(name: string): Promise<void> {
-    const client = await this.getClient()
-    await client.deleteCollection(name)
-  }
-
-  async listCollections(): Promise<VectorCollectionInfo[]> {
-    const client = await this.getClient()
-    const response = await client.getCollections()
-    const infos: VectorCollectionInfo[] = []
-
-    for (const collection of response.collections) {
-      try {
-        const info = await client.getCollection(collection.name)
-        const vectors = info.config.params.vectors
-        infos.push({
-          name: collection.name,
-          documentCount: info.points_count ?? 0,
-          dimension:
-            typeof vectors === "object" && vectors !== null && "size" in vectors
-              ? (vectors as { size: number }).size
-              : undefined,
-        })
-      } catch {
-        infos.push({ name: collection.name, documentCount: 0 })
-      }
-    }
-
-    return infos
-  }
-
-  async getCollectionInfo(name: string): Promise<VectorCollectionInfo> {
-    const client = await this.getClient()
-    const info = await client.getCollection(name)
-    const vectors = info.config.params.vectors
-    return {
-      name,
-      documentCount: info.points_count ?? 0,
-      dimension:
-        typeof vectors === "object" && vectors !== null && "size" in vectors
-          ? (vectors as { size: number }).size
-          : undefined,
-    }
-  }
-
-  async scrollDocuments(
-    collectionName: string,
-    options: ScrollOptions = {}
-  ): Promise<ScrollResponse> {
-    const client = await this.getClient()
-    const offset = options.offset
-    const limit = options.limit ?? 100
-    const { filter, requiresPostFilter } = this.buildQdrantFilter({
-      filter: options.filter,
-      filters: options.filters,
-      filterMode: options.filterMode,
-    })
-    const response = await client.scroll(collectionName, {
-      offset,
-      limit,
-      filter,
-      with_payload: true,
-      with_vector: true,
-    })
-
-    const mapped = response.points.map((point) => ({
-      id: String(point.id),
-      content: (point.payload?.content as string) || "",
-      metadata: point.payload as Record<string, unknown> | undefined,
-      embedding: point.vector as number[] | undefined,
-    }))
-    const postFiltered = requiresPostFilter
-      ? applyUnifiedPostFilters(mapped, options.filters, options.filterMode)
-      : mapped
-    const total = await this.countDocuments(collectionName, {
-      filter: options.filter,
-      filters: options.filters,
-      filterMode: options.filterMode,
-    }).catch(() => postFiltered.length)
-
-    return {
-      documents: postFiltered,
-      total,
-      offset: options.offset ?? 0,
-      limit,
-      hasMore: postFiltered.length === limit && (options.offset ?? 0) + limit < total,
-    }
-  }
-
-  async countDocuments(
-    collectionName: string,
-    options?: {
-      filter?: Record<string, unknown>
-      filters?: PayloadFilter[]
-      filterMode?: "and" | "or"
-    }
-  ): Promise<number> {
-    const client = await this.getClient()
-    const { filter, requiresPostFilter } = this.buildQdrantFilter({
-      filter: options?.filter,
-      filters: options?.filters,
-      filterMode: options?.filterMode,
-    })
-
-    if (!requiresPostFilter) {
-      const result = await client.count(collectionName, {
-        filter,
-        exact: true,
-      } as any)
-      return result.count ?? 0
-    }
-
-    const response = await client.scroll(collectionName, {
-      limit: 10000,
-      with_payload: true,
-      with_vector: false,
-      filter,
-    })
-    const mapped = response.points.map((point) => ({
-      metadata: point.payload as Record<string, unknown> | undefined,
-    }))
-    return applyUnifiedPostFilters(mapped, options?.filters, options?.filterMode).length
-  }
 }
 
-/**
- * Milvus Vector Store implementation
- */
-export class MilvusVectorStore implements IVectorStore {
+export class MilvusVectorStore extends CloudVectorStore {
   readonly provider: VectorStoreProvider = "milvus"
-  private config: VectorStoreConfig
-  private milvusClient: import("@zilliz/milvus2-sdk-node").MilvusClient | null = null
-
-  constructor(config: VectorStoreConfig) {
-    this.config = config
-  }
-
-  private async getClient(): Promise<import("@zilliz/milvus2-sdk-node").MilvusClient> {
-    if (!this.milvusClient) {
-      const { MilvusClient } = await import("@zilliz/milvus2-sdk-node")
-      this.milvusClient = new MilvusClient({
-        address: this.config.milvusAddress!,
-        token: this.config.milvusToken,
-        username: this.config.milvusUsername,
-        password: this.config.milvusPassword,
-        ssl: this.config.milvusSsl,
-      })
-    }
-    return this.milvusClient
-  }
-
-  private buildMilvusFilterExpression(options: {
-    filter?: Record<string, unknown>
-    filters?: PayloadFilter[]
-    filterMode?: "and" | "or"
-  }): string | undefined {
-    if (options.filter) {
-      const native = options.filter as unknown
-      if (typeof native === "string") {
-        return native
-      }
-      if (typeof native === "object") {
-        const clauses = Object.entries(native as Record<string, unknown>).map(
-          ([key, value]) => `${key} == ${toMilvusLiteral(value)}`
-        )
-        if (clauses.length > 0) {
-          return clauses.length === 1 ? clauses[0] : `(${clauses.join(" and ")})`
-        }
-      }
-    }
-
-    if (options.filters && options.filters.length > 0) {
-      return buildMilvusFilterFromUnified(options.filters, options.filterMode)
-    }
-
-    return undefined
-  }
-
-  async addDocuments(collectionName: string, documents: VectorDocument[]): Promise<void> {
-    const client = await this.getClient()
-    const { generateEmbeddings } = await import("./embedding")
-
-    const needsEmbedding = documents.some((doc) => !doc.embedding)
-    let embeddings: number[][] | undefined
-
-    if (needsEmbedding) {
-      const textsToEmbed = documents.filter((doc) => !doc.embedding).map((doc) => doc.content)
-      if (textsToEmbed.length > 0) {
-        const result = await generateEmbeddings(
-          textsToEmbed,
-          this.config.embeddingConfig,
-          this.config.embeddingApiKey
-        )
-        let embeddingIndex = 0
-        embeddings = documents.map((doc) => {
-          if (doc.embedding) return doc.embedding
-          return result.embeddings[embeddingIndex++]
-        })
-      }
-    } else {
-      embeddings = documents.map((doc) => doc.embedding!)
-    }
-
-    const data = documents.map((doc, i) => {
-      const baseData: Record<string, unknown> = {
-        id: doc.id,
-        vector: embeddings![i],
-        content: doc.content,
-      }
-      if (doc.metadata) {
-        Object.entries(doc.metadata).forEach(([key, value]) => {
-          if (key !== "id" && key !== "vector" && key !== "content") {
-            baseData[key] = value
-          }
-        })
-      }
-      return baseData
-    })
-
-    const batchSize = 1000
-    for (let i = 0; i < data.length; i += batchSize) {
-      await client.upsert({
-        collection_name: collectionName,
-        data: data.slice(i, i + batchSize) as any,
-      })
-    }
-  }
-
-  async updateDocuments(collectionName: string, documents: VectorDocument[]): Promise<void> {
-    await this.addDocuments(collectionName, documents)
-  }
-
-  async deleteDocuments(collectionName: string, ids: string[]): Promise<void> {
-    const client = await this.getClient()
-    const idsStr = ids.map((id) => `"${id}"`).join(", ")
-    await client.delete({ collection_name: collectionName, filter: `id in [${idsStr}]` })
-  }
-
-  async searchDocuments(
-    collectionName: string,
-    query: string,
-    options: SearchOptions = {}
-  ): Promise<VectorSearchResult[]> {
-    const queryResult = await generateEmbedding(
-      query,
-      this.config.embeddingConfig,
-      this.config.embeddingApiKey
-    )
-    return this.searchByEmbedding(collectionName, queryResult.embedding, options)
-  }
-
-  async searchByEmbedding(
-    collectionName: string,
-    embedding: number[],
-    options: SearchOptions = {}
-  ): Promise<VectorSearchResult[]> {
-    const client = await this.getClient()
-    const { topK = 5, threshold } = options
-    const filterExpression = this.buildMilvusFilterExpression({
-      filter: options.filter,
-      filters: options.filters,
-      filterMode: options.filterMode,
-    })
-
-    const searchResponse = await client.search({
-      collection_name: collectionName,
-      data: [embedding],
-      limit: topK,
-      filter: filterExpression,
-      output_fields: ["content", "*"],
-    } as any)
-
-    const mapped = (searchResponse.results as any[]).map((result: Record<string, unknown>) => ({
-      id: String(result.id),
-      content: (result.content as string) || "",
-      metadata: Object.fromEntries(
-        Object.entries(result).filter(([key]) => !["id", "score", "vector"].includes(key))
-      ),
-      score: result.score as number,
-    }))
-
-    const postFiltered = applyUnifiedPostFilters(mapped, options.filters, options.filterMode)
-    const thresholdFiltered =
-      threshold === undefined ? postFiltered : postFiltered.filter((row) => row.score >= threshold)
-    return applyThresholdAndPagination(thresholdFiltered, options).results
-  }
-
-  async searchDocumentsWithTotal(
-    collectionName: string,
-    query: string,
-    options: SearchOptions = {}
-  ): Promise<SearchResponse> {
-    const queryResult = await generateEmbedding(
-      query,
-      this.config.embeddingConfig,
-      this.config.embeddingApiKey
-    )
-    const requested = Math.max(
-      (options.offset ?? 0) + (options.limit ?? options.topK ?? 5),
-      options.topK ?? 5
-    )
-    const rows = await this.searchByEmbedding(collectionName, queryResult.embedding, {
-      ...options,
-      topK: requested,
-      offset: 0,
-      limit: requested,
-    })
-    const paged = applyThresholdAndPagination(rows, options)
-    const total = await this.countDocuments(collectionName, {
-      filter: options.filter,
-      filters: options.filters,
-      filterMode: options.filterMode,
-    }).catch(() => paged.total)
-    return { ...paged, total }
-  }
-
-  async getDocuments(collectionName: string, ids: string[]): Promise<VectorDocument[]> {
-    const client = await this.getClient()
-    const idsStr = ids.map((id) => `"${id}"`).join(", ")
-
-    const queryResponse = await client.query({
-      collection_name: collectionName,
-      filter: `id in [${idsStr}]`,
-      output_fields: ["id", "content", "vector", "*"],
-    })
-
-    return queryResponse.data.map((item: Record<string, unknown>) => ({
-      id: String(item.id),
-      content: (item.content as string) || "",
-      metadata: Object.fromEntries(
-        Object.entries(item).filter(([key]) => !["id", "content", "vector"].includes(key))
-      ),
-      embedding: item.vector as number[] | undefined,
-    }))
-  }
-
-  async createCollection(
-    name: string,
-    options?: { dimension?: number; metadata?: Record<string, unknown> }
-  ): Promise<void> {
-    const client = await this.getClient()
-    const { DataType } = await import("@zilliz/milvus2-sdk-node")
-
-    const exists = await client.hasCollection({ collection_name: name })
-    if (exists.value) return
-
-    const dimension = options?.dimension || this.config.embeddingConfig.dimensions || 1536
-
-    await client.createCollection({
-      collection_name: name,
-      fields: [
-        { name: "id", data_type: DataType.VarChar, is_primary_key: true, max_length: 512 },
-        { name: "vector", data_type: DataType.FloatVector, dim: dimension },
-        { name: "content", data_type: DataType.VarChar, max_length: 65535 },
-      ],
-      enable_dynamic_field: true,
-    })
-
-    await client.createIndex({
-      collection_name: name,
-      field_name: "vector",
-      index_type: "HNSW",
-      metric_type: "COSINE",
-      params: { M: 16, efConstruction: 256 },
-    })
-
-    await client.loadCollection({ collection_name: name })
-  }
-
-  async deleteCollection(name: string): Promise<void> {
-    const client = await this.getClient()
-    const exists = await client.hasCollection({ collection_name: name })
-    if (exists.value) {
-      await client.dropCollection({ collection_name: name })
-    }
-  }
-
-  async listCollections(): Promise<VectorCollectionInfo[]> {
-    const client = await this.getClient()
-    const { DataType } = await import("@zilliz/milvus2-sdk-node")
-    const response = await client.listCollections()
-    const infos: VectorCollectionInfo[] = []
-
-    for (const collection of response.data) {
-      const collectionName = typeof collection === "string" ? collection : (collection as any).name
-      try {
-        const describeResponse = await client.describeCollection({
-          collection_name: collectionName,
-        })
-        const statsResponse = await client.getCollectionStatistics({
-          collection_name: collectionName,
-        })
-
-        let dimension = 0
-        for (const field of describeResponse.schema.fields) {
-          // @ts-expect-error - DataType enum comparison with string
-          if (field.data_type === DataType.FloatVector || field.data_type === "FloatVector") {
-            dimension =
-              Number((field.type_params as any[])?.find((p) => p.key === "dim")?.value) || 0
-            break
-          }
-        }
-
-        let documentCount = 0
-        const rowCountStat = (statsResponse.stats as any[])?.find((s) => s.key === "row_count")
-        if (rowCountStat) {
-          documentCount = parseInt(String(rowCountStat.value), 10) || 0
-        }
-
-        infos.push({
-          name: String(collectionName),
-          documentCount,
-          dimension,
-          description: describeResponse.schema.description,
-        })
-      } catch {
-        infos.push({ name: collectionName, documentCount: 0 })
-      }
-    }
-
-    return infos
-  }
-
-  async getCollectionInfo(name: string): Promise<VectorCollectionInfo> {
-    const client = await this.getClient()
-    const { DataType } = await import("@zilliz/milvus2-sdk-node")
-
-    const describeResponse = await client.describeCollection({ collection_name: name })
-    const statsResponse = await client.getCollectionStatistics({ collection_name: name })
-
-    let dimension = 0
-    for (const field of describeResponse.schema.fields) {
-      // @ts-expect-error - DataType enum comparison with string
-      if (field.data_type === DataType.FloatVector || field.data_type === "FloatVector") {
-        dimension = Number((field.type_params as any[])?.find((p) => p.key === "dim")?.value) || 0
-        break
-      }
-    }
-
-    let documentCount = 0
-    const rowCountStat = (statsResponse.stats as any[])?.find((s) => s.key === "row_count")
-    if (rowCountStat) {
-      documentCount = parseInt(String(rowCountStat.value), 10) || 0
-    }
-
-    return {
-      name,
-      documentCount,
-      dimension,
-      description: describeResponse.schema.description,
-    }
-  }
-
-  async scrollDocuments(
-    collectionName: string,
-    options: ScrollOptions = {}
-  ): Promise<ScrollResponse> {
-    const client = await this.getClient()
-    const offset = options.offset ?? 0
-    const limit = options.limit ?? 100
-    const filterExpression = this.buildMilvusFilterExpression({
-      filter: options.filter,
-      filters: options.filters,
-      filterMode: options.filterMode,
-    })
-
-    const response = await client.query({
-      collection_name: collectionName,
-      filter: filterExpression || "",
-      output_fields: ["id", "content", "vector", "*"],
-      limit,
-      offset,
-    })
-
-    const docs: VectorDocument[] = response.data.map((item: Record<string, unknown>) => ({
-      id: String(item.id),
-      content: (item.content as string) || "",
-      metadata: Object.fromEntries(
-        Object.entries(item).filter(([key]) => !["id", "content", "vector"].includes(key))
-      ),
-      embedding: item.vector as number[] | undefined,
-    }))
-
-    const total = await this.countDocuments(collectionName, {
-      filter: options.filter,
-      filters: options.filters,
-      filterMode: options.filterMode,
-    }).catch(() => docs.length)
-
-    return {
-      documents: docs,
-      total,
-      offset,
-      limit,
-      hasMore: offset + docs.length < total,
-    }
-  }
-
-  async countDocuments(
-    collectionName: string,
-    options?: {
-      filter?: Record<string, unknown>
-      filters?: PayloadFilter[]
-      filterMode?: "and" | "or"
-    }
-  ): Promise<number> {
-    const client = await this.getClient()
-    const filterExpression = this.buildMilvusFilterExpression({
-      filter: options?.filter,
-      filters: options?.filters,
-      filterMode: options?.filterMode,
-    })
-    const response = await client.query({
-      collection_name: collectionName,
-      filter: filterExpression || "",
-      output_fields: ["count(*)"],
-    })
-    return (response.data[0]?.["count(*)"] as number) || 0
-  }
 }
+
+// ============================================================================
+// Pre-Phase C legacy SDK-based cloud store implementations have been deleted.
+// All cloud paths now go through CloudVectorStore → vectorCloudInvoke → Rust.
+// ============================================================================
 
 /**
  * Create a vector store instance based on provider

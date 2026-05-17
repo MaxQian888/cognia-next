@@ -159,7 +159,8 @@ export const vectorCloudInvoke = {
   deleteCollection: (a: CloudArgs, name: string) =>
     invoke<void>("vector_cloud_delete_collection", { ...a, name }),
 
-  listCollections: (a: CloudArgs) => invoke<CollectionWire[]>("vector_cloud_list_collections", a),
+  listCollections: (a: CloudArgs) =>
+    invoke<CollectionWire[]>("vector_cloud_list_collections", { ...a }),
 
   getCollection: (a: CloudArgs, name: string) =>
     invoke<CollectionWire>("vector_cloud_get_collection", { ...a, name }),
@@ -192,7 +193,7 @@ export const vectorCloudInvoke = {
     invoke<number>("vector_cloud_truncate", { ...a, collection }),
 
   // --- Health ---
-  healthCheck: (a: CloudArgs) => invoke<HealthStatus>("vector_cloud_health_check", a),
+  healthCheck: (a: CloudArgs) => invoke<HealthStatus>("vector_cloud_health_check", { ...a }),
 } as const
 
 /** Helper: is the `HealthStatus` value the simple `"healthy"` string? */
