@@ -7,6 +7,7 @@ use tauri::State;
 
 use super::types::{McpServerError, McpServerStatus};
 use super::McpServerState;
+use crate::automation::commands::AutomationState;
 
 /// Start the MCP HTTP server.
 ///
@@ -24,12 +25,21 @@ use super::McpServerState;
 #[tauri::command]
 pub async fn mcp_server_start(
     state: State<'_, McpServerState>,
+    automation: State<'_, AutomationState>,
     port: u16,
     token: String,
     settings_json: String,
     sidecar_path: String,
 ) -> Result<u16, McpServerError> {
-    state.start(port, token, settings_json, sidecar_path).await
+    state
+        .start(
+            port,
+            token,
+            settings_json,
+            sidecar_path,
+            Some(automation.handle.clone()),
+        )
+        .await
 }
 
 /// Stop the MCP HTTP server, draining in-flight requests first.
@@ -45,6 +55,7 @@ pub async fn mcp_server_stop(state: State<'_, McpServerState>) -> Result<(), Mcp
 #[tauri::command]
 pub async fn mcp_server_restart(
     state: State<'_, McpServerState>,
+    automation: State<'_, AutomationState>,
     port: u16,
     token: String,
     settings_json: String,
@@ -52,7 +63,15 @@ pub async fn mcp_server_restart(
 ) -> Result<u16, McpServerError> {
     // Stop is best-effort — if it's not running, that's fine.
     let _ = state.stop();
-    state.start(port, token, settings_json, sidecar_path).await
+    state
+        .start(
+            port,
+            token,
+            settings_json,
+            sidecar_path,
+            Some(automation.handle.clone()),
+        )
+        .await
 }
 
 /// Return the current status of the MCP HTTP server.
@@ -99,6 +118,7 @@ mod tests {
                 String::new(),
                 r#"{"enabled":true,"enabledScopes":[]}"#.to_string(),
                 "/nonexistent/cognia-mcp.js".to_string(),
+                None,
             )
             .await
             .unwrap_err();
@@ -115,6 +135,7 @@ mod tests {
                 "some-token".to_string(),
                 "not json at all".to_string(),
                 "/nonexistent/cognia-mcp.js".to_string(),
+                None,
             )
             .await
             .unwrap_err();
@@ -145,7 +166,7 @@ mod tests {
             let mut inner = state.inner.lock();
             inner.status.running = true;
             inner.status.port = Some(12345);
-            inner.server = Some((handle, Arc::new(sidecar)));
+            inner.server = Some((handle, Arc::new(sidecar), None));
         }
 
         let err = state
@@ -154,6 +175,7 @@ mod tests {
                 "tok".to_string(),
                 r#"{"enabled":true,"enabledScopes":[]}"#.to_string(),
                 "/nonexistent/cognia-mcp.js".to_string(),
+                None,
             )
             .await
             .unwrap_err();

@@ -17,7 +17,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { motion, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 
-import { SwipeRow } from "@/components/mobile/interactions/swipe-row"
+import { SwipeRow } from "@/components/interactions/swipe-row"
 import { TwinDraftCard } from "@/components/mobile/discover/twin-draft-card"
 import { createCharacter } from "@/lib/db/characters"
 import { createSkill } from "@/lib/db/skills"

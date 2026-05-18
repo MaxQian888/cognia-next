@@ -13,8 +13,16 @@ import type {
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { DISCORD_A2UI_CAPABILITY, DISCORD_CAPS } from "./capability"
-import { parseDiscordDispatch, parseDiscordInteraction } from "./parse"
-import { serializeOutboundAsync, serializeDelete, serializeEdit } from "./serialize"
+import { parseDiscordDispatch, parseDiscordInteraction, type DiscordMessage } from "./parse"
+import type { NormalizedInboundEvent } from "@/types/connectors/event"
+import {
+  serializeOutboundAsync,
+  serializeDelete,
+  serializeEdit,
+  serializeReaction,
+  serializeReactionRemoval,
+  serializeFetchHistory,
+} from "./serialize"
 import { sendDiscordVoiceMessage } from "./voice-upload"
 import { startGatewayClient } from "./gateway-client"
 import type { GatewayClient } from "./gateway-client"
@@ -55,7 +63,7 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
   let _gatewayClient: GatewayClient | null = null
 
   async function doRequest(
-    method: "GET" | "POST" | "PATCH" | "DELETE",
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
     path: string,
     body?: unknown
   ): Promise<unknown> {
@@ -232,6 +240,89 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
     await doRequest("POST", `/channels/${channelId}/typing`)
   }
 
+  /**
+   * Push a bot reaction onto a message (ADR-0009 v41 / A2). Mirrors the
+   * Slack adapter's `addReaction(channel, ts, name)` shape so the
+   * connector bus can issue reaction sends without adapter-specific
+   * branches. `emoji` is either a unicode character or Discord's custom
+   * emoji `name:id` form; the serializer URL-encodes it for the
+   * `/reactions/{emoji}/@me` path.
+   */
+  async function addReaction(channelId: string, messageId: string, emoji: string): Promise<void> {
+    const call = serializeReaction(channelId, messageId, emoji)
+    await doRequest(call.method, call.url.replace(DISCORD_API_BASE, ""))
+  }
+
+  /** Retract a bot reaction previously added with `addReaction`. */
+  async function removeReaction(
+    channelId: string,
+    messageId: string,
+    emoji: string
+  ): Promise<void> {
+    const call = serializeReactionRemoval(channelId, messageId, emoji)
+    await doRequest(call.method, call.url.replace(DISCORD_API_BASE, ""))
+  }
+
+  /**
+   * Walk `GET /channels/:id/messages` with `before=cursor` pagination
+   * (ADR-0009 v41 / A2.b). Each returned message is projected through
+   * `parseDiscordDispatch` (via a synthetic MESSAGE_CREATE wrapper) so the
+   * consumer sees identical `NormalizedInboundEvent` shapes to the live
+   * gateway path.
+   *
+   * Bounds:
+   *   - per-page size = 100 (Discord cap)
+   *   - max pages = 50 (safety stop)
+   *   - `opts.before` is forwarded as the starting message-id cursor
+   *   - `opts.max` caps total events yielded.
+   */
+  async function* fetchHistory(
+    conversationKey: string,
+    historyOpts: { before?: string; after?: string; max?: number }
+  ): AsyncGenerator<NormalizedInboundEvent> {
+    // conversationKey shape: "discord:<adapterId>:<channelId>[:<threadId>]"
+    const parts = conversationKey.split(":")
+    const channelId = parts[2]
+    if (!channelId) return
+    const overallCap = Math.max(historyOpts.max ?? 200, 1)
+    const PAGE_SIZE = 100
+    const MAX_PAGES = 50
+
+    let yielded = 0
+    let cursor: string | undefined = historyOpts.before
+    for (let page = 0; page < MAX_PAGES; page++) {
+      if (yielded >= overallCap) return
+      const call = serializeFetchHistory(channelId, {
+        limit: Math.min(PAGE_SIZE, overallCap - yielded),
+        before: cursor,
+        after: historyOpts.after,
+      })
+      const resp = (await doRequest("GET", call.url.replace(DISCORD_API_BASE, ""))) as
+        | DiscordMessage[]
+        | null
+      const messages = resp ?? []
+      if (messages.length === 0) return
+
+      // Discord returns newest-first; iterate in returned order so the
+      // consumer gets recent → older. The pagination cursor is the oldest
+      // message's id for the next (even older) page.
+      for (const msg of messages) {
+        if (yielded >= overallCap) return
+        const event = parseDiscordDispatch(opts.id, selfId, {
+          t: "MESSAGE_CREATE",
+          d: msg,
+        } as unknown as Parameters<typeof parseDiscordDispatch>[2])
+        if (event) {
+          yielded++
+          yield event
+        }
+      }
+      const oldest = messages[messages.length - 1]
+      if (!oldest?.id || oldest.id === cursor) return
+      cursor = oldest.id
+    }
+  }
+
   async function refreshCredentials(): Promise<void> {
     // No-op: botToken is a resolver function called fresh on each request
   }
@@ -255,7 +346,14 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
     edit,
     delete: deleteMessage,
     setTyping,
+    addReaction,
+    removeReaction,
+    fetchHistory,
     refreshCredentials,
     a2uiCapability: () => DISCORD_A2UI_CAPABILITY,
+  } as PlatformAdapter & {
+    addReaction: typeof addReaction
+    removeReaction: typeof removeReaction
+    fetchHistory: typeof fetchHistory
   }
 }

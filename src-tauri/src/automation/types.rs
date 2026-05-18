@@ -144,6 +144,12 @@ pub struct ClickOpts {
     /// force coordinate input — useful for games / custom-drawn surfaces UIA
     /// can't see.
     pub use_native: Option<bool>,
+    /// Number of consecutive clicks (1 = single, 2 = double, 3 = triple).
+    /// When unset, falls back to `double` (true → 2, false/None → 1).
+    /// Backends repeat the click using the OS double-click cadence so
+    /// applications see a real native triple-click rather than three
+    /// independent presses.
+    pub count: Option<u32>,
 }
 
 /// Cross-platform 2D point in screen coordinates.
@@ -453,6 +459,22 @@ mod tests {
         let _back: ClickOpts = serde_json::from_str("{}").unwrap();
         assert!(opts.use_native.is_none());
         let _ = json;
+    }
+
+    #[test]
+    fn click_opts_count_roundtrips() {
+        let opts = ClickOpts {
+            count: Some(3),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&opts).unwrap();
+        assert!(json.contains("\"count\":3"));
+        let back: ClickOpts = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.count, Some(3));
+
+        // Missing field deserializes to None for backward compatibility.
+        let legacy: ClickOpts = serde_json::from_str(r#"{"button":"left"}"#).unwrap();
+        assert!(legacy.count.is_none());
     }
 
     #[test]

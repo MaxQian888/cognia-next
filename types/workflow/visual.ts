@@ -223,6 +223,12 @@ export interface VisualWorkflow {
   tags?: string[]
   isTemplate?: boolean
   isBuiltIn?: boolean
+  /**
+   * Optional complexity hint used by the templates picker to group / filter
+   * built-in examples. Author-supplied; not derived. Templates without a
+   * value fall through to the picker's default bucket.
+   */
+  complexity?: "starter" | "intermediate" | "advanced"
   createdAt: number
   updatedAt: number
   nodes: WorkflowNode[]
@@ -268,6 +274,12 @@ export interface WorkflowNodeData<TParams = Record<string, unknown>> {
   credentialRefs?: Record<string, string>
   /** Whether this node is currently disabled (skipped during runs). */
   disabled?: boolean
+  /**
+   * Provenance: `"ai"` if the node was authored by the workflow-AI
+   * agent (via the `cognia-workflow-ai` plugin), `"user"` for manual
+   * authoring, undefined for nodes that pre-date the field.
+   */
+  authoredBy?: "ai" | "user"
 }
 
 export interface WorkflowEdge {

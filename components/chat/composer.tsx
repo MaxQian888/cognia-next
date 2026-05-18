@@ -1058,6 +1058,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               segments: [{ type: "text", text: trimmed }],
               metadata: { idempotencyKey: crypto.randomUUID() },
             },
+            source: "manual",
           })
           // Insert StoredMessage with outboundJobId
           const now = Date.now()
@@ -1171,6 +1172,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           segments: draft.segments,
           metadata: { idempotencyKey: crypto.randomUUID() },
         },
+        source: "draft-approved",
       })
       await approveDraft(draft.id)
       setPendingDrafts((prev) => prev.filter((d) => d.id !== draft.id))

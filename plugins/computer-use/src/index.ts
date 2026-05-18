@@ -17,10 +17,17 @@
  *   every send when `character.enableComputerUse === true`.
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import type { PluginContext, PluginDefinition, PluginTool } from "@/types/plugin"
 import { defineNativeAnthropicTool } from "@/lib/plugin/sdk"
 import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
+import {
+  dispatchAnthropicAction,
+  type BashAction,
+  type ComputerAction,
+  type TextEditorAction,
+} from "@/lib/automation/anthropic-action-mapper"
+import { pluginComputerUseBash, pluginComputerUseTextEditor } from "@/lib/automation/plugin-tauri"
 
 const COMPUTER_TOOL = defineNativeAnthropicTool({
   id: "computer",
@@ -56,6 +63,190 @@ const TEXT_EDITOR_TOOL = defineNativeAnthropicTool({
 // `useTranslations()` consumer in case future host UI surfaces want to
 // render the same copy.
 const PLUGIN_ID = "cognia-computer-use"
+
+// Tool names the model sees once exposed through the in-process
+// `cognia-plugin-tools` MCP server. The sidecar wrapper prefixes them with
+// `mcp__cognia-plugin-tools__` before they reach the Anthropic API.
+const TOOL_COMPUTER_USE = "computer_use"
+const TOOL_BASH = "bash"
+const TOOL_TEXT_EDITOR = "text_editor"
+
+// JSON Schema for the `computer_use` plugin tool. Mirrors Anthropic's
+// `computer_20251124` input shape: a discriminated union over `action`. We
+// keep snake_case names because the model emits them verbatim and the
+// Rust enum uses serde's snake_case rename.
+const COMPUTER_USE_SCHEMA = {
+  type: "object",
+  required: ["action"],
+  properties: {
+    action: {
+      type: "string",
+      enum: [
+        "screenshot",
+        "left_click",
+        "right_click",
+        "middle_click",
+        "double_click",
+        "triple_click",
+        "mouse_move",
+        "left_click_drag",
+        "left_mouse_down",
+        "left_mouse_up",
+        "scroll",
+        "type",
+        "key",
+        "hold_key",
+        "wait",
+        "cursor_position",
+      ],
+    },
+    coordinate: {
+      type: "array",
+      items: { type: "integer" },
+      minItems: 2,
+      maxItems: 2,
+      description: "[x, y] screen coordinates in pixels.",
+    },
+    start_coordinate: {
+      type: "array",
+      items: { type: "integer" },
+      minItems: 2,
+      maxItems: 2,
+      description: "Drag origin in pixels (left_click_drag only).",
+    },
+    text: {
+      type: "string",
+      description: "Text to type or key chord to send.",
+    },
+    duration: {
+      type: "number",
+      description: "Seconds (fractional allowed). Used by `hold_key` and `wait`.",
+    },
+    scroll_direction: {
+      type: "string",
+      enum: ["up", "down", "left", "right"],
+    },
+    scroll_amount: {
+      type: "integer",
+      minimum: 1,
+      description: "Wheel notches to scroll (1 amount = 120 OS wheel units).",
+    },
+  },
+} as const
+
+const BASH_SCHEMA = {
+  type: "object",
+  required: ["command"],
+  properties: {
+    command: { type: "string", description: "Shell command to execute." },
+    restart: {
+      type: "boolean",
+      description: "If true, restart the bash shell instead of executing a command.",
+    },
+    timeout: {
+      type: "integer",
+      minimum: 1,
+      description: "Optional timeout in seconds.",
+    },
+  },
+} as const
+
+const TEXT_EDITOR_SCHEMA = {
+  type: "object",
+  required: ["action", "path"],
+  properties: {
+    action: {
+      type: "string",
+      enum: ["view", "create", "str_replace", "insert", "undo_edit"],
+    },
+    path: { type: "string", description: "Absolute file path." },
+    file_text: { type: "string", description: "Used by `create`." },
+    old_str: { type: "string", description: "Used by `str_replace`." },
+    new_str: { type: "string", description: "Used by `str_replace` and `insert`." },
+    insert_line: {
+      type: "integer",
+      minimum: 0,
+      description: "Used by `insert` — line number after which to insert.",
+    },
+  },
+} as const
+
+const COMPUTER_USE_DESCRIPTION =
+  "Drive the desktop: take a screenshot; click, double-click, triple-click, drag, " +
+  "or scroll at screen coordinates; press a key chord; hold a key; pause; or read " +
+  "the cursor position. Use action='screenshot' first to see what's on screen, then " +
+  "issue follow-up actions to interact with it. Coordinates are absolute pixels."
+
+const BASH_DESCRIPTION =
+  "Execute a bash command on the local machine and return stdout/stderr/exit-code. " +
+  "Use `restart: true` to reset the shell state."
+
+const TEXT_EDITOR_DESCRIPTION =
+  "View / create / str_replace / insert / undo_edit on a local file. `view` returns " +
+  "the file's full text; `create` writes new content; `str_replace` replaces an " +
+  "exact unique substring; `insert` appends `new_str` after `insert_line`; " +
+  "`undo_edit` reverts the most recent mutating action against `path`."
+
+function buildPluginTools(): PluginTool[] {
+  return [
+    {
+      name: TOOL_COMPUTER_USE,
+      pluginId: PLUGIN_ID,
+      definition: {
+        name: TOOL_COMPUTER_USE,
+        description: COMPUTER_USE_DESCRIPTION,
+        category: "automation",
+        requiresApproval: true,
+        parametersSchema: COMPUTER_USE_SCHEMA as unknown as Record<string, unknown>,
+      },
+      execute: async (args) => {
+        // Surface stays "computerUse" — chat-driven invocations route
+        // through the Anthropic native tool semantics. The Rust permission
+        // gate uses this to pick the right tier.
+        return dispatchAnthropicAction(args as unknown as ComputerAction, {
+          surface: "computerUse",
+          pluginId: PLUGIN_ID,
+        })
+      },
+    },
+    {
+      name: TOOL_BASH,
+      pluginId: PLUGIN_ID,
+      definition: {
+        name: TOOL_BASH,
+        description: BASH_DESCRIPTION,
+        category: "automation",
+        requiresApproval: true,
+        parametersSchema: BASH_SCHEMA as unknown as Record<string, unknown>,
+      },
+      execute: async (args) => {
+        return pluginComputerUseBash(args as unknown as BashAction, {
+          surface: "computerUse",
+          pluginId: PLUGIN_ID,
+        })
+      },
+    },
+    {
+      name: TOOL_TEXT_EDITOR,
+      pluginId: PLUGIN_ID,
+      definition: {
+        name: TOOL_TEXT_EDITOR,
+        description: TEXT_EDITOR_DESCRIPTION,
+        category: "automation",
+        requiresApproval: true,
+        parametersSchema: TEXT_EDITOR_SCHEMA as unknown as Record<string, unknown>,
+      },
+      execute: async (args) => {
+        return pluginComputerUseTextEditor(args as unknown as TextEditorAction, {
+          surface: "computerUse",
+          pluginId: PLUGIN_ID,
+        })
+      },
+    },
+  ]
+}
+
+const PLUGIN_TOOL_NAMES = [TOOL_COMPUTER_USE, TOOL_BASH, TOOL_TEXT_EDITOR] as const
 
 const SLASH_MESSAGES: Record<string, { description: string; body: string }> = {
   en: {
@@ -122,11 +313,31 @@ const definition: PluginDefinition = {
       source: "plugin",
       pluginId: ctx.pluginId,
     })
+
+    // Register the three plugin MCP tools so the chat-side Claude Code SDK
+    // sees `mcp__cognia-plugin-tools__{computer_use,bash,text_editor}`.
+    // The sidecar's plugin-tools bridge (sidecar/builtin-tools/plugin-tools.mjs)
+    // synthesizes the MCP server from `SendOptions.pluginTools`, which is
+    // populated by `buildPluginToolsManifest()` from the plugin store.
+    if (ctx.agent?.registerTool) {
+      for (const tool of buildPluginTools()) {
+        ctx.agent.registerTool(tool)
+      }
+    } else {
+      ctx.logger?.warn(
+        "ctx.agent.registerTool unavailable — computer-use chat path will not surface tools"
+      )
+    }
   },
   deactivate: async (ctx?: PluginContext) => {
     if (ctx?.pluginId) {
       unregisterCommandsByPlugin(ctx.pluginId)
       unregisterPluginI18n(ctx.pluginId)
+      if (ctx.agent?.unregisterTool) {
+        for (const name of PLUGIN_TOOL_NAMES) {
+          ctx.agent.unregisterTool(name)
+        }
+      }
     }
   },
 }

@@ -70,7 +70,7 @@ import { WorkflowNodeComponent } from "./nodes/workflow-node"
 import { EditorToolbar } from "./toolbar"
 import { EditorEmptyState } from "./empty-state"
 import { NodeSearchSidebar, NODE_DRAG_MIME } from "./node-search-sidebar"
-import { InspectorPanel } from "./inspector-panel"
+import { RightSidebar } from "./right-sidebar"
 import { CommandPalette } from "./command-palette"
 import { ShortcutsCheatsheet } from "./shortcuts-cheatsheet"
 import * as ResizablePrimitive from "react-resizable-panels"
@@ -86,6 +86,19 @@ const edgeTypes: EdgeTypes = {
   smart: SmartEdge as unknown as EdgeTypes[string],
 }
 
+// Lifted to module scope so React Flow doesn't see a fresh array identity on
+// every render and re-initialize internal state. (A2)
+const SNAP_GRID: [number, number] = [16, 16]
+const DELETE_KEY_CODE: string[] = ["Backspace", "Delete"]
+const MULTI_SELECTION_KEY_CODE: string[] = ["Shift", "Meta", "Control"]
+const FIT_VIEW_PROPS = false
+const PRO_OPTIONS = { hideAttribution: true } as const
+
+// Node count at which we enable React Flow's viewport-culling. Below this
+// the overhead of measuring + filtering nodes per render outweighs the win;
+// above it, culling is a net positive even on `high` tier. (A1)
+const CULLING_THRESHOLD = 40
+
 interface CanvasInnerProps {
   store: EditorStore
   onRequestRun: () => void
@@ -96,6 +109,12 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const t = useTranslations("workflows.canvasToast")
   const tValidation = useTranslations("workflows.validation")
 
+  // (A3) Structural slice — covers the graph + envelope identity + the
+  // actions that mutate them. Subscribes to nodes/edges array identity
+  // (re-render is unavoidable when these change because React Flow needs
+  // the new lists) but NOT to `runStatusByStepId` / `validationByStepId`
+  // / `lastRunByStepId` — those churn during active runs and are now read
+  // per-node via `useNodeDecoration` (A4).
   const {
     nodes,
     edges,
@@ -103,10 +122,6 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     dirty,
     workflowName,
     workflowId,
-    runStatusByStepId,
-    validationByStepId,
-    isDraggingAny,
-    snapToGrid,
     setNodes,
     setEdges,
     setViewport,
@@ -116,7 +131,6 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     markSaved,
     toWorkflow,
     revalidateAll,
-    setIsDraggingAny,
   } = useStore(
     useShallow((s: EditorState) => ({
       nodes: s.nodes,
@@ -125,10 +139,6 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       dirty: s.dirty,
       workflowName: s.baseWorkflow.name,
       workflowId: s.baseWorkflow.id,
-      runStatusByStepId: s.runStatusByStepId,
-      validationByStepId: s.validationByStepId,
-      isDraggingAny: s.isDraggingAny,
-      snapToGrid: s.snapToGrid,
       setNodes: s.setNodes,
       setEdges: s.setEdges,
       setViewport: s.setViewport,
@@ -138,9 +148,16 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       markSaved: s.markSaved,
       toWorkflow: s.toWorkflow,
       revalidateAll: s.revalidateAll,
-      setIsDraggingAny: s.setIsDraggingAny,
     }))
   )
+
+  // (A3) Interaction slice — small primitives consumed by the canvas
+  // chrome (minimap degrade flag, snap toggle, dragging flag setter).
+  // Split out so toggling these doesn't churn the structural slice.
+  const isDraggingAny = useStore((s) => s.isDraggingAny)
+  const snapToGrid = useStore((s) => s.snapToGrid)
+  const setIsDraggingAny = useStore((s) => s.setIsDraggingAny)
+  const setLastRunByStepId = useStore((s) => s.setLastRunByStepId)
 
   const perfTier = useEffectivePerfTier(useStore)
   const rf = useReactFlow()
@@ -158,31 +175,13 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   // node; runs in parallel with the live bridge above.
   const lastRunByStepId = useLastRunSummaryByStep(workflowId)
 
-  // Merge the live runStatus + validation errors + last-run summary into each
-  // node's `data` so `WorkflowNodeComponent` can render the status ring
-  // without the runtime events plumbing leaking down to each node.
-  const decoratedNodes = useMemo(() => {
-    return nodes.map((n) => {
-      const status = runStatusByStepId[n.id]
-      const validation = validationByStepId[n.id]
-      const lastRun = lastRunByStepId[n.id]
-      if (!status && !validation && !lastRun) return n
-      return {
-        ...n,
-        data: {
-          ...n.data,
-          ...(status ? { runStatus: status } : {}),
-          ...(lastRun ? { lastRun } : {}),
-          ...(validation
-            ? {
-                validationErrorCount: Object.keys(validation.fields).length,
-                validationErrors: validation.summary,
-              }
-            : {}),
-        },
-      }
-    })
-  }, [nodes, runStatusByStepId, validationByStepId, lastRunByStepId])
+  // (A4) Mirror the Dexie-derived `lastRunByStepId` into the editor store
+  // so per-node `useNodeDecoration` can pick it up via fine-grained
+  // subscriptions. Identity comparison inside the action prevents churn
+  // when liveQuery returns an unchanged snapshot.
+  useEffect(() => {
+    setLastRunByStepId(lastRunByStepId)
+  }, [lastRunByStepId, setLastRunByStepId])
 
   const [saving, setSaving] = useState(false)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
@@ -300,22 +299,21 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const drag = useDragSnapshot()
   const dragRectRef = useRef<{ width: number; height: number } | null>(null)
 
-  /* eslint-disable react-hooks/preserve-manual-memoization */
   const dragComputeAndSet = useCallback(
     (dragged: RectLike) => {
-      const map = drag.snapshot.current
-      if (!map) return
-      // Array.from keeps the original Map intact; the result is local to
-      // this rAF tick.
-      const peers: RectLike[] = Array.from(map.values())
-      setAlignmentGuides(computeAlignmentGuides(dragged, peers))
+      // (A6) Reuse the cached AlignmentIndex built lazily by the snapshot
+      // hook. Per-tick cost drops from O(n) (Array.from + scan) to
+      // O(log n + k) per anchor via sorted-axis binary search.
+      const index = drag.getAlignmentIndex()
+      if (!index) return
+      setAlignmentGuides(computeAlignmentGuides(dragged, index))
     },
-    // drag.snapshot is a useRef object (stable identity); the callback reads
-    // .current freshly on each rAF tick. React Compiler can't statically prove
-    // the ref's mutability is safe here, so we disable the auto-memo check.
-    [drag.snapshot]
+    // drag.getAlignmentIndex is a stable callback over a ref; React Compiler
+    // can't statically prove ref-read safety here, so we disable the
+    // auto-memo check.
+    [drag]
   )
-  /* eslint-enable react-hooks/preserve-manual-memoization */
+
   const dragThrottled = useRafThrottle(dragComputeAndSet)
 
   const handleNodeDragStart = useCallback(
@@ -917,7 +915,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
             />
             <ConnectionPointerListener store={useStore} />
             <ReactFlow
-              nodes={decoratedNodes}
+              nodes={nodes}
               edges={edges}
               viewport={viewport}
               onNodesChange={onNodesChange}
@@ -944,16 +942,23 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
                 })
               }}
               onConnectEnd={() => useStore.getState().endConnection()}
-              fitView={false}
+              fitView={FIT_VIEW_PROPS}
               minZoom={0.2}
               maxZoom={2}
               snapToGrid={snapToGrid}
-              snapGrid={[16, 16]}
-              deleteKeyCode={["Backspace", "Delete"]}
-              multiSelectionKeyCode={["Shift", "Meta", "Control"]}
+              snapGrid={SNAP_GRID}
+              deleteKeyCode={DELETE_KEY_CODE}
+              multiSelectionKeyCode={MULTI_SELECTION_KEY_CODE}
               panOnScroll
               selectionOnDrag
-              proOptions={{ hideAttribution: true }}
+              proOptions={PRO_OPTIONS}
+              // (A1) Tier-aware viewport culling: enable when graphs grow
+              // past CULLING_THRESHOLD nodes OR when the user/system chose
+              // a non-`high` tier. Below the threshold on `high`, the
+              // per-render measure+filter cost outweighs the savings.
+              onlyRenderVisibleElements={
+                nodes.length >= CULLING_THRESHOLD || perfTier.effective !== "high"
+              }
             >
               <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
               <Controls position="bottom-left" />
@@ -975,7 +980,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
           </div>
         </ResizablePrimitive.Separator>
         <ResizablePrimitive.Panel defaultSize="24%" minSize="18%" maxSize="40%">
-          <InspectorPanel useStore={store} className="h-full w-full" />
+          <RightSidebar useStore={store} className="h-full w-full" />
         </ResizablePrimitive.Panel>
       </ResizablePrimitive.Group>
       <CommandPalette

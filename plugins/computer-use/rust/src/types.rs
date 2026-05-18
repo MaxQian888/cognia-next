@@ -36,6 +36,7 @@ pub enum ComputerAction {
     HoldKey { text: String, duration: f64 },
     Wait { duration: f64 },
     Zoom { region: [i32; 4] },
+    CursorPosition,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -58,6 +59,16 @@ pub struct ComputerResult {
     pub display_width_px: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_height_px: Option<u32>,
+    /// Populated only by `cursor_position`. Wire shape mirrors Anthropic's
+    /// docs: `{ "x": <i32>, "y": <i32> }`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<CursorPositionPayload>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct CursorPositionPayload {
+    pub x: i32,
+    pub y: i32,
 }
 
 // =============================================================================

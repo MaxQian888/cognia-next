@@ -315,7 +315,7 @@ biometric 守卫由 `hooks/use-biometric-guard.ts:verify()` 暴露，包装"删�
 - **左侧抽屉**（Sheet slide-from-left）：`GuildRail` + `MobileChannelList` —— 桌面侧栏的内容下沉到抽屉里。
 - **底部抽屉**（Sheet slide-from-bottom）：会话动作（设置、角色选择、成员列表、登出）。
 - **Tab Bar**：`components/mobile/shell/mobile-tab-bar.tsx` —— Chat / Inbox / Workflows / Me 四 tab。
-- **手势交互**：`components/mobile/interactions/` —— `LongPress`、`PullToRefresh`、`SwipeRow`，全部用同一套 pointer polyfill。
+- **手势交互**：`components/interactions/` —— `LongPress`、`PullToRefresh`、`SwipeRow`，全部用同一套 pointer polyfill（在移动与桌面之间共享）。
 - **OfflineBanner**：`components/mobile/offline-banner.tsx` 在 `@capacitor/network` 报 `connected: false` 时弹横条。
 
 桌面与移动壳**不**共享 `chat-view.tsx` 之外的组件 —— `ChatPane` 本身平台无关，但容器、抽屉、tab 全独立。Mobile 用 `Sheet`/`Drawer`，桌面用 `SidebarProvider` + 拖拽分割。

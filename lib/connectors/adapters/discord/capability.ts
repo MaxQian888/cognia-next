@@ -13,11 +13,23 @@ import {
 export const DISCORD_CAPS: readonly Capability[] = [
   "delete",
   "edit",
+  // `GET /channels/{channel.id}/messages?limit=N&before=...` — added at
+  // ADR-0009 v41 / A2.b. Cursor-paginated history walk via the adapter
+  // `fetchHistory(conversationKey, opts)` async generator. Each page
+  // returns newest-first; the cursor for the next (older) page is the
+  // oldest message id in the previous response.
+  "history.fetch",
   "send.a2ui",
   "send.file",
   "send.image",
   "send.markdown",
   "send.mention",
+  // `PUT /channels/{channel.id}/messages/{message.id}/reactions/{emoji}/@me`
+  // — see A2 in the IM connector gap-closure plan (ADR-0009 v41). The
+  // Discord REST endpoint operates per-emoji and requires the emoji URI-
+  // encoded (`reactions/%F0%9F%91%8D/@me` for `👍`); the helper takes care
+  // of that so call sites pass the raw unicode character.
+  "send.reaction",
   "send.reply",
   "send.text",
   "send.thread",

@@ -25,6 +25,7 @@ import { OutboundTab } from "./tabs/outbound-tab"
 import { AuditTab } from "./tabs/audit-tab"
 import { ConversationsTab } from "./tabs/conversations-tab"
 import { InboxTab } from "./tabs/inbox-tab"
+import { CapabilityMatrixTab } from "./tabs/capability-matrix-tab"
 
 const CONNECTIONS_TAB_PARAM = "connectionsTab"
 
@@ -35,6 +36,7 @@ export type ConnectionsTabId =
   | "inbox"
   | "outbound"
   | "audit"
+  | "capability"
 
 const TAB_IDS: ConnectionsTabId[] = [
   "overview",
@@ -43,6 +45,7 @@ const TAB_IDS: ConnectionsTabId[] = [
   "inbox",
   "outbound",
   "audit",
+  "capability",
 ]
 
 function isConnectionsTab(value: string | null): value is ConnectionsTabId {
@@ -90,6 +93,7 @@ export function ConnectionsSection() {
           <TabsTrigger value="inbox">{t("tabs.inbox")}</TabsTrigger>
           <TabsTrigger value="outbound">{t("tabs.outbound")}</TabsTrigger>
           <TabsTrigger value="audit">{t("tabs.audit")}</TabsTrigger>
+          <TabsTrigger value="capability">{t("tabs.capability")}</TabsTrigger>
         </TabsList>
         <TabsContent value="overview" className="mt-4">
           <OverviewTab />
@@ -108,6 +112,9 @@ export function ConnectionsSection() {
         </TabsContent>
         <TabsContent value="audit" className="mt-4">
           <AuditTab />
+        </TabsContent>
+        <TabsContent value="capability" className="mt-4">
+          <CapabilityMatrixTab />
         </TabsContent>
       </Tabs>
     </div>

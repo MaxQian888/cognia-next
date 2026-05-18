@@ -6,7 +6,7 @@ describe("SLACK_CAPS", () => {
     expect(Array.isArray(SLACK_CAPS)).toBe(true)
   })
 
-  it("declares the Phase-1 capability set plus send.a2ui (Group 1 addition)", () => {
+  it("declares the Phase-1 capability set plus send.a2ui + typing (A3)", () => {
     const expected = [
       "delete",
       "edit",
@@ -23,6 +23,7 @@ describe("SLACK_CAPS", () => {
       "send.reply",
       "send.text",
       "send.thread",
+      "typing",
     ]
     expect([...SLACK_CAPS].sort()).toEqual([...expected].sort())
   })
@@ -38,8 +39,11 @@ describe("SLACK_CAPS", () => {
     expect([...SLACK_CAPS]).toEqual(sorted)
   })
 
-  it("does not include send.typing (not a native bot API in Phase 1)", () => {
-    expect(SLACK_CAPS).not.toContain("typing")
+  it("includes typing (A3 — assistant.threads.setStatus, gated by assistantAppEnabled)", () => {
+    // ADR-0009 v41 / A3 — capability is advertised; the adapter no-ops at
+    // runtime when the assistantAppEnabled option is off, so non-assistant
+    // bots don't surface a 403.
+    expect(SLACK_CAPS).toContain("typing")
   })
 })
 
@@ -63,9 +67,17 @@ describe("SLACK_A2UI_CAPABILITY", () => {
     expect(SLACK_A2UI_CAPABILITY.Divider).toBe("native")
   })
 
-  it("declares data widgets as fallback (no native Block Kit equivalent)", () => {
+  it("declares data widgets (Chart/Table) as fallback (no native Block Kit equivalent)", () => {
     expect(SLACK_A2UI_CAPABILITY.Chart).toBe("fallback")
     expect(SLACK_A2UI_CAPABILITY.Table).toBe("fallback")
-    expect(SLACK_A2UI_CAPABILITY.Slider).toBe("fallback")
+  })
+
+  it("declares Slider/Tabs/Accordion as simulated (B6 — multi-step stand-ins)", () => {
+    // ADR-0009 v41 / B6 — quantised static_select stand-in for Slider,
+    // header+section+divider per tab for Tabs, toggle button per panel
+    // for Accordion. Capability advertised; mapper integration follows.
+    expect(SLACK_A2UI_CAPABILITY.Slider).toBe("simulated")
+    expect(SLACK_A2UI_CAPABILITY.Tabs).toBe("simulated")
+    expect(SLACK_A2UI_CAPABILITY.Accordion).toBe("simulated")
   })
 })

@@ -478,7 +478,17 @@ export type SDKMessage =
 // ---- Persistence shapes --------------------------------------------------
 
 /** Distinguishes 1:1 character chats from multi-character team chats. */
-export type SessionKind = "direct" | "team"
+/**
+ * Discriminator on `ChatSession` that controls how `resolveSendOptions`
+ * builds the SDK invocation:
+ *   • `"direct"` — single character session (Phase 1 / legacy)
+ *   • `"team"`   — multi-character team session (loads team config)
+ *   • `"workflow-editor"` — chat panel inside the visual workflow editor
+ *     (Phase C, ADR-0026 follow-up). Loads the cognia-workflow-ai plugin
+ *     tools + the four workflow subagents + a system prompt block
+ *     summarising the currently-open workflow.
+ */
+export type SessionKind = "direct" | "team" | "workflow-editor"
 
 export interface ChatSession {
   id: string
@@ -900,6 +910,14 @@ export interface AppSettings {
   providerUIPreferences?: import("@/types/provider/provider").ProviderUIPreferences
   /** Whether the user dismissed the first-time providers onboarding banner. */
   providerOnboardingDismissed?: boolean
+  /**
+   * ISO 8601 timestamp recorded the first time the user dismissed or
+   * completed the desktop first-run onboarding dialog. Set on any exit path
+   * (skip, OAuth success, character pick, tour finish). The trigger
+   * predicate in `lib/onboarding/should-show.ts` treats any non-empty value
+   * as "do not show again" — re-entry happens via Settings only.
+   */
+  onboardingDismissedAt?: string
 
   // ---- Provider routing (P4) ----
   /**
@@ -1357,6 +1375,19 @@ export interface Character {
      * Automation → Permissions.
      */
     requireConsent?: boolean
+    /**
+     * How the chat-side canUseTool modal behaves for the three computer-use
+     * plugin tools (`computer_use` / `bash` / `text_editor`) on this
+     * character. Independent of the Rust permission gate's tier — both
+     * gates evaluate every call.
+     *
+     * - `"always-ask"` (default): every invocation prompts the user.
+     * - `"session-grant"`: the first prompt offers an "always allow this
+     *   session" button that remembers the verdict until the chat closes.
+     * - `"auto"`: chat-side modal is suppressed; the Rust gate alone
+     *   decides. Use sparingly — best paired with `Tier::Whitelist`.
+     */
+    chatConsentMode?: "always-ask" | "session-grant" | "auto"
   }
   createdAt: number
   updatedAt: number

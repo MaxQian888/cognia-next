@@ -244,4 +244,53 @@ describe("parseDiscordDispatch", () => {
       expect(parseDiscordDispatch(ADAPTER_ID, SELF_ID, dispatch)).toBeNull()
     })
   })
+
+  // A2.b — mention_roles parse (ADR-0009 v41).
+  describe("role mentions (mention_roles)", () => {
+    it("emits one mention segment with kind='role' per entry in mention_roles", () => {
+      const dispatch: DiscordDispatch = {
+        t: "MESSAGE_CREATE",
+        op: 0,
+        d: {
+          id: "msg-roles-1",
+          content: "Heads up @here",
+          channel_id: "ch-1",
+          guild_id: "g-1",
+          author: { id: "u-1", username: "alice" },
+          timestamp: "2026-05-18T00:00:00.000Z",
+          attachments: [],
+          mentions: [],
+          mention_roles: ["role-eng", "role-pm"],
+        },
+      } as unknown as DiscordDispatch
+      const event = parseDiscordDispatch(ADAPTER_ID, SELF_ID, dispatch)
+      const roleSegments = event!.segments.filter(
+        (s) => s.type === "mention" && (s as { kind?: string }).kind === "role"
+      )
+      expect(roleSegments).toHaveLength(2)
+      const roleIds = roleSegments.map((s) => (s as { userId: string }).userId).sort()
+      expect(roleIds).toEqual(["role-eng", "role-pm"])
+    })
+
+    it("emits no role mention segments when mention_roles is absent or empty", () => {
+      const dispatch: DiscordDispatch = {
+        t: "MESSAGE_CREATE",
+        op: 0,
+        d: {
+          id: "msg-roles-2",
+          content: "no roles here",
+          channel_id: "ch-1",
+          author: { id: "u-1", username: "alice" },
+          timestamp: "2026-05-18T00:00:00.000Z",
+          attachments: [],
+          mentions: [],
+        },
+      } as unknown as DiscordDispatch
+      const event = parseDiscordDispatch(ADAPTER_ID, SELF_ID, dispatch)
+      const roleSegments = event!.segments.filter(
+        (s) => s.type === "mention" && (s as { kind?: string }).kind === "role"
+      )
+      expect(roleSegments).toHaveLength(0)
+    })
+  })
 })

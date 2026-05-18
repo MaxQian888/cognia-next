@@ -69,7 +69,7 @@ jest.mock("./recent-runs-feed", () => ({
   RecentRunsFeed: () => <div data-testid="recent-runs-stub" />,
 }))
 
-jest.mock("@/components/mobile/interactions/long-press", () => ({
+jest.mock("@/components/interactions/long-press", () => ({
   LongPress: ({
     children,
     onLongPress,

@@ -28,7 +28,7 @@ import {
   MemoizedLogEntry,
   HighlightedText,
   splitByQuery,
-  LEVEL_CONFIG,
+  LEVEL_THEME,
   ALL_LEVELS,
 } from "./log-entry"
 import type { StructuredLogEntry, LogLevel } from "@/lib/logger"
@@ -172,16 +172,17 @@ describe("HighlightedText", () => {
   })
 })
 
-describe("LEVEL_CONFIG / ALL_LEVELS", () => {
-  it("exposes config for every level in ALL_LEVELS", () => {
+describe("LEVEL_THEME / ALL_LEVELS", () => {
+  it("exposes theme for every level in ALL_LEVELS", () => {
     expect(ALL_LEVELS).toEqual(["trace", "debug", "info", "warn", "error", "fatal"])
     for (const level of ALL_LEVELS) {
-      const cfg = LEVEL_CONFIG[level]
-      expect(cfg).toBeTruthy()
-      expect(cfg.icon).toBeDefined()
-      expect(typeof cfg.color).toBe("string")
-      expect(typeof cfg.bgColor).toBe("string")
-      expect(typeof cfg.gutterClass).toBe("string")
+      const theme = LEVEL_THEME[level]
+      expect(theme).toBeTruthy()
+      expect(theme.icon).toBeDefined()
+      expect(typeof theme.iconColor).toBe("string")
+      expect(typeof theme.badgeClass).toBe("string")
+      expect(typeof theme.bgClass).toBe("string")
+      expect(typeof theme.gutterClass).toBe("string")
     }
   })
 })

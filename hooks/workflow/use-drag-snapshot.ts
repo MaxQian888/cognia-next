@@ -15,7 +15,11 @@
  */
 
 import { useCallback, useRef, type MutableRefObject } from "react"
-import type { RectLike } from "@/lib/workflow/editor/alignment-guides"
+import {
+  buildAlignmentIndex,
+  type AlignmentIndex,
+  type RectLike,
+} from "@/lib/workflow/editor/alignment-guides"
 
 /** Defaults that match the unified `WorkflowNodeComponent` styling. */
 export const DEFAULT_NODE_WIDTH = 240
@@ -31,8 +35,20 @@ export interface DragSnapshotSourceNode {
 
 export interface DragSnapshotHandle {
   snapshot: MutableRefObject<Map<string, RectLike> | null>
+  /**
+   * Cached alignment index for the current drag. Built lazily on first
+   * access via `getAlignmentIndex()`; null outside an active drag. Cached
+   * so the per-rAF call to `computeAlignmentGuides` pays O(log n + k) per
+   * anchor instead of rebuilding the sorted-axis index every frame.
+   */
+  alignmentIndex: MutableRefObject<AlignmentIndex | null>
   capture: (nodes: ReadonlyArray<DragSnapshotSourceNode>, excludeId?: string) => void
   release: () => void
+  /**
+   * Returns the cached `AlignmentIndex` for the current drag, building
+   * it on first call. Returns `null` if no drag is active.
+   */
+  getAlignmentIndex: () => AlignmentIndex | null
 }
 
 function pickWidth(n: DragSnapshotSourceNode): number {
@@ -45,6 +61,7 @@ function pickHeight(n: DragSnapshotSourceNode): number {
 
 export function useDragSnapshot(): DragSnapshotHandle {
   const snapshot = useRef<Map<string, RectLike> | null>(null)
+  const alignmentIndex = useRef<AlignmentIndex | null>(null)
 
   const capture = useCallback(
     (nodes: ReadonlyArray<DragSnapshotSourceNode>, excludeId?: string) => {
@@ -60,13 +77,26 @@ export function useDragSnapshot(): DragSnapshotHandle {
         })
       }
       snapshot.current = map
+      // Invalidate the cached alignment index; it'll be rebuilt lazily on
+      // the first dragComputeAndSet tick.
+      alignmentIndex.current = null
     },
     []
   )
 
   const release = useCallback(() => {
     snapshot.current = null
+    alignmentIndex.current = null
   }, [])
 
-  return { snapshot, capture, release }
+  const getAlignmentIndex = useCallback((): AlignmentIndex | null => {
+    if (alignmentIndex.current) return alignmentIndex.current
+    const map = snapshot.current
+    if (!map) return null
+    const idx = buildAlignmentIndex(Array.from(map.values()))
+    alignmentIndex.current = idx
+    return idx
+  }, [])
+
+  return { snapshot, alignmentIndex, capture, release, getAlignmentIndex }
 }

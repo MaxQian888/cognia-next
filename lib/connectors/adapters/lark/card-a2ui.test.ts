@@ -84,6 +84,62 @@ describe("buildLarkA2UICard", () => {
     expect(tags).toContain("picker_date")
   })
 
+  // B4 — simulated Checkbox stand-in (ADR-0009 v41).
+  it("renders Checkbox as a two-option select_static (simulated tier)", async () => {
+    const surface: A2UISegmentContent = {
+      components: {
+        root: { id: "root", component: "Column", children: ["chk"] },
+        chk: { id: "chk", component: "Checkbox", label: "I agree", value: false, action: "agree" },
+      },
+      dataModel: {},
+      rootId: "root",
+    }
+    const body = await buildLarkA2UICard(baseInput(surface))
+    const parsed = JSON.parse(body.content) as {
+      elements: Array<{
+        tag: string
+        actions?: Array<{
+          tag: string
+          options?: Array<{ value: string; text: { content: string } }>
+          initial_option?: string
+          value?: { simulatedCheckbox?: boolean }
+        }>
+      }>
+    }
+    const selects = parsed.elements
+      .flatMap((e) => e.actions ?? [])
+      .filter((a) => a.tag === "select_static")
+    expect(selects).toHaveLength(1)
+    const sel = selects[0]
+    expect(sel.options?.map((o) => o.value).sort()).toEqual(["false", "true"])
+    expect(sel.initial_option).toBe("false")
+    expect(sel.value?.simulatedCheckbox).toBe(true)
+    // Each option's label embeds the field name so the trigger surface
+    // tells the user what's being checked.
+    expect(sel.options?.[0].text.content).toContain("I agree")
+  })
+
+  it("renders Checkbox with initial_option=true when value is truthy", async () => {
+    const surface: A2UISegmentContent = {
+      components: {
+        root: { id: "root", component: "Column", children: ["chk"] },
+        chk: { id: "chk", component: "Checkbox", label: "Subscribe", value: true },
+      },
+      dataModel: {},
+      rootId: "root",
+    }
+    const body = await buildLarkA2UICard(baseInput(surface))
+    const parsed = JSON.parse(body.content) as {
+      elements: Array<{
+        actions?: Array<{ tag: string; initial_option?: string }>
+      }>
+    }
+    const sel = parsed.elements
+      .flatMap((e) => e.actions ?? [])
+      .find((a) => a.tag === "select_static")
+    expect(sel?.initial_option).toBe("true")
+  })
+
   it("renders TextField / TextArea as input elements with appropriate rows", async () => {
     const surface: A2UISegmentContent = {
       components: {
@@ -176,6 +232,61 @@ describe("parseLarkInteractiveCallback", () => {
     expect(cb!.componentId).toBe("b1")
     expect(cb!.conversationKey).toBe("lark:adp_lk:oc_chat")
     expect(cb!.user.remoteUserId).toBe("ou_user1")
+  })
+
+  // B4 — when the mapper marks a select_static value with
+  // simulatedCheckbox:true, the parser lifts it back into a real
+  // checkbox event so the bridge doesn't need to know about Lark's
+  // stand-in encoding.
+  it("simulated checkbox select_static lifts to actionType=checkbox + boolean value", () => {
+    const envelope: LarkEventEnvelope = {
+      schema: "2.0",
+      header: {
+        event_id: "evt_chk",
+        event_type: "im.interactive_message.action_triggered_v1",
+      },
+      event: {
+        operator: { open_id: "ou_user1" },
+        open_chat_id: "oc_chat",
+        action: {
+          tag: "select_static",
+          value: {
+            actionId: "a2ui:sfc:chk:agree",
+            surfaceId: "sfc",
+            componentId: "chk",
+            simulatedCheckbox: true,
+          },
+          option: "true",
+        },
+      } as unknown as LarkEventEnvelope["event"],
+    }
+    const cb = parseLarkInteractiveCallback("adp_lk", "BOT", envelope)
+    expect(cb!.actionType).toBe("checkbox")
+    expect(cb!.value).toBe("true")
+  })
+
+  it("simulated checkbox returns 'false' when the selected option is anything other than 'true'", () => {
+    const envelope: LarkEventEnvelope = {
+      schema: "2.0",
+      header: { event_id: "evt_chk_2", event_type: "im.interactive_message.action_triggered_v1" },
+      event: {
+        operator: { open_id: "ou_user1" },
+        open_chat_id: "oc_chat",
+        action: {
+          tag: "select_static",
+          value: {
+            actionId: "a2ui:sfc:chk:agree",
+            surfaceId: "sfc",
+            componentId: "chk",
+            simulatedCheckbox: true,
+          },
+          option: "false",
+        },
+      } as unknown as LarkEventEnvelope["event"],
+    }
+    const cb = parseLarkInteractiveCallback("adp_lk", "BOT", envelope)
+    expect(cb!.actionType).toBe("checkbox")
+    expect(cb!.value).toBe("false")
   })
 
   it("select_static produces actionType=select with option as value", () => {

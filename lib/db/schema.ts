@@ -1143,6 +1143,76 @@ export class CogniaDB extends Dexie {
       }
       await seedTrustedPublishers(tx as unknown as Parameters<typeof seedTrustedPublishers>[0])
     })
+
+    // v40 — Computer Use chat-side dispatch completeness (ADR-0020 addendum
+    //   2026-05-18). Two additive fields:
+    //     • `Character.computerUseSettings.chatConsentMode` — controls the
+    //       chat-side canUseTool modal cadence ("always-ask" | "session-grant"
+    //       | "auto"). Defaults to "always-ask" when unset.
+    //     • `ClickOpts.count` — number of consecutive clicks (1/2/3). Used
+    //       by Anthropic `triple_click` actions. Backwards-compatible — the
+    //       existing `double` field still wins when `count` is unset.
+    //   No store-shape changes; both fields are optional on existing rows.
+    this.version(40).stores({})
+
+    // v41 — IM connector complete gap closure (ADR-0009 v41, im-a2ui-warm-
+    //   eclipse plan). One migration bundles five additive changes; no
+    //   table is dropped, no column is renamed, no row is rewritten beyond
+    //   the connectorCallbackBindings `kind` backfill and the
+    //   outboundQueue `source` backfill.
+    //
+    //   • `connectorCallbackBindings` gains a `kind` discriminator
+    //     ("callback_query" | "force_reply" | "modal_open" | "block_action")
+    //     so the bus can route inbound platform callbacks to the right
+    //     correlation path. Adds `kind` as a non-compound index so the
+    //     LRU prune + maintenance UIs can do per-kind filters. Rows
+    //     persisted before v41 backfill to `"callback_query"` (the only
+    //     case the v38 schema supported).
+    //
+    //   • `outboundQueue.source` (enum: "ai-run" | "manual" | "workflow" |
+    //     "draft-approved") + optional `sourceWorkflow` triple — captures
+    //     job provenance so the inbox UI can render a workflow badge and
+    //     so audit log queries can drill down on origin. Rows persisted
+    //     before v41 backfill to `"ai-run"` because that's the only path
+    //     that existed when they were created. No index change (filter
+    //     column).
+    //
+    //   • `conversationOverrides` gains `providerOverride?: string` +
+    //     `modelOverride?: string`. Both are filter-only columns on this
+    //     small per-conversation table, so no index change is needed.
+    //
+    //   • `adapterInstances` gains `implMetadata?: {impl, version,
+    //     features}` — populated by adapter startup probes (OneBot
+    //     `get_version_info`, Slack `auth.test`, etc.). No index change.
+    //
+    //   • `automationAuditLog.conversationKey?: string` — so the inbox's
+    //     computer-use HITL strip can filter to the conversation that
+    //     drove the action. Index `conversationKey` so the filter is
+    //     selective.
+    this.version(41)
+      .stores({
+        connectorCallbackBindings:
+          "&id, [adapterId+actionId], adapterId, kind, surfaceId, conversationKey, createdAt, expiresAt",
+        automationAuditLog: "&id, ts, surface, decision, command, conversationKey",
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table("connectorCallbackBindings")
+          .toCollection()
+          .modify((row: Record<string, unknown>) => {
+            if (typeof row.kind !== "string") {
+              row.kind = "callback_query"
+            }
+          })
+        await tx
+          .table("outboundQueue")
+          .toCollection()
+          .modify((row: Record<string, unknown>) => {
+            if (typeof row.source !== "string") {
+              row.source = "ai-run"
+            }
+          })
+      })
   }
 
   sessionState!: Table<SessionStateRow, string>
@@ -1223,6 +1293,11 @@ export interface SessionStateRow {
  * One row per automation Tauri command call. Mirror of
  * `src-tauri/src/automation/audit.rs:AuditEntry` (camelCase wire format).
  * Written by the `automation:event` subscriber in `lib/automation/audit.ts`.
+ *
+ * `conversationKey` was added at schema v41 so the inbox can surface the
+ * computer-use HITL request/decision timeline scoped to the conversation
+ * that drove the action (see ADR-0009 v41 / Category E3 in the IM
+ * connector gap-closure plan). Existing rows have the field undefined.
  */
 export interface AutomationAuditLogRow {
   id: string
@@ -1236,6 +1311,15 @@ export interface AutomationAuditLogRow {
   reason: string | null
   durationMs: number
   error: string | null
+  /**
+   * Connector conversation key the computer-use action was initiated
+   * from, when known. Populated when the surface is `"computerUse"` and
+   * the chat session has a `platformBinding`. Used by
+   * `components/inbox/computer-use-events-strip.tsx` to filter by
+   * conversation. Optional because workflow / MCP / plugin invocations
+   * may not have a conversation context.
+   */
+  conversationKey?: string
 }
 
 /** Registry entry for a plugin's declared Dexie tables. Written by applyPluginTables. */

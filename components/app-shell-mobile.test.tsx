@@ -151,14 +151,14 @@ jest.mock("@/components/chat/character-picker", () => ({
   CharacterPicker: ({ open }: { open: boolean }) =>
     open ? <div data-testid="char-picker" /> : null,
 }))
-jest.mock("@/components/desktop/onboarding-dialog", () => ({
+jest.mock("@/components/shell/onboarding-dialog", () => ({
   OnboardingDialog: ({ open }: { open: boolean }) =>
     open ? <div data-testid="onboarding" /> : null,
 }))
 jest.mock("@/components/chat/tool-approval-dialog", () => ({
   ToolApprovalDialog: () => null,
 }))
-jest.mock("@/components/desktop/guild-rail", () => ({
+jest.mock("@/components/shell/guild-rail", () => ({
   GuildRail: ({
     onCreateTeam,
     onOpenSettings,
@@ -196,7 +196,7 @@ jest.mock("@/components/mobile/shell/character-header", () => ({
     fallbackTitle: string
   }) => <div data-testid="mobile-active-title">{subject?.name ?? fallbackTitle}</div>,
 }))
-jest.mock("@/components/desktop/member-list", () => ({
+jest.mock("@/components/shell/member-list", () => ({
   MemberList: () => <div data-testid="member-list" />,
 }))
 

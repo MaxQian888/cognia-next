@@ -150,6 +150,13 @@ export async function truncateActionId(
  * `conversationKey` is optional but recommended — it lets the bus scope
  * the assistant's next turn to the right ChatSession without re-deriving
  * from the callback payload.
+ *
+ * `kind` was added at schema v41 so the bus can distinguish ordinary
+ * button/select callbacks (Slack `block_actions`, Discord
+ * `MESSAGE_COMPONENT`, Lark `action_triggered_v1`, Telegram
+ * `callback_query`) from ForceReply replies (Telegram) and Discord
+ * modal-open buttons. Defaults to `"callback_query"` so callers in the
+ * v18-v40 code path don't need to change.
  */
 export async function recordCallbackBinding(input: {
   adapterId: string
@@ -158,11 +165,14 @@ export async function recordCallbackBinding(input: {
   componentId?: string
   conversationKey?: string
   expiresAt?: number
+  /** Defaults to `"callback_query"` — see `ConnectorCallbackBindingKind`. */
+  kind?: ConnectorCallbackBindingRow["kind"]
 }): Promise<void> {
   const row: ConnectorCallbackBindingRow = {
     id: `${input.adapterId}:${input.actionId}`,
     adapterId: input.adapterId,
     actionId: input.actionId,
+    kind: input.kind ?? "callback_query",
     surfaceId: input.surfaceId,
     componentId: input.componentId,
     conversationKey: input.conversationKey,

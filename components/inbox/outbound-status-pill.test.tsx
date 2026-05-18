@@ -36,6 +36,7 @@ function makeJob(id: string, status: OutboundJobRow["status"]): OutboundJobRow {
     createdAt: Date.now(),
     nextAttemptAt: Date.now(),
     idempotencyKey: "idem_1",
+    source: "ai-run",
   }
 }
 
@@ -131,5 +132,48 @@ describe("OutboundStatusPill", () => {
     rerender(<OutboundStatusPill jobId="jd" />)
     // Dead-lettered renders only in the trigger (TooltipContent shows the lastError or unknownError fallback).
     expect(screen.getAllByText("Dead-lettered").length).toBeGreaterThanOrEqual(1)
+  })
+
+  // ADR-0009 v41 / E2 — provenance badge next to the status pill.
+  describe("OutboundSourceBadge (v41 / E2)", () => {
+    it("renders nothing for the dominant source=ai-run path", () => {
+      mockJob = { ...makeJob("ar", "sent"), source: "ai-run" }
+      render(<OutboundStatusPill jobId="ar" />)
+      expect(screen.queryByTestId("outbound-source-badge-ar")).not.toBeInTheDocument()
+    })
+
+    it("renders Workflow badge with click-to-jump link when source=workflow", () => {
+      mockJob = {
+        ...makeJob("wf", "sent"),
+        source: "workflow",
+        sourceWorkflow: { workflowId: "wf_42", runId: "run_7", nodeId: "n_send_3" },
+      }
+      render(<OutboundStatusPill jobId="wf" />)
+      const badge = screen.getByTestId("outbound-source-badge-wf")
+      expect(badge).toHaveAttribute("data-source", "workflow")
+      expect(badge.tagName).toBe("A")
+      expect(badge).toHaveAttribute("href", "/workflows/wf_42/runs/run_7#node-n_send_3")
+    })
+
+    it("renders Manual badge when source=manual", () => {
+      mockJob = { ...makeJob("mn", "sent"), source: "manual" }
+      render(<OutboundStatusPill jobId="mn" />)
+      const badge = screen.getByTestId("outbound-source-badge-mn")
+      expect(badge).toHaveAttribute("data-source", "manual")
+    })
+
+    it("renders Draft-approved badge when source=draft-approved", () => {
+      mockJob = { ...makeJob("dr", "sent"), source: "draft-approved" }
+      render(<OutboundStatusPill jobId="dr" />)
+      const badge = screen.getByTestId("outbound-source-badge-dr")
+      expect(badge).toHaveAttribute("data-source", "draft-approved")
+    })
+
+    it("omits the workflow badge when source=workflow but sourceWorkflow is missing", () => {
+      mockJob = { ...makeJob("wfo", "sent"), source: "workflow" }
+      render(<OutboundStatusPill jobId="wfo" />)
+      // Missing sourceWorkflow → cannot render a click-to-jump → render nothing.
+      expect(screen.queryByTestId("outbound-source-badge-wfo")).not.toBeInTheDocument()
+    })
   })
 })

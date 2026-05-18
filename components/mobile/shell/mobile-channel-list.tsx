@@ -17,8 +17,8 @@ import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 import type { Character, ChatSession } from "@/lib/claude/types"
 
-import { SwipeRow } from "../interactions/swipe-row"
-import { LongPress } from "../interactions/long-press"
+import { SwipeRow } from "@/components/interactions/swipe-row"
+import { LongPress } from "@/components/interactions/long-press"
 
 export interface MobileChannelListProps {
   sessions: ChatSession[]

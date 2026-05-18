@@ -121,11 +121,41 @@ export interface ConnectorCallbackEvent {
 }
 
 /**
+ * Discriminator on `ConnectorCallbackBindingRow.kind` — added at schema v41
+ * so the binding table can host more than just the v38 callback-query case.
+ *
+ *   - `"callback_query"` — Slack `block_actions`, Discord `MESSAGE_COMPONENT`
+ *                          INTERACTION_CREATE, Lark `action_triggered_v1`,
+ *                          Telegram `callback_query`. **Default for rows
+ *                          persisted before v41.**
+ *   - `"force_reply"`    — Telegram ForceReply correlation: the row is
+ *                          created when the assistant sends a message with
+ *                          `reply_markup.force_reply`; the parser matches the
+ *                          inbound `reply_to_message.message_id` against
+ *                          stored bindings to recover the surface + component
+ *                          that asked for input.
+ *   - `"modal_open"`     — Discord button → modal double-hop: the row is
+ *                          created when the assistant sends a button labelled
+ *                          "Fill form"; on `MESSAGE_COMPONENT` the parser
+ *                          looks up the binding to know which TextInput /
+ *                          StringSelect to wrap into a modal response.
+ *   - `"block_action"`   — generic platform interaction that's neither a
+ *                          callback_query nor a form (e.g., Slack
+ *                          `external_select` dynamic option requests).
+ */
+export type ConnectorCallbackBindingKind =
+  | "callback_query"
+  | "force_reply"
+  | "modal_open"
+  | "block_action"
+
+/**
  * Persisted association between an outbound A2UI surface and the
  * platform-specific identifiers we need to route inbound callbacks back
  * to it.
  *
- * Stored in Dexie table `connectorCallbackBindings` added at schema v38.
+ * Stored in Dexie table `connectorCallbackBindings` added at schema v38;
+ * the `kind` discriminator was added at v41.
  * One row per (adapter, surface, component, action) combination written
  * by the A2UI mapper at outbound time; read by the parser at callback
  * arrival.
@@ -134,6 +164,9 @@ export interface ConnectorCallbackEvent {
  *   - Lark:     `actionId` = the `value.tag` we baked into the card.
  *   - Telegram: `actionId` = an opaque short id (Telegram caps
  *                 callback_data at 64 bytes, so we keep a lookup row).
+ *                 For ForceReply bindings the `actionId` is the platform
+ *                 message_id of the sent prompt — that's what the parser
+ *                 matches against inbound `reply_to_message.message_id`.
  *   - Discord:  `actionId` = the `custom_id` we generated.
  */
 export interface ConnectorCallbackBindingRow {
@@ -142,6 +175,13 @@ export interface ConnectorCallbackBindingRow {
   adapterId: string
   /** Platform-side callback identifier. */
   actionId: string
+  /**
+   * Discriminator so the bus can route inbound platform events to the
+   * right correlation path (callback button vs. ForceReply vs. modal-open
+   * vs. generic block action). Rows persisted before v41 backfill to
+   * `"callback_query"`.
+   */
+  kind: ConnectorCallbackBindingKind
   surfaceId: string
   componentId?: string
   conversationKey?: string

@@ -102,16 +102,27 @@ export type A2UIComponentKind = (typeof A2UI_COMPONENT_KINDS)[number]
 /**
  * How an adapter intends to handle a specific A2UI component kind.
  *
- *   - `native`      — the platform renders the component natively (Slack
- *                     button block, Lark card datepicker, etc.).
+ *   - `native`      — the platform renders the component natively and the
+ *                     interaction is synchronous from the user's point of
+ *                     view (Slack button block, Lark card datepicker, etc.).
+ *   - `simulated`   — the platform CAN deliver the interaction but only
+ *                     through a multi-step UX (Telegram ForceReply for
+ *                     TextField, Discord modal double-hop for forms, NapCat
+ *                     QQ markdown card for OneBot buttons). The component
+ *                     is functional, but the assistant must not assume a
+ *                     synchronous reply on the same turn — the user might
+ *                     dismiss the modal, take time to type, etc.
  *   - `fallback`    — the platform cannot render it but the adapter will
  *                     project it into `plainTextMirror` so semantics survive.
  *   - `unsupported` — the platform cannot render and the adapter cannot
  *                     fallback (e.g., interactive Charts on OneBot). The
  *                     assistant SHOULD NOT generate this kind on this
  *                     platform; the build-options capability prompt warns it.
+ *
+ * Worst-case ordering for `CapabilityEvaluation.worstCase`:
+ *   `unsupported > fallback > simulated > native`.
  */
-export type A2UIComponentSupport = "native" | "fallback" | "unsupported"
+export type A2UIComponentSupport = "native" | "simulated" | "fallback" | "unsupported"
 
 export type A2UICapabilityMatrix = Readonly<Record<A2UIComponentKind, A2UIComponentSupport>>
 

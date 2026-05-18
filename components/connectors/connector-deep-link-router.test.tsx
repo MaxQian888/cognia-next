@@ -182,7 +182,9 @@ describe("ConnectorDeepLinkRouter", () => {
       "cognia://connector/oauth/slack?code=exchange-code&state=valid-state",
     ])
     await waitFor(() => {
-      expect(fakeHandler).toHaveBeenCalledWith("exchange-code")
+      // ADR-0009 v41 / D2 — handler signature gained `state` so platform
+      // handlers (Lark first) can decode an adapterId out of it.
+      expect(fakeHandler).toHaveBeenCalledWith("exchange-code", "valid-state")
       expect(mockToastSuccess).toHaveBeenCalledWith("slack connected successfully")
     })
   })

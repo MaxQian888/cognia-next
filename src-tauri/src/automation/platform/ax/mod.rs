@@ -188,6 +188,12 @@ impl AutomationBackend for AxBackend {
         };
         e.button(b, dir).map_err(input_err("mouse_button"))
     }
+
+    fn cursor_position(&self) -> Result<Point> {
+        let e = enigo_new()?;
+        let (x, y) = e.location().map_err(input_err("cursor_position"))?;
+        Ok(Point { x, y })
+    }
 }
 
 fn enigo_new() -> Result<Enigo> {

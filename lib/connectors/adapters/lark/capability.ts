@@ -40,7 +40,8 @@ export const LARK_CAPS: readonly Capability[] = [
 ] as const
 
 /**
- * A2UI capability matrix for the Lark adapter (G3.4).
+ * A2UI capability matrix for the Lark adapter (G3.4, extended at ADR-0009
+ * v41 / B4 for Checkbox simulated tier).
  *
  * Native rendering (via `buildLarkA2UICard`):
  *   - Text / Link / Divider / Card (header) / Alert → div+lark_md / hr.
@@ -51,8 +52,19 @@ export const LARK_CAPS: readonly Capability[] = [
  *   - TextField / TextArea → `input` element (rows=4 for TextArea).
  *   - Row / Column / List → layout-only.
  *
+ * Simulated (functional but multi-step UX, or stand-in component):
+ *   - Checkbox → two-option `select_static` ("✓" / "✗") labelled with
+ *     the field name. Lark interactive cards 2.0 have no native single-
+ *     checkbox element, so the mapper renders the component as a
+ *     `select_static` with two options + `simulatedCheckbox: true` on
+ *     the wire value. `parseLarkInteractiveCallback` lifts the event
+ *     back into `actionType: "checkbox"` with a canonical "true" /
+ *     "false" string so the A2UI bridge sees the same shape as on
+ *     platforms with native checkbox support. The user-visible UX is
+ *     "tap the dropdown, pick ✓ or ✗" — single round-trip but two
+ *     visible steps, hence simulated.
+ *
  * Fallback (renders via plain text mirror):
- *   - Checkbox (Lark cards have no single-checkbox element).
  *   - Slider / Table / Chart / DataExplorer / Pagination.
  *   - Tabs / Accordion / Dialog / Drawer / Sheet / Sidebar / Collapsible.
  */
@@ -73,4 +85,5 @@ export const LARK_A2UI_CAPABILITY: A2UICapabilityMatrix = buildA2UICapabilityMat
   Row: "native",
   Column: "native",
   List: "native",
+  Checkbox: "simulated",
 })

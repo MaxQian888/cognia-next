@@ -315,6 +315,11 @@ pub async fn plugin_computer_use_execute(
                 tokio::time::sleep(Duration::from_secs_f64(duration_secs)).await;
                 Ok(build_computer_result(None, None))
             }
+
+            super::translator::TranslatedAction::CursorPosition => {
+                let point = handle.cursor_position().await.map_err(|e| format!("{e}"))?;
+                Ok(super::translator::build_cursor_position_result(point))
+            }
         }
     })
     .await

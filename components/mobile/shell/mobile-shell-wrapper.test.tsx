@@ -36,7 +36,11 @@ jest.mock("@/lib/capacitor/haptics", () => ({
 }))
 
 jest.mock("@/components/mobile/offline-banner", () => ({
-  OfflineBanner: () => null,
+  OfflineBanner: () => <div data-testid="offline-banner-stub" />,
+}))
+
+jest.mock("@/components/mobile/mobile-outbound-runner-provider", () => ({
+  MobileOutboundRunnerProvider: () => <div data-testid="outbound-runner-stub" />,
 }))
 
 const inboundUnreadRef = { value: 0 }
@@ -125,6 +129,41 @@ describe("<MobileShellWrapper />", () => {
       </MobileShellWrapper>
     )
     expect(screen.queryByTestId("mobile-tab-bar")).not.toBeInTheDocument()
+  })
+
+  it("desktop pass-through: omits OfflineBanner and outbound runner on tauri", () => {
+    platformMock.mockReturnValue("tauri")
+    render(
+      <MobileShellWrapper>
+        <div data-testid="child">desktop</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.getByTestId("child")).toBeInTheDocument()
+    expect(screen.queryByTestId("offline-banner-stub")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("outbound-runner-stub")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("mobile-tab-bar")).not.toBeInTheDocument()
+  })
+
+  it("desktop pass-through: omits OfflineBanner and outbound runner on web", () => {
+    platformMock.mockReturnValue("web")
+    render(
+      <MobileShellWrapper>
+        <div data-testid="child">web</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.queryByTestId("offline-banner-stub")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("outbound-runner-stub")).not.toBeInTheDocument()
+  })
+
+  it("mobile: mounts OfflineBanner and outbound runner", () => {
+    platformMock.mockReturnValue("mobile")
+    render(
+      <MobileShellWrapper>
+        <div>x</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.getByTestId("offline-banner-stub")).toBeInTheDocument()
+    expect(screen.getByTestId("outbound-runner-stub")).toBeInTheDocument()
   })
 
   it("forwards badges to the tab bar", () => {

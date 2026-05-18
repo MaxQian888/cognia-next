@@ -41,6 +41,7 @@ import {
   type ClipboardEnvelope,
 } from "./clipboard"
 import type { PerformanceTier } from "./performance-tier"
+import type { LastRunSummary } from "@/lib/workflow/runtime/last-run-summary"
 
 export interface EditorStateSnapshot {
   nodes: RFWorkflowNode[]
@@ -92,6 +93,13 @@ export interface EditorState extends EditorStateSnapshot {
    * change by `revalidateNode` and on save by `revalidateAll`.
    */
   validationByStepId: Record<string, NodeValidationResult>
+  /**
+   * Aggregated outcome of the most recent terminal event for each step.
+   * Mirrored into the store by the canvas (which subscribes via Dexie
+   * liveQuery `useLastRunSummaryByStep`) so that `useNodeDecoration` can
+   * read per-node decorations with O(1) fine-grained subscriptions. (A4)
+   */
+  lastRunByStepId: Record<string, LastRunSummary>
 
   // ── editor preferences (ephemeral; not undoable) ──────────────────────────
   /**
@@ -258,6 +266,14 @@ export interface EditorState extends EditorStateSnapshot {
   /** Replace the whole validation map (used by `revalidateAll`). */
   setValidationBatch: (entries: Record<string, NodeValidationResult>) => void
   clearValidation: () => void
+  /**
+   * Replace the entire last-run-summary map. The canvas calls this from a
+   * `useEffect` driven by the `useLastRunSummaryByStep` Dexie liveQuery.
+   * Identity is referentially compared before write so unrelated runs do
+   * not churn subscribers.
+   */
+  setLastRunByStepId: (entries: Record<string, LastRunSummary>) => void
+  clearLastRun: () => void
   /** Run zod validation for one node and write the result to the store. */
   revalidateNode: (id: string) => NodeValidationResult
   /** Run zod validation for every node and replace `validationByStepId`. */
@@ -321,6 +337,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         savedAt: initial.updatedAt > 0 ? initial.updatedAt : null,
         runStatusByStepId: {},
         validationByStepId: {},
+        lastRunByStepId: {},
         performanceTier: "auto",
         isDraggingAny: false,
         snapToGrid: true,
@@ -413,6 +430,9 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
               notes: overrides?.notes,
               credentialRefs: overrides?.credentialRefs,
               disabled: overrides?.disabled,
+              // Provenance (Phase E): "ai" when created via the
+              // workflow-ai plugin tools, "user" / undefined otherwise.
+              authoredBy: overrides?.authoredBy,
               kind,
               typeVersion: 1,
             },
@@ -613,6 +633,14 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         },
         setValidationBatch: (entries) => set({ validationByStepId: { ...entries } }),
         clearValidation: () => set({ validationByStepId: {} }),
+        setLastRunByStepId: (entries) => {
+          // Skip the write entirely when the reference matches — Dexie
+          // liveQuery hands us a fresh object only when underlying rows
+          // actually changed.
+          if (get().lastRunByStepId === entries) return
+          set({ lastRunByStepId: entries })
+        },
+        clearLastRun: () => set({ lastRunByStepId: {} }),
         revalidateNode: (id) => {
           const node = get().nodes.find((n) => n.id === id)
           if (!node) return { fields: {}, summary: [], hasErrors: false }

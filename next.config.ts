@@ -1,5 +1,4 @@
 import createNextIntlPlugin from "next-intl/plugin"
-import path from "node:path"
 import type { NextConfig } from "next"
 
 const withNextIntl = createNextIntlPlugin("./i18n/request.ts")
@@ -11,19 +10,18 @@ const internalHost = process.env.TAURI_DEV_HOST || "localhost"
 // Relative path: Turbopack on Windows rejects absolute paths in resolveAlias.
 const browserStub = "./lib/browser-stubs/empty.js"
 
-// Server-only packages aliased to an empty stub for the browser bundle.
-// Per ADR-0022, the 5 vector cloud SDKs are gone — their wire formats are
-// implemented in Rust under src-tauri/src/vector/backends/. Only simple-git
-// remains here; the Tauri code-repo importer is its sole user.
-const SERVER_ONLY_PACKAGES = [
-  // simple-git shells out — only the Tauri code-repo importer uses it,
-  // alias to the empty stub so the mobile / web bundle stays clean.
-  "simple-git",
-]
-
-// Truly un-polyfillable Node.js built-ins (safety net for any dep that slips
-// past the package-level alias above). Do NOT include modules that Turbopack/
-// webpack polyfill automatically (path, stream, os, zlib).
+// Node.js built-ins that third-party deps reach for. Our first-party code no
+// longer touches any of these (the two surviving Node-leaning modules,
+// `lib/twin/importers/code-repo/git-repo.ts` and `lib/github/workspace.ts`,
+// now invoke Tauri Rust commands instead of `simple-git` / `node:fs/promises`),
+// so the previous `SERVER_ONLY_PACKAGES = ["simple-git"]` entry is gone for
+// good. The list below still exists because the Next.js bundle pulls in
+// third-party libraries we don't control whose transitive deps reach for
+// Node built-ins — e.g. `@modelcontextprotocol/sdk/client/stdio` (workflow
+// MCP node) hops through `cross-spawn` → `which` → `isexe/windows.js`, which
+// statically requires `fs` and `child_process`. The MCP node only ever runs
+// in the Tauri main process, but webpack still has to resolve the dynamic
+// chunk targets, so we substitute an empty stub for the client bundle.
 //
 // Both bare (`fs`) and `node:`-prefixed (`node:fs`) forms must be listed:
 // Turbopack matches `resolveAlias` keys against the literal request string
@@ -49,7 +47,7 @@ const NODE_ONLY_MODULES = [
   // Webpack 5 with Next.js 16 doesn't auto-polyfill `node:events` for
   // ESM deps that import it explicitly. Aliasing to the stub keeps the
   // mobile bundle from blowing up the moment any transitive dep
-  // (simple-git → @kwsites/file-exists, etc.) reaches for it.
+  // (cross-spawn → ... → events, etc.) reaches for it.
   "events",
   "node:events",
 ]
@@ -68,29 +66,14 @@ const nextConfig: NextConfig = {
   },
   // Configure assetPrefix or else the server won't properly resolve your assets.
   assetPrefix: isProd ? undefined : `http://${internalHost}:3000`,
-  // No server-external packages currently — the 5 vector cloud SDKs that
-  // used to live here are now Rust-side (ADR-0022).
-  serverExternalPackages: [],
-  // Turbopack (pnpm dev): alias server-only packages + Node.js built-ins to the
-  // empty stub so none of their transitive deps enter the browser bundle.
+  // Turbopack (pnpm dev): alias Node.js built-ins to the empty stub so none of
+  // their (third-party) callers enter the browser bundle.
   turbopack: {
-    resolveAlias: {
-      ...Object.fromEntries(SERVER_ONLY_PACKAGES.map((pkg) => [pkg, browserStub])),
-      ...Object.fromEntries(NODE_ONLY_MODULES.map((m) => [m, browserStub])),
-    },
+    resolveAlias: Object.fromEntries(NODE_ONLY_MODULES.map((m) => [m, browserStub])),
   },
-  // Webpack (pnpm build): package-level aliases + built-in fallbacks for client bundles.
+  // Webpack (pnpm build): client-side fallbacks for Node built-ins.
   webpack: (config, { isServer }) => {
     if (!isServer) {
-      // Webpack aliases must be absolute paths (relative ones get treated
-      // as module IDs and never resolve). Turbopack accepts the relative
-      // form, so we keep `browserStub` as a relative literal and resolve
-      // here.
-      const stubAbsolute = path.resolve(process.cwd(), browserStub)
-      config.resolve.alias = {
-        ...config.resolve.alias,
-        ...Object.fromEntries(SERVER_ONLY_PACKAGES.map((pkg) => [pkg, stubAbsolute])),
-      }
       config.resolve.fallback = {
         ...config.resolve.fallback,
         ...Object.fromEntries(NODE_ONLY_MODULES.map((m) => [m, false])),

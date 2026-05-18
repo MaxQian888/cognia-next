@@ -27,7 +27,11 @@ beforeEach(async () => {
 
 async function seedAll() {
   const db = getDb()
-  await saveSettings({ apiKey: "secret", defaultModel: "claude" })
+  await saveSettings({
+    apiKey: "secret",
+    defaultModel: "claude",
+    onboardingDismissedAt: "2026-05-18T12:00:00.000Z",
+  })
   await db.characters.put({
     id: "c-builtin",
     name: "Built-in",
@@ -146,6 +150,10 @@ describe("buildBackupPackage", () => {
     expect(pkg.manifest.schemaVersion).toBe(3)
     expect(pkg.manifest.appVersion).toMatch(/\d+\.\d+\.\d+/)
     expect(pkg.payload.settings?.apiKey).toBeUndefined()
+    // onboardingDismissedAt rides on the generic settings blob — never
+    // stripped (unlike apiKey) so the user's "I've seen the wizard" flag
+    // survives backup/restore.
+    expect(pkg.payload.settings?.onboardingDismissedAt).toBe("2026-05-18T12:00:00.000Z")
     expect(pkg.payload.characters?.map((c) => c.id)).toEqual(["c-user"])
     expect(pkg.payload.skills?.map((s) => s.id)).toEqual(["s-user"])
     expect(pkg.payload.teams?.map((t) => t.id)).toEqual(["t-user"])

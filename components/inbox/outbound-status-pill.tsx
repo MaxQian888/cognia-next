@@ -8,6 +8,7 @@
  * States: queued / sending / sent / failed (with retry button) / deadlettered.
  */
 
+import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
@@ -17,6 +18,7 @@ import {
   AlertCircleIcon,
   BanIcon,
   RefreshCwIcon,
+  WorkflowIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -62,34 +64,101 @@ export function OutboundStatusPill({ jobId, className }: OutboundStatusPillProps
   }
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className={cn("inline-flex items-center gap-1 text-xs", config.colorClass, className)}
-          data-testid={`outbound-status-pill-${jobId}`}
-          data-status={job.status}
-        >
-          <Icon className={cn("h-3 w-3", job.status === "sending" && "animate-spin")} />
-          <span>{statusLabel}</span>
-          {job.status === "failed" && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-5 px-1 text-xs"
-              onClick={() => void handleRetry()}
-              data-testid={`outbound-retry-btn-${jobId}`}
-            >
-              <RefreshCwIcon className="h-3 w-3" />
-              <span className="sr-only">{t("retry")}</span>
-            </Button>
-          )}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="top" className="text-xs">
-        {job.status === "failed" || job.status === "deadlettered"
-          ? (job.lastError ?? t("unknownError"))
-          : statusLabel}
-      </TooltipContent>
-    </Tooltip>
+    <span className="inline-flex items-center gap-1.5">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            className={cn("inline-flex items-center gap-1 text-xs", config.colorClass, className)}
+            data-testid={`outbound-status-pill-${jobId}`}
+            data-status={job.status}
+          >
+            <Icon className={cn("h-3 w-3", job.status === "sending" && "animate-spin")} />
+            <span>{statusLabel}</span>
+            {job.status === "failed" && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-5 px-1 text-xs"
+                onClick={() => void handleRetry()}
+                data-testid={`outbound-retry-btn-${jobId}`}
+              >
+                <RefreshCwIcon className="h-3 w-3" />
+                <span className="sr-only">{t("retry")}</span>
+              </Button>
+            )}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs">
+          {job.status === "failed" || job.status === "deadlettered"
+            ? (job.lastError ?? t("unknownError"))
+            : statusLabel}
+        </TooltipContent>
+      </Tooltip>
+      <OutboundSourceBadge job={job} />
+    </span>
   )
+}
+
+/**
+ * Source provenance badge (ADR-0009 v41 / E2). Appears next to the status
+ * pill when the job's `source` is anything other than the dominant
+ * `"ai-run"` path. Workflow-sourced jobs render with a click-to-jump link
+ * into the workflow run view; manual / draft-approved render as plain
+ * badges (those origins are already self-evident from the inbox UX, but
+ * surfacing them keeps the audit story uniform).
+ *
+ * Rows persisted before v41 backfill to `source: "ai-run"` so this
+ * component renders nothing for legacy data — matching the v18-v40 UX.
+ */
+function OutboundSourceBadge({ job }: { job: OutboundJobRow }) {
+  const t = useTranslations("inbox.outboundSource")
+  if (job.source === "ai-run") return null
+
+  if (job.source === "workflow" && job.sourceWorkflow) {
+    const { workflowId, runId, nodeId } = job.sourceWorkflow
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Link
+            href={`/workflows/${workflowId}/runs/${runId}#node-${nodeId}`}
+            data-testid={`outbound-source-badge-${job.id}`}
+            data-source="workflow"
+            className="inline-flex items-center gap-0.5 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 hover:bg-amber-500/20 dark:text-amber-400"
+          >
+            <WorkflowIcon className="h-3 w-3" />
+            <span>{t("workflow")}</span>
+          </Link>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs">
+          {t("workflowTooltip", { nodeId })}
+        </TooltipContent>
+      </Tooltip>
+    )
+  }
+
+  if (job.source === "manual") {
+    return (
+      <span
+        data-testid={`outbound-source-badge-${job.id}`}
+        data-source="manual"
+        className="inline-flex items-center rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium text-sky-600 dark:text-sky-400"
+      >
+        {t("manual")}
+      </span>
+    )
+  }
+
+  if (job.source === "draft-approved") {
+    return (
+      <span
+        data-testid={`outbound-source-badge-${job.id}`}
+        data-source="draft-approved"
+        className="inline-flex items-center rounded border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-400"
+      >
+        {t("draftApproved")}
+      </span>
+    )
+  }
+
+  return null
 }

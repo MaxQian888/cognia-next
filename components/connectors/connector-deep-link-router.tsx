@@ -75,8 +75,11 @@ async function handleOAuthUrl(raw: string): Promise<void> {
   }
 
   // ── Step 3: invoke handler ─────────────────────────────────────────────────
+  // State is forwarded so platform-specific handlers can decode an
+  // adapterId out of it (Lark uses `lark:<adapterId>:<nonce>` to scope
+  // the exchange to a specific configured account). ADR-0009 v41 / D2.
   try {
-    await handler(code)
+    await handler(code, state)
     toast.success(`${adapterType} connected successfully`)
   } catch (err) {
     toast.error(`OAuth exchange failed: ${err instanceof Error ? err.message : String(err)}`)

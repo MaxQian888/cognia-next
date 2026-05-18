@@ -143,6 +143,30 @@ describe("desktop client", () => {
     await desktop.killSwitch()
     expect(mockCall).toHaveBeenCalledWith("automation_kill_switch", {})
   })
+
+  it("desktop.cursorPosition returns Point and forwards ctx", async () => {
+    mockCall.mockResolvedValueOnce({ x: 12, y: 34 })
+    const point = await desktop.cursorPosition({ surface: "computerUse" })
+    expect(point).toEqual({ x: 12, y: 34 })
+    expect(mockCall).toHaveBeenCalledWith("desktop_cursor_position", {
+      ctx: { surface: "computerUse" },
+    })
+  })
+
+  it("desktop.cursorPosition accepts no ctx", async () => {
+    mockCall.mockResolvedValueOnce({ x: 0, y: 0 })
+    await desktop.cursorPosition()
+    expect(mockCall).toHaveBeenCalledWith("desktop_cursor_position", { ctx: undefined })
+  })
+
+  it("desktop.click marshals count for triple-click", async () => {
+    mockCall.mockResolvedValueOnce(undefined)
+    const target = { kind: "point" as const, x: 5, y: 6 }
+    await desktop.click(target, { count: 3 }, { surface: "computerUse" })
+    expect(mockCall).toHaveBeenCalledWith("desktop_click", {
+      args: { target, opts: { count: 3 }, ctx: { surface: "computerUse" } },
+    })
+  })
 })
 
 describe("defaultAutomationSettings", () => {

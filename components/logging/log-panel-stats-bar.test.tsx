@@ -350,7 +350,7 @@ describe("TransportHealthDetail", () => {
         onViewDiagnostics={jest.fn()}
       />
     )
-    expect(container.querySelector(".border-amber-500\\/40")).toBeInTheDocument()
+    expect(container.querySelector(".border-warning\\/40")).toBeInTheDocument()
   })
 })
 

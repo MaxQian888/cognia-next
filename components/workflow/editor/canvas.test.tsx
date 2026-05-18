@@ -28,6 +28,15 @@ const reactFlowPropsRef: { current: Record<string, unknown> | null } = {
   current: null,
 }
 
+// Stub the workflow-editor chat tab so this canvas-focused suite doesn't
+// pay the cost of pulling the chat-ui dependency graph (ai-elements →
+// use-stick-to-bottom is ESM-only). The full chat-tab is covered by its
+// own tests under `hooks/chat/` + `plugins/workflow-ai/`.
+jest.mock("./right-sidebar/chat-tab", () => ({
+  __esModule: true,
+  WorkflowEditorChatTab: () => null,
+}))
+
 // Mock @xyflow/react in this test — its rendering pipeline depends on real
 // browser geometry (ResizeObserver, layout) that jsdom can't provide. We
 // stand in a thin shell that just renders nodes/edges as data attributes so

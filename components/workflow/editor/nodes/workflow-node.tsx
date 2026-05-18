@@ -18,6 +18,8 @@ import type { WorkflowNodeData } from "@/types/workflow/visual"
 import type { NodeRunStatus } from "@/lib/workflow/editor/store"
 import type { LastRunSummary } from "@/lib/workflow/runtime/last-run-summary"
 import { useEditorStoreOrNull } from "@/lib/workflow/editor/store-context"
+import { useNodeDecoration } from "@/lib/workflow/editor/use-node-decoration"
+import { getEdgeById, hasEdgeBetween } from "@/lib/workflow/editor/edge-index"
 import { useShallow } from "zustand/react/shallow"
 import { flagsForTier, resolveEffectiveTier } from "@/lib/workflow/editor/performance-tier"
 import { buildClipboardEnvelope, serializeClipboard } from "@/lib/workflow/editor/clipboard"
@@ -161,15 +163,30 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
   const isAnnotation = category === "annotation"
   const showInput = !data.kind.startsWith("trigger.")
   const showOutput = data.kind !== "annotation.note" && data.kind !== "annotation.group"
-  const status: NodeRunStatus = data.runStatus ?? "idle"
-  const errorCount = data.validationErrorCount ?? data.validationErrors?.length ?? 0
+
+  // (A4) Per-node decoration — runStatus / validation / lastRun — is read
+  // via fine-grained Zustand selectors so unrelated status/validation
+  // mutations elsewhere in the graph DO NOT re-render this node. Falls
+  // back to the legacy `data.*` fields when a store provider isn't
+  // mounted (test renders, storybook).
+  const decoration = useNodeDecoration(id)
+  const status: NodeRunStatus = decoration.runStatus ?? data.runStatus ?? "idle"
+  const validationFields = decoration.validation?.fields
+  const validationSummary = decoration.validation?.summary
+  const errorCount = validationFields
+    ? Object.keys(validationFields).length
+    : (data.validationErrorCount ?? data.validationErrors?.length ?? 0)
   const hasErrors = errorCount > 0
+  const errorTooltip = validationSummary ?? data.validationErrors
+  const effectiveLastRun = decoration.lastRun ?? data.lastRun
 
   // Pull whatever store context we can — `null` in headless tests is fine.
   const store = useEditorStoreOrNull()
-  // useShallow must be called unconditionally; extracting the selector keeps
-  // the optional store invocation without the linter flagging a conditional
-  // hook call.
+  // (A3/A5) Narrow selector — drops `nodes` and `edges` arrays from the
+  // subscription so node identity changes (the most frequent mutations
+  // during editing) no longer re-render every node. Per-render reads of
+  // those arrays go through `store.getState()` + the indexed helpers in
+  // `edge-index.ts`, which are O(1).
   const storeSelector = useShallow(
     (
       s: Parameters<NonNullable<typeof store>>[0] extends (state: infer S) => unknown ? S : never
@@ -179,8 +196,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
       setSelectedNodes: s.setSelectedNodes,
       removeNodes: s.removeNodes,
       performanceTier: s.performanceTier,
-      nodes: s.nodes,
-      edges: s.edges,
+      nodeCount: s.nodes.length,
       spotlightedNodeId: s.spotlightedNodeId,
       hoveredEdgeId: s.hoveredEdgeId,
       connectionState: s.connectionState,
@@ -194,7 +210,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
   const motionEnabled = storeBits
     ? flagsForTier(
         resolveEffectiveTier(storeBits.performanceTier, {
-          nodeCount: storeBits.nodes.length,
+          nodeCount: storeBits.nodeCount,
           prefersReducedMotion:
             typeof window !== "undefined" && window.matchMedia
               ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -206,9 +222,11 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
   // Hovered-edge endpoint ring: when an edge in the workflow is being
   // hovered and one of its endpoints is THIS node, draw a thin primary ring
   // so the user sees which two nodes the edge connects.
+  // (A5) Read via the indexed `getEdgeById` helper — O(1) lookup against
+  // a WeakMap-cached edge index instead of O(E) `Array.find` per render.
   const isHoveredEdgeEndpoint = (() => {
-    if (!storeBits?.hoveredEdgeId) return false
-    const edge = storeBits.edges.find((e) => e.id === storeBits.hoveredEdgeId)
+    if (!storeBits?.hoveredEdgeId || !store) return false
+    const edge = getEdgeById(store.getState().edges, storeBits.hoveredEdgeId)
     return !!edge && (edge.source === id || edge.target === id)
   })()
 
@@ -221,19 +239,19 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
   const isConnectionSource = cs?.sourceId === id
   let connectionRing: "compatible" | "incompatible" | null = null
   let isActiveCandidate = false
-  if (cs && !isConnectionSource && showInput) {
+  if (cs && !isConnectionSource && showInput && store) {
     isActiveCandidate = cs.candidate?.nodeId === id
     const kindOk = !data.kind.startsWith("trigger.") && data.kind !== "annotation.note"
-    // Disallow self / multi-incoming-cycle creation cheaply; the canonical
-    // gate runs through `validateConnection` when the actual drop happens.
-    const wouldCycle =
-      storeBits!.edges.some((e) => e.source === id && e.target === cs.sourceId) === true
+    // (A5) Disallow self / multi-incoming-cycle creation cheaply via the
+    // indexed edge lookup. The canonical gate runs through
+    // `validateConnection` when the actual drop happens.
+    const wouldCycle = hasEdgeBetween(store.getState().edges, id, cs.sourceId)
     connectionRing = kindOk && !wouldCycle ? "compatible" : "incompatible"
   }
 
   // The lastRun footer is suppressed while a run is actively in progress so
   // the user sees current-run state, not stale history.
-  const showLastRun = !!data.lastRun && status === "idle"
+  const showLastRun = !!effectiveLastRun && status === "idle"
   // Sticky note nodes use the user-picked color instead of the default
   // annotation palette — see `NoteConfig` in inspector/forms/index.tsx.
   const stickyColor =
@@ -274,6 +292,16 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
       onMouseLeave={() => storeBits?.setHoveredNode(null)}
     >
       <StatusCornerBadge status={status} />
+      {data.authoredBy === "ai" ? (
+        <span
+          className="absolute -top-1.5 -left-1.5 z-10 inline-flex items-center justify-center rounded-full bg-violet-500 px-1.5 text-[9px] font-bold tracking-wide text-white shadow ring-2 ring-background"
+          title="Authored by the workflow-AI assistant — Ctrl+Z to revert."
+          data-testid="wf-node-ai-badge"
+          aria-label="AI-authored node"
+        >
+          AI
+        </span>
+      ) : null}
       {storeBits && !isAnnotation ? (
         <NodeFloatingToolbar
           nodeId={id}
@@ -282,7 +310,10 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
           motionEnabled={motionEnabled}
           onRun={() => storeBits.requestRunFromStep(id)}
           onCopy={async () => {
-            const node = storeBits.nodes.find((n) => n.id === id)
+            // (A3) Read node freshly from the store on click instead of
+            // subscribing to the entire `nodes` array. Same data, no
+            // per-mutation re-render.
+            const node = store?.getState().nodes.find((n) => n.id === id)
             if (!node) return
             const env = buildClipboardEnvelope([node], [], [node.id])
             try {
@@ -327,7 +358,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
             <div className="text-sm font-medium truncate text-foreground flex-1">{data.label}</div>
             {hasErrors ? (
               <span
-                title={data.validationErrors?.join("\n") ?? `${errorCount} validation issue(s)`}
+                title={errorTooltip?.join("\n") ?? `${errorCount} validation issue(s)`}
                 className="inline-flex items-center gap-0.5 rounded-full bg-destructive/15 px-1.5 py-px text-[10px] font-semibold text-destructive"
                 data-testid="wf-node-error-badge"
               >
@@ -342,7 +373,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
           ) : null}
         </div>
       </div>
-      {showLastRun && data.lastRun ? <LastRunFooter lastRun={data.lastRun} /> : null}
+      {showLastRun && effectiveLastRun ? <LastRunFooter lastRun={effectiveLastRun} /> : null}
       {showOutput ? (
         <Handle
           type="source"

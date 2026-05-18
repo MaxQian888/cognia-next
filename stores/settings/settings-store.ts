@@ -171,6 +171,8 @@ interface SettingsState {
   providerUsageStats: Record<string, ProviderModelUsageEntry[]>
   providerUIPreferences: ProviderUIPreferences
   providerOnboardingDismissed: boolean
+  /** ISO 8601 timestamp of when the desktop first-run onboarding dialog was last dismissed/completed. */
+  onboardingDismissedAt: string | undefined
 
   setTheme: (mode: AppTheme) => Promise<void>
   setColorTheme: (preset: ColorThemePreset) => Promise<void>
@@ -224,6 +226,8 @@ interface SettingsState {
   ) => Promise<void>
   setProviderUIPreferences: (patch: Partial<ProviderUIPreferences>) => Promise<void>
   dismissProviderOnboarding: () => Promise<void>
+  /** Persist the desktop first-run dialog dismissal so it doesn't re-appear on relaunch. */
+  dismissOnboarding: () => Promise<void>
   /** Patch provider-level inference defaults (temperature, max tokens, …). */
   setProviderInferenceDefaults: (
     providerId: string,
@@ -347,6 +351,7 @@ interface FlatPluginFields {
   providerUsageStats: Record<string, ProviderModelUsageEntry[]>
   providerUIPreferences: ProviderUIPreferences
   providerOnboardingDismissed: boolean
+  onboardingDismissedAt: string | undefined
   background: BackgroundSettings
   wallpapers: Wallpaper[]
   customCss: string
@@ -380,6 +385,7 @@ function deriveFlatPluginFields(s: AppSettings | null): FlatPluginFields {
       ...(s?.providerUIPreferences ?? {}),
     },
     providerOnboardingDismissed: s?.providerOnboardingDismissed ?? false,
+    onboardingDismissedAt: s?.onboardingDismissedAt ?? undefined,
     background: { ...DEFAULT_BACKGROUND_SETTINGS, ...(s?.background ?? {}) },
     wallpapers: s?.wallpapers ?? [],
     customCss: s?.customCss ?? "",
@@ -947,6 +953,11 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
 
     dismissProviderOnboarding: async () => {
       const next = await saveSettings({ providerOnboardingDismissed: true })
+      set({ settings: next })
+    },
+
+    dismissOnboarding: async () => {
+      const next = await saveSettings({ onboardingDismissedAt: new Date().toISOString() })
       set({ settings: next })
     },
 

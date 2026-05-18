@@ -117,6 +117,13 @@ export interface ClickOpts {
    * UIA can't see, or to drive an exact pixel-level interaction.
    */
   useNative?: boolean
+  /**
+   * Number of consecutive clicks (1 = single, 2 = double, 3 = triple). When
+   * unset, falls back to `double` (true → 2). The Rust backend repeats
+   * clicks at the OS double-click cadence so applications see a real
+   * native triple-click rather than three independent presses.
+   */
+  count?: 1 | 2 | 3
 }
 
 /** 2D screen coordinate, mirror of Rust `automation::types::Point`. */

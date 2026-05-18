@@ -155,6 +155,25 @@ export const desktop = {
   },
 
   /**
+   * Read the current cursor position in screen coordinates. Read-only call —
+   * does not trigger a consent prompt regardless of tier.
+   */
+  cursorPosition(ctx?: CallContext): Promise<Point> {
+    return transport.call<Point>("desktop_cursor_position", { ctx })
+  },
+
+  /**
+   * Resolve the topmost UI element at the given screen coordinates.
+   * Read-only — used by Inspector's "Pick" affordance after the overlay
+   * captures the user's intended target.
+   */
+  pickAtPoint(point: Point, ctx: CallContext = {}): Promise<ElementInfo> {
+    return transport.call<ElementInfo>("desktop_pick_at_point", {
+      args: { point, ctx },
+    })
+  },
+
+  /**
    * Reply to a consent-request event raised by `automation:consent-request`.
    * `persist == true` means "always allow this kind of call for the rest of
    * the session". The `prompt` field MUST match the one received in the

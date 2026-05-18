@@ -31,6 +31,7 @@
 //! - `commands`    — Tauri command entry points
 //! - `mod` (here)  — `McpServerState` orchestrator
 
+pub mod automation_proxy;
 pub mod commands;
 pub mod http_server;
 pub mod sidecar;
@@ -41,9 +42,12 @@ use std::sync::Arc;
 use chrono::Utc;
 use parking_lot::Mutex;
 
+use automation_proxy::AutomationProxy;
 use http_server::{spawn_server, ServerHandle};
 use sidecar::SidecarProcess;
 use types::{ExternalBridgeSettings, McpServerError, McpServerStatus};
+
+use crate::automation::worker::AutomationHandle;
 
 // ---------------------------------------------------------------------------
 // State
@@ -60,9 +64,11 @@ pub struct McpServerState {
 
 pub(crate) struct McpServerInner {
     pub(crate) status: McpServerStatus,
-    /// Running server handle + the sidecar process it talks to.
-    /// `None` when the server is stopped.
-    pub(crate) server: Option<(ServerHandle, Arc<SidecarProcess>)>,
+    /// Running server handle + the sidecar process it talks to + the
+    /// optional automation proxy. The proxy is `Some` only when start()
+    /// was given an `AutomationHandle`; tests that build state manually
+    /// (e.g. `start_stop_round_trip`) leave it `None`.
+    pub(crate) server: Option<(ServerHandle, Arc<SidecarProcess>, Option<Arc<AutomationProxy>>)>,
 }
 
 impl McpServerState {
@@ -104,6 +110,7 @@ impl McpServerState {
         token: String,
         settings_json: String,
         sidecar_path: String,
+        automation: Option<AutomationHandle>,
     ) -> Result<u16, McpServerError> {
         // Guard: reject empty token before attempting any I/O.
         if token.is_empty() {
@@ -120,13 +127,35 @@ impl McpServerState {
         // Guard: reject if already running.
         {
             let inner = self.inner.lock();
-            if let Some((handle, _)) = &inner.server {
+            if let Some((handle, ..)) = &inner.server {
                 return Err(McpServerError::AlreadyRunning(handle.bound_port));
             }
         }
 
-        // Spawn the Node sidecar first so we fail fast if node isn't available.
-        let sidecar = SidecarProcess::spawn(&sidecar_path, &settings_json).await?;
+        // Spawn the optional automation proxy BEFORE the sidecar so its
+        // address + token can be passed through the sidecar's env. The
+        // proxy lifetime is tied to McpServerInner — drop releases the
+        // port and aborts the listener task.
+        let (proxy, proxy_env): (Option<Arc<AutomationProxy>>, Vec<(String, String)>) =
+            match automation {
+                Some(handle) => {
+                    let proxy = AutomationProxy::spawn(handle)
+                        .await
+                        .map_err(|e| McpServerError::SidecarSpawn(format!(
+                            "automation_proxy bind failed: {e}"
+                        )))?;
+                    let env = vec![
+                        ("COGNIA_AUTOMATION_PROXY".to_string(), proxy.addr.to_string()),
+                        ("COGNIA_AUTOMATION_PROXY_TOKEN".to_string(), proxy.token.clone()),
+                    ];
+                    (Some(Arc::new(proxy)), env)
+                }
+                None => (None, Vec::new()),
+            };
+
+        // Spawn the Node sidecar — passing the proxy env if we have one.
+        let sidecar =
+            SidecarProcess::spawn_with_env(&sidecar_path, &settings_json, &proxy_env).await?;
         let sidecar = Arc::new(sidecar);
 
         // Bind and spawn the axum listener.
@@ -142,7 +171,7 @@ impl McpServerState {
                 port: Some(bound_port),
                 started_at: Some(started_at),
             };
-            inner.server = Some((server_handle, sidecar));
+            inner.server = Some((server_handle, sidecar, proxy));
         }
 
         Ok(bound_port)
@@ -157,11 +186,13 @@ impl McpServerState {
     /// - [`McpServerError::NotRunning`] if the server is already stopped.
     pub fn stop(&self) -> Result<(), McpServerError> {
         let mut inner = self.inner.lock();
-        let Some((handle, _sidecar)) = inner.server.take() else {
+        let Some((handle, _sidecar, _proxy)) = inner.server.take() else {
             return Err(McpServerError::NotRunning);
         };
-        // Signal axum's graceful-shutdown future.  The sidecar (`_sidecar`) is
-        // dropped here, which triggers `kill_on_drop` on the Node child.
+        // Signal axum's graceful-shutdown future. `_sidecar` is dropped
+        // here, which triggers `kill_on_drop` on the Node child. `_proxy`
+        // (if any) is dropped here too, which aborts the listener task
+        // and releases the bound TCP port.
         let _ = handle.shutdown.send(());
         inner.status = McpServerStatus::default();
         Ok(())
@@ -202,7 +233,7 @@ mod tests {
     async fn start_empty_token_returns_token_missing() {
         let state = McpServerState::new();
         let err = state
-            .start(0, String::new(), "{}".to_string(), "/dev/null".to_string())
+            .start(0, String::new(), "{}".to_string(), "/dev/null".to_string(), None)
             .await
             .unwrap_err();
         assert!(matches!(err, McpServerError::TokenMissing));
@@ -212,7 +243,13 @@ mod tests {
     async fn start_bad_json_returns_invalid_settings() {
         let state = McpServerState::new();
         let err = state
-            .start(0, "tok".to_string(), "garbage".to_string(), "/dev/null".to_string())
+            .start(
+                0,
+                "tok".to_string(),
+                "garbage".to_string(),
+                "/dev/null".to_string(),
+                None,
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, McpServerError::InvalidSettings(_)));
@@ -242,7 +279,7 @@ mod tests {
                 port: Some(bound_port),
                 started_at: Some(Utc::now().to_rfc3339()),
             };
-            inner.server = Some((server_handle, sidecar));
+            inner.server = Some((server_handle, sidecar, None));
         }
 
         assert!(state.is_running());
@@ -273,7 +310,7 @@ mod tests {
                 port: Some(server_handle.bound_port),
                 started_at: None,
             };
-            inner.server = Some((server_handle, sidecar));
+            inner.server = Some((server_handle, sidecar, None));
         }
 
         state.stop().expect("first stop");

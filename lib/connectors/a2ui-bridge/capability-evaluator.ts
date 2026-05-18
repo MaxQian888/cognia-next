@@ -27,11 +27,21 @@ import { walkA2UISurface } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 export interface CapabilityEvaluation {
   /** Component kinds present in the surface that the platform renders natively. */
   native: A2UIComponentKind[]
+  /**
+   * Present kinds that the platform delivers via a multi-step UX
+   * (Telegram ForceReply, Discord modal double-hop, NapCat QQ card).
+   * The component IS functional — the assistant just shouldn't assume
+   * an instantaneous reply on the same turn.
+   */
+  simulated: A2UIComponentKind[]
   /** Present kinds that will degrade to plainTextMirror but are still safe to send. */
   fallback: A2UIComponentKind[]
   /** Present kinds the adapter refuses; the assistant should avoid these. */
   unsupported: A2UIComponentKind[]
-  /** Overall verdict — `"unsupported"` if any unsupported kind is present. */
+  /**
+   * Overall verdict. Ordering, worst → best:
+   *   `unsupported > fallback > simulated > native`.
+   */
   worstCase: A2UIComponentSupport
 }
 
@@ -51,6 +61,7 @@ export function evaluateSurfaceAgainstCapability(
   })
 
   const native: A2UIComponentKind[] = []
+  const simulated: A2UIComponentKind[] = []
   const fallback: A2UIComponentKind[] = []
   const unsupported: A2UIComponentKind[] = []
   let worstCase: A2UIComponentSupport = "native"
@@ -62,17 +73,21 @@ export function evaluateSurfaceAgainstCapability(
       continue
     }
     const support = matrix[kind] ?? "fallback"
-    if (support === "native") native.push(kind)
-    else if (support === "fallback") {
+    if (support === "native") {
+      native.push(kind)
+    } else if (support === "simulated") {
+      simulated.push(kind)
+      if (worstCase === "native") worstCase = "simulated"
+    } else if (support === "fallback") {
       fallback.push(kind)
-      if (worstCase === "native") worstCase = "fallback"
+      if (worstCase === "native" || worstCase === "simulated") worstCase = "fallback"
     } else {
       unsupported.push(kind)
       worstCase = "unsupported"
     }
   }
 
-  return { native, fallback, unsupported, worstCase }
+  return { native, simulated, fallback, unsupported, worstCase }
 }
 
 /**
@@ -85,6 +100,7 @@ export function buildCapabilityPromptSection(
   matrix: A2UICapabilityMatrix
 ): string {
   const native = componentKindsByLevel(matrix, "native")
+  const simulated = componentKindsByLevel(matrix, "simulated")
   const fallback = componentKindsByLevel(matrix, "fallback")
   const unsupported = componentKindsByLevel(matrix, "unsupported")
 
@@ -93,6 +109,11 @@ export function buildCapabilityPromptSection(
   ]
   if (native.length > 0) {
     lines.push(`- Renders natively: ${native.join(", ")}.`)
+  }
+  if (simulated.length > 0) {
+    lines.push(
+      `- Available via multi-step UX — do not assume a synchronous reply on the same turn: ${simulated.join(", ")}.`
+    )
   }
   if (fallback.length > 0) {
     lines.push(

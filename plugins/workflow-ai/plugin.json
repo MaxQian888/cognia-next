@@ -1,0 +1,25 @@
+{
+  "id": "cognia-workflow-ai",
+  "name": "Workflow AI",
+  "version": "0.1.0",
+  "description": "AI co-pilot for the visual workflow editor — exposes graph-read, graph-mutation, layout, and run-control tools to the chat panel so an agent can author, refactor, and execute workflows on behalf of the user.",
+  "type": "frontend",
+  "capabilities": ["tools", "commands"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": { "cognia": ">=0.1.0" },
+  "permissions": [],
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "available",
+      "hint": "All tools target the per-editor Zustand store; no native deps."
+    },
+    "tauri": {
+      "availability": "available",
+      "entrypoint": "src/index.ts",
+      "hint": "Run-control tools delegate to the same `runWorkflow` orchestrator the toolbar's Run button uses; everything else mutates the renderer-side store."
+    }
+  }
+}

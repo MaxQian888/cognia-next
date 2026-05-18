@@ -11,13 +11,16 @@ use std::time::Duration;
 
 use uiautomation::inputs::{Keyboard, Mouse};
 use uiautomation::types::Point as UiaPoint;
+use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL,
-    MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP,
-    MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEINPUT,
-    MOUSE_EVENT_FLAGS,
+    GetDoubleClickTime, SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_ABSOLUTE,
+    MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN,
+    MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
+    MOUSEEVENTF_WHEEL, MOUSEINPUT, MOUSE_EVENT_FLAGS,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetCursorPos, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN,
+};
 
 use crate::automation::types::*;
 
@@ -28,6 +31,42 @@ pub fn click_point(x: i32, y: i32) -> Result<()> {
         .map_err(|e| AutomationError::BackendError {
             message: format!("mouse click failed: {e}"),
         })
+}
+
+/// Click at `(x, y)` `count` times in a row. Consecutive clicks are spaced
+/// to fall within `GetDoubleClickTime` so the OS recognises the sequence as
+/// a real double / triple click instead of independent single clicks. A
+/// `count` of 0 or 1 is treated as a single click.
+pub fn click_point_multi(x: i32, y: i32, count: u32) -> Result<()> {
+    let n = count.max(1);
+    if n == 1 {
+        return click_point(x, y);
+    }
+    // GetDoubleClickTime is the *maximum* gap that still registers as a
+    // multi-click. Use half of it so we stay comfortably under the threshold
+    // even when the system call returns a generous value.
+    let dct = unsafe { GetDoubleClickTime() };
+    let gap_ms = u64::from(dct).max(1) / 2;
+    let gap = Duration::from_millis(gap_ms);
+    for i in 0..n {
+        click_point(x, y)?;
+        if i + 1 < n {
+            thread::sleep(gap);
+        }
+    }
+    Ok(())
+}
+
+/// Read the current cursor position via `GetCursorPos`. Read-only — no
+/// gating side effects.
+pub fn cursor_position() -> Result<Point> {
+    let mut p = POINT { x: 0, y: 0 };
+    unsafe {
+        GetCursorPos(&mut p).map_err(|e| AutomationError::BackendError {
+            message: format!("GetCursorPos failed: {e}"),
+        })?;
+    }
+    Ok(Point { x: p.x, y: p.y })
 }
 
 pub fn type_text(text: &str, delay_ms: Option<u32>) -> Result<()> {

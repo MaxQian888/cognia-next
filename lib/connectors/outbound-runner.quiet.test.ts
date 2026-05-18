@@ -49,6 +49,7 @@ async function enqueue(adapterId: string, conversationKey: string) {
       segments: [{ type: "text", text: "msg" }],
       metadata: { idempotencyKey: crypto.randomUUID() },
     },
+    source: "ai-run",
   })
 }
 

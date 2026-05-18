@@ -34,6 +34,7 @@ import { findSessionByConversationKey } from "./runtime"
 import { appendAudit } from "./audit"
 import type { MessageSegment } from "@/types/connectors/segment"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
+import type { OutboundJobSource, OutboundJobWorkflowSource } from "@/lib/db/connector-types"
 
 // ---------------------------------------------------------------------------
 // Payload shapes (informal — the scheduler passes Record<string,unknown>)
@@ -44,6 +45,16 @@ interface OutboundSendPayload {
   conversationKey: string
   segments: MessageSegment[]
   idempotencyKey?: string
+  /**
+   * Provenance override (added at schema v41). Workflows that drop a job
+   * onto the scheduler MUST pass `source: "workflow"` + `sourceWorkflow`
+   * so the inbox UI can show the right badge. Manual user schedules can
+   * omit this; the handler defaults to `"manual"` because the dominant
+   * use of the connector outbound scheduler is a human queuing a future
+   * send (recurring reminder, time-zone-aware broadcast, etc.).
+   */
+  source?: OutboundJobSource
+  sourceWorkflow?: OutboundJobWorkflowSource
 }
 
 interface ScheduledDigestPayload {
@@ -110,6 +121,8 @@ async function handleOutboundSend(
           idempotencyKey: idempotencyKey ?? crypto.randomUUID(),
         },
       },
+      source: payload.source ?? "manual",
+      sourceWorkflow: payload.source === "workflow" ? payload.sourceWorkflow : undefined,
     })
 
     await appendAudit({
@@ -289,6 +302,7 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
           scheduledTaskId: sourceTaskId,
         },
       },
+      source: "ai-run",
     })
 
     await appendAudit({

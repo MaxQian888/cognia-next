@@ -9,11 +9,13 @@
  * /agent-teams pages aren't the only window into the catalogue.
  */
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CompassIcon, PlusIcon } from "lucide-react"
 
+import { usePlatform } from "@/hooks/use-platform"
 import { CharacterCard } from "@/components/mobile/discover/character-card"
 import { CharacterDetailSheet } from "@/components/mobile/discover/character-detail-sheet"
 import { DiscoverSearch } from "@/components/mobile/discover/discover-search"
@@ -39,6 +41,26 @@ type DiscoverTab = "characters" | "teams" | "skills" | "plugins" | "twinDrafts"
 const TAB_IDS: DiscoverTab[] = ["characters", "teams", "skills", "plugins", "twinDrafts"]
 
 export default function DiscoverPage() {
+  const platform = usePlatform()
+  const router = useRouter()
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
+    if (!mounted) return
+    if (platform === "mobile") return
+    router.replace("/agent-teams")
+  }, [mounted, platform, router])
+
+  if (!mounted || platform !== "mobile") return null
+  return <DiscoverMobileBody />
+}
+
+function DiscoverMobileBody() {
   const t = useTranslations("mobile.discover")
   const [tab, setTab] = useState<DiscoverTab>("characters")
   const [editorOpen, setEditorOpen] = useState(false)

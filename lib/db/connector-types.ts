@@ -26,6 +26,31 @@ import type { ConnectorCallbackBindingRow } from "@/types/connectors/interaction
 export type { ConnectorCallbackBindingRow }
 
 /**
+ * Optional probe metadata captured at adapter start. Used by OneBot to
+ * record which upstream implementation (NapCat / Lagrange / LLOneBot) the
+ * adapter is talking to, alongside the version string and the set of
+ * non-standard extensions the upstream advertises. Added at schema v41 in
+ * support of A5 (OneBot feature detection) + B5 (NapCat simulated mapper).
+ *
+ * Treat the field as opaque outside of the adapter that wrote it: each
+ * platform may use it differently in future revisions (e.g., a Slack
+ * adapter could record `assistantAppEnabled` here). Unknown impls are
+ * tagged with `impl: "unknown"` so consumers can degrade safely.
+ */
+export interface AdapterImplMetadata {
+  /** e.g., `"napcat"`, `"lagrange"`, `"llonebot"`, `"unknown"`. */
+  impl: string
+  /** Free-form upstream version string ("v4.2.1", "0.0.13"). */
+  version: string
+  /**
+   * Non-standard capability tokens detected at probe time. The mapper
+   * consumes this set when deciding whether to emit native rich content
+   * (e.g., `"napcat:markdown-card"` enables QQ markdown buttons).
+   */
+  features: string[]
+}
+
+/**
  * One row per configured adapter instance (one Telegram bot, one Discord
  * guild connection, etc.). The `credentialsRef` field points into the OS
  * keyring — it never holds the actual secret value.
@@ -60,6 +85,14 @@ export interface AdapterInstanceRow {
    * the cache the next time the adapter starts.
    */
   lastKnownCapabilities?: A2UICapabilityMatrix
+  /**
+   * Optional upstream-implementation probe result. Added at v41 in support
+   * of OneBot NapCat / Lagrange / LLOneBot feature detection. Other
+   * adapters MAY populate this when feature-detect probes (`auth.test`,
+   * `getMe`, etc.) carry useful upstream metadata. Re-written on each
+   * adapter start so reconnects can detect upstream upgrades.
+   */
+  implMetadata?: AdapterImplMetadata
   createdAt: number
   updatedAt: number
 }
@@ -101,6 +134,40 @@ export interface InboundLedgerRow {
 export type OutboundJobStatus = "pending" | "sending" | "sent" | "failed" | "deadlettered"
 
 /**
+ * Provenance of an outbound job. Added at schema v41 so the inbox UI can
+ * tell a workflow-pushed message apart from a normal ai-run reply, and
+ * the audit log carries one extra dimension for routing introspection.
+ *
+ *   - `"ai-run"`         — the connector runtime ran the AI loop on an
+ *                          inbound trigger and enqueued the assistant's
+ *                          reply (this is the v18-v40 baseline).
+ *   - `"manual"`         — operator typed the message into the inbox
+ *                          composer and clicked Send.
+ *   - `"workflow"`       — a Visual Workflow node (`action.connector.send`)
+ *                          drove the send. `sourceWorkflow` carries the
+ *                          {workflowId, runId, nodeId} triple for jump-to.
+ *   - `"draft-approved"` — the message originated as a `ConnectorDraftRow`
+ *                          (manual-mode AI reply), then the operator
+ *                          clicked Approve.
+ *
+ * Rows persisted before v41 backfill to `"ai-run"` because that's the
+ * only path that existed when they were created.
+ */
+export type OutboundJobSource = "ai-run" | "manual" | "workflow" | "draft-approved"
+
+/**
+ * Cross-reference back to the Visual Workflow node that produced a
+ * workflow-sourced outbound job. Populated only when `source = "workflow"`;
+ * undefined otherwise. Used by `components/inbox/conversation-list.tsx`
+ * to render a workflow badge with click-to-jump.
+ */
+export interface OutboundJobWorkflowSource {
+  workflowId: string
+  runId: string
+  nodeId: string
+}
+
+/**
  * One row per outbound delivery job. The runner processes rows in
  * `[conversationKey+createdAt]` order (FIFO per conversation lane).
  */
@@ -118,6 +185,19 @@ export interface OutboundJobRow {
   /** Wall-clock at which the runner is allowed to retry. */
   nextAttemptAt: number
   idempotencyKey: string
+  /**
+   * Provenance of the enqueue. Added at v41; rows persisted before v41
+   * backfill to `"ai-run"` via the upgrade hook. Required on new rows
+   * so the inbox UI can avoid the `?? "ai-run"` defensive read at every
+   * render path.
+   */
+  source: OutboundJobSource
+  /**
+   * Cross-reference back to the workflow that produced this job.
+   * Populated only when `source === "workflow"`. Used by the inbox UI
+   * to render a workflow badge.
+   */
+  sourceWorkflow?: OutboundJobWorkflowSource
 }
 
 /**
@@ -143,6 +223,24 @@ export interface ConversationOverrideRow {
    * accidentally fire screenshot / mouse / keyboard actions on the host.
    */
   allowComputerUse?: boolean
+  /**
+   * Per-conversation provider override (added at schema v41 in support
+   * of A6). When set, takes precedence over the character / app default
+   * provider in `lib/claude/build-options.ts:resolveSendOptions`. Use
+   * for "this Telegram channel always routes to Codex, this Slack
+   * workspace routes to OpenCode" kinds of overrides. Validation lives
+   * at the CRUD layer; an unknown providerId here is treated as "no
+   * override" by the resolver to avoid hard-failing sends.
+   */
+  providerOverride?: string
+  /**
+   * Per-conversation model override (added at schema v41 in support
+   * of A6). When set, takes precedence over the character / app default
+   * model. Independent of `providerOverride` — operators MAY set just
+   * the model (e.g., "always use gpt-5 on this channel, regardless of
+   * which Codex account is currently active") without changing provider.
+   */
+  modelOverride?: string
   createdAt: number
   updatedAt: number
 }

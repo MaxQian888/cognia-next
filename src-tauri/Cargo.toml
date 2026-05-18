@@ -148,6 +148,15 @@ serde_urlencoded = "0.7"
 # CI). Pure-Rust, MIT-licensed, no transitive system deps.
 local-ip-address = "0.6"
 
+# Twin code-repo importer (ADR-0003 / next.config.ts node-only purge) —
+# walks a local git repo from Rust instead of `simple-git`. We only ever
+# `Repository::open` a path the user picked via the file dialog, so the
+# default `https` / `ssh` features (which pull OpenSSL + libssh2) are off.
+# `vendored-libgit2` ships libgit2's C source inside `libgit2-sys` so
+# developer machines don't need a system install — critical on Windows
+# where libgit2 isn't typically present.
+git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2"] }
+
 # Companion TLS (Wave 1.4 / M2.8) — self-signed certificate generation +
 # SHA-256 SubjectPublicKeyInfo fingerprint computation. The mobile client
 # pins the fingerprint via the QR pair payload, so the cert chain is never

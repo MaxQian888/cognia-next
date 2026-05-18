@@ -17,6 +17,6 @@ export {
   MemoizedLogEntry,
   TraceGroup,
   HighlightedText,
-  LEVEL_CONFIG,
+  LEVEL_THEME,
   ALL_LEVELS,
 } from "./log-entry"

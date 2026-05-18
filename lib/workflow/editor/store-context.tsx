@@ -14,8 +14,9 @@
  * which scopes the same idea to a single `currentNodeId`.
  */
 
-import { createContext, useContext, type ReactNode } from "react"
+import { createContext, useContext, useEffect, type ReactNode } from "react"
 import type { EditorStore } from "@/lib/workflow/editor/store"
+import { registerEditorStore, unregisterEditorStore } from "@/lib/workflow/editor/store-registry"
 
 const EditorStoreContext = createContext<EditorStore | null>(null)
 
@@ -26,6 +27,19 @@ export function EditorStoreProvider({
   store: EditorStore
   children: ReactNode
 }) {
+  // (C.2) Mirror the per-instance store into the out-of-React registry so
+  // plugin-tool handlers (which fire from stdio callbacks outside the
+  // React tree) can reach the store via `getEditorStore(workflowId)`.
+  // Lifecycle is bound to this provider — the registry entry appears on
+  // mount and disappears on unmount, never drifting.
+  useEffect(() => {
+    const workflowId = store.getState().baseWorkflow.id
+    if (!workflowId) return
+    registerEditorStore(workflowId, store)
+    return () => {
+      unregisterEditorStore(workflowId)
+    }
+  }, [store])
   return <EditorStoreContext.Provider value={store}>{children}</EditorStoreContext.Provider>
 }
 

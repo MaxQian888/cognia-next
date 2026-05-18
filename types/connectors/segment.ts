@@ -13,7 +13,20 @@ export type MessageSegment =
   | { type: "video"; url: string; thumbnailUrl?: string; durationSec?: number }
   | { type: "voice"; url: string; durationSec?: number; transcript?: string }
   | { type: "file"; url: string; name: string; mimeType: string; sizeBytes: number }
-  | { type: "mention"; userId: string; displayName?: string }
+  | {
+      type: "mention"
+      /** The mentioned entity's stable platform id. For role/channel mentions on platforms that distinguish those (Discord), this carries the role or channel id; for user mentions, the user id. */
+      userId: string
+      displayName?: string
+      /**
+       * Mention kind. Defaults to `"user"` when unspecified so v18-v40
+       * readers continue to treat every mention as a user mention.
+       * `"role"` is emitted by the Discord parser from `mention_roles`
+       * (ADR-0009 v41 / A2). `"channel"` is reserved for the future
+       * Discord channel-mention extension.
+       */
+      kind?: "user" | "role" | "channel"
+    }
   | { type: "emoji"; code: string }
   | { type: "code"; language?: string; code: string }
   | { type: "card"; card: PlatformCard }

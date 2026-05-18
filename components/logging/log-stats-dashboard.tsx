@@ -46,6 +46,8 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { TOOLTIP_STYLE, CHART_MARGINS } from "@/lib/observability/chart-config"
+import { LEVEL_THEME } from "@/lib/logger/level-theme"
+import { useThemeColors } from "@/lib/logger/use-theme-colors"
 import type { StructuredLogEntry, LogLevel } from "@/lib/logger"
 import type { NativeLoggingReadiness } from "@/lib/native/native-logging-readiness"
 
@@ -55,15 +57,6 @@ export interface LogStatsDashboardProps {
   nativeLogging?: NativeLoggingReadiness
   onSearchFilter?: (query: string) => void
   className?: string
-}
-
-const LEVEL_COLORS: Record<LogLevel, string> = {
-  trace: "#94a3b8",
-  debug: "#3b82f6",
-  info: "#22c55e",
-  warn: "#eab308",
-  error: "#ef4444",
-  fatal: "#b91c1c",
 }
 
 /**
@@ -182,8 +175,8 @@ function StatCard({
           <p className="text-xs text-muted-foreground truncate">{label}</p>
           <div className="flex items-center gap-1.5">
             <p className="text-lg font-semibold leading-tight">{value}</p>
-            {trend === "up" && <TrendingUp className="h-3.5 w-3.5 text-red-500" />}
-            {trend === "down" && <TrendingDown className="h-3.5 w-3.5 text-green-500" />}
+            {trend === "up" && <TrendingUp className="h-3.5 w-3.5 text-destructive" />}
+            {trend === "down" && <TrendingDown className="h-3.5 w-3.5 text-success" />}
             {trend === "stable" && <Minus className="h-3.5 w-3.5 text-muted-foreground" />}
           </div>
           {sub && <p className="text-xs text-muted-foreground truncate">{sub}</p>}
@@ -202,6 +195,7 @@ export function LogStatsDashboard({
 }: LogStatsDashboardProps) {
   const t = useTranslations("logging")
   const locale = useLocale()
+  const themeColors = useThemeColors()
 
   // Level distribution data
   const levelData = useMemo(() => {
@@ -214,10 +208,10 @@ export function LogStatsDashboard({
       .map(([level, count]) => ({
         name: level,
         value: count,
-        color: LEVEL_COLORS[level as LogLevel] || "#94a3b8",
+        color: themeColors[LEVEL_THEME[level as LogLevel].chartColor],
       }))
       .sort((a, b) => b.value - a.value)
-  }, [logs])
+  }, [logs, themeColors])
 
   // Module activity data
   const moduleData = useMemo(() => {
@@ -336,14 +330,14 @@ export function LogStatsDashboard({
           icon={Layers}
           label={t("dashboard.totalLogs")}
           value={logs.length.toLocaleString()}
-          color="bg-blue-500/10 text-blue-500"
+          color="bg-chart-3/10 text-chart-3"
         />
         <StatCard
           icon={AlertTriangle}
           label={t("dashboard.errorRate")}
           value={`${stats.errorRate}%`}
           sub={`${stats.errorCount} ${t("dashboard.errors")}`}
-          color="bg-red-500/10 text-red-500"
+          color="bg-destructive/10 text-destructive"
           trend={stats.errorTrend}
         />
         <StatCard
@@ -351,39 +345,39 @@ export function LogStatsDashboard({
           label={t("dashboard.topModule")}
           value={stats.topModule?.[0] || "-"}
           sub={stats.topModule ? `${stats.topModule[1]} ${t("panel.logs")}` : undefined}
-          color="bg-green-500/10 text-green-500"
+          color="bg-success/10 text-success"
         />
         <StatCard
           icon={Clock}
           label={t("dashboard.timeSpan")}
           value={stats.timeSpan || "-"}
-          color="bg-purple-500/10 text-purple-500"
+          color="bg-chart-4/10 text-chart-4"
         />
         <StatCard
           icon={Gauge}
           label={t("dashboard.logRate")}
           value={logRate > 0 ? logRate : "-"}
           sub={logRate > 0 ? t("dashboard.logsPerMinUnit") : undefined}
-          color="bg-cyan-500/10 text-cyan-500"
+          color="bg-chart-2/10 text-chart-2"
         />
         <StatCard
           icon={AlertCircle}
           label={t("dashboard.warningRate")}
           value={`${stats.warnRate}%`}
           sub={`${stats.warnCount} ${t("dashboard.warnings")}`}
-          color="bg-yellow-500/10 text-yellow-500"
+          color="bg-warning/10 text-warning"
         />
         <StatCard
           icon={Grid3X3}
           label={t("dashboard.uniqueModules")}
           value={stats.uniqueModules}
-          color="bg-indigo-500/10 text-indigo-500"
+          color="bg-chart-5/10 text-chart-5"
         />
         <StatCard
           icon={Hash}
           label={t("dashboard.uniqueTraces")}
           value={stats.uniqueTraces}
-          color="bg-orange-500/10 text-orange-500"
+          color="bg-chart-1/10 text-chart-1"
         />
       </div>
 
@@ -479,16 +473,16 @@ export function LogStatsDashboard({
                 <AreaChart data={volumeData} margin={CHART_MARGINS.default}>
                   <defs>
                     <linearGradient id="logVolumeInfo" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.6} />
-                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                      <stop offset="5%" stopColor={themeColors.success} stopOpacity={0.6} />
+                      <stop offset="95%" stopColor={themeColors.success} stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="logVolumeWarn" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#eab308" stopOpacity={0.6} />
-                      <stop offset="95%" stopColor="#eab308" stopOpacity={0} />
+                      <stop offset="5%" stopColor={themeColors.warning} stopOpacity={0.6} />
+                      <stop offset="95%" stopColor={themeColors.warning} stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="logVolumeError" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.6} />
-                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                      <stop offset="5%" stopColor={themeColors.destructive} stopOpacity={0.6} />
+                      <stop offset="95%" stopColor={themeColors.destructive} stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -503,7 +497,7 @@ export function LogStatsDashboard({
                     type="monotone"
                     dataKey="info"
                     stackId="1"
-                    stroke="#22c55e"
+                    stroke={themeColors.success}
                     fill="url(#logVolumeInfo)"
                     name={t("levels.info")}
                   />
@@ -511,7 +505,7 @@ export function LogStatsDashboard({
                     type="monotone"
                     dataKey="warn"
                     stackId="1"
-                    stroke="#eab308"
+                    stroke={themeColors.warning}
                     fill="url(#logVolumeWarn)"
                     name={t("levels.warn")}
                   />
@@ -519,7 +513,7 @@ export function LogStatsDashboard({
                     type="monotone"
                     dataKey="error"
                     stackId="1"
-                    stroke="#ef4444"
+                    stroke={themeColors.destructive}
                     fill="url(#logVolumeError)"
                     name={t("levels.error")}
                   />
@@ -527,8 +521,8 @@ export function LogStatsDashboard({
                     type="monotone"
                     dataKey="other"
                     stackId="1"
-                    stroke="#94a3b8"
-                    fill="#94a3b8"
+                    stroke={themeColors["muted-foreground"]}
+                    fill={themeColors["muted-foreground"]}
                     fillOpacity={0.2}
                     name={t("dashboard.otherSeries")}
                   />
@@ -563,7 +557,7 @@ export function LogStatsDashboard({
                   <Line
                     type="monotone"
                     dataKey="current"
-                    stroke="#ef4444"
+                    stroke={themeColors.destructive}
                     strokeWidth={2}
                     dot={false}
                     name={t("dashboard.currentPeriod")}
@@ -571,7 +565,7 @@ export function LogStatsDashboard({
                   <Line
                     type="monotone"
                     dataKey="previous"
-                    stroke="#94a3b8"
+                    stroke={themeColors["muted-foreground"]}
                     strokeWidth={2}
                     strokeDasharray="4 4"
                     dot={false}
@@ -619,7 +613,7 @@ export function LogStatsDashboard({
                     />
                     <Bar
                       dataKey="count"
-                      fill="#3b82f6"
+                      fill={themeColors["chart-3"]}
                       radius={[0, 4, 4, 0]}
                       name={t("dashboard.logsSeries")}
                     />

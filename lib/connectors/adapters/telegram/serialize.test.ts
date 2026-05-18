@@ -1,5 +1,5 @@
 import { escapeMdV2 } from "./markdown-v2"
-import { serializeOutbound } from "./serialize"
+import { serializeOutbound, serializeReaction } from "./serialize"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
 
@@ -136,5 +136,54 @@ describe("serializeOutbound", () => {
       makeReq([{ type: "text", text: "thread msg" }], { threadId: "42" })
     )
     expect(calls[0].payload["message_thread_id"]).toBe(42)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// serializeReaction (A1 — setMessageReaction)
+// ---------------------------------------------------------------------------
+describe("serializeReaction", () => {
+  it("builds setMessageReaction with a single emoji", () => {
+    const call = serializeReaction("123456789", 42, "👍")
+    expect(call.method).toBe("setMessageReaction")
+    expect(call.payload["chat_id"]).toBe("123456789")
+    expect(call.payload["message_id"]).toBe(42)
+    expect(call.payload["reaction"]).toEqual([{ type: "emoji", emoji: "👍" }])
+  })
+
+  it("accepts an emoji array and emits one ReactionType per entry", () => {
+    const call = serializeReaction("c1", "100", ["👍", "❤"])
+    expect(call.payload["reaction"]).toEqual([
+      { type: "emoji", emoji: "👍" },
+      { type: "emoji", emoji: "❤" },
+    ])
+  })
+
+  it("clears the bot's reactions when passed an empty array", () => {
+    const call = serializeReaction("c1", 1, [])
+    expect(call.payload["reaction"]).toEqual([])
+  })
+
+  it("clears the bot's reactions when passed an empty string", () => {
+    const call = serializeReaction("c1", 1, "")
+    expect(call.payload["reaction"]).toEqual([])
+  })
+
+  it("opts.isBig adds is_big=true to the payload", () => {
+    const call = serializeReaction("c1", 1, "🎉", { isBig: true })
+    expect(call.payload["is_big"]).toBe(true)
+  })
+
+  it("omits is_big when opts.isBig is false/undefined", () => {
+    const calA = serializeReaction("c1", 1, "🎉")
+    const calB = serializeReaction("c1", 1, "🎉", { isBig: false })
+    expect(calA.payload["is_big"]).toBeUndefined()
+    expect(calB.payload["is_big"]).toBeUndefined()
+  })
+
+  it("coerces messageId strings to numbers (Telegram requires int)", () => {
+    const call = serializeReaction("c1", "12345", "👍")
+    expect(call.payload["message_id"]).toBe(12345)
+    expect(typeof call.payload["message_id"]).toBe("number")
   })
 })

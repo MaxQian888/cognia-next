@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Native Anthropic Computer Use tool (computer_20251124) — screen capture, mouse/keyboard control via the Operator action protocol. Tauri Rust backend ships in a follow-up.",
   "type": "frontend",
-  "capabilities": ["native-anthropic-tool", "commands"],
+  "capabilities": ["native-anthropic-tool", "commands", "tools"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",

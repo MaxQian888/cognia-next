@@ -1,4 +1,12 @@
-import { serializeOutbound, serializeDelete, serializeEdit, escapeDiscordMd } from "./serialize"
+import {
+  serializeOutbound,
+  serializeDelete,
+  serializeEdit,
+  serializeReaction,
+  serializeReactionRemoval,
+  serializeFetchHistory,
+  escapeDiscordMd,
+} from "./serialize"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
 
@@ -151,5 +159,74 @@ describe("serializeEdit", () => {
     expect(call.method).toBe("PATCH")
     expect(call.url).toBe("https://discord.com/api/v10/channels/123/messages/456")
     expect(call.payload).toEqual({ content: "new content" })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// serializeReaction / serializeReactionRemoval (A2 — PUT|DELETE /reactions/{emoji}/@me)
+// ---------------------------------------------------------------------------
+
+describe("serializeReaction", () => {
+  it("builds PUT to /reactions/{emoji}/@me with URL-encoded unicode emoji", () => {
+    const call = serializeReaction("123", "456", "👍")
+    expect(call.method).toBe("PUT")
+    // encodeURIComponent("👍") → "%F0%9F%91%8D"
+    expect(call.url).toBe(
+      "https://discord.com/api/v10/channels/123/messages/456/reactions/%F0%9F%91%8D/@me"
+    )
+    expect(call.payload).toEqual({})
+  })
+
+  it("URL-encodes Discord custom-emoji name:id form as a single path segment", () => {
+    const call = serializeReaction("123", "456", "thumbsup:43623862374")
+    // encodeURIComponent("thumbsup:43623862374") → "thumbsup%3A43623862374"
+    expect(call.url).toBe(
+      "https://discord.com/api/v10/channels/123/messages/456/reactions/thumbsup%3A43623862374/@me"
+    )
+  })
+})
+
+describe("serializeReactionRemoval", () => {
+  it("builds DELETE with the same URL shape as serializeReaction", () => {
+    const call = serializeReactionRemoval("123", "456", "👍")
+    expect(call.method).toBe("DELETE")
+    expect(call.url).toBe(
+      "https://discord.com/api/v10/channels/123/messages/456/reactions/%F0%9F%91%8D/@me"
+    )
+    expect(call.payload).toEqual({})
+  })
+})
+
+// ---------------------------------------------------------------------------
+// serializeFetchHistory (A2.b — GET /channels/:id/messages cursor pagination)
+// ---------------------------------------------------------------------------
+
+describe("serializeFetchHistory", () => {
+  it("builds GET-shaped URL with limit", () => {
+    const call = serializeFetchHistory("123", { limit: 50 })
+    expect(call.url).toBe("https://discord.com/api/v10/channels/123/messages?limit=50")
+    expect(call.payload).toEqual({})
+  })
+
+  it("clamps limit to Discord's 1..100 range", () => {
+    const high = serializeFetchHistory("123", { limit: 9999 })
+    expect(high.url).toContain("limit=100")
+    const low = serializeFetchHistory("123", { limit: 0 })
+    expect(low.url).toContain("limit=1")
+  })
+
+  it("includes before cursor when provided", () => {
+    const call = serializeFetchHistory("123", { limit: 50, before: "9999" })
+    expect(call.url).toContain("before=9999")
+  })
+
+  it("includes after cursor when provided", () => {
+    const call = serializeFetchHistory("123", { limit: 50, after: "1000" })
+    expect(call.url).toContain("after=1000")
+  })
+
+  it("defaults limit to 50 when omitted", () => {
+    const call = serializeFetchHistory("123", {})
+    expect(call.url).toContain("limit=50")
   })
 })

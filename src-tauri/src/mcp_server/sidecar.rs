@@ -47,7 +47,22 @@ impl SidecarProcess {
     /// Spawn `node <sidecar_path>` with the bridge env vars set.
     ///
     /// `settings_json` is forwarded verbatim as `COGNIA_BRIDGE_SETTINGS`.
+    /// Convenience wrapper around `spawn_with_env` with no extra env. Kept
+    /// for completeness; callers that need the automation-proxy env go
+    /// through `spawn_with_env` directly.
+    #[allow(dead_code)]
     pub async fn spawn(sidecar_path: &str, settings_json: &str) -> Result<Self, McpServerError> {
+        Self::spawn_with_env(sidecar_path, settings_json, &[]).await
+    }
+
+    /// Like `spawn`, but injects extra env vars before launching the child.
+    /// Used to pass the automation-proxy address + token through to the
+    /// `external-bridge` handler running inside the sidecar.
+    pub async fn spawn_with_env(
+        sidecar_path: &str,
+        settings_json: &str,
+        extra_env: &[(String, String)],
+    ) -> Result<Self, McpServerError> {
         let mut cmd = Command::new("node");
         cmd.arg(sidecar_path)
             .env("COGNIA_BRIDGED", "1")
@@ -57,6 +72,10 @@ impl SidecarProcess {
             // Inherit stderr so logs surface in the Tauri console / log file.
             .stderr(std::process::Stdio::inherit())
             .kill_on_drop(true);
+
+        for (key, value) in extra_env {
+            cmd.env(key, value);
+        }
 
         let mut child = cmd.spawn().map_err(|e| {
             McpServerError::SidecarSpawn(format!(

@@ -125,13 +125,17 @@ function ChannelListBody({
     undefined
   )
 
-  // Filter the session list by selected guild.
+  // Filter the session list by selected guild. (Phase D) Sessions with
+  // `kind === "workflow-editor"` are scoped to the workflow editor's chat
+  // tab and never surface in the main channel list — they appear ONLY
+  // inside the editor itself.
   const filtered = useMemo(() => {
+    const visible = sessions.filter((s) => s.kind !== "workflow-editor")
     if (chatGuild.kind === "team") {
-      return sessions.filter((s) => s.kind === "team" && s.teamId === chatGuild.teamId)
+      return visible.filter((s) => s.kind === "team" && s.teamId === chatGuild.teamId)
     }
     // DM bucket: anything that isn't a team session.
-    return sessions.filter((s) => s.kind !== "team")
+    return visible.filter((s) => s.kind !== "team")
   }, [sessions, chatGuild])
 
   // For DMs, group by character; legacy sessions land under "Other".

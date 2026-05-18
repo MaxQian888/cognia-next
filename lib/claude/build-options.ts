@@ -48,6 +48,56 @@ import { DEFAULT_ROUTING_CONFIG } from "@/types/provider/model-mapping"
 export const BRIEF_OUTPUT_SNIPPET =
   "Respond concisely. Skip preamble, headers, and bullet-list filler. Direct answers only — match length to the question."
 
+/**
+ * Build the workflow-editor system-prompt snapshot block.
+ *
+ * Trimmed to <3KB so we don't blow the system-prompt budget on a
+ * 200-node graph: only the envelope, node count, selection, and (for
+ * up to 12 selected nodes) per-node detail. The agent gets the full
+ * picture via wf_read_graph when it needs it.
+ */
+function buildWorkflowSnapshotBlock(
+  workflowId: string,
+  s: {
+    baseWorkflow: { id: string; name?: string; description?: string }
+    nodes: ReadonlyArray<{ id: string; data: { kind: string; label: string } }>
+    edges: ReadonlyArray<unknown>
+    selectedNodeIds: string[]
+    runStatusByStepId: Record<string, string>
+    validationByStepId: Record<string, unknown>
+  }
+): string {
+  const lines: string[] = []
+  lines.push("# Currently-open workflow")
+  lines.push(`- workflowId: ${workflowId}`)
+  lines.push(`- name: ${s.baseWorkflow.name ?? "(untitled)"}`)
+  if (s.baseWorkflow.description) {
+    lines.push(`- description: ${s.baseWorkflow.description}`)
+  }
+  lines.push(`- nodes: ${s.nodes.length}; edges: ${s.edges.length}`)
+  const failingCount = Object.keys(s.validationByStepId).length
+  if (failingCount > 0) lines.push(`- nodes failing validation: ${failingCount}`)
+  const runningCount = Object.values(s.runStatusByStepId).filter((v) => v === "running").length
+  if (runningCount > 0) lines.push(`- nodes currently running: ${runningCount}`)
+  if (s.selectedNodeIds.length > 0) {
+    lines.push(`- selection: ${s.selectedNodeIds.length} node(s)`)
+    const detailLimit = 12
+    const detailIds = s.selectedNodeIds.slice(0, detailLimit)
+    for (const id of detailIds) {
+      const node = s.nodes.find((n) => n.id === id)
+      if (node) lines.push(`  - ${id} :: ${node.data.kind} :: ${node.data.label}`)
+    }
+    if (s.selectedNodeIds.length > detailLimit) {
+      lines.push(`  - …and ${s.selectedNodeIds.length - detailLimit} more`)
+    }
+  }
+  lines.push("")
+  lines.push(
+    "Use the wf_* MCP tools to read / mutate / lay out / run this workflow on the user's behalf. ALWAYS call wf_read_graph before referencing any node id you didn't just create."
+  )
+  return lines.join("\n")
+}
+
 export interface BuildOptionsContext {
   session?: ChatSession | null
   /** Override the resolving character — used by team chat per-member sends. */
@@ -296,21 +346,49 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // surface it below as one input to the model precedence.
   const modeUpdate = activeMode ? buildAgentModeSessionUpdate(activeMode) : undefined
 
-  // --- Model: per-session > member override > mode override > character > app default ------
+  // --- IM per-channel override (ADR-0009 v41 / A6) ------------------------
+  // For IM-bound sessions, look up the ConversationOverrideRow once up-front
+  // so its `providerOverride` / `modelOverride` fields can sit at the very
+  // top of the model + provider precedence chains. The same row is reused
+  // later for the computer-use gate (line ~648) — fetching it once here is
+  // cheaper than two separate reads, and keeping the read at the top makes
+  // the precedence ordering legible.
+  //
+  // The IM channel's override is intentionally above `session.providerOverride`
+  // because users edit it from the inbox header at runtime, where the
+  // ChatSession may have been minted weeks ago with a stale `providerOverride`.
+  let imOverrideRow:
+    | Awaited<ReturnType<typeof import("@/lib/db/conversation-overrides").readForResolution>>
+    | undefined
+  if (session?.platformBinding?.adapterId && session.platformBinding.conversationKey) {
+    try {
+      const { readForResolution } = await import("@/lib/db/conversation-overrides")
+      imOverrideRow = await readForResolution(session.platformBinding.conversationKey)
+    } catch {
+      // Best-effort — missing override row / stale Dexie shouldn't crash the
+      // send; fall back to the session/character/app chain.
+    }
+  }
+  const imProviderOverride = imOverrideRow?.providerOverride
+  const imModelOverride = imOverrideRow?.modelOverride
+
+  // --- Model: IM channel override > per-session > member override > mode override > character > app default ------
   let model: string | undefined =
+    imModelOverride ??
     session?.model ??
     memberOverride?.modelOverride ??
     modeUpdate?.model ??
     character?.model ??
     appSettings?.defaultModel
 
-  // --- Provider: per-session override > character > app default > "anthropic" -----
+  // --- Provider: IM channel override > per-session override > character > app default > "anthropic" -----
   // The sidecar uses `provider` to pick which dispatcher (`anthropic` vs the
   // generic `ai-sdk` runner) to invoke. Credentials travel inline so the
   // sidecar never reads keys from disk. Resolution is best-effort: when the
   // selected provider has no key configured we leave both fields off and
   // let the sidecar fall back to ANTHROPIC_API_KEY (legacy path).
   let providerId =
+    imProviderOverride ??
     session?.providerOverride ??
     character?.providerId ??
     appSettings?.defaultProvider ??
@@ -633,16 +711,45 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     opts.builtinTools = appSettings.builtinTools
   }
 
+  // --- Compute the effective Computer Use authorization once -------------
+  // Two gates need this verdict: the plugin-tools manifest (so the chat
+  // path doesn't surface `mcp__cognia-plugin-tools__{computer_use,bash,
+  // text_editor}` to the model when the character — or an IM-session
+  // safeguard — disallows it) AND the legacy anthropic-tools path below.
+  //
+  // G6 — IM-driven sessions default-deny Computer Use so an inbound
+  // Telegram / Slack / Discord / Lark message can't fire screenshot /
+  // mouse / keyboard actions. Per-conversation opt-in lives on
+  // `ConversationOverrideRow.allowComputerUse`.
+  //
+  // Reuses `imOverrideRow` already fetched at the top of the resolver
+  // (A6, per-channel provider override) instead of issuing a second Dexie
+  // read. The first read is best-effort, so `imOverrideRow` may still be
+  // undefined here; the fallback is the safe `false` default.
+  const imSession = Boolean(session?.platformBinding?.adapterId)
+  const allowImComputerUse = imOverrideRow?.allowComputerUse === true
+  const computerUseAllowedForChat =
+    character?.enableComputerUse === true && (!imSession || allowImComputerUse)
+
   // --- Plugin tools → SDK sidecar (M2) -------------------------------------
   // When the plugin store has enabled `tools` plugins, surface their tool
   // manifest so the sidecar can build a synthetic `cognia-plugin-tools`
   // in-process MCP server. Functions don't cross the stdio channel; the
   // sidecar emits `plugin_tool_exec` events and the renderer dispatches
   // them via `lib/claude/plugin-tool-ipc.ts:handlePluginToolExec`.
+  //
+  // Per-character Computer Use gating: the `cognia-computer-use` plugin
+  // contributes three tools (computer_use / bash / text_editor). Filter
+  // them out when the character doesn't enable Computer Use, or when the
+  // IM-session safeguard denies access. Other plugins flow through
+  // unchanged.
   if (!character?.disablePluginTools) {
     try {
       const { buildPluginToolsManifest } = await import("@/lib/plugin/bridge/sidecar-tools-bridge")
-      const manifest = buildPluginToolsManifest()
+      let manifest = buildPluginToolsManifest()
+      if (!computerUseAllowedForChat) {
+        manifest = manifest.filter((entry) => entry.pluginId !== "cognia-computer-use")
+      }
       if (manifest.length > 0) opts.pluginTools = manifest
     } catch {
       // Non-fatal — skip plugin tools for this turn if the bridge isn't
@@ -656,24 +763,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // the matching `anthropic-beta` header to `appendHeaders`. The sidecar
   // forwards them to the Anthropic SDK verbatim. See ADR-0020.
   //
-  // G6 — for IM-driven sessions (session bound to a connector platform
-  // binding), default to blacklisting Computer Use tools so an inbound
-  // Telegram / Slack / Discord / Lark message can't fire screenshot /
-  // mouse / keyboard actions. Per-conversation opt-in lives on
-  // `ConversationOverrideRow.allowComputerUse`.
+  // The Claude Code Agent SDK is MCP-only and currently ignores
+  // `opts.anthropicTools` — the chat path uses the plugin-tools route
+  // above. This call is kept so the `anthropic-beta` header still goes
+  // out (harmless, future-proofs the day the SDK adds native-tool
+  // support) and so the External Bridge MCP path can still introspect
+  // the native-anthropic-tool registry.
   try {
     const { applyComputerUseTools } = await import("@/lib/claude/computer-use-tools")
-    const imSession = Boolean(session?.platformBinding?.adapterId)
-    let allowImComputerUse = false
-    if (imSession && session?.platformBinding?.conversationKey) {
-      try {
-        const { readForResolution } = await import("@/lib/db/conversation-overrides")
-        const overrideRow = await readForResolution(session.platformBinding.conversationKey)
-        allowImComputerUse = overrideRow?.allowComputerUse === true
-      } catch {
-        // Override lookup is best-effort; fall back to the safe default.
-      }
-    }
     const applied = applyComputerUseTools({
       character,
       opts,
@@ -770,6 +867,46 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     appSettings?.defaultMaxThinkingTokens
   if (typeof thinkingBudget === "number" && thinkingBudget > 0) {
     opts.maxThinkingTokens = thinkingBudget
+  }
+
+  // --- Workflow-editor session branch (Phase C.6) -------------------------
+  // When the active session is the chat panel embedded in the visual
+  // workflow editor, layer in the four workflow subagents and a compact
+  // system-prompt snapshot of the currently-open workflow so the agent
+  // has grounding before its first tool call. The plugin-tool surface
+  // (cognia-workflow-ai) is already added to `opts.pluginTools` via the
+  // plugin store's enabled-plugins scan (above), so we don't double-
+  // register it here — we only contribute the subagents + system prompt.
+  if (session?.kind === "workflow-editor") {
+    try {
+      const { workflowEditorSubagents } = await import("@/lib/claude/agents/subagents")
+      opts.agents = { ...(opts.agents ?? {}), ...workflowEditorSubagents() }
+    } catch (err) {
+      console.warn("workflow-editor subagent registration failed:", err)
+    }
+    // Sessions for this surface are minted with id = `workflow:${workflowId}`.
+    // Extract the workflow id and look up the registered editor store so we
+    // can build a snapshot. If no editor is open (rare race during nav),
+    // skip the snapshot block — the agent will discover the graph via its
+    // first wf_read_graph tool call.
+    const workflowId = session.id.startsWith("workflow:")
+      ? session.id.slice("workflow:".length)
+      : undefined
+    if (workflowId) {
+      try {
+        const { getEditorStore } = await import("@/lib/workflow/editor/store-registry")
+        const store = getEditorStore(workflowId)
+        if (store) {
+          const s = store.getState()
+          const snapshot = buildWorkflowSnapshotBlock(workflowId, s)
+          opts.appendSystemPrompt = opts.appendSystemPrompt
+            ? `${opts.appendSystemPrompt}\n\n---\n\n${snapshot}`
+            : snapshot
+        }
+      } catch (err) {
+        console.warn("workflow-editor snapshot block failed:", err)
+      }
+    }
   }
 
   // --- Resume / fork continuity --------------------------------------------

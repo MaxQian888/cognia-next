@@ -108,6 +108,13 @@ enum Request {
         transition: ButtonTransition,
         reply: oneshot::Sender<Result<()>>,
     },
+    CursorPosition {
+        reply: oneshot::Sender<Result<Point>>,
+    },
+    PickAtPoint {
+        point: Point,
+        reply: oneshot::Sender<Result<ElementInfo>>,
+    },
     Shutdown,
 }
 
@@ -231,6 +238,12 @@ impl Worker {
                             reply,
                         } => {
                             let _ = reply.send(backend.mouse_button(button, transition));
+                        }
+                        Request::CursorPosition { reply } => {
+                            let _ = reply.send(backend.cursor_position());
+                        }
+                        Request::PickAtPoint { point, reply } => {
+                            let _ = reply.send(backend.pick_at_point(point));
                         }
                         Request::Shutdown => break,
                     }
@@ -389,6 +402,14 @@ impl AutomationHandle {
             reply,
         })
         .await
+    }
+
+    pub async fn cursor_position(&self) -> Result<Point> {
+        round_trip(&self.tx, |reply| Request::CursorPosition { reply }).await
+    }
+
+    pub async fn pick_at_point(&self, point: Point) -> Result<ElementInfo> {
+        round_trip(&self.tx, |reply| Request::PickAtPoint { point, reply }).await
     }
 
     /// Best-effort shutdown — the worker drains in-flight requests and then
