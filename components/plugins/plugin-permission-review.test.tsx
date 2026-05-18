@@ -78,4 +78,20 @@ describe("PluginPermissionReview", () => {
     fireEvent.click(screen.getByText("revokeAll"))
     expect(guard.getPluginPermissions("p_review")).toEqual([])
   })
+
+  it("applies mobile-first w-[95vw] width to DialogContent", () => {
+    render(<PluginPermissionReview />)
+    const dialog = screen.getByRole("dialog")
+    expect(dialog.className).toContain("w-[95vw]")
+  })
+
+  it("hides Declared and Optional columns on narrow viewports via hidden md:table-cell", () => {
+    render(<PluginPermissionReview />)
+    const declaredHeader = screen.getByText("colDeclared").closest("th")
+    const optionalHeader = screen.getByText("colOptional").closest("th")
+    expect(declaredHeader?.className).toContain("hidden")
+    expect(declaredHeader?.className).toContain("md:table-cell")
+    expect(optionalHeader?.className).toContain("hidden")
+    expect(optionalHeader?.className).toContain("md:table-cell")
+  })
 })

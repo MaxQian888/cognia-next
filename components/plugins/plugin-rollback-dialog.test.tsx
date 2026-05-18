@@ -144,4 +144,14 @@ describe("PluginRollbackDialog", () => {
     const button = (await screen.findByLabelText(/rollbackAria.*1\.0\.0/)) as HTMLButtonElement
     expect(button).toBeDisabled()
   })
+
+  it("applies mobile-first w-[95vw] width to DialogContent", () => {
+    __resetPluginRollbackClientForTests({
+      getRollbackInfo: async () => sampleInfo,
+      rollback: jest.fn(),
+    })
+    render(<PluginRollbackDialog open pluginId="alpha" onClose={() => {}} />)
+    const dialog = screen.getByRole("dialog")
+    expect(dialog.className).toContain("w-[95vw]")
+  })
 })

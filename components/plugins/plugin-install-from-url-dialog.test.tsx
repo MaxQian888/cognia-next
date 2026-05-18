@@ -132,4 +132,10 @@ describe("PluginInstallFromUrlDialog", () => {
     fireEvent.click(screen.getByText("cancel"))
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
+
+  it("applies mobile-first w-[95vw] width to DialogContent", () => {
+    render(<PluginInstallFromUrlDialog open={true} onOpenChange={() => {}} />)
+    const dialog = screen.getByRole("dialog")
+    expect(dialog.className).toContain("w-[95vw]")
+  })
 })

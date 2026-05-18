@@ -149,4 +149,10 @@ describe("InstallFromUrlDialog", () => {
     })
     expect(installMock).not.toHaveBeenCalled()
   })
+
+  it("applies mobile-first w-[95vw] width to DialogContent", () => {
+    render(<InstallFromUrlDialog open onOpenChange={() => {}} />)
+    const dialog = screen.getByRole("dialog")
+    expect(dialog.className).toContain("w-[95vw]")
+  })
 })

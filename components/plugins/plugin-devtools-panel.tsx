@@ -538,7 +538,7 @@ export function HotReloadPane() {
           <Card className="p-3 text-center text-xs text-muted-foreground">{t("historyEmpty")}</Card>
         ) : (
           <Card className="p-0">
-            <ScrollArea className="max-h-[30vh]">
+            <ScrollArea className="max-h-[40vh] sm:max-h-[30vh]">
               <ul className="divide-y">
                 {reloadHistory
                   .slice()
@@ -714,7 +714,7 @@ function SummaryCard({
         <Icon className="size-3.5" />
         {label}
       </div>
-      <div className="text-2xl font-semibold tabular-nums">{value}</div>
+      <div className="text-xl md:text-2xl font-semibold tabular-nums">{value}</div>
     </Card>
   )
 }

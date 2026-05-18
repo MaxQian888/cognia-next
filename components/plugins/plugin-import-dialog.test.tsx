@@ -103,4 +103,25 @@ describe("PluginImportDialog", () => {
     expect(usePluginsStore.getState().importStaging).toBeNull()
     expect(upsertPluginMock).not.toHaveBeenCalled()
   })
+
+  it("applies mobile-first w-[95vw] width to DialogContent", () => {
+    usePluginsStore.setState({
+      importStaging: {
+        drafts: [
+          {
+            id: "p1",
+            name: "Plugin 1",
+            version: "1.0.0",
+            manifest: { id: "p1" },
+            sourceLabel: "manifest.json",
+          },
+        ],
+        sourceLabel: "test bundle",
+        parseErrors: [],
+      },
+    })
+    render(<PluginImportDialog />)
+    const dialog = screen.getByRole("dialog")
+    expect(dialog.className).toContain("w-[95vw]")
+  })
 })

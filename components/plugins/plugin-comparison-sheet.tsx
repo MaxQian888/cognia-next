@@ -16,7 +16,6 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Card } from "@/components/ui/card"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { usePluginMarketplaceStore } from "@/stores/plugin/plugin-marketplace-store"
 import type { PluginMarketplaceEntry } from "@/hooks/plugins/use-plugin-marketplace"
 
@@ -80,10 +79,12 @@ export function PluginComparisonSheet({ resolveEntry, entries, installedIds, onI
         {resolved.length === 0 ? (
           <Card className="p-6 text-center mt-4 text-sm text-muted-foreground">{t("empty")}</Card>
         ) : (
-          <ScrollArea className="mt-4">
+          <div className="mt-4 overflow-x-auto">
             <div
               className="grid gap-3"
-              style={{ gridTemplateColumns: `repeat(${resolved.length}, minmax(0,1fr))` }}
+              style={{
+                gridTemplateColumns: `repeat(${resolved.length}, minmax(14rem,1fr))`,
+              }}
             >
               {resolved.map((entry) => (
                 <ComparisonColumn
@@ -95,7 +96,7 @@ export function PluginComparisonSheet({ resolveEntry, entries, installedIds, onI
                 />
               ))}
             </div>
-          </ScrollArea>
+          </div>
         )}
 
         <SheetFooter className="mt-4 gap-2">

@@ -41,7 +41,7 @@ export function PluginPermissionReview() {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="w-[95vw] max-w-2xl max-h-[85vh] flex flex-col">
         {target ? <PermissionReviewContent pluginId={target.pluginId} onClose={close} /> : null}
       </DialogContent>
     </Dialog>
@@ -87,17 +87,21 @@ function PermissionReviewContent({ pluginId, onClose }: { pluginId: string; onCl
         <DialogDescription>{t("description")}</DialogDescription>
       </DialogHeader>
 
-      <Card className="p-0">
-        <ScrollArea className="max-h-[40vh]">
+      <Card className="p-0 flex-1 min-h-0 flex flex-col overflow-hidden">
+        <ScrollArea className="flex-1 min-h-0">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="min-w-[10rem]">{t("colPermission")}</TableHead>
-                  <TableHead className="min-w-[6rem] text-center">{t("colDeclared")}</TableHead>
-                  <TableHead className="min-w-[6rem] text-center">{t("colOptional")}</TableHead>
-                  <TableHead className="min-w-[6rem] text-center">{t("colGranted")}</TableHead>
-                  <TableHead className="min-w-[8rem] text-right">{t("colActions")}</TableHead>
+                  <TableHead className="min-w-[8rem]">{t("colPermission")}</TableHead>
+                  <TableHead className="hidden md:table-cell min-w-[6rem] text-center">
+                    {t("colDeclared")}
+                  </TableHead>
+                  <TableHead className="hidden md:table-cell min-w-[6rem] text-center">
+                    {t("colOptional")}
+                  </TableHead>
+                  <TableHead className="min-w-[5rem] text-center">{t("colGranted")}</TableHead>
+                  <TableHead className="min-w-[6rem] text-right">{t("colActions")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -201,10 +205,10 @@ function PermissionRow({
         </div>
         <p className="text-xs text-muted-foreground">{description}</p>
       </TableCell>
-      <TableCell className="text-center">
+      <TableCell className="hidden md:table-cell text-center">
         {declared && <CheckCircle2Icon className="size-3.5 inline text-foreground/60" />}
       </TableCell>
-      <TableCell className="text-center">
+      <TableCell className="hidden md:table-cell text-center">
         {optional && <CheckCircle2Icon className="size-3.5 inline text-foreground/60" />}
       </TableCell>
       <TableCell className="text-center">

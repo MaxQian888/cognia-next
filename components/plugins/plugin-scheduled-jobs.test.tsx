@@ -131,4 +131,12 @@ describe("PluginScheduledJobs", () => {
     expect(screen.getByText("beta")).toBeInTheDocument()
     expect(screen.queryByText("gamma")).not.toBeInTheDocument()
   })
+
+  it("hides the handler column on narrow viewports via hidden sm:table-cell", () => {
+    mockJobs = [makeJob({ pluginId: "plugin_x", handler: "myHandler", cron: "0 * * * *" })]
+    render(<PluginScheduledJobs />)
+    const handlerCell = screen.getByText("myHandler").closest("td")
+    expect(handlerCell?.className).toContain("hidden")
+    expect(handlerCell?.className).toContain("sm:table-cell")
+  })
 })

@@ -86,7 +86,7 @@ export function PluginInstallFromUrlDialog({ open, onOpenChange }: Props) {
         onOpenChange(next)
       }}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="w-[95vw] sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <GlobeIcon className="size-4" />

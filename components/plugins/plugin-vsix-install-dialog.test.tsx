@@ -167,4 +167,10 @@ describe("PluginVsixInstallDialog", () => {
       )
     })
   })
+
+  it("applies mobile-first w-[95vw] width to DialogContent", () => {
+    render(<PluginVsixInstallDialog open onOpenChange={jest.fn()} />)
+    const dialog = screen.getByRole("dialog")
+    expect(dialog.className).toContain("w-[95vw]")
+  })
 })

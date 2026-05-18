@@ -62,7 +62,7 @@ export function PluginMarketplaceDetail({
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
+      <SheetContent className="w-full sm:max-w-2xl lg:max-w-3xl overflow-y-auto">
         {entry ? (
           <>
             <SheetHeader>

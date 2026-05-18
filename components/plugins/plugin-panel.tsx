@@ -166,7 +166,7 @@ export function PluginPanel() {
             <TabsContent value="installed" className="mt-0">
               <div className="space-y-3">
                 <PluginCategorySheet className="lg:hidden" />
-                <div className="grid gap-4 lg:grid-cols-[200px_1fr]">
+                <div className="grid gap-4 lg:grid-cols-[14rem_1fr] xl:grid-cols-[16rem_1fr]">
                   <div className="hidden lg:block">
                     <PluginCategorySidebar />
                   </div>

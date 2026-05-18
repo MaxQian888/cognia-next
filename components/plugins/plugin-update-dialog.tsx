@@ -128,7 +128,7 @@ export function PluginUpdateDialog({ open, onClose }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="w-[95vw] max-w-2xl max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
@@ -150,8 +150,8 @@ export function PluginUpdateDialog({ open, onClose }: Props) {
           </Button>
         </div>
 
-        <Card className="p-0">
-          <ScrollArea className="max-h-[40vh]">
+        <Card className="p-0 flex-1 min-h-0 flex flex-col overflow-hidden">
+          <ScrollArea className="flex-1 min-h-0">
             {updates.length === 0 ? (
               <p className="p-4 text-center text-sm text-muted-foreground">{t("upToDate")}</p>
             ) : (

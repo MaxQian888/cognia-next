@@ -48,7 +48,7 @@ export function PluginConflictDialog({ onContinue }: Props = {}) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && setTarget(null)}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="w-[95vw] max-w-xl">
         <DialogHeader>
           <DialogTitle>{t("title", { id: pluginId })}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>

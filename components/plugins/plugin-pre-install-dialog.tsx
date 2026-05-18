@@ -66,7 +66,7 @@ export function PluginPreInstallDialog({ target, onContinue, onCancel }: Props) 
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
-      <DialogContent className="max-w-xl" data-testid="plugin-pre-install-dialog">
+      <DialogContent className="w-[95vw] max-w-xl" data-testid="plugin-pre-install-dialog">
         {target && (
           <>
             <DialogHeader>

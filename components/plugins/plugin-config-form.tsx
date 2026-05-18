@@ -124,7 +124,7 @@ export function PluginConfigForm() {
   const open = target !== null
   return (
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="w-[95vw] max-w-xl">
         {target ? <PluginConfigFormContent pluginId={target.pluginId} onClose={close} /> : null}
       </DialogContent>
     </Dialog>

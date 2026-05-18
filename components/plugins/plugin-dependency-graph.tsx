@@ -97,7 +97,7 @@ export function PluginDependencyGraph({ manifest }: Props) {
 
       {!loading && result && (
         <>
-          <ScrollArea className="max-h-[40vh]">
+          <ScrollArea className="max-h-[55vh] sm:max-h-[40vh]">
             <ul className="space-y-0.5 text-xs">
               <li>
                 <code className="font-mono">{manifest.id}</code>

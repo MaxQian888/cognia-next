@@ -200,6 +200,7 @@ export function PluginScheduledJobs({ jobsOverride }: PluginScheduledJobsProps =
                 activeKey={sortKey}
                 activeDir={sortDir}
                 onClick={handleSort}
+                className="hidden sm:table-cell"
               />
               <SortableHeader
                 label={t("colCron")}
@@ -237,7 +238,9 @@ export function PluginScheduledJobs({ jobsOverride }: PluginScheduledJobsProps =
             {filteredAndSorted.map((job) => (
               <TableRow key={job.id}>
                 <TableCell className="font-mono text-xs">{job.pluginId}</TableCell>
-                <TableCell className="font-mono text-xs">{job.handler}</TableCell>
+                <TableCell className="hidden sm:table-cell font-mono text-xs">
+                  {job.handler}
+                </TableCell>
                 <TableCell className="font-mono text-xs">{job.cron}</TableCell>
                 <TableCell>
                   <StatusBadge status={job.status} />

@@ -69,8 +69,8 @@ export function PluginAnalytics({ pluginId }: Props) {
         />
       </div>
 
-      <Card className="p-0">
-        <ScrollArea className="max-h-[50vh]">
+      <Card className="p-0 flex flex-col max-h-[60vh] md:max-h-[70vh]">
+        <ScrollArea className="flex-1 min-h-0">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
@@ -89,11 +89,11 @@ export function PluginAnalytics({ pluginId }: Props) {
                   return (
                     <TableRow key={entry.pluginId}>
                       <TableCell>
-                        <div className="space-y-0.5">
-                          <div className="font-medium text-sm">
+                        <div className="space-y-0.5 min-w-0">
+                          <div className="font-medium text-sm truncate">
                             {plugin?.name ?? entry.pluginId}
                           </div>
-                          <div className="font-mono text-xs text-muted-foreground">
+                          <div className="font-mono text-xs text-muted-foreground truncate max-w-[14ch] sm:max-w-none">
                             {entry.pluginId}
                           </div>
                         </div>
@@ -136,7 +136,7 @@ function SummaryCard({
         <Icon className="size-3.5" />
         {label}
       </div>
-      <div className="text-2xl font-semibold tabular-nums flex items-center gap-2">
+      <div className="text-xl md:text-2xl font-semibold tabular-nums flex flex-wrap items-center gap-2">
         {value}
         {variant === "destructive" && Number(value) > 0 && (
           <Badge variant="destructive" className="text-xs">

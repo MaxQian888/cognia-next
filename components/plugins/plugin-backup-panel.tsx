@@ -134,7 +134,7 @@ export function PluginBackupPanel({ pluginId }: Props) {
 
       {error && <p className="text-xs text-destructive break-words">{error}</p>}
 
-      <ScrollArea className="max-h-[30vh]">
+      <ScrollArea className="max-h-[40vh] sm:max-h-[30vh]">
         {snapshots.length === 0 ? (
           <p className="text-xs text-muted-foreground text-center py-4">{t("empty")}</p>
         ) : (

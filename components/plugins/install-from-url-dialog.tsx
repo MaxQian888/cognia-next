@@ -169,7 +169,7 @@ export function InstallFromUrlDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="max-w-xl" data-testid="install-from-url-dialog">
+        <DialogContent className="w-[95vw] max-w-xl" data-testid="install-from-url-dialog">
           <DialogHeader>
             <DialogTitle>{t("title")}</DialogTitle>
             <DialogDescription>{t("description")}</DialogDescription>

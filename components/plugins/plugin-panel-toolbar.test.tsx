@@ -270,4 +270,14 @@ describe("PluginPanelToolbar", () => {
     render(<PluginPanelToolbar />)
     expect(screen.getByText("groupManifest")).toBeInTheDocument()
   })
+
+  it("hides secondary action labels behind hidden lg:inline on narrow viewports", () => {
+    render(<PluginPanelToolbar onCheckUpdates={() => {}} onSyncRegistry={() => {}} />)
+    const checkLabel = screen.getByText("checkUpdates")
+    const syncLabel = screen.getByText("syncRegistry")
+    expect(checkLabel.className).toContain("hidden")
+    expect(checkLabel.className).toContain("lg:inline")
+    expect(syncLabel.className).toContain("hidden")
+    expect(syncLabel.className).toContain("lg:inline")
+  })
 })

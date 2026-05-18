@@ -32,7 +32,7 @@ export function PluginPanelGrid() {
 
   if (totals.total === 0) {
     return (
-      <Card className="p-8 text-center space-y-3">
+      <Card className="p-6 md:p-8 text-center space-y-3">
         <BoxesIcon className="size-10 mx-auto text-muted-foreground" />
         <p className="text-sm text-muted-foreground">{t("emptyAll")}</p>
         <Button size="sm" onClick={() => setActiveTab("browse")}>
@@ -44,7 +44,7 @@ export function PluginPanelGrid() {
 
   if (filtered.length === 0) {
     return (
-      <Card className="p-8 text-center space-y-2">
+      <Card className="p-6 md:p-8 text-center space-y-2">
         <BoxesIcon className="size-10 mx-auto text-muted-foreground" />
         <p className="text-sm text-muted-foreground">{t("emptyFiltered")}</p>
       </Card>

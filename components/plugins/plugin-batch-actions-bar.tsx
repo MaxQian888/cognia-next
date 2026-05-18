@@ -52,13 +52,19 @@ export function PluginBatchActionsBar() {
         {t("selected", { count: selection.size })}
       </Badge>
       <div className="h-4 w-px bg-border mx-1" />
-      <Button size="sm" variant="ghost" onClick={() => void handleToggleAll()}>
-        <PowerIcon className="size-3.5 mr-1.5" />
-        {allEnabled ? t("disableAll") : t("enableAll")}
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => void handleToggleAll()}
+        aria-label={allEnabled ? t("disableAll") : t("enableAll")}
+      >
+        <PowerIcon className="size-3.5 sm:mr-1.5" />
+        <span className="hidden sm:inline">{allEnabled ? t("disableAll") : t("enableAll")}</span>
       </Button>
       <Button
         size="sm"
         variant="ghost"
+        aria-label={t("refresh")}
         onClick={() => {
           // Force re-fetch by toggling a no-op selection reset/restore.
           // This keeps the bar reactive even when the underlying rows
@@ -73,12 +79,18 @@ export function PluginBatchActionsBar() {
           }, 0)
         }}
       >
-        <RefreshCcwIcon className="size-3.5 mr-1.5" />
-        {t("refresh")}
+        <RefreshCcwIcon className="size-3.5 sm:mr-1.5" />
+        <span className="hidden sm:inline">{t("refresh")}</span>
       </Button>
-      <Button size="sm" variant="ghost" className="text-destructive" onClick={handleUninstallAll}>
-        <Trash2Icon className="size-3.5 mr-1.5" />
-        {t("uninstall")}
+      <Button
+        size="sm"
+        variant="ghost"
+        className="text-destructive"
+        onClick={handleUninstallAll}
+        aria-label={t("uninstall")}
+      >
+        <Trash2Icon className="size-3.5 sm:mr-1.5" />
+        <span className="hidden sm:inline">{t("uninstall")}</span>
       </Button>
       <div className="h-4 w-px bg-border mx-1" />
       <Button

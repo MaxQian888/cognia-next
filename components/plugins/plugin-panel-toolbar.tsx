@@ -149,9 +149,9 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
             )}
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button size="sm" variant="outline" onClick={onCheckUpdates}>
-          <RefreshCcwIcon className="size-3.5 mr-1.5" />
-          {t("checkUpdates")}
+        <Button size="sm" variant="outline" onClick={onCheckUpdates} aria-label={t("checkUpdates")}>
+          <RefreshCcwIcon className="size-3.5 lg:mr-1.5" />
+          <span className="hidden lg:inline">{t("checkUpdates")}</span>
         </Button>
         <Button
           size="sm"
@@ -161,11 +161,11 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
           aria-label={t("syncRegistryAria")}
         >
           {syncing ? (
-            <Loader2Icon className="size-3.5 mr-1.5 animate-spin" />
+            <Loader2Icon className="size-3.5 lg:mr-1.5 animate-spin" />
           ) : (
-            <DownloadIcon className="size-3.5 mr-1.5" />
+            <DownloadIcon className="size-3.5 lg:mr-1.5" />
           )}
-          {t("syncRegistry")}
+          <span className="hidden lg:inline">{t("syncRegistry")}</span>
         </Button>
       </div>
 

@@ -67,4 +67,16 @@ describe("PluginConflictDialog", () => {
     expect(usePluginsStore.getState().conflictDialogTarget).toBeNull()
     expect(onContinue).toHaveBeenCalledWith("plugin_a")
   })
+
+  it("applies mobile-first w-[95vw] width to DialogContent", () => {
+    usePluginsStore.setState({
+      conflictDialogTarget: {
+        pluginId: "plugin_a",
+        conflicts: [{ severity: "low", message: "x" }],
+      },
+    })
+    render(<PluginConflictDialog />)
+    const dialog = screen.getByRole("dialog")
+    expect(dialog.className).toContain("w-[95vw]")
+  })
 })

@@ -88,7 +88,7 @@ export function PluginPermissionsTab() {
 
   if (all.length === 0) {
     return (
-      <Card className="p-8 text-center space-y-3">
+      <Card className="p-6 md:p-8 text-center space-y-3">
         <ShieldCheckIcon className="size-10 mx-auto text-muted-foreground" />
         <p className="text-sm text-muted-foreground">{t("emptyAll")}</p>
       </Card>

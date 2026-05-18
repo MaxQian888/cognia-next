@@ -26,7 +26,7 @@ export function PluginDetailPanel() {
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && closeDetail()}>
-      <SheetContent className="w-full sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl flex flex-col p-0">
+      <SheetContent className="w-full sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl 2xl:max-w-5xl flex flex-col p-0">
         <SheetHeader className="sticky top-0 z-10 bg-background border-b px-6 py-4">
           {detailPluginId ? (
             <PluginDetailHeader pluginId={detailPluginId} />

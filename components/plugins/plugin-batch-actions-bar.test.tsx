@@ -88,4 +88,15 @@ describe("PluginBatchActionsBar", () => {
     fireEvent.click(screen.getByLabelText("clearSelection"))
     expect(usePluginsStore.getState().selection.size).toBe(0)
   })
+
+  it("hides secondary labels behind hidden sm:inline on narrow viewports", () => {
+    render(<PluginBatchActionsBar />)
+    const disableLabel = screen.getByText("disableAll")
+    const refreshLabel = screen.getByText("refresh")
+    const uninstallLabel = screen.getByText("uninstall")
+    for (const label of [disableLabel, refreshLabel, uninstallLabel]) {
+      expect(label.className).toContain("hidden")
+      expect(label.className).toContain("sm:inline")
+    }
+  })
 })

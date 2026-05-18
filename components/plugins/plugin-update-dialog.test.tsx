@@ -69,4 +69,11 @@ describe("PluginUpdateDialog", () => {
     fireEvent.click(screen.getByText("close"))
     expect(onClose).toHaveBeenCalled()
   })
+
+  it("applies mobile-first w-[95vw] width to DialogContent", () => {
+    __resetPluginUpdateClientForTests(makeClient([]))
+    render(<PluginUpdateDialog open onClose={() => {}} />)
+    const dialog = screen.getByRole("dialog")
+    expect(dialog.className).toContain("w-[95vw]")
+  })
 })

@@ -134,4 +134,10 @@ describe("PluginConfigForm", () => {
     render(<PluginConfigForm />)
     expect(screen.getByText("unsupportedField")).toBeInTheDocument()
   })
+
+  it("applies mobile-first w-[95vw] width to DialogContent", () => {
+    render(<PluginConfigForm />)
+    const dialog = screen.getByRole("dialog")
+    expect(dialog.className).toContain("w-[95vw]")
+  })
 })
