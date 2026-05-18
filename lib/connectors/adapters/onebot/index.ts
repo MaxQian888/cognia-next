@@ -91,6 +91,67 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     return currentVariant ?? "v11"
   }
 
+  /**
+   * Probe upstream impl (NapCat / Lagrange / LLOneBot) via the OneBot
+   * `get_version_info` action — added at ADR-0009 v41 / A5. Result is
+   * persisted on `AdapterInstanceRow.implMetadata` (schema v41) so the
+   * mapper layer can choose NapCat-only extension paths (markdown card
+   * buttons, file upload, emoji like) and the capability matrix view
+   * can show what the upstream supports.
+   *
+   * Best-effort: a probe failure (timeout, unsupported action, missing
+   * impl field) MUST NOT block startup. We simply leave `implMetadata`
+   * unset and the mapper falls back to the standards-only path.
+   */
+  async function probeUpstreamImpl(): Promise<void> {
+    try {
+      const resp = await sendToOneBot(opts.id, {
+        action: "get_version_info",
+        params: {},
+        echo: `${opts.id}:probe:${Date.now()}`,
+      })
+      if (resp.status !== "ok" || !resp.data || typeof resp.data !== "object") return
+      const data = resp.data as Record<string, unknown>
+      const rawImpl = typeof data["app_name"] === "string" ? (data["app_name"] as string) : ""
+      const version = typeof data["app_version"] === "string" ? (data["app_version"] as string) : ""
+      // Normalise the impl name. NapCat reports "NapCat.Onebot"; Lagrange
+      // reports "Lagrange.Core" or "Lagrange.OneBot"; LLOneBot reports
+      // "LLOneBot". We lowercase + strip everything from the first
+      // non-alphanumeric so the mapper can do `if (impl === "napcat")`.
+      const impl =
+        rawImpl
+          .toLowerCase()
+          .split(/[.\-_:\s]/)[0]
+          ?.replace(/[^a-z0-9]/g, "") || "unknown"
+
+      // Capability features advertised by extensions of the OneBot spec
+      // — `markdown-card` is what NapCat calls its QQ markdown card
+      // protocol; `upload_group_file` and `set_msg_emoji_like` are the
+      // action endpoints we feature-test for. Lagrange ships subset.
+      const features: string[] = []
+      if (impl === "napcat") {
+        features.push("markdown-card", "upload_group_file", "set_msg_emoji_like")
+      } else if (impl === "lagrange") {
+        // Lagrange supports the file upload action; markdown cards are
+        // hit-or-miss across versions so we leave the flag off until
+        // B5 introduces an explicit behaviour probe.
+        features.push("upload_group_file")
+      }
+
+      try {
+        const { updateAdapterInstance } = await import("@/lib/db/adapter-instances")
+        await updateAdapterInstance(opts.id, {
+          implMetadata: { impl, version, features },
+        })
+      } catch {
+        // Adapter row may not exist in the test harness or during a fresh
+        // first start — non-fatal.
+      }
+    } catch {
+      // Probe failed — leave implMetadata untouched.
+    }
+  }
+
   async function start(ctx: AdapterContext): Promise<void> {
     stopCalled = false
     healthState = "running"
@@ -99,10 +160,15 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     const unlistenResp = await subscribeOneBotResponses(opts.id)
     unlisteners.push(unlistenResp)
 
-    // Subscribe to open/close lifecycle
+    // Subscribe to open/close lifecycle. A5 — kick a `get_version_info`
+    // probe on every open so reconnects update implMetadata if the user
+    // upgraded their upstream (NapCat → Lagrange swap, version bump, …).
     const unlistenOpen = await subscribeOneBotOpen(opts.id, () => {
       healthState = "running"
       lastActivityAt = Date.now()
+      // Fire-and-forget — the probe writes Dexie + returns. We don't
+      // await so a slow client doesn't block other connection setup.
+      void probeUpstreamImpl()
     })
     unlisteners.push(unlistenOpen)
 

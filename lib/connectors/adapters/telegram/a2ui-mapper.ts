@@ -192,6 +192,43 @@ export async function buildTelegramA2UICalls(
         flushRow()
         lastEmittedWasButton = false
         break
+      case "TextField":
+      case "TextArea": {
+        // B2 — ForceReply simulation (ADR-0009 v41). Telegram bots can't
+        // surface a native text input, but `reply_markup.force_reply`
+        // makes the client prefill a reply-to context that nudges the
+        // user toward sending a free-text reply. The adapter's send loop
+        // captures the returned platform message_id and records a
+        // `kind: "force_reply"` binding so the parser can correlate the
+        // next inbound `reply_to_message.message_id` back to this
+        // component.
+        flushRow()
+        lastEmittedWasButton = false
+        const label = stringValue(node.raw.label) || stringValue(node.raw.placeholder) || "Reply"
+        const placeholder = stringValue(node.raw.placeholder) || label
+        const promptText = escapeMdV2(label)
+        const payload: Record<string, unknown> = {
+          chat_id: input.chatId,
+          text: promptText.length > 0 ? promptText : escapeMdV2("Reply"),
+          parse_mode: "MarkdownV2",
+          reply_markup: {
+            force_reply: true,
+            input_field_placeholder: placeholder.slice(0, 64),
+            selective: true,
+          },
+          ...input.routing,
+        }
+        calls.push({
+          method: "sendMessage",
+          payload,
+          forceReplyBinding: {
+            surfaceId: input.surfaceId,
+            componentId: node.id,
+            conversationKey: input.conversationKey,
+          },
+        })
+        break
+      }
       default:
         // Unsupported component — caller's `plainTextMirror` fallback
         // covers it (the bus appends it as a sendMessage when our

@@ -13,8 +13,14 @@ import type {
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { TELEGRAM_A2UI_CAPABILITY, TELEGRAM_CAPS } from "./capability"
-import { parseTelegramUpdate, parseTelegramCallbackQuery, type TelegramUpdate } from "./parse"
-import { serializeOutboundAsync } from "./serialize"
+import {
+  parseTelegramUpdate,
+  parseTelegramCallbackQuery,
+  parseTelegramForceReplyCorrelation,
+  type TelegramUpdate,
+} from "./parse"
+import { serializeOutboundAsync, serializeReaction } from "./serialize"
+import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import { startLongPoll } from "./transport-longpoll"
 import { startWebhookTransport } from "./transport-webhook"
 import { getBus } from "@/lib/connectors/bus"
@@ -167,6 +173,29 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
             continue
           }
 
+          // B2 — ForceReply correlation (ADR-0009 v41). If the inbound
+          // message is a reply to one of our outstanding ForceReply
+          // prompts, route it as a callback (actionType="input")
+          // instead of an ordinary message — that way the assistant's
+          // next turn sees the user's free-text input wired straight
+          // onto the A2UI surface's TextField/TextArea component.
+          try {
+            const forceReplyCallback = await parseTelegramForceReplyCorrelation(
+              opts.id,
+              opts.selfId,
+              update
+            )
+            if (forceReplyCallback) {
+              lastActivityAt = Date.now()
+              await getBus().dispatchConnectorCallback(forceReplyCallback)
+              continue
+            }
+          } catch (err) {
+            ctx.logger.warn("telegram:force_reply correlation failed", {
+              reason: err instanceof Error ? err.message : String(err),
+            })
+          }
+
           // Regular message / edit / reaction → message event.
           const event = parseTelegramUpdate(opts.id, opts.selfId, update)
           if (event) {
@@ -205,6 +234,25 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
         const result = await doSend(call.method, call.payload as Record<string, unknown>)
         if (result.message_id !== undefined) {
           platformMessageId = String(result.message_id)
+          // B2 — post-send ForceReply binding. The mapper signals which
+          // A2UI surface + component asked for input; we couldn't know
+          // the platform message_id until Telegram echoed it back. The
+          // parser will use this row when the user replies to the prompt.
+          if (call.forceReplyBinding) {
+            try {
+              await recordCallbackBinding({
+                adapterId: opts.id,
+                actionId: platformMessageId,
+                kind: "force_reply",
+                surfaceId: call.forceReplyBinding.surfaceId,
+                componentId: call.forceReplyBinding.componentId,
+                conversationKey: call.forceReplyBinding.conversationKey,
+              })
+            } catch {
+              // Binding persistence is best-effort — a Dexie outage
+              // shouldn't fail the platform send.
+            }
+          }
         }
       }
       return { ok: true, platformMessageId }
@@ -277,6 +325,28 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
     await doSend("sendChatAction", { chat_id: chatId, action: "typing" })
   }
 
+  /**
+   * Push a bot reaction onto a message via `setMessageReaction` (Bot API 7.0+,
+   * shipped at ADR-0009 v41 / A1 of the IM connector gap-closure plan).
+   *
+   * Bots may only push the `emoji` ReactionType — passing the unicode
+   * character directly is the simplest stable contract. Passing an empty
+   * `emoji` clears the bot's reactions on the message.
+   *
+   * Mirrors the `addReaction` surface area exposed by the Slack adapter so
+   * the connector bus can route capability-aware reaction sends without
+   * adapter-specific call sites.
+   */
+  async function addReaction(
+    chatId: string | number,
+    messageId: string | number,
+    emoji: string | string[],
+    opts?: { isBig?: boolean }
+  ): Promise<void> {
+    const call = serializeReaction(chatId, messageId, emoji, opts)
+    await doSend(call.method, call.payload)
+  }
+
   async function refreshCredentials(): Promise<void> {
     // No-op: botToken is a resolver function called fresh on each request
   }
@@ -300,7 +370,10 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
     edit,
     delete: deleteMessage,
     setTyping,
+    addReaction,
     refreshCredentials,
     a2uiCapability: () => TELEGRAM_A2UI_CAPABILITY,
+  } as PlatformAdapter & {
+    addReaction: typeof addReaction
   }
 }

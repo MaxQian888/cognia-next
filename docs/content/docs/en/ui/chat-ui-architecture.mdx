@@ -300,7 +300,7 @@ The desktop shell stacks 4 global floating layers:
 | Component | Purpose | File |
 | --------- | ------- | ---- |
 | `TitleBar` | Custom window title bar (no native chrome), with close/min/max + drag area | `components/desktop/title-bar.tsx` |
-| `GuildRail` | Ultra-narrow left vertical rail, listing guild (team) switches | `components/desktop/guild-rail.tsx` |
+| `GuildRail` | Ultra-narrow left vertical rail, listing guild (team) switches | `components/shell/guild-rail.tsx` |
 | `StatusBar` | Bottom status bar — sidecar health, current transport, network indicator | `components/desktop/status-bar.tsx` |
 | `CommandPalette` | `Ctrl+K` to invoke: cross-section search + navigation + execute slash commands | `components/desktop/command-palette.tsx` |
 
@@ -350,7 +350,7 @@ All copy goes through `useTranslations(...)`:
 | Change Markdown rendering behavior | `components/chat/markdown-renderer.tsx` + Streamdown plugin config |
 | Change ChatHeader items | `components/chat/chat-header.tsx` |
 | Change desktop command palette entries | `components/desktop/command-palette.tsx` |
-| Change mobile gestures | `components/mobile/interactions/*` |
+| Change mobile gestures | `components/interactions/*` |
 
 ## Related Pages
 

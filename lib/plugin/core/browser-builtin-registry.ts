@@ -10,6 +10,7 @@ import githubDeliveryManifest from "@/plugins/github-delivery/plugin.json"
 import promptTemplatesManifest from "@/plugins/prompt-templates/plugin.json"
 import screenshotManifest from "@/plugins/screenshot/plugin.json"
 import webToolsManifest from "@/plugins/web-tools/plugin.json"
+import workflowAiManifest from "@/plugins/workflow-ai/plugin.json"
 import workspaceToolsManifest from "@/plugins/workspace-tools/plugin.json"
 
 // Static imports for built-in plugin modules
@@ -20,6 +21,7 @@ import screenshotModule from "@/plugins/screenshot/src/index"
 import promptTemplatesModule from "@/plugins/prompt-templates/src/index"
 import clipboardHistoryModule from "@/plugins/clipboard-history/src/index"
 import githubDeliveryModule from "@/plugins/github-delivery/src/index"
+import workflowAiModule from "@/plugins/workflow-ai/src/index"
 
 export interface BrowserBuiltinRegistryEntry {
   manifest: PluginManifest
@@ -78,6 +80,12 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://github-delivery",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(githubDeliveryModule),
+  },
+  {
+    manifest: asPluginManifest(workflowAiManifest),
+    path: "builtin://cognia-workflow-ai",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(workflowAiModule),
   },
 ]
 

@@ -313,7 +313,7 @@ Biometric guard is exposed by `hooks/use-biometric-guard.ts:verify()`, wrapping 
 - **Left drawer** (Sheet slide-from-left): `GuildRail` + `MobileChannelList` — desktop sidebar content下沉 into a drawer.
 - **Bottom drawer** (Sheet slide-from-bottom): Session actions (settings, character selection, member list, sign out).
 - **Tab Bar**: `components/mobile/shell/mobile-tab-bar.tsx` — Chat / Inbox / Workflows / Me, four tabs.
-- **Gestures**: `components/mobile/interactions/` — `LongPress`, `PullToRefresh`, `SwipeRow`, all using the same pointer polyfill.
+- **Gestures**: `components/interactions/` — `LongPress`, `PullToRefresh`, `SwipeRow`, all using the same pointer polyfill (shared across mobile and desktop where applicable).
 - **OfflineBanner**: `components/mobile/offline-banner.tsx` shows a horizontal bar when `@capacitor/network` reports `connected: false`.
 
 Desktop and mobile shells **do not** share components outside of `chat-view.tsx` — `ChatPane` itself is platform-agnostic, but containers, drawers, and tabs are all independent. Mobile uses `Sheet`/`Drawer`; desktop uses `SidebarProvider` + draggable splits.

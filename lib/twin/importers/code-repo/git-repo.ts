@@ -1,15 +1,18 @@
 /**
- * git-repo importer — walks recent commits in a local Git repository and
- * emits one `RawSource` per commit (subject + body + diff stat). The
- * downstream code-strategy chunker handles syntax-aware slicing on the
- * patches; everything before the patch reads as plain markdown.
+ * git-repo importer — walks recent commits in a local Git repository via the
+ * Tauri `twin_parse_git_repo` command and emits one `RawSource` per commit.
  *
- * Tauri-only: `simple-git` shells out, so the workbench should gate this
- * importer behind `isTauri()`. The function returns an empty array (with a
- * console warning) when called in a context without `Node.fs` access so
- * tests / web-mode previews fail cleanly.
+ * The walk runs in the Rust main process (libgit2 via the `git2` crate), so
+ * this module no longer pulls `simple-git` into the Next.js bundle — that's
+ * what let us drop the `NODE_ONLY_MODULES` / `SERVER_ONLY_PACKAGES` aliases
+ * from `next.config.ts`. The UI continues to gate the picker behind
+ * `tauriAvailable`; the `isTauri()` early-return below is a defensive belt
+ * for non-Tauri callers (jsdom, web preview, etc.).
  */
 
+import { invoke } from "@tauri-apps/api/core"
+
+import { isTauri } from "@/lib/tauri"
 import type { RawSource } from "@/lib/twin/ingest/parse"
 
 export interface GitRepoImportOptions {
@@ -32,80 +35,55 @@ export interface CommitRecord {
   filesChanged: number
   insertions: number
   deletions: number
-  /** Truncated diff (8 KB cap to keep the chunker happy). */
+  /** `--stat` summary + unified patch, capped at 8 KB by the Rust command. */
   diff: string
 }
 
-const DIFF_BYTE_CAP = 8 * 1024
+interface ParseGitRepoArgs {
+  repoPath: string
+  maxCommits: number
+  author?: string
+}
+
+const DEFAULT_MAX_COMMITS = 200
 
 export async function parseGitRepo(options: GitRepoImportOptions): Promise<RawSource[]> {
-  let simpleGitMod: typeof import("simple-git")
-  try {
-    simpleGitMod = await import("simple-git")
-  } catch {
-    // simple-git may not load in jsdom / browser previews. Surface zero
-    // sources rather than crashing the workbench.
-    return []
-  }
-  const git = simpleGitMod.simpleGit(options.repoPath)
-  const limit = options.maxCommits ?? 200
-
-  let log
-  try {
-    log = await git.log({ maxCount: limit })
-  } catch {
+  if (!isTauri()) {
     return []
   }
 
-  const sources: RawSource[] = []
-  for (const entry of log.all) {
-    if (
-      options.author &&
-      !`${entry.author_name} ${entry.author_email}`
-        .toLowerCase()
-        .includes(options.author.toLowerCase())
-    ) {
-      continue
-    }
-
-    let diff = ""
-    try {
-      diff = await git.show(["--stat", "--patch", "--unified=2", entry.hash])
-    } catch {
-      diff = "(diff unavailable)"
-    }
-    const truncated =
-      diff.length > DIFF_BYTE_CAP ? `${diff.slice(0, DIFF_BYTE_CAP)}\n…(diff truncated)` : diff
-    const subject = entry.message.split("\n", 1)[0] ?? entry.message
-    const bodyRest = entry.message.slice(subject.length).trim()
-    const ts = Date.parse(entry.date)
-    const record: CommitRecord = {
-      hash: entry.hash,
-      subject,
-      body: bodyRest,
-      author: entry.author_name,
-      email: entry.author_email,
-      timestampMs: Number.isFinite(ts) ? ts : 0,
-      filesChanged: 0,
-      insertions: 0,
-      deletions: 0,
-      diff: truncated,
-    }
-
-    const text = renderCommit(record)
-    sources.push({
-      id: `tws_git_${options.twinId}_${entry.hash.slice(0, 12)}`,
-      filename: `${options.repoPath}/${entry.hash.slice(0, 12)}.md`,
-      format: "code",
-      text,
-      baseMetadata: {
-        commitSha: entry.hash,
-        timestamp: record.timestampMs,
-        speakers: [`${record.author} <${record.email}>`],
-      },
-    })
+  const args: ParseGitRepoArgs = {
+    repoPath: options.repoPath,
+    maxCommits:
+      options.maxCommits && options.maxCommits > 0 ? options.maxCommits : DEFAULT_MAX_COMMITS,
+    author: options.author?.trim() || undefined,
   }
-  return sources
+
+  let records: CommitRecord[]
+  try {
+    records = await invoke<CommitRecord[]>("twin_parse_git_repo", { args })
+  } catch {
+    // The Rust command surfaces its own errors as strings; we mirror the
+    // legacy behavior of returning zero sources so the workbench can carry
+    // on with whatever else the user selected.
+    return []
+  }
+
+  return records.map((record) => recordToRawSource(options, record))
+}
+
+function recordToRawSource(options: GitRepoImportOptions, record: CommitRecord): RawSource {
+  return {
+    id: `tws_git_${options.twinId}_${record.hash.slice(0, 12)}`,
+    filename: `${options.repoPath}/${record.hash.slice(0, 12)}.md`,
+    format: "code",
+    text: renderCommit(record),
+    baseMetadata: {
+      commitSha: record.hash,
+      timestamp: record.timestampMs,
+      speakers: [`${record.author} <${record.email}>`],
+    },
+  }
 }
 
 function renderCommit(commit: CommitRecord): string {

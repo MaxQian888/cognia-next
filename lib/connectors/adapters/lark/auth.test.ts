@@ -1,5 +1,11 @@
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
-import { getTenantAccessToken, clearTokenCache, buildLarkOAuthUrl } from "./auth"
+import {
+  getTenantAccessToken,
+  clearTokenCache,
+  buildLarkOAuthUrl,
+  exchangeCodeForUserAccessToken,
+  refreshUserAccessToken,
+} from "./auth"
 
 const mockHttp = connectorsHttpRequest as jest.Mock
 
@@ -107,5 +113,135 @@ describe("buildLarkOAuthUrl", () => {
     })
     expect(url).not.toContain("cognia://connector/oauth/lark?foo=bar")
     expect(url).toContain("redirect_uri=")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// A4 / D2 — OAuth code exchange + refresh (ADR-0009 v41)
+// ---------------------------------------------------------------------------
+
+function makeOidcResponse(opts: {
+  accessToken?: string
+  refreshToken?: string
+  openId?: string
+  name?: string
+  expiresIn?: number
+  refreshExpiresIn?: number
+  code?: number
+  msg?: string
+}) {
+  return {
+    status: 200,
+    headers: {},
+    body: JSON.stringify({
+      code: opts.code ?? 0,
+      msg: opts.msg,
+      data:
+        opts.code === undefined || opts.code === 0
+          ? {
+              access_token: opts.accessToken ?? "u-token",
+              refresh_token: opts.refreshToken ?? "u-refresh",
+              expires_in: opts.expiresIn ?? 7200,
+              refresh_expires_in: opts.refreshExpiresIn ?? 31_104_000,
+              open_id: opts.openId ?? "ou_default",
+              union_id: "on_default",
+              token_type: "Bearer",
+              scope: "im:message",
+              name: opts.name,
+              avatar_url: "https://avatar.example.com",
+              email: "user@example.com",
+              enterprise_email: "user@bigcorp.example.com",
+            }
+          : undefined,
+    }),
+  }
+}
+
+describe("exchangeCodeForUserAccessToken", () => {
+  beforeEach(() => {
+    mockHttp.mockReset()
+  })
+
+  it("POSTs the OIDC endpoint with Bearer TAT and authorization_code grant body", async () => {
+    mockHttp.mockResolvedValueOnce(
+      makeOidcResponse({
+        accessToken: "u-access",
+        refreshToken: "u-refresh",
+        openId: "ou_alice",
+        name: "Alice",
+      })
+    )
+    const result = await exchangeCodeForUserAccessToken({
+      code: "abc123",
+      appAccessToken: "tat-xyz",
+    })
+    expect(result.accessToken).toBe("u-access")
+    expect(result.refreshToken).toBe("u-refresh")
+    expect(result.openId).toBe("ou_alice")
+    expect(result.name).toBe("Alice")
+    expect(result.expiresInSec).toBe(7200)
+    expect(result.refreshExpiresInSec).toBe(31_104_000)
+
+    const call = mockHttp.mock.calls[0][0] as {
+      url: string
+      headers: Record<string, string>
+      body: string
+    }
+    expect(call.url).toContain("/authen/v1/oidc/access_token")
+    expect(call.headers.Authorization).toBe("Bearer tat-xyz")
+    expect(JSON.parse(call.body)).toEqual({ grant_type: "authorization_code", code: "abc123" })
+  })
+
+  it("throws when Lark returns a non-zero code", async () => {
+    mockHttp.mockResolvedValueOnce(makeOidcResponse({ code: 99991661, msg: "auth code expired" }))
+    await expect(
+      exchangeCodeForUserAccessToken({ code: "stale", appAccessToken: "tat" })
+    ).rejects.toThrow(/auth code expired/)
+  })
+
+  it("throws when the response is missing access_token", async () => {
+    mockHttp.mockResolvedValueOnce({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({ code: 0, data: { refresh_token: "r-only" } }),
+    })
+    await expect(
+      exchangeCodeForUserAccessToken({ code: "x", appAccessToken: "tat" })
+    ).rejects.toThrow(/OIDC access_token failed/)
+  })
+})
+
+describe("refreshUserAccessToken", () => {
+  beforeEach(() => {
+    mockHttp.mockReset()
+  })
+
+  it("POSTs the refresh endpoint with the refresh_token grant body", async () => {
+    mockHttp.mockResolvedValueOnce(
+      makeOidcResponse({ accessToken: "u-fresh", refreshToken: "u-rotated" })
+    )
+    const result = await refreshUserAccessToken({
+      refreshToken: "old-refresh",
+      appAccessToken: "tat",
+    })
+    expect(result.accessToken).toBe("u-fresh")
+    // Lark may rotate the refresh token; callers must persist whatever comes back.
+    expect(result.refreshToken).toBe("u-rotated")
+
+    const call = mockHttp.mock.calls[0][0] as { url: string; body: string }
+    expect(call.url).toContain("/authen/v1/oidc/refresh_access_token")
+    expect(JSON.parse(call.body)).toEqual({
+      grant_type: "refresh_token",
+      refresh_token: "old-refresh",
+    })
+  })
+
+  it("throws on non-zero refresh code", async () => {
+    mockHttp.mockResolvedValueOnce(
+      makeOidcResponse({ code: 99991671, msg: "refresh token expired" })
+    )
+    await expect(
+      refreshUserAccessToken({ refreshToken: "expired", appAccessToken: "tat" })
+    ).rejects.toThrow(/refresh token expired/)
   })
 })

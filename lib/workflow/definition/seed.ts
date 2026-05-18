@@ -13,6 +13,10 @@
 import { seedBuiltInWorkflows } from "@/lib/db/workflows"
 import { DEFAULT_WORKFLOW_SETTINGS, type VisualWorkflow } from "@/types/workflow/visual"
 import { buildGithubDeliveryTemplates } from "./seed-github"
+import { httpRetryFallbackTemplate } from "./templates/http-retry-fallback"
+import { parallelAnalystsTemplate } from "./templates/parallel-analysts"
+import { inboxTriageTwinTemplate } from "./templates/inbox-triage-twin"
+import { githubIssueToPrTemplate } from "./templates/github-issue-to-pr"
 
 const NOW = 1_730_000_000_000 // Stable timestamp so re-seeds don't change row hashes.
 
@@ -713,17 +717,32 @@ function subworkflowOrchestratorTemplate(): VisualWorkflow {
  * requiring a database.
  */
 export function buildBuiltInWorkflowTemplates(): VisualWorkflow[] {
+  // Tag the legacy templates with a complexity hint so the picker can
+  // group them alongside the new advanced examples (B1-B4). The first
+  // four are linear starters, the next five demonstrate one extra
+  // construct (loops / branches / subworkflows) each, and the GitHub
+  // pack falls through as "advanced" by virtue of cross-service depth.
+  const withComplexity = (
+    wf: VisualWorkflow,
+    complexity: VisualWorkflow["complexity"]
+  ): VisualWorkflow => ({ ...wf, complexity })
+
   return [
-    helloWorldTemplate(),
-    httpDataPipelineTemplate(),
-    conditionalReplyTemplate(),
-    skillBundleTemplate(),
-    inboundTriageTemplate(),
-    dailyDigestTemplate(),
-    ragFaqTemplate(),
-    webhookEchoTemplate(),
-    loopOverItemsTemplate(),
-    subworkflowOrchestratorTemplate(),
+    withComplexity(helloWorldTemplate(), "starter"),
+    withComplexity(httpDataPipelineTemplate(), "starter"),
+    withComplexity(conditionalReplyTemplate(), "starter"),
+    withComplexity(skillBundleTemplate(), "starter"),
+    withComplexity(inboundTriageTemplate(), "intermediate"),
+    withComplexity(dailyDigestTemplate(), "intermediate"),
+    withComplexity(ragFaqTemplate(), "intermediate"),
+    withComplexity(webhookEchoTemplate(), "intermediate"),
+    withComplexity(loopOverItemsTemplate(), "intermediate"),
+    withComplexity(subworkflowOrchestratorTemplate(), "advanced"),
+    // Phase B — new complex templates.
+    httpRetryFallbackTemplate(),
+    parallelAnalystsTemplate(),
+    inboxTriageTwinTemplate(),
+    githubIssueToPrTemplate(),
     ...buildGithubDeliveryTemplates(),
   ]
 }

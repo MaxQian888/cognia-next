@@ -139,20 +139,20 @@ describe("LogSettings — Levels tab", () => {
 })
 
 describe("LogSettings — Native banner", () => {
-  it("renders healthy tone (emerald)", () => {
+  it("renders healthy tone (success token)", () => {
     mockUseTransportHealth.mockReturnValue({
       nativeLogging: defaultNativeLogging({ runtime: "tauri", status: "healthy" }),
     })
     const { container } = render(<LogSettings />)
-    expect(container.querySelector(".border-emerald-500\\/40")).toBeInTheDocument()
+    expect(container.querySelector(".border-success\\/40")).toBeInTheDocument()
   })
 
-  it("renders degraded tone (amber)", () => {
+  it("renders degraded tone (warning token)", () => {
     mockUseTransportHealth.mockReturnValue({
       nativeLogging: defaultNativeLogging({ runtime: "tauri", status: "degraded" }),
     })
     const { container } = render(<LogSettings />)
-    expect(container.querySelector(".border-amber-500\\/40")).toBeInTheDocument()
+    expect(container.querySelector(".border-warning\\/40")).toBeInTheDocument()
   })
 
   it("renders inactive tone (muted)", () => {

@@ -3491,7 +3491,19 @@
         "conversations": "会话",
         "inbox": "收件箱",
         "outbound": "出站",
-        "audit": "审计"
+        "audit": "审计",
+        "capability": "能力矩阵"
+      },
+      "capabilityMatrix": {
+        "intro": "每个单元格展示了适配器在其平台上如何投射 A2UI 组件。能力在适配器每次启动时刷新。",
+        "componentColumn": "组件",
+        "emptyState": "尚未配置任何适配器。在「适配器」标签页中添加一个，能力矩阵会自动填充。",
+        "tiers": {
+          "native": "原生",
+          "simulated": "模拟",
+          "fallback": "降级",
+          "unsupported": "不支持"
+        }
       },
       "overview": {
         "serverHeading": "连接器服务",
@@ -7199,7 +7211,7 @@
     },
     "onboarding": {
       "step1Title": "欢迎使用 Cognia",
-      "step1Description": "Cognia 代表你与 Claude 对话。粘贴一个 Anthropic API 密钥即可开始 — 它仅保存在本机的 IndexedDB 中，并由内嵌的 Node 子进程使用。",
+      "step1Description": "选择你想使用的登录方式。订阅登录会写入系统密钥环；粘贴的 API 密钥仅保存在本机 IndexedDB 与内嵌的 Node 子进程中。",
       "step2Title": "挑选一个角色开始",
       "step2Description": "每个角色都自带系统提示与工具。稍后可以在 设置 → 角色 中编辑、复制或新建更多。",
       "apiKeyLabel": "Anthropic API 密钥",
@@ -7212,7 +7224,69 @@
       "continue": "继续",
       "back": "返回",
       "done": "完成",
-      "toastNeedKey": "粘贴你的 Anthropic API 密钥以继续。"
+      "toastNeedKey": "粘贴你的 Anthropic API 密钥以继续。",
+      "provider": {
+        "title": "选择登录方式",
+        "description": "用你已经付费的方式登录。后续可以在 设置 → 订阅 添加更多账号。",
+        "backToChooser": "换一种登录方式",
+        "loggedInBadge": "已连接",
+        "loggedInDescription": "{provider} 已连接。可以继续下一步，或在下方选择另一个角色。",
+        "claude": {
+          "title": "Claude Pro / Max",
+          "description": "通过浏览器 PKCE 登录你的 Anthropic 订阅。",
+          "cta": "使用 Anthropic 登录"
+        },
+        "codex": {
+          "title": "ChatGPT Plus / Pro（Codex）",
+          "description": "用设备代码流将本应用与 ChatGPT 订阅配对。",
+          "cta": "使用 ChatGPT 登录"
+        },
+        "opencode": {
+          "title": "OpenCode Zen",
+          "description": "粘贴 OpenCode Zen 的 API 密钥，可选填写区域 Base URL。",
+          "cta": "粘贴 OpenCode 密钥"
+        },
+        "apiKey": {
+          "title": "粘贴 Anthropic API 密钥",
+          "description": "如果你在 console.anthropic.com 拿到的是工作空间 API 密钥而非订阅，用这种方式。",
+          "cta": "使用 API 密钥"
+        }
+      },
+      "tour": {
+        "title": "接下来你可以做什么",
+        "description": "这些功能已经上线。如果不需要可以直接跳过。",
+        "skip": "跳过引导",
+        "next": "下一个",
+        "previous": "上一个",
+        "done": "完成",
+        "openSettings": "打开设置",
+        "progress": "第 {current} / {total} 个",
+        "ocr": {
+          "title": "从图片和 PDF 中提取文字",
+          "description": "在输入栏悬浮附件即可把文字拉进对话。本地引擎离线可用；云端提供商可选。",
+          "cta": "配置 OCR"
+        },
+        "computerUse": {
+          "title": "让 AI 操作桌面",
+          "description": "Computer Use 默认关闭。可按角色启用，并选择权限等级（关闭 / 白名单 / 单次询问）。",
+          "cta": "打开自动化设置"
+        },
+        "connectors": {
+          "title": "对接 Telegram、Discord、Slack、飞书、OneBot",
+          "description": "把助手运行为常用平台上的机器人，支持自动 / 手动 / 草稿三种模式。",
+          "cta": "配置连接器"
+        },
+        "mobile": {
+          "title": "在局域网或公网上配对手机",
+          "description": "生成 5 分钟有效的配对凭据让手机扫码。优先 mDNS，依次回退到 WebRTC 和 Cloudflare 隧道。",
+          "cta": "打开配对设置"
+        },
+        "twin": {
+          "title": "用你自己的写作训练数字分身",
+          "description": "上传文档后，蒸馏流水线会生成一份脱敏的风格画像，可以绑定到任意角色。",
+          "cta": "打开数字分身设置"
+        }
+      }
     },
     "sessionRow": {
       "untitled": "（无标题）",
@@ -11344,6 +11418,19 @@
       },
       "unknownError": "未知错误"
     },
+    "outboundSource": {
+      "workflow": "工作流",
+      "workflowTooltip": "由工作流节点 {nodeId} 发送 — 点击打开运行记录",
+      "manual": "手动",
+      "draftApproved": "草稿已批准"
+    },
+    "providerModelSwitcher": {
+      "aria": "Provider 与模型覆盖",
+      "title": "Provider · 模型",
+      "default": "默认",
+      "clearOverride": "使用默认（取消覆盖）",
+      "noProvidersConfigured": "未配置任何 Provider"
+    },
     "policyInfo": {
       "aria": "策略信息",
       "title": "策略",
@@ -11465,5 +11552,20 @@
     "title": "页面未找到",
     "description": "我们找不到你要访问的页面。它可能已被移动、重命名或删除。",
     "goHome": "返回首页"
+  },
+  "workflowEditor": {
+    "rightSidebar": {
+      "tabs": {
+        "chat": "对话",
+        "inspector": "检查器"
+      },
+      "chatLoading": "正在加载对话…"
+    },
+    "chat": {
+      "noWorkflow": "打开一个工作流以启动 AI 协作会话。",
+      "loading": "正在准备对话…",
+      "ariaLabel": "{name} 的工作流 AI 对话",
+      "placeholder": "让工作流 AI 帮你构建、重构或诊断这张图。"
+    }
   }
 }

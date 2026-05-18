@@ -56,6 +56,125 @@ describe("getDb", () => {
     expect(db.pluginDexieMeta).toBeDefined()
   })
 
+  it("opens at schema v41 (IM connector complete gap closure)", async () => {
+    const db = getDb()
+    await db.open()
+    // Dexie's `verno` reflects the highest version block registered.
+    expect(db.verno).toBeGreaterThanOrEqual(41)
+  })
+
+  // v41 — IM connector complete gap closure (ADR-0009 v41,
+  // im-a2ui-warm-eclipse plan). Round-trip the five additive fields so a
+  // future contributor can't accidentally trim them in a downstream type
+  // refactor.
+  it("v41 connector + automation fields round-trip and indexes accept inserts", async () => {
+    const db = getDb()
+    const now = Date.now()
+
+    // connectorCallbackBindings: new `kind` column + index.
+    await db.connectorCallbackBindings.put({
+      id: "tg-1:msg-42",
+      adapterId: "tg-1",
+      actionId: "msg-42",
+      kind: "force_reply",
+      surfaceId: "sfc_form",
+      componentId: "txt_name",
+      conversationKey: "telegram:tg-1:1",
+      createdAt: now,
+    })
+    const bindings = await db.connectorCallbackBindings
+      .where("kind")
+      .equals("force_reply")
+      .toArray()
+    expect(bindings).toHaveLength(1)
+    expect(bindings[0].kind).toBe("force_reply")
+
+    // adapterInstances: new `implMetadata` column.
+    await db.adapterInstances.put({
+      id: "ob-1",
+      type: "onebot",
+      displayName: "QQ via NapCat",
+      enabled: true,
+      transportMode: "reverse-ws",
+      settings: {},
+      credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["ob-1:onebotBearer"] },
+      trigger: {
+        rules: [{ kind: "private-default" }],
+        blockers: [],
+        storeUnmatchedInDraftMode: false,
+      },
+      defaultMode: "manual",
+      implMetadata: {
+        impl: "napcat",
+        version: "4.2.1",
+        features: ["markdown-card", "upload_group_file", "set_msg_emoji_like"],
+      },
+      createdAt: now,
+      updatedAt: now,
+    })
+    const ob = await db.adapterInstances.get("ob-1")
+    expect(ob?.implMetadata?.impl).toBe("napcat")
+    expect(ob?.implMetadata?.features).toContain("markdown-card")
+
+    // conversationOverrides: provider/model override columns.
+    await db.conversationOverrides.put({
+      id: "co-v41",
+      conversationKey: "slack:slk-1:C123",
+      sessionId: "s_v41",
+      providerOverride: "codex",
+      modelOverride: "gpt-5",
+      createdAt: now,
+      updatedAt: now,
+    })
+    const co = await db.conversationOverrides.get("co-v41")
+    expect(co?.providerOverride).toBe("codex")
+    expect(co?.modelOverride).toBe("gpt-5")
+
+    // outboundQueue: source + sourceWorkflow.
+    await db.outboundQueue.put({
+      id: "ob-v41-wf",
+      adapterId: "tg-1",
+      conversationKey: "telegram:tg-1:1",
+      request: {
+        conversationRef: { platform: "telegram", adapterId: "tg-1" },
+        segments: [{ type: "text", text: "from workflow" }],
+        metadata: { idempotencyKey: "k_wf" },
+      },
+      status: "pending",
+      attempts: 0,
+      createdAt: now,
+      nextAttemptAt: now,
+      idempotencyKey: "k_wf",
+      source: "workflow",
+      sourceWorkflow: { workflowId: "wf_1", runId: "run_1", nodeId: "n_send" },
+    })
+    const wfJob = await db.outboundQueue.get("ob-v41-wf")
+    expect(wfJob?.source).toBe("workflow")
+    expect(wfJob?.sourceWorkflow?.workflowId).toBe("wf_1")
+
+    // automationAuditLog: conversationKey column + index.
+    await db.automationAuditLog.put({
+      id: "aud-v41-1",
+      ts: now,
+      surface: "computerUse",
+      pluginId: null,
+      command: "screen.capture",
+      processName: null,
+      windowTitle: null,
+      decision: "allow",
+      reason: null,
+      durationMs: 12,
+      error: null,
+      conversationKey: "discord:dc-1:9999",
+    })
+    const audits = await db.automationAuditLog
+      .where("conversationKey")
+      .equals("discord:dc-1:9999")
+      .toArray()
+    expect(audits).toHaveLength(1)
+    expect(audits[0].decision).toBe("allow")
+  })
+
   // §A-Schema migration check for v18: Platform Connectors tables open
   // cleanly on a fresh database (Dexie auto-applies all version blocks up to
   // 18). Verify round-trips through each new table to prove the per-row type
@@ -123,6 +242,7 @@ describe("getDb", () => {
       createdAt: now,
       nextAttemptAt: now,
       idempotencyKey: "k1",
+      source: "ai-run",
     })
     expect((await db.outboundQueue.get("ob-1"))?.status).toBe("pending")
 

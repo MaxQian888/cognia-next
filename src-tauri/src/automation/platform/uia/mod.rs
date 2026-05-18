@@ -92,6 +92,15 @@ impl AutomationBackend for UiaBackend {
     }
 
     fn click(&self, target: ClickTarget, opts: ClickOpts) -> Result<()> {
+        // Resolve effective click count: explicit `count` wins; otherwise
+        // `double: true` means 2, anything else means 1. Triple-click only
+        // round-trips reliably through the coordinate path, so we bypass
+        // pattern dispatch when count > 1.
+        let count = opts
+            .count
+            .unwrap_or_else(|| if opts.double == Some(true) { 2 } else { 1 })
+            .max(1);
+
         match target {
             ClickTarget::Element { element_ref } => {
                 let elt = self
@@ -99,24 +108,25 @@ impl AutomationBackend for UiaBackend {
                     .get(&element_ref)
                     .ok_or(AutomationError::StaleElement)?;
 
-                // UIA Pattern-first click strategy. `useNative` defaults to
-                // true: try Invoke → Toggle → SelectionItem; on miss, fall
-                // back to a coordinate click at the bounding-rect center.
-                let use_native = opts.use_native.unwrap_or(true);
-                if use_native {
-                    if let Ok(true) = pattern::try_pattern_click(&elt) {
+                if count == 1 {
+                    // UIA Pattern-first click strategy. `useNative` defaults
+                    // to true: try Invoke → Toggle → SelectionItem; on miss,
+                    // fall back to a coordinate click at the bounding-rect
+                    // center.
+                    let use_native = opts.use_native.unwrap_or(true);
+                    if use_native {
+                        if let Ok(true) = pattern::try_pattern_click(&elt) {
+                            return Ok(());
+                        }
+                    }
+                    if elt.click().is_ok() {
                         return Ok(());
                     }
                 }
 
-                // Fallback path 1: try the element's native `click()` method
-                // (uiautomation crate's helper that synthesizes input at the
-                // element's clickable point).
-                if elt.click().is_ok() {
-                    return Ok(());
-                }
-
-                // Fallback path 2: bounding-rect center coordinate click.
+                // Multi-click or pattern miss: coordinate click at the
+                // element's bounding-rect center, repeated `count` times with
+                // OS double-click cadence.
                 let rect =
                     elt.get_bounding_rectangle()
                         .map_err(|e| AutomationError::BackendError {
@@ -124,9 +134,9 @@ impl AutomationBackend for UiaBackend {
                         })?;
                 let cx = (rect.get_left() + rect.get_right()) / 2;
                 let cy = (rect.get_top() + rect.get_bottom()) / 2;
-                input::click_point(cx, cy)
+                input::click_point_multi(cx, cy, count)
             }
-            ClickTarget::Point { x, y } => input::click_point(x, y),
+            ClickTarget::Point { x, y } => input::click_point_multi(x, y, count),
         }
     }
 
@@ -235,6 +245,20 @@ impl AutomationBackend for UiaBackend {
         transition: ButtonTransition,
     ) -> Result<()> {
         input::button(button, transition)
+    }
+
+    fn cursor_position(&self) -> Result<Point> {
+        input::cursor_position()
+    }
+
+    fn pick_at_point(&self, point: Point) -> Result<ElementInfo> {
+        let elt = self
+            .automation
+            .element_from_point(uiautomation::types::Point::new(point.x, point.y))
+            .map_err(|e| AutomationError::BackendError {
+                message: format!("element_from_point({}, {}): {e}", point.x, point.y),
+            })?;
+        Ok(element_info(&self.cache, &elt))
     }
 }
 

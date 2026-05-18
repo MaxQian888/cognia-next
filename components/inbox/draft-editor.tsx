@@ -34,6 +34,7 @@ export function DraftEditor({ draft, onClose }: DraftEditorProps) {
         adapterId: draft.outboundPreview.conversationRef.adapterId,
         conversationKey: draft.conversationKey,
         request: { ...draft.outboundPreview, segments: edited },
+        source: "draft-approved",
       })
     },
     onComplete: onClose,

@@ -313,3 +313,93 @@ in a dedicated follow-up ADR.
   `src-tauri/src/mcp_server/sidecar.rs`. Tracked separately.
 - macOS / Linux UIA-equivalent tree walking (Phase 6.b).
 - Plugin-registered custom desktop actions / UIA patterns.
+
+## Addendum 2026-05-18 — Chat dispatch + 3 actions + cursor_position
+
+A follow-up completion pass closes the two structurally-deferred dispatch
+gaps via a different architectural approach than the original ADR
+forecasted, plus shipping the three minor actions the original M5 surface
+left out.
+
+### Architectural pivot — chat path via Plugin MCP, not a new dispatcher
+
+The 2026-05-15 addendum framed chat-driven `canUseTool` dispatch as
+requiring "either teaching `ai-sdk.mjs` to plumb provider-defined tools
+through the Vercel AI SDK, or adding a brand-new Anthropic-direct
+dispatcher". Both routes would have bypassed `@anthropic-ai/claude-agent-sdk`
+and forfeited every Claude Code feature that lives only in that SDK
+(built-in Bash/Read/Edit, subagent `agents`, settings sources, resume/fork
+session continuity, `effort`, `maxThinkingTokens`, partial-message streaming,
+Anthropic Skills passthrough).
+
+The pivot: **expose `computer_use` / `bash` / `text_editor` as Plugin MCP
+tools** through the existing `cognia-plugin-tools` bridge instead of
+trying to inject API-level native tools. The model sees them as
+`mcp__cognia-plugin-tools__{computer_use,bash,text_editor}` rather than
+the API-level `type: "computer_20251124"` shape. Functional surface is
+identical (same action union, same backend dispatch). The cost is the
+Anthropic API's _native_ computer-use pretraining boost does not engage
+in the same way — the model is still very capable but doesn't get the
+special-cased prompt treatment the native tool type triggers.
+
+Tradeoff accepted by the user explicitly: every Claude Code SDK feature
+is preserved; the chat path runs through `dispatchAnthropic` unchanged.
+
+### Closed gaps
+
+1. **Chat-driven Computer Use** — `plugins/computer-use/src/index.ts`
+   `activate()` now registers three plugin tools via
+   `ctx.agent.registerTool()`. `plugin.json` adds the `"tools"` capability.
+   The existing sidecar bridge at `sidecar/builtin-tools/plugin-tools.mjs`
+   surfaces them as MCP tools to the SDK without any dispatcher change.
+   `requiresApproval: true` engages the chat-side `canUseTool` modal;
+   the Rust permission gate fires independently on every `desktop.*` call.
+
+2. **External MCP `mcp_computer_use`** — `src-tauri/src/mcp_server/automation_proxy.rs`
+   (new) creates a dedicated Unix domain socket / Windows named pipe per
+   `SidecarProcess`. The path is passed to the Node MCP sidecar via the
+   `COGNIA_AUTOMATION_PROXY` env var. `lib/external-bridge/handlers/computer-use.ts`
+   opens that socket on first call, sends a newline-framed JSON envelope
+   `{ id, command, args, ctx }`, awaits the matching response. The MCP
+   stdin/stdout transport's strict sequential mutex stays untouched —
+   automation requests ride a fully separate channel.
+
+3. **Inspector Pick** — `src-tauri/src/automation/platform/uia/pick.rs`
+   (new, Windows) registers a low-level `WH_MOUSE_LL` hook on a dedicated
+   thread, opens a transparent always-on-top webview labelled
+   `automation-pick-overlay` (the overlay is purely cosmetic — clicks
+   pass through to the underlying app via `pointer-events: none`), and
+   resolves an `ElementInfo` via UIA's `ElementFromPoint(x, y)` on the
+   first `WM_LBUTTONDOWN`. New Tauri commands `desktop_pick_start` /
+   `desktop_pick_cancel`. macOS / Linux return `UnsupportedPlatform`.
+   The Inspector tab enables its Pick button when `caps.hasUia === true`.
+
+4. **`triple_click` / `wait` / `cursor_position`** — `ClickOpts.count`
+   added (1/2/3); UIA backend repeats clicks at the OS double-click cadence
+   (`GetDoubleClickTime`). `Wait` was already in the action enum and is
+   handled at the Anthropic-action-mapper layer (TS sleep, no Rust round
+   trip needed). `cursor_position` added as a new read-only Tauri command
+   (`GetCursorPos` on Windows, `Enigo::location()` on macOS / Linux).
+
+### Renamed Non-Goals
+
+The two items the 2026-05-15 addendum classified as structurally-deferred
+Non-Goals are now closed:
+
+- ~~Chat-driven `canUseTool` sidecar dispatch~~ — shipped via Plugin MCP.
+- ~~MCP standalone `computer_use` IPC~~ — shipped via the
+  `COGNIA_AUTOMATION_PROXY` side-channel.
+
+### Still-deferred
+
+- macOS / Linux UIA-equivalent tree walking (Phase 6.b).
+- Plugin-registered custom desktop actions / UIA patterns.
+- macOS / Linux full chord parser + `hold_key` parity. Tracked as part of
+  the Phase 6.b non-Windows backend completion.
+
+### Schema
+
+Schema bump to `v40` (additive — no migration). Adds optional
+`Character.computerUseSettings.chatConsentMode`
+(`"always-ask" | "session-grant" | "auto"`, defaults to `"always-ask"`)
+and `ClickOpts.count` (1/2/3). Existing rows round-trip unchanged.

@@ -202,3 +202,76 @@ Windows 后端解析 `uiautomation::inputs::Keyboard::send_keys` 能接受的所
 - MCP 单机 `computer_use` IPC。Node MCP sidecar 使用 SDK 的 `StdioServerTransport`，独占 stdin/stdout。`automation_proxy` 信封需要 Node 侧自定义 Transport 包装 + Rust 侧 `mcp_server/sidecar.rs` 的 stdout 抽取重构，独立跟进。
 - macOS / Linux 等效 UIA 树遍历（Phase 6.b）。
 - 插件注册的自定义桌面动作 / UIA 模式。
+
+## Addendum 2026-05-18 — 聊天派发 + 三个动作 + cursor_position
+
+通过架构上的转向关闭了 2026-05-15 addendum 标记为结构性 Non-Goal 的两个派发缺口，并补齐 M5 原始范围之外的三个小动作。
+
+### 架构转向 —— 经由 Plugin MCP 实现聊天，而不是新派发器
+
+2026-05-15 addendum 把聊天驱动的 `canUseTool` 派发框定为「要么让 `ai-sdk.mjs`
+透传 provider-defined tools，要么新建 Anthropic 直连派发器」。两条路都会绕过
+`@anthropic-ai/claude-agent-sdk`，丧失只在该 SDK 内才存在的 Claude Code 能力
+（built-in Bash/Read/Edit、subagent `agents`、settings sources、resume/fork、
+`effort`、`maxThinkingTokens`、partial-message 流、Anthropic Skills 透传）。
+
+转向方案：**把 `computer_use` / `bash` / `text_editor` 通过现有
+`cognia-plugin-tools` 桥包装成 Plugin MCP 工具**，而不是注入 API 级原生工具。
+模型看到的是 `mcp__cognia-plugin-tools__{computer_use,bash,text_editor}` 而不是
+API 级 `type: "computer_20251124"`。功能等价，但 Anthropic API 端原生
+computer-use 的预训练加成不会触发 —— 模型仍然可用，只是少了原生工具类型带来的
+prompt 处理优惠。
+
+用户明确接受这个权衡：Claude Code SDK 的全部能力得以保留；聊天路径继续走
+`dispatchAnthropic`，无任何改动。
+
+### 已关闭的缺口
+
+1. **聊天驱动 Computer Use** — `plugins/computer-use/src/index.ts` 的
+   `activate()` 通过 `ctx.agent.registerTool()` 注册三个插件工具。`plugin.json`
+   增加 `"tools"` capability。现有 `sidecar/builtin-tools/plugin-tools.mjs` 桥
+   会自动把它们暴露为 MCP 工具给 SDK，**无需任何派发器改动**。
+   `requiresApproval: true` 触发聊天侧 `canUseTool` 模态；Rust 权限门在每次
+   `desktop.*` 调用时独立启用。
+
+2. **外部 MCP `mcp_computer_use`** — `src-tauri/src/mcp_server/automation_proxy.rs`
+   （新）为每个 `SidecarProcess` 创建专属 Unix Socket / Windows Named Pipe，
+   通过 `COGNIA_AUTOMATION_PROXY` 环境变量传给 Node MCP sidecar。
+   `lib/external-bridge/handlers/computer-use.ts` 在首次调用时打开该套接字，
+   发送 `{ id, command, args, ctx }` 信封并等待对应响应。MCP stdin/stdout
+   传输的串行 mutex 不受影响 —— 自动化请求走完全独立的通道。
+
+3. **Inspector Pick** — `src-tauri/src/automation/platform/uia/pick.rs`（新，
+   Windows）在专用线程注册低级 `WH_MOUSE_LL` 钩子，打开一个透明置顶 webview
+   `automation-pick-overlay`（覆盖窗仅作视觉提示 —— `pointer-events: none` 让
+   点击穿透到底层应用），首次捕获 `WM_LBUTTONDOWN` 后通过 UIA
+   `ElementFromPoint(x, y)` 解析 `ElementInfo`。新 Tauri 命令
+   `desktop_pick_start` / `desktop_pick_cancel`。macOS / Linux 返回
+   `UnsupportedPlatform`。
+
+4. **`triple_click` / `wait` / `cursor_position`** — `ClickOpts.count` 字段
+   （1/2/3）；UIA 后端按 OS `GetDoubleClickTime` 节奏重复点击。`Wait` 已在
+   ComputerAction 枚举里，Anthropic action mapper 层在 TS 端直接 sleep，无
+   Rust 往返。`cursor_position` 作为只读 Tauri 命令新增（Windows
+   `GetCursorPos`，macOS / Linux 走 `Enigo::location()`）。
+
+### 重新分类的 Non-Goal
+
+2026-05-15 addendum 中归为结构性 Non-Goal 的两项现在已关闭：
+
+- ~~聊天驱动 `canUseTool` 侧车派发~~ —— 通过 Plugin MCP 实现。
+- ~~MCP 单机 `computer_use` IPC~~ —— 通过 `COGNIA_AUTOMATION_PROXY` 侧通道实现。
+
+### 仍延迟
+
+- macOS / Linux 等效 UIA 树遍历（Phase 6.b）。
+- 插件注册的自定义桌面动作 / UIA 模式。
+- macOS / Linux 完整 chord 解析器 + `hold_key` 等价支持。归入 Phase 6.b 非
+  Windows 后端补齐。
+
+### Schema
+
+Schema 升级到 `v40`（仅新增，无迁移）。增加可选字段
+`Character.computerUseSettings.chatConsentMode`
+（`"always-ask" | "session-grant" | "auto"`，默认 `"always-ask"`）和
+`ClickOpts.count`（1/2/3）。既有行原样可读。

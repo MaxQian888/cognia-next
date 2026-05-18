@@ -45,6 +45,7 @@ const pendingJob: OutboundJobRow = {
   createdAt: now - 5000,
   nextAttemptAt: now + 5000,
   idempotencyKey: "idem-1",
+  source: "ai-run",
 }
 
 const failedJob: OutboundJobRow = {
@@ -58,6 +59,7 @@ const failedJob: OutboundJobRow = {
   createdAt: now - 30000,
   nextAttemptAt: now + 60000,
   idempotencyKey: "idem-2",
+  source: "ai-run",
 }
 
 const sentJob: OutboundJobRow = {
@@ -70,6 +72,7 @@ const sentJob: OutboundJobRow = {
   createdAt: now - 10000,
   nextAttemptAt: now - 5000,
   idempotencyKey: "idem-3",
+  source: "ai-run",
 }
 
 beforeEach(() => {

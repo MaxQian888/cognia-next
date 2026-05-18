@@ -47,6 +47,61 @@ describe("serializeSend", () => {
     const content = JSON.parse(call.payload["content"] as string) as { text: string }
     expect(content.text).toBe("test text")
   })
+
+  // A4 — Phase 2 marker closed: serializer now honours explicit
+  // receiveIdType + receiveId / openId / userId / email on the ref so the
+  // caller can target a user by user_id or email without an open_id.
+  it("honours explicit receiveIdType + receiveId on the conversation ref", () => {
+    const call = serializeSend({
+      conversationRef: {
+        platform: "lark",
+        adapterId: "lark-1",
+        channelId: "ignored",
+        receiveIdType: "email",
+        receiveId: "alice@example.com",
+      } as unknown as OutboundRequest["conversationRef"],
+      segments: [{ type: "text", text: "hi" }],
+      metadata: { idempotencyKey: "k1" },
+    })
+    expect(call.url).toContain("receive_id_type=email")
+    expect(call.payload["receive_id"]).toBe("alice@example.com")
+  })
+
+  it("infers receive_id_type=user_id when ref carries .userId", () => {
+    const call = serializeSend({
+      conversationRef: {
+        platform: "lark",
+        adapterId: "lark-1",
+        channelId: "ignored",
+        userId: "u12345",
+      } as unknown as OutboundRequest["conversationRef"],
+      segments: [{ type: "text", text: "hi" }],
+      metadata: { idempotencyKey: "k1" },
+    })
+    expect(call.url).toContain("receive_id_type=user_id")
+    expect(call.payload["receive_id"]).toBe("u12345")
+  })
+
+  it("infers receive_id_type=email when ref carries .email", () => {
+    const call = serializeSend({
+      conversationRef: {
+        platform: "lark",
+        adapterId: "lark-1",
+        channelId: "ignored",
+        email: "bob@example.com",
+      } as unknown as OutboundRequest["conversationRef"],
+      segments: [{ type: "text", text: "hi" }],
+      metadata: { idempotencyKey: "k1" },
+    })
+    expect(call.url).toContain("receive_id_type=email")
+    expect(call.payload["receive_id"]).toBe("bob@example.com")
+  })
+
+  it("falls back to chat_id prefix sniff when no explicit type set (legacy)", () => {
+    const call = serializeSend(makeReq({ channelId: "oc_chat_legacy" }))
+    expect(call.url).toContain("receive_id_type=chat_id")
+    expect(call.payload["receive_id"]).toBe("oc_chat_legacy")
+  })
 })
 
 describe("serializeEdit", () => {

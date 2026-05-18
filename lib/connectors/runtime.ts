@@ -409,6 +409,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
               sourceMessageId: storedMsg.id,
             },
           },
+          source: "ai-run",
         })
 
         await appendAudit({

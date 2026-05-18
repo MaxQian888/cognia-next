@@ -26,9 +26,40 @@ describe("evaluateSurfaceAgainstCapability", () => {
     })
     const ev = evaluateSurfaceAgainstCapability(richSurface, matrix)
     expect(ev.native.sort()).toEqual(["Column", "Text"])
+    expect(ev.simulated).toEqual([])
     expect(ev.fallback).toEqual(["Button"])
     expect(ev.unsupported).toEqual(["Chart"])
     expect(ev.worstCase).toBe("unsupported")
+  })
+
+  it("buckets simulated kinds into their own bucket and orders worstCase 'unsupported > fallback > simulated > native'", () => {
+    const matrix = buildA2UICapabilityMatrix({
+      Column: "native",
+      Text: "native",
+      Button: "simulated",
+      Chart: "fallback",
+    })
+    const ev = evaluateSurfaceAgainstCapability(richSurface, matrix)
+    expect(ev.native.sort()).toEqual(["Column", "Text"])
+    expect(ev.simulated).toEqual(["Button"])
+    expect(ev.fallback).toEqual(["Chart"])
+    expect(ev.unsupported).toEqual([])
+    // fallback present → fallback beats simulated
+    expect(ev.worstCase).toBe("fallback")
+  })
+
+  it("worstCase = 'simulated' when only native + simulated present", () => {
+    const matrix = buildA2UICapabilityMatrix({
+      Column: "native",
+      Text: "native",
+      Button: "simulated",
+      Chart: "simulated",
+    })
+    const ev = evaluateSurfaceAgainstCapability(richSurface, matrix)
+    expect(ev.simulated.sort()).toEqual(["Button", "Chart"])
+    expect(ev.fallback).toEqual([])
+    expect(ev.unsupported).toEqual([])
+    expect(ev.worstCase).toBe("simulated")
   })
 
   it("worstCase = 'fallback' when only fallbacks present", () => {
@@ -52,6 +83,7 @@ describe("evaluateSurfaceAgainstCapability", () => {
     })
     const ev = evaluateSurfaceAgainstCapability(richSurface, matrix)
     expect(ev.worstCase).toBe("native")
+    expect(ev.simulated).toEqual([])
     expect(ev.fallback).toEqual([])
     expect(ev.unsupported).toEqual([])
   })
@@ -68,6 +100,7 @@ describe("evaluateSurfaceAgainstCapability", () => {
     // No known kinds → all buckets empty, worstCase stays native (we
     // can't say anything definitive about an unknown kind).
     expect(ev.native).toEqual([])
+    expect(ev.simulated).toEqual([])
     expect(ev.fallback).toEqual([])
     expect(ev.unsupported).toEqual([])
     expect(ev.worstCase).toBe("native")
@@ -100,5 +133,27 @@ describe("buildCapabilityPromptSection", () => {
     const prompt = buildCapabilityPromptSection("Slack", matrix)
     expect(prompt).toContain("Slack")
     expect(prompt).not.toContain("NOT supported")
+  })
+
+  it("includes the simulated bullet with multi-step UX warning when present", () => {
+    const matrix = buildA2UICapabilityMatrix({
+      Text: "native",
+      TextField: "simulated",
+      TextArea: "simulated",
+    })
+    const prompt = buildCapabilityPromptSection("Telegram", matrix)
+    expect(prompt).toContain("Available via multi-step UX")
+    expect(prompt).toContain("do not assume a synchronous reply")
+    // Catalogue order: TextField precedes TextArea in the forms family.
+    expect(prompt).toContain("TextField, TextArea")
+  })
+
+  it("omits the simulated bullet when no simulated kinds are present", () => {
+    const matrix = buildA2UICapabilityMatrix({
+      Text: "native",
+      Button: "native",
+    })
+    const prompt = buildCapabilityPromptSection("Slack", matrix)
+    expect(prompt).not.toContain("Available via multi-step UX")
   })
 })

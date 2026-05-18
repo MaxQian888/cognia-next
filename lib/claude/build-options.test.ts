@@ -33,6 +33,14 @@ jest.mock("@/lib/agent", () => ({
   buildAgentModeSessionUpdate: jest.fn(),
 }))
 
+jest.mock("@/lib/plugin/bridge/sidecar-tools-bridge", () => ({
+  buildPluginToolsManifest: jest.fn(() => []),
+}))
+
+jest.mock("@/lib/db/conversation-overrides", () => ({
+  readForResolution: jest.fn(),
+}))
+
 import { buildAgentModeSessionUpdate } from "@/lib/agent"
 import { getCharacter, listCharactersByIds } from "@/lib/db/characters"
 import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
@@ -322,6 +330,77 @@ describe("resolveSendOptions — model precedence", () => {
 
     const opts5 = await resolveSendOptions({})
     expect(opts5.model).toBeUndefined()
+  })
+
+  // v41 / A6 — per-channel provider+model override is the topmost rung of
+  // the precedence chain. Inbox conversation-header edits write to the
+  // ConversationOverrideRow; the resolver reads that row once per send.
+  it("IM ConversationOverrideRow.providerOverride/modelOverride sit above session, character, app", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const overrides = require("@/lib/db/conversation-overrides")
+    const mReadOverride = overrides.readForResolution as jest.Mock
+    mReadOverride.mockResolvedValueOnce({
+      providerOverride: "codex",
+      modelOverride: "gpt-5",
+    })
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        model: "session-model",
+        providerOverride: "anthropic",
+        platformBinding: {
+          adapterId: "tg-1",
+          conversationKey: "telegram:tg-1:9",
+        },
+      } as ChatSession),
+      character: makeChar({ id: "c1", model: "char", providerId: "openai" }),
+      appSettings: {
+        defaultModel: "app-default",
+        defaultProvider: "anthropic",
+      } as AppSettings,
+    })
+    // IM override wins on both axes.
+    expect(opts.model).toBe("gpt-5")
+    expect(opts.provider).toBe("codex")
+  })
+
+  it("IM override falls through to session.providerOverride when only one axis is set", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const overrides = require("@/lib/db/conversation-overrides")
+    const mReadOverride = overrides.readForResolution as jest.Mock
+    mReadOverride.mockResolvedValueOnce({ modelOverride: "gpt-5" })
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        providerOverride: "openai",
+        platformBinding: {
+          adapterId: "tg-1",
+          conversationKey: "telegram:tg-1:9",
+        },
+      } as ChatSession),
+      character: makeChar({ id: "c1", model: "char", providerId: "anthropic" }),
+    })
+    expect(opts.model).toBe("gpt-5")
+    // No providerOverride on the row → falls through to session.providerOverride.
+    expect(opts.provider).toBe("openai")
+  })
+
+  it("non-IM sessions ignore the row read (precedence unchanged)", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const overrides = require("@/lib/db/conversation-overrides")
+    const mReadOverride = overrides.readForResolution as jest.Mock
+    mReadOverride.mockResolvedValueOnce({
+      providerOverride: "codex",
+      modelOverride: "gpt-5",
+    })
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", model: "session-model" }),
+      character: makeChar({ id: "c1", providerId: "anthropic" }),
+    })
+    // Without platformBinding, the resolver MUST NOT issue the override
+    // read — the mock is harmless because nothing consumes it.
+    expect(opts.model).toBe("session-model")
+    expect(opts.provider).toBe("anthropic")
   })
 })
 
@@ -799,5 +878,114 @@ describe("listTeamMembers", () => {
     const out = await listTeamMembers(["c1"])
     expect(mListCharsByIds).toHaveBeenCalledWith(["c1"])
     expect(out).toHaveLength(1)
+  })
+})
+
+describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const sidecarBridge = require("@/lib/plugin/bridge/sidecar-tools-bridge")
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const overrides = require("@/lib/db/conversation-overrides")
+  const mBuildManifest = sidecarBridge.buildPluginToolsManifest as jest.Mock
+  const mReadOverride = overrides.readForResolution as jest.Mock
+
+  const cuTools = [
+    {
+      name: "computer_use",
+      description: "drive desktop",
+      jsonSchema: {},
+      pluginId: "cognia-computer-use",
+    },
+    {
+      name: "bash",
+      description: "shell",
+      jsonSchema: {},
+      pluginId: "cognia-computer-use",
+    },
+    {
+      name: "text_editor",
+      description: "edit",
+      jsonSchema: {},
+      pluginId: "cognia-computer-use",
+    },
+  ]
+  const otherTool = {
+    name: "github_pr",
+    description: "open a PR",
+    jsonSchema: {},
+    pluginId: "cognia-github-delivery",
+  }
+
+  beforeEach(() => {
+    mBuildManifest.mockReset().mockReturnValue([...cuTools, otherTool])
+    mReadOverride.mockReset()
+  })
+
+  it("includes computer-use plugin tools when character.enableComputerUse=true", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar({ enableComputerUse: true }),
+    })
+    const names = (opts.pluginTools ?? []).map((t) => t.name).sort()
+    expect(names).toEqual(["bash", "computer_use", "github_pr", "text_editor"])
+  })
+
+  it("filters computer-use plugin tools when character.enableComputerUse !== true", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar({ enableComputerUse: false }),
+    })
+    const names = (opts.pluginTools ?? []).map((t) => t.name)
+    expect(names).toEqual(["github_pr"])
+    expect(names).not.toContain("computer_use")
+  })
+
+  it("filters when character has no Computer Use flag at all", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar(),
+    })
+    const names = (opts.pluginTools ?? []).map((t) => t.name)
+    expect(names).toEqual(["github_pr"])
+  })
+
+  it("IM-session default-denies computer-use plugin tools even when character allows", async () => {
+    mReadOverride.mockResolvedValueOnce(undefined)
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        platformBinding: {
+          adapterId: "telegram",
+          conversationKey: "tg:123",
+        },
+      } as ChatSession),
+      character: makeChar({ enableComputerUse: true }),
+    })
+    const names = (opts.pluginTools ?? []).map((t) => t.name)
+    expect(names).toEqual(["github_pr"])
+  })
+
+  it("IM-session opt-in (allowComputerUse=true) restores computer-use plugin tools", async () => {
+    mReadOverride.mockResolvedValueOnce({ allowComputerUse: true })
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        platformBinding: {
+          adapterId: "telegram",
+          conversationKey: "tg:123",
+        },
+      } as ChatSession),
+      character: makeChar({ enableComputerUse: true }),
+    })
+    const names = (opts.pluginTools ?? []).map((t) => t.name).sort()
+    expect(names).toEqual(["bash", "computer_use", "github_pr", "text_editor"])
+  })
+
+  it("disablePluginTools wipes the manifest regardless of Computer Use", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar({ enableComputerUse: true, disablePluginTools: true }),
+    })
+    expect(opts.pluginTools).toBeUndefined()
   })
 })

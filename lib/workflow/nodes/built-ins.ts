@@ -784,6 +784,16 @@ registerNodeExecutor({
         replyTo: params.replyToMessageId ? { messageId: params.replyToMessageId } : undefined,
         metadata: { idempotencyKey },
       },
+      // Provenance per ADR-0009 v41 — the inbox UI uses this to render a
+      // "from workflow" badge with click-to-jump on the conversation
+      // timeline. `ctx.workflowId` carries the user-authored workflow id
+      // (distinct from `ctx.runId` which is the per-execution token).
+      source: "workflow",
+      sourceWorkflow: {
+        workflowId: ctx.workflowId,
+        runId: ctx.runId,
+        nodeId: ctx.stepId,
+      },
     })
     return {
       output: {

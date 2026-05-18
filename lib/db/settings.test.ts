@@ -59,6 +59,18 @@ describe("getSettings", () => {
     expect(s.background?.position).toBe("cover")
   })
 
+  it("defaults onboardingDismissedAt to undefined for fresh installs", async () => {
+    const s = await getSettings()
+    expect(s.onboardingDismissedAt).toBeUndefined()
+  })
+
+  it("preserves a saved onboardingDismissedAt across get/save round-trips", async () => {
+    const ts = "2026-05-18T12:00:00.000Z"
+    await saveSettings({ onboardingDismissedAt: ts })
+    const s = await getSettings()
+    expect(s.onboardingDismissedAt).toBe(ts)
+  })
+
   it("merges defaults under a partially-populated row (forward compat)", async () => {
     // Write only the bare minimum to simulate an older install that didn't
     // know about searchProviders.

@@ -661,6 +661,47 @@ pub async fn desktop_window_op(
     )
 }
 
+#[tauri::command]
+pub async fn desktop_cursor_position(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    ctx: Option<CallContext>,
+) -> std::result::Result<Point, String> {
+    let ctx = ctx.unwrap_or_default();
+    command_body!(
+        app,
+        state,
+        ctx,
+        "cursor_position",
+        state.handle.cursor_position().await
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickAtPointArgs {
+    pub point: Point,
+    #[serde(default)]
+    pub ctx: CallContext,
+}
+
+#[tauri::command]
+pub async fn desktop_pick_at_point(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    args: PickAtPointArgs,
+) -> std::result::Result<ElementInfo, String> {
+    let ctx = args.ctx;
+    let point = args.point;
+    command_body!(
+        app,
+        state,
+        ctx,
+        "pick_at_point",
+        state.handle.pick_at_point(point).await
+    )
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Consent response. The renderer-side overlay invokes this when the user
 // clicks Allow once / Always allow this session / Reject. `prompt` is

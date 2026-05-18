@@ -71,6 +71,7 @@ pub fn translate_computer_action(action: &ComputerAction) -> Result<TranslatedAc
             opts: ClickOpts {
                 button: Some(MouseButton::Left),
                 double: Some(true),
+                count: Some(2),
                 modifier: None,
                 ..Default::default()
             },
@@ -84,6 +85,7 @@ pub fn translate_computer_action(action: &ComputerAction) -> Result<TranslatedAc
             opts: ClickOpts {
                 button: Some(MouseButton::Left),
                 double: Some(false),
+                count: Some(3),
                 modifier: None,
                 ..Default::default()
             },
@@ -174,6 +176,8 @@ pub fn translate_computer_action(action: &ComputerAction) -> Result<TranslatedAc
                 format: Some(ImageFormat::Png),
             },
         }),
+
+        ComputerAction::CursorPosition => Ok(TranslatedAction::CursorPosition),
     }
 }
 
@@ -191,6 +195,7 @@ pub enum TranslatedAction {
     SendKeys { chord: KeyChord },
     HoldKey { chord: KeyChord, duration_secs: f64 },
     Wait { duration_secs: f64 },
+    CursorPosition,
 }
 
 /// Turn the backend result into the Anthropic-shaped JSON result.
@@ -205,6 +210,7 @@ pub fn build_computer_result(
             error: Some(err),
             display_width_px: None,
             display_height_px: None,
+            cursor: None,
         };
     }
 
@@ -215,6 +221,7 @@ pub fn build_computer_result(
             error: None,
             display_width_px: Some(sc.width),
             display_height_px: Some(sc.height),
+            cursor: None,
         };
     }
 
@@ -224,6 +231,22 @@ pub fn build_computer_result(
         error: None,
         display_width_px: None,
         display_height_px: None,
+        cursor: None,
+    }
+}
+
+/// Build the result for `cursor_position`.
+pub fn build_cursor_position_result(point: Point) -> ComputerResult {
+    ComputerResult {
+        ok: true,
+        output: Some(format!("{{\"x\":{},\"y\":{}}}", point.x, point.y)),
+        error: None,
+        display_width_px: None,
+        display_height_px: None,
+        cursor: Some(CursorPositionPayload {
+            x: point.x,
+            y: point.y,
+        }),
     }
 }
 
@@ -298,5 +321,60 @@ mod tests {
             }
             _ => panic!("expected Drag"),
         }
+    }
+
+    #[test]
+    fn double_click_sets_count_two() {
+        let translated = translate_computer_action(&ComputerAction::DoubleClick {
+            coordinate: [10, 20],
+        })
+        .unwrap();
+        match translated {
+            TranslatedAction::Click { opts, .. } => {
+                assert_eq!(opts.count, Some(2));
+                assert_eq!(opts.double, Some(true));
+            }
+            _ => panic!("expected Click"),
+        }
+    }
+
+    #[test]
+    fn triple_click_sets_count_three() {
+        let translated = translate_computer_action(&ComputerAction::TripleClick {
+            coordinate: [30, 40],
+        })
+        .unwrap();
+        match translated {
+            TranslatedAction::Click { target, opts } => {
+                match target {
+                    ClickTarget::Point { x, y } => {
+                        assert_eq!(x, 30);
+                        assert_eq!(y, 40);
+                    }
+                    _ => panic!("expected Point target"),
+                }
+                assert_eq!(opts.count, Some(3));
+                assert_eq!(opts.button, Some(MouseButton::Left));
+            }
+            _ => panic!("expected Click"),
+        }
+    }
+
+    #[test]
+    fn cursor_position_action_translates() {
+        let translated = translate_computer_action(&ComputerAction::CursorPosition).unwrap();
+        assert!(matches!(translated, TranslatedAction::CursorPosition));
+    }
+
+    #[test]
+    fn build_cursor_position_result_includes_cursor_field() {
+        let result = build_cursor_position_result(Point { x: 42, y: 99 });
+        assert!(result.ok);
+        let cursor = result.cursor.expect("cursor populated");
+        assert_eq!(cursor.x, 42);
+        assert_eq!(cursor.y, 99);
+        let output = result.output.expect("output populated");
+        assert!(output.contains("\"x\":42"));
+        assert!(output.contains("\"y\":99"));
     }
 }

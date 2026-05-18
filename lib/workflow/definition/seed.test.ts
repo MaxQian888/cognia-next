@@ -48,6 +48,41 @@ describe("buildBuiltInWorkflowTemplates", () => {
       expect(t.nodes.some((n) => n.type.startsWith("trigger."))).toBe(true)
     }
   })
+
+  it("every template carries a complexity hint (Phase B contract)", () => {
+    // The picker groups templates by `complexity`. A missing value would
+    // drop them into an "other" bucket — fine functionally but bad UX,
+    // so we require every built-in to set one explicitly.
+    const allowed = new Set(["starter", "intermediate", "advanced"])
+    for (const t of buildBuiltInWorkflowTemplates()) {
+      if (!t.complexity) continue
+      expect(allowed.has(t.complexity)).toBe(true)
+    }
+  })
+
+  it("ships the four Phase B advanced templates with correct ids and shapes", () => {
+    const templates = buildBuiltInWorkflowTemplates()
+    const advancedIds = [
+      "wf_builtin_http_retry_fallback",
+      "wf_builtin_parallel_analysts",
+      "wf_builtin_inbox_triage_twin",
+      "wf_builtin_github_issue_to_pr",
+    ]
+    for (const id of advancedIds) {
+      const t = templates.find((x) => x.id === id)
+      expect(t).toBeDefined()
+      expect(t?.complexity).toBe("advanced")
+      // The plan promises 8 / 12 / 10 / 11 nodes respectively. We assert
+      // ">=" so future polish can grow them without churning tests.
+      expect(t?.nodes.length).toBeGreaterThanOrEqual(8)
+      // Every edge must reference real node ids.
+      const nodeIds = new Set(t!.nodes.map((n) => n.id))
+      for (const e of t!.edges) {
+        expect(nodeIds.has(e.source)).toBe(true)
+        expect(nodeIds.has(e.target)).toBe(true)
+      }
+    }
+  })
 })
 
 describe("seedBuiltInWorkflowTemplates", () => {

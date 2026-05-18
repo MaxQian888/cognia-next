@@ -27,8 +27,18 @@ describe("DISCORD_CAPS", () => {
     }
   })
 
-  it("has exactly 13 entries (Phase-1 + send.a2ui + send.voice + send.video)", () => {
-    expect(DISCORD_CAPS).toHaveLength(13)
+  it("includes send.reaction (A2 — PUT /reactions/{emoji}/@me)", () => {
+    // ADR-0009 v41 / A2: parity with Slack + Lark + Telegram reaction-send.
+    // Discord's REST endpoint is per-emoji, URL-encoded.
+    expect(DISCORD_CAPS).toContain("send.reaction")
+  })
+
+  it("includes history.fetch (A2.b — GET /channels/:id/messages cursor pagination)", () => {
+    expect(DISCORD_CAPS).toContain("history.fetch")
+  })
+
+  it("has exactly 15 entries (Phase-1 + send.a2ui + send.voice + send.video + send.reaction + history.fetch)", () => {
+    expect(DISCORD_CAPS).toHaveLength(15)
   })
 })
 

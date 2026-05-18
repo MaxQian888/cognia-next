@@ -10,8 +10,12 @@ import {
  * Kept in alphabetical order for stable diffs.
  *
  * Notes:
- *  - send.typing: no native typing on bot APIs in Phase 1
- *    (assistant.threads.setStatus requires the assistants beta)
+ *  - typing: gated on adapter option `assistantAppEnabled`. When the
+ *    Slack app is registered as an Assistant App (beta), the adapter
+ *    issues `assistant.threads.setStatus` from `setTyping(...)` — the
+ *    capability is always advertised, but the adapter no-ops the call
+ *    when the option is off so non-assistant bots don't 403. Added at
+ *    ADR-0009 v41 / A3.
  *  - rich-card.slack: Block Kit opaque payload passthrough
  *  - rich-markdown.slack: Slack mrkdwn dialect
  */
@@ -31,6 +35,7 @@ export const SLACK_CAPS: readonly Capability[] = [
   "send.reply",
   "send.text",
   "send.thread",
+  "typing",
 ] as const
 
 /**
@@ -68,4 +73,13 @@ export const SLACK_A2UI_CAPABILITY: A2UICapabilityMatrix = buildA2UICapabilityMa
   Row: "native",
   Column: "native",
   List: "native",
+  // Simulated tier (ADR-0009 v41 / B6) — these have no native Block Kit
+  // equivalent but can be stood in with quantised select / header+section
+  // / toggle button patterns. The mapper can opt in to emit these
+  // stand-ins; the assistant is warned via the capability prompt that
+  // they're multi-step UX (e.g., switching tab content requires a click +
+  // a follow-up message).
+  Slider: "simulated",
+  Tabs: "simulated",
+  Accordion: "simulated",
 })

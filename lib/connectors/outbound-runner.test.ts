@@ -50,6 +50,7 @@ async function enqueue(adapterId: string, conversationKey: string, idempotencyKe
       segments: [{ type: "text", text: "hello" }],
       metadata: { idempotencyKey: idempotencyKey ?? crypto.randomUUID() },
     },
+    source: "ai-run",
   })
 }
 
@@ -375,6 +376,7 @@ describe("outbound-runner — Task 39 cross-conversation parallelism", () => {
         segments: [{ type: "text", text: "A1" }],
         metadata: { idempotencyKey: "A1" },
       },
+      source: "ai-run",
     })
     await enqueueOutbound({
       adapterId,
@@ -384,6 +386,7 @@ describe("outbound-runner — Task 39 cross-conversation parallelism", () => {
         segments: [{ type: "text", text: "B1" }],
         metadata: { idempotencyKey: "B1" },
       },
+      source: "ai-run",
     })
     await enqueueOutbound({
       adapterId,
@@ -393,6 +396,7 @@ describe("outbound-runner — Task 39 cross-conversation parallelism", () => {
         segments: [{ type: "text", text: "A2" }],
         metadata: { idempotencyKey: "A2" },
       },
+      source: "ai-run",
     })
     await enqueueOutbound({
       adapterId,
@@ -402,6 +406,7 @@ describe("outbound-runner — Task 39 cross-conversation parallelism", () => {
         segments: [{ type: "text", text: "B2" }],
         metadata: { idempotencyKey: "B2" },
       },
+      source: "ai-run",
     })
 
     await runOnce(adapters)

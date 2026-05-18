@@ -67,6 +67,8 @@ export async function updateAdapterInstance(
       | "publicUrl"
       | "quietHours"
       | "muted"
+      | "lastKnownCapabilities"
+      | "implMetadata"
     >
   >
 ): Promise<void> {

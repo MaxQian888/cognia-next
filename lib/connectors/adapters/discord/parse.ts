@@ -180,6 +180,15 @@ function buildSegments(msg: DiscordMessage): MessageSegment[] {
     segments.push({ type: "emoji", code: sticker.name })
   }
 
+  // Role mentions (ADR-0009 v41 / A2). Discord ships these as a top-level
+  // `mention_roles: string[]` array on the message; the user-id placeholders
+  // also embed `<@&{role_id}>` tokens inside `content`, but rather than
+  // re-parse those tokens we surface each id as a `kind:"role"` mention
+  // segment alongside the regular user-mention segments built downstream.
+  for (const roleId of msg.mention_roles ?? []) {
+    segments.push({ type: "mention", userId: roleId, kind: "role" })
+  }
+
   // Attachments: discriminate image / audio / video / generic file.
   for (const att of msg.attachments) {
     const contentType = att.content_type ?? ""

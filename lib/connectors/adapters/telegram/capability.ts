@@ -24,6 +24,12 @@ export const TELEGRAM_CAPS: readonly Capability[] = [
   "send.image",
   "send.markdown",
   "send.mention",
+  // `setMessageReaction` (Bot API 7.0) — see A1 in the IM connector
+  // gap-closure plan (ADR-0009 v41). The mapper sends one emoji per
+  // reaction; type="emoji" is the only `ReactionType` Bot API will accept
+  // from bots today, so a Slack/Lark custom-emoji shortcode is mapped to
+  // the unicode entity in the segment fanout.
+  "send.reaction",
   "send.reply",
   "send.text",
   "send.thread",
@@ -33,7 +39,8 @@ export const TELEGRAM_CAPS: readonly Capability[] = [
 ] as const
 
 /**
- * A2UI capability matrix for the Telegram adapter (G3.1).
+ * A2UI capability matrix for the Telegram adapter (G3.1, extended at ADR-
+ * 0009 v41 / B2 for ForceReply simulation).
  *
  * Native rendering coverage:
  *   - Text / Link / Divider / Card / Alert: rendered as MarkdownV2 in
@@ -46,10 +53,18 @@ export const TELEGRAM_CAPS: readonly Capability[] = [
  *     round-trips through Telegram's 64-byte `callback_data` cap.
  *   - Row / Column / List: layout-only; the mapper walks children.
  *
+ * Simulated (functional but multi-step UX):
+ *   - TextField / TextArea: rendered as a `sendMessage` with
+ *     `reply_markup.force_reply`. The user's next reply is correlated
+ *     against an outstanding `kind: "force_reply"` binding via
+ *     `parseTelegramForceReplyCorrelation`; the bus then routes it as
+ *     an `actionType: "input"` callback. Multi-step because the user
+ *     must tap-reply rather than fill an inline form.
+ *
  * Components NOT supported natively (`fallback`) — assistant remains
  * free to emit them; they render via `plainTextMirror`:
- *   - Form controls (TextField / TextArea / Select / Checkbox / Radio /
- *     RadioGroup / Slider / DatePicker / TimePicker / DateTimePicker).
+ *   - Other form controls (Select / Checkbox / Radio / RadioGroup /
+ *     Slider / DatePicker / TimePicker / DateTimePicker).
  *   - Data widgets (Table / Chart / DataExplorer / Pagination).
  *   - Overlay widgets (Tabs / Accordion / Dialog / Drawer / Sheet /
  *     Sidebar / Collapsible).
@@ -65,4 +80,6 @@ export const TELEGRAM_A2UI_CAPABILITY: A2UICapabilityMatrix = buildA2UICapabilit
   Row: "native",
   Column: "native",
   List: "native",
+  TextField: "simulated",
+  TextArea: "simulated",
 })

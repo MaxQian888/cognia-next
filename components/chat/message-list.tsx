@@ -18,7 +18,7 @@ import {
 import type { UIMessage } from "ai"
 import { ArrowDownIcon, DownloadIcon, Trash2Icon } from "lucide-react"
 import { MessageRenderer } from "./message-renderer"
-import { LongPress } from "@/components/mobile/interactions/long-press"
+import { LongPress } from "@/components/interactions/long-press"
 import { MessageActionSheet } from "@/components/mobile/chat/message-action-sheet"
 import { useChatStore } from "@/stores/chat"
 import { usePlatform } from "@/hooks/use-platform"

@@ -61,7 +61,7 @@ jest.mock("@/hooks/use-platform", () => ({
   usePlatform: jest.fn(() => "desktop"),
 }))
 
-jest.mock("@/components/mobile/interactions/long-press", () => ({
+jest.mock("@/components/interactions/long-press", () => ({
   LongPress: ({
     children,
     onLongPress,

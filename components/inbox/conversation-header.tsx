@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { ChevronLeftIcon } from "lucide-react"
 import { ModeSwitcher } from "./mode-switcher"
+import { ProviderModelSwitcher } from "./provider-model-switcher"
 import { PolicyInfo } from "./policy-info"
 import { PlatformBadge } from "./platform-badge"
 import { Badge } from "@/components/ui/badge"
@@ -32,6 +33,10 @@ interface ConversationHeaderProps {
   currentMode: ConnectorMode
   policy: TriggerPolicy
   characterId?: string
+  /** Current ConversationOverrideRow.providerOverride, if set. */
+  providerOverride?: string
+  /** Current ConversationOverrideRow.modelOverride, if set. */
+  modelOverride?: string
   onModeChange?: (mode: ConnectorMode) => void
 }
 
@@ -43,6 +48,8 @@ export function ConversationHeader({
   currentMode,
   policy,
   characterId,
+  providerOverride,
+  modelOverride,
   onModeChange,
 }: ConversationHeaderProps) {
   const t = useTranslations("inbox.conversationHeader")
@@ -113,12 +120,21 @@ export function ConversationHeader({
 
       {/* Middle: live ModeSwitcher on desktop, static disabled badge on web */}
       {desktop ? (
-        <ModeSwitcher
-          conversationKey={conversationKey}
-          sessionId={sessionId}
-          currentMode={currentMode}
-          onModeChange={onModeChange}
-        />
+        <>
+          <ModeSwitcher
+            conversationKey={conversationKey}
+            sessionId={sessionId}
+            currentMode={currentMode}
+            onModeChange={onModeChange}
+          />
+          {/* A6 — per-channel provider/model override (ADR-0009 v41). */}
+          <ProviderModelSwitcher
+            conversationKey={conversationKey}
+            sessionId={sessionId}
+            providerOverride={providerOverride}
+            modelOverride={modelOverride}
+          />
+        </>
       ) : (
         <Tooltip>
           <TooltipTrigger asChild>

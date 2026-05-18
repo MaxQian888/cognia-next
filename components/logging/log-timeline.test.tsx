@@ -66,8 +66,8 @@ describe("LogTimeline", () => {
   it("renders error and warning sparklines when those levels are present", () => {
     const logs = buildHourlyLogs()
     const { container } = renderTimeline({ logs })
-    expect(container.querySelector(".bg-red-500")).toBeInTheDocument()
-    expect(container.querySelector(".bg-yellow-500")).toBeInTheDocument()
+    expect(container.querySelector(".bg-destructive")).toBeInTheDocument()
+    expect(container.querySelector(".bg-warning")).toBeInTheDocument()
   })
 
   it("omits sparklines when only info-level logs are present", () => {

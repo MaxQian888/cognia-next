@@ -40,9 +40,10 @@ import { toast } from "sonner"
 
 import { ChatPane } from "@/components/chat/chat-view"
 import { CharacterPicker } from "@/components/chat/character-picker"
-import { GuildRail } from "@/components/desktop/guild-rail"
-import { MemberList } from "@/components/desktop/member-list"
-import { OnboardingDialog } from "@/components/desktop/onboarding-dialog"
+import { GuildRail } from "@/components/shell/guild-rail"
+import { MemberList } from "@/components/shell/member-list"
+import { OnboardingDialog } from "@/components/shell/onboarding-dialog"
+import { shouldShowOnboarding } from "@/lib/onboarding/should-show"
 import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
 import { CharacterHeader } from "@/components/mobile/shell/character-header"
 import { MobileChannelList } from "@/components/mobile/shell/mobile-channel-list"
@@ -94,7 +95,6 @@ export function AppShellMobile() {
   const [memberSheetOpen, setMemberSheetOpen] = useState(false)
   const [characterPickerOpen, setCharacterPickerOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
-  const [onboardingDismissed, setOnboardingDismissed] = useState(false)
   const [lastErrorShown, setLastErrorShown] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
 
@@ -131,12 +131,16 @@ export function AppShellMobile() {
     if (!mounted) return
     const settings = useSettingsStore.getState().settings
     if (!settings) return
-    if (!settings.apiKey && !onboardingDismissed && sessions.length === 0) {
+    let cancelled = false
+    void shouldShowOnboarding(settings, sessions.length).then((show) => {
+      if (cancelled || !show) return
       log.info("onboarding shown (mobile)")
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setOnboardingOpen(true)
+    })
+    return () => {
+      cancelled = true
     }
-  }, [mounted, onboardingDismissed, sessions.length])
+  }, [mounted, sessions.length])
 
   // Auto-select most recent session matching the current guild.
   useEffect(() => {
@@ -417,7 +421,6 @@ export function AppShellMobile() {
         open={onboardingOpen}
         onOpenChange={(open) => {
           setOnboardingOpen(open)
-          if (!open) setOnboardingDismissed(true)
         }}
         onPickCharacter={async (c) => {
           const s = await create({

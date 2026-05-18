@@ -22,7 +22,7 @@
  * rendered as disabled with an explainer tooltip for now.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { CrosshairIcon, RefreshCwIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -61,6 +61,7 @@ export function InspectorTab() {
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<ElementInfo | null>(null)
   const [patternBusy, setPatternBusy] = useState<PatternKind | null>(null)
+  const [pickCountdown, setPickCountdown] = useState<number | null>(null)
 
   useEffect(() => {
     if (!isTauri()) return
@@ -99,6 +100,62 @@ export function InspectorTab() {
       setLoading(false)
     }
   }, [resolveRoot, maxDepth])
+
+  // Pick affordance — uses a 3-second countdown so the user can move the
+  // cursor onto the target before capture. No transparent overlay window;
+  // the cursor stays free-roaming because the Cognia window does not
+  // capture mouse. Cancel via the same button.
+  const PICK_COUNTDOWN_SECONDS = 3
+  const pickCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const cancelPick = useCallback(() => {
+    if (pickCountdownRef.current != null) {
+      clearInterval(pickCountdownRef.current)
+      pickCountdownRef.current = null
+    }
+    setPickCountdown(null)
+  }, [])
+
+  const startPick = useCallback(() => {
+    if (pickCountdown !== null) {
+      cancelPick()
+      return
+    }
+    setPickCountdown(PICK_COUNTDOWN_SECONDS)
+    pickCountdownRef.current = setInterval(() => {
+      setPickCountdown((prev) => {
+        if (prev === null) return null
+        if (prev <= 1) {
+          if (pickCountdownRef.current != null) {
+            clearInterval(pickCountdownRef.current)
+            pickCountdownRef.current = null
+          }
+          void (async () => {
+            try {
+              const point = await desktop.cursorPosition()
+              const info = await desktop.pickAtPoint(point)
+              setSelected(info)
+              toast.success(t("pickOk"))
+            } catch (err) {
+              toast.error(t("pickFailed", { error: String(err) }))
+            } finally {
+              setPickCountdown(null)
+            }
+          })()
+          return null
+        }
+        return prev - 1
+      })
+    }, 1000)
+  }, [pickCountdown, cancelPick, t])
+
+  useEffect(() => {
+    return () => {
+      if (pickCountdownRef.current != null) {
+        clearInterval(pickCountdownRef.current)
+      }
+    }
+  }, [])
 
   const testPattern = useCallback(
     async (kind: PatternKind) => {
@@ -184,9 +241,17 @@ export function InspectorTab() {
             >
               {t("rootMode.manual")}
             </Button>
-            <Button size="sm" variant="ghost" disabled title={t("pickInactiveTooltip")}>
+            <Button
+              size="sm"
+              variant={pickCountdown !== null ? "default" : "ghost"}
+              onClick={startPick}
+              title={pickCountdown !== null ? t("pickCancelTooltip") : t("pickStartTooltip")}
+              aria-label={pickCountdown !== null ? t("pickCancelAria") : t("pickStartAria")}
+            >
               <CrosshairIcon className="size-4 mr-1" />
-              {t("pickInactive")}
+              {pickCountdown !== null
+                ? t("pickCountdown", { seconds: pickCountdown })
+                : t("pickStart")}
             </Button>
           </div>
           {rootMode === "manual" && (

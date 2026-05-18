@@ -30,7 +30,7 @@ import {
 import type { LucideIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { usePathname, useRouter } from "next/navigation"
-import { AvatarBadge } from "./avatar-badge"
+import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 const log = loggers.ui

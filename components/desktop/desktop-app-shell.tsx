@@ -22,7 +22,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
 import { CommandPalette } from "@/components/desktop/command-palette"
-import { GuildRail } from "@/components/desktop/guild-rail"
+import { GuildRail } from "@/components/shell/guild-rail"
 import { StatusBar } from "@/components/desktop/status-bar"
 import { TitleBar } from "@/components/desktop/title-bar"
 import { WindowFocusTracker } from "@/components/desktop/window-focus-tracker"
@@ -81,6 +81,12 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
     return () => document.body.removeAttribute("data-app-shell")
   }, [isMobile, bypass])
 
+  // Defense-in-depth against the SSR/hydration paint: until effects run,
+  // `usePlatform()` returns the server snapshot ("web") and `usePathname()`
+  // can briefly disagree with the post-hydration value. Render children only
+  // until the first effect — Capacitor visiting /pair must never flash any
+  // desktop chrome.
+  if (!mounted) return <>{children}</>
   if (isMobile || bypass) return <>{children}</>
 
   const handleCreateTeam = () => {

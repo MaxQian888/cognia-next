@@ -3491,7 +3491,19 @@
         "conversations": "Conversations",
         "inbox": "Inbox",
         "outbound": "Outbound",
-        "audit": "Audit"
+        "audit": "Audit",
+        "capability": "Capabilities"
+      },
+      "capabilityMatrix": {
+        "intro": "Each cell shows how the adapter projects an A2UI component on its platform. Capabilities are refreshed each time the adapter starts.",
+        "componentColumn": "Component",
+        "emptyState": "No adapters configured yet. Add one in the Adapters tab to populate the capability matrix.",
+        "tiers": {
+          "native": "Native",
+          "simulated": "Simulated",
+          "fallback": "Fallback",
+          "unsupported": "Unsupported"
+        }
       },
       "overview": {
         "serverHeading": "Connector Server",
@@ -7199,7 +7211,7 @@
     },
     "onboarding": {
       "step1Title": "Welcome to Cognia",
-      "step1Description": "Cognia talks to Claude on your behalf. Paste an Anthropic API key to begin — it's stored locally in your browser's IndexedDB and pushed to the embedded Node sidecar.",
+      "step1Description": "Pick how you want to sign in. Subscription logins live in your OS keyring; pasted API keys live in your browser's IndexedDB and the embedded Node sidecar.",
       "step2Title": "Pick a character to start",
       "step2Description": "Each character carries its own system prompt and tools. You can edit, duplicate, or create more later in Settings → Characters.",
       "apiKeyLabel": "Anthropic API key",
@@ -7212,7 +7224,69 @@
       "continue": "Continue",
       "back": "Back",
       "done": "Done",
-      "toastNeedKey": "Paste your Anthropic API key to continue."
+      "toastNeedKey": "Paste your Anthropic API key to continue.",
+      "provider": {
+        "title": "How do you want to sign in?",
+        "description": "Use the same login method you already pay for. You can add more accounts later in Settings → Subscription.",
+        "backToChooser": "Choose a different sign-in method",
+        "loggedInBadge": "Connected",
+        "loggedInDescription": "{provider} is connected. You can move on or pick another character below.",
+        "claude": {
+          "title": "Claude Pro / Max",
+          "description": "Sign in with your Anthropic subscription via PKCE in your browser.",
+          "cta": "Sign in with Anthropic"
+        },
+        "codex": {
+          "title": "ChatGPT Plus / Pro (Codex)",
+          "description": "Pair this app with your ChatGPT subscription via the device-code flow.",
+          "cta": "Sign in with ChatGPT"
+        },
+        "opencode": {
+          "title": "OpenCode Zen",
+          "description": "Paste an OpenCode Zen API key. Optional region override available.",
+          "cta": "Paste OpenCode key"
+        },
+        "apiKey": {
+          "title": "Paste an Anthropic API key",
+          "description": "Use this if you have a workspace API key from console.anthropic.com instead of a subscription.",
+          "cta": "Use API key"
+        }
+      },
+      "tour": {
+        "title": "What you can do next",
+        "description": "These ship with Cognia today. Skip if you'd rather discover them yourself.",
+        "skip": "Skip tour",
+        "next": "Next",
+        "previous": "Previous",
+        "done": "Done",
+        "openSettings": "Open settings",
+        "progress": "{current} of {total}",
+        "ocr": {
+          "title": "Extract text from images and PDFs",
+          "description": "Hover an attachment in the composer to pull text into your prompt. Local engines work offline; cloud providers are optional.",
+          "cta": "Configure OCR"
+        },
+        "computerUse": {
+          "title": "Let the AI drive the desktop",
+          "description": "Computer Use is off by default. Enable it per character and pick a permission tier (off / whitelist / per-call).",
+          "cta": "Open automation settings"
+        },
+        "connectors": {
+          "title": "Bridge to Telegram, Discord, Slack, Lark, OneBot",
+          "description": "Run the assistant as a bot in your favorite messaging platform with auto / manual / draft modes.",
+          "cta": "Configure connectors"
+        },
+        "mobile": {
+          "title": "Pair your phone over LAN or WAN",
+          "description": "Generate a 5-minute pair token, then scan it from the mobile app. Falls back from mDNS to WebRTC to Cloudflare tunnel automatically.",
+          "cta": "Open companion settings"
+        },
+        "twin": {
+          "title": "Train a digital twin on your writing",
+          "description": "Upload documents and the distill pipeline builds a redacted style profile you can bind to any character.",
+          "cta": "Open twin settings"
+        }
+      }
     },
     "sessionRow": {
       "untitled": "(untitled)",
@@ -11344,6 +11418,19 @@
       },
       "unknownError": "Unknown error"
     },
+    "outboundSource": {
+      "workflow": "Workflow",
+      "workflowTooltip": "Sent by workflow node {nodeId} — click to open the run",
+      "manual": "Manual",
+      "draftApproved": "Approved draft"
+    },
+    "providerModelSwitcher": {
+      "aria": "Provider and model override",
+      "title": "Provider · model",
+      "default": "Default",
+      "clearOverride": "Use default (no override)",
+      "noProvidersConfigured": "No providers configured"
+    },
     "policyInfo": {
       "aria": "Policy info",
       "title": "Policy",
@@ -11465,5 +11552,20 @@
     "title": "Page not found",
     "description": "We couldn't find the page you were looking for. It may have been moved, renamed, or deleted.",
     "goHome": "Back to home"
+  },
+  "workflowEditor": {
+    "rightSidebar": {
+      "tabs": {
+        "chat": "Chat",
+        "inspector": "Inspector"
+      },
+      "chatLoading": "Loading chat…"
+    },
+    "chat": {
+      "noWorkflow": "Open a workflow to start a co-pilot session.",
+      "loading": "Preparing chat…",
+      "ariaLabel": "Workflow AI chat for {name}",
+      "placeholder": "Ask the workflow AI to build, refactor, or diagnose this graph."
+    }
   }
 }

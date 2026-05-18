@@ -21,7 +21,23 @@ export interface SerializedTelegramCall {
     | "editMessageText"
     | "deleteMessage"
     | "sendChatAction"
+    | "setMessageReaction"
   payload: Record<string, unknown>
+  /**
+   * Post-send binding intent (ADR-0009 v41 / B2). When set, the adapter's
+   * send loop captures the returned platform `message_id` and records a
+   * `kind: "force_reply"` binding on `connectorCallbackBindings` so the
+   * parser can correlate the next inbound `reply_to_message.message_id`
+   * back to the A2UI surface + component that asked for input.
+   *
+   * Only meaningful on `sendMessage` calls that carry a
+   * `reply_markup.force_reply` payload — ignored otherwise.
+   */
+  forceReplyBinding?: {
+    surfaceId: string
+    componentId: string
+    conversationKey?: string
+  }
 }
 
 /** Extract chat_id from the conversation reference. */
@@ -212,6 +228,41 @@ export async function serializeOutboundAsync(
   }
 
   return calls
+}
+
+/**
+ * Build a `setMessageReaction` Bot API call (added at ADR-0009 v41 / A1).
+ *
+ * Telegram's Bot API 7.0+ accepts a `ReactionType[]` where each entry is
+ * either `{type: "emoji", emoji}` (unicode emoji) or `{type: "custom_emoji",
+ * custom_emoji_id}` (a Telegram premium custom emoji id). Bots can only
+ * push the `emoji` variant unless explicitly granted custom-emoji rights
+ * by the chat admin, so this helper always emits the unicode form. Pass
+ * an empty array to clear the bot's reactions on the message.
+ *
+ *   serializeReaction("123456", 42, "👍")         // add one reaction
+ *   serializeReaction("123456", 42, ["👍", "❤"])  // add two reactions
+ *   serializeReaction("123456", 42, [])           // clear bot reactions
+ *
+ * Reuses the same {method, payload} envelope as the other serializers so
+ * the adapter's HTTP runner doesn't need a special path.
+ */
+export function serializeReaction(
+  chatId: string | number,
+  messageId: string | number,
+  emoji: string | string[],
+  opts?: { isBig?: boolean }
+): SerializedTelegramCall {
+  const list = Array.isArray(emoji) ? emoji : emoji.length > 0 ? [emoji] : []
+  return {
+    method: "setMessageReaction",
+    payload: {
+      chat_id: chatId,
+      message_id: Number(messageId),
+      reaction: list.map((e) => ({ type: "emoji", emoji: e })),
+      ...(opts?.isBig ? { is_big: true } : {}),
+    },
+  }
 }
 
 function extractConversationKey(req: OutboundRequest): string | undefined {

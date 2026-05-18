@@ -229,6 +229,30 @@ describe("settings merge", () => {
     expect((await db.settings.get("singleton"))?.apiKey).toBe("secret")
   })
 
+  it("preserves onboardingDismissedAt across import (never stripped like apiKey)", async () => {
+    const db = getDb()
+    await applyBackupPackage(
+      pkg({
+        settings: {
+          id: "singleton",
+          alwaysAllowTools: [],
+          builtinTools: {
+            fileExtras: true,
+            git: true,
+            process: false,
+            environment: true,
+            shellAdvanced: false,
+          },
+          onboardingDismissedAt: "2026-05-18T12:00:00.000Z",
+        },
+      }),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false }
+    )
+    expect((await db.settings.get("singleton"))?.onboardingDismissedAt).toBe(
+      "2026-05-18T12:00:00.000Z"
+    )
+  })
+
   it("counts as skipped when strategy=skip and a local settings row exists", async () => {
     const db = getDb()
     await db.settings.put({

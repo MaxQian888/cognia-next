@@ -5,15 +5,18 @@
  * directory, hands it to the AI driver (Claude Code), then commits and pushes
  * the result. There are two backends:
  *
- *   - `local`: classic git worktree under <app_data>/cognia/github-worktrees/
- *   - `e2b`:   delegate to the e2b-sandbox plugin for cloud execution
+ *   - `local`: Tauri Rust commands shell out to system `git` under the
+ *     `<baseDir>/<repo>/<timestamp>` worktree, then `tokio::fs` cleans up.
+ *   - `e2b`:   delegate to the e2b-sandbox plugin for cloud execution.
  *
- * This module owns the `local` backend and exposes a thin interface that the
- * `e2b` backend can implement against the same shape.
+ * Previously the `local` backend imported `simple-git` and `node:fs/promises`
+ * directly, which dragged Node built-ins into the Next.js client bundle via
+ * the plugin registry's static imports. The implementation now invokes Rust
+ * commands (`github_workspace_*`), so the TS surface here is pure ESM — that
+ * is what lets `next.config.ts` drop the `NODE_ONLY_MODULES` aliases.
  */
 
-import { join } from "node:path"
-import { mkdir, rm, stat } from "node:fs/promises"
+import { invoke } from "@tauri-apps/api/core"
 
 export type WorkspaceBackend = "local" | "e2b"
 
@@ -62,44 +65,16 @@ export interface CloneOptions {
   token: string
   /** Backend selector. */
   backend: WorkspaceBackend
-  /** Override the base directory for local backend (test injection). */
+  /** Override the base directory for the local backend (test injection). */
   baseDir?: string
-  /** Override the simple-git factory (test injection). */
-  gitFactory?: GitFactory
-}
-
-/**
- * Minimal subset of simple-git we depend on. Lets tests inject a fake.
- */
-export interface GitClient {
-  clone(remote: string, target: string, opts?: string[]): Promise<unknown>
-  cwd(opts: { path: string; root?: boolean }): Promise<unknown>
-  add(files: string | string[]): Promise<unknown>
-  commit(msg: string): Promise<unknown>
-  push(remote: string, branch: string, opts?: string[]): Promise<unknown>
-  status(): Promise<{ files: Array<{ path: string }> }>
-  log(opts?: Record<string, unknown>): Promise<{ all: ReadonlyArray<{ message: string; hash: string }> }>
-}
-
-export type GitFactory = () => GitClient
-
-const DEFAULT_BASE_DIR = "cognia-github-worktrees"
-
-/** Exported for tests to verify the lazy require path works. */
-export function _defaultGitFactory(): GitClient {
-  // Lazy-require keeps test mocks lightweight and allows running in
-  // environments where simple-git isn't installed (e.g. unit tests).
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const simpleGit = require("simple-git").simpleGit as () => GitClient
-  return simpleGit()
 }
 
 /**
  * Allocate a workspace and clone the repo into it.
  *
  * For `local` backend, returns a `WorkspaceHandle` whose path is a fresh
- * directory under `<baseDir>/<repo>/<timestamp>`. For `e2b`, this is currently
- * a stub that throws — the e2b implementation lands in M5.
+ * directory under `<baseDir>/<repo>/<timestamp>`. For `e2b`, delegates to
+ * the registered backend or throws if none is wired up yet.
  */
 export async function cloneToWorkspace(opts: CloneOptions): Promise<WorkspaceHandle> {
   if (opts.backend === "e2b") {
@@ -114,24 +89,22 @@ export async function cloneToWorkspace(opts: CloneOptions): Promise<WorkspaceHan
       token: opts.token,
     })
   }
-  const baseDir = opts.baseDir ?? DEFAULT_BASE_DIR
-  const sanitizedRepo = opts.repoFullName.replace(/[^a-zA-Z0-9._-]/g, "_")
-  const stamp = Date.now().toString(36)
-  const path = join(baseDir, sanitizedRepo, stamp)
 
-  await mkdir(path, { recursive: true })
-  const git = (opts.gitFactory ?? _defaultGitFactory)()
-  // Clone with auth in the URL — we never echo it back; suitable for short-
-  // lived installation tokens. PAT users should use a fine-scoped token.
-  const remote = `https://x-access-token:${opts.token}@github.com/${opts.repoFullName}.git`
-  await git.clone(remote, path, ["--branch", opts.branch, "--depth", "20"])
+  const result = await invoke<{ path: string; createdAt: number }>("github_workspace_clone", {
+    args: {
+      repoFullName: opts.repoFullName,
+      branch: opts.branch,
+      token: opts.token,
+      baseDir: opts.baseDir,
+    },
+  })
 
   return {
     backend: "local",
-    path,
+    path: result.path,
     repoFullName: opts.repoFullName,
     branch: opts.branch,
-    createdAt: Date.now(),
+    createdAt: result.createdAt,
   }
 }
 
@@ -140,7 +113,6 @@ export interface CommitAndPushOptions {
   message: string
   /** Branch to push to. Defaults to workspace.branch. */
   remoteBranch?: string
-  gitFactory?: GitFactory
 }
 
 /**
@@ -160,18 +132,15 @@ export async function commitAndPush(opts: CommitAndPushOptions): Promise<string>
       remoteBranch: opts.remoteBranch,
     })
   }
-  const git = (opts.gitFactory ?? _defaultGitFactory)()
-  await git.cwd({ path: opts.workspace.path, root: false })
-  const status = await git.status()
-  if (status.files.length === 0) {
-    throw new Error("commitAndPush: no changes to commit")
-  }
-  await git.add(".")
-  await git.commit(opts.message)
-  const branch = opts.remoteBranch ?? opts.workspace.branch
-  await git.push("origin", branch, ["--set-upstream"])
-  const log = await git.log({ maxCount: 1 })
-  return log.all[0]?.hash ?? ""
+
+  return invoke<string>("github_workspace_commit_and_push", {
+    args: {
+      workspacePath: opts.workspace.path,
+      branch: opts.workspace.branch,
+      message: opts.message,
+      remoteBranch: opts.remoteBranch,
+    },
+  })
 }
 
 /**
@@ -191,8 +160,7 @@ export async function removeWorkspace(handle: WorkspaceHandle): Promise<boolean>
     }
   }
   try {
-    await rm(handle.path, { recursive: true, force: true })
-    return true
+    return await invoke<boolean>("github_workspace_remove", { path: handle.path })
   } catch (err) {
     console.error(`removeWorkspace failed for ${handle.path}`, err)
     return false
@@ -200,15 +168,12 @@ export async function removeWorkspace(handle: WorkspaceHandle): Promise<boolean>
 }
 
 /**
- * Inspect a local workspace; returns null if the directory no longer exists.
- * Used by the audit UI to show worktree status.
+ * Inspect a local workspace; returns `{ exists: false }` if the directory no
+ * longer exists. Used by the audit UI to show worktree status.
  */
-export async function statWorkspace(
-  path: string
-): Promise<{ exists: boolean; mtime?: number }> {
+export async function statWorkspace(path: string): Promise<{ exists: boolean; mtime?: number }> {
   try {
-    const s = await stat(path)
-    return { exists: true, mtime: s.mtimeMs }
+    return await invoke<{ exists: boolean; mtime?: number }>("github_workspace_stat", { path })
   } catch {
     return { exists: false }
   }

@@ -421,6 +421,19 @@ export function parseLarkInteractiveCallback(
   if (action.tag === "select_static") {
     actionType = "select"
     value = action.option ?? ""
+    // B4 — simulated Checkbox (ADR-0009 v41). The mapper marks the wire
+    // value with `simulatedCheckbox: true` so the parser can lift the
+    // event back into a real `actionType: "checkbox"` event with a
+    // canonical "true"/"false" value, sparing the bridge from a
+    // platform-aware coercion step.
+    if (
+      typeof action.value === "object" &&
+      action.value &&
+      (action.value as Record<string, unknown>).simulatedCheckbox === true
+    ) {
+      actionType = "checkbox"
+      value = value === "true" ? "true" : "false"
+    }
   } else if (action.tag === "picker_date" || action.tag === "picker_time") {
     actionType = "input"
     value =

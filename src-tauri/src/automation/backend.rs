@@ -57,6 +57,19 @@ pub trait AutomationBackend {
         button: MouseButton,
         transition: ButtonTransition,
     ) -> Result<()>;
+
+    /// Read the current cursor position in screen coordinates. Read-only —
+    /// driving-call classification does not apply. Used by
+    /// `computer_use({ action: "cursor_position" })`.
+    fn cursor_position(&self) -> Result<Point>;
+
+    /// Resolve the topmost UI element at screen coordinates. Read-only.
+    /// Backs the Inspector "Pick" affordance: the renderer overlay
+    /// captures a point and calls this to materialise an `ElementInfo`.
+    ///
+    /// macOS / Linux return `UnsupportedPlatform` until equivalent
+    /// AXUIElement / AT-SPI hit-testing ships (Phase 6.b).
+    fn pick_at_point(&self, point: Point) -> Result<ElementInfo>;
 }
 
 /// A back-end that fails every call with `UnsupportedPlatform`. macOS and
@@ -132,6 +145,12 @@ impl AutomationBackend for StubBackend {
     ) -> Result<()> {
         Err(AutomationError::UnsupportedPlatform)
     }
+    fn cursor_position(&self) -> Result<Point> {
+        Err(AutomationError::UnsupportedPlatform)
+    }
+    fn pick_at_point(&self, _p: Point) -> Result<ElementInfo> {
+        Err(AutomationError::UnsupportedPlatform)
+    }
 }
 
 #[cfg(test)]
@@ -190,6 +209,14 @@ mod tests {
         ));
         assert!(matches!(
             b.mouse_button(MouseButton::Left, ButtonTransition::Down),
+            Err(AutomationError::UnsupportedPlatform)
+        ));
+        assert!(matches!(
+            b.cursor_position(),
+            Err(AutomationError::UnsupportedPlatform)
+        ));
+        assert!(matches!(
+            b.pick_at_point(Point { x: 0, y: 0 }),
             Err(AutomationError::UnsupportedPlatform)
         ));
     }

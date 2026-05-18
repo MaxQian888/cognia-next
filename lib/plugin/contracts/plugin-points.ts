@@ -167,8 +167,8 @@ const VIRTUAL_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
 ])
 
 const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoint, string>> = {
-  "sidebar.left.top": "components/desktop/guild-rail.tsx",
-  "sidebar.left.bottom": "components/desktop/guild-rail.tsx",
+  "sidebar.left.top": "components/shell/guild-rail.tsx",
+  "sidebar.left.bottom": "components/shell/guild-rail.tsx",
   "toolbar.left": "components/desktop/title-bar.tsx",
   "toolbar.center": "components/desktop/title-bar.tsx",
   "toolbar.right": "components/desktop/title-bar.tsx",

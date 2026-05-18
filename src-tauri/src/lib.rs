@@ -12,6 +12,7 @@ mod connectors;
 mod external_agent;
 mod files;
 mod fs_atomic;
+mod github;
 mod hooks;
 mod keyring_secrets;
 mod logging;
@@ -27,6 +28,7 @@ mod shell;
 mod skills;
 mod subscription;
 mod tts;
+mod twin;
 mod vector;
 mod wallpaper;
 mod workflow;
@@ -599,6 +601,8 @@ pub fn run() {
             automation::commands::desktop_hold_key,
             automation::commands::desktop_mouse_button,
             automation::commands::desktop_window_op,
+            automation::commands::desktop_cursor_position,
+            automation::commands::desktop_pick_at_point,
             automation::commands::automation_audit_snapshot,
             automation::commands::automation_settings_get,
             automation::commands::automation_settings_set,
@@ -607,6 +611,11 @@ pub fn run() {
             plugins::computer_use::commands::plugin_computer_use_execute,
             plugins::computer_use::commands::plugin_computer_use_bash,
             plugins::computer_use::commands::plugin_computer_use_text_editor,
+            twin::code_repo::twin_parse_git_repo,
+            github::workspace::github_workspace_clone,
+            github::workspace::github_workspace_commit_and_push,
+            github::workspace::github_workspace_remove,
+            github::workspace::github_workspace_stat,
             ocr::ocr_extract_native,
             ocr::ocr_list_native_backends,
             ocr::ocr_model_status,

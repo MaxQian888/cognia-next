@@ -1,13 +1,24 @@
 /**
- * CRUD layer for the `outboundQueue` Dexie table (schema v18).
+ * CRUD layer for the `outboundQueue` Dexie table (schema v18, extended at v41).
  *
  * Outbound delivery jobs are processed FIFO per conversation lane.
  * The runner uses `pickNextDue` to claim the oldest pending row whose
  * `nextAttemptAt <= now`, then transitions it through the lifecycle:
  * pending → sending → sent | failed | deadlettered.
+ *
+ * Provenance: every enqueue MUST declare a `source` (added at v41) so the
+ * inbox UI can render the right badge and the audit log can drill down on
+ * origin. Rows persisted before v41 backfill to `"ai-run"` via the v41
+ * upgrade hook — but new rows MUST declare explicitly; the type system
+ * enforces this so a workflow-pushed message never silently looks like an
+ * ai-run reply.
  */
 
-import type { OutboundJobRow } from "./connector-types"
+import type {
+  OutboundJobRow,
+  OutboundJobSource,
+  OutboundJobWorkflowSource,
+} from "./connector-types"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import { getDb } from "./schema"
 
@@ -21,6 +32,20 @@ export interface EnqueueInput {
   request: OutboundRequest
   /** Override nextAttemptAt — defaults to now (immediate). */
   nextAttemptAt?: number
+  /**
+   * Provenance of this enqueue. Required at schema v41+. The four legal
+   * values correspond to the four paths that can produce an outbound:
+   * the connector ai-loop reply (`"ai-run"`), the inbox manual composer
+   * (`"manual"`), a Visual Workflow `action.connector.send` node
+   * (`"workflow"`, in which case `sourceWorkflow` MUST also be set), or a
+   * draft approval (`"draft-approved"`).
+   */
+  source: OutboundJobSource
+  /**
+   * Workflow back-reference. Required when `source === "workflow"`,
+   * ignored otherwise.
+   */
+  sourceWorkflow?: OutboundJobWorkflowSource
 }
 
 export async function enqueueOutbound(input: EnqueueInput): Promise<OutboundJobRow> {
@@ -35,6 +60,10 @@ export async function enqueueOutbound(input: EnqueueInput): Promise<OutboundJobR
     createdAt: now,
     nextAttemptAt: input.nextAttemptAt ?? now,
     idempotencyKey: input.request.metadata.idempotencyKey,
+    source: input.source,
+    ...(input.source === "workflow" && input.sourceWorkflow
+      ? { sourceWorkflow: input.sourceWorkflow }
+      : {}),
   }
   await getDb().outboundQueue.add(row)
   return row

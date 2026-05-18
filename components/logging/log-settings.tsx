@@ -440,8 +440,8 @@ export function LogSettings({ className }: LogSettingsProps) {
     }
   })()
   const nativeStatusToneClasses: Record<NativeStatusTone, string> = {
-    success: "border-emerald-500/40 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300",
-    warning: "border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-300",
+    success: "border-success/40 bg-success/5 text-success",
+    warning: "border-warning/40 bg-warning/5 text-warning",
     danger: "border-destructive/50 bg-destructive/5 text-destructive",
     muted: "border-border bg-muted/30 text-muted-foreground",
   }
@@ -1363,7 +1363,7 @@ export function LogSettings({ className }: LogSettingsProps) {
         <div className="flex items-center gap-2 text-xs sm:text-sm min-h-6">
           {hasChanges && (
             <>
-              <span className="h-2 w-2 rounded-full bg-amber-500" aria-hidden />
+              <span className="h-2 w-2 rounded-full bg-warning" aria-hidden />
               <span className="text-muted-foreground">{unsavedLabel}</span>
             </>
           )}

@@ -33,15 +33,30 @@ function threadIdFromRef(req: OutboundRequest): string | undefined {
  * Determine the receive_id_type and receive_id for an outbound send.
  *
  * Lark messages are sent to:
- *   - open_id: a specific user (for p2p / DMs)
- *   - chat_id: a group chat (for group messages)
+ *   - open_id: a specific user (for p2p / DMs), prefix `ou_` / `on_`
+ *   - chat_id: a group chat (for group messages), prefix `oc_`
+ *   - user_id: enterprise-specific user id (no prefix; numeric or
+ *     custom). Carried verbatim on `conversationRef.userId` so the caller
+ *     can target a Feishu user without an open_id.
+ *   - email: enterprise account email — useful when the assistant
+ *     wants to ping a colleague by mail address without having resolved
+ *     them to an open_id first.
  *
- * We use chat_id universally in Phase 1 since we always have the chat_id from
- * incoming events. Caller can pass a specific open_id via conversationRef if
- * needed (Phase 2).
+ * Closes the v18 Phase 2 marker (ADR-0009 v41 / A4) by honouring an
+ * explicit `receiveIdType` on the conversation ref when present, falling
+ * back to the prefix-sniff for legacy bindings that only carry the chat
+ * id.
  */
-function buildReceiveIdParams(chatId: string): { receiveIdType: string; receiveId: string } {
-  // If the id starts with oc_ it's a chat_id; ou_ would be an open_id.
+function buildReceiveIdParams(
+  chatId: string,
+  explicitType?: string,
+  explicitReceiveId?: string
+): { receiveIdType: string; receiveId: string } {
+  if (explicitType && explicitReceiveId) {
+    // Trust the caller — adapter-registry / inbound parsers know best.
+    return { receiveIdType: explicitType, receiveId: explicitReceiveId }
+  }
+  // If the id starts with oc_ it's a chat_id; ou_/on_ would be an open_id.
   if (chatId.startsWith("ou_") || chatId.startsWith("on_")) {
     return { receiveIdType: "open_id", receiveId: chatId }
   }
@@ -55,7 +70,33 @@ function buildReceiveIdParams(chatId: string): { receiveIdType: string; receiveI
 export function serializeSend(req: OutboundRequest): SerializedLarkCall {
   const chatId = chatIdFromRef(req)
   const threadId = threadIdFromRef(req)
-  const { receiveIdType, receiveId } = buildReceiveIdParams(chatId)
+  // A4 — honour explicit receiveIdType + receiveId when the conversation
+  // ref carries them. Closes the Phase-2 marker that previously forced
+  // every send through chat_id even when the caller wanted to target a
+  // user by open_id / user_id / email.
+  const ref = req.conversationRef as Record<string, unknown>
+  const explicitType =
+    typeof ref["receiveIdType"] === "string" ? (ref["receiveIdType"] as string) : undefined
+  const explicitReceiveId =
+    typeof ref["receiveId"] === "string"
+      ? (ref["receiveId"] as string)
+      : typeof ref["openId"] === "string"
+        ? (ref["openId"] as string)
+        : typeof ref["userId"] === "string"
+          ? (ref["userId"] as string)
+          : typeof ref["email"] === "string"
+            ? (ref["email"] as string)
+            : undefined
+  const inferredType =
+    explicitType ??
+    (typeof ref["openId"] === "string"
+      ? "open_id"
+      : typeof ref["userId"] === "string"
+        ? "user_id"
+        : typeof ref["email"] === "string"
+          ? "email"
+          : undefined)
+  const { receiveIdType, receiveId } = buildReceiveIdParams(chatId, inferredType, explicitReceiveId)
 
   const body = segmentsToLarkBody(req.segments)
 

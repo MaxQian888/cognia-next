@@ -21,7 +21,7 @@ import type { Character, Team } from "@/lib/claude/types"
 import { ChevronDownIcon, ChevronRightIcon, StickyNoteIcon, UsersIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { AvatarBadge } from "./avatar-badge"
+import { AvatarBadge } from "@/components/desktop/avatar-badge"
 
 const log = loggers.ui
 

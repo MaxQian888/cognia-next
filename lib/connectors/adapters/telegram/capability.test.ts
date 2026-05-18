@@ -32,7 +32,14 @@ describe("TELEGRAM_CAPS", () => {
     expect(TELEGRAM_CAPS).not.toContain("history.fetch")
   })
 
-  it("has exactly 14 entries (13 Phase-1 + send.a2ui)", () => {
-    expect(TELEGRAM_CAPS).toHaveLength(14)
+  it("includes send.reaction (A1 / setMessageReaction)", () => {
+    // ADR-0009 v41 / A1: parity with Slack + Lark reaction-send capability.
+    // Bot API 7.0+ exposes setMessageReaction; bots may push emoji
+    // ReactionType (custom_emoji is admin-gated).
+    expect(TELEGRAM_CAPS).toContain("send.reaction")
+  })
+
+  it("has exactly 15 entries (13 Phase-1 + send.a2ui + send.reaction)", () => {
+    expect(TELEGRAM_CAPS).toHaveLength(15)
   })
 })

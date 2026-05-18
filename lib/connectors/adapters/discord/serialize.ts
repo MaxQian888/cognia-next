@@ -22,7 +22,7 @@ export function escapeDiscordMd(text: string): string {
 }
 
 export interface SerializedDiscordCall {
-  method: "POST" | "PATCH" | "DELETE"
+  method: "POST" | "PATCH" | "DELETE" | "PUT"
   url: string
   payload: Record<string, unknown>
 }
@@ -220,5 +220,72 @@ export function serializeEdit(
     method: "PATCH",
     url: `${DISCORD_API_BASE}/channels/${channelId}/messages/${messageId}`,
     payload: { content },
+  }
+}
+
+/**
+ * Build a `GET /channels/{channel.id}/messages?limit=N&before=cursor`
+ * call (added at ADR-0009 v41 / A2.b). Discord's REST history endpoint
+ * caps `limit` at 100 per request; the adapter pages with `before` to
+ * walk older messages.
+ */
+export function serializeFetchHistory(
+  channelId: string,
+  options: { limit?: number; before?: string; after?: string }
+): SerializedDiscordCall {
+  const limit = Math.min(Math.max(options.limit ?? 50, 1), 100)
+  const qs = new URLSearchParams({ limit: String(limit) })
+  if (options.before) qs.set("before", options.before)
+  if (options.after) qs.set("after", options.after)
+  // GET is not in the SerializedDiscordCall method union (the adapter's
+  // doRequest handles all REST verbs through fetch directly). We model
+  // history fetches as method="POST" with an empty payload so the type
+  // contract stays narrow — the adapter switches to GET when the URL
+  // ends in /messages?limit=...
+  return {
+    method: "POST",
+    url: `${DISCORD_API_BASE}/channels/${channelId}/messages?${qs.toString()}`,
+    payload: {},
+  }
+}
+
+/**
+ * Build a `PUT /channels/{channel.id}/messages/{message.id}/reactions/{emoji}/@me`
+ * call (added at ADR-0009 v41 / A2 of the IM connector gap-closure plan).
+ *
+ * `emoji` may be either:
+ *   - a unicode character (e.g. `"👍"`) — URL-encoded by this helper, OR
+ *   - a custom-emoji identifier in Discord's `name:id` form
+ *     (e.g. `"thumbsup:43623862374"`) — URL-encoded as a single segment.
+ *
+ * Reactions are per-emoji on Discord (no batched ReactionType[] like on
+ * Telegram). To remove a reaction, use `serializeReactionRemoval` below
+ * (DELETE on the same path).
+ */
+export function serializeReaction(
+  channelId: string,
+  messageId: string,
+  emoji: string
+): SerializedDiscordCall {
+  return {
+    method: "PUT",
+    url: `${DISCORD_API_BASE}/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}/@me`,
+    payload: {},
+  }
+}
+
+/**
+ * Build a DELETE call to remove the bot's own reaction from a message.
+ * Useful for retracting an earlier `serializeReaction` call.
+ */
+export function serializeReactionRemoval(
+  channelId: string,
+  messageId: string,
+  emoji: string
+): SerializedDiscordCall {
+  return {
+    method: "DELETE",
+    url: `${DISCORD_API_BASE}/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}/@me`,
+    payload: {},
   }
 }

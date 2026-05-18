@@ -9,6 +9,7 @@
  */
 
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
@@ -27,6 +28,7 @@ import { MobileSettingsPanel } from "@/components/mobile/settings/mobile-setting
 import { ProfileHeader } from "@/components/mobile/me/profile-header"
 import { TodayStatsCard } from "@/components/mobile/me/today-stats-card"
 import { QuickToggles } from "@/components/mobile/me/quick-toggles"
+import { usePlatform } from "@/hooks/use-platform"
 import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
 import type { CompanionConfig } from "@/lib/tauri/transport-companion"
 
@@ -53,9 +55,24 @@ function SectionLink({ href, label, icon: Icon, testId }: SectionLinkProps) {
 
 export default function MePage() {
   const t = useTranslations("mobile.me")
+  const platform = usePlatform()
+  const router = useRouter()
+  const [mounted, setMounted] = useState(false)
   const [config, setConfig] = useState<CompanionConfig | null>(null)
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
+    if (!mounted) return
+    if (platform === "mobile") return
+    router.replace("/settings")
+  }, [mounted, platform, router])
+
+  useEffect(() => {
+    if (platform !== "mobile") return
     let cancelled = false
     void hydrateCompanionConfig()
       .then((cfg) => {
@@ -65,7 +82,9 @@ export default function MePage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [platform])
+
+  if (!mounted || platform !== "mobile") return null
 
   const paired = !!config
 

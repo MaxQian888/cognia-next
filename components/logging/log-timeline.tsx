@@ -40,10 +40,10 @@ interface TimelineBucket {
 
 function getBucketColor(bucket: TimelineBucket): string {
   if (bucket.total === 0) return "bg-muted/30"
-  if (bucket.error > 0) return "bg-red-500"
-  if (bucket.warn > 0) return "bg-yellow-500"
-  if (bucket.info > 0) return "bg-green-500"
-  return "bg-blue-500"
+  if (bucket.error > 0) return "bg-destructive"
+  if (bucket.warn > 0) return "bg-warning"
+  if (bucket.info > 0) return "bg-success"
+  return "bg-chart-3"
 }
 
 function getBucketOpacity(bucket: TimelineBucket, maxCount: number): number {
@@ -133,12 +133,12 @@ const TimelineBucketTile = memo(function TimelineBucketTile({
             {totalLabel}: {total}
           </p>
           {error > 0 && (
-            <p className="text-red-400">
+            <p className="text-destructive">
               {errorsLabel}: {error}
             </p>
           )}
           {warn > 0 && (
-            <p className="text-yellow-400">
+            <p className="text-warning">
               {warningsLabel}: {warn}
             </p>
           )}
@@ -330,15 +330,15 @@ export function LogTimeline({
         )}
         <div className="flex items-center gap-1.5 ml-auto">
           <div className="flex items-center gap-1">
-            <div aria-hidden="true" className="h-2 w-2 rounded-sm bg-green-500" />
+            <div aria-hidden="true" className="h-2 w-2 rounded-sm bg-success" />
             <span className="text-xs sm:text-[10px] text-muted-foreground">{t("levels.info")}</span>
           </div>
           <div className="flex items-center gap-1">
-            <div aria-hidden="true" className="h-2 w-2 rounded-sm bg-yellow-500" />
+            <div aria-hidden="true" className="h-2 w-2 rounded-sm bg-warning" />
             <span className="text-xs sm:text-[10px] text-muted-foreground">{t("levels.warn")}</span>
           </div>
           <div className="flex items-center gap-1">
-            <div aria-hidden="true" className="h-2 w-2 rounded-sm bg-red-500" />
+            <div aria-hidden="true" className="h-2 w-2 rounded-sm bg-destructive" />
             <span className="text-xs sm:text-[10px] text-muted-foreground">
               {t("levels.error")}
             </span>
@@ -385,7 +385,7 @@ export function LogTimeline({
             {buckets.map((bucket, i) => (
               <div
                 key={i}
-                className="flex-1 min-w-0 bg-red-500 motion-safe:transition-opacity"
+                className="flex-1 min-w-0 bg-destructive motion-safe:transition-opacity"
                 style={{
                   opacity:
                     bucket.error > 0 ? Math.max(0.3, bucket.error / maxPerLevel.error) : 0.05,
@@ -399,7 +399,7 @@ export function LogTimeline({
             {buckets.map((bucket, i) => (
               <div
                 key={i}
-                className="flex-1 min-w-0 bg-yellow-500 motion-safe:transition-opacity"
+                className="flex-1 min-w-0 bg-warning motion-safe:transition-opacity"
                 style={{
                   opacity: bucket.warn > 0 ? Math.max(0.3, bucket.warn / maxPerLevel.warn) : 0.05,
                 }}

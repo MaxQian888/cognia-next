@@ -601,6 +601,65 @@ export function parseTelegramCallbackQuery(
   }
 }
 
+/**
+ * Correlate an inbound message against an outstanding ForceReply binding
+ * (ADR-0009 v41 / B2). If the message has a `reply_to_message.message_id`
+ * that matches a `kind: "force_reply"` row in `connectorCallbackBindings`
+ * for this adapter, synthesise a `ConnectorCallbackEvent{actionType:"input"}`
+ * so the bus routes the user's free-text reply onto the A2UI surface as
+ * if they had typed into a native TextField/TextArea.
+ *
+ * Returns `null` when there's no `reply_to_message`, no matching binding,
+ * or the binding has expired. The transport then falls back to the
+ * normal `parseTelegramUpdate` message path.
+ */
+export async function parseTelegramForceReplyCorrelation(
+  adapterId: string,
+  selfId: string,
+  update: TelegramUpdate
+): Promise<ConnectorCallbackEvent | null> {
+  const msg = update.message ?? update.channel_post
+  if (!msg?.reply_to_message?.message_id) return null
+
+  // Lazy import to avoid a circular dep through the bus barrel.
+  const { resolveCallbackBinding } = await import("@/lib/connectors/adapters/_shared/a2ui-mapper")
+  const binding = await resolveCallbackBinding(adapterId, String(msg.reply_to_message.message_id))
+  if (!binding || binding.kind !== "force_reply") return null
+  if (binding.expiresAt !== undefined && binding.expiresAt < Date.now()) return null
+
+  const chatId = msg.chat.id
+  const threadId = msg.message_thread_id !== undefined ? String(msg.message_thread_id) : undefined
+  const conversationKey = buildConversationKey("telegram", adapterId, String(chatId), threadId)
+  const userInfo = msg.from
+  const sender = userInfo
+    ? buildPlatformIdentity(adapterId, chatId, userInfo)
+    : {
+        id: `telegram:${adapterId}:${chatId}`,
+        platform: "telegram" as const,
+        adapterId,
+        remoteUserId: String(chatId),
+      }
+
+  const text = msg.text ?? msg.caption ?? ""
+
+  return {
+    platform: "telegram",
+    adapterId,
+    selfId,
+    triggerId: `tgfr:${msg.message_id}:${msg.reply_to_message.message_id}`,
+    surfaceId: binding.surfaceId,
+    componentId: binding.componentId,
+    actionType: "input",
+    value: text,
+    payload: undefined,
+    originatingMessageId: String(msg.message_id),
+    conversationKey: binding.conversationKey ?? conversationKey,
+    user: sender,
+    timestamp: Date.now(),
+    raw: update,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Public parser
 // ---------------------------------------------------------------------------

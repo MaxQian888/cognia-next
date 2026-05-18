@@ -11,11 +11,6 @@ import { useTranslations } from "next-intl"
 import {
   ChevronDown,
   ChevronRight,
-  AlertCircle,
-  AlertTriangle,
-  Info,
-  Bug,
-  XCircle,
   Clock,
   Copy,
   Check,
@@ -39,52 +34,11 @@ import {
 } from "@/components/ui/context-menu"
 import { AGENT_TRACE_MODULE } from "@/lib/agent-trace/log-adapter"
 import { LIVE_TRACE_EVENT_ICONS, LIVE_TRACE_EVENT_COLORS } from "@/lib/agent"
-import type { StructuredLogEntry, LogLevel } from "@/lib/logger"
+import { LEVEL_THEME, ALL_LEVELS } from "@/lib/logger/level-theme"
+import type { StructuredLogEntry } from "@/lib/logger"
 import type { AgentTraceEventType } from "@/types/agent/agent-trace"
 
-export const LEVEL_CONFIG: Record<
-  LogLevel,
-  { icon: React.ElementType; color: string; bgColor: string; gutterClass: string }
-> = {
-  trace: {
-    icon: Bug,
-    color: "text-gray-500",
-    bgColor: "bg-gray-100 dark:bg-gray-800",
-    gutterClass: "border-l-muted-foreground/40",
-  },
-  debug: {
-    icon: Bug,
-    color: "text-blue-500",
-    bgColor: "bg-blue-100 dark:bg-blue-900/30",
-    gutterClass: "border-l-blue-500/70",
-  },
-  info: {
-    icon: Info,
-    color: "text-green-500",
-    bgColor: "bg-green-100 dark:bg-green-900/30",
-    gutterClass: "border-l-emerald-500/70",
-  },
-  warn: {
-    icon: AlertTriangle,
-    color: "text-yellow-500",
-    bgColor: "bg-yellow-100 dark:bg-yellow-900/30",
-    gutterClass: "border-l-amber-500/80",
-  },
-  error: {
-    icon: AlertCircle,
-    color: "text-red-500",
-    bgColor: "bg-red-100 dark:bg-red-900/30",
-    gutterClass: "border-l-destructive/80",
-  },
-  fatal: {
-    icon: XCircle,
-    color: "text-red-700",
-    bgColor: "bg-red-200 dark:bg-red-900/50",
-    gutterClass: "border-l-destructive",
-  },
-}
-
-export const ALL_LEVELS: LogLevel[] = ["trace", "debug", "info", "warn", "error", "fatal"]
+export { LEVEL_THEME, ALL_LEVELS }
 
 /**
  * Split text by search query into parts for highlighting.
@@ -127,7 +81,7 @@ export function HighlightedText({
       {parts.map((part, i) => {
         regex.lastIndex = 0
         return regex.test(part) ? (
-          <mark key={i} className="bg-yellow-200 dark:bg-yellow-800 rounded px-0.5">
+          <mark key={i} className="bg-warning/30 text-foreground rounded px-0.5">
             {part}
           </mark>
         ) : (
@@ -167,7 +121,7 @@ export function LogEntry({
   t,
 }: LogEntryProps) {
   const [copied, setCopied] = useState(false)
-  const config = LEVEL_CONFIG[log.level]
+  const theme = LEVEL_THEME[log.level]
   const isTraceEntry = log.module === AGENT_TRACE_MODULE
   const TraceIcon =
     isTraceEntry && log.eventId
@@ -177,8 +131,8 @@ export function LogEntry({
     isTraceEntry && log.eventId
       ? LIVE_TRACE_EVENT_COLORS[log.eventId as AgentTraceEventType]
       : undefined
-  const Icon = (TraceIcon ?? config.icon) as React.ComponentType<{ className?: string }>
-  const iconColor = traceColor ?? config.color
+  const Icon = (TraceIcon ?? theme.icon) as React.ComponentType<{ className?: string }>
+  const iconColor = traceColor ?? theme.iconColor
 
   const handleCopy = useCallback(() => {
     const text = JSON.stringify(log, null, 2)
@@ -229,8 +183,8 @@ export function LogEntry({
           className={cn(
             "group border-b border-border/50 border-l-[3px] transition-colors outline-none",
             "hover:bg-muted/50 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/40",
-            isExpanded && config.bgColor,
-            config.gutterClass
+            isExpanded && theme.bgClass,
+            theme.gutterClass
           )}
         >
           <div className="flex items-start gap-2 px-3 py-2 cursor-pointer" onClick={handleToggle}>
@@ -288,7 +242,7 @@ export function LogEntry({
                       }}
                     >
                       {isBookmarked ? (
-                        <BookmarkCheck className="h-3 w-3 text-yellow-500" />
+                        <BookmarkCheck className="h-3 w-3 text-warning" />
                       ) : (
                         <Bookmark className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                       )}
@@ -373,7 +327,7 @@ export function LogEntry({
                     }}
                   >
                     {copied ? (
-                      <Check className="h-3 w-3 text-green-500" />
+                      <Check className="h-3 w-3 text-success" />
                     ) : (
                       <Copy className="h-3 w-3" />
                     )}
@@ -396,9 +350,9 @@ export function LogEntry({
               )}
 
               {log.stack && (
-                <div className="rounded bg-red-50 dark:bg-red-900/20 p-2">
+                <div className="rounded bg-destructive/10 p-2">
                   <div className="text-xs text-muted-foreground mb-1">{t("panel.stackTrace")}:</div>
-                  <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap text-red-600 dark:text-red-400">
+                  <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap text-destructive">
                     {log.stack}
                   </pre>
                 </div>
@@ -438,8 +392,7 @@ export function LogEntry({
           <ContextMenuItem onClick={handleToggleBookmark}>
             {isBookmarked ? (
               <>
-                <BookmarkCheck className="h-4 w-4 mr-2 text-yellow-500" />{" "}
-                {t("panel.removeBookmark")}
+                <BookmarkCheck className="h-4 w-4 mr-2 text-warning" /> {t("panel.removeBookmark")}
               </>
             ) : (
               <>
@@ -499,7 +452,7 @@ export function TraceGroup({
         </Badge>
         {hasErrors && <Badge variant="destructive">{t("panel.error")}</Badge>}
         {hasWarnings && !hasErrors && (
-          <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
+          <Badge variant="secondary" className="bg-warning/15 text-warning">
             {t("panel.warning")}
           </Badge>
         )}

@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { LEVEL_CONFIG } from "./log-entry"
+import { LEVEL_THEME } from "@/lib/logger/level-theme"
 import type { LogLevel, TransportHealthSnapshot } from "@/lib/logger"
 import type { UseTransportHealthResult } from "@/hooks/logging"
 
@@ -29,16 +29,14 @@ const TRANSPORT_TILE_VISIBLE_LIMIT = 3
 type TransportTone = "success" | "warning" | "danger" | "muted"
 
 const TRANSPORT_TILE_TONE_CLASSES: Record<TransportTone, string> = {
-  success:
-    "border-emerald-500/40 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10",
-  warning:
-    "border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10",
+  success: "border-success/40 bg-success/5 text-success hover:bg-success/10",
+  warning: "border-warning/40 bg-warning/5 text-warning hover:bg-warning/10",
   danger: "border-destructive/50 bg-destructive/5 text-destructive hover:bg-destructive/10",
   muted: "border-border bg-muted/30 text-muted-foreground hover:bg-muted/40",
 }
 const TRANSPORT_TILE_DOT_CLASSES: Record<TransportTone, string> = {
-  success: "bg-emerald-500",
-  warning: "bg-amber-500",
+  success: "bg-success",
+  warning: "bg-warning",
   danger: "bg-destructive",
   muted: "bg-muted-foreground/50",
 }
@@ -133,7 +131,7 @@ export function LogPanelStatsBar({
   onPageSizeChange,
 }: LogPanelStatsBarProps) {
   const t = useTranslations("logging")
-  const pulseColor = logRate < 10 ? "bg-green-500" : logRate <= 100 ? "bg-yellow-500" : "bg-red-500"
+  const pulseColor = logRate < 10 ? "bg-success" : logRate <= 100 ? "bg-warning" : "bg-destructive"
 
   const start = filteredCount === 0 ? 0 : (currentPage - 1) * pageSize + 1
   const end = Math.min(currentPage * pageSize, filteredCount)
@@ -169,9 +167,9 @@ export function LogPanelStatsBar({
       {/* Center: level counts (non-zero) */}
       {Object.entries(stats.byLevel).map(([level, count]) => {
         if (count === 0) return null
-        const config = LEVEL_CONFIG[level as LogLevel]
+        const theme = LEVEL_THEME[level as LogLevel]
         return (
-          <span key={level} className={cn("flex items-center gap-0.5 shrink-0", config.color)}>
+          <span key={level} className={cn("flex items-center gap-0.5 shrink-0", theme.iconColor)}>
             {t(`levels.${level}`)}: <span className="font-medium">{count}</span>
           </span>
         )
@@ -516,8 +514,8 @@ function MetricCell({
       className={cn(
         "rounded-md border px-2 py-1.5 flex flex-col gap-0.5",
         tone === "danger" && "border-destructive/40 bg-destructive/5",
-        tone === "warning" && "border-amber-500/40 bg-amber-500/5",
-        tone === "success" && "border-emerald-500/40 bg-emerald-500/5",
+        tone === "warning" && "border-warning/40 bg-warning/5",
+        tone === "success" && "border-success/40 bg-success/5",
         tone === "muted" && "border-border bg-background/40"
       )}
     >

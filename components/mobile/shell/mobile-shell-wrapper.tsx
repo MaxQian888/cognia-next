@@ -57,6 +57,23 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
     )
   }, [platform, pathname])
 
+  // Desktop pass-through: skip mobile-only providers (OfflineBanner,
+  // outbound runner, tab bar) and the `min-h-[100dvh]` viewport reservation
+  // so `DesktopAppShell` owns the entire layout. The thin wrapper div is
+  // kept so existing tests / dev tools can still locate the shell.
+  if (platform !== "mobile") {
+    return (
+      <div
+        data-testid="mobile-shell-wrapper"
+        className={cn("contents", className)}
+        data-platform={platform}
+        data-tab-bar-visible="false"
+      >
+        {children}
+      </div>
+    )
+  }
+
   const mergedBadges: Partial<Record<TabId, number>> = {
     ...(badges ?? {}),
     chat: (badges?.chat ?? 0) + inboundUnread,

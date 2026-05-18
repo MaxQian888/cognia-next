@@ -52,7 +52,8 @@ import {
 } from "@/lib/agent"
 import { formatCost } from "@/lib/agent-trace/cost-estimator"
 import type { AgentTraceEventType } from "@/types/agent/agent-trace"
-import type { StructuredLogEntry, LogLevel } from "@/lib/logger"
+import type { StructuredLogEntry } from "@/lib/logger"
+import { LEVEL_THEME } from "@/lib/logger/level-theme"
 
 export interface LogDetailPanelProps {
   log: StructuredLogEntry
@@ -62,15 +63,6 @@ export interface LogDetailPanelProps {
   onToggleBookmark?: (id: string) => void
   onSelectRelated?: (log: StructuredLogEntry) => void
   className?: string
-}
-
-const LEVEL_BADGE_COLORS: Record<LogLevel, string> = {
-  trace: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-  debug: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
-  info: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300",
-  warn: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300",
-  error: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300",
-  fatal: "bg-red-200 text-red-900 dark:bg-red-900/50 dark:text-red-200",
 }
 
 /**
@@ -122,16 +114,16 @@ function parseStackTrace(stack: string): { fn: string; file: string; line: strin
 
 function JsonPrimitive({ value }: { value: unknown }) {
   if (typeof value === "string") {
-    return <span className="text-green-600 dark:text-green-400">&quot;{value}&quot;</span>
+    return <span className="text-chart-2">&quot;{value}&quot;</span>
   }
   if (typeof value === "number") {
-    return <span className="text-blue-600 dark:text-blue-400">{value}</span>
+    return <span className="text-chart-3">{value}</span>
   }
   if (typeof value === "boolean") {
-    return <span className="text-orange-600 dark:text-orange-400">{String(value)}</span>
+    return <span className="text-chart-1">{String(value)}</span>
   }
   if (value === null) {
-    return <span className="text-orange-600 dark:text-orange-400">null</span>
+    return <span className="text-chart-1">null</span>
   }
   return <span>{String(value)}</span>
 }
@@ -162,7 +154,7 @@ function JsonTreeNode({
       <div className="font-mono text-xs leading-5" style={{ paddingLeft: depth * 12 }}>
         {label ? (
           <>
-            <span className="text-purple-600 dark:text-purple-400">&quot;{label}&quot;</span>
+            <span className="text-chart-4">&quot;{label}&quot;</span>
             <span>: </span>
           </>
         ) : null}
@@ -179,9 +171,7 @@ function JsonTreeNode({
       <div style={{ paddingLeft: depth * 12 }}>
         <CollapsibleTrigger className="flex items-center gap-1 text-xs font-mono hover:text-foreground">
           {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-          {label ? (
-            <span className="text-purple-600 dark:text-purple-400">&quot;{label}&quot;:</span>
-          ) : null}
+          {label ? <span className="text-chart-4">&quot;{label}&quot;:</span> : null}
           <span>{wrapperOpen}</span>
           <span className="text-muted-foreground">{entries.length}</span>
           <span className="text-muted-foreground">{isArray ? "items" : "keys"}</span>
@@ -234,7 +224,7 @@ function CopyButton({
           className={cn(showText ? "h-7 gap-1.5 px-2 text-xs" : "h-6 w-6 shrink-0")}
           onClick={handleCopy}
         >
-          {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+          {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
           {showText ? <span>{label}</span> : null}
         </Button>
       </TooltipTrigger>
@@ -275,10 +265,7 @@ function AgentTraceDetailSection({
             {data.eventType?.replace(/_/g, " ") ?? "unknown"}
           </Badge>
           {data.success === true && (
-            <Badge
-              variant="secondary"
-              className="text-xs gap-1 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300"
-            >
+            <Badge variant="secondary" className="text-xs gap-1 bg-success/15 text-success">
               <CheckCircle2 className="h-3 w-3" />
               {t("trace.success")}
             </Badge>
@@ -461,7 +448,7 @@ export function LogDetailPanel({
       <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
         <div className="flex items-center gap-2 min-w-0">
           <h3 className="text-sm font-semibold truncate">{t("detail.title")}</h3>
-          <Badge className={cn("text-xs shrink-0", LEVEL_BADGE_COLORS[log.level])}>
+          <Badge className={cn("text-xs shrink-0", LEVEL_THEME[log.level].badgeClass)}>
             {log.level.toUpperCase()}
           </Badge>
         </div>
@@ -476,7 +463,7 @@ export function LogDetailPanel({
                   onClick={() => onToggleBookmark(log.id)}
                 >
                   {isBookmarked ? (
-                    <BookmarkCheck className="h-4 w-4 text-yellow-500" />
+                    <BookmarkCheck className="h-4 w-4 text-warning" />
                   ) : (
                     <Bookmark className="h-4 w-4" />
                   )}
@@ -638,7 +625,7 @@ export function LogDetailPanel({
                         className={cn(
                           "flex items-start gap-2 px-2 py-1.5 rounded text-xs font-mono",
                           i === 0
-                            ? "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300"
+                            ? "bg-destructive/10 text-destructive"
                             : "bg-muted/30 text-muted-foreground"
                         )}
                       >
@@ -656,8 +643,8 @@ export function LogDetailPanel({
                     ))}
                   </div>
                 ) : (
-                  <ScrollArea className="max-h-40 rounded-md bg-red-50 dark:bg-red-900/20">
-                    <pre className="text-xs font-mono whitespace-pre-wrap p-3 text-red-600 dark:text-red-400">
+                  <ScrollArea className="max-h-40 rounded-md bg-destructive/10">
+                    <pre className="text-xs font-mono whitespace-pre-wrap p-3 text-destructive">
                       {log.stack}
                     </pre>
                   </ScrollArea>
@@ -693,7 +680,7 @@ export function LogDetailPanel({
                         <Badge
                           className={cn(
                             "text-[10px] shrink-0 px-1.5",
-                            LEVEL_BADGE_COLORS[related.level]
+                            LEVEL_THEME[related.level].badgeClass
                           )}
                         >
                           {related.level}

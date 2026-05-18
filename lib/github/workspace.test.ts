@@ -1,8 +1,11 @@
-import { mkdir, rm, writeFile } from "node:fs/promises"
-import { join } from "node:path"
-import { tmpdir } from "node:os"
+jest.mock("@tauri-apps/api/core", () => ({
+  invoke: jest.fn(),
+}))
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { invoke } = require("@tauri-apps/api/core") as { invoke: jest.Mock }
+
 import {
-  _defaultGitFactory,
   cloneToWorkspace,
   commitAndPush,
   getE2BBackend,
@@ -10,64 +13,64 @@ import {
   setE2BBackend,
   statWorkspace,
   type E2BBackend,
-  type GitClient,
   type WorkspaceHandle,
 } from "./workspace"
 
-afterEach(() => setE2BBackend(null))
-
-const TMP = join(tmpdir(), `cognia-ws-test-${Math.random().toString(36).slice(2)}`)
-
-beforeAll(async () => {
-  await mkdir(TMP, { recursive: true })
+beforeEach(() => {
+  invoke.mockReset()
+  setE2BBackend(null)
 })
-afterAll(async () => {
-  await rm(TMP, { recursive: true, force: true })
-})
-
-function fakeGit(overrides: Partial<GitClient> = {}): GitClient {
-  return {
-    clone: jest.fn(async () => {}),
-    cwd: jest.fn(async () => {}),
-    add: jest.fn(async () => {}),
-    commit: jest.fn(async () => {}),
-    push: jest.fn(async () => {}),
-    status: jest.fn(async () => ({ files: [{ path: "a.txt" }] })),
-    log: jest.fn(async () => ({ all: [{ hash: "abc1234", message: "test" }] })),
-    ...overrides,
-  }
-}
 
 describe("cloneToWorkspace — local backend", () => {
-  it("creates a directory under baseDir/<repo>/<stamp> and calls git.clone", async () => {
-    const git = fakeGit()
+  it("invokes github_workspace_clone and synthesizes a WorkspaceHandle", async () => {
+    invoke.mockResolvedValueOnce({ path: "/tmp/ws/octocat_hello-world/abc", createdAt: 123 })
     const handle = await cloneToWorkspace({
       repoFullName: "octocat/hello-world",
       branch: "main",
       token: "x",
       backend: "local",
-      baseDir: TMP,
-      gitFactory: () => git,
+      baseDir: "/tmp/ws",
     })
-    expect(handle.backend).toBe("local")
-    expect(handle.path.startsWith(join(TMP, "octocat_hello-world"))).toBe(true)
-    expect(handle.repoFullName).toBe("octocat/hello-world")
-    expect(handle.branch).toBe("main")
-    expect(git.clone).toHaveBeenCalledTimes(1)
+    expect(invoke).toHaveBeenCalledWith("github_workspace_clone", {
+      args: {
+        repoFullName: "octocat/hello-world",
+        branch: "main",
+        token: "x",
+        baseDir: "/tmp/ws",
+      },
+    })
+    expect(handle).toEqual({
+      backend: "local",
+      path: "/tmp/ws/octocat_hello-world/abc",
+      repoFullName: "octocat/hello-world",
+      branch: "main",
+      createdAt: 123,
+    })
   })
 
-  it("sanitizes repo full names with slashes / special chars", async () => {
-    const git = fakeGit()
-    const handle = await cloneToWorkspace({
-      repoFullName: "my org/cool repo",
+  it("forwards baseDir undefined when not supplied", async () => {
+    invoke.mockResolvedValueOnce({ path: "/some/path", createdAt: 0 })
+    await cloneToWorkspace({
+      repoFullName: "o/r",
       branch: "main",
-      token: "x",
+      token: "tok",
       backend: "local",
-      baseDir: TMP,
-      gitFactory: () => git,
     })
-    expect(handle.path).not.toMatch(/[\\/ ]my org/)
-    expect(handle.path).toMatch(/my_org_cool_repo/)
+    expect(invoke).toHaveBeenCalledWith("github_workspace_clone", {
+      args: { repoFullName: "o/r", branch: "main", token: "tok", baseDir: undefined },
+    })
+  })
+
+  it("propagates a Rust-side clone failure", async () => {
+    invoke.mockRejectedValueOnce("git clone failed: branch not found")
+    await expect(
+      cloneToWorkspace({
+        repoFullName: "o/r",
+        branch: "main",
+        token: "x",
+        backend: "local",
+      })
+    ).rejects.toMatch(/git clone failed/)
   })
 
   it("throws for the e2b backend when no backend is registered", async () => {
@@ -79,6 +82,7 @@ describe("cloneToWorkspace — local backend", () => {
         backend: "e2b",
       })
     ).rejects.toThrow(/e2b workspace backend not registered/)
+    expect(invoke).not.toHaveBeenCalled()
   })
 
   it("delegates to the registered E2B backend when one is set", async () => {
@@ -106,90 +110,60 @@ describe("cloneToWorkspace — local backend", () => {
       branch: "main",
       token: "tok",
     })
-  })
-
-  it("falls back to DEFAULT_BASE_DIR when baseDir is omitted", async () => {
-    const git = fakeGit()
-    // Use a unique sub-id to avoid collision with the real cwd default base.
-    const handle = await cloneToWorkspace({
-      repoFullName: `octocat/${Math.random().toString(36).slice(2)}`,
-      branch: "main",
-      token: "x",
-      backend: "local",
-      gitFactory: () => git,
-    })
-    // The default base is "cognia-github-worktrees" relative to cwd.
-    expect(handle.path).toMatch(/cognia-github-worktrees/)
-    // Cleanup the directory we just created under cwd.
-    await rm(handle.path, { recursive: true, force: true })
-  })
-
-  it("includes branch and depth args in the clone call", async () => {
-    const clone = jest.fn(async () => {})
-    const git = fakeGit({ clone })
-    await cloneToWorkspace({
-      repoFullName: "o/r",
-      branch: "feat/x",
-      token: "tok",
-      backend: "local",
-      baseDir: TMP,
-      gitFactory: () => git,
-    })
-    expect(clone).toHaveBeenCalledWith(
-      expect.stringContaining("https://x-access-token:tok@github.com/o/r.git"),
-      expect.any(String),
-      ["--branch", "feat/x", "--depth", "20"]
-    )
+    expect(invoke).not.toHaveBeenCalled()
   })
 })
 
 describe("commitAndPush", () => {
   const handle: WorkspaceHandle = {
     backend: "local",
-    path: TMP,
+    path: "/tmp/ws/o_r/abc",
     repoFullName: "o/r",
     branch: "feat/x",
-    createdAt: Date.now(),
+    createdAt: 0,
   }
 
-  it("stages, commits, pushes, returns SHA", async () => {
-    const git = fakeGit()
-    const sha = await commitAndPush({
-      workspace: handle,
-      message: "Cognia: do the thing",
-      gitFactory: () => git,
+  it("invokes github_workspace_commit_and_push and returns the SHA", async () => {
+    invoke.mockResolvedValueOnce("deadbeef\n")
+    const sha = await commitAndPush({ workspace: handle, message: "Cognia: do the thing" })
+    expect(sha).toBe("deadbeef\n")
+    expect(invoke).toHaveBeenCalledWith("github_workspace_commit_and_push", {
+      args: {
+        workspacePath: handle.path,
+        branch: "feat/x",
+        message: "Cognia: do the thing",
+        remoteBranch: undefined,
+      },
     })
-    expect(sha).toBe("abc1234")
-    expect(git.add).toHaveBeenCalledWith(".")
-    expect(git.commit).toHaveBeenCalledWith("Cognia: do the thing")
-    expect(git.push).toHaveBeenCalledWith("origin", "feat/x", ["--set-upstream"])
   })
 
-  it("uses remoteBranch override when supplied", async () => {
-    const git = fakeGit()
+  it("forwards remoteBranch when supplied", async () => {
+    invoke.mockResolvedValueOnce("sha")
     await commitAndPush({
       workspace: handle,
       message: "x",
       remoteBranch: "cognia/issue-5",
-      gitFactory: () => git,
     })
-    expect(git.push).toHaveBeenCalledWith("origin", "cognia/issue-5", ["--set-upstream"])
+    expect(invoke).toHaveBeenCalledWith("github_workspace_commit_and_push", {
+      args: {
+        workspacePath: handle.path,
+        branch: "feat/x",
+        message: "x",
+        remoteBranch: "cognia/issue-5",
+      },
+    })
   })
 
-  it("throws when there are no changes to commit", async () => {
-    const git = fakeGit({ status: jest.fn(async () => ({ files: [] })) })
-    await expect(
-      commitAndPush({ workspace: handle, message: "x", gitFactory: () => git })
-    ).rejects.toThrow(/no changes/)
+  it("propagates the Rust 'no changes' error verbatim", async () => {
+    invoke.mockRejectedValueOnce("commitAndPush: no changes to commit")
+    await expect(commitAndPush({ workspace: handle, message: "x" })).rejects.toMatch(/no changes/)
   })
 
   it("rejects e2b workspace when no backend is registered", async () => {
     await expect(
-      commitAndPush({
-        workspace: { ...handle, backend: "e2b" },
-        message: "x",
-      })
+      commitAndPush({ workspace: { ...handle, backend: "e2b" }, message: "x" })
     ).rejects.toThrow(/e2b workspace backend not registered/)
+    expect(invoke).not.toHaveBeenCalled()
   })
 
   it("delegates commitAndPush to the registered E2B backend", async () => {
@@ -210,29 +184,33 @@ describe("commitAndPush", () => {
       message: "msg",
       remoteBranch: "feat/x",
     })
-  })
-
-  it("returns empty string if log has no entries", async () => {
-    const git = fakeGit({ log: jest.fn(async () => ({ all: [] })) })
-    const sha = await commitAndPush({ workspace: handle, message: "x", gitFactory: () => git })
-    expect(sha).toBe("")
+    expect(invoke).not.toHaveBeenCalled()
   })
 })
 
 describe("removeWorkspace + statWorkspace", () => {
-  it("removes a local workspace directory", async () => {
-    const path = join(TMP, "wstmp")
-    await mkdir(path, { recursive: true })
-    await writeFile(join(path, "a.txt"), "hello")
-    const ok = await removeWorkspace({
-      backend: "local",
-      path,
-      repoFullName: "o/r",
-      branch: "main",
-      createdAt: 0,
-    })
+  const localHandle: WorkspaceHandle = {
+    backend: "local",
+    path: "/tmp/ws/o_r/abc",
+    repoFullName: "o/r",
+    branch: "main",
+    createdAt: 0,
+  }
+
+  it("returns the Rust bool for a successful local rm", async () => {
+    invoke.mockResolvedValueOnce(true)
+    const ok = await removeWorkspace(localHandle)
     expect(ok).toBe(true)
-    expect((await statWorkspace(path)).exists).toBe(false)
+    expect(invoke).toHaveBeenCalledWith("github_workspace_remove", { path: localHandle.path })
+  })
+
+  it("logs and returns false when the Rust command rejects", async () => {
+    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    invoke.mockRejectedValueOnce("rm failed")
+    const ok = await removeWorkspace(localHandle)
+    expect(ok).toBe(false)
+    expect(errSpy).toHaveBeenCalled()
+    errSpy.mockRestore()
   })
 
   it("returns false for e2b handle when no backend is registered", async () => {
@@ -244,6 +222,7 @@ describe("removeWorkspace + statWorkspace", () => {
       createdAt: 0,
     })
     expect(ok).toBe(false)
+    expect(invoke).not.toHaveBeenCalled()
   })
 
   it("delegates removal to the registered E2B backend", async () => {
@@ -283,52 +262,17 @@ describe("removeWorkspace + statWorkspace", () => {
     errSpy.mockRestore()
   })
 
-  it("returns false (not throw) when path does not exist on a local rm", async () => {
-    // node fs.rm with force: true should not throw — we treat any rm error as
-    // a logged failure so the GC pass keeps going.
-    const ok = await removeWorkspace({
-      backend: "local",
-      path: join(TMP, "does-not-exist"),
-      repoFullName: "o/r",
-      branch: "main",
-      createdAt: 0,
-    })
-    // With force: true rm succeeds; we still return true.
-    expect(ok).toBe(true)
+  it("statWorkspace returns the Rust shape on success", async () => {
+    invoke.mockResolvedValueOnce({ exists: true, mtime: 1234.5 })
+    const s = await statWorkspace("/some/path")
+    expect(s).toEqual({ exists: true, mtime: 1234.5 })
+    expect(invoke).toHaveBeenCalledWith("github_workspace_stat", { path: "/some/path" })
   })
 
-  it("statWorkspace returns mtime for an existing path", async () => {
-    const path = join(TMP, "stat-target")
-    await mkdir(path, { recursive: true })
-    const s = await statWorkspace(path)
-    expect(s.exists).toBe(true)
-    expect(typeof s.mtime).toBe("number")
-  })
-
-  it("removeWorkspace logs and returns false when fs.rm rejects (mock the case)", async () => {
-    // Force a non-recoverable rm error by using an invalid handle path that
-    // bypasses the force-overwrite. Easiest reliable repro is a long path
-    // with embedded null bytes (which Node rejects synchronously).
-    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {})
-    const ok = await removeWorkspace({
-      backend: "local",
-      path: " illegal-path",
-      repoFullName: "o/r",
-      branch: "main",
-      createdAt: 0,
-    })
-    expect(ok).toBe(false)
-    expect(errSpy).toHaveBeenCalled()
-    errSpy.mockRestore()
-  })
-})
-
-describe("_defaultGitFactory", () => {
-  it("returns a simple-git client without throwing", () => {
-    const git = _defaultGitFactory()
-    expect(git).toBeDefined()
-    // simple-git instances expose `clone`, `add`, `commit`, etc.
-    expect(typeof (git as { clone: unknown }).clone).toBe("function")
+  it("statWorkspace swallows command rejections as { exists: false }", async () => {
+    invoke.mockRejectedValueOnce("nope")
+    const s = await statWorkspace("/some/path")
+    expect(s).toEqual({ exists: false })
   })
 })
 

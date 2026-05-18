@@ -103,6 +103,7 @@ describe("Composer platform binding — manual mode", () => {
         segments: [{ type: "text", text: "hello manual" }],
         metadata: { idempotencyKey: crypto.randomUUID() },
       },
+      source: "manual",
     })
 
     expect(job.adapterId).toBe("cai_test_1")
@@ -169,6 +170,7 @@ describe("Composer platform binding — draft mode", () => {
         segments: draft.segments,
         metadata: { idempotencyKey: crypto.randomUUID() },
       },
+      source: "draft-approved",
     })
 
     await approveDraft(draft.id)

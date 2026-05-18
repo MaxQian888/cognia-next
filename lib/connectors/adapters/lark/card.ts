@@ -371,6 +371,55 @@ export async function buildLarkA2UICard(input: LarkA2UIMapperInput): Promise<Lar
         flushAction()
         break
       }
+      case "Checkbox": {
+        // B4 — simulated stand-in (ADR-0009 v41). Lark interactive cards
+        // 2.0 have no native single-checkbox element, so we render the
+        // component as a two-option `select_static` ("✓" / "✗"). The
+        // assistant treats the inbound value as a boolean.
+        flushAction()
+        const action = stringValue(node.raw.action) || node.id
+        const fullId = buildActionId(input.surfaceId, node.id, action)
+        await recordCallbackBinding({
+          adapterId: input.adapterId,
+          actionId: fullId,
+          surfaceId: input.surfaceId,
+          componentId: node.id,
+          conversationKey: input.conversationKey,
+        })
+        const label = stringValue(node.raw.label) || stringValue(node.raw.text) || "Checkbox"
+        const initial =
+          node.raw.value === true || stringValue(node.raw.value) === "true" ? "true" : "false"
+        const row = ensureAction()
+        row.actions.push({
+          tag: "select_static",
+          placeholder: { tag: "plain_text", content: label },
+          // Lark renders the selected option's text in the trigger so
+          // labelling each option with its own glyph makes the toggle
+          // legible even before the user opens the dropdown.
+          options: [
+            {
+              text: { tag: "plain_text", content: `${label}: ✓` },
+              value: "true",
+            },
+            {
+              text: { tag: "plain_text", content: `${label}: ✗` },
+              value: "false",
+            },
+          ],
+          initial_option: initial,
+          value: {
+            actionId: fullId,
+            surfaceId: input.surfaceId,
+            componentId: node.id,
+            // Mark the wire payload as a simulated checkbox so the parser
+            // can coerce the returned "true"/"false" string back into a
+            // boolean before handing the event to the A2UI bridge.
+            simulatedCheckbox: true,
+          },
+        })
+        flushAction()
+        break
+      }
       case "DatePicker":
       case "TimePicker": {
         flushAction()

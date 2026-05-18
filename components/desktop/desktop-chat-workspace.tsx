@@ -24,10 +24,11 @@ import { toast } from "sonner"
 import { ChatPane } from "@/components/chat/chat-view"
 import { CharacterPicker } from "@/components/chat/character-picker"
 import { ChannelList } from "@/components/desktop/channel-list"
-import { MemberList } from "@/components/desktop/member-list"
+import { MemberList } from "@/components/shell/member-list"
 import { ArtifactPanel } from "@/components/artifacts/artifact-panel"
 import { CanvasShell } from "@/components/canvas"
-import { OnboardingDialog } from "@/components/desktop/onboarding-dialog"
+import { OnboardingDialog } from "@/components/shell/onboarding-dialog"
+import { shouldShowOnboarding } from "@/lib/onboarding/should-show"
 import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
 import type { ComposerHandle } from "@/components/chat/composer"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
@@ -61,7 +62,6 @@ export function DesktopChatWorkspace() {
   const [lastErrorShown, setLastErrorShown] = useState<string | null>(null)
   const [characterPickerOpen, setCharacterPickerOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
-  const [onboardingDismissed, setOnboardingDismissed] = useState(false)
 
   const composerRef = useRef<ComposerHandle | null>(null)
 
@@ -89,12 +89,16 @@ export function DesktopChatWorkspace() {
     if (!mounted) return
     const settings = useSettingsStore.getState().settings
     if (!settings) return
-    if (!settings.apiKey && !onboardingDismissed && sessions.length === 0) {
+    let cancelled = false
+    void shouldShowOnboarding(settings, sessions.length).then((show) => {
+      if (cancelled || !show) return
       log.info("onboarding shown")
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setOnboardingOpen(true)
+    })
+    return () => {
+      cancelled = true
     }
-  }, [mounted, onboardingDismissed, sessions.length])
+  }, [mounted, sessions.length])
 
   useEffect(() => {
     if (!mounted) return
@@ -260,7 +264,6 @@ export function DesktopChatWorkspace() {
           setOnboardingOpen(open)
           if (!open) {
             log.info("onboarding dismissed")
-            setOnboardingDismissed(true)
           }
         }}
         onPickCharacter={async (c) => {

@@ -129,7 +129,7 @@ jest.mock("@/components/desktop/channel-list", () => ({
     <button data-testid="channel-select-stub" onClick={() => onSelect("s-2")} />
   ),
 }))
-jest.mock("@/components/desktop/member-list", () => ({
+jest.mock("@/components/shell/member-list", () => ({
   MemberList: () => <div data-testid="member-list" />,
 }))
 jest.mock("@/components/artifacts/artifact-panel", () => ({
@@ -138,7 +138,7 @@ jest.mock("@/components/artifacts/artifact-panel", () => ({
 jest.mock("@/components/canvas", () => ({
   CanvasShell: () => <div data-testid="canvas-shell" />,
 }))
-jest.mock("@/components/desktop/onboarding-dialog", () => ({
+jest.mock("@/components/shell/onboarding-dialog", () => ({
   OnboardingDialog: ({ open }: { open: boolean }) =>
     open ? <div data-testid="onboarding" /> : null,
 }))

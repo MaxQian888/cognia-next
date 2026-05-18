@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import { render, screen, waitFor, act } from "@testing-library/react"
+import { renderToString } from "react-dom/server"
 
 const logInfo = jest.fn()
 const logWarn = jest.fn()
@@ -57,7 +58,7 @@ jest.mock("@/components/desktop/zoom-shortcuts", () => ({
 jest.mock("@/components/desktop/command-palette", () => ({
   CommandPalette: () => <div data-testid="command-palette" />,
 }))
-jest.mock("@/components/desktop/guild-rail", () => ({
+jest.mock("@/components/shell/guild-rail", () => ({
   GuildRail: ({
     onCreateTeam,
     onOpenSettings,
@@ -144,6 +145,21 @@ test("sets data-app-shell on body while mounted, removes on unmount", () => {
   expect(document.body.getAttribute("data-app-shell")).toBe("true")
   unmount()
   expect(document.body.getAttribute("data-app-shell")).toBeNull()
+})
+
+test("SSR / pre-hydration paint emits no chrome (Capacitor /pair flash guard)", () => {
+  pathname = "/pair"
+  platformValue = "web"
+  const html = renderToString(
+    <DesktopAppShell>
+      <div data-testid="route-content" />
+    </DesktopAppShell>
+  )
+  expect(html).not.toContain("title-bar")
+  expect(html).not.toContain("status-bar")
+  expect(html).not.toContain("guild-rail-stub")
+  expect(html).not.toContain("command-palette")
+  expect(html).toContain("route-content")
 })
 
 test("returns children passthrough on mobile (no chrome)", () => {
