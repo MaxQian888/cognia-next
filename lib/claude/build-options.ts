@@ -869,14 +869,27 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     opts.maxThinkingTokens = thinkingBudget
   }
 
-  // --- Workflow-editor session branch (Phase C.6) -------------------------
-  // When the active session is the chat panel embedded in the visual
-  // workflow editor, layer in the four workflow subagents and a compact
-  // system-prompt snapshot of the currently-open workflow so the agent
-  // has grounding before its first tool call. The plugin-tool surface
-  // (cognia-workflow-ai) is already added to `opts.pluginTools` via the
-  // plugin store's enabled-plugins scan (above), so we don't double-
-  // register it here — we only contribute the subagents + system prompt.
+  // --- Workflow-editor session branch (Phase C.6 → Workflow Copilot) ------
+  // For sessions mounted inside the visual workflow editor's right
+  // sidebar we replace the additive character / mode / twin / A2UI /
+  // skill stack with a single coherent "Workflow Copilot" identity:
+  //
+  //   • opts.systemPrompt           ← Workflow Copilot prompt (verbatim,
+  //                                   no character prelude)
+  //   • opts.appendSystemPrompt     ← cleared, then set to the per-turn
+  //                                   workflow snapshot block (no A2UI
+  //                                   / skill / goal append)
+  //   • opts.allowedTools           ← strict whitelist (wf_* + Read)
+  //   • opts.disallowedTools        ← belt-and-suspenders disallow list
+  //   • opts.mcpServers             ← cleared (only the synthetic
+  //                                   cognia-plugin-tools server survives,
+  //                                   and that lives on opts.pluginTools)
+  //   • opts.agents                 ← the four specialist subagents
+  //                                   remain attached so the Copilot can
+  //                                   delegate refactor / debug / etc.
+  //
+  // We DON'T touch the resume/fork block below — that still applies so
+  // sidecar restarts can recover the workflow chat seamlessly.
   if (session?.kind === "workflow-editor") {
     try {
       const { workflowEditorSubagents } = await import("@/lib/claude/agents/subagents")
@@ -892,20 +905,40 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     const workflowId = session.id.startsWith("workflow:")
       ? session.id.slice("workflow:".length)
       : undefined
+    let snapshot: string | null = null
     if (workflowId) {
       try {
         const { getEditorStore } = await import("@/lib/workflow/editor/store-registry")
         const store = getEditorStore(workflowId)
         if (store) {
           const s = store.getState()
-          const snapshot = buildWorkflowSnapshotBlock(workflowId, s)
-          opts.appendSystemPrompt = opts.appendSystemPrompt
-            ? `${opts.appendSystemPrompt}\n\n---\n\n${snapshot}`
-            : snapshot
+          snapshot = buildWorkflowSnapshotBlock(workflowId, s)
         }
       } catch (err) {
         console.warn("workflow-editor snapshot block failed:", err)
       }
+    }
+    try {
+      const {
+        buildWorkflowCopilotPrompt,
+        WORKFLOW_COPILOT_ALLOWED_TOOLS,
+        WORKFLOW_COPILOT_DISALLOWED_TOOLS,
+      } = await import("@/lib/claude/agents/workflow-copilot-prompt")
+      // Overwrite — not union. The additive stack above has already run
+      // (character prompt, skills, mode, A2UI capability prompt, goal,
+      // twin runtime) but for this session kind we deliberately drop
+      // every one of those layers in favour of the Workflow Copilot
+      // identity.
+      opts.systemPrompt = buildWorkflowCopilotPrompt(null)
+      opts.appendSystemPrompt = snapshot ?? undefined
+      opts.allowedTools = [...WORKFLOW_COPILOT_ALLOWED_TOOLS]
+      opts.disallowedTools = [...WORKFLOW_COPILOT_DISALLOWED_TOOLS]
+      // External MCP servers are character-scope; the Copilot operates
+      // purely through the workflow-ai plugin tools (already populated on
+      // `opts.pluginTools` above by `buildPluginToolsManifest()`).
+      delete opts.mcpServers
+    } catch (err) {
+      console.warn("workflow-editor copilot prompt installation failed:", err)
     }
   }
 

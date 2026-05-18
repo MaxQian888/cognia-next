@@ -105,6 +105,24 @@ export async function updateSession(
 }
 
 /**
+ * Drop the SDK-side session id from the row. Used by the workflow-editor
+ * chat-tab's "Clear conversation" action so the next send starts a fresh
+ * SDK query (no resume, no carried-over context). Implemented via
+ * Dexie's `modify` so we can `delete` the field outright; passing
+ * `undefined` through `update()` would leave the value intact.
+ */
+export async function clearSessionSdkLink(id: string): Promise<void> {
+  await getDb()
+    .sessions.where("id")
+    .equals(id)
+    .modify((s) => {
+      delete s.sdkSessionId
+      delete s.forkedFromSdkSessionId
+      s.updatedAt = Date.now()
+    })
+}
+
+/**
  * Fork an existing chat session: creates a new ChatSession that inherits the
  * parent's character / team / per-session overrides, with `forkedFromSdkSessionId`
  * set to the parent's `sdkSessionId`. The next send on the new session will

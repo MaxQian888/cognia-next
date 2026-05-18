@@ -23,6 +23,7 @@ import { RuntimeQueryCard } from "./mcp-renderers/runtime-query-card"
 import { PlanCard } from "./mcp-renderers/plan-card"
 import { ReadCard } from "./mcp-renderers/read-card"
 import { GlobCard } from "./mcp-renderers/glob-card"
+import { WorkflowProposalCard } from "@/components/workflow/editor/chat/workflow-proposal-card"
 
 type CardComponent = (props: { part: ToolUIPart }) => React.JSX.Element | null
 
@@ -36,6 +37,10 @@ const REGISTRY: Record<string, CardComponent> = {
   Plan: PlanCard,
   Read: ReadCard,
   Glob: GlobCard,
+  // Workflow Copilot — proposal card (wf_propose_batch + wf_apply_template
+  // share the same payload shape: { proposalId, summary, opCount, ... }).
+  wf_propose_batch: WorkflowProposalCard,
+  wf_apply_template: WorkflowProposalCard,
 }
 
 export function isStructuredMcpToolType(type: string): boolean {

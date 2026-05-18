@@ -18,11 +18,20 @@ import { buildReadTools } from "./tools/read-tools"
 import { buildMutateTools } from "./tools/mutate-tools"
 import { buildLayoutTools } from "./tools/layout-tools"
 import { buildRunTools } from "./tools/run-tools"
+import { buildProposeTools } from "./tools/propose-tools"
+import { buildTemplateTools } from "./tools/template-tools"
 
 const PLUGIN_ID = "cognia-workflow-ai"
 
 export function buildWorkflowAiTools(): PluginTool[] {
-  return [...buildReadTools(), ...buildMutateTools(), ...buildLayoutTools(), ...buildRunTools()]
+  return [
+    ...buildReadTools(),
+    ...buildMutateTools(),
+    ...buildProposeTools(),
+    ...buildTemplateTools(),
+    ...buildLayoutTools(),
+    ...buildRunTools(),
+  ]
 }
 
 const I18N_MESSAGES = {

@@ -989,3 +989,136 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
     expect(opts.pluginTools).toBeUndefined()
   })
 })
+
+describe("resolveSendOptions — workflow-editor (Workflow Copilot mode)", () => {
+  it("REPLACES the system prompt with the Workflow Copilot prompt", async () => {
+    const ch = makeChar({
+      id: "c1",
+      systemPrompt: "I am Marketing Assistant — perky and witty.",
+    })
+    const opts = await resolveSendOptions({
+      character: ch,
+      session: makeSession({ id: "workflow:wf_42", kind: "workflow-editor" }),
+    })
+    // The character prompt is gone.
+    expect(opts.systemPrompt).not.toContain("Marketing Assistant")
+    // The Workflow Copilot identity is in.
+    expect(opts.systemPrompt).toContain("Workflow Copilot")
+    expect(opts.systemPrompt).toContain("wf_propose_batch")
+  })
+
+  it("overrides allowedTools with the strict whitelist (no Bash, no Edit, no Write)", async () => {
+    const ch = makeChar({
+      id: "c1",
+      // Try to sneak Bash in via the character — Workflow Copilot must
+      // ignore it.
+      allowedTools: ["Bash", "Edit", "Write"],
+    })
+    const opts = await resolveSendOptions({
+      character: ch,
+      session: makeSession({ id: "workflow:wf_42", kind: "workflow-editor" }),
+    })
+    expect(opts.allowedTools).toBeDefined()
+    expect(opts.allowedTools).not.toContain("Bash")
+    expect(opts.allowedTools).not.toContain("Edit")
+    expect(opts.allowedTools).not.toContain("Write")
+    // The wf_* family must be in.
+    expect(opts.allowedTools).toContain("mcp__cognia-plugin-tools__wf_read_graph")
+    expect(opts.allowedTools).toContain("mcp__cognia-plugin-tools__wf_propose_batch")
+    expect(opts.allowedTools).toContain("mcp__cognia-plugin-tools__wf_apply_template")
+  })
+
+  it("sets a defense-in-depth disallowedTools list that includes Bash + Computer Use", async () => {
+    const ch = makeChar({ id: "c1" })
+    const opts = await resolveSendOptions({
+      character: ch,
+      session: makeSession({ id: "workflow:wf_42", kind: "workflow-editor" }),
+    })
+    expect(opts.disallowedTools).toBeDefined()
+    expect(opts.disallowedTools).toContain("Bash")
+    expect(opts.disallowedTools).toContain("Write")
+    expect(opts.disallowedTools).toContain("Edit")
+    // Computer Use names
+    expect(opts.disallowedTools).toContain("computer")
+    expect(opts.disallowedTools).toContain("str_replace_editor")
+  })
+
+  it("drops mcpServers (external MCP) — Workflow Copilot only uses the synthetic plugin-tools server", async () => {
+    mListMcp.mockResolvedValueOnce([
+      { id: "test-runner", name: "Test Runner" } as unknown as Awaited<
+        ReturnType<typeof listEnabledMcpServers>
+      >[number],
+    ])
+    mBuildMap.mockReturnValueOnce({ "test-runner": { command: "x", args: [] } })
+    const ch = makeChar({ id: "c1" })
+    const opts = await resolveSendOptions({
+      character: ch,
+      session: makeSession({ id: "workflow:wf_42", kind: "workflow-editor" }),
+    })
+    expect(opts.mcpServers).toBeUndefined()
+  })
+
+  it("clears appendSystemPrompt — A2UI / skill / goal sections do not leak into this session", async () => {
+    const ch = makeChar({
+      id: "c1",
+      // briefMode would normally add to appendSystemPrompt
+      briefMode: true,
+    })
+    const opts = await resolveSendOptions({
+      character: ch,
+      session: makeSession({ id: "workflow:wf_42", kind: "workflow-editor" }),
+    })
+    // appendSystemPrompt is either undefined (no editor open) or only the
+    // workflow snapshot block — definitely NOT BRIEF_OUTPUT_SNIPPET text.
+    if (opts.appendSystemPrompt) {
+      // It can only contain the workflow snapshot block, never the brief snippet.
+      expect(opts.appendSystemPrompt).not.toContain("Keep responses")
+    }
+  })
+
+  it("attaches the four workflow subagents", async () => {
+    const ch = makeChar({ id: "c1" })
+    const opts = await resolveSendOptions({
+      character: ch,
+      session: makeSession({ id: "workflow:wf_42", kind: "workflow-editor" }),
+    })
+    expect(opts.agents).toBeDefined()
+    expect(opts.agents).toHaveProperty("workflow-designer")
+    expect(opts.agents).toHaveProperty("workflow-debugger")
+    expect(opts.agents).toHaveProperty("workflow-refactorer")
+    expect(opts.agents).toHaveProperty("workflow-doc-writer")
+  })
+
+  it("STILL applies the resume/fork continuity logic below the override block", async () => {
+    const ch = makeChar({ id: "c1" })
+    const opts = await resolveSendOptions({
+      character: ch,
+      session: makeSession({
+        id: "workflow:wf_42",
+        kind: "workflow-editor",
+        sdkSessionId: "sdk_42",
+      } as Partial<ChatSession>),
+    })
+    // The post-branch code at lines 912+ sets opts.resumeSessionId when
+    // the session has an sdkSessionId. Workflow-editor override must NOT
+    // clobber this.
+    expect(opts.resumeSessionId).toBe("sdk_42")
+  })
+
+  it("does NOT touch other session kinds", async () => {
+    const ch = makeChar({
+      id: "c1",
+      systemPrompt: "I am Marketing Assistant.",
+      allowedTools: ["Bash"],
+    })
+    const opts = await resolveSendOptions({
+      character: ch,
+      session: makeSession({ id: "s_direct", kind: "direct" }),
+    })
+    // Normal session: Workflow Copilot prompt should NOT be installed.
+    expect(opts.systemPrompt).toContain("Marketing Assistant")
+    expect(opts.systemPrompt).not.toContain("Workflow Copilot")
+    // Character's allowedTools survives.
+    expect(opts.allowedTools).toContain("Bash")
+  })
+})

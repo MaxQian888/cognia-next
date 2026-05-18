@@ -589,3 +589,161 @@ describe("editor store — validation", () => {
     expect(r.fields).toEqual({})
   })
 })
+
+describe("editor store — applyProposalOps", () => {
+  it("returns applied=0 and is a no-op for an empty batch", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const result = useStore.getState().applyProposalOps([])
+    expect(result.applied).toBe(0)
+    expect(useStore.getState().nodes).toHaveLength(0)
+    expect(useStore.getState().dirty).toBe(false)
+  })
+
+  it("adds nodes + connects them in one batch and stamps authoredBy: 'ai'", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const result = useStore.getState().applyProposalOps([
+      {
+        type: "add_node",
+        nodeId: "n_a",
+        kind: "trigger.manual",
+        position: { x: 0, y: 0 },
+      },
+      {
+        type: "add_node",
+        nodeId: "n_b",
+        kind: "ai.prompt",
+        position: { x: 200, y: 0 },
+        data: { params: { userPrompt: "hello" } },
+      },
+      {
+        type: "connect_edge",
+        edgeId: "e_ab",
+        source: "n_a",
+        target: "n_b",
+      },
+    ])
+    expect(result.applied).toBe(3)
+    expect(result.firstError).toBeUndefined()
+    const state = useStore.getState()
+    expect(state.nodes).toHaveLength(2)
+    expect(state.edges).toHaveLength(1)
+    expect(state.dirty).toBe(true)
+    for (const n of state.nodes) {
+      expect(n.data.authoredBy).toBe("ai")
+    }
+  })
+
+  it("the entire batch is a SINGLE zundo entry — one undo reverses it", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().applyProposalOps([
+      { type: "add_node", nodeId: "n_a", kind: "trigger.manual", position: { x: 0, y: 0 } },
+      {
+        type: "add_node",
+        nodeId: "n_b",
+        kind: "ai.prompt",
+        position: { x: 200, y: 0 },
+        data: { params: { userPrompt: "hi" } },
+      },
+      { type: "connect_edge", edgeId: "e_ab", source: "n_a", target: "n_b" },
+    ])
+    expect(useStore.getState().nodes).toHaveLength(2)
+    expect(useStore.getState().edges).toHaveLength(1)
+    useStore.temporal.getState().undo()
+    expect(useStore.getState().nodes).toHaveLength(0)
+    expect(useStore.getState().edges).toHaveLength(0)
+  })
+
+  it("supports configure_node and runs validation on touched nodes", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    // Add a cron trigger without a cron expression — should produce a validation error.
+    useStore
+      .getState()
+      .applyProposalOps([
+        { type: "add_node", nodeId: "n_cron", kind: "trigger.cron", position: { x: 0, y: 0 } },
+      ])
+    expect(useStore.getState().validationByStepId["n_cron"]).toBeDefined()
+    // Configure it to a valid value — validation should clear.
+    useStore.getState().applyProposalOps([
+      {
+        type: "configure_node",
+        nodeId: "n_cron",
+        patch: { params: { cron: "0 9 * * 1-5" } },
+      },
+    ])
+    expect(useStore.getState().validationByStepId["n_cron"]).toBeUndefined()
+  })
+
+  it("rejects connect_edge with a dangling source and surfaces firstError", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const result = useStore.getState().applyProposalOps([
+      {
+        type: "connect_edge",
+        edgeId: "e_dangling",
+        source: "n_nonexistent",
+        target: "n_also_nonexistent",
+      },
+    ])
+    expect(result.applied).toBe(0)
+    expect(result.firstError).toMatch(/n_nonexistent.*does not exist/)
+    expect(useStore.getState().edges).toHaveLength(0)
+  })
+
+  it("rejects duplicate node id but continues with subsequent ops", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore
+      .getState()
+      .applyProposalOps([
+        { type: "add_node", nodeId: "n_a", kind: "trigger.manual", position: { x: 0, y: 0 } },
+      ])
+    const result = useStore.getState().applyProposalOps([
+      // Duplicate id — should fail.
+      { type: "add_node", nodeId: "n_a", kind: "ai.prompt", position: { x: 200, y: 0 } },
+      // Valid follow-up — should still apply.
+      { type: "add_node", nodeId: "n_b", kind: "ai.prompt", position: { x: 400, y: 0 } },
+    ])
+    expect(result.applied).toBe(1)
+    expect(result.firstError).toMatch(/already exists/)
+    expect(
+      useStore
+        .getState()
+        .nodes.map((n) => n.id)
+        .sort()
+    ).toEqual(["n_a", "n_b"])
+  })
+
+  it("removing a node also drops incident edges + prunes its selection + validation", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().applyProposalOps([
+      { type: "add_node", nodeId: "n_a", kind: "trigger.manual", position: { x: 0, y: 0 } },
+      { type: "add_node", nodeId: "n_b", kind: "trigger.cron", position: { x: 200, y: 0 } },
+      { type: "connect_edge", edgeId: "e_ab", source: "n_a", target: "n_b" },
+    ])
+    useStore.getState().setSelectedNodes(["n_a", "n_b"])
+    expect(useStore.getState().validationByStepId["n_b"]).toBeDefined()
+
+    useStore.getState().applyProposalOps([{ type: "remove_node", nodeId: "n_b" }])
+    const state = useStore.getState()
+    expect(state.nodes.map((n) => n.id)).toEqual(["n_a"])
+    expect(state.edges).toHaveLength(0)
+    expect(state.selectedNodeIds).toEqual(["n_a"])
+    expect(state.validationByStepId["n_b"]).toBeUndefined()
+  })
+
+  it("disconnect_edge removes the edge without touching nodes", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().applyProposalOps([
+      { type: "add_node", nodeId: "n_a", kind: "trigger.manual", position: { x: 0, y: 0 } },
+      {
+        type: "add_node",
+        nodeId: "n_b",
+        kind: "ai.prompt",
+        position: { x: 200, y: 0 },
+        data: { params: { userPrompt: "hi" } },
+      },
+      { type: "connect_edge", edgeId: "e_ab", source: "n_a", target: "n_b" },
+    ])
+    useStore.getState().applyProposalOps([{ type: "disconnect_edge", edgeId: "e_ab" }])
+    expect(useStore.getState().nodes).toHaveLength(2)
+    expect(useStore.getState().edges).toHaveLength(0)
+  })
+})

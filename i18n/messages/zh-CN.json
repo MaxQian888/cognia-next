@@ -11711,7 +11711,8 @@
     "rightSidebar": {
       "tabs": {
         "chat": "对话",
-        "inspector": "检查器"
+        "inspector": "检查器",
+        "templates": "模板"
       },
       "chatLoading": "正在加载对话…"
     },
@@ -11719,7 +11720,50 @@
       "noWorkflow": "打开一个工作流以启动 AI 协作会话。",
       "loading": "正在准备对话…",
       "ariaLabel": "{name} 的工作流 AI 对话",
-      "placeholder": "让工作流 AI 帮你构建、重构或诊断这张图。"
+      "placeholder": "让工作流 AI 帮你构建、重构或诊断这张图。",
+      "clear": "清空对话",
+      "clearConfirmTitle": "清空这个工作流的对话？",
+      "clearConfirmDescription": "这个工作流的副驾驶会话中的所有消息都将被删除。下一次发送时会开启一个新的 agent 会话。",
+      "clearConfirm": "清空",
+      "clearCancel": "取消",
+      "proposal": {
+        "apply": "应用",
+        "discard": "丢弃",
+        "showOps": "展开 {count} 项操作",
+        "hideOps": "收起操作",
+        "errorNotFound": "这个提案已不可用——可能已被更新的提案替代。",
+        "errorEditorNotOpen": "对应的工作流编辑器未打开。",
+        "status": {
+          "open": "待确认",
+          "applied": "已应用",
+          "discarded": "已丢弃"
+        }
+      },
+      "mention": {
+        "noNodes": "工作流里还没有节点。",
+        "noEdges": "工作流里还没有边。",
+        "noResults": "没有匹配。",
+        "nodesHeading": "节点",
+        "edgesHeading": "边"
+      }
+    },
+    "templates": {
+      "tabHeading": "模板",
+      "tabHelp": "用 slot 填空脚手架，通过提案流程合并进当前工作流——不会替换已有内容。",
+      "emptyState": "尚未注册任何模板。",
+      "applyCta": "应用模板",
+      "cancel": "取消",
+      "slotRequiredMissing": "填好所有必填项才能应用模板。"
+    }
+  },
+  "slashCommands": {
+    "workflow": {
+      "validate": "运行本地校验并让 agent 修复",
+      "explain": "解释选中或 @ 提及的节点",
+      "suggest": "提议下一个节点（不会自动添加）",
+      "run": "运行工作流（或从指定步骤运行）。需要批准。",
+      "debug": "通过 workflow-debugger 子代理诊断失败的运行",
+      "refactor": "通过 workflow-refactorer 子代理重构子图"
     }
   }
 }

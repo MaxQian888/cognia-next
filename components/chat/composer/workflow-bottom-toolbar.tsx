@@ -59,6 +59,7 @@ import {
   type WorkflowQuickActionKind,
 } from "@/lib/workflow/editor/workflow-editor-context"
 import type { EditorState } from "@/lib/workflow/editor/store"
+import { dispatchWorkflowSlashAction } from "@/lib/slash-commands/actions/workflow"
 
 interface WorkflowBottomToolbarProps {
   session: ChatSession | null
@@ -133,7 +134,19 @@ function QuickActions({ ctx, disabled }: { ctx: WorkflowEditorContextValue; disa
   )
 
   const dispatch = (kind: WorkflowQuickActionKind) => {
-    void ctx.onQuickAction(kind)
+    // Single dispatch path with the formal slash commands so the button
+    // click and `/validate` typed into the composer produce identical
+    // behavior. Falls back to the legacy onQuickAction (which the test
+    // harness still wires in) when the runtime can't emit DOM events.
+    if (kind === "explain") {
+      if (!dispatchWorkflowSlashAction({ kind: "explain", args: "" })) {
+        void ctx.onQuickAction(kind)
+      }
+      return
+    }
+    if (!dispatchWorkflowSlashAction({ kind })) {
+      void ctx.onQuickAction(kind)
+    }
   }
 
   const explainDisabled = disabled || selectionCount === 0

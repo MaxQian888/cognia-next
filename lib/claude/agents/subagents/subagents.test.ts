@@ -25,8 +25,13 @@ describe("workflow subagent definitions", () => {
     for (const agent of [workflowDesignerAgent, workflowRefactorerAgent]) {
       expect(agent.tools).toContain("mcp__cognia-plugin-tools__wf_read_graph")
       expect(agent.tools).toContain("mcp__cognia-plugin-tools__wf_add_node")
-      expect(agent.tools).toContain("mcp__cognia-plugin-tools__wf_batch_apply")
     }
+    // Designer prefers wf_propose_batch (Workflow Copilot proposal flow);
+    // refactorer keeps wf_batch_apply because its small in-place edits
+    // already cite which subgraph they touch.
+    expect(workflowDesignerAgent.tools).toContain("mcp__cognia-plugin-tools__wf_propose_batch")
+    expect(workflowDesignerAgent.tools).toContain("mcp__cognia-plugin-tools__wf_apply_template")
+    expect(workflowRefactorerAgent.tools).toContain("mcp__cognia-plugin-tools__wf_batch_apply")
   })
 
   it("debugger has ONLY read tools (no write surface)", () => {

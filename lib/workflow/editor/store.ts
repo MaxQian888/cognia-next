@@ -40,6 +40,7 @@ import {
   selectionBounds,
   type ClipboardEnvelope,
 } from "./clipboard"
+import type { ProposalOp } from "./proposal-types"
 import type { PerformanceTier } from "./performance-tier"
 import type { LastRunSummary } from "@/lib/workflow/runtime/last-run-summary"
 
@@ -249,6 +250,15 @@ export interface EditorState extends EditorStateSnapshot {
    * paste content potentially copied from another workflow.
    */
   pasteFromEnvelope: (envelope: ClipboardEnvelope) => string[]
+  /**
+   * Apply a batch of `ProposalOp`s from the workflow copilot in ONE undoable
+   * step. The entire batch goes through a single `set()` call so a single
+   * Ctrl+Z reverses the whole AI-authored change. Touched nodes are
+   * re-validated and merged into `validationByStepId`. Returns the count of
+   * applied ops + the first error message if any op was rejected (e.g.,
+   * `connect_edge` referencing a node that does not exist).
+   */
+  applyProposalOps: (ops: ReadonlyArray<ProposalOp>) => { applied: number; firstError?: string }
   /**
    * Wrap the given nodes in an `annotation.group` frame sized to the
    * selection bounding box (with padding). Returns the new group's id.
@@ -572,6 +582,165 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             dirty: true,
           })
           return cloned.nodes.map((n) => n.id)
+        },
+
+        applyProposalOps: (ops) => {
+          if (!ops || ops.length === 0) return { applied: 0 }
+          // Compute terminal nodes/edges + validation map locally so the
+          // whole batch lands in a single set() call — that's what makes
+          // zundo collapse the batch into one undo entry.
+          const startNodes = get().nodes
+          const startEdges = get().edges
+          const startValidation = get().validationByStepId
+
+          const nodeById = new Map(startNodes.map((n) => [n.id, n]))
+          const edgeById = new Map(startEdges.map((e) => [e.id, e]))
+          // Track ids touched so we know which nodes to re-validate.
+          const touchedNodeIds = new Set<string>()
+          let firstError: string | undefined
+          let applied = 0
+
+          for (let i = 0; i < ops.length; i++) {
+            const op = ops[i]
+            switch (op.type) {
+              case "add_node": {
+                if (nodeById.has(op.nodeId)) {
+                  firstError = firstError ?? `op ${i}: node id "${op.nodeId}" already exists`
+                  continue
+                }
+                const data: RFWorkflowNode["data"] = {
+                  label: (op.data?.label as string | undefined) ?? defaultLabelFor(op.kind),
+                  params: (op.data?.params as Record<string, unknown> | undefined) ?? {},
+                  notes: op.data?.notes,
+                  credentialRefs: op.data?.credentialRefs as Record<string, string> | undefined,
+                  disabled: op.data?.disabled as boolean | undefined,
+                  authoredBy: (op.data?.authoredBy as "ai" | "user" | undefined) ?? "ai",
+                  kind: op.kind,
+                  typeVersion: 1,
+                }
+                nodeById.set(op.nodeId, {
+                  id: op.nodeId,
+                  type: "workflowNode",
+                  position: op.position,
+                  data,
+                })
+                touchedNodeIds.add(op.nodeId)
+                applied++
+                break
+              }
+              case "remove_node": {
+                if (!nodeById.has(op.nodeId)) {
+                  firstError = firstError ?? `op ${i}: node id "${op.nodeId}" does not exist`
+                  continue
+                }
+                nodeById.delete(op.nodeId)
+                // drop incident edges
+                for (const [eid, e] of edgeById) {
+                  if (e.source === op.nodeId || e.target === op.nodeId) {
+                    edgeById.delete(eid)
+                  }
+                }
+                touchedNodeIds.delete(op.nodeId)
+                applied++
+                break
+              }
+              case "connect_edge": {
+                if (edgeById.has(op.edgeId)) {
+                  firstError = firstError ?? `op ${i}: edge id "${op.edgeId}" already exists`
+                  continue
+                }
+                if (!nodeById.has(op.source)) {
+                  firstError =
+                    firstError ?? `op ${i}: connect_edge source "${op.source}" does not exist`
+                  continue
+                }
+                if (!nodeById.has(op.target)) {
+                  firstError =
+                    firstError ?? `op ${i}: connect_edge target "${op.target}" does not exist`
+                  continue
+                }
+                const data =
+                  typeof op.label === "string" && op.label.length > 0
+                    ? { label: op.label }
+                    : undefined
+                edgeById.set(op.edgeId, {
+                  id: op.edgeId,
+                  source: op.source,
+                  target: op.target,
+                  sourceHandle: op.sourceHandle,
+                  targetHandle: op.targetHandle,
+                  type: "default",
+                  ...(data ? { data } : {}),
+                })
+                applied++
+                break
+              }
+              case "disconnect_edge": {
+                if (!edgeById.has(op.edgeId)) {
+                  firstError = firstError ?? `op ${i}: edge id "${op.edgeId}" does not exist`
+                  continue
+                }
+                edgeById.delete(op.edgeId)
+                applied++
+                break
+              }
+              case "configure_node": {
+                const node = nodeById.get(op.nodeId)
+                if (!node) {
+                  firstError = firstError ?? `op ${i}: node id "${op.nodeId}" does not exist`
+                  continue
+                }
+                // Stamp authoredBy: "ai" by default on patches so the
+                // touched node carries provenance even if the agent forgot.
+                const patchWithProvenance: Partial<WorkflowNodeData> = {
+                  authoredBy: "ai",
+                  ...op.patch,
+                }
+                nodeById.set(op.nodeId, {
+                  ...node,
+                  data: { ...node.data, ...patchWithProvenance },
+                })
+                touchedNodeIds.add(op.nodeId)
+                applied++
+                break
+              }
+            }
+          }
+
+          // Re-validate every touched node and merge into the validation map.
+          const nextValidation: Record<string, NodeValidationResult> = { ...startValidation }
+          for (const id of touchedNodeIds) {
+            const node = nodeById.get(id)
+            if (!node) {
+              delete nextValidation[id]
+              continue
+            }
+            const result = validateNodeParams(
+              node.data.kind as WorkflowNodeKind,
+              (node.data.params as Record<string, unknown> | undefined) ?? {}
+            )
+            if (result.hasErrors) nextValidation[id] = result
+            else delete nextValidation[id]
+          }
+          // Also prune validation entries for nodes that were removed by
+          // this batch (whose ids never made it into touchedNodeIds).
+          for (const id of Object.keys(startValidation)) {
+            if (!nodeById.has(id)) delete nextValidation[id]
+          }
+
+          const nextNodes = Array.from(nodeById.values())
+          const nextEdges = Array.from(edgeById.values())
+          const nextSelectedNodes = get().selectedNodeIds.filter((id) => nodeById.has(id))
+          const nextSelectedEdges = get().selectedEdgeIds.filter((id) => edgeById.has(id))
+          set({
+            nodes: nextNodes,
+            edges: nextEdges,
+            selectedNodeIds: nextSelectedNodes,
+            selectedEdgeIds: nextSelectedEdges,
+            validationByStepId: nextValidation,
+            dirty: true,
+          })
+          return firstError ? { applied, firstError } : { applied }
         },
 
         groupSelected: (ids) => {

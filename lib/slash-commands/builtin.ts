@@ -19,6 +19,7 @@ import { handleContext, handleCost, handleDoctor, handleStatus } from "./actions
 import { seedBuiltinSlashCommands } from "./registry"
 import { handleReset, handleResume, handleSessions } from "./actions/sessions"
 import { dispatchGoalSubcommand } from "./actions/goal"
+import { WORKFLOW_SLASH_COMMANDS } from "./actions/workflow"
 
 /**
  * Names of the sections in the Settings page (URL `?section=` values).
@@ -343,6 +344,10 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
       }
     },
   },
+  // Workflow Copilot commands — only active inside workflow-editor sessions.
+  // Each handler self-gates on activeSessionId so the picker never lists
+  // them in the main chat.
+  ...WORKFLOW_SLASH_COMMANDS,
 ]
 
 // Phase 3: mirror BUILTIN_SLASH_COMMANDS into the unified registry as

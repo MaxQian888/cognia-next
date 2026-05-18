@@ -11711,7 +11711,8 @@
     "rightSidebar": {
       "tabs": {
         "chat": "Chat",
-        "inspector": "Inspector"
+        "inspector": "Inspector",
+        "templates": "Templates"
       },
       "chatLoading": "Loading chat…"
     },
@@ -11719,7 +11720,50 @@
       "noWorkflow": "Open a workflow to start a co-pilot session.",
       "loading": "Preparing chat…",
       "ariaLabel": "Workflow AI chat for {name}",
-      "placeholder": "Ask the workflow AI to build, refactor, or diagnose this graph."
+      "placeholder": "Ask the workflow AI to build, refactor, or diagnose this graph.",
+      "clear": "Clear conversation",
+      "clearConfirmTitle": "Clear this workflow's chat?",
+      "clearConfirmDescription": "Every message in this workflow's co-pilot session will be deleted. The next message you send starts a fresh agent session.",
+      "clearConfirm": "Clear",
+      "clearCancel": "Cancel",
+      "proposal": {
+        "apply": "Apply",
+        "discard": "Discard",
+        "showOps": "Show {count} ops",
+        "hideOps": "Hide ops",
+        "errorNotFound": "This proposal is no longer available — it may have been replaced by a newer one.",
+        "errorEditorNotOpen": "The editor for this workflow is not open.",
+        "status": {
+          "open": "Pending",
+          "applied": "Applied",
+          "discarded": "Discarded"
+        }
+      },
+      "mention": {
+        "noNodes": "No nodes in this workflow yet.",
+        "noEdges": "No edges in this workflow yet.",
+        "noResults": "No matches.",
+        "nodesHeading": "Nodes",
+        "edgesHeading": "Edges"
+      }
+    },
+    "templates": {
+      "tabHeading": "Templates",
+      "tabHelp": "Apply a slot-filled scaffold via the proposal flow. Templates merge into the current workflow — they don't replace it.",
+      "emptyState": "No templates registered.",
+      "applyCta": "Apply template",
+      "cancel": "Cancel",
+      "slotRequiredMissing": "Fill every required field to apply this template."
+    }
+  },
+  "slashCommands": {
+    "workflow": {
+      "validate": "Run local validation and ask the agent to fix any issues",
+      "explain": "Explain the selected or @-mentioned nodes",
+      "suggest": "Propose one next node to add (no auto-apply)",
+      "run": "Run the workflow (or from a specific step). Requires approval.",
+      "debug": "Diagnose a failing run via the workflow-debugger subagent",
+      "refactor": "Restructure a subgraph via the workflow-refactorer subagent"
     }
   }
 }

@@ -39,7 +39,11 @@ const WorkflowEditorChatTab = lazy(() =>
   import("./chat-tab").then((m) => ({ default: m.WorkflowEditorChatTab }))
 )
 
-type RightSidebarTab = "chat" | "inspector"
+const TemplatesTab = lazy(() =>
+  import("./templates-tab").then((m) => ({ default: m.TemplatesTab }))
+)
+
+type RightSidebarTab = "chat" | "inspector" | "templates"
 
 export function RightSidebar({
   useStore,
@@ -76,7 +80,8 @@ export function RightSidebar({
   }, [selectionCount])
 
   const handleTabChange = (next: string) => {
-    const v = (next === "chat" ? "chat" : "inspector") as RightSidebarTab
+    const v: RightSidebarTab =
+      next === "chat" ? "chat" : next === "templates" ? "templates" : "inspector"
     userPinnedTab.current = v
     setTab(v)
   }
@@ -88,7 +93,7 @@ export function RightSidebar({
       className={cn("flex h-full w-full flex-col border-l bg-card/40", className)}
       data-testid="workflow-right-sidebar"
     >
-      <TabsList className="m-2 grid w-auto grid-cols-2">
+      <TabsList className="m-2 grid w-auto grid-cols-3">
         <TabsTrigger value="chat" data-testid="workflow-right-sidebar-tab-chat">
           {t("tabs.chat")}
         </TabsTrigger>
@@ -97,6 +102,9 @@ export function RightSidebar({
           {selectionCount > 1 ? (
             <span className="ml-1 text-[10px] opacity-70">×{selectionCount}</span>
           ) : null}
+        </TabsTrigger>
+        <TabsTrigger value="templates" data-testid="workflow-right-sidebar-tab-templates">
+          {t("tabs.templates")}
         </TabsTrigger>
       </TabsList>
       <TabsContent value="chat" className="flex-1 m-0 overflow-hidden">
@@ -121,6 +129,21 @@ export function RightSidebar({
       </TabsContent>
       <TabsContent value="inspector" className="flex-1 m-0 overflow-hidden">
         <InspectorPanel useStore={useStore} className="border-l-0" />
+      </TabsContent>
+      <TabsContent value="templates" className="flex-1 m-0 overflow-hidden">
+        <Suspense
+          fallback={
+            <div
+              className="flex h-full w-full items-center justify-center gap-2 p-6 text-sm text-muted-foreground"
+              data-testid="workflow-templates-tab-suspense"
+            >
+              <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+              {t("chatLoading")}
+            </div>
+          }
+        >
+          <TemplatesTab useStore={useStore} workflowId={workflowId} />
+        </Suspense>
       </TabsContent>
     </Tabs>
   )
