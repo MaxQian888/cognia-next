@@ -26,6 +26,8 @@ import {
   type EdgeChange,
   type NodeChange,
   type NodeTypes,
+  type OnConnectEnd,
+  type OnConnectStart,
   type ReactFlowInstance,
   type Viewport,
 } from "@xyflow/react"
@@ -93,11 +95,6 @@ const DELETE_KEY_CODE: string[] = ["Backspace", "Delete"]
 const MULTI_SELECTION_KEY_CODE: string[] = ["Shift", "Meta", "Control"]
 const FIT_VIEW_PROPS = false
 const PRO_OPTIONS = { hideAttribution: true } as const
-
-// Node count at which we enable React Flow's viewport-culling. Below this
-// the overhead of measuring + filtering nodes per render outweighs the win;
-// above it, culling is a net positive even on `high` tier. (A1)
-const CULLING_THRESHOLD = 40
 
 interface CanvasInnerProps {
   store: EditorStore
@@ -283,13 +280,38 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     [nodes, edges]
   )
 
-  const onMoveEnd = useCallback((_e: unknown, v: Viewport) => setViewport(v), [setViewport])
+  // Stabilized connect handlers — React Flow re-attaches its prop listeners
+  // when the callback identity changes, so we wrap these in `useCallback`
+  // rather than passing inline arrows on every parent render. (A2)
+  const handleConnectStart = useCallback<OnConnectStart>(
+    (_e, params) => {
+      if (!params.nodeId) return
+      useStore.getState().beginConnection({
+        sourceId: params.nodeId,
+        sourceHandle: params.handleId ?? null,
+      })
+    },
+    [useStore]
+  )
+  const handleConnectEnd = useCallback<OnConnectEnd>(
+    () => useStore.getState().endConnection(),
+    [useStore]
+  )
 
-  // Live viewport mirror — React Flow's `onMove` fires while the user is
-  // panning / zooming. The breadcrumb subscribes to this so its segment
-  // updates during the pan rather than only on settle.
-  const [liveViewport, setLiveViewport] = useState<Viewport | null>(null)
-  const onMove = useCallback((_e: unknown, v: Viewport) => setLiveViewport(v), [])
+  // (A7) Track whether the user is actively panning/zooming the viewport.
+  // The PerfMiniMap consumes this so the minimap drops its pointer listeners
+  // and flat-colours its nodes while the viewport moves — same degrade path
+  // that already runs during node-drag. Without this, MiniMap's internal
+  // viewport subscription forces a per-frame repaint of every node colour.
+  const [isMovingViewport, setIsMovingViewport] = useState(false)
+  const handleMoveStart = useCallback(() => setIsMovingViewport(true), [])
+  const onMoveEnd = useCallback(
+    (_e: unknown, v: Viewport) => {
+      setIsMovingViewport(false)
+      setViewport(v)
+    },
+    [setViewport]
+  )
 
   // Compute alignment guides while dragging. The peer rect map is captured
   // ONCE on drag start (O(n)) and looked up via ref each frame — the per-
@@ -902,11 +924,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
             onDrop={handleDrop}
             onDragOver={handleDragOver}
           >
-            <ViewportBreadcrumb
-              store={useStore}
-              reactFlowInstance={reactFlowInstance}
-              liveViewport={liveViewport}
-            />
+            <ViewportBreadcrumb store={useStore} reactFlowInstance={reactFlowInstance} />
             <LassoOverlay
               containerRef={canvasWrapperRef}
               reactFlowInstance={reactFlowInstance}
@@ -922,7 +940,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
               isValidConnection={isValidConnection}
-              onMove={onMove}
+              onMoveStart={handleMoveStart}
               onMoveEnd={onMoveEnd}
               onNodeDragStart={handleNodeDragStart}
               onNodeDrag={handleNodeDrag}
@@ -934,14 +952,8 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
               connectionLineComponent={connectionLineGhost}
-              onConnectStart={(_e, params) => {
-                if (!params.nodeId) return
-                useStore.getState().beginConnection({
-                  sourceId: params.nodeId,
-                  sourceHandle: params.handleId ?? null,
-                })
-              }}
-              onConnectEnd={() => useStore.getState().endConnection()}
+              onConnectStart={handleConnectStart}
+              onConnectEnd={handleConnectEnd}
               fitView={FIT_VIEW_PROPS}
               minZoom={0.2}
               maxZoom={2}
@@ -953,18 +965,20 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
               selectionOnDrag
               proOptions={PRO_OPTIONS}
               // (A1) Tier-aware viewport culling: enable when graphs grow
-              // past CULLING_THRESHOLD nodes OR when the user/system chose
-              // a non-`high` tier. Below the threshold on `high`, the
-              // per-render measure+filter cost outweighs the savings.
+              // past `perfTier.flags.cullingThreshold` OR when the user/
+              // system chose a non-`high` tier. Below the threshold on
+              // `high`, the per-render measure+filter cost outweighs the
+              // savings; the threshold itself is tier-driven so balanced/
+              // reduced can opt into culling unconditionally.
               onlyRenderVisibleElements={
-                nodes.length >= CULLING_THRESHOLD || perfTier.effective !== "high"
+                nodes.length >= perfTier.flags.cullingThreshold || perfTier.effective !== "high"
               }
             >
               <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
               <Controls position="bottom-left" />
               {perfTier.flags.showMinimap ? (
                 <PerfMiniMap
-                  degraded={isDraggingAny || perfTier.flags.minimapDegraded}
+                  degraded={isDraggingAny || isMovingViewport || perfTier.flags.minimapDegraded}
                   nodeColor={minimapNodeColor}
                   className="!rounded-md !border !bg-background"
                 />

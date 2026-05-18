@@ -1186,7 +1186,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   }, [])
 
   return (
-    <div className="border-t bg-background/70 p-3">
+    <div className="@container/composer border-t bg-background/70 p-3">
       <PromptInputProvider>
         <ComposerInner
           session={session}

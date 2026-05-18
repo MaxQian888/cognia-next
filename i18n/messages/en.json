@@ -468,6 +468,8 @@
       "input": "Input",
       "output": "Output",
       "cache": "Cache",
+      "cacheWriteShort": "Write",
+      "cacheReadShort": "Read",
       "cost": "Cost",
       "byModelTitle": "By model",
       "noModelData": "No persisted usage rows yet — totals above come from in-memory turns.",
@@ -616,7 +618,19 @@
         "usageInput": "Input",
         "usageOutput": "Output",
         "usageCached": "Cached",
-        "pluginExtensionOverflow": "More plugin actions"
+        "pluginExtensionOverflow": "More plugin actions",
+        "workflow": {
+          "validate": "Validate",
+          "validateAria": "Validate the current workflow",
+          "validateTooltip": "Run the schema validator and ask the agent to fix any issues",
+          "explain": "Explain",
+          "explainAria": "Explain selected nodes",
+          "explainTooltip": "Ask the agent to explain the {count} selected node(s)",
+          "explainNoSelection": "Select one or more nodes on the canvas first",
+          "suggest": "Suggest",
+          "suggestAria": "Suggest the next node",
+          "suggestTooltip": "Ask the workflow-designer agent for the next node to add"
+        }
       },
       "helperHints": {
         "send": "⏎ Send · ⇧⏎ New line",
@@ -6285,6 +6299,12 @@
     "enableA2UI": "Enable A2UI",
     "enableA2UIDesc": "Render the mode response inside an A2UI template.",
     "modePreview": "Mode Preview",
+    "categoryLabel": "Category:",
+    "outputLabel": "Output:",
+    "toolsLabel": "Tools:",
+    "previewLabel": "Preview:",
+    "yes": "Yes",
+    "no": "No",
     "generateFromDescription": "Generate from Description",
     "generateFromDescriptionDesc": "Describe what you need; the editor fills in tools, prompt, and category.",
     "generationPromptPlaceholder": "e.g., A coding assistant that explains diffs and runs tests...",
@@ -8906,7 +8926,69 @@
       "redownload": "Re-download",
       "modelDir": "Stored in: {path}",
       "downloadFailed": "Download failed: {message}",
-      "downloadComplete": "Models ready ({bytes} bytes total)"
+      "downloadComplete": "Models ready ({bytes} bytes total)",
+      "emptyNoModelFiles": "No managed model files for this backend.",
+      "shellUnavailable": "Local model management is only available in the desktop app."
+    },
+    "sidebar": {
+      "searchPlaceholder": "Search OCR providers",
+      "categoryAll": "All",
+      "clearCache": "Clear OCR cache",
+      "stats": "{enabled} enabled · {local} local · {cloud} cloud",
+      "mobileTrigger": "Providers"
+    },
+    "status": {
+      "ready": "Ready",
+      "connected": "Connected",
+      "notConfigured": "Not configured",
+      "unsupported": "Unsupported",
+      "error": "Error",
+      "disabled": "Disabled"
+    },
+    "detail": {
+      "tabsConfig": "Config",
+      "tabsModels": "Models",
+      "tabsAdvanced": "Advanced",
+      "enable": "Enabled",
+      "openDocs": "Open docs",
+      "shellSupportBrowser": "Browser",
+      "shellSupportDesktop": "Desktop",
+      "shellSupportMobile": "Mobile",
+      "noCredentials": "No credentials required for this engine."
+    },
+    "credentials": {
+      "apiKey": "API key",
+      "appId": "App ID",
+      "appKey": "App key",
+      "applicationId": "Application ID",
+      "password": "Password",
+      "accessKeyId": "AWS access key ID",
+      "secretAccessKey": "AWS secret access key",
+      "sessionToken": "AWS session token (optional)",
+      "endpoint": "Endpoint URL",
+      "show": "Show",
+      "hide": "Hide",
+      "placeholder": "Paste credential",
+      "reusesMainProviderHint": "Uses your {provider} API key from the AI Providers page."
+    },
+    "probe": {
+      "button": "Probe connection",
+      "running": "Probing…",
+      "successWithLatency": "Probe OK ({ms} ms)",
+      "failure": "Probe failed: {message}"
+    },
+    "advanced": {
+      "title": "Per-provider overrides",
+      "description": "Leave empty to inherit the global default.",
+      "formatOverride": "Output format override",
+      "formatInherit": "Inherit global",
+      "languagesOverride": "Languages override",
+      "languagesHint": "Comma-separated, e.g. en,zh.",
+      "modelVariant": "Model variant",
+      "region": "Region",
+      "promptTemplate": "Prompt template",
+      "reset": "Reset to defaults",
+      "clearProviderCache": "Clear this provider's cache"
     },
     "composer": {
       "menu": {
@@ -8938,7 +9020,28 @@
     },
     "autoRouter": {
       "fellBackToCloud": "Local OCR engine unavailable. Using {provider}.",
-      "fellBackToWasm": "Falling back to in-browser Tesseract."
+      "fellBackToWasm": "Falling back to in-browser Tesseract.",
+      "title": "Auto-Router",
+      "description": "These settings apply when callers don't pick a provider explicitly.",
+      "defaultBadge": "Default",
+      "label": "Auto-Router",
+      "subtitleAuto": "auto → {fallback}",
+      "subtitleFixed": "→ {provider}",
+      "defaultProvider": "Default provider",
+      "defaultFormat": "Default output format",
+      "defaultLanguages": "Default languages",
+      "languagesHint": "Comma-separated language codes (e.g. en, zh).",
+      "maxImageDimension": "Max image dimension (px)",
+      "maxImageHint": "Downscale before sending. Bounds LLM-vision token cost.",
+      "cloudFallback": "Cloud fallback",
+      "cloudFallbackHint": "Use a cloud provider when local engines are unavailable.",
+      "cloudFallbackProvider": "Cloud fallback provider",
+      "pdfFastPath": "PDF text-layer fast-path",
+      "pdfFastPathHint": "Skip OCR on PDF pages that already have a text layer.",
+      "cacheTtlDays": "Cache TTL (days)",
+      "cacheTtlHint": "0 = no expiry. Default 30.",
+      "clearAllCache": "Clear all OCR cache",
+      "noFallbackProvider": "No cloud provider selected"
     },
     "langPacks": {
       "manageButton": "Manage language packs",
@@ -9777,6 +9880,57 @@
     "notFoundTitle": "Workflow not found",
     "notFoundDescription": "The workflow you tried to open doesn't exist or has been deleted.",
     "notFoundBackToLibrary": "Back to library",
+    "library": {
+      "title": "Workflows",
+      "subtitle": "Visual orchestrations across triggers, AI, and connectors.",
+      "new": "New workflow",
+      "searchPlaceholder": "Search workflows…",
+      "empty": {
+        "title": "No workflows yet",
+        "description": "Build your first workflow to automate a multi-step flow across chat, triggers, and tools.",
+        "cta": "Create workflow",
+        "titleQuery": "No matching workflows",
+        "descriptionQuery": "Try a different search term or clear the filter."
+      },
+      "createDialog": {
+        "title": "Create workflow",
+        "description": "Pick a name to get started — you can refine the description and graph in the editor.",
+        "name": "Name",
+        "namePlaceholder": "Untitled workflow",
+        "descriptionLabel": "Description",
+        "descriptionPlaceholder": "(optional) one-line summary",
+        "cancel": "Cancel",
+        "create": "Create"
+      },
+      "statBar": {
+        "runs7d": "Runs (7d)",
+        "successRate": "Success rate",
+        "activeWorkflows": "Active workflows",
+        "failedToday": "Failed today"
+      }
+    },
+    "card": {
+      "edit": "Edit",
+      "viewRuns": "View runs",
+      "duplicate": "Duplicate",
+      "delete": "Delete",
+      "deleted": "Workflow deleted",
+      "deleteFailed": "Failed to delete workflow",
+      "duplicated": "Workflow duplicated",
+      "duplicateFailed": "Failed to duplicate workflow",
+      "node": "{count, plural, one {# node} other {# nodes}}",
+      "trigger": "{count, plural, one {# trigger} other {# triggers}}",
+      "action": "{count, plural, one {# action} other {# actions}}",
+      "builtin": "Built-in",
+      "template": "Template",
+      "updated": "Updated {ago}",
+      "deleteConfirm": {
+        "title": "Delete workflow?",
+        "description": "This permanently deletes \"{name}\" along with its run history. This cannot be undone.",
+        "cancel": "Cancel",
+        "confirm": "Delete"
+      }
+    },
     "canvasToast": {
       "savedOk": "Workflow saved",
       "saveFailed": "Failed to save workflow",

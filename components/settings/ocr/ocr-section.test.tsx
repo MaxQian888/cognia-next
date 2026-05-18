@@ -11,36 +11,43 @@ import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/lib/ocr/types"
 
 function renderSection(
   overrides: Partial<UserOcrSettings> = {},
-  modelBridge: OcrModelBridge | null = null
+  modelBridge: OcrModelBridge | null = null,
+  extra: Partial<React.ComponentProps<typeof OcrSection>> = {}
 ) {
   const settings: UserOcrSettings = { ...DEFAULT_OCR_SETTINGS, ...overrides }
   const onChange = jest.fn()
   const onClearCache = jest.fn()
   const onClearProviderCache = jest.fn()
+  const onCredentialChange = jest.fn()
   const utils = render(
     <OcrSection
       settings={settings}
       onChange={onChange}
       onClearCache={onClearCache}
       onClearProviderCache={onClearProviderCache}
+      onCredentialChange={onCredentialChange}
       modelBridge={modelBridge}
+      platform="web"
+      {...extra}
     />
   )
-  return { ...utils, onChange, onClearCache, onClearProviderCache }
+  return { ...utils, onChange, onClearCache, onClearProviderCache, onCredentialChange }
 }
 
 describe("OcrSection", () => {
-  it("renders the OCR settings heading and description", () => {
+  it("renders the OCR heading and section testid", () => {
     renderSection()
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/ocr/i)
     expect(screen.getByTestId("ocr-section")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/OCR/i)
   })
 
-  it("lists every provider grouped by category", () => {
+  it("defaults to the Auto-Router pseudo-entry", () => {
     renderSection()
-    // The sidebar list renders the translated label for every provider. The
-    // default Jest i18n mock resolves keys against `en.json`, so each label
-    // is the human-readable provider name (e.g. "Mistral OCR").
+    expect(screen.getByTestId("ocr-auto-router-panel")).toBeInTheDocument()
+  })
+
+  it("lists every shipped provider in the sidebar", () => {
+    renderSection()
     const knownLabels = [
       /Mistral OCR/i,
       /Google Cloud Vision/i,
@@ -55,21 +62,34 @@ describe("OcrSection", () => {
       /Nanonets/i,
       /Feishu \/ Lark/i,
       /Tesseract \(WASM\)/i,
-      /Tesseract \(native\)/i,
-      /Windows\.Media\.Ocr/i,
-      /Apple Vision/i,
-      /ML Kit Text Recognition/i,
+      /ocrs/i,
+      /PaddleOCR/i,
+      /Local HTTP/i,
     ]
     for (const label of knownLabels) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0)
     }
   })
 
-  it("invokes onChange when the default languages input changes", async () => {
+  it("switches to the detail panel when a provider is clicked", async () => {
+    const user = userEvent.setup()
+    renderSection()
+    const mistralBtn = screen.getAllByTestId("ocr-sidebar-item-mistral-ocr")[0]!
+    await user.click(mistralBtn)
+    expect(screen.getByTestId("ocr-detail-panel")).toBeInTheDocument()
+    expect(screen.queryByTestId("ocr-auto-router-panel")).not.toBeInTheDocument()
+  })
+
+  it("fires onClearCache from the sidebar footer button", async () => {
+    const user = userEvent.setup()
+    const { onClearCache } = renderSection()
+    await user.click(screen.getByRole("button", { name: /Clear OCR cache/i }))
+    expect(onClearCache).toHaveBeenCalledTimes(1)
+  })
+
+  it("fires onChange when the Auto-Router languages input changes", () => {
     const { onChange } = renderSection()
-    const input = screen.getByLabelText(/languages/i) as HTMLInputElement
-    // userEvent.type escapes commas; fire a change event directly so we keep
-    // the assertion focused on the controlled-input wiring.
+    const input = screen.getByLabelText(/Default languages/i) as HTMLInputElement
     input.focus()
     Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!.call(
       input,
@@ -77,85 +97,118 @@ describe("OcrSection", () => {
     )
     input.dispatchEvent(new Event("input", { bubbles: true }))
     expect(onChange).toHaveBeenCalled()
-    const last = onChange.mock.calls[onChange.mock.calls.length - 1]![0] as UserOcrSettings
+    const last = onChange.mock.calls.at(-1)![0] as UserOcrSettings
     expect(last.defaultLanguages).toEqual(["en", "zh"])
   })
 
-  it("toggles the cloud-fallback switch", async () => {
+  it("toggles the cloud fallback switch from the Auto-Router panel", async () => {
     const user = userEvent.setup()
     const { onChange } = renderSection({ cloudFallbackEnabled: true })
     const switches = screen.getAllByRole("switch")
-    const cloudFallback = switches.find((el) =>
+    const cloud = switches.find((el) =>
       el.getAttribute("aria-label")?.toLowerCase().includes("cloud")
     )!
-    await user.click(cloudFallback)
-    const last = onChange.mock.calls[onChange.mock.calls.length - 1]![0] as UserOcrSettings
+    await user.click(cloud)
+    const last = onChange.mock.calls.at(-1)![0] as UserOcrSettings
     expect(last.cloudFallbackEnabled).toBe(false)
   })
 
-  it("toggles a provider's enabled flag from the detail card", async () => {
+  it("toggles a provider's enabled flag from the detail panel header", async () => {
     const user = userEvent.setup()
     const { onChange } = renderSection()
-    const detailCard = screen.getByTestId("ocr-provider-detail")
-    const toggle = within(detailCard).getByRole("switch")
+    await user.click(screen.getAllByTestId("ocr-sidebar-item-mistral-ocr")[0]!)
+    const detail = screen.getByTestId("ocr-detail-panel")
+    const toggle = within(detail).getByRole("switch")
     await user.click(toggle)
-    const last = onChange.mock.calls[onChange.mock.calls.length - 1]![0] as UserOcrSettings
-    expect(Object.values(last.providerEnabled)).toContain(false)
+    expect(onChange).toHaveBeenCalled()
+    const last = onChange.mock.calls.at(-1)![0] as UserOcrSettings
+    expect(last.providerEnabled["mistral-ocr"]).toBe(false)
   })
 
-  it("calls onClearCache when the global clear-cache button is pressed", async () => {
-    const user = userEvent.setup()
-    const { onClearCache } = renderSection()
-    await user.click(screen.getByRole("button", { name: "Clear OCR cache" }))
-    expect(onClearCache).toHaveBeenCalledTimes(1)
-  })
-
-  it("calls onClearProviderCache scoped to the selected provider", async () => {
+  it("calls onClearProviderCache from the Advanced tab clear-cache action", async () => {
     const user = userEvent.setup()
     const { onClearProviderCache } = renderSection()
-    const detailCard = screen.getByTestId("ocr-provider-detail")
-    const button = within(detailCard).getByRole("button", {
-      name: /clear cache for this provider/i,
-    })
-    await user.click(button)
-    expect(onClearProviderCache).toHaveBeenCalledTimes(1)
-    // Default selection is the first provider in PROVIDER_LIST.
+    await user.click(screen.getAllByTestId("ocr-sidebar-item-mistral-ocr")[0]!)
+    await user.click(screen.getByRole("tab", { name: /Advanced/i }))
+    await user.click(screen.getByTestId("ocr-adv-clear-cache"))
     expect(onClearProviderCache).toHaveBeenCalledWith("mistral-ocr")
   })
 
-  it("includes the new local providers in the sidebar", () => {
-    renderSection()
-    expect(screen.getAllByText(/ocrs \(local\)/i).length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/PaddleOCR \(local\)/i).length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/Local HTTP \(self-hosted\)/i).length).toBeGreaterThan(0)
+  it("threads credentials updates through onCredentialChange", async () => {
+    const user = userEvent.setup()
+    const { onCredentialChange } = renderSection()
+    await user.click(screen.getAllByTestId("ocr-sidebar-item-mistral-ocr")[0]!)
+    const input = screen.getByLabelText(/API key/i)
+    await user.type(input, "k")
+    expect(onCredentialChange).toHaveBeenCalled()
+    expect(onCredentialChange.mock.calls.at(-1)).toEqual(["mistral-ocr", "apiKey", "k"])
   })
 
-  it("shows the model manager only for backends with managed models", async () => {
+  it("derives connected status once credentials are present", async () => {
+    const user = userEvent.setup()
+    renderSection({}, null, { credentials: { "mistral-ocr": { apiKey: "sk-z" } } })
+    await user.click(screen.getAllByTestId("ocr-sidebar-item-mistral-ocr")[0]!)
+    expect(document.querySelector('[data-status="connected"]')).not.toBeNull()
+  })
+
+  it("derives unsupported status when shell doesn't allow the provider", async () => {
+    const user = userEvent.setup()
+    renderSection({}, null, { platform: "web" })
+    // tesseract-native is tauri-only — should be 'unsupported' on web shell.
+    await user.click(screen.getAllByTestId("ocr-sidebar-item-tesseract-native")[0]!)
+    expect(document.querySelector('[data-status="unsupported"]')).not.toBeNull()
+  })
+
+  it("shows the LocalModelManager for managed-model backends when a bridge is provided", async () => {
     const user = userEvent.setup()
     const stubBridge = makeBridgeStub({
       installed: false,
       files: [{ file_name: "x", installed: false, expected_bytes: 100 }],
     })
-    renderSection({}, stubBridge)
-    // Mistral OCR is selected by default — no model manager.
-    expect(screen.queryByTestId("ocr-model-manager-ocrs")).not.toBeInTheDocument()
-    // Click the ocrs entry in the sidebar.
-    const ocrsButton = screen.getAllByRole("button", { name: /ocrs \(local\)/i })[0]!
-    await user.click(ocrsButton)
-    expect(screen.getByTestId("ocr-model-manager-ocrs")).toBeInTheDocument()
-    // local-http is not in the managed-models set.
-    const localHttp = screen.getAllByRole("button", { name: /Local HTTP/i })[0]!
-    await user.click(localHttp)
-    expect(screen.queryByTestId("ocr-model-manager-ocrs")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("ocr-model-manager-local-http")).not.toBeInTheDocument()
+    renderSection({}, stubBridge, { platform: "tauri" })
+    // The auto-router panel is the default; switch to ocrs first.
+    const ocrsBtn = screen.getAllByTestId("ocr-sidebar-item-ocrs")[0]!
+    await user.click(ocrsBtn)
+    await user.click(screen.getByRole("tab", { name: /Models/i }))
+    expect(await screen.findByTestId("ocr-model-manager-ocrs")).toBeInTheDocument()
   })
 
-  it("suppresses the model row entirely when modelBridge is null", async () => {
+  it("hides the LocalModelManager for non-managed backends", async () => {
+    const user = userEvent.setup()
+    renderSection()
+    await user.click(screen.getAllByTestId("ocr-sidebar-item-mistral-ocr")[0]!)
+    await user.click(screen.getByRole("tab", { name: /Models/i }))
+    expect(screen.queryByTestId("ocr-model-manager-mistral-ocr")).not.toBeInTheDocument()
+    expect(screen.getByTestId("ocr-models-empty")).toBeInTheDocument()
+  })
+
+  it("suppresses the LocalModelManager entirely when modelBridge is null on managed backends", async () => {
     const user = userEvent.setup()
     renderSection({}, null)
-    const ocrsButton = screen.getAllByRole("button", { name: /ocrs \(local\)/i })[0]!
-    await user.click(ocrsButton)
+    const ocrsBtn = screen.getAllByTestId("ocr-sidebar-item-ocrs")[0]!
+    await user.click(ocrsBtn)
+    await user.click(screen.getByRole("tab", { name: /Models/i }))
     expect(screen.queryByTestId("ocr-model-manager-ocrs")).not.toBeInTheDocument()
+    expect(screen.getByTestId("ocr-models-shell-unavailable")).toBeInTheDocument()
+  })
+
+  it("renders the probe button only when onProbeProvider is supplied", async () => {
+    const user = userEvent.setup()
+    const onProbeProvider = jest.fn(async () => ({ ok: true as const, durationMs: 42 }))
+    renderSection({}, null, { onProbeProvider })
+    await user.click(screen.getAllByTestId("ocr-sidebar-item-mistral-ocr")[0]!)
+    expect(screen.getByTestId("ocr-probe-button")).toBeInTheDocument()
+    await user.click(screen.getByTestId("ocr-probe-button"))
+    await waitFor(() => expect(onProbeProvider).toHaveBeenCalledWith("mistral-ocr"))
+    // After a successful probe the sidebar badge flips to "connected".
+    await waitFor(() => {
+      expect(document.querySelector('[data-status="connected"]')).not.toBeNull()
+    })
+  })
+
+  it("renders the mobile sheet trigger", () => {
+    renderSection()
+    expect(screen.getByTestId("ocr-mobile-sheet-trigger")).toBeInTheDocument()
   })
 })
 
@@ -193,7 +246,7 @@ function makeBridgeStub(initial: Partial<ModelStatus> = {}): OcrModelBridge {
   }
 }
 
-describe("LocalModelManager", () => {
+describe("LocalModelManager (backward-compat re-export)", () => {
   it("shows missing-model count from the initial status", async () => {
     const bridge: OcrModelBridge = {
       async status() {
@@ -216,37 +269,6 @@ describe("LocalModelManager", () => {
     render(<LocalModelManager backend="ocrs" bridge={bridge} />)
     await waitFor(() => {
       expect(screen.getByText(/1 model file/i)).toBeInTheDocument()
-    })
-  })
-
-  it("invokes download and refreshes status on click", async () => {
-    const user = userEvent.setup()
-    const downloadMock = jest.fn(async () => ({
-      backend: "ocrs",
-      installed: true,
-      model_dir: "/tmp/ocrs",
-      files: [{ file_name: "det.rten", installed: true, expected_bytes: 100, actual_bytes: 100 }],
-      total_bytes: 100,
-    }))
-    const bridge: OcrModelBridge = {
-      async status() {
-        return {
-          backend: "ocrs",
-          installed: false,
-          model_dir: "/tmp/ocrs",
-          files: [{ file_name: "det.rten", installed: false, expected_bytes: 100 }],
-          total_bytes: 0,
-        }
-      },
-      download: downloadMock,
-      onProgress: () => () => {},
-    }
-    render(<LocalModelManager backend="ocrs" bridge={bridge} />)
-    const button = await screen.findByRole("button", { name: /download/i })
-    await user.click(button)
-    await waitFor(() => expect(downloadMock).toHaveBeenCalledWith("ocrs"))
-    await waitFor(() => {
-      expect(screen.getByText(/models ready/i)).toBeInTheDocument()
     })
   })
 

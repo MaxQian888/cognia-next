@@ -36,12 +36,25 @@ import { ExternalAgentSelector } from "@/components/agent/external-agent-selecto
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { PluginExtensionSlotWithOverflow } from "@/components/plugins/plugin-extension-slot-with-overflow"
+import { WorkflowBottomToolbar } from "./workflow-bottom-toolbar"
 
 interface BottomToolbarProps {
   session: ChatSession | null
 }
 
 export function BottomToolbar({ session }: BottomToolbarProps) {
+  // The workflow-editor session is the same discriminator that
+  // `resolveSendOptions` keys on to inject workflow subagents + the graph
+  // snapshot. The composer surface deserves the same scoping: the generic
+  // runtime / mode / external-agent / web-search / generic-skills / generic
+  // plugin-slot controls have no useful meaning inside a workflow chat.
+  if (session?.kind === "workflow-editor") {
+    return <WorkflowBottomToolbar session={session} />
+  }
+  return <GenericBottomToolbar session={session} />
+}
+
+function GenericBottomToolbar({ session }: BottomToolbarProps) {
   const t = useTranslations("chat.composer.toolbar")
   const router = useRouter()
   const messages = useChatStore((s) => s.messages)
@@ -93,6 +106,17 @@ export function BottomToolbar({ session }: BottomToolbarProps) {
       } as unknown as LanguageModelUsage)
     : undefined
 
+  // Responsive tiers (driven by the `@container/composer` declared on the
+  // composer's outer wrapper):
+  //   • Tier 1 — Model / Permission / Context — always visible.
+  //   • Tier 2 — Web search / Skills — hidden below @sm/composer (~420px).
+  //   • Tier 3 — AgentRuntime / AgentMode / ExternalAgent / Plugin slot —
+  //     hidden below @md/composer (~560px).
+  // Below those thresholds the controls are intentionally hidden, not
+  // collapsed into a "More" menu: most of them are popovers in their own
+  // right and re-mounting them inside a DropdownMenuItem would desync
+  // their open-state. The user can resize the panel, or change the
+  // affected setting from Settings → Agent runtime / Web search / Skills.
   return (
     <div className="mt-2 flex items-center justify-between gap-2 px-1 text-[11px] text-muted-foreground">
       <div className="flex min-w-0 items-center gap-2">
@@ -101,47 +125,51 @@ export function BottomToolbar({ session }: BottomToolbarProps) {
           onCycle={(next) => setPermissionMode(next)}
           disabled={isStreaming}
         />
-        <WebSearchToggle disabled={isStreaming} />
-        <Button
-          type="button"
-          size="icon"
-          variant={ephemeralSkillIds.length > 0 ? "default" : "ghost"}
-          onClick={() => setPickerOpen(true)}
-          aria-label={tSkill("trigger")}
-          disabled={isStreaming}
-          className="size-7"
-        >
-          <SparklesIcon className="size-3.5" />
-        </Button>
+        <div className="hidden items-center gap-2 @sm/composer:flex">
+          <WebSearchToggle disabled={isStreaming} />
+          <Button
+            type="button"
+            size="icon"
+            variant={ephemeralSkillIds.length > 0 ? "default" : "ghost"}
+            onClick={() => setPickerOpen(true)}
+            aria-label={tSkill("trigger")}
+            disabled={isStreaming}
+            className="size-7"
+          >
+            <SparklesIcon className="size-3.5" />
+          </Button>
+        </div>
         <SkillPicker
           open={pickerOpen}
           onOpenChange={setPickerOpen}
           value={ephemeralSkillIds}
           onChange={setEphemeralSkillIds}
         />
-        <AgentRuntimeSelector disabled={isStreaming} />
-        {runtime === "claude-sdk" && (
-          <AgentModeSelector
-            selectedModeId={modeId}
-            onModeChange={(mode) => setModeId(mode.id)}
-            onSelectTeam={(teamId) => router.push(`/agent-teams/${teamId}`)}
-            onCreateTeam={() => router.push("/agent-teams")}
-            disabled={isStreaming}
+        <div className="hidden items-center gap-2 @md/composer:flex">
+          <AgentRuntimeSelector disabled={isStreaming} />
+          {runtime === "claude-sdk" && (
+            <AgentModeSelector
+              selectedModeId={modeId}
+              onModeChange={(mode) => setModeId(mode.id)}
+              onSelectTeam={(teamId) => router.push(`/agent-teams/${teamId}`)}
+              onCreateTeam={() => router.push("/agent-teams")}
+              disabled={isStreaming}
+            />
+          )}
+          {runtime === "external" && (
+            <ExternalAgentSelector
+              selectedAgentId={externalAgentId}
+              onAgentChange={handleExternalAgentChange}
+              disabled={isStreaming}
+            />
+          )}
+          <PluginExtensionSlotWithOverflow
+            point="chat.input.actions"
+            limit={3}
+            className="flex items-center gap-1 empty:hidden"
+            overflowLabel={t("pluginExtensionOverflow")}
           />
-        )}
-        {runtime === "external" && (
-          <ExternalAgentSelector
-            selectedAgentId={externalAgentId}
-            onAgentChange={handleExternalAgentChange}
-            disabled={isStreaming}
-          />
-        )}
-        <PluginExtensionSlotWithOverflow
-          point="chat.input.actions"
-          limit={3}
-          className="flex items-center gap-1 empty:hidden"
-          overflowLabel={t("pluginExtensionOverflow")}
-        />
+        </div>
       </div>
 
       <Context maxTokens={max} modelId={modelId} usage={aiUsage} usedTokens={used}>

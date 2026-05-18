@@ -864,7 +864,7 @@ export function ProviderImportExport({ onClose }: ProviderImportExportProps) {
                       {importFileName || "settings.json"}
                     </span>
                   </div>
-                  <Badge variant="default" className="bg-green-600">
+                  <Badge variant="success">
                     <Check className="h-3 w-3 mr-1" />
                     {t("valid") || "Valid"}
                   </Badge>

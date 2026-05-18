@@ -369,7 +369,7 @@ export function OllamaModelManager({
                                 </Badge>
                               )}
                               {isRunning && (
-                                <Badge variant="default" className="text-[10px] bg-green-500">
+                                <Badge variant="success" className="text-[10px]">
                                   <Zap className="h-2.5 w-2.5 mr-0.5" />
                                   {t("running")}
                                 </Badge>

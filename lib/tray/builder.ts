@@ -4,7 +4,9 @@
 //   1. Substitute the empty `tray.all-commands` placeholder with the
 //      submenu produced by `lib/tray/all-commands.ts`.
 //   2. Resolve i18n keys to their localized strings via the `t` function
-//      the caller passes in (the renderer pulls it from next-intl).
+//      the caller passes in (the renderer pulls it from next-intl's root
+//      translator — labels in `defaults.ts` already include the `tray.`
+//      prefix, so scoping to a namespace would double-prefix them).
 //   3. Drop items whose `when` expression evaluates to `false` against the
 //      provided `TrayStateSnapshot`.
 //   4. Strip render-only fields (`when`, `iconHint`, `hidden`) so the DTO

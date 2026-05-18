@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import { BottomToolbar } from "./bottom-toolbar"
 import type { ChatSession } from "@/lib/claude/types"
 
@@ -127,6 +127,37 @@ beforeEach(() => {
     setExternalAgentId: jest.fn(),
   }
   for (const key of Object.keys(lastSelectorProps)) delete lastSelectorProps[key]
+})
+
+// Stub the workflow toolbar variant so the branching test doesn't need
+// the full workflow context tree.
+jest.mock("./workflow-bottom-toolbar", () => ({
+  WorkflowBottomToolbar: () => <div data-testid="workflow-bottom-toolbar" />,
+}))
+
+describe("BottomToolbar — session-kind branching", () => {
+  it("delegates to WorkflowBottomToolbar when session.kind === 'workflow-editor'", () => {
+    const wfSession: ChatSession = {
+      id: "workflow:wf_x",
+      title: "Test workflow",
+      kind: "workflow-editor",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    render(<BottomToolbar session={wfSession} />)
+    expect(screen.getByTestId("workflow-bottom-toolbar")).toBeInTheDocument()
+    // Generic-toolbar controls should not be rendered when the branch fires.
+    expect(screen.queryByTestId("agent-runtime-selector")).toBeNull()
+    expect(screen.queryByTestId("agent-mode-selector")).toBeNull()
+    expect(screen.queryByTestId("web-search-toggle")).toBeNull()
+  })
+
+  it("renders the generic toolbar for a direct session", () => {
+    render(<BottomToolbar session={session} />)
+    expect(screen.queryByTestId("workflow-bottom-toolbar")).toBeNull()
+    expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
+    expect(screen.getByTestId("web-search-toggle")).toBeInTheDocument()
+  })
 })
 
 describe("BottomToolbar — agent-mode wiring", () => {

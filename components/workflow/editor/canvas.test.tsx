@@ -97,7 +97,13 @@ jest.mock("@xyflow/react", () => {
       fitView: () => undefined,
       setCenter: () => undefined,
       screenToFlowPosition: ({ x, y }: { x: number; y: number }) => ({ x, y }),
+      getViewport: () => ({ x: 0, y: 0, zoom: 1 }),
     }),
+    // ViewportBreadcrumb subscribes here for live pan/zoom updates. The
+    // canvas suite only asserts on the React Flow surface, so a no-op stub
+    // is fine — the dedicated viewport-breadcrumb.test.tsx exercises the
+    // subscription path directly.
+    useOnViewportChange: (_args: unknown) => undefined,
     applyNodeChanges: (_c: unknown, n: unknown) => n,
     applyEdgeChanges: (_c: unknown, e: unknown) => e,
     addEdge: (e: unknown, edges: unknown[]) => [...edges, e],
@@ -199,5 +205,49 @@ describe("WorkflowEditorCanvas", () => {
       ;(props!.onNodeDragStop as () => void)()
     })
     expect(screen.getByTestId("minimap-mock").getAttribute("data-pannable")).toBe("true")
+  })
+
+  it("flips minimap to degraded mode while the viewport is panning/zooming", async () => {
+    const wf = await createWorkflow({ name: "x" })
+    const sample: VisualWorkflow = { ...buildSample(), id: wf.id }
+    renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    const props = reactFlowPropsRef.current
+    expect(typeof props?.onMoveStart).toBe("function")
+    expect(typeof props?.onMoveEnd).toBe("function")
+    // After this change `onMove` no longer fires React state updates on the
+    // canvas parent — only the breadcrumb owns the per-frame viewport.
+    expect(props?.onMove).toBeUndefined()
+
+    const { act } = jest.requireActual("@testing-library/react")
+    act(() => {
+      ;(props!.onMoveStart as (...args: unknown[]) => void)({}, { x: 0, y: 0, zoom: 1 })
+    })
+    expect(screen.getByTestId("minimap-mock").getAttribute("data-pannable")).toBe("false")
+    act(() => {
+      ;(props!.onMoveEnd as (...args: unknown[]) => void)({}, { x: 0, y: 0, zoom: 1 })
+    })
+    expect(screen.getByTestId("minimap-mock").getAttribute("data-pannable")).toBe("true")
+  })
+
+  it("passes stable onConnectStart / onConnectEnd identities across renders", async () => {
+    const wf = await createWorkflow({ name: "x" })
+    const sample: VisualWorkflow = { ...buildSample(), id: wf.id }
+    const { rerender } = renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    const first = reactFlowPropsRef.current
+    expect(typeof first?.onConnectStart).toBe("function")
+    expect(typeof first?.onConnectEnd).toBe("function")
+    const firstStart = first!.onConnectStart
+    const firstEnd = first!.onConnectEnd
+
+    // Trigger a re-render with the same workflow object — identities should
+    // be reused thanks to `useCallback`. (No inline arrows on ReactFlow.)
+    rerender(
+      <TooltipProvider>
+        <WorkflowEditorCanvas workflow={sample} />
+      </TooltipProvider>
+    )
+    const second = reactFlowPropsRef.current
+    expect(second?.onConnectStart).toBe(firstStart)
+    expect(second?.onConnectEnd).toBe(firstEnd)
   })
 })

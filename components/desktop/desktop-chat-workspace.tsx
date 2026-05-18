@@ -16,7 +16,7 @@
  * fills the shell's content slot.
  */
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
@@ -31,6 +31,7 @@ import { OnboardingDialog } from "@/components/shell/onboarding-dialog"
 import { shouldShowOnboarding } from "@/lib/onboarding/should-show"
 import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
 import type { ComposerHandle } from "@/components/chat/composer"
+import type { ApprovalDecision, Character } from "@/lib/claude/types"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { usePlatform } from "@/hooks/use-platform"
 import { useChatStore } from "@/stores/chat"
@@ -102,20 +103,22 @@ export function DesktopChatWorkspace() {
 
   useEffect(() => {
     if (!mounted) return
-    if (activeSessionId) {
-      const current = sessions.find((s) => s.id === activeSessionId)
-      if (current && selectedGuild.kind === "team") {
-        if (current.kind !== "team" || current.teamId !== selectedGuild.teamId) {
-          const target = guildFromSession(current)
-          log.info("auto guild-switch from active session", {
-            sessionId: current.id,
-            target,
-          })
-          setSelectedGuild(target)
-        }
-      }
-      return
-    }
+    if (!activeSessionId) return
+    if (selectedGuild.kind !== "team") return
+    const current = sessions.find((s) => s.id === activeSessionId)
+    if (!current) return
+    if (current.kind === "team" && current.teamId === selectedGuild.teamId) return
+    const target = guildFromSession(current)
+    log.info("auto guild-switch from active session", {
+      sessionId: current.id,
+      target,
+    })
+    setSelectedGuild(target)
+  }, [mounted, activeSessionId, sessions, selectedGuild, setSelectedGuild])
+
+  useEffect(() => {
+    if (!mounted) return
+    if (activeSessionId) return
     const matching = sessions.find((s) => {
       if (selectedGuild.kind === "team") {
         return s.kind === "team" && s.teamId === selectedGuild.teamId
@@ -126,7 +129,7 @@ export function DesktopChatWorkspace() {
       log.info("auto-select session", { sessionId: matching.id })
       select(matching.id)
     }
-  }, [mounted, sessions, activeSessionId, selectedGuild, select, setSelectedGuild])
+  }, [mounted, activeSessionId, sessions, selectedGuild, select])
 
   useEffect(() => {
     if (errorMessage && errorMessage !== lastErrorShown) {
@@ -139,12 +142,18 @@ export function DesktopChatWorkspace() {
     }
   }, [errorMessage, lastErrorShown])
 
-  const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
+  const activeSession = useMemo(
+    () => sessions.find((s) => s.id === activeSessionId) ?? null,
+    [sessions, activeSessionId]
+  )
 
-  const openSettings = (tab?: string) => {
-    log.info("open settings", { tab: tab ?? "general" })
-    router.push(tab ? `/settings?section=${tab}` : "/settings")
-  }
+  const openSettings = useCallback(
+    (tab?: string) => {
+      log.info("open settings", { tab: tab ?? "general" })
+      router.push(tab ? `/settings?section=${tab}` : "/settings")
+    },
+    [router]
+  )
 
   useEffect(() => {
     if (!pendingSettingsRequest) return
@@ -152,42 +161,119 @@ export function DesktopChatWorkspace() {
 
     openSettings(pendingSettingsRequest.tab)
     clearPendingSettings()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingSettingsRequest])
+  }, [pendingSettingsRequest, openSettings, clearPendingSettings])
 
-  const handleNewDirect = () => {
+  const handleNewDirect = useCallback(() => {
     log.info("new-direct (open character picker)")
     setCharacterPickerOpen(true)
-  }
+  }, [])
 
-  const handleNewTeamConversation = async (teamId: string) => {
-    log.info("new-team-conversation", { teamId })
-    const s = await create({ title: "New conversation", kind: "team", teamId })
-    select(s.id)
-  }
+  const handleNewTeamConversation = useCallback(
+    async (teamId: string) => {
+      log.info("new-team-conversation", { teamId })
+      const s = await create({ title: "New conversation", kind: "team", teamId })
+      select(s.id)
+    },
+    [create, select]
+  )
 
-  const handleSwitchToSession = (id: string) => {
-    log.info("switch-to-session", { sessionId: id })
-    select(id)
-    const target = sessions.find((s) => s.id === id)
-    if (!target) return
-    setSelectedGuild(guildFromSession(target))
-  }
+  const handleSwitchToSession = useCallback(
+    (id: string) => {
+      log.info("switch-to-session", { sessionId: id })
+      select(id)
+      const target = sessions.find((s) => s.id === id)
+      if (!target) return
+      setSelectedGuild(guildFromSession(target))
+    },
+    [select, sessions, setSelectedGuild]
+  )
 
   const isTeamSession = activeSession?.kind === "team" && Boolean(activeSession.teamId)
   const isCanvasGuild = selectedGuild.kind === "canvas"
 
   const send = isTeamSession ? teamChat.send : directChat.send
   const stop = isTeamSession ? teamChat.stop : directChat.stop
-  const respondToApproval = (
-    approval: typeof pendingApproval,
-    decision: Parameters<typeof directChat.respondToApproval>[1]
-  ) => {
-    if (!approval) return Promise.resolve()
-    return approval.sessionId.includes("::char::")
-      ? teamChat.respondToApproval(approval, decision)
-      : directChat.respondToApproval(approval, decision)
-  }
+
+  const handleChannelNewDirect = useCallback(() => {
+    void handleNewDirect()
+  }, [handleNewDirect])
+
+  const handleChannelNewTeam = useCallback(
+    (id: string) => {
+      void handleNewTeamConversation(id)
+    },
+    [handleNewTeamConversation]
+  )
+
+  const handleChannelDelete = useCallback(
+    (id: string) => {
+      void remove(id)
+    },
+    [remove]
+  )
+
+  const handleChannelRename = useCallback(
+    (id: string, title: string) => {
+      void rename(id, title)
+    },
+    [rename]
+  )
+
+  const handleUseSample = useCallback(
+    (text: string) => {
+      void send(text)
+    },
+    [send]
+  )
+
+  const handleMemberMention = useCallback((c: Character) => {
+    composerRef.current?.insertMention(c.name)
+  }, [])
+
+  const handleCharacterPick = useCallback(
+    async (c: Character) => {
+      log.info("character-picker pick", { characterId: c.id })
+      const s = await create({
+        title: `Chat with ${c.name}`,
+        kind: "direct",
+        characterId: c.id,
+      })
+      select(s.id)
+      setSelectedGuild({ kind: "dm" })
+    },
+    [create, select, setSelectedGuild]
+  )
+
+  const handleOnboardingOpenChange = useCallback((open: boolean) => {
+    setOnboardingOpen(open)
+    if (!open) {
+      log.info("onboarding dismissed")
+    }
+  }, [])
+
+  const handleOnboardingPickCharacter = useCallback(
+    async (c: Character) => {
+      log.info("onboarding pick-character", { characterId: c.id })
+      const s = await create({
+        title: `Chat with ${c.name}`,
+        kind: "direct",
+        characterId: c.id,
+      })
+      select(s.id)
+      setSelectedGuild({ kind: "dm" })
+    },
+    [create, select, setSelectedGuild]
+  )
+
+  const handleToolApprovalRespond = useCallback(
+    (decision: ApprovalDecision) => {
+      if (!pendingApproval) return Promise.resolve()
+      return pendingApproval.sessionId.includes("::char::")
+        ? teamChat.respondToApproval(pendingApproval, decision)
+        : directChat.respondToApproval(pendingApproval, decision)
+    },
+    [pendingApproval, teamChat, directChat]
+  )
 
   return (
     <>
@@ -202,10 +288,10 @@ export function DesktopChatWorkspace() {
               sessions={sessions}
               activeSessionId={activeSessionId}
               onSelect={handleSwitchToSession}
-              onNewDirect={() => void handleNewDirect()}
-              onNewTeamConversation={(id) => void handleNewTeamConversation(id)}
-              onDelete={(id) => void remove(id)}
-              onRename={(id, title) => void rename(id, title)}
+              onNewDirect={handleChannelNewDirect}
+              onNewTeamConversation={handleChannelNewTeam}
+              onDelete={handleChannelDelete}
+              onRename={handleChannelRename}
             />
           )}
 
@@ -223,7 +309,7 @@ export function DesktopChatWorkspace() {
                 onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
                 onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
                 onCreate={handleNewDirect}
-                onUseSample={(text) => void send(text)}
+                onUseSample={handleUseSample}
                 onOpenSettings={openSettings}
                 composerRef={composerRef}
               />
@@ -234,9 +320,7 @@ export function DesktopChatWorkspace() {
             <MemberList
               teamSessionId={activeSession?.id ?? null}
               teamId={activeSession?.teamId ?? null}
-              onMention={(c) => {
-                composerRef.current?.insertMention(c.name)
-              }}
+              onMention={handleMemberMention}
             />
           )}
           <ArtifactPanel />
@@ -246,44 +330,16 @@ export function DesktopChatWorkspace() {
       <CharacterPicker
         open={characterPickerOpen}
         onOpenChange={setCharacterPickerOpen}
-        onPick={async (c) => {
-          log.info("character-picker pick", { characterId: c.id })
-          const s = await create({
-            title: `Chat with ${c.name}`,
-            kind: "direct",
-            characterId: c.id,
-          })
-          select(s.id)
-          setSelectedGuild({ kind: "dm" })
-        }}
+        onPick={handleCharacterPick}
       />
 
       <OnboardingDialog
         open={onboardingOpen}
-        onOpenChange={(open) => {
-          setOnboardingOpen(open)
-          if (!open) {
-            log.info("onboarding dismissed")
-          }
-        }}
-        onPickCharacter={async (c) => {
-          log.info("onboarding pick-character", { characterId: c.id })
-          const s = await create({
-            title: `Chat with ${c.name}`,
-            kind: "direct",
-            characterId: c.id,
-          })
-          select(s.id)
-          setSelectedGuild({ kind: "dm" })
-        }}
+        onOpenChange={handleOnboardingOpenChange}
+        onPickCharacter={handleOnboardingPickCharacter}
       />
 
-      <ToolApprovalDialog
-        approval={pendingApproval}
-        onRespond={(decision) =>
-          pendingApproval ? respondToApproval(pendingApproval, decision) : Promise.resolve()
-        }
-      />
+      <ToolApprovalDialog approval={pendingApproval} onRespond={handleToolApprovalRespond} />
     </>
   )
 }

@@ -16,7 +16,7 @@ import { useEffect, useMemo, useState } from "react"
 import { ChevronRight } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useShallow } from "zustand/react/shallow"
-import type { ReactFlowInstance, Viewport } from "@xyflow/react"
+import { useOnViewportChange, type ReactFlowInstance, type Viewport } from "@xyflow/react"
 import { cn } from "@/lib/utils"
 import { useRafThrottle } from "@/hooks/workflow/use-raf-throttle"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
@@ -27,13 +27,6 @@ const GROUP_KIND = "annotation.group"
 export interface ViewportBreadcrumbProps {
   store: EditorStore
   reactFlowInstance: ReactFlowInstance | null
-  /**
-   * Optional live viewport from React Flow's `onMove` event. When provided,
-   * the breadcrumb recomputes during the pan (throttled with rAF). Falls
-   * back to the store's `viewport` field, which only settles on
-   * `onMoveEnd`, when omitted.
-   */
-  liveViewport?: Viewport | null
   className?: string
 }
 
@@ -88,11 +81,14 @@ function findActiveGroup(
 export function ViewportBreadcrumb({
   store,
   reactFlowInstance,
-  liveViewport,
   className,
 }: ViewportBreadcrumbProps) {
   const t = useTranslations("workflows.editor.breadcrumb")
-  const { workflowName, nodes, viewport } = store(
+  const {
+    workflowName,
+    nodes,
+    viewport: storeViewport,
+  } = store(
     useShallow((s: EditorState) => ({
       workflowName: s.baseWorkflow.name,
       nodes: s.nodes,
@@ -100,10 +96,14 @@ export function ViewportBreadcrumb({
     }))
   )
 
-  // The active group is recomputed off the rAF throttle so quick pans don't
-  // do an O(n) scan per pointermove tick. We prefer `liveViewport` when the
-  // canvas is feeding `onMove` events; otherwise we fall back to the
-  // settled `viewport` field.
+  // Per-frame live viewport state is owned LOCALLY by the breadcrumb so that
+  // pan/zoom doesn't re-render the canvas parent every animation frame. The
+  // seed comes from the editor store; `useOnViewportChange` then pushes
+  // updates while the user is interacting. The active-group compute below is
+  // rAF-throttled so the O(n) group scan only runs once per frame.
+  const [liveViewport, setLiveViewport] = useState<Viewport>(storeViewport)
+  useOnViewportChange({ onChange: setLiveViewport })
+
   const [activeGroup, setActiveGroup] = useState<GroupHit | null>(null)
   const compute = useMemo(
     () => (vp: Viewport) => setActiveGroup(findActiveGroup(nodes, vp)),
@@ -111,10 +111,9 @@ export function ViewportBreadcrumb({
   )
   const throttled = useRafThrottle(compute)
 
-  const effectiveViewport = liveViewport ?? viewport
   useEffect(() => {
-    throttled.call(effectiveViewport)
-  }, [throttled, effectiveViewport])
+    throttled.call(liveViewport)
+  }, [throttled, liveViewport])
 
   const handleFitAll = () => {
     reactFlowInstance?.fitView({ duration: 240, padding: 0.2 })

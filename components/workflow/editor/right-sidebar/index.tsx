@@ -112,6 +112,7 @@ export function RightSidebar({
           }
         >
           <WorkflowEditorChatTab
+            useStore={useStore}
             workflowId={workflowId}
             workflowName={workflowName}
             onOpenWorkflowSettings={onOpenWorkflowSettings}

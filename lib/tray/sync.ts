@@ -14,13 +14,40 @@ import { useTranslations } from "next-intl"
 import { loggers } from "@/lib/logger"
 import { isTauri } from "@/lib/tauri"
 
-import { buildTrayPayload } from "./builder"
+import { buildTrayPayload, type TrayTranslator } from "./builder"
 import { subscribeTrayItems } from "./registry"
 import { useTrayStore } from "./store"
 import { useTrayStateSnapshot } from "./state-snapshot"
 import type { TrayStateSnapshot } from "./types"
 
 const PUSH_DEBOUNCE_MS = 150
+
+/**
+ * Shape of the translator returned by next-intl's `useTranslations()`. We only
+ * need the call signature and `.has(key)` predicate; the rest of the surface
+ * (`rich`, `markup`, `raw`, formatter helpers, …) is intentionally omitted so
+ * tests can pass a minimal stand-in without recreating all of next-intl.
+ */
+export interface NextIntlTranslator {
+  (key: string): string
+  has(key: string): boolean
+}
+
+/**
+ * Wrap a next-intl translator so that *unknown* keys flow through as-is
+ * instead of throwing `MISSING_MESSAGE`. The tray's `label` field carries two
+ * kinds of strings: i18n keys (e.g. `tray.show`, `tray.categories.chat` from
+ * `defaults.ts` and `all-commands.ts`) and literal display strings (slash
+ * command names like `/clear`, plugin tray-item labels, command titles).
+ * The builder calls `t(label)` on every entry; without this guard, the
+ * literal-label path crashes the tray rebuild under production next-intl.
+ *
+ * Exported for direct unit testing — see `sync.test.ts`. Use through
+ * `useSyncTrayToRust` in production.
+ */
+export function makeResilientTrayTranslator(t: NextIntlTranslator): TrayTranslator {
+  return (key: string) => (t.has(key) ? t(key) : key)
+}
 
 /**
  * Read the tooltip Rust currently has registered for the tray icon. Returns
@@ -75,7 +102,11 @@ export function defaultSnapshot(): TrayStateSnapshot {
  * Mount once at the app root.
  */
 export function useSyncTrayToRust(): void {
-  const t = useTranslations("tray")
+  // Use the root translator: tray menu labels in `lib/tray/defaults.ts` and
+  // `lib/tray/all-commands.ts` are stored as full keys (`tray.show`,
+  // `tray.allCommands`, `tray.categories.<bucket>`). Scoping to "tray" here
+  // would prepend a second `tray.` segment and fail every lookup.
+  const t = useTranslations() as unknown as NextIntlTranslator
   const tooltipKey = useTrayStore((s) => s.tooltip)
   const iconState = useTrayStore((s) => s.iconState)
   const items = useTrayStore((s) => s.items)
@@ -94,10 +125,11 @@ export function useSyncTrayToRust(): void {
   useEffect(() => {
     if (!isTauri() || !hydrated) return
 
+    const resilientT = makeResilientTrayTranslator(t)
     function flush() {
       const dto = buildTrayPayload({
         items,
-        t: ((key: string) => t(key as never)) as (key: string) => string,
+        t: resilientT,
         snapshot,
       })
       void invoke("tray_set_menu", { items: dto }).catch((err) => {

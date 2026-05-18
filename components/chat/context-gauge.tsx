@@ -29,14 +29,14 @@ import { useChatStore } from "@/stores/chat"
 import type { UsageInfo } from "@/lib/claude/adapter"
 
 /**
- * Conservative defaults for the major Claude tiers. Models we don't recognise
- * fall back to 200k which is the standard Claude 4.X window.
+ * Conservative defaults for the major Claude tiers. The Claude 4.X family
+ * (Opus 4.X / Sonnet 4.X / Haiku 4.X) now exposes a 1M-token context window
+ * across the SDKs we target, so it is the default. Claude 3.X stayed at 200k.
  */
 const CONTEXT_WINDOW_BY_PREFIX: Array<[RegExp, number]> = [
-  [/claude-opus-4-7\[1m\]/i, 1_000_000],
-  [/claude-opus-4/i, 200_000],
-  [/claude-sonnet-4/i, 200_000],
-  [/claude-haiku-4/i, 200_000],
+  [/claude-opus-4/i, 1_000_000],
+  [/claude-sonnet-4/i, 1_000_000],
+  [/claude-haiku-4/i, 1_000_000],
   [/claude-3-5-sonnet/i, 200_000],
   [/claude-3-5-haiku/i, 200_000],
   [/claude-3-opus/i, 200_000],
@@ -45,7 +45,7 @@ const CONTEXT_WINDOW_BY_PREFIX: Array<[RegExp, number]> = [
   [/gemini-1\.5/i, 1_000_000],
 ]
 
-const DEFAULT_CONTEXT_WINDOW = 200_000
+const DEFAULT_CONTEXT_WINDOW = 1_000_000
 
 export function contextWindowForModel(model: string | undefined): number {
   if (!model) return DEFAULT_CONTEXT_WINDOW

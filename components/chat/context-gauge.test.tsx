@@ -20,18 +20,23 @@ describe("contextWindowForModel", () => {
     expect(contextWindowForModel("claude-opus-4-7[1m]")).toBe(1_000_000)
   })
 
-  it("returns 200K for generic Claude 4 models", () => {
-    expect(contextWindowForModel("claude-sonnet-4-6")).toBe(200_000)
-    expect(contextWindowForModel("claude-haiku-4-5-20251001")).toBe(200_000)
+  it("returns 1M for generic Claude 4 models", () => {
+    expect(contextWindowForModel("claude-sonnet-4-6")).toBe(1_000_000)
+    expect(contextWindowForModel("claude-haiku-4-5-20251001")).toBe(1_000_000)
+  })
+
+  it("returns 200K for Claude 3.X models", () => {
+    expect(contextWindowForModel("claude-3-5-sonnet-20241022")).toBe(200_000)
+    expect(contextWindowForModel("claude-3-opus-20240229")).toBe(200_000)
   })
 
   it("returns 128K for GPT-4o variants", () => {
     expect(contextWindowForModel("gpt-4o-mini")).toBe(128_000)
   })
 
-  it("falls back to 200K for unknown / undefined models", () => {
-    expect(contextWindowForModel(undefined)).toBe(200_000)
-    expect(contextWindowForModel("some-future-model")).toBe(200_000)
+  it("falls back to 1M for unknown / undefined models", () => {
+    expect(contextWindowForModel(undefined)).toBe(1_000_000)
+    expect(contextWindowForModel("some-future-model")).toBe(1_000_000)
   })
 })
 
@@ -59,7 +64,7 @@ describe("ContextGauge", () => {
     render(<ContextGauge modelId="claude-sonnet-4-6" />)
 
     const node = screen.getByTestId("context-gauge")
-    expect(node).toHaveAttribute("data-max-tokens", "200000")
+    expect(node).toHaveAttribute("data-max-tokens", "1000000")
     expect(node).toHaveAttribute("data-used-tokens", "320")
   })
 

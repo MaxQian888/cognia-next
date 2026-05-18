@@ -3,6 +3,26 @@
  */
 
 import { act, render, screen, fireEvent } from "@testing-library/react"
+
+// `useOnViewportChange` from @xyflow/react requires a `<ReactFlowProvider>`
+// at runtime. The breadcrumb is rendered standalone in these tests (we only
+// want to assert on its DOM), so stub the hook out and expose the registered
+// callback through a test-scoped ref so individual tests can simulate a live
+// viewport change when needed.
+const lastViewportChangeRef: {
+  current: ((vp: { x: number; y: number; zoom: number }) => void) | null
+} = { current: null }
+jest.mock("@xyflow/react", () => ({
+  __esModule: true,
+  useOnViewportChange: ({
+    onChange,
+  }: {
+    onChange: (vp: { x: number; y: number; zoom: number }) => void
+  }) => {
+    lastViewportChangeRef.current = onChange
+  },
+}))
+
 import { createEditorStore, type EditorStore } from "@/lib/workflow/editor/store"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 import { ViewportBreadcrumb } from "./viewport-breadcrumb"
@@ -68,6 +88,7 @@ function buildStoreWithGroup(): EditorStore {
 describe("ViewportBreadcrumb", () => {
   beforeEach(() => {
     installRafShim()
+    lastViewportChangeRef.current = null
     // jsdom defaults: 1024 × 768.
     Object.defineProperty(window, "innerWidth", { value: 1024, configurable: true })
     Object.defineProperty(window, "innerHeight", { value: 768, configurable: true })
@@ -107,6 +128,24 @@ describe("ViewportBreadcrumb", () => {
     fireEvent.click(screen.getByTestId("viewport-breadcrumb-root"))
     expect(fitView).toHaveBeenCalled()
     expect(fitView.mock.calls[0][0]).toMatchObject({ duration: 240, padding: 0.2 })
+  })
+
+  it("updates the active group when useOnViewportChange fires (live pan/zoom)", () => {
+    const store = buildStoreWithGroup()
+    render(<ViewportBreadcrumb store={store} reactFlowInstance={null} />)
+    act(() => flushRaf())
+    expect(screen.getByTestId("viewport-breadcrumb-group").textContent).toBe("Group A")
+
+    // Pan the viewport so the screen-centre flow point lands outside the
+    // group rect. With window 1024×768 and zoom=1, shifting viewport.x by
+    // 800 moves the flow-space centre from x=512 → x=-288 (well left of the
+    // group at x=[400,640]).
+    expect(typeof lastViewportChangeRef.current).toBe("function")
+    act(() => {
+      lastViewportChangeRef.current?.({ x: 800, y: 0, zoom: 1 })
+    })
+    act(() => flushRaf())
+    expect(screen.queryByTestId("viewport-breadcrumb-group")).toBeNull()
   })
 
   it("clicking the group segment focuses the group via setCenter", () => {

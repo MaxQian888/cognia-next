@@ -218,7 +218,7 @@ export function LocalProviderSettings(_props: LocalProviderSettingsProps) {
             </div>
             <div className="flex items-center gap-2">
               {groupRunning > 0 && (
-                <Badge variant="default" className="bg-green-600">
+                <Badge variant="success">
                   {groupRunning} {t("running")}
                 </Badge>
               )}
@@ -273,7 +273,7 @@ export function LocalProviderSettings(_props: LocalProviderSettingsProps) {
             </div>
             <div className="flex items-center gap-2">
               {runningCount > 0 && (
-                <Badge variant="default" className="bg-green-600">
+                <Badge variant="success">
                   <Zap className="h-3 w-3 mr-1" />
                   {runningCount} {t("running")}
                 </Badge>

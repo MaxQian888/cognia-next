@@ -53,6 +53,8 @@ export function buildAllCommandsSubmenu(): TrayMenuSubmenu {
   for (const c of CATEGORY_ORDER) buckets.set(c, [])
 
   // Slash commands (builtin + plugin slash) ─ source: lib/slash-commands.
+  // The label `/${cmd.name}` is a literal display string, not an i18n key;
+  // `makeResilientTrayTranslator` in sync.ts passes it through unchanged.
   for (const cmd of listSlashCommands()) {
     const bucket = bucketOf(cmd.category, cmd.source === "plugin" ? "plugins" : "chat")
     buckets.get(bucket)!.push(
@@ -64,6 +66,9 @@ export function buildAllCommandsSubmenu(): TrayMenuSubmenu {
   }
 
   // Plugin-contributed tray items ─ source: lib/tray/registry.
+  // `item.label` is the literal display string supplied by the plugin via
+  // `registerTrayItem`; it is not an i18n key and flows through the
+  // resilient translator unchanged.
   for (const item of listTrayItems()) {
     const bucket = bucketOf(item.category, "plugins")
     buckets.get(bucket)!.push(
@@ -78,6 +83,8 @@ export function buildAllCommandsSubmenu(): TrayMenuSubmenu {
   // commands registered via `lib/plugin/commands/registry.ts`. Slash
   // commands and tray items already have dedicated buckets above; this is
   // the path for anything registered as a plain `CommandRegistration`.
+  // `cmd.title ?? id` is a literal display string (or fallback to the raw
+  // id), not an i18n key — same convention as the two loops above.
   for (const id of getCommands(true)) {
     const cmd = getCommand(id)
     if (!cmd) continue

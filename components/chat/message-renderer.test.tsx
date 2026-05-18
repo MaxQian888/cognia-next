@@ -517,6 +517,53 @@ describe("team speaker display", () => {
   })
 })
 
+// ── mention highlighting (user messages) ─────────────────────────────────────
+
+describe("mention highlighting", () => {
+  it("renders one styled mention chip per known character match", () => {
+    const characterById = new Map([
+      ["char_alice", { id: "char_alice", name: "Alice", systemPrompt: "" }],
+      ["char_bob", { id: "char_bob", name: "Bob", systemPrompt: "" }],
+    ]) as unknown as Map<string, import("@/lib/claude/types").Character>
+
+    const msg: UIMessage = {
+      id: "u-mentions",
+      role: "user",
+      parts: [{ type: "text", text: "hey @Alice and @Bob, look here" }],
+    }
+
+    const { container } = render(<MessageRenderer message={msg} characterById={characterById} />)
+
+    const chips = container.querySelectorAll("span.rounded.bg-muted")
+    expect(chips.length).toBe(2)
+    expect(chips[0].textContent).toBe("@Alice")
+    expect(chips[1].textContent).toBe("@Bob")
+  })
+
+  it("preserves mention chips when the same message re-renders with identical text", () => {
+    const characterById = new Map([
+      ["char_alice", { id: "char_alice", name: "Alice", systemPrompt: "" }],
+    ]) as unknown as Map<string, import("@/lib/claude/types").Character>
+
+    const msg: UIMessage = {
+      id: "u-mention-stable",
+      role: "user",
+      parts: [{ type: "text", text: "ping @Alice" }],
+    }
+
+    const { container, rerender } = render(
+      <MessageRenderer message={msg} characterById={characterById} />
+    )
+    const firstChip = container.querySelector("span.rounded.bg-muted")
+    expect(firstChip?.textContent).toBe("@Alice")
+
+    rerender(<MessageRenderer message={msg} characterById={characterById} />)
+    const secondChip = container.querySelector("span.rounded.bg-muted")
+    // React reconciliation reuses the same DOM node when keys are stable.
+    expect(secondChip).toBe(firstChip)
+  })
+})
+
 // ── regenerate action ─────────────────────────────────────────────────────────
 
 describe("regenerate action", () => {

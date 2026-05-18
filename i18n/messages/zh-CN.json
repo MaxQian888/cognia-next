@@ -468,6 +468,8 @@
       "input": "输入",
       "output": "输出",
       "cache": "缓存",
+      "cacheWriteShort": "写",
+      "cacheReadShort": "读",
       "cost": "成本",
       "byModelTitle": "按模型拆分",
       "noModelData": "尚无持久化用量记录——上面的汇总来自内存中已加载的轮次。",
@@ -616,7 +618,19 @@
         "usageInput": "输入",
         "usageOutput": "输出",
         "usageCached": "缓存",
-        "pluginExtensionOverflow": "更多插件操作"
+        "pluginExtensionOverflow": "更多插件操作",
+        "workflow": {
+          "validate": "校验",
+          "validateAria": "校验当前工作流",
+          "validateTooltip": "运行结构校验器，让代理帮你修复发现的问题",
+          "explain": "解释",
+          "explainAria": "解释所选节点",
+          "explainTooltip": "让代理解释当前选中的 {count} 个节点",
+          "explainNoSelection": "请先在画布上选中一个或多个节点",
+          "suggest": "下一个",
+          "suggestAria": "建议下一个节点",
+          "suggestTooltip": "让 workflow-designer 子代理推荐下一个要添加的节点"
+        }
       },
       "helperHints": {
         "send": "⏎ 发送 · ⇧⏎ 换行",
@@ -6285,6 +6299,12 @@
     "enableA2UI": "启用 A2UI",
     "enableA2UIDesc": "在 A2UI 模板中呈现模式响应。",
     "modePreview": "模式预览",
+    "categoryLabel": "分类：",
+    "outputLabel": "输出：",
+    "toolsLabel": "工具：",
+    "previewLabel": "实时预览：",
+    "yes": "是",
+    "no": "否",
     "generateFromDescription": "通过描述生成",
     "generateFromDescriptionDesc": "描述你的需求，编辑器会自动填入工具、提示词与分类。",
     "generationPromptPlaceholder": "例如：能讲解 diff、并能运行测试的编程助手……",
@@ -8906,7 +8926,69 @@
       "redownload": "重新下载",
       "modelDir": "存储位置：{path}",
       "downloadFailed": "下载失败：{message}",
-      "downloadComplete": "模型已就绪（共 {bytes} 字节）"
+      "downloadComplete": "模型已就绪（共 {bytes} 字节）",
+      "emptyNoModelFiles": "该后端没有需要管理的模型文件。",
+      "shellUnavailable": "本地模型管理仅在桌面端可用。"
+    },
+    "sidebar": {
+      "searchPlaceholder": "搜索 OCR provider",
+      "categoryAll": "全部",
+      "clearCache": "清空 OCR 缓存",
+      "stats": "已启用 {enabled} · 本地 {local} · 云端 {cloud}",
+      "mobileTrigger": "Provider 列表"
+    },
+    "status": {
+      "ready": "就绪",
+      "connected": "已连接",
+      "notConfigured": "未配置",
+      "unsupported": "不可用",
+      "error": "异常",
+      "disabled": "已停用"
+    },
+    "detail": {
+      "tabsConfig": "配置",
+      "tabsModels": "模型",
+      "tabsAdvanced": "高级",
+      "enable": "启用",
+      "openDocs": "查看文档",
+      "shellSupportBrowser": "浏览器",
+      "shellSupportDesktop": "桌面",
+      "shellSupportMobile": "移动",
+      "noCredentials": "该引擎无需凭据。"
+    },
+    "credentials": {
+      "apiKey": "API key",
+      "appId": "App ID",
+      "appKey": "App key",
+      "applicationId": "Application ID",
+      "password": "Password",
+      "accessKeyId": "AWS access key ID",
+      "secretAccessKey": "AWS secret access key",
+      "sessionToken": "AWS session token（可选）",
+      "endpoint": "端点 URL",
+      "show": "显示",
+      "hide": "隐藏",
+      "placeholder": "粘贴凭据",
+      "reusesMainProviderHint": "复用「AI Providers」页面里的 {provider} API key。"
+    },
+    "probe": {
+      "button": "探测连接",
+      "running": "探测中…",
+      "successWithLatency": "探测成功（{ms} ms）",
+      "failure": "探测失败：{message}"
+    },
+    "advanced": {
+      "title": "Provider 局部覆盖",
+      "description": "留空即使用全局默认值。",
+      "formatOverride": "输出格式覆盖",
+      "formatInherit": "沿用全局",
+      "languagesOverride": "语言覆盖",
+      "languagesHint": "逗号分隔，如 en,zh。",
+      "modelVariant": "模型变体",
+      "region": "区域",
+      "promptTemplate": "提示词模板",
+      "reset": "重置为默认值",
+      "clearProviderCache": "清空该 provider 的缓存"
     },
     "composer": {
       "menu": {
@@ -8938,7 +9020,28 @@
     },
     "autoRouter": {
       "fellBackToCloud": "本地 OCR 引擎不可用，已切换到 {provider}。",
-      "fellBackToWasm": "回退到浏览器内的 Tesseract。"
+      "fellBackToWasm": "回退到浏览器内的 Tesseract。",
+      "title": "Auto-Router",
+      "description": "未显式指定 provider 时使用以下配置。",
+      "defaultBadge": "默认",
+      "label": "Auto-Router",
+      "subtitleAuto": "auto → {fallback}",
+      "subtitleFixed": "→ {provider}",
+      "defaultProvider": "默认 provider",
+      "defaultFormat": "默认输出格式",
+      "defaultLanguages": "默认语言",
+      "languagesHint": "逗号分隔的语言代码（如 en, zh）。",
+      "maxImageDimension": "最大图像边长（像素）",
+      "maxImageHint": "发送前降采样，用于约束大模型视觉的 token 成本。",
+      "cloudFallback": "云端回退",
+      "cloudFallbackHint": "本地引擎不可用时使用云端 provider。",
+      "cloudFallbackProvider": "云端回退 provider",
+      "pdfFastPath": "PDF 文本层快速路径",
+      "pdfFastPathHint": "PDF 页面已有文本层时跳过 OCR。",
+      "cacheTtlDays": "缓存有效期（天）",
+      "cacheTtlHint": "0 表示永不过期。默认 30。",
+      "clearAllCache": "清空全部 OCR 缓存",
+      "noFallbackProvider": "未选择云端 provider"
     },
     "langPacks": {
       "manageButton": "管理语言包",
@@ -9777,6 +9880,57 @@
     "notFoundTitle": "未找到工作流",
     "notFoundDescription": "你要打开的工作流不存在或已被删除。",
     "notFoundBackToLibrary": "返回工作流库",
+    "library": {
+      "title": "工作流",
+      "subtitle": "围绕触发器、AI 和连接器的可视化编排。",
+      "new": "新建工作流",
+      "searchPlaceholder": "搜索工作流…",
+      "empty": {
+        "title": "暂无工作流",
+        "description": "创建第一个工作流，把多步流程串联到聊天、触发器和工具之上。",
+        "cta": "创建工作流",
+        "titleQuery": "未找到匹配的工作流",
+        "descriptionQuery": "试试其它关键词，或清空筛选条件。"
+      },
+      "createDialog": {
+        "title": "创建工作流",
+        "description": "先取个名字即可 —— 描述和图谱都能在编辑器里继续完善。",
+        "name": "名称",
+        "namePlaceholder": "未命名工作流",
+        "descriptionLabel": "描述",
+        "descriptionPlaceholder": "（可选）一句话简介",
+        "cancel": "取消",
+        "create": "创建"
+      },
+      "statBar": {
+        "runs7d": "近 7 天运行",
+        "successRate": "成功率",
+        "activeWorkflows": "活跃工作流",
+        "failedToday": "今日失败"
+      }
+    },
+    "card": {
+      "edit": "编辑",
+      "viewRuns": "查看运行记录",
+      "duplicate": "复制",
+      "delete": "删除",
+      "deleted": "工作流已删除",
+      "deleteFailed": "删除工作流失败",
+      "duplicated": "工作流已复制",
+      "duplicateFailed": "复制工作流失败",
+      "node": "{count, plural, other {# 个节点}}",
+      "trigger": "{count, plural, other {# 个触发器}}",
+      "action": "{count, plural, other {# 个操作}}",
+      "builtin": "内置",
+      "template": "模板",
+      "updated": "更新于 {ago}",
+      "deleteConfirm": {
+        "title": "确认删除工作流？",
+        "description": "将永久删除「{name}」及其运行历史，且无法撤销。",
+        "cancel": "取消",
+        "confirm": "删除"
+      }
+    },
     "canvasToast": {
       "savedOk": "工作流已保存",
       "saveFailed": "保存工作流失败",

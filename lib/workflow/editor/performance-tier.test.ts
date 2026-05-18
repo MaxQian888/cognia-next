@@ -53,6 +53,7 @@ describe("flagsForTier", () => {
       liveQueryWhileDragging: true,
       inspectorLiveValidation: true,
       nodeCardTransitions: true,
+      cullingThreshold: 25,
     })
   })
 
@@ -65,6 +66,7 @@ describe("flagsForTier", () => {
     expect(flags.liveQueryWhileDragging).toBe(false)
     expect(flags.inspectorLiveValidation).toBe(true)
     expect(flags.nodeCardTransitions).toBe(true)
+    expect(flags.cullingThreshold).toBe(0)
   })
 
   it("reduced tier turns motion and minimap off", () => {
@@ -76,11 +78,20 @@ describe("flagsForTier", () => {
       liveQueryWhileDragging: false,
       inspectorLiveValidation: false,
       nodeCardTransitions: false,
+      cullingThreshold: 0,
     })
   })
 
   it("returns a fresh reference each call (does not leak the internal table)", () => {
     expect(flagsForTier("high")).not.toBe(flagsForTier("high"))
+  })
+
+  it("cullingThreshold is low enough on high tier to engage on small graphs", () => {
+    // Was a hard 40 in canvas.tsx; tier-driven now so balanced/reduced can
+    // unconditionally cull (0) and high still has a small-graph fast path.
+    expect(flagsForTier("high").cullingThreshold).toBeLessThan(40)
+    expect(flagsForTier("balanced").cullingThreshold).toBe(0)
+    expect(flagsForTier("reduced").cullingThreshold).toBe(0)
   })
 })
 

@@ -116,7 +116,7 @@ export function LocalProviderCard({
           <Server className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm font-medium">{config.name}</span>
           {isConnected && (
-            <Badge variant="default" className="text-[10px] bg-green-600">
+            <Badge variant="success" className="text-[10px]">
               <Check className="h-2.5 w-2.5 mr-0.5" />
               {t("connected")}
             </Badge>

@@ -1,8 +1,9 @@
 // Locked default tray layout — see plan §"Default tray layout".
 //
 // Strings here are i18n keys, not the visible labels. `lib/tray/builder.ts`
-// resolves them through `useTranslations("tray")` before flushing the DTO
-// to Rust. Accelerators are the chord strings the Rust shortcut registry
+// resolves them through the root `useTranslations()` translator (the keys
+// already include the `tray.` prefix) before flushing the DTO to Rust.
+// Accelerators are the chord strings the Rust shortcut registry
 // will report for the corresponding ids; if the user rebinds via the
 // settings UI, the renderer will rewrite the field before the next push.
 

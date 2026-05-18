@@ -1,97 +1,162 @@
 "use client"
 
 /**
- * OCR settings — entry component rendered from `settings-shell.tsx` when the
- * `ocr` section is active. Mirrors the layout used by `components/settings/
- * search/` (left list of providers, right detail pane), but lighter — OCR
- * config is much smaller per provider than the main LLM-provider system.
+ * OCR settings — top-level shell rendered from `settings-shell.tsx` when the
+ * `ocr` section is active.
+ *
+ * Mirrors the model-provider settings layout: a left sidebar with a pinned
+ * Auto-Router pseudo-entry plus one row per registered OCR provider, and a
+ * right detail panel with Config / Models / Advanced tabs (or the Auto-Router
+ * defaults form when the pinned entry is selected). Mobile shells get a Sheet
+ * drawer for the sidebar.
+ *
+ * This file is the orchestrator — it holds all in-session state and threads
+ * callbacks down into `OcrSidebar`, `OcrDetailPanel`, and the three tab
+ * components under `./tabs`.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Menu } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
+import { detectNativePlatform, type NativePlatform } from "@/lib/capacitor/_shared"
+import type { ProbeOutcome } from "@/lib/ocr/probe"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
-import { Separator } from "@/components/ui/separator"
-import {
-  type OcrProviderCategory,
   DEFAULT_OCR_SETTINGS,
+  type OcrProviderCategory,
+  type OcrProviderShellSupport,
   type UserOcrSettings,
 } from "@/lib/ocr/types"
+import { OcrDetailPanel } from "./ocr-detail-panel"
+import {
+  OCR_AUTO_ROUTER_ID,
+  OcrSidebar,
+  type OcrCategoryFilter,
+  type OcrSidebarProvider,
+} from "./ocr-sidebar"
+import type { OcrProviderStatus } from "./ocr-sidebar-item"
+import { OcrAutoRouterPanel } from "./tabs/ocr-auto-router-panel"
+import { OcrAdvancedTab } from "./tabs/ocr-advanced-tab"
+import { OcrConfigTab } from "./tabs/ocr-config-tab"
+import { BACKENDS_WITH_MANAGED_MODELS, OcrModelsTab } from "./tabs/ocr-models-tab"
 
-const PROVIDER_LIST: Array<{
+// Re-export the model-manager API so external consumers (and the existing
+// test suite at the time of the redesign) keep their import paths working.
+export {
+  LocalModelManager,
+  BACKENDS_WITH_MANAGED_MODELS,
+  buildTauriModelBridge,
+} from "./tabs/ocr-models-tab"
+export type {
+  ModelStatus,
+  ModelFileStatus,
+  DownloadProgressEvent,
+  OcrModelBridge,
+} from "./tabs/ocr-models-tab"
+
+/** Static descriptor of every shipped OCR provider, used by the settings UI. */
+export interface OcrProviderDescriptor {
   id: string
   category: OcrProviderCategory
-}> = [
-  { id: "mistral-ocr", category: "document-cloud" },
-  { id: "google-vision", category: "document-cloud" },
-  { id: "aws-textract", category: "document-cloud" },
-  { id: "azure-document-intelligence", category: "document-cloud" },
-  { id: "anthropic-vision", category: "llm-vision" },
-  { id: "openai-vision", category: "llm-vision" },
-  { id: "gemini-vision", category: "llm-vision" },
-  { id: "mathpix", category: "specialist" },
-  { id: "ocr-space", category: "specialist" },
-  { id: "abbyy-cloud", category: "specialist" },
-  { id: "nanonets", category: "specialist" },
-  { id: "lark-basic", category: "lark" },
-  { id: "tesseract-wasm", category: "local" },
-  { id: "tesseract-native", category: "local" },
-  { id: "windows-media-ocr", category: "local" },
-  { id: "apple-vision", category: "local" },
-  { id: "mlkit-android", category: "local" },
-  { id: "ocrs", category: "local" },
-  { id: "paddle-ocr", category: "local" },
-  { id: "local-http", category: "local" },
-]
-
-/** Backends that ship their own downloaded model files. */
-const BACKENDS_WITH_MANAGED_MODELS = new Set<string>(["ocrs", "paddle-ocr"])
-
-export interface ModelFileStatus {
-  file_name: string
-  installed: boolean
-  expected_bytes: number
-  actual_bytes?: number
+  credentialKeys: readonly string[]
+  reusesMainProviderKey?: boolean
+  shells: OcrProviderShellSupport
 }
 
-export interface ModelStatus {
-  backend: string
-  installed: boolean
-  model_dir: string
-  files: ModelFileStatus[]
-  total_bytes: number
-  reason?: string
+const SHELLS_ALL: OcrProviderShellSupport = { browser: true, tauri: true, capacitor: true }
+const SHELLS_TAURI_ONLY: OcrProviderShellSupport = {
+  browser: false,
+  tauri: true,
+  capacitor: false,
 }
-
-export interface DownloadProgressEvent {
-  backend: string
-  file_name: string
-  bytes_done: number
-  bytes_total: number
-  file_index: number
-  file_count: number
+const SHELLS_TAURI_MOBILE: OcrProviderShellSupport = {
+  browser: false,
+  tauri: true,
+  capacitor: true,
+}
+const SHELLS_ANDROID_ONLY: OcrProviderShellSupport = {
+  browser: false,
+  tauri: false,
+  capacitor: true,
 }
 
 /**
- * Tauri-backed bridge for the local model manager. Injected so the test
- * suite can drive the UI without spinning up a Tauri runtime.
+ * Mirrors the registry shipped by `lib/ocr/runtime.ts`. The settings page
+ * intentionally re-declares the metadata here (rather than calling into the
+ * runtime) so it can render before `installOcrRuntime()` has populated the
+ * shared registry and so unit tests can render without a runtime boot.
  */
-export interface OcrModelBridge {
-  status(backend: string): Promise<ModelStatus>
-  download(backend: string): Promise<ModelStatus>
-  /** Subscribe to download-progress events. Returns an unsubscribe fn. */
-  onProgress(handler: (event: DownloadProgressEvent) => void): () => void
-}
+export const OCR_PROVIDER_REGISTRY: ReadonlyArray<OcrProviderDescriptor> = [
+  { id: "mistral-ocr", category: "document-cloud", credentialKeys: ["apiKey"], shells: SHELLS_ALL },
+  {
+    id: "google-vision",
+    category: "document-cloud",
+    credentialKeys: ["apiKey"],
+    shells: SHELLS_ALL,
+  },
+  {
+    id: "aws-textract",
+    category: "document-cloud",
+    credentialKeys: ["accessKeyId", "secretAccessKey", "sessionToken"],
+    shells: SHELLS_ALL,
+  },
+  {
+    id: "azure-document-intelligence",
+    category: "document-cloud",
+    credentialKeys: ["apiKey", "endpoint"],
+    shells: SHELLS_ALL,
+  },
+  {
+    id: "anthropic-vision",
+    category: "llm-vision",
+    credentialKeys: [],
+    reusesMainProviderKey: true,
+    shells: SHELLS_ALL,
+  },
+  {
+    id: "openai-vision",
+    category: "llm-vision",
+    credentialKeys: [],
+    reusesMainProviderKey: true,
+    shells: SHELLS_ALL,
+  },
+  {
+    id: "gemini-vision",
+    category: "llm-vision",
+    credentialKeys: [],
+    reusesMainProviderKey: true,
+    shells: SHELLS_ALL,
+  },
+  {
+    id: "mathpix",
+    category: "specialist",
+    credentialKeys: ["appId", "appKey"],
+    shells: SHELLS_ALL,
+  },
+  { id: "ocr-space", category: "specialist", credentialKeys: ["apiKey"], shells: SHELLS_ALL },
+  {
+    id: "abbyy-cloud",
+    category: "specialist",
+    credentialKeys: ["applicationId", "password"],
+    shells: SHELLS_ALL,
+  },
+  { id: "nanonets", category: "specialist", credentialKeys: ["apiKey"], shells: SHELLS_ALL },
+  {
+    id: "lark-basic",
+    category: "lark",
+    credentialKeys: ["appId", "appSecret"],
+    shells: SHELLS_ALL,
+  },
+  { id: "tesseract-wasm", category: "local", credentialKeys: [], shells: SHELLS_ALL },
+  { id: "tesseract-native", category: "local", credentialKeys: [], shells: SHELLS_TAURI_ONLY },
+  { id: "windows-media-ocr", category: "local", credentialKeys: [], shells: SHELLS_TAURI_ONLY },
+  { id: "apple-vision", category: "local", credentialKeys: [], shells: SHELLS_TAURI_MOBILE },
+  { id: "mlkit-android", category: "local", credentialKeys: [], shells: SHELLS_ANDROID_ONLY },
+  { id: "ocrs", category: "local", credentialKeys: [], shells: SHELLS_TAURI_ONLY },
+  { id: "paddle-ocr", category: "local", credentialKeys: [], shells: SHELLS_TAURI_ONLY },
+  { id: "local-http", category: "local", credentialKeys: [], shells: SHELLS_ALL },
+]
 
 export interface OcrSectionProps {
   settings?: UserOcrSettings
@@ -99,18 +164,44 @@ export interface OcrSectionProps {
   onClearCache?: () => Promise<void> | void
   onClearProviderCache?: (providerId: string) => Promise<void> | void
   /**
-   * Bridge to the Rust-side model manager. When omitted the page tries to
-   * build one from Tauri's `invoke` / `listen`; tests pass a stub directly.
-   * Pass `null` to suppress the model row entirely (e.g. on the browser
-   * shell where these backends can't run).
+   * Bridge to the Rust-side model manager. When omitted, `OcrModelsTab`
+   * tries to build one from Tauri's `invoke` / `listen`; tests pass a stub
+   * directly. Pass `null` to suppress local-model UI entirely (e.g. browser
+   * shell where the Rust commands aren't reachable).
    */
-  modelBridge?: OcrModelBridge | null
+  modelBridge?: import("./tabs/ocr-models-tab").OcrModelBridge | null
+  /**
+   * Wire a probe runner. When provided, every cloud / LLM-vision provider's
+   * Config tab gains a "Probe connection" button. Results are kept in
+   * session memory only.
+   */
+  onProbeProvider?: (providerId: string) => Promise<ProbeOutcome>
+  /**
+   * Initial credentials by provider id. The shell keeps these in local state
+   * and never persists them — wiring a real keyring resolver is parent work.
+   */
+  credentials?: Record<string, Record<string, string>>
+  onCredentialChange?: (providerId: string, key: string, value: string) => void
+  /** Override platform detection (tests). Defaults to runtime detection. */
+  platform?: NativePlatform
 }
 
 export function OcrSection(props: OcrSectionProps): React.ReactElement {
   const t = useTranslations()
-  const [settings, setSettings] = useState<UserOcrSettings>(props.settings ?? DEFAULT_OCR_SETTINGS)
-  const [selectedId, setSelectedId] = useState<string>(PROVIDER_LIST[0]!.id)
+  const [settings, setSettings] = useState<UserOcrSettings>(
+    () => props.settings ?? DEFAULT_OCR_SETTINGS
+  )
+  const [selectedId, setSelectedId] = useState<string>(OCR_AUTO_ROUTER_ID)
+  const [search, setSearch] = useState("")
+  const [categoryFilter, setCategoryFilter] = useState<OcrCategoryFilter>("all")
+  const [credentials, setCredentials] = useState<Record<string, Record<string, string>>>(
+    () => props.credentials ?? {}
+  )
+  const [probeResults, setProbeResults] = useState<Record<string, ProbeOutcome>>({})
+  const [probingId, setProbingId] = useState<string | null>(null)
+  const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
+
+  const platform = props.platform ?? detectNativePlatform()
 
   const handleChange = useCallback(
     (next: UserOcrSettings) => {
@@ -120,420 +211,292 @@ export function OcrSection(props: OcrSectionProps): React.ReactElement {
     [props]
   )
 
-  const grouped = useMemo(() => groupByCategory(PROVIDER_LIST), [])
+  const handleCredentialChange = useCallback(
+    (providerId: string, key: string, value: string) => {
+      setCredentials((prev) => ({
+        ...prev,
+        [providerId]: { ...(prev[providerId] ?? {}), [key]: value },
+      }))
+      props.onCredentialChange?.(providerId, key, value)
+    },
+    [props]
+  )
+
+  // Filter providers by search + category. Shell-incompatible entries stay
+  // visible (with an `unsupported` badge) so users can see the full menu.
+  const sidebarProviders: OcrSidebarProvider[] = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return OCR_PROVIDER_REGISTRY.filter((p) => {
+      if (categoryFilter !== "all" && p.category !== categoryFilter) return false
+      if (!q) return true
+      const label = (t(`ocr.providers.${p.id}.label`) ?? p.id).toLowerCase()
+      return p.id.toLowerCase().includes(q) || label.includes(q)
+    }).map((p) => buildSidebarRow(p, settings, credentials, probeResults, platform, t))
+  }, [search, categoryFilter, settings, credentials, probeResults, platform, t])
+
+  const stats = useMemo(() => computeSidebarStats(OCR_PROVIDER_REGISTRY, settings), [settings])
+
+  const autoRouterSubtitle = useMemo(() => {
+    if (settings.defaultProviderId === "auto") {
+      const fallback = settings.cloudFallbackProviderId ?? "auto"
+      return t("ocr.autoRouter.subtitleAuto", {
+        fallback: tryProviderLabel(t, fallback),
+      })
+    }
+    return t("ocr.autoRouter.subtitleFixed", {
+      provider: tryProviderLabel(t, settings.defaultProviderId),
+    })
+  }, [settings.defaultProviderId, settings.cloudFallbackProviderId, t])
+
+  const selectedProvider = useMemo(
+    () => OCR_PROVIDER_REGISTRY.find((p) => p.id === selectedId) ?? null,
+    [selectedId]
+  )
+
+  const handleProbe = useCallback(async () => {
+    if (!props.onProbeProvider || !selectedProvider) return
+    setProbingId(selectedProvider.id)
+    try {
+      const outcome = await props.onProbeProvider(selectedProvider.id)
+      setProbeResults((prev) => ({ ...prev, [selectedProvider.id]: outcome }))
+    } finally {
+      setProbingId(null)
+    }
+  }, [props, selectedProvider])
+
+  const handleSelect = useCallback((id: string) => {
+    setSelectedId(id)
+    setMobileSheetOpen(false)
+  }, [])
+
+  const sidebarNode = (
+    <OcrSidebar
+      providers={sidebarProviders}
+      autoRouterSubtitle={autoRouterSubtitle}
+      selectedId={selectedId}
+      onSelect={handleSelect}
+      searchQuery={search}
+      onSearchChange={setSearch}
+      categoryFilter={categoryFilter}
+      onCategoryChange={setCategoryFilter}
+      onClearCache={() => void props.onClearCache?.()}
+      stats={stats}
+    />
+  )
+
+  const autoRouterOptions = useMemo(
+    () =>
+      OCR_PROVIDER_REGISTRY.map((p) => ({
+        id: p.id,
+        label: t(`ocr.providers.${p.id}.label`),
+        isCloudOrVision: p.category === "document-cloud" || p.category === "llm-vision",
+      })),
+    [t]
+  )
+
+  const detailNode = (() => {
+    if (selectedId === OCR_AUTO_ROUTER_ID) {
+      return (
+        <OcrAutoRouterPanel
+          settings={settings}
+          onChange={handleChange}
+          providers={autoRouterOptions}
+          onClearCache={() => void props.onClearCache?.()}
+        />
+      )
+    }
+    if (!selectedProvider) {
+      return (
+        <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
+          Unknown OCR provider.
+        </div>
+      )
+    }
+    const isEnabled = settings.providerEnabled[selectedProvider.id] !== false
+    const status = deriveStatus(
+      selectedProvider,
+      credentials,
+      probeResults[selectedProvider.id],
+      platform
+    )
+    return (
+      <OcrDetailPanel
+        provider={{
+          id: selectedProvider.id,
+          name: t(`ocr.providers.${selectedProvider.id}.label`),
+          category: selectedProvider.category,
+        }}
+        status={status}
+        isEnabled={isEnabled}
+        onToggleEnabled={(next) =>
+          handleChange({
+            ...settings,
+            providerEnabled: {
+              ...settings.providerEnabled,
+              [selectedProvider.id]: next,
+            },
+          })
+        }
+        configTab={
+          <OcrConfigTab
+            providerId={selectedProvider.id}
+            credentialKeys={selectedProvider.credentialKeys}
+            reusesMainProviderKey={selectedProvider.reusesMainProviderKey}
+            shells={selectedProvider.shells}
+            credentials={credentials[selectedProvider.id] ?? {}}
+            onCredentialChange={(key, value) =>
+              handleCredentialChange(selectedProvider.id, key, value)
+            }
+            description={t(`ocr.providers.${selectedProvider.id}.description`)}
+            onProbe={props.onProbeProvider ? handleProbe : undefined}
+            probeOutcome={probeResults[selectedProvider.id]}
+            isProbing={probingId === selectedProvider.id}
+          />
+        }
+        modelsTab={
+          BACKENDS_WITH_MANAGED_MODELS.has(selectedProvider.id) ? (
+            <OcrModelsTab providerId={selectedProvider.id} bridge={props.modelBridge} />
+          ) : (
+            <OcrModelsTab providerId={selectedProvider.id} bridge={null} />
+          )
+        }
+        advancedTab={
+          <OcrAdvancedTab
+            providerId={selectedProvider.id}
+            config={settings.providerConfig[selectedProvider.id] ?? {}}
+            onConfigChange={(next) =>
+              handleChange({
+                ...settings,
+                providerConfig: { ...settings.providerConfig, [selectedProvider.id]: next },
+              })
+            }
+            onClearProviderCache={() => void props.onClearProviderCache?.(selectedProvider.id)}
+          />
+        }
+      />
+    )
+  })()
 
   return (
-    <div className="space-y-6" data-testid="ocr-section">
+    <div className="flex h-full min-h-0 flex-col gap-4" data-testid="ocr-section">
       <header>
         <h1 className="text-2xl font-semibold">{t("settings.tabs.ocr")}</h1>
         <p className="text-sm text-muted-foreground">{t("settings.descriptions.ocr")}</p>
       </header>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("ocr.defaults.title")}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="space-y-1">
-              <Label htmlFor="ocr-default-provider">{t("ocr.defaults.defaultProvider")}</Label>
-              <Select
-                value={settings.defaultProviderId}
-                onValueChange={(v) =>
-                  handleChange({
-                    ...settings,
-                    defaultProviderId: v as UserOcrSettings["defaultProviderId"],
-                  })
-                }
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[320px_1fr]">
+        {/* Desktop sidebar */}
+        <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
+          {sidebarNode}
+        </div>
+
+        {/* Mobile top bar with sheet trigger */}
+        <div className="flex items-center gap-2 md:hidden">
+          <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
+            <SheetTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0 gap-1.5"
+                data-testid="ocr-mobile-sheet-trigger"
               >
-                <SelectTrigger id="ocr-default-provider">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">{t("ocr.defaults.auto")}</SelectItem>
-                  {PROVIDER_LIST.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {t(`ocr.providers.${p.id}.label`)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <Label htmlFor="ocr-format">{t("ocr.params.format.label")}</Label>
-              <Select
-                value={settings.defaultFormat}
-                onValueChange={(v) =>
-                  handleChange({
-                    ...settings,
-                    defaultFormat: v as UserOcrSettings["defaultFormat"],
-                  })
-                }
-              >
-                <SelectTrigger id="ocr-format">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="markdown">{t("ocr.params.format.markdown")}</SelectItem>
-                  <SelectItem value="text">{t("ocr.params.format.text")}</SelectItem>
-                  <SelectItem value="blocks">{t("ocr.params.format.blocks")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <Label htmlFor="ocr-langs">{t("ocr.params.languages.label")}</Label>
-              <Input
-                id="ocr-langs"
-                value={settings.defaultLanguages.join(",")}
-                onChange={(e) =>
-                  handleChange({
-                    ...settings,
-                    defaultLanguages: e.target.value
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                  })
-                }
-              />
-            </div>
-
-            <div className="space-y-1">
-              <Label htmlFor="ocr-max-dim">{t("ocr.params.maxImageDimension.label")}</Label>
-              <Input
-                id="ocr-max-dim"
-                type="number"
-                min={256}
-                max={8192}
-                step={64}
-                value={settings.maxImageDimension}
-                onChange={(e) =>
-                  handleChange({
-                    ...settings,
-                    maxImageDimension: Number(e.target.value) || settings.maxImageDimension,
-                  })
-                }
-              />
-            </div>
-          </div>
-
-          <Separator />
-
-          <div className="flex items-center justify-between">
-            <div>
-              <Label className="text-sm">{t("ocr.defaults.cloudFallback")}</Label>
-              <p className="text-xs text-muted-foreground">{t("ocr.defaults.cloudFallbackHint")}</p>
-            </div>
-            <Switch
-              checked={settings.cloudFallbackEnabled}
-              onCheckedChange={(checked) =>
-                handleChange({ ...settings, cloudFallbackEnabled: checked })
-              }
-              aria-label={t("ocr.defaults.cloudFallback")}
-            />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div>
-              <Label className="text-sm">{t("ocr.defaults.pdfFastPath")}</Label>
-              <p className="text-xs text-muted-foreground">{t("ocr.defaults.pdfFastPathHint")}</p>
-            </div>
-            <Switch
-              checked={settings.pdfTextLayerFastPath}
-              onCheckedChange={(checked) =>
-                handleChange({ ...settings, pdfTextLayerFastPath: checked })
-              }
-              aria-label={t("ocr.defaults.pdfFastPath")}
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[260px_1fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("ocr.providers.title")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {(Object.entries(grouped) as Array<[OcrProviderCategory, typeof PROVIDER_LIST]>).map(
-              ([category, providers]) => (
-                <div key={category} className="space-y-1">
-                  <p className="text-xs font-medium uppercase text-muted-foreground">
-                    {t(`ocr.categories.${category}`)}
-                  </p>
-                  <ul role="list" className="space-y-1">
-                    {providers.map((p) => (
-                      <li key={p.id}>
-                        <button
-                          type="button"
-                          className={`w-full rounded px-2 py-1 text-left text-sm hover:bg-muted ${selectedId === p.id ? "bg-muted font-medium" : ""}`}
-                          onClick={() => setSelectedId(p.id)}
-                          aria-current={selectedId === p.id ? "true" : undefined}
-                        >
-                          {t(`ocr.providers.${p.id}.label`)}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )
-            )}
-          </CardContent>
-        </Card>
-
-        <Card data-testid="ocr-provider-detail">
-          <CardHeader>
-            <CardTitle>{t(`ocr.providers.${selectedId}.label`)}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              {t(`ocr.providers.${selectedId}.description`)}
+                <Menu className="h-4 w-4" />
+                {t("ocr.sidebar.mobileTrigger")}
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-[300px] p-0">
+              <SheetHeader className="px-3 pt-3">
+                <SheetTitle className="text-sm">{t("ocr.providers.title")}</SheetTitle>
+              </SheetHeader>
+              {sidebarNode}
+            </SheetContent>
+          </Sheet>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium">
+              {selectedId === OCR_AUTO_ROUTER_ID
+                ? t("ocr.autoRouter.label")
+                : t(`ocr.providers.${selectedId}.label`)}
             </p>
-            <div className="flex items-center justify-between">
-              <Label className="text-sm">{t("ocr.providers.enabled")}</Label>
-              <Switch
-                checked={settings.providerEnabled[selectedId] !== false}
-                onCheckedChange={(checked) =>
-                  handleChange({
-                    ...settings,
-                    providerEnabled: { ...settings.providerEnabled, [selectedId]: checked },
-                  })
-                }
-                aria-label={`${t("ocr.providers.enabled")} (${selectedId})`}
-              />
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void props.onClearProviderCache?.(selectedId)}
-            >
-              {t("ocr.cache.clearProvider")}
-            </Button>
+          </div>
+        </div>
 
-            {BACKENDS_WITH_MANAGED_MODELS.has(selectedId) && props.modelBridge !== null && (
-              <>
-                <Separator />
-                <LocalModelManager backend={selectedId} bridge={props.modelBridge} />
-              </>
-            )}
-          </CardContent>
-        </Card>
+        {/* Detail panel */}
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">{detailNode}</div>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("ocr.cache.title")}</CardTitle>
-        </CardHeader>
-        <CardContent className="flex items-center gap-4">
-          <Button variant="outline" onClick={() => void props.onClearCache?.()}>
-            {t("ocr.cache.clear")}
-          </Button>
-          <p className="text-sm text-muted-foreground">{t("ocr.cache.description")}</p>
-        </CardContent>
-      </Card>
     </div>
   )
 }
 
-function groupByCategory(
-  list: typeof PROVIDER_LIST
-): Record<OcrProviderCategory, typeof PROVIDER_LIST> {
-  const out: Record<OcrProviderCategory, typeof PROVIDER_LIST> = {
-    "document-cloud": [],
-    "llm-vision": [],
-    specialist: [],
-    lark: [],
-    local: [],
-  }
-  for (const p of list) {
-    out[p.category].push(p)
-  }
-  return out
-}
+/* ─────────────────────────── helpers ─────────────────────────── */
 
-/**
- * UI for the per-backend model-management row. Calls into the Rust
- * `ocr_model_status` and `ocr_download_model` commands via the supplied
- * bridge (Tauri in production, a stub in tests).
- */
-interface LocalModelManagerProps {
-  backend: string
-  bridge?: OcrModelBridge
-}
-
-export function LocalModelManager(props: LocalModelManagerProps): React.ReactElement {
-  const t = useTranslations()
-  const [bridge] = useState<OcrModelBridge | null>(() => props.bridge ?? buildTauriModelBridge())
-  const [status, setStatus] = useState<ModelStatus | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [downloading, setDownloading] = useState(false)
-  const [progress, setProgress] = useState<DownloadProgressEvent | null>(null)
-
-  // Fetch initial status. Re-fetched after every download attempt.
-  const refresh = useCallback(async () => {
-    if (!bridge) return
-    try {
-      const s = await bridge.status(props.backend)
-      setStatus(s)
-      setError(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    }
-  }, [bridge, props.backend])
-
-  useEffect(() => {
-    // Initial mount-time fetch of model status. The setState inside
-    // `refresh()` is exactly what the effect is here for — synchronizing
-    // local state with the Rust-side status. Cascading-render concerns
-    // don't apply because `refresh` is stable across re-renders (its
-    // closure only depends on `bridge` and `props.backend`).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refresh()
-  }, [refresh])
-
-  useEffect(() => {
-    if (!bridge) return
-    const off = bridge.onProgress((event) => {
-      if (event.backend === props.backend) {
-        setProgress(event)
-      }
-    })
-    return off
-  }, [bridge, props.backend])
-
-  const handleDownload = useCallback(async () => {
-    if (!bridge) return
-    setDownloading(true)
-    setError(null)
-    setProgress(null)
-    try {
-      const after = await bridge.download(props.backend)
-      setStatus(after)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setDownloading(false)
-      setProgress(null)
-    }
-  }, [bridge, props.backend])
-
-  if (!bridge)
-    return <p className="text-xs text-muted-foreground">{t("ocr.modelStatus.description")}</p>
-
-  const missingCount = status ? status.files.filter((f) => !f.installed).length : 0
-  const percent =
-    progress && progress.bytes_total > 0
-      ? Math.min(100, Math.round((progress.bytes_done / progress.bytes_total) * 100))
-      : 0
-
-  return (
-    <div className="space-y-2" data-testid={`ocr-model-manager-${props.backend}`}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="space-y-0.5">
-          <Label className="text-sm">{t("ocr.modelStatus.title")}</Label>
-          <p className="text-xs text-muted-foreground">{t("ocr.modelStatus.description")}</p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void handleDownload()}
-          disabled={downloading}
-          aria-label={t("ocr.modelStatus.download")}
-        >
-          {status?.installed ? t("ocr.modelStatus.redownload") : t("ocr.modelStatus.download")}
-        </Button>
-      </div>
-      {status && status.reason ? (
-        <p className="text-xs text-muted-foreground">{status.reason}</p>
-      ) : status ? (
-        <p className="text-xs text-muted-foreground">
-          {status.installed
-            ? t("ocr.modelStatus.downloadComplete", { bytes: status.total_bytes })
-            : t("ocr.modelStatus.missing", { count: missingCount })}
-        </p>
-      ) : null}
-      {status?.model_dir && (
-        <p className="break-all text-xs text-muted-foreground">
-          {t("ocr.modelStatus.modelDir", { path: status.model_dir })}
-        </p>
-      )}
-      {downloading && progress && (
-        <div className="space-y-1">
-          <p className="text-xs">
-            {t("ocr.modelStatus.downloading", {
-              file: progress.file_name,
-              percent,
-            })}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {t("ocr.modelStatus.downloadingDetail", {
-              bytesDone: progress.bytes_done,
-              bytesTotal: progress.bytes_total,
-              index: progress.file_index,
-              count: progress.file_count,
-            })}
-          </p>
-        </div>
-      )}
-      {error && (
-        <p className="text-xs text-destructive" role="alert">
-          {t("ocr.modelStatus.downloadFailed", { message: error })}
-        </p>
-      )}
-    </div>
-  )
-}
-
-/**
- * Build a bridge backed by the real Tauri commands. Returns `null` when
- * the app is running in a non-Tauri shell (browser export / Capacitor)
- * where the Rust side isn't reachable — the parent then hides the row.
- */
-function buildTauriModelBridge(): OcrModelBridge | null {
-  if (typeof window === "undefined") return null
-  if (!("__TAURI_INTERNALS__" in (window as unknown as Record<string, unknown>))) return null
-  // Late-import the Tauri SDK so the static export's tree-shaker can drop
-  // it when the binding isn't reachable.
-  type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>
-  type ListenFn = <T>(event: string, cb: (e: { payload: T }) => void) => Promise<() => void>
-  let invokeFnPromise: Promise<InvokeFn> | null = null
-  let listenFnPromise: Promise<ListenFn> | null = null
-  const getInvoke = (): Promise<InvokeFn> => {
-    invokeFnPromise ??= import("@tauri-apps/api/core").then((m) => m.invoke as InvokeFn)
-    return invokeFnPromise
-  }
-  const getListen = (): Promise<ListenFn> => {
-    listenFnPromise ??= import("@tauri-apps/api/event").then((m) => m.listen as ListenFn)
-    return listenFnPromise
-  }
+function buildSidebarRow(
+  provider: OcrProviderDescriptor,
+  settings: UserOcrSettings,
+  credentials: Record<string, Record<string, string>>,
+  probeResults: Record<string, ProbeOutcome>,
+  platform: NativePlatform,
+  t: ReturnType<typeof useTranslations>
+): OcrSidebarProvider {
+  const status = deriveStatus(provider, credentials, probeResults[provider.id], platform)
+  const disabled = settings.providerEnabled[provider.id] === false
   return {
-    async status(backend) {
-      const invoke = await getInvoke()
-      return invoke<ModelStatus>("ocr_model_status", { backend })
-    },
-    async download(backend) {
-      const invoke = await getInvoke()
-      await invoke<unknown>("ocr_download_model", { backend })
-      return invoke<ModelStatus>("ocr_model_status", { backend })
-    },
-    onProgress(handler) {
-      let unlisten: (() => void) | null = null
-      let detached = false
-      void getListen().then(async (listen) => {
-        const off = await listen<DownloadProgressEvent>("ocr://download-progress", (event) =>
-          handler(event.payload)
-        )
-        if (detached) {
-          off()
-        } else {
-          unlisten = off
-        }
-      })
-      return () => {
-        detached = true
-        unlisten?.()
-      }
-    },
+    id: provider.id,
+    name: t(`ocr.providers.${provider.id}.label`),
+    subtitle: t(`ocr.categories.${provider.category}`),
+    status,
+    disabled,
   }
+}
+
+function deriveStatus(
+  provider: OcrProviderDescriptor,
+  credentials: Record<string, Record<string, string>>,
+  lastProbe: ProbeOutcome | undefined,
+  platform: NativePlatform
+): OcrProviderStatus {
+  if (!shellAllowsPlatform(provider.shells, platform)) return "unsupported"
+  if (lastProbe) return lastProbe.ok ? "connected" : "error"
+  if (provider.reusesMainProviderKey) {
+    // We can't know without probing — surface "not configured" so the UI
+    // nudges the user toward the AI Providers page.
+    return "not-configured"
+  }
+  if (provider.credentialKeys.length === 0) return "ready"
+  const filled = credentials[provider.id] ?? {}
+  const allPresent = provider.credentialKeys.every((k) => {
+    if (k === "sessionToken") return true // AWS optional token doesn't gate readiness
+    return typeof filled[k] === "string" && filled[k]!.length > 0
+  })
+  return allPresent ? "connected" : "not-configured"
+}
+
+function shellAllowsPlatform(shells: OcrProviderShellSupport, platform: NativePlatform): boolean {
+  switch (platform) {
+    case "tauri":
+      return shells.tauri
+    case "mobile":
+      return shells.capacitor
+    case "web":
+      return shells.browser
+  }
+}
+
+function computeSidebarStats(
+  registry: ReadonlyArray<OcrProviderDescriptor>,
+  settings: UserOcrSettings
+) {
+  let enabled = 0
+  let local = 0
+  let cloud = 0
+  for (const p of registry) {
+    if (settings.providerEnabled[p.id] !== false) enabled += 1
+    if (p.category === "local") local += 1
+    if (p.category === "document-cloud" || p.category === "llm-vision") cloud += 1
+  }
+  return { enabled, local, cloud }
+}
+
+function tryProviderLabel(t: ReturnType<typeof useTranslations>, id: string): string {
+  if (id === "auto") return id
+  return t(`ocr.providers.${id}.label`)
 }

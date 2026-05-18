@@ -40,7 +40,7 @@ export const ProviderStatusBadge = React.memo(function ProviderStatusBadge({
 
     case "connected":
       return (
-        <Badge variant="default" className={`h-6 text-xs gap-1 bg-green-600 ${className || ""}`}>
+        <Badge variant="success" className={`h-6 text-xs gap-1 ${className || ""}`}>
           <Check className="h-3 w-3" />
           {latency ? `${latency}ms` : !compact && (t("connected") || "Connected")}
         </Badge>

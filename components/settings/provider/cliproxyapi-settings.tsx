@@ -199,7 +199,7 @@ export function CLIProxyAPISettings({ className }: CLIProxyAPISettingsProps) {
               <Server className="h-4 w-4 text-blue-500" />
               <CardTitle className="text-sm">{t("serverStatus")}</CardTitle>
               {connectionStatus === "connected" && (
-                <Badge variant="default" className="bg-green-600 text-xs">
+                <Badge variant="success" className="text-xs">
                   <Check className="h-3 w-3 mr-1" />
                   {t("connected")}
                 </Badge>

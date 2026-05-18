@@ -353,7 +353,7 @@ export function LocalProviderSetupWizard({
             </div>
 
             {verificationResult?.success && (
-              <Badge variant="default" className="bg-green-600">
+              <Badge variant="success">
                 <Check className="h-3 w-3 mr-1" />
                 {t("connected")}
               </Badge>

@@ -40,6 +40,13 @@ export interface EffectivePerfFlags {
   inspectorLiveValidation: boolean
   /** Apply CSS transitions on node card shadow/ring on hover/select. */
   nodeCardTransitions: boolean
+  /**
+   * Node count at which React Flow's `onlyRenderVisibleElements` kicks in.
+   * Below this, the per-render measure+filter cost outweighs the savings on
+   * the `high` tier; `balanced`/`reduced` always cull (threshold 0) since
+   * they're already in a degraded budget.
+   */
+  cullingThreshold: number
 }
 
 export interface ResolveOpts {
@@ -66,6 +73,7 @@ const FLAGS_BY_TIER: Record<ResolvedPerformanceTier, EffectivePerfFlags> = {
     liveQueryWhileDragging: true,
     inspectorLiveValidation: true,
     nodeCardTransitions: true,
+    cullingThreshold: 25,
   },
   balanced: {
     showMinimap: true,
@@ -75,6 +83,7 @@ const FLAGS_BY_TIER: Record<ResolvedPerformanceTier, EffectivePerfFlags> = {
     liveQueryWhileDragging: false,
     inspectorLiveValidation: true,
     nodeCardTransitions: true,
+    cullingThreshold: 0,
   },
   reduced: {
     showMinimap: false,
@@ -84,6 +93,7 @@ const FLAGS_BY_TIER: Record<ResolvedPerformanceTier, EffectivePerfFlags> = {
     liveQueryWhileDragging: false,
     inspectorLiveValidation: false,
     nodeCardTransitions: false,
+    cullingThreshold: 0,
   },
 }
 

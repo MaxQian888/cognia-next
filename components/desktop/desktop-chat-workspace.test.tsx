@@ -124,10 +124,13 @@ jest.mock("@/components/chat/character-picker", () => ({
   CharacterPicker: ({ open }: { open: boolean }) =>
     open ? <div data-testid="char-picker" /> : null,
 }))
+const channelListPropsLog: Array<Record<string, unknown>> = []
 jest.mock("@/components/desktop/channel-list", () => ({
-  ChannelList: ({ onSelect }: { onSelect: (id: string) => void }) => (
-    <button data-testid="channel-select-stub" onClick={() => onSelect("s-2")} />
-  ),
+  ChannelList: (props: Record<string, unknown>) => {
+    channelListPropsLog.push(props)
+    const onSelect = props.onSelect as (id: string) => void
+    return <button data-testid="channel-select-stub" onClick={() => onSelect("s-2")} />
+  },
 }))
 jest.mock("@/components/shell/member-list", () => ({
   MemberList: () => <div data-testid="member-list" />,
@@ -167,6 +170,7 @@ beforeEach(() => {
   selectedGuild = { kind: "dm" }
   errorMessageRef.current = null
   pendingSettingsRequestRef.current = null
+  channelListPropsLog.length = 0
 })
 
 test("auto-selects a matching session on first render and logs", async () => {
@@ -222,4 +226,25 @@ test("marks the chat <main> region as a scope-target for chat backgrounds", () =
   const { container } = render(<DesktopChatWorkspace />)
   const main = container.querySelector("main[data-bg-target='chat']")
   expect(main).not.toBeNull()
+})
+
+test("ChannelList callback props stay referentially stable across re-renders", () => {
+  sessionsRef.current = [
+    { id: "s-1", title: "x", kind: "direct", createdAt: 0, updatedAt: 0 } as unknown as ChatSession,
+  ]
+  const { rerender } = render(<DesktopChatWorkspace />)
+  expect(channelListPropsLog.length).toBeGreaterThanOrEqual(1)
+  const firstProps = channelListPropsLog[channelListPropsLog.length - 1]
+
+  // Force another render of the workspace without changing any dependency
+  // that feeds the channel-list callbacks. useCallback should return the
+  // same references.
+  rerender(<DesktopChatWorkspace />)
+  const secondProps = channelListPropsLog[channelListPropsLog.length - 1]
+
+  expect(secondProps.onSelect).toBe(firstProps.onSelect)
+  expect(secondProps.onNewDirect).toBe(firstProps.onNewDirect)
+  expect(secondProps.onNewTeamConversation).toBe(firstProps.onNewTeamConversation)
+  expect(secondProps.onDelete).toBe(firstProps.onDelete)
+  expect(secondProps.onRename).toBe(firstProps.onRename)
 })

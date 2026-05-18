@@ -15,9 +15,15 @@
  * branch in `resolveSendOptions` (Phase C.6) layers the workflow
  * subagents + system-prompt snapshot on every send so the agent has
  * grounding without re-prompting the user.
+ *
+ * In addition to the generic chat plumbing, this tab provides a
+ * `WorkflowEditorProvider` so the workflow-specific composer toolbar
+ * (`WorkflowBottomToolbar`) can read the editor store (for selection)
+ * and dispatch workflow quick actions (Validate / Explain / Suggest)
+ * back through the same `claude.send` path.
  */
 
-import { useCallback } from "react"
+import { useCallback, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { ChatPane } from "@/components/chat/chat-view"
@@ -25,12 +31,22 @@ import { useClaudeChat } from "@/hooks/chat/use-claude-chat"
 import { useWorkflowEditorSession } from "@/hooks/chat/use-workflow-editor-session"
 import { Loader2Icon, MessageSquareIcon } from "lucide-react"
 import type { SendContent } from "@/lib/claude/types"
+import type { EditorStore } from "@/lib/workflow/editor/store"
+import {
+  WorkflowEditorProvider,
+  type WorkflowEditorContextValue,
+  type WorkflowQuickActionKind,
+} from "@/lib/workflow/editor/workflow-editor-context"
+import { buildQuickActionPrompt } from "@/lib/workflow/editor/quick-action-prompts"
 
 export function WorkflowEditorChatTab({
+  useStore,
   workflowId,
   workflowName,
   onOpenWorkflowSettings,
 }: {
+  /** Per-instance editor store (created by the canvas). */
+  useStore: EditorStore
   workflowId: string | undefined
   workflowName: string | undefined
   /** Hook to open the workflow-settings dialog when the composer asks for "settings". */
@@ -66,6 +82,25 @@ export function WorkflowEditorChatTab({
     [claude]
   )
 
+  // Build the workflow quick-action prompts from the *current* editor
+  // state at click time — we read directly via `getState()` so the prompt
+  // captures whatever the user just selected, without making the toolbar
+  // re-render on every selection change.
+  const handleQuickAction = useCallback(
+    async (kind: WorkflowQuickActionKind) => {
+      const state = useStore.getState()
+      const prompt = buildQuickActionPrompt(kind, state)
+      if (!prompt) return
+      await handleSend(prompt)
+    },
+    [useStore, handleSend]
+  )
+
+  const ctxValue = useMemo<WorkflowEditorContextValue>(
+    () => ({ useEditorStore: useStore, onQuickAction: handleQuickAction }),
+    [useStore, handleQuickAction]
+  )
+
   if (!workflowId) {
     return (
       <div
@@ -91,28 +126,35 @@ export function WorkflowEditorChatTab({
   }
 
   return (
-    <div
-      className="flex h-full w-full flex-col bg-card/40"
-      aria-label={t("ariaLabel", { name: workflowName ?? workflowId })}
-      data-testid="workflow-chat-tab"
-    >
-      <ChatPane
-        activeSession={session}
-        onSend={handleSend}
-        onStop={handleStop}
-        onRegenerate={handleRegenerate}
-        onEditResend={handleEditResend}
-        onCreate={() => {
-          /* New-session button is a no-op here — the workflow-editor session
-           * is fixed per workflow. The button is still visible (so muscle
-           * memory works) but the click is benign. */
-        }}
-        onUseSample={(text) => {
-          void handleSend({ type: "text", text } as never)
-        }}
-        onOpenSettings={(tab) => onOpenWorkflowSettings?.(tab)}
-        showHeader={false}
-      />
-    </div>
+    <WorkflowEditorProvider value={ctxValue}>
+      <div
+        className="flex h-full w-full flex-col bg-card/40"
+        aria-label={t("ariaLabel", { name: workflowName ?? workflowId })}
+        data-testid="workflow-chat-tab"
+      >
+        <ChatPane
+          activeSession={session}
+          onSend={handleSend}
+          onStop={handleStop}
+          onRegenerate={handleRegenerate}
+          onEditResend={handleEditResend}
+          onCreate={() => {
+            /* New-session button is a no-op here — the workflow-editor session
+             * is fixed per workflow. The button is still visible (so muscle
+             * memory works) but the click is benign. */
+          }}
+          onUseSample={(text) => {
+            void handleSend({ type: "text", text } as never)
+          }}
+          onOpenSettings={(tab) => onOpenWorkflowSettings?.(tab)}
+          showHeader={false}
+        />
+      </div>
+    </WorkflowEditorProvider>
   )
 }
+
+// Re-exported so external callers (alternative chat shells) can resolve
+// the workflow store's selected-nodes shape without importing the
+// internal store types.
+export type { EditorStore }

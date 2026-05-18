@@ -21,7 +21,13 @@ jest.mock("@/lib/db/goals", () => ({
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { invoke } = require("@tauri-apps/api/core") as { invoke: jest.Mock }
 
-import { useSyncTrayToRust, defaultSnapshot, getTrayTooltipFromRust } from "./sync"
+import {
+  useSyncTrayToRust,
+  defaultSnapshot,
+  getTrayTooltipFromRust,
+  makeResilientTrayTranslator,
+  type NextIntlTranslator,
+} from "./sync"
 import { useTrayStore, __resetTrayStoreForTesting } from "./store"
 import { __resetTrayRegistryForTesting, registerTrayItem } from "./registry"
 import { DEFAULT_TRAY_ITEMS } from "./defaults"
@@ -84,6 +90,27 @@ describe("useSyncTrayToRust", () => {
     expect(afterBurst - initialCalls).toBeLessThanOrEqual(1)
   })
 
+  it("resolves tray labels via the root translator (not a `tray`-scoped one)", () => {
+    // Regression: the hook used to call `useTranslations(\"tray\")`, which
+    // turned the `tray.show` key in DEFAULT_TRAY_ITEMS into a lookup against
+    // `tray.tray.show` and logged a MISSING_MESSAGE warning at every flush.
+    useTrayStore.setState({ items: DEFAULT_TRAY_ITEMS, hydrated: true })
+    renderHook(() => useSyncTrayToRust())
+    act(() => {
+      jest.advanceTimersByTime(200)
+    })
+    const menuCall = invoke.mock.calls.find((c) => c[0] === "tray_set_menu")
+    expect(menuCall).toBeDefined()
+    const dto = (menuCall![1] as { items: Array<{ id: string; label: string }> }).items
+    const showItem = dto.find((d) => d.id === "tray.show")
+    expect(showItem?.label).toBe("Show Cognia")
+    // Must not have leaked the raw key through. Separators have no label.
+    for (const item of dto) {
+      if (typeof item.label !== "string") continue
+      expect(item.label.startsWith("tray.")).toBe(false)
+    }
+  })
+
   it("pushes tray_set_icon_state when iconState changes", () => {
     useTrayStore.setState({ items: DEFAULT_TRAY_ITEMS, hydrated: true })
     renderHook(() => useSyncTrayToRust())
@@ -110,6 +137,49 @@ describe("useSyncTrayToRust", () => {
     expect(invoke).toHaveBeenCalledWith("tray_set_tooltip", {
       text: "Cognia (busy)",
     })
+  })
+})
+
+describe("makeResilientTrayTranslator", () => {
+  // Production next-intl throws `MISSING_MESSAGE` when a key is missing.
+  // The global jest mock in `jest.setup.ts` is lenient and returns the key
+  // verbatim, which masks the bug — so this test uses a strict synthetic
+  // translator that matches production behaviour.
+  function strictTranslator(known: Record<string, string>): NextIntlTranslator {
+    const t = ((key: string) => {
+      if (key in known) return known[key]
+      throw new Error(`MISSING_MESSAGE: Could not resolve '${key}'`)
+    }) as NextIntlTranslator
+    t.has = (key: string) => key in known
+    return t
+  }
+
+  it("returns the translation for known i18n keys", () => {
+    const resilient = makeResilientTrayTranslator(
+      strictTranslator({ "tray.show": "Show Cognia", "tray.newChat": "New Chat" })
+    )
+    expect(resilient("tray.show")).toBe("Show Cognia")
+    expect(resilient("tray.newChat")).toBe("New Chat")
+  })
+
+  it("returns the key verbatim for unknown labels (slash names, plugin labels)", () => {
+    const resilient = makeResilientTrayTranslator(strictTranslator({ "tray.show": "Show Cognia" }))
+    // Regression: `/clear` flowed in from `all-commands.ts` as a literal slash
+    // label. Without the resilient wrapper, the builder's `t("/clear")` call
+    // crashed the tray rebuild under production next-intl
+    // (`MISSING_MESSAGE: Could not resolve '/clear' in messages for locale 'zh-CN'`).
+    expect(resilient("/clear")).toBe("/clear")
+    expect(resilient("/goal")).toBe("/goal")
+    // Plugin tray items pass arbitrary display strings as `label`.
+    expect(resilient("My Plugin Action")).toBe("My Plugin Action")
+    // Command titles from `lib/plugin/commands/registry.ts` likewise.
+    expect(resilient("git.status")).toBe("git.status")
+  })
+
+  it("does not throw even when every label is unknown", () => {
+    const resilient = makeResilientTrayTranslator(strictTranslator({}))
+    expect(() => resilient("/clear")).not.toThrow()
+    expect(() => resilient("anything")).not.toThrow()
   })
 })
 

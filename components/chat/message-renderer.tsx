@@ -222,22 +222,27 @@ function MessageRendererInner({
 
   return (
     <Message from={message.role}>
-      {speaker && message.role === "assistant" && (
-        <div className="mb-1 flex items-center gap-2 self-start text-xs">
-          <Avatar className="size-5">
-            <AvatarFallback
-              className="text-[10px] text-white"
-              style={{ backgroundColor: avatarColor(speaker) }}
-              aria-hidden
-            >
-              {avatarGlyph(speaker)}
-            </AvatarFallback>
-          </Avatar>
-          <span className="font-medium" style={{ color: avatarColor(speaker) }}>
-            {speaker.name}
-          </span>
-        </div>
-      )}
+      {speaker &&
+        message.role === "assistant" &&
+        (() => {
+          const speakerColor = avatarColor(speaker)
+          return (
+            <div className="mb-1 flex items-center gap-2 self-start text-xs">
+              <Avatar className="size-5">
+                <AvatarFallback
+                  className="text-[10px] text-white"
+                  style={{ backgroundColor: speakerColor }}
+                  aria-hidden
+                >
+                  {avatarGlyph(speaker)}
+                </AvatarFallback>
+              </Avatar>
+              <span className="font-medium" style={{ color: speakerColor }}>
+                {speaker.name}
+              </span>
+            </div>
+          )
+        })()}
 
       <PluginExtensionSlot point="chat.message.before" className="mb-1 empty:hidden" />
 
@@ -404,7 +409,6 @@ function highlightMentions(
     charByLowerName.set(c.name.toLowerCase(), c)
   }
   let match: RegExpExecArray | null
-  let key = 0
   while ((match = pattern.exec(text)) !== null) {
     if (match.index > last) {
       out.push(text.slice(last, match.index))
@@ -413,7 +417,7 @@ function highlightMentions(
     const c = charByLowerName.get(name.toLowerCase())
     out.push(
       <span
-        key={`m-${key++}-${match.index}`}
+        key={`m-${match.index}`}
         className="rounded bg-muted px-1 font-medium"
         style={c ? { color: avatarColor(c) } : undefined}
       >
