@@ -1,12 +1,13 @@
 import { LARK_CAPS } from "./capability"
 
 describe("LARK_CAPS", () => {
-  it("contains all expected Phase-1 capabilities", () => {
+  it("contains all expected Phase-1 capabilities plus send.a2ui", () => {
     const expected = [
       "delete",
       "edit",
       "history.fetch",
       "rich-card.lark",
+      "send.a2ui",
       "send.card",
       "send.file",
       "send.image",

@@ -101,12 +101,13 @@ describe("getDb", () => {
     ).toBe("pi-1")
 
     await db.inboundLedger.put({
-      id: "tg-1:m-1",
+      id: "tg-1:inbound:m-1",
       adapterId: "tg-1",
+      namespace: "inbound",
       platformMessageId: "m-1",
       receivedAt: now,
     })
-    expect((await db.inboundLedger.get("tg-1:m-1"))?.adapterId).toBe("tg-1")
+    expect((await db.inboundLedger.get("tg-1:inbound:m-1"))?.adapterId).toBe("tg-1")
 
     await db.outboundQueue.put({
       id: "ob-1",

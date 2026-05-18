@@ -21,7 +21,7 @@
  */
 
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
-import type { MessageSegment } from "@/types/connectors/segment"
+import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segment"
 import type { RouteDecision } from "./mode-router"
 import type { ResolvedBinding } from "./policy-resolve"
 import type { SendContent, ChatSession, StoredMessage, AppSettings } from "@/lib/claude/types"
@@ -35,6 +35,7 @@ import { readForResolution } from "@/lib/db/conversation-overrides"
 import { getCharacter } from "@/lib/db/characters"
 import { getSettings } from "@/lib/db/settings"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import { assistantReplyToSegments } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
 import { appendAudit } from "./audit"
 import { getBus } from "./bus"
 
@@ -52,7 +53,26 @@ export type RunAndCaptureFn = (
   sessionId: string,
   prompt: SendContent,
   options?: import("@/lib/claude/types").SendOptions
-) => Promise<{ text: string; messageId: string }>
+) => Promise<{
+  text: string
+  messageId: string
+  /**
+   * A2UI surfaces emitted during this turn via the `builtin:a2ui-bridge`
+   * MCP tools. Empty for plain-text turns. The runtime projects them into
+   * `MessageSegment.a2ui` segments via
+   * `lib/connectors/a2ui-bridge/a2ui-to-segments.ts`.
+   *
+   * Optional in the type so older capture wrappers (and the mock used by
+   * test stubs that don't care about A2UI) keep compiling — the runtime
+   * defaults to an empty record when missing.
+   */
+  a2uiSurfaces?: Record<string, A2UISegmentContent>
+  /**
+   * Surface ids in emission order. Optional for the same back-compat
+   * reasons as `a2uiSurfaces`.
+   */
+  a2uiSurfaceOrder?: string[]
+}>
 
 export interface RuntimeOptions {
   /**
@@ -67,8 +87,12 @@ export interface RuntimeOptions {
 /**
  * Find an existing ChatSession whose `platformBinding.conversationKey`
  * matches the given key, or return undefined if none.
+ *
+ * Exported so `scheduled-outbound.ts:handleScheduledDigest` can reuse
+ * the lookup when it drives a scheduled auto-mode AI turn without an
+ * inbound event in hand.
  */
-async function findSessionByConversationKey(
+export async function findSessionByConversationKey(
   conversationKey: string
 ): Promise<ChatSession | undefined> {
   const sessions = await getDb().sessions.toArray()
@@ -342,7 +366,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
 
         // ── Capture the assistant reply via the injected wrapper ──
         const prompt = inboundEventToSendContent(event)
-        let captured: { text: string; messageId: string }
+        let captured: Awaited<ReturnType<RunAndCaptureFn>>
         try {
           captured = await opts.runAndCapture(session.id, prompt, sendOptions)
         } catch (err) {
@@ -358,8 +382,21 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           break
         }
 
-        // ── Enqueue the outbound delivery job ──
-        const outboundSegments: MessageSegment[] = [{ type: "text", text: captured.text }]
+        // ── Project text + A2UI surfaces into MessageSegment[] ──
+        // The captured reply may include any combination of plain text
+        // and A2UI surfaces (created via the builtin:a2ui-bridge MCP
+        // tools). `assistantReplyToSegments` projects each surface into
+        // a {type:"a2ui", surfaceId, content, plainTextMirror} segment
+        // and appends the trailing markdown text — adapter serialisers
+        // then route a2ui segments through `_shared/a2ui-mapper.ts` per
+        // platform (Slack Block Kit / Lark Interactive Card / Telegram
+        // InlineKeyboardMarkup / Discord Embed+Components / OneBot
+        // basic segments + plainTextMirror).
+        const outboundSegments: MessageSegment[] = assistantReplyToSegments({
+          text: captured.text,
+          a2uiSurfaces: captured.a2uiSurfaces,
+          a2uiSurfaceOrder: captured.a2uiSurfaceOrder,
+        })
         const idempotencyKey = `airun:${captured.messageId}`
         await enqueueOutbound({
           adapterId: event.adapterId,

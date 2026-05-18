@@ -79,6 +79,13 @@
     "log:default",
     "log:allow-log",
 
+    "upload:default",
+    "upload:allow-upload",
+    "upload:allow-download",
+
+    "positioner:default",
+    "positioner:allow-move-window",
+
     {
       "identifier": "shell:allow-execute",
       "allow": [

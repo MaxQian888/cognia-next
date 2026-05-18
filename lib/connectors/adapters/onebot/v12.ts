@@ -139,6 +139,86 @@ export function parseV12Event(
     return v12DeleteToEvent(adapterId, event)
   }
 
+  // ── Other notices → system event (audit-only) ─────────────────────
+  if (event.type === "notice") {
+    const systemKind: NonNullable<NormalizedInboundEvent["systemKind"]> =
+      event.detail_type === "group_member_increase" || event.detail_type === "friend_increase"
+        ? "member_added"
+        : event.detail_type === "group_member_decrease" || event.detail_type === "friend_decrease"
+          ? "member_removed"
+          : "member_added"
+    const isGroup = (event.detail_type ?? "").startsWith("group_")
+    const userId = event.user_id ?? ""
+    const groupId = event.group_id ?? ""
+    const chatKey = isGroup ? `g:${groupId}` : `p:${userId}`
+    const conversationKey = buildConversationKey("onebot", adapterId, chatKey)
+    return {
+      platform: "onebot",
+      adapterId,
+      selfId: event.self.user_id,
+      messageId: `${event.type}:${event.detail_type ?? "evt"}:${event.id}`,
+      conversationRef: {
+        platform: "onebot",
+        adapterId,
+        chatKey,
+        detailType: isGroup ? "group" : "private",
+        groupId: isGroup ? groupId : undefined,
+        userId,
+      },
+      conversationKey,
+      sender: {
+        id: `onebot:${userId}`,
+        platform: "onebot",
+        adapterId,
+        remoteUserId: userId,
+      },
+      channel: {
+        id: conversationKey,
+        kind: isGroup ? "group" : "private",
+        platformChannelId: isGroup ? groupId : userId,
+      },
+      segments: [],
+      plainText: "",
+      mentions: { selfMentioned: false, users: [] },
+      timestamp: event.time * 1000,
+      raw: event,
+      kind: "system",
+      systemKind,
+    }
+  }
+
+  // ── Meta events: skip heartbeats; surface lifecycle for audit. ─────
+  if (event.type === "meta") {
+    // Don't emit anything — the transport-reverse-ws already drives the
+    // adapter health state for connect/disconnect; surfacing every meta
+    // tick to the bus would balloon the audit log.
+    return null
+  }
+
+  // ── Request events: friend / group requests — surface as system. ───
+  if (event.type === "request") {
+    const userId = event.user_id ?? ""
+    const chatKey = `p:${userId}`
+    const conversationKey = buildConversationKey("onebot", adapterId, chatKey)
+    return {
+      platform: "onebot",
+      adapterId,
+      selfId: event.self.user_id,
+      messageId: `request:${event.id}`,
+      conversationRef: { platform: "onebot", adapterId, chatKey, detailType: "private" },
+      conversationKey,
+      sender: { id: `onebot:${userId}`, platform: "onebot", adapterId, remoteUserId: userId },
+      channel: { id: conversationKey, kind: "private", platformChannelId: userId },
+      segments: [],
+      plainText: "",
+      mentions: { selfMentioned: false, users: [] },
+      timestamp: event.time * 1000,
+      raw: event,
+      kind: "system",
+      systemKind: "member_added",
+    }
+  }
+
   if (event.type !== "message") return null
 
   const detailType = event.detail_type ?? "private"

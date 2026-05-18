@@ -1349,7 +1349,7 @@
       "slashCommands": "内置、自定义、插件贡献的斜杠命令统一浏览,可搜索并将命令复制到聊天输入框。",
       "tools": "内置 shell、文件系统、git、进程与环境工具 — 全局开关、风险等级与「始终允许」管理。",
       "search": "联网搜索 provider（Tavily、Brave、Bing、Google、Perplexity、Exa…）、默认参数、缓存、安全与来源验证。",
-      "ocr": "OCR 服务提供商（Mistral OCR、Google Vision、AWS Textract、Azure DI、Claude / GPT / Gemini 视觉、Mathpix、OCR.space、ABBYY、Nanonets、飞书）以及本地引擎（Tesseract WASM/原生、Windows.Media.Ocr、Apple Vision、Android ML Kit）。含自动路由、PDF 文本层快速路径与结果缓存。",
+      "ocr": "OCR 服务提供商（Mistral OCR、Google Vision、AWS Textract、Azure DI、Claude / GPT / Gemini 视觉、Mathpix、OCR.space、ABBYY、Nanonets、飞书）以及本地引擎（Tesseract WASM/原生、Windows.Media.Ocr、Apple Vision、Android ML Kit、ocrs、PaddleOCR）和自托管 HTTP 适配器。含自动路由、PDF 文本层快速路径与结果缓存。",
       "speech": "语音输入（STT）的语言与麦克风，朗读（TTS）的提供商、音色与自动播放。",
       "characters": "复用的角色，可独立配置模型与技能。",
       "skills": "拼接到系统提示词的可复用指令片段。",
@@ -3784,6 +3784,59 @@
         "saving": "保存中…",
         "enterField": "输入 {label}"
       }
+    },
+    "developer": {
+      "lsp": {
+        "title": "允许未签名的 LSP 二进制",
+        "description": "开启后，VS Code 扩展的 LSP 二进制策略会在一次会话内确认后允许未签名服务器启动，而非直接拒绝。仅当你在调试自己开发的 .vsix 时使用。",
+        "warning": "不要在你会安装未经审计的第三方 .vsix 的机器上启用。每一次启动仍会被写入自动化审计日志。",
+        "toggleAriaLabel": "切换允许未签名 LSP 二进制"
+      }
+    },
+    "lspServers": {
+      "title": "语言服务器",
+      "description": "添加 Language Server Protocol (LSP) 服务器，为 Skills、Canvas 和 Artifact 编辑器提供补全、悬停、诊断和跳转到定义。在这里添加的服务器会在每次启动 cognia 时自动加载。",
+      "addButton": "添加服务器",
+      "addAriaLabel": "添加新的语言服务器",
+      "empty": "尚未配置语言服务器。点击\"添加服务器\"指向你机器上已安装的二进制（如 eslint-server / pyright-langserver / rust-analyzer）。",
+      "tableAriaLabel": "已配置的语言服务器",
+      "enabledAriaLabel": "切换 {name}",
+      "removeAriaLabel": "删除 {name}",
+      "col": {
+        "name": "名称",
+        "languages": "语言",
+        "command": "命令",
+        "enabled": "启用",
+        "actions": "操作"
+      },
+      "add": {
+        "title": "添加语言服务器",
+        "description": "指向你机器上一个兼容 LSP 的二进制。cognia 会在 sidecar 中启动它，并将其诊断信息桥接到编辑器。",
+        "field": {
+          "name": "显示名称",
+          "languages": "语言",
+          "command": "命令",
+          "args": "参数"
+        },
+        "placeholder": {
+          "name": "ESLint",
+          "languages": "typescript, javascript",
+          "command": "/usr/local/bin/eslint-server 或 node_modules/.bin/eslint-server",
+          "args": "每行一个参数，如 --stdio"
+        },
+        "hint": {
+          "languages": "逗号分隔的 Monaco 语言 id 列表。",
+          "command": "绝对路径或相对于 cognia 安装目录的路径。支持 ${workspaceFolder} 占位符。",
+          "args": "每行一个参数。支持 ${workspaceFolder} 占位符。"
+        },
+        "error": {
+          "name": "名称必填。",
+          "command": "命令必填。",
+          "languages": "至少需要一种语言。"
+        },
+        "submit": "添加",
+        "cancel": "取消"
+      }
     }
   },
   "presets": {
@@ -4913,6 +4966,205 @@
       "actions": {
         "save": "保存",
         "reset": "恢复默认"
+      }
+    },
+    "providers": {
+      "anthropic": "Claude",
+      "codex": "Codex",
+      "opencode": "OpenCode"
+    },
+    "migration": {
+      "toastTitle": "订阅模块已升级",
+      "toastBody": "已将 {count, plural, =1 {1 个旧账号} other {# 个旧账号}} 迁移到新版凭证仓。"
+    },
+    "common": {
+      "accountList": {
+        "title": "账号",
+        "empty": "暂无账号。先添加一个再使用此服务商。",
+        "addAccount": "添加账号",
+        "active": "当前激活",
+        "setActive": "设为激活",
+        "rename": "重命名",
+        "renameDialogTitle": "重命名账号",
+        "renameLabel": "别名",
+        "renamePlaceholder": "例如：公司 Pro",
+        "renameClearHint": "留空则回退到根据套餐 / 邮箱自动生成的标签。",
+        "remove": "删除",
+        "removeDialogTitle": "删除该账号？",
+        "removeDialogBody": "凭证会从 OS 系统钥匙串中移除。随时可以重新登录。",
+        "cancel": "取消",
+        "confirm": "保存",
+        "removeConfirm": "删除",
+        "secretsHidden": "Token 不显示——如需查看请打开 OS 钥匙串管理器。"
+      },
+      "preset": {
+        "title": "第三方端点",
+        "description": "覆盖上游 Base URL，常用于 AWS Bedrock、Azure OpenAI、OpenRouter 等中转。",
+        "noPreset": "暂未配置预设。",
+        "addPreset": "添加预设",
+        "editPreset": "编辑预设",
+        "removePreset": "删除预设",
+        "labelField": "名称",
+        "labelPlaceholder": "例如：AWS Bedrock",
+        "baseUrlField": "Base URL",
+        "baseUrlPlaceholder": "https://bedrock-runtime.us-west-2.amazonaws.com",
+        "headersField": "额外请求头（可选）",
+        "headersHint": "每行一条 `Key: Value`，会附加到每次请求。",
+        "save": "保存预设",
+        "cancel": "取消",
+        "validationEmptyBaseUrl": "Base URL 不能为空。",
+        "validationInvalidUrl": "Base URL 必须是合法的 URL。",
+        "validationEmptyKey": "请求头 Key 不能为空。",
+        "presetActive": "预设已生效",
+        "presetInactive": "使用默认端点"
+      },
+      "importExport": {
+        "title": "备份与还原",
+        "description": "把订阅凭证仓导出为加密文件，方便在另一台机器上恢复。",
+        "exportButton": "导出…",
+        "importButton": "导入…",
+        "exportDialogTitle": "导出订阅凭证仓",
+        "exportDialogBody": "请设置加密口令。文件采用 AES-GCM（PBKDF2-SHA256，600 000 轮）加密，口令是保护 token 的唯一一道防线。",
+        "passphraseField": "口令",
+        "passphraseConfirmField": "确认口令",
+        "passphraseMismatch": "两次口令不一致。",
+        "passphraseEmpty": "口令不能为空。",
+        "downloading": "正在准备下载…",
+        "exportSuccess": "已保存加密备份。",
+        "exportFailed": "导出失败：{error}",
+        "importDialogTitle": "导入订阅凭证仓",
+        "importDialogBody": "选择加密备份文件，并输入创建时使用的口令。",
+        "fileField": "备份文件",
+        "fileFieldHint": "拖入 `.cogniabak` 文件，或点击选择。",
+        "importSuccess": "已导入 {count, plural, =1 {1 个账号} other {# 个账号}}。",
+        "importFailed": "导入失败：{error}",
+        "passphraseWrong": "口令无法解密这份备份。",
+        "confirmImport": "导入",
+        "cancel": "取消"
+      },
+      "switchToast": {
+        "switched": "已切换激活账号到 {label}。",
+        "cleared": "已清除激活账号。",
+        "switchFailed": "切换激活账号失败：{error}"
+      }
+    },
+    "codex": {
+      "title": "Codex（OpenAI）",
+      "description": "用 ChatGPT 账号登录或粘贴 OpenAI API key。激活的账号会被 codex 外部代理使用。",
+      "webModeBanner": "Codex 凭证存放在 OS 钥匙串中——仅在桌面版可用。",
+      "login": {
+        "title": "登录 Codex",
+        "modeGroupLabel": "登录方式",
+        "modes": {
+          "reuse": {
+            "label": "复用 codex-cli",
+            "description": "从 `~/.codex/auth.json` 或 codex-cli 钥匙串条目中读取现有凭证，只读，不会写回。"
+          },
+          "oauth": {
+            "label": "Device-code OAuth",
+            "description": "用 codex-cli 的官方 client_id 在 auth.openai.com 上重新登录 ChatGPT。"
+          }
+        },
+        "reuse": {
+          "scanning": "正在扫描 codex-cli 凭证…",
+          "noneFound": "没找到 codex-cli 凭证。可以安装 codex-cli 并运行 `codex login`，或改用 OAuth 流程。",
+          "sourceLabel": "来源",
+          "sourceFile": "~/.codex/auth.json",
+          "sourceKeyring": "codex-cli 系统钥匙串",
+          "authMode": "认证模式",
+          "email": "邮箱",
+          "plan": "套餐",
+          "lastRefresh": "上次刷新",
+          "adopt": "复用该凭证",
+          "adopted": "已复用。",
+          "adoptFailed": "复用失败：{error}",
+          "rescan": "重新扫描",
+          "notAdoptable": "该凭证既没有 ChatGPT bearer 也没有 OpenAI API key，无法复用。请运行 `codex login` 刷新。",
+          "authJsonPath": "auth.json 路径"
+        },
+        "oauth": {
+          "starting": "正在从 auth.openai.com 申请 device code…",
+          "userCodeLabel": "用户码",
+          "verificationUriLabel": "授权页面",
+          "openVerificationUri": "打开授权页面",
+          "pasteHint": "在打开的页面里输入上方的用户码，等待自动确认。",
+          "polling": "等待 OpenAI 服务器确认…",
+          "expired": "device code 已过期，请重新登录。",
+          "accessDenied": "在 OpenAI 一侧取消了登录。",
+          "granted": "登录成功。",
+          "saveFailed": "保存凭证失败：{error}"
+        },
+        "actions": {
+          "cancel": "取消",
+          "startOauth": "开始 OAuth",
+          "close": "关闭"
+        }
+      },
+      "overview": {
+        "signedOutTitle": "尚未激活 Codex 账号",
+        "signedOutBody": "添加一个 Codex 账号即可启用 codex 外部代理。",
+        "signInCta": "添加账号",
+        "activeTitle": "当前激活的 Codex 账号",
+        "authMode": "认证模式",
+        "authModeChatGpt": "ChatGPT",
+        "authModeApiKey": "API key",
+        "noUsageTitle": "Codex 不暴露 usage",
+        "noUsageBody": "OpenAI 没有提供 Claude 那套统一限流响应头。账号标签仍能看到套餐 + 过期时间。"
+      },
+      "account": {
+        "signedOutTitle": "暂无账号",
+        "signedOutBody": "登录后即可在外部代理中使用 Codex。",
+        "unknownEmail": "（未提供邮箱）",
+        "planLine": "{plan} · {mode}",
+        "expiresLabel": "Token 过期时间",
+        "refresh": "立即刷新 Token",
+        "revokeOnSignOut": "服务端同步撤销",
+        "revokeOnSignOutHint": "同时告诉 auth.openai.com 让该 token 失效。默认关闭——仅本地登出可恢复。"
+      },
+      "settings": {
+        "preferDiscovered": {
+          "title": "本地无激活账号时显示 codex-cli 凭证",
+          "description": "我们不再在运行时自动复用——若需要使用 codex-cli 凭证，请在「账号」标签里手动复用一次。",
+          "label": "在「复用」流程里展示 codex-cli 发现的凭证"
+        },
+        "autoRefresh": {
+          "title": "临近过期时自动刷新",
+          "description": "当 ChatGPT Token 还剩约 5 分钟过期时自动刷新；关闭则等到下一次 401 再懒刷新。",
+          "label": "自动刷新临近过期的 Token"
+        }
+      }
+    },
+    "opencode": {
+      "title": "OpenCode",
+      "description": "从 `~/.local/share/opencode/auth.json` 读取已配置的凭证；OpenCode-Zen 订阅以「粘贴 API key」的方式接入。OpenCode 本身管理大量服务商，我们只展示白名单内的几项。",
+      "webModeBanner": "OpenCode 凭证存放在 OS 钥匙串中——仅在桌面版可用。",
+      "discovery": {
+        "title": "OpenCode 中已配置的服务商",
+        "description": "只读地扫描 OpenCode CLI 的 auth.json，从不写回。",
+        "scanning": "正在扫描 auth.json…",
+        "empty": "auth.json 中没有白名单内的条目。运行 `opencode auth` 配置 Anthropic / OpenAI / OpenCode-Zen 之一。",
+        "pathLabel": "auth.json",
+        "subProviderLabel": "服务商",
+        "kindLabel": "类型",
+        "kindApiKey": "API key",
+        "kindOauth": "OAuth",
+        "kindUnknown": "未知",
+        "rescan": "重新扫描"
+      },
+      "zen": {
+        "title": "OpenCode-Zen 订阅",
+        "description": "粘贴 opencode.ai/auth 页面给出的 API key。等上游公开 OAuth 接口后，会替换为完整 OAuth 流程。",
+        "pasteKey": "粘贴 Zen API key",
+        "addKey": "添加 Zen key",
+        "accessTokenField": "Zen API key",
+        "accessTokenPlaceholder": "粘贴 opencode.ai/auth 显示的 key",
+        "baseUrlField": "Base URL（可选）",
+        "baseUrlPlaceholder": "留空则使用默认 Zen 端点",
+        "labelField": "别名（可选）",
+        "labelPlaceholder": "OpenCode Zen",
+        "save": "保存 Zen key",
+        "cancel": "取消",
+        "saveFailed": "保存失败：{error}"
       }
     }
   },
@@ -8482,6 +8734,18 @@
       "mlkit-android": {
         "label": "ML Kit 文字识别",
         "description": "仅 Capacitor（Android）。覆盖拉丁、中文、天城文、日文、韩文等脚本。"
+      },
+      "ocrs": {
+        "label": "ocrs（本地）",
+        "description": "纯 Rust 跨平台 OCR，基于 ocrs + RTen。无系统依赖，英文为主。模型（约 12 MB）首次使用时下载。"
+      },
+      "paddle-ocr": {
+        "label": "PaddleOCR（本地）",
+        "description": "通过 oar-ocr + ONNX Runtime 调用 PP-OCRv5。开源方案中中日韩准确率最强。模型（约 17 MB）首次使用时下载。"
+      },
+      "local-http": {
+        "label": "本地 HTTP（自托管）",
+        "description": "对接自托管 OCR 服务器（Umi-OCR、PaddleOCR-Server）。请配置端点 URL 和请求方言。"
       }
     },
     "params": {
@@ -8527,6 +8791,20 @@
       "enableForms": {
         "label": "抽取表单字段",
         "description": "请求结构化表单 key/value。会提升每页成本。"
+      },
+      "dialect": {
+        "label": "请求方言",
+        "description": "选择自托管服务器的协议。Umi-OCR 使用 JSON；PaddleOCR-Server 使用其 serving API。",
+        "umi-ocr": "Umi-OCR",
+        "paddleocr-server": "PaddleOCR-Server"
+      },
+      "apiKey": {
+        "label": "Bearer 令牌（可选）",
+        "description": "存在时以 Authorization: Bearer 形式发送。无需鉴权的局域网服务器请留空。"
+      },
+      "timeoutMs": {
+        "label": "超时时间（毫秒）",
+        "description": "超过此毫秒数后中止请求。默认 30 秒。"
       }
     },
     "health": {
@@ -8541,6 +8819,20 @@
       "clearProvider": "清空该 provider 的缓存",
       "itemsLabel": "{count} 条 · {bytes} 字节",
       "description": "按文件 SHA-256、provider、语言列表组合索引。"
+    },
+    "modelStatus": {
+      "title": "本地模型",
+      "description": "纯 Rust 的 OCR 引擎不随安装包附带模型权重以保持安装体积；首次使用时会下载到用户数据目录。",
+      "installed": "模型就绪",
+      "missing": "缺少 {count} 个模型文件",
+      "downloading": "正在下载 {file}（{percent}%）",
+      "downloadingDetail": "{bytesDone} / {bytesTotal} 字节 — 第 {index} / {count} 个文件",
+      "download": "下载模型",
+      "downloadAll": "下载全部模型文件",
+      "redownload": "重新下载",
+      "modelDir": "存储位置：{path}",
+      "downloadFailed": "下载失败：{message}",
+      "downloadComplete": "模型已就绪（共 {bytes} 字节）"
     },
     "composer": {
       "menu": {
@@ -10999,7 +11291,9 @@
       "markdownPlaceholder": "草稿 Markdown…",
       "approveAndSend": "批准并发送",
       "reject": "拒绝",
-      "cancel": "取消"
+      "cancel": "取消",
+      "a2uiBadge": "A2UI",
+      "a2uiEmptyMirror": "（无文本镜像 — 仅交互界面）"
     },
     "conversationHeader": {
       "modeSwitchDesktopOnly": "切换模式需要桌面端"

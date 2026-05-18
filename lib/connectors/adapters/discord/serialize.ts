@@ -10,6 +10,7 @@
 
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
+import { buildDiscordA2UIPayload } from "./a2ui-mapper"
 
 const DISCORD_API_BASE = "https://discord.com/api/v10"
 
@@ -107,6 +108,15 @@ function serializeSegment(
       // reply segments are handled via replyTo on the OutboundRequest
       return null
 
+    case "a2ui": {
+      // Sync path: emit the `plainTextMirror` as fallback. The async
+      // `serializeOutboundAsync` invokes the full mapper (embeds +
+      // components) and overrides this.
+      const payload: Record<string, unknown> = { content: seg.plainTextMirror }
+      if (messageReference) payload["message_reference"] = messageReference
+      return { method: "POST", url, payload }
+    }
+
     default:
       // Unsupported segment types dropped in Phase 1
       return null
@@ -114,7 +124,9 @@ function serializeSegment(
 }
 
 /**
- * Project an OutboundRequest into an ordered list of Discord REST calls.
+ * Project an OutboundRequest into an ordered list of Discord REST calls
+ * (sync path). a2ui segments fall back to `plainTextMirror`; use
+ * `serializeOutboundAsync` for the full embed + components rendering.
  */
 export function serializeOutbound(req: OutboundRequest): SerializedDiscordCall[] {
   const channelId = channelIdFromRef(req)
@@ -127,6 +139,62 @@ export function serializeOutbound(req: OutboundRequest): SerializedDiscordCall[]
   }
 
   return calls
+}
+
+/**
+ * Async serializer used by the production adapter `send()`. a2ui
+ * segments are projected via `buildDiscordA2UIPayload` (embeds +
+ * components + callback bindings); other segments delegate to the sync
+ * path.
+ */
+export async function serializeOutboundAsync(
+  req: OutboundRequest,
+  adapterId: string
+): Promise<SerializedDiscordCall[]> {
+  const channelId = channelIdFromRef(req)
+  const messageReference = buildMessageReference(req, channelId)
+  const calls: SerializedDiscordCall[] = []
+  const url = `${DISCORD_API_BASE}/channels/${channelId}/messages`
+
+  for (const seg of req.segments) {
+    if (seg.type === "a2ui") {
+      const payload = await buildDiscordA2UIPayload({
+        adapterId,
+        surfaceId: seg.surfaceId,
+        surface: seg.content,
+        conversationKey: extractConversationKey(req, channelId),
+      })
+      const hasNative =
+        (payload.embeds && payload.embeds.length > 0) ||
+        (payload.components && payload.components.length > 0) ||
+        (payload.content && payload.content.length > 0)
+      if (!hasNative) {
+        // Mapper produced nothing — fall back to plain text mirror.
+        const body: Record<string, unknown> = { content: seg.plainTextMirror }
+        if (messageReference) body["message_reference"] = messageReference
+        calls.push({ method: "POST", url, payload: body })
+        continue
+      }
+      const body: Record<string, unknown> = { ...payload }
+      if (messageReference) body["message_reference"] = messageReference
+      calls.push({ method: "POST", url, payload: body })
+      continue
+    }
+    const call = serializeSegment(seg, channelId, messageReference)
+    if (call) calls.push(call)
+  }
+
+  return calls
+}
+
+function extractConversationKey(req: OutboundRequest, channelId: string): string | undefined {
+  const ref = req.conversationRef as Record<string, unknown>
+  const adapterId = typeof ref["adapterId"] === "string" ? ref["adapterId"] : ""
+  if (!adapterId || !channelId) return undefined
+  const thread = req.threadId
+  return thread
+    ? `discord:${adapterId}:${channelId}:${thread}`
+    : `discord:${adapterId}:${channelId}`
 }
 
 /**

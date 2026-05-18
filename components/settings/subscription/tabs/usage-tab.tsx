@@ -25,7 +25,7 @@ import {
   SettingsEmptyState,
 } from "@/components/settings/common/settings-section"
 
-import { useSubscriptionUsage } from "@/lib/anthropic-subscription/hooks"
+import { useAnthropicUsage } from "@/lib/subscription/anthropic/hooks"
 import { isTauri } from "@/lib/tauri"
 import { topByCost, type SessionUsageTotals } from "@/lib/db/session-usage"
 import { listSessions } from "@/lib/db/sessions"
@@ -35,7 +35,7 @@ import { useChatStore } from "@/stores/chat"
 export function SubscriptionUsageTab() {
   const t = useTranslations("subscription")
   const tabReady = isTauri()
-  const { rows, loading } = useSubscriptionUsage(200)
+  const { rows, loading } = useAnthropicUsage(200)
 
   if (!tabReady) {
     return <SettingsAlert title={t("webModeBanner")}>{t("webModeBanner")}</SettingsAlert>

@@ -6,8 +6,9 @@ describe("TELEGRAM_CAPS", () => {
     expect([...TELEGRAM_CAPS]).toEqual(sorted)
   })
 
-  it("includes the Phase-1 ship-set", () => {
+  it("includes the Phase-1 ship-set plus send.a2ui (Group 1 addition)", () => {
     const required = [
+      "send.a2ui",
       "send.text",
       "send.markdown",
       "send.image",
@@ -31,7 +32,7 @@ describe("TELEGRAM_CAPS", () => {
     expect(TELEGRAM_CAPS).not.toContain("history.fetch")
   })
 
-  it("has exactly 13 entries", () => {
-    expect(TELEGRAM_CAPS).toHaveLength(13)
+  it("has exactly 14 entries (13 Phase-1 + send.a2ui)", () => {
+    expect(TELEGRAM_CAPS).toHaveLength(14)
   })
 })

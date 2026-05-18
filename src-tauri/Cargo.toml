@@ -6,7 +6,10 @@ authors = ["AstroAir <astro_air@126.com>"]
 license = "MIT"
 repository = "https://github.com/AstroAir/cognia-next"
 edition = "2021"
-rust-version = "1.82"
+# Bumped from 1.82 → 1.84.1 because `oar-ocr` (gated behind the optional
+# `ocr-paddle` feature) uses edition 2024 and pins MSRV at 1.84.1. The default
+# build doesn't compile the dep, but the workspace MSRV must accommodate it.
+rust-version = "1.84.1"
 default-run = "cognia-next"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -55,6 +58,18 @@ tauri-plugin-os = "2"
 # Scope-locked to the `cloudflared` binary in `tauri.conf.json`.
 tauri-plugin-shell = "2"
 tauri-plugin-store = "2"
+# `persisted-scope` transparently saves and restores the `fs` / `asset` plugin
+# scope grants across app restarts — so once a user picks a folder via the
+# dialog plugin, that grant survives a relaunch without re-prompting.
+# Backend-only; no JS surface and no capability entry needed.
+tauri-plugin-persisted-scope = "2"
+# Chunked upload + download with progress events. Used by the renderer to push
+# attachments through the connector outbound runner without hand-rolled
+# multipart streaming. See `lib/tauri/upload.ts`.
+tauri-plugin-upload = "2"
+# Window positioner — exposes `moveWindow(Position)` for tray-anchored panels
+# and standard placements (TopRight, Center, etc.). See `lib/tauri/positioner.ts`.
+tauri-plugin-positioner = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "sync", "time", "net", "signal"] }
 dirs = "6"
 # `directories` (separate from `dirs`) gives us the per-platform config_dir
@@ -81,8 +96,6 @@ toml_edit = { version = "0.22", features = ["serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2", "multipart"] }
 tokio-socks = "0.5"
 tokio-rustls = "0.26"
-rustls-pki-types = "1"
-webpki-roots = "0.26"
 futures-util = { version = "0.3", default-features = false }
 bytes = "1"
 
@@ -99,7 +112,7 @@ qdrant-client = { version = "1.18", default-features = false, features = ["serde
 # TTS support — provider key vault, Edge-TTS WebSocket bridge, and HTTP proxy.
 keyring = "3"
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-native-roots", "connect"] }
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "v7"] }
 base64 = "0.22"
 
 # Workflow cron daemon — `cron` is just the expression parser; we drive
@@ -118,7 +131,6 @@ subtle = "2"
 tower = { version = "0.5", features = ["util", "limit", "timeout"] }
 tower-http = { version = "0.6", features = ["limit", "trace", "cors"] }
 hmac = "0.12"
-sha1 = "0.10"
 sha2 = "0.10"
 ed25519-dalek = "2"
 hex = "0.4"
@@ -175,6 +187,7 @@ zip = { version = "2", default-features = false, features = ["deflate", "bzip2"]
 # component is compiled. wasmtime 26 is the last release before the major
 # version churn around the Pulley interpreter; pinning to 26 keeps us on a
 # stable wit-bindgen surface (0.34) until we revisit ABI in v0.2.
+# Re-verified 2026-05-18: latest is 44.0.1 — ABI revisit per ADR-0013 still pending.
 wasmtime = { version = "26", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
 wasmtime-wasi = "26"
 wasmparser = "0.221"
@@ -183,7 +196,7 @@ wasmparser = "0.221"
 # `derive` gives us the `#[derive(Parser)]` macro; `std` keeps default
 # features (env / wrap_help / etc.). Pulling clap is cheap compared to
 # maintaining a hand-rolled parser as the subcommand surface grows.
-clap = { version = "=4.6.0", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
 
 # UI automation — cross-platform screenshot (xcap works on Win/macOS/Linux).
 # Windows UIA bindings (`uiautomation`) and macOS/Linux a11y crates are
@@ -195,12 +208,39 @@ dial9-tokio-telemetry = "0.3"
 # the existing tokio runtime. The desktop side of the WAN transport acts
 # as the "peer" counterpart of every mobile client in its rendezvous room;
 # `webrtc-rs` is the only mature pure-Rust crate that ships the full
-# data-channel stack out of the box. Pinned to 0.17 (latest stable on
-# crates.io as of 2026-05) — the 0.20.x alpha line is still experimenting
+# data-channel stack out of the box. Pinned to 0.17 (re-verified 2026-05-18:
+# latest stable is 0.17.1) — the 0.20.x alpha line is still experimenting
 # with runtime flexibility (Tokio/Smol) and not yet ready for production.
 # Heavy compile cost (~50 transitive deps) is acceptable for the
 # connectivity win.
 webrtc = "0.17"
+
+# ADR-0024 — local OCR engines (opt-in via `ocr-ocrs` / `ocr-paddle` features).
+#
+# `ocrs` + `rten` form a pure-Rust ONNX-style OCR pipeline that needs no
+# system deps (no CMake, no onnxruntime DLLs). Models (~12 MB total) are
+# downloaded on first use into `<app_data>/cognia/ocr/ocrs/`. Note: `rten`
+# is unusable in dev profile without opt-level=3 per upstream README — see
+# the [profile.dev.package.rten] block below.
+ocrs           = { version = "0.12", optional = true }
+rten           = { version = "0.24", optional = true, default-features = false }
+# `rten-imageproc` is pulled transitively via `rten`/`ocrs` (its `RotatedRect`
+# type leaks through `find_text_lines`). Keeping it as an explicit optional
+# dep so backend code can `use rten_imageproc::*` directly without depending
+# on upstream re-export stability.
+rten-imageproc = { version = "0.24", optional = true }
+
+# `oar-ocr` wraps PaddleOCR PP-OCRv5 models through ONNX Runtime. Strong CJK
+# accuracy, ~17 MB models. Uses `ort` (still pre-1.0); pin EXACTLY to avoid
+# ABI drift between RCs across crate consumers. The `download-binaries`
+# feature pulls a prebuilt onnxruntime tarball at build time; `copy-dylibs`
+# copies the runtime DLL next to the binary so Tauri's bundle picks it up.
+oar-ocr        = { version = "0.6",  optional = true }
+ort            = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = ["download-binaries", "copy-dylibs"] }
+
+# Shared image decoder used by both OCR backends — feature-gated so it
+# doesn't get pulled into default builds.
+image          = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg", "webp", "bmp", "tiff"] }
 
 [target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
 tauri-plugin-window-state = "2"
@@ -243,9 +283,9 @@ syslog = "7"
 enigo = "0.6"
 
 [dev-dependencies]
-# Unit tests for the scheduler + vector subsystems create temp sqlite DBs.
-tempfile = "3"
 # HTTP mock server for connectors::http_client and attachments tests.
+# (`tempfile` is in `[dependencies]` for runtime plugin staging and is
+# transitively available in unit tests, so it isn't re-declared here.)
 wiremock = "0.6"
 
 # ADR-0024 — OCR backend opt-in features. The default build ships
@@ -262,3 +302,19 @@ ocr-windows = []
 # Apple Vision via the Swift sidecar at `sidecars/apple-vision-ocr/`. The
 # binary is bundled through `tauri.conf.json` `bundle.externalBin`.
 ocr-apple = []
+# Pure-Rust OCR via `ocrs` + RTen. No system deps; models downloaded on
+# first use into `<app_data>/cognia/ocr/ocrs/`. English-biased — pair with
+# `ocr-paddle` for CJK coverage.
+ocr-ocrs = ["dep:ocrs", "dep:rten", "dep:rten-imageproc", "dep:image"]
+# PaddleOCR PP-OCRv5 via `oar-ocr` + ONNX Runtime. Best open CJK accuracy;
+# ships an onnxruntime DLL alongside the executable (handled by `ort`'s
+# `copy-dylibs` feature).
+ocr-paddle = ["dep:oar-ocr", "dep:ort", "dep:image"]
+
+# RTen is mandatory `--release` per upstream README — without opt-level=3
+# even smoke tests crawl. The override keeps dev iteration usable when the
+# `ocr-ocrs` feature is on.
+[profile.dev.package.rten]
+opt-level = 3
+[profile.dev.package.rten-imageproc]
+opt-level = 3

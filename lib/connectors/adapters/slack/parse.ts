@@ -14,6 +14,11 @@ import type { NormalizedInboundEvent, PlatformIdentity } from "@/types/connector
 import { buildConversationKey } from "@/types/connectors/event"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { segmentsToPlainText } from "@/types/connectors/segment"
+import { MentionAccumulator } from "@/lib/connectors/adapters/_shared/mention-extractor"
+import type {
+  ConnectorCallbackActionType,
+  ConnectorCallbackEvent,
+} from "@/types/connectors/interaction"
 
 // ---------------------------------------------------------------------------
 // Minimal Slack Events API types (only fields we consume)
@@ -90,57 +95,42 @@ function detectMentions(
   selfId: string,
   event: SlackMessageEvent
 ): { selfMentioned: boolean; users: string[] } {
-  const users: string[] = []
-  let selfMentioned = false
+  const acc = new MentionAccumulator(selfId)
 
-  // Check plain text for <@USERID> mentions
+  // Plain-text `<@USERID>` matches first.
   const text = event.text ?? ""
   const mentionRegex = /<@([A-Z0-9]+)>/g
   let match: RegExpExecArray | null
   while ((match = mentionRegex.exec(text)) !== null) {
-    const userId = match[1]
-    if (!users.includes(userId)) {
-      users.push(userId)
-    }
-    if (userId === selfId) {
-      selfMentioned = true
-    }
+    acc.add(match[1])
   }
 
-  // Also scan blocks for rich_text mention elements
+  // Walk rich_text blocks for `user` elements — Slack's modern client
+  // sends mentions through this path even when the plain text shape
+  // also carries them.
   if (event.blocks) {
     const scanElements = (elements: SlackBlockElement[]) => {
       for (const el of elements) {
-        if (el.type === "user" && el.user_id) {
-          if (!users.includes(el.user_id)) {
-            users.push(el.user_id)
-          }
-          if (el.user_id === selfId) {
-            selfMentioned = true
-          }
-        }
-        if (el.elements) {
-          scanElements(el.elements)
-        }
+        if (el.type === "user" && el.user_id) acc.add(el.user_id)
+        if (el.elements) scanElements(el.elements)
       }
     }
     for (const block of event.blocks) {
-      if (block.elements) {
-        scanElements(block.elements)
-      }
+      if (block.elements) scanElements(block.elements)
     }
   }
 
-  return { selfMentioned, users }
+  return acc.finalize()
 }
 
 function buildSegments(event: SlackMessageEvent): MessageSegment[] {
   const segments: MessageSegment[] = []
 
-  // Image files first
+  // Files: discriminate image / audio / video / generic.
   if (event.files) {
     for (const file of event.files) {
-      if (file.mimetype.startsWith("image/")) {
+      const mime = file.mimetype ?? ""
+      if (mime.startsWith("image/")) {
         segments.push({
           type: "image",
           url: file.url_private,
@@ -148,12 +138,21 @@ function buildSegments(event: SlackMessageEvent): MessageSegment[] {
           width: file.original_w,
           height: file.original_h,
         })
+      } else if (mime.startsWith("audio/")) {
+        // Slack treats voice messages as audio files with the same shape
+        // as regular audio attachments.
+        segments.push({
+          type: "voice",
+          url: file.url_private,
+        })
+      } else if (mime.startsWith("video/")) {
+        segments.push({ type: "video", url: file.url_private })
       } else {
         segments.push({
           type: "file",
           url: file.url_private,
           name: file.name,
-          mimeType: file.mimetype,
+          mimeType: mime,
           sizeBytes: file.size ?? 0,
         })
       }
@@ -338,4 +337,189 @@ export function parseSlackEventCallback(
     timestamp: Math.round(parseFloat(event.ts) * 1000),
     raw: envelope,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Interactive payloads (block_actions / view_submission) — G3.3 callback channel
+// ---------------------------------------------------------------------------
+
+export interface SlackInteractiveActionElement {
+  action_id?: string
+  block_id?: string
+  type?: string
+  value?: string
+  selected_option?: { value?: string; text?: { text?: string } }
+  selected_options?: Array<{ value?: string }>
+  selected_date?: string
+  selected_time?: string
+  text?: { text?: string }
+}
+
+export interface SlackInteractivePayload {
+  type: string
+  trigger_id?: string
+  user?: { id: string; username?: string; team_id?: string }
+  team?: { id: string; domain?: string }
+  channel?: { id: string; name?: string }
+  container?: {
+    type?: string
+    message_ts?: string
+    channel_id?: string
+    thread_ts?: string
+  }
+  actions?: SlackInteractiveActionElement[]
+  view?: {
+    id: string
+    type: string
+    callback_id?: string
+    state?: {
+      values?: Record<
+        string,
+        Record<
+          string,
+          {
+            type?: string
+            value?: string
+            selected_option?: { value?: string }
+            selected_date?: string
+            selected_time?: string
+          }
+        >
+      >
+    }
+  }
+}
+
+/**
+ * Project a Slack interactive payload (block_actions / view_submission /
+ * view_closed) into a `ConnectorCallbackEvent` for the ConnectorBus
+ * callback channel.
+ *
+ *   - `block_actions`     → actionType="button" or "select" (driven by
+ *                           the action element's `type`). triggerId is
+ *                           the `action_id`, which the A2UI mapper baked
+ *                           with `buildActionId(surfaceId, componentId, action)`
+ *                           so the binding row resolves the surface.
+ *   - `view_submission`   → actionType="submit" with the full form
+ *                           values flattened into `payload`.
+ *   - `view_closed`       → actionType="dismiss".
+ *
+ * Returns null for unsupported payload types or malformed shapes.
+ */
+export function parseSlackInteractivePayload(
+  adapterId: string,
+  selfId: string,
+  payload: SlackInteractivePayload
+): ConnectorCallbackEvent | null {
+  if (!payload.user) return null
+  const user: PlatformIdentity = {
+    id: `slack:${payload.user.id}`,
+    platform: "slack",
+    adapterId,
+    remoteUserId: payload.user.id,
+    displayName: payload.user.username,
+  }
+  const channelId = payload.container?.channel_id ?? payload.channel?.id
+  const threadTs = payload.container?.thread_ts
+  const conversationKey = channelId
+    ? buildConversationKey("slack", adapterId, channelId, threadTs)
+    : undefined
+
+  if (payload.type === "block_actions") {
+    const action = payload.actions?.[0]
+    if (!action || !action.action_id) return null
+    const actionType: ConnectorCallbackActionType =
+      action.type === "static_select" ||
+      action.type === "multi_static_select" ||
+      action.type === "external_select" ||
+      action.type === "users_select" ||
+      action.type === "channels_select"
+        ? "select"
+        : action.type === "datepicker" || action.type === "timepicker"
+          ? "input"
+          : action.type === "checkboxes" || action.type === "radio_buttons"
+            ? "checkbox"
+            : "button"
+    let value = ""
+    let payloadFields: Record<string, unknown> | undefined
+    if (action.type?.endsWith("select")) {
+      value = action.selected_option?.value ?? ""
+      if (action.selected_options && action.selected_options.length > 1) {
+        payloadFields = {
+          values: action.selected_options.map((o) => o.value).filter(Boolean),
+        }
+      }
+    } else if (action.type === "datepicker") {
+      value = action.selected_date ?? ""
+    } else if (action.type === "timepicker") {
+      value = action.selected_time ?? ""
+    } else if (action.type === "checkboxes" || action.type === "radio_buttons") {
+      value = action.selected_option?.value ?? ""
+    } else {
+      value = action.value ?? ""
+    }
+    return {
+      platform: "slack",
+      adapterId,
+      selfId,
+      triggerId: action.action_id,
+      surfaceId: "",
+      componentId: undefined,
+      actionType,
+      value,
+      payload: payloadFields,
+      originatingMessageId: payload.container?.message_ts,
+      conversationKey,
+      user,
+      timestamp: Date.now(),
+      raw: payload,
+    }
+  }
+
+  if (payload.type === "view_submission" && payload.view) {
+    const flat: Record<string, unknown> = {}
+    const values = payload.view.state?.values ?? {}
+    for (const blockId of Object.keys(values)) {
+      for (const actionId of Object.keys(values[blockId])) {
+        const v = values[blockId][actionId]
+        flat[actionId] =
+          v.value ?? v.selected_option?.value ?? v.selected_date ?? v.selected_time ?? ""
+      }
+    }
+    return {
+      platform: "slack",
+      adapterId,
+      selfId,
+      triggerId: payload.view.callback_id ?? payload.view.id,
+      surfaceId: "",
+      componentId: undefined,
+      actionType: "submit",
+      value: "",
+      payload: flat,
+      originatingMessageId: payload.container?.message_ts,
+      conversationKey,
+      user,
+      timestamp: Date.now(),
+      raw: payload,
+    }
+  }
+
+  if (payload.type === "view_closed" && payload.view) {
+    return {
+      platform: "slack",
+      adapterId,
+      selfId,
+      triggerId: payload.view.callback_id ?? payload.view.id,
+      surfaceId: "",
+      componentId: undefined,
+      actionType: "dismiss",
+      value: "",
+      conversationKey,
+      user,
+      timestamp: Date.now(),
+      raw: payload,
+    }
+  }
+
+  return null
 }

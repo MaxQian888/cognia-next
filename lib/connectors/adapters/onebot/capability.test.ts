@@ -6,10 +6,10 @@ describe("ONEBOT_CAPS", () => {
     expect([...ONEBOT_CAPS]).toEqual(sorted)
   })
 
-  it("includes the Phase-1 ship-set", () => {
+  it("includes the Phase-1 ship-set (minus send.markdown) plus send.a2ui", () => {
     const required = [
+      "send.a2ui",
       "send.text",
-      "send.markdown",
       "send.image",
       "send.voice",
       "send.video",
@@ -25,12 +25,17 @@ describe("ONEBOT_CAPS", () => {
     }
   })
 
-  it("does NOT include edit or typing (OneBot lacks native support)", () => {
+  it("does NOT include edit, typing, or send.markdown (OneBot lacks native support; markdown degrades silently)", () => {
     expect(ONEBOT_CAPS).not.toContain("edit")
     expect(ONEBOT_CAPS).not.toContain("typing")
+    // send.markdown is dropped per the A2UI ⇄ IM plan (Group 1 / 3.5):
+    // OneBot has no native markdown renderer and the prior "degrade
+    // silently to text" behaviour conflicts with the capability-aware
+    // downgrade contract.
+    expect(ONEBOT_CAPS).not.toContain("send.markdown")
   })
 
-  it("has exactly 11 entries", () => {
+  it("has exactly 11 entries (removed send.markdown, added send.a2ui)", () => {
     expect(ONEBOT_CAPS).toHaveLength(11)
   })
 })

@@ -36,6 +36,15 @@ describe("recordAndCheckInbound", () => {
     expect(isNew).toBe(true)
   })
 
+  it("callback namespace dedupes independently from default inbound", async () => {
+    const firstInbound = await recordAndCheckInbound("a1", "shared", "inbound")
+    const firstCallback = await recordAndCheckInbound("a1", "shared", "callback")
+    expect(firstInbound).toBe(true)
+    expect(firstCallback).toBe(true)
+    expect(await recordAndCheckInbound("a1", "shared", "inbound")).toBe(false)
+    expect(await recordAndCheckInbound("a1", "shared", "callback")).toBe(false)
+  })
+
   it("triggers pruneOldest on the 200th call (prune cap = 10_000)", async () => {
     // Seed 500 rows above the cap to make pruning observable at a small scale.
     // We set LEDGER_CAP to 10_000 but the pruner only removes the overflow.
@@ -47,10 +56,12 @@ describe("recordAndCheckInbound", () => {
     // and the count matches what we expect.
 
     const db = getDb()
-    // Seed 100 rows (well under 10_000 cap)
+    // Seed 100 rows (well under 10_000 cap) — must include `namespace`
+    // field since schema v38 promoted it to part of the row contract.
     const rows = Array.from({ length: 100 }, (_, i) => ({
-      id: `a_seed:msg_${i}`,
+      id: `a_seed:inbound:msg_${i}`,
       adapterId: "a_seed",
+      namespace: "inbound" as const,
       platformMessageId: `msg_${i}`,
       receivedAt: Date.now() - (100 - i),
     }))

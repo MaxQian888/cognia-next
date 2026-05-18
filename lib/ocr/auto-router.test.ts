@@ -44,6 +44,63 @@ describe("DEFAULT_LOCAL_PREFERENCE", () => {
   it("seeds mlkit-android as the Android default", () => {
     expect(DEFAULT_LOCAL_PREFERENCE.android[0]).toBe("mlkit-android")
   })
+
+  it("places ocrs and paddle-ocr ahead of tesseract on every desktop OS", () => {
+    for (const os of ["windows", "macos", "linux"] as const) {
+      const order = DEFAULT_LOCAL_PREFERENCE[os]
+      const ocrsIdx = order.indexOf("ocrs")
+      const paddleIdx = order.indexOf("paddle-ocr")
+      const tessNativeIdx = order.indexOf("tesseract-native")
+      const tessWasmIdx = order.indexOf("tesseract-wasm")
+      expect(ocrsIdx).toBeGreaterThanOrEqual(0)
+      expect(paddleIdx).toBeGreaterThanOrEqual(0)
+      expect(ocrsIdx).toBeLessThan(tessNativeIdx)
+      expect(paddleIdx).toBeLessThan(tessNativeIdx)
+      expect(tessNativeIdx).toBeLessThan(tessWasmIdx)
+    }
+  })
+
+  it("makes ocrs the head of the Linux preference list", () => {
+    expect(DEFAULT_LOCAL_PREFERENCE.linux[0]).toBe("ocrs")
+  })
+
+  it("does not include local-http in any preference bucket — it is user-pinned", () => {
+    for (const order of Object.values(DEFAULT_LOCAL_PREFERENCE)) {
+      expect(order).not.toContain("local-http")
+    }
+  })
+})
+
+describe("ocrs / paddle-ocr readiness gating", () => {
+  it("falls through ocrs to paddle-ocr when ocrs models aren't installed", async () => {
+    const reg = createOcrRegistry()
+    reg.register(makeProvider({ id: "ocrs", category: "local" }))
+    reg.register(makeProvider({ id: "paddle-ocr", category: "local" }))
+    reg.register(makeProvider({ id: "tesseract-wasm", category: "local" }))
+    const picked = await pickDefaultProvider({
+      registry: reg,
+      settings: settings(),
+      platform: "tauri",
+      osTag: "linux",
+      localReadiness: (id) => id !== "ocrs",
+    })
+    expect(picked.id).toBe("paddle-ocr")
+  })
+
+  it("falls all the way to tesseract-wasm when both ocrs and paddle models are missing", async () => {
+    const reg = createOcrRegistry()
+    reg.register(makeProvider({ id: "ocrs", category: "local" }))
+    reg.register(makeProvider({ id: "paddle-ocr", category: "local" }))
+    reg.register(makeProvider({ id: "tesseract-wasm", category: "local" }))
+    const picked = await pickDefaultProvider({
+      registry: reg,
+      settings: settings(),
+      platform: "tauri",
+      osTag: "linux",
+      localReadiness: (id) => id === "tesseract-wasm",
+    })
+    expect(picked.id).toBe("tesseract-wasm")
+  })
 })
 
 describe("pickDefaultProvider", () => {

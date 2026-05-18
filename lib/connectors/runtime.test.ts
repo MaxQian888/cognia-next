@@ -171,7 +171,7 @@ describe("installRuntime — ai-run (happy path)", () => {
     expect(content).toBe("hello runtime")
   })
 
-  it("enqueues an outbound job with the captured assistant text", async () => {
+  it("enqueues an outbound job with the captured assistant text projected as markdown", async () => {
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_ai" })
     await callHandler(event, "ai-run")
 
@@ -179,9 +179,12 @@ describe("installRuntime — ai-run (happy path)", () => {
     expect(jobs).toHaveLength(1)
     expect(jobs[0].adapterId).toBe("adapter_1")
     expect(jobs[0].status).toBe("pending")
+    // G2 reroutes captured text through `assistantReplyToSegments`,
+    // which emits a `markdown` segment (preserves rich-text intent;
+    // adapters degrade via `defaultDegradeChain("markdown") → ["markdown", "text"]`).
     expect(jobs[0].request.segments[0]).toMatchObject({
-      type: "text",
-      text: "Hello back from Claude!",
+      type: "markdown",
+      md: "Hello back from Claude!",
     })
   })
 

@@ -25,6 +25,17 @@ import type { Character, SendOptions } from "@/lib/claude/types"
 export interface ApplyComputerUseInput {
   character: Character | null | undefined
   opts: SendOptions
+  /**
+   * G6 — set to true when the current session is bound to an IM
+   * connector (`session.platformBinding` exists). The default policy
+   * for IM sessions is to short-circuit before attaching Computer Use
+   * tools so an inbound Telegram / Slack / Discord / Lark message can't
+   * trigger screenshot / mouse / keyboard actions on the operator's
+   * machine. `allowImComputerUse: true` re-enables the tools per
+   * conversation (driven by `ConversationOverrideRow.allowComputerUse`).
+   */
+  imSession?: boolean
+  allowImComputerUse?: boolean
 }
 
 export interface ApplyComputerUseResult {
@@ -45,6 +56,13 @@ export function applyComputerUseTools(input: ApplyComputerUseInput): ApplyComput
   const { character } = input
   const opts = { ...input.opts }
   if (!character?.enableComputerUse) {
+    return { opts, attachedCount: 0 }
+  }
+  // G6 IM blacklist — short-circuit before the registry walk so even a
+  // character that has Computer Use globally enabled can't fire native
+  // tools through an IM-driven turn unless the operator opted in on
+  // this specific conversation.
+  if (input.imSession === true && input.allowImComputerUse !== true) {
     return { opts, attachedCount: 0 }
   }
 

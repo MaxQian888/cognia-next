@@ -1,9 +1,18 @@
-import { render, screen, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { OcrSection } from "./ocr-section"
+import {
+  LocalModelManager,
+  OcrSection,
+  type DownloadProgressEvent,
+  type ModelStatus,
+  type OcrModelBridge,
+} from "./ocr-section"
 import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/lib/ocr/types"
 
-function renderSection(overrides: Partial<UserOcrSettings> = {}) {
+function renderSection(
+  overrides: Partial<UserOcrSettings> = {},
+  modelBridge: OcrModelBridge | null = null
+) {
   const settings: UserOcrSettings = { ...DEFAULT_OCR_SETTINGS, ...overrides }
   const onChange = jest.fn()
   const onClearCache = jest.fn()
@@ -14,6 +23,7 @@ function renderSection(overrides: Partial<UserOcrSettings> = {}) {
       onChange={onChange}
       onClearCache={onClearCache}
       onClearProviderCache={onClearProviderCache}
+      modelBridge={modelBridge}
     />
   )
   return { ...utils, onChange, onClearCache, onClearProviderCache }
@@ -111,5 +121,214 @@ describe("OcrSection", () => {
     expect(onClearProviderCache).toHaveBeenCalledTimes(1)
     // Default selection is the first provider in PROVIDER_LIST.
     expect(onClearProviderCache).toHaveBeenCalledWith("mistral-ocr")
+  })
+
+  it("includes the new local providers in the sidebar", () => {
+    renderSection()
+    expect(screen.getAllByText(/ocrs \(local\)/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/PaddleOCR \(local\)/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Local HTTP \(self-hosted\)/i).length).toBeGreaterThan(0)
+  })
+
+  it("shows the model manager only for backends with managed models", async () => {
+    const user = userEvent.setup()
+    const stubBridge = makeBridgeStub({
+      installed: false,
+      files: [{ file_name: "x", installed: false, expected_bytes: 100 }],
+    })
+    renderSection({}, stubBridge)
+    // Mistral OCR is selected by default — no model manager.
+    expect(screen.queryByTestId("ocr-model-manager-ocrs")).not.toBeInTheDocument()
+    // Click the ocrs entry in the sidebar.
+    const ocrsButton = screen.getAllByRole("button", { name: /ocrs \(local\)/i })[0]!
+    await user.click(ocrsButton)
+    expect(screen.getByTestId("ocr-model-manager-ocrs")).toBeInTheDocument()
+    // local-http is not in the managed-models set.
+    const localHttp = screen.getAllByRole("button", { name: /Local HTTP/i })[0]!
+    await user.click(localHttp)
+    expect(screen.queryByTestId("ocr-model-manager-ocrs")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("ocr-model-manager-local-http")).not.toBeInTheDocument()
+  })
+
+  it("suppresses the model row entirely when modelBridge is null", async () => {
+    const user = userEvent.setup()
+    renderSection({}, null)
+    const ocrsButton = screen.getAllByRole("button", { name: /ocrs \(local\)/i })[0]!
+    await user.click(ocrsButton)
+    expect(screen.queryByTestId("ocr-model-manager-ocrs")).not.toBeInTheDocument()
+  })
+})
+
+function makeBridgeStub(initial: Partial<ModelStatus> = {}): OcrModelBridge {
+  let status: ModelStatus = {
+    backend: "ocrs",
+    installed: false,
+    model_dir: "/tmp/ocrs",
+    files: [],
+    total_bytes: 0,
+    ...initial,
+  }
+  const listeners: Array<(e: DownloadProgressEvent) => void> = []
+  return {
+    async status() {
+      return status
+    },
+    async download(backend) {
+      status = {
+        ...status,
+        backend,
+        installed: true,
+        files: status.files.map((f) => ({ ...f, installed: true, actual_bytes: f.expected_bytes })),
+        total_bytes: status.files.reduce((acc, f) => acc + f.expected_bytes, 0),
+      }
+      return status
+    },
+    onProgress(handler) {
+      listeners.push(handler)
+      return () => {
+        const idx = listeners.indexOf(handler)
+        if (idx >= 0) listeners.splice(idx, 1)
+      }
+    },
+  }
+}
+
+describe("LocalModelManager", () => {
+  it("shows missing-model count from the initial status", async () => {
+    const bridge: OcrModelBridge = {
+      async status() {
+        return {
+          backend: "ocrs",
+          installed: false,
+          model_dir: "/tmp/ocrs",
+          files: [
+            { file_name: "det.rten", installed: false, expected_bytes: 100 },
+            { file_name: "rec.rten", installed: true, expected_bytes: 200, actual_bytes: 200 },
+          ],
+          total_bytes: 200,
+        }
+      },
+      async download() {
+        throw new Error("not reached")
+      },
+      onProgress: () => () => {},
+    }
+    render(<LocalModelManager backend="ocrs" bridge={bridge} />)
+    await waitFor(() => {
+      expect(screen.getByText(/1 model file/i)).toBeInTheDocument()
+    })
+  })
+
+  it("invokes download and refreshes status on click", async () => {
+    const user = userEvent.setup()
+    const downloadMock = jest.fn(async () => ({
+      backend: "ocrs",
+      installed: true,
+      model_dir: "/tmp/ocrs",
+      files: [{ file_name: "det.rten", installed: true, expected_bytes: 100, actual_bytes: 100 }],
+      total_bytes: 100,
+    }))
+    const bridge: OcrModelBridge = {
+      async status() {
+        return {
+          backend: "ocrs",
+          installed: false,
+          model_dir: "/tmp/ocrs",
+          files: [{ file_name: "det.rten", installed: false, expected_bytes: 100 }],
+          total_bytes: 0,
+        }
+      },
+      download: downloadMock,
+      onProgress: () => () => {},
+    }
+    render(<LocalModelManager backend="ocrs" bridge={bridge} />)
+    const button = await screen.findByRole("button", { name: /download/i })
+    await user.click(button)
+    await waitFor(() => expect(downloadMock).toHaveBeenCalledWith("ocrs"))
+    await waitFor(() => {
+      expect(screen.getByText(/models ready/i)).toBeInTheDocument()
+    })
+  })
+
+  it("displays progress events while downloading", async () => {
+    let emit: ((e: DownloadProgressEvent) => void) | null = null
+    let resolveDownload!: (s: ModelStatus) => void
+    const bridge: OcrModelBridge = {
+      async status() {
+        return {
+          backend: "ocrs",
+          installed: false,
+          model_dir: "/tmp/ocrs",
+          files: [{ file_name: "det.rten", installed: false, expected_bytes: 100 }],
+          total_bytes: 0,
+        }
+      },
+      async download() {
+        return new Promise<ModelStatus>((resolve) => {
+          resolveDownload = resolve
+        })
+      },
+      onProgress(handler) {
+        emit = handler
+        return () => {
+          emit = null
+        }
+      },
+    }
+    const user = userEvent.setup()
+    render(<LocalModelManager backend="ocrs" bridge={bridge} />)
+    const button = await screen.findByRole("button", { name: /download/i })
+    await user.click(button)
+    act(() => {
+      emit?.({
+        backend: "ocrs",
+        file_name: "det.rten",
+        bytes_done: 50,
+        bytes_total: 100,
+        file_index: 1,
+        file_count: 1,
+      })
+    })
+    await waitFor(() => {
+      expect(screen.getByText(/Downloading det.rten/i)).toBeInTheDocument()
+    })
+    act(() => {
+      resolveDownload({
+        backend: "ocrs",
+        installed: true,
+        model_dir: "/tmp/ocrs",
+        files: [{ file_name: "det.rten", installed: true, expected_bytes: 100, actual_bytes: 100 }],
+        total_bytes: 100,
+      })
+    })
+    await waitFor(() => {
+      expect(screen.getByText(/models ready/i)).toBeInTheDocument()
+    })
+  })
+
+  it("surfaces an error when the download promise rejects", async () => {
+    const user = userEvent.setup()
+    const bridge: OcrModelBridge = {
+      async status() {
+        return {
+          backend: "ocrs",
+          installed: false,
+          model_dir: "/tmp/ocrs",
+          files: [{ file_name: "det.rten", installed: false, expected_bytes: 100 }],
+          total_bytes: 0,
+        }
+      },
+      async download() {
+        throw new Error("network unreachable")
+      },
+      onProgress: () => () => {},
+    }
+    render(<LocalModelManager backend="ocrs" bridge={bridge} />)
+    const button = await screen.findByRole("button", { name: /download/i })
+    await user.click(button)
+    await waitFor(() => {
+      const alert = screen.getByRole("alert")
+      expect(alert).toHaveTextContent(/network unreachable/i)
+    })
   })
 })

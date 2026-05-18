@@ -161,11 +161,43 @@ Both are registered as `TaskExecutor` via `lib/connectors/scheduled-outbound.ts`
 **Negative / deferred**
 
 - The `auto` mode AI loop is stubbed; full `sendPrompt` → reply → outbound integration is
-  Phase 1+ work (Task 40+).
+  Phase 1+ work (Task 40+). **Closed in v38** — see `runConnectorDigestTurn` in
+  `lib/connectors/scheduled-outbound.ts`.
 - Attachment caching (`connectorAttachments` table) is schema-only; the fetch pipeline is
-  Phase 2.
+  Phase 2. **Closed in v38** — TS dispatcher in `lib/connectors/attachment-fetcher.ts`
+  (Rust implementation in `src-tauri/src/connectors/attachments.rs` was already complete).
 - OAuth flows for Slack/Lark are partially wired; production tokens require Tauri keyring
-  integration and a hosted redirect URL.
+  integration and a hosted redirect URL. Status remains partial; see ADR-0025 follow-up.
+
+---
+
+## v38 — IM completion track (2026-05-18, see ADR-0025)
+
+Schema bumped v18 → v38 with three additions:
+
+- `inboundLedger.namespace` (default `"inbound"`) so the same dedup machinery
+  serves connector callbacks; backfill upgrade hook tags every legacy row.
+- New `connectorCallbackBindings` table — written by the per-platform A2UI
+  mapper at outbound time, read by `ConnectorBus.dispatchConnectorCallback`
+  to recover `(surfaceId, componentId, conversationKey)` from the wire
+  action id.
+- `adapterInstances.lastKnownCapabilities` — cached `A2UICapabilityMatrix`
+  refreshed by `ConnectorBusProvider` on each adapter registration.
+
+Phase 2 closure:
+
+- `runConnectorDigestTurn` drives the full `resolveSendOptions → safeSendPrompt →
+assistantReplyToSegments → enqueueOutbound` pipeline. PII gating runs before
+  every IM-driven turn via `lib/connectors/ai-loop/safe-send-prompt.ts`.
+- A2UI surfaces project natively into Slack Block Kit / Lark Interactive Card /
+  Telegram InlineKeyboardMarkup / Discord Embed + Components / OneBot text-and-image.
+  Each platform's coverage is in ADR-0025's capability table.
+- Inbound callbacks (`block_actions` / `INTERACTION_CREATE` / `callback_query` /
+  `im.interactive_message.action_triggered_v1`) flow through
+  `ConnectorBus.dispatchConnectorCallback` → `builtin:a2ui-bridge` MCP server
+  (new `a2ui_handle_connector_action` tool) → fresh AI-loop turn.
+- Computer Use is blacklisted for IM sessions by default; opt-in lives on
+  `ConversationOverrideRow.allowComputerUse`.
 
 ---
 

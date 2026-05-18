@@ -17,9 +17,13 @@ import type { PlatformKind } from "@/types/connectors/platform-kind"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { TriggerPolicy, ConnectorMode } from "@/types/connectors/policy"
 import type { TransportMode } from "@/types/connectors/adapter"
+import type { A2UICapabilityMatrix } from "@/types/connectors/capability"
 import type { ConversationReference, PlatformIdentity } from "@/types/connectors/event"
 import type { AuditEntry } from "@/types/connectors/audit"
 import type { MessageSegment } from "@/types/connectors/segment"
+import type { ConnectorCallbackBindingRow } from "@/types/connectors/interaction"
+
+export type { ConnectorCallbackBindingRow }
 
 /**
  * One row per configured adapter instance (one Telegram bot, one Discord
@@ -47,6 +51,15 @@ export interface AdapterInstanceRow {
   quietHours?: { from: string; to: string; tz: string }
   /** Adapter is muted globally (drops outbound). */
   muted?: boolean
+  /**
+   * Cache of `PlatformAdapter.a2uiCapability()` written at adapter start.
+   * `lib/claude/build-options.ts:resolveSendOptions` reads this to inject
+   * a capability-aware system prompt without an async fan-out at every
+   * send. Rows that pre-date v38 will have `undefined` here; the resolver
+   * treats that as "all components fallback" and the runtime refreshes
+   * the cache the next time the adapter starts.
+   */
+  lastKnownCapabilities?: A2UICapabilityMatrix
   createdAt: number
   updatedAt: number
 }
@@ -61,13 +74,26 @@ export interface PlatformIdentityRow extends PlatformIdentity {
 }
 
 /**
- * One row per received inbound message, keyed `${adapterId}:${platformMessageId}`.
- * Used by the dedup layer to detect redelivery within a sliding window (cap 10k rows).
+ * Dedup ledger row. Originally one row per received inbound message; v38
+ * widened the table with a `namespace` field so the same dedup machinery
+ * can serve any sliding-window dedup case (inbound messages, connector
+ * callbacks, future webhook receivers, etc.) without proliferating tables.
+ *
+ * Rows persisted before v38 carry `namespace === "inbound"` (set by the
+ * v38 upgrade hook). Newly-inserted rows always set namespace explicitly.
+ *
+ * Keyed `${adapterId}:${namespace}:${platformMessageId}` for new rows;
+ * pre-v38 rows keep the original `${adapterId}:${platformMessageId}` id
+ * — the row is queryable either way via the compound index.
  */
+export type InboundLedgerNamespace = "inbound" | "callback"
+
 export interface InboundLedgerRow {
-  /** `${adapterId}:${platformMessageId}` */
+  /** `${adapterId}:${namespace}:${platformMessageId}` (or legacy form). */
   id: string
   adapterId: string
+  /** Sliding-window namespace; defaults to `"inbound"` for legacy rows. */
+  namespace: InboundLedgerNamespace
   platformMessageId: string
   receivedAt: number
 }
@@ -110,6 +136,13 @@ export interface ConversationOverrideRow {
   archived?: boolean
   /** Last-read pointer; in tandem with the existing sessionState table. */
   lastReadAt?: number
+  /**
+   * Per-conversation opt-in for Anthropic native Computer Use tools.
+   * G6 default for IM-channel conversations is "no" — operators MUST
+   * flip this true explicitly so a Telegram/Discord/Slack reply cannot
+   * accidentally fire screenshot / mouse / keyboard actions on the host.
+   */
+  allowComputerUse?: boolean
   createdAt: number
   updatedAt: number
 }

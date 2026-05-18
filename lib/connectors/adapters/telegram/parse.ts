@@ -1,20 +1,28 @@
 /**
  * Telegram update → NormalizedInboundEvent parser.
  *
- * Handles the four update types Phase 1 + Phase 2 surface:
- * - `message`         → kind="create" with text + photo segments.
- * - `channel_post`    → kind="create" (anonymous channel post).
- * - `edited_message`  → kind="edit" with `replacesMessageId` set so the bus
- *                       can update the existing StoredMessage in place.
- * - `callback_query`  → kind="create" with a single text segment carrying
- *                       the button payload. Treated as a fresh message so
- *                       downstream gates (rate-limit, dedup) apply normally.
+ * Handles the update types Phase 1 + G3.1 surface:
+ * - `message`              → kind="create" with text + media segments.
+ * - `channel_post`         → kind="create" (anonymous channel post).
+ * - `edited_message`       → kind="edit" with `replacesMessageId` set so the bus
+ *                            can update the existing StoredMessage in place.
+ * - `message_reaction`     → kind="system" with systemKind="reaction_added"/"reaction_removed".
+ * - `callback_query`       → routed through `parseTelegramCallbackQuery` to the
+ *                            ConnectorBus callback channel (NOT messageToEvent).
+ *
+ * Native media coverage (G3.1):
+ *   text, photo, voice, audio, video, video_note, document, animation,
+ *   sticker, location, contact, dice. Each maps to the closest
+ *   MessageSegment kind; non-mapped fields degrade to a plain-text
+ *   description so the assistant sees SOMETHING.
  */
 
 import type { NormalizedInboundEvent, PlatformIdentity } from "@/types/connectors/event"
 import { buildConversationKey } from "@/types/connectors/event"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { segmentsToPlainText } from "@/types/connectors/segment"
+import { MentionAccumulator } from "@/lib/connectors/adapters/_shared/mention-extractor"
+import type { ConnectorCallbackEvent } from "@/types/connectors/interaction"
 
 // ---------------------------------------------------------------------------
 // Minimal Telegram Bot API types (only the fields we consume)
@@ -53,6 +61,86 @@ export interface TelegramPhotoSize {
   height: number
 }
 
+export interface TelegramVoice {
+  file_id: string
+  duration: number
+  mime_type?: string
+  file_size?: number
+}
+
+export interface TelegramAudio {
+  file_id: string
+  duration: number
+  title?: string
+  performer?: string
+  mime_type?: string
+  file_size?: number
+}
+
+export interface TelegramVideo {
+  file_id: string
+  width: number
+  height: number
+  duration: number
+  mime_type?: string
+  file_size?: number
+  thumb?: TelegramPhotoSize
+}
+
+export interface TelegramVideoNote {
+  file_id: string
+  length: number
+  duration: number
+  thumb?: TelegramPhotoSize
+}
+
+export interface TelegramDocument {
+  file_id: string
+  file_name?: string
+  mime_type?: string
+  file_size?: number
+}
+
+export interface TelegramAnimation {
+  file_id: string
+  width: number
+  height: number
+  duration: number
+  thumb?: TelegramPhotoSize
+  file_name?: string
+  mime_type?: string
+  file_size?: number
+}
+
+export interface TelegramSticker {
+  file_id: string
+  emoji?: string
+  set_name?: string
+  is_animated?: boolean
+  is_video?: boolean
+  width: number
+  height: number
+}
+
+export interface TelegramLocation {
+  longitude: number
+  latitude: number
+  /** Optional live-location accuracy. */
+  horizontal_accuracy?: number
+}
+
+export interface TelegramContact {
+  phone_number: string
+  first_name: string
+  last_name?: string
+  user_id?: number
+}
+
+export interface TelegramDice {
+  emoji: string
+  value: number
+}
+
 export interface TelegramMessage {
   message_id: number
   from?: TelegramUser
@@ -62,7 +150,18 @@ export interface TelegramMessage {
   text?: string
   caption?: string
   entities?: TelegramMessageEntity[]
+  caption_entities?: TelegramMessageEntity[]
   photo?: TelegramPhotoSize[]
+  voice?: TelegramVoice
+  audio?: TelegramAudio
+  video?: TelegramVideo
+  video_note?: TelegramVideoNote
+  document?: TelegramDocument
+  animation?: TelegramAnimation
+  sticker?: TelegramSticker
+  location?: TelegramLocation
+  contact?: TelegramContact
+  dice?: TelegramDice
   reply_to_message?: TelegramMessage
   /** Set on edited_message updates — Telegram's wall-clock for the edit. */
   edit_date?: number
@@ -78,6 +177,22 @@ export interface TelegramCallbackQuery {
   inline_message_id?: string
 }
 
+export interface TelegramReactionType {
+  /** `emoji` for standard reactions, `custom_emoji` for premium ones. */
+  type: "emoji" | "custom_emoji"
+  emoji?: string
+  custom_emoji_id?: string
+}
+
+export interface TelegramMessageReactionUpdated {
+  chat: TelegramChat
+  message_id: number
+  user?: TelegramUser
+  date: number
+  old_reaction: TelegramReactionType[]
+  new_reaction: TelegramReactionType[]
+}
+
 export interface TelegramUpdate {
   update_id: number
   message?: TelegramMessage
@@ -85,6 +200,7 @@ export interface TelegramUpdate {
   channel_post?: TelegramMessage
   edited_channel_post?: TelegramMessage
   callback_query?: TelegramCallbackQuery
+  message_reaction?: TelegramMessageReactionUpdated
 }
 
 // ---------------------------------------------------------------------------
@@ -111,51 +227,46 @@ function buildPlatformIdentity(
 }
 
 /**
- * Detect if the bot (@selfUsername derived from selfId) is mentioned via
- * entities, or if the message is a direct reply to the bot's own message.
+ * Detect if the bot is mentioned via entities, reply_to, or text_mention.
+ * Uses the shared `MentionAccumulator` so dedup + self-detection stays
+ * consistent across all five platforms.
  */
 function detectMentions(
   selfId: string,
   msg: TelegramMessage
 ): { selfMentioned: boolean; users: string[] } {
-  const users: string[] = []
-  let selfMentioned = false
+  const acc = new MentionAccumulator(selfId)
 
-  // Check reply_to_message — reply to bot's message counts as self-mention
+  // Reply to the bot's own message counts as a self-mention.
   if (msg.reply_to_message?.from?.id !== undefined) {
     const replieeId = String(msg.reply_to_message.from.id)
-    if (replieeId === selfId) {
-      selfMentioned = true
+    if (replieeId === selfId) acc.markSelfMentioned()
+  }
+
+  // Walk both message and caption entity lists — captions on media
+  // messages carry @mentions in the same shape.
+  const allEntities = [...(msg.entities ?? []), ...(msg.caption_entities ?? [])]
+  const textSource = msg.text ?? msg.caption ?? ""
+  for (const entity of allEntities) {
+    if (entity.type === "mention") {
+      const mentioned = textSource.slice(entity.offset, entity.offset + entity.length).trim()
+      acc.add(mentioned)
+    } else if (entity.type === "text_mention" && entity.user) {
+      acc.add(String(entity.user.id))
     }
   }
 
-  // Check entities for @mention type
-  if (msg.entities) {
-    for (const entity of msg.entities) {
-      if (entity.type === "mention") {
-        // Extract the mentioned username from text
-        const start = entity.offset
-        const end = entity.offset + entity.length
-        const mentioned = (msg.text ?? "").slice(start, end).trim()
-        users.push(mentioned)
-      } else if (entity.type === "text_mention" && entity.user) {
-        users.push(String(entity.user.id))
-        if (String(entity.user.id) === selfId) {
-          selfMentioned = true
-        }
-      }
-    }
-  }
-
-  return { selfMentioned, users }
+  return acc.finalize()
 }
 
 function buildSegments(msg: TelegramMessage): MessageSegment[] {
   const segments: MessageSegment[] = []
+  const captionAfter = (): void => {
+    if (msg.caption) segments.push({ type: "text", text: msg.caption })
+  }
 
-  // Photo message: image segment first, then caption as text if present
+  // Photo message
   if (msg.photo && msg.photo.length > 0) {
-    // Pick the largest photo variant
     const largest = msg.photo.reduce((best, p) =>
       p.file_size !== undefined && (best.file_size ?? 0) < p.file_size ? p : best
     )
@@ -165,13 +276,103 @@ function buildSegments(msg: TelegramMessage): MessageSegment[] {
       width: largest.width,
       height: largest.height,
     })
-    if (msg.caption) {
-      segments.push({ type: "text", text: msg.caption })
-    }
+    captionAfter()
     return segments
   }
 
-  // Plain text message
+  // Voice (always a voice segment — transcript is generated server-side later)
+  if (msg.voice) {
+    segments.push({
+      type: "voice",
+      url: `tg://file/${msg.voice.file_id}`,
+      durationSec: msg.voice.duration,
+    })
+    captionAfter()
+    return segments
+  }
+
+  // Audio file (music / podcast). Treat as a generic file with a friendly name.
+  if (msg.audio) {
+    const name = msg.audio.title ?? msg.audio.performer ?? `audio-${msg.audio.file_id.slice(0, 8)}`
+    segments.push({
+      type: "file",
+      url: `tg://file/${msg.audio.file_id}`,
+      name,
+      mimeType: msg.audio.mime_type ?? "audio/mpeg",
+      sizeBytes: msg.audio.file_size ?? 0,
+    })
+    captionAfter()
+    return segments
+  }
+
+  // Video / video_note / animation — all surface as `video` segments so
+  // downstream renderers treat them identically. video_note (round avatar
+  // recording) carries a `length` field instead of width/height.
+  const videoLike = msg.video ?? msg.video_note ?? msg.animation
+  if (videoLike) {
+    segments.push({
+      type: "video",
+      url: `tg://file/${videoLike.file_id}`,
+      thumbnailUrl:
+        "thumb" in videoLike && videoLike.thumb
+          ? `tg://file/${videoLike.thumb.file_id}`
+          : undefined,
+      durationSec: videoLike.duration,
+    })
+    captionAfter()
+    return segments
+  }
+
+  // Document — generic file. Use the original file name where Telegram
+  // provided one, else synthesise from the file_id.
+  if (msg.document) {
+    segments.push({
+      type: "file",
+      url: `tg://file/${msg.document.file_id}`,
+      name: msg.document.file_name ?? `document-${msg.document.file_id.slice(0, 8)}`,
+      mimeType: msg.document.mime_type ?? "application/octet-stream",
+      sizeBytes: msg.document.file_size ?? 0,
+    })
+    captionAfter()
+    return segments
+  }
+
+  // Sticker — surface the sticker emoji as an emoji segment so trigger
+  // matchers and the renderer treat the message like an emoji.
+  if (msg.sticker) {
+    segments.push({ type: "emoji", code: msg.sticker.emoji ?? "sticker" })
+    return segments
+  }
+
+  // Location — proper location segment.
+  if (msg.location) {
+    segments.push({
+      type: "location",
+      lat: msg.location.latitude,
+      lon: msg.location.longitude,
+    })
+    return segments
+  }
+
+  // Contact — fall back to a friendly text rendering (no canonical
+  // segment kind for contact cards).
+  if (msg.contact) {
+    const name = [msg.contact.first_name, msg.contact.last_name].filter(Boolean).join(" ")
+    segments.push({
+      type: "text",
+      text: `[contact] ${name} ${msg.contact.phone_number}`,
+    })
+    return segments
+  }
+
+  // Dice — Telegram's animated dice / dart / basketball / bowling /
+  // soccer / slot machine. Surface the emoji + outcome value.
+  if (msg.dice) {
+    segments.push({ type: "text", text: `${msg.dice.emoji} (${msg.dice.value})` })
+    return segments
+  }
+
+  // Plain text or caption-only message
   if (msg.text) {
     segments.push({ type: "text", text: msg.text })
   } else if (msg.caption) {
@@ -268,76 +469,135 @@ function messageToEvent(
 }
 
 /**
- * Project a callback_query into a NormalizedInboundEvent. Inline-button
- * presses look like a fresh user message whose body is the button payload.
- * We synthesise a `messageId` from the callback id so the dedup ledger
- * treats two presses of the same button-press idempotency-wise (Telegram
- * never re-issues a callback_query id for the same press).
+ * Project a `message_reaction` update into a system event. The bus walks
+ * the `old_reaction` / `new_reaction` arrays and emits one `reaction_added`
+ * or `reaction_removed` per delta — but the runtime currently consumes
+ * `system` events at the audit-only layer, so for parity with Discord /
+ * Lark we emit a single representative event tagged with the dominant
+ * change (added wins over removed when both are present).
  */
-function callbackQueryToEvent(
+function reactionToEvent(
   adapterId: string,
   selfId: string,
-  cq: TelegramCallbackQuery,
+  reactionUpd: TelegramMessageReactionUpdated,
   rawUpdate: TelegramUpdate
 ): NormalizedInboundEvent | null {
-  // Without an originating message we can't anchor a conversationKey.
-  // Inline_message_id-only presses (no chat) fall through to null — they
-  // are an admin / bot-management surface we don't subscribe to.
-  if (!cq.message) return null
+  if (!reactionUpd.user) return null
 
-  const msg = cq.message
-  const chatId = msg.chat.id
-  const threadId = msg.message_thread_id !== undefined ? String(msg.message_thread_id) : undefined
-  const conversationKey = buildConversationKey("telegram", adapterId, String(chatId), threadId)
+  const added = reactionUpd.new_reaction.filter(
+    (r) => !reactionUpd.old_reaction.some((o) => sameReaction(o, r))
+  )
+  const removed = reactionUpd.old_reaction.filter(
+    (r) => !reactionUpd.new_reaction.some((o) => sameReaction(o, r))
+  )
+  const isAdd = added.length > 0
+  const representative = (isAdd ? added : removed)[0]
+  if (!representative) return null
 
-  const sender = buildPlatformIdentity(adapterId, chatId, cq.from)
-
-  const data = cq.data ?? ""
-  const segments: MessageSegment[] = data
-    ? [{ type: "text", text: data }]
-    : [{ type: "text", text: "[callback_query]" }]
-  const plainText = segmentsToPlainText(segments)
-
-  const channelKind: "private" | "group" | "channel" | "thread" =
-    msg.chat.type === "private"
-      ? "private"
-      : msg.chat.type === "channel"
-        ? "channel"
-        : threadId !== undefined
-          ? "thread"
-          : "group"
-
-  // The synthetic messageId mirrors `tgcq:<callback_query.id>` so dedup
-  // can spot a re-delivered callback. Telegram's callback_query.id is
-  // globally unique per press.
-  const messageId = `tgcq:${cq.id}`
+  const chat = reactionUpd.chat
+  const chatId = chat.id
+  const conversationKey = buildConversationKey("telegram", adapterId, String(chatId))
+  const sender = buildPlatformIdentity(adapterId, chatId, reactionUpd.user)
 
   return {
     platform: "telegram",
     adapterId,
     selfId,
-    messageId,
+    messageId: `tgreact:${reactionUpd.message_id}:${reactionUpd.user.id}:${reactionUpd.date}`,
     conversationRef: {
       platform: "telegram",
       adapterId,
       chatId: String(chatId),
-      messageId,
-      callbackQueryId: cq.id,
+      messageId: String(reactionUpd.message_id),
     },
     conversationKey,
     sender,
     channel: {
       id: conversationKey,
-      name: msg.chat.title ?? msg.chat.username ?? msg.chat.first_name,
-      kind: channelKind,
+      name: chat.title ?? chat.username ?? chat.first_name,
+      kind: chat.type === "private" ? "private" : chat.type === "channel" ? "channel" : "group",
       platformChannelId: String(chatId),
     },
-    segments,
-    plainText,
+    segments: [
+      {
+        type: "emoji",
+        code:
+          representative.type === "emoji"
+            ? (representative.emoji ?? "?")
+            : `custom:${representative.custom_emoji_id ?? "?"}`,
+      },
+    ],
+    plainText: representative.emoji ?? "[reaction]",
     mentions: { selfMentioned: false, users: [] },
-    timestamp: Date.now(),
+    timestamp: reactionUpd.date * 1000,
     raw: rawUpdate,
-    kind: "create",
+    kind: "system",
+    systemKind: isAdd ? "reaction_added" : "reaction_removed",
+    replacesMessageId: String(reactionUpd.message_id),
+  }
+}
+
+function sameReaction(a: TelegramReactionType, b: TelegramReactionType): boolean {
+  if (a.type !== b.type) return false
+  if (a.type === "emoji") return a.emoji === b.emoji
+  return a.custom_emoji_id === b.custom_emoji_id
+}
+
+// ---------------------------------------------------------------------------
+// Callback-query → ConnectorCallbackEvent (G4 channel)
+// ---------------------------------------------------------------------------
+
+/**
+ * Project a Telegram callback_query into a `ConnectorCallbackEvent`
+ * suitable for `ConnectorBus.dispatchConnectorCallback`.
+ *
+ * Telegram inline-keyboard buttons carry up to 64 bytes of `callback_data`.
+ * The Telegram A2UI mapper (`a2ui-mapper.ts`) writes the long
+ * `a2ui:<surfaceId>:<componentId>:<action>` id into
+ * `connectorCallbackBindings` and uses a SHA-1-suffix short form on the
+ * wire when needed. The bus's `dispatchConnectorCallback` recovers the
+ * surface context via the binding lookup — adapter side just hands back
+ * whatever data string Telegram delivered.
+ *
+ * Returns `null` for inline-message-only callbacks (no anchoring chat)
+ * because we don't subscribe to bot-management surfaces.
+ */
+export function parseTelegramCallbackQuery(
+  adapterId: string,
+  selfId: string,
+  update: TelegramUpdate
+): ConnectorCallbackEvent | null {
+  const cq = update.callback_query
+  if (!cq?.message) return null
+
+  const msg = cq.message
+  const chatId = msg.chat.id
+  const threadId = msg.message_thread_id !== undefined ? String(msg.message_thread_id) : undefined
+  const conversationKey = buildConversationKey("telegram", adapterId, String(chatId), threadId)
+  const sender = buildPlatformIdentity(adapterId, chatId, cq.from)
+
+  const value = cq.data ?? ""
+
+  return {
+    platform: "telegram",
+    adapterId,
+    selfId,
+    // The callback_query.id is globally unique per press — Telegram never
+    // re-issues it. Perfect dedup key for namespace="callback".
+    triggerId: value || `tgcq:${cq.id}`,
+    // surfaceId / componentId are resolved via the binding row written at
+    // outbound time. The event passes whatever we have right now (empty)
+    // and the bus's `resolveCallbackBinding` upgrades them.
+    surfaceId: "",
+    componentId: undefined,
+    actionType: "button",
+    value,
+    payload: undefined,
+    originatingMessageId: String(msg.message_id),
+    conversationKey,
+    user: sender,
+    timestamp: Date.now(),
+    raw: update,
   }
 }
 
@@ -349,8 +609,10 @@ function callbackQueryToEvent(
  * Parse a Telegram update envelope into a `NormalizedInboundEvent`.
  *
  * Returns `null` for updates we deliberately ignore:
- * - inline-message-only callback_query (no anchoring chat)
- * - empty / unrecognised update types
+ * - callback_query (use `parseTelegramCallbackQuery` instead — the
+ *   transport routes those through `ConnectorBus.dispatchConnectorCallback`).
+ * - inline-message-only callback_query (no anchoring chat).
+ * - empty / unrecognised update types.
  */
 export function parseTelegramUpdate(
   adapterId: string,
@@ -379,9 +641,14 @@ export function parseTelegramUpdate(
     )
   }
 
-  // ── Inline button press → synthetic create event ──────────────────────
+  // ── Reaction updates → system event ───────────────────────────────────
+  if (update.message_reaction !== undefined) {
+    return reactionToEvent(adapterId, selfId, update.message_reaction, update)
+  }
+
+  // ── Inline button press: handled separately via the callback channel ──
   if (update.callback_query !== undefined) {
-    return callbackQueryToEvent(adapterId, selfId, update.callback_query, update)
+    return null
   }
 
   // ── Regular create paths ──────────────────────────────────────────────

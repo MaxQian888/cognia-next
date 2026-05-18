@@ -67,6 +67,30 @@ export function DraftEditor({ draft, onClose }: DraftEditorProps) {
               />
             )
           }
+          if (seg.type === "a2ui") {
+            // G5: draft preview for A2UI surfaces — show the pre-baked
+            // `plainTextMirror` so the operator can see what users on
+            // text-only channels will receive, plus a badge with the
+            // surface id. The full interactive renderer mounts in the
+            // main chat pane (ChatPane already handles A2UI parts);
+            // we keep the draft editor lightweight + non-editable for
+            // assistant-generated surfaces.
+            return (
+              <div
+                key={i}
+                className="space-y-2 rounded-md border bg-muted/40 px-3 py-2 text-xs"
+                data-testid={`draft-segment-a2ui-${i}`}
+              >
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Badge variant="outline">{t("a2uiBadge")}</Badge>
+                  <span className="truncate font-mono">{seg.surfaceId}</span>
+                </div>
+                <pre className="whitespace-pre-wrap break-words font-mono text-xs">
+                  {seg.plainTextMirror || t("a2uiEmptyMirror")}
+                </pre>
+              </div>
+            )
+          }
           return (
             <div
               key={i}

@@ -12,11 +12,12 @@ import type {
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
-import { TELEGRAM_CAPS } from "./capability"
-import { parseTelegramUpdate, type TelegramUpdate } from "./parse"
-import { serializeOutbound } from "./serialize"
+import { TELEGRAM_A2UI_CAPABILITY, TELEGRAM_CAPS } from "./capability"
+import { parseTelegramUpdate, parseTelegramCallbackQuery, type TelegramUpdate } from "./parse"
+import { serializeOutboundAsync } from "./serialize"
 import { startLongPoll } from "./transport-longpoll"
 import { startWebhookTransport } from "./transport-webhook"
+import { getBus } from "@/lib/connectors/bus"
 
 export interface TelegramAdapterOptions {
   id: string
@@ -47,6 +48,23 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
   let lastActivityAt: number | undefined = undefined
   let stopCalled = false
 
+  /**
+   * Custom error wrapper carrying the Telegram-side `retry_after`. The
+   * outbound runner inspects this on platform_5xx codes to backoff
+   * beyond the default exponential — Telegram is explicit about how long
+   * a client should wait before retrying after a 429.
+   */
+  class TelegramApiError extends Error {
+    constructor(
+      message: string,
+      readonly status: number,
+      readonly retryAfterMs: number | undefined
+    ) {
+      super(message)
+      this.name = "TelegramApiError"
+    }
+  }
+
   async function doSend(
     method: string,
     payload: Record<string, unknown>
@@ -58,11 +76,50 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     })
-    const body = JSON.parse(resp.body) as { ok: boolean; result?: { message_id?: number } }
+    let body: {
+      ok: boolean
+      result?: { message_id?: number }
+      description?: string
+      error_code?: number
+      parameters?: { retry_after?: number; migrate_to_chat_id?: number }
+    }
+    try {
+      body = JSON.parse(resp.body)
+    } catch {
+      throw new TelegramApiError(
+        `Telegram ${method} returned non-JSON body: ${resp.body.slice(0, 200)}`,
+        resp.status,
+        undefined
+      )
+    }
     if (!body.ok) {
-      throw new Error(`Telegram ${method} failed: ${resp.body}`)
+      // Telegram returns `parameters.retry_after` in seconds whenever
+      // the bot is rate-limited (HTTP 429) — surface it as ms so the
+      // caller / outbound runner can honour the cool-down.
+      const retryAfterMs =
+        typeof body.parameters?.retry_after === "number"
+          ? body.parameters.retry_after * 1000
+          : resp.status === 429
+            ? extractRetryAfter(resp.headers)
+            : undefined
+      throw new TelegramApiError(
+        `Telegram ${method} failed: ${body.description ?? resp.body}`,
+        resp.status,
+        retryAfterMs
+      )
     }
     return body.result ?? {}
+  }
+
+  function extractRetryAfter(headers: Record<string, string>): number | undefined {
+    // Normalise header lookup — Tauri returns lower-cased keys, but be safe.
+    for (const [k, v] of Object.entries(headers)) {
+      if (k.toLowerCase() === "retry-after") {
+        const secs = Number(v)
+        if (Number.isFinite(secs) && secs > 0) return secs * 1000
+      }
+    }
+    return undefined
   }
 
   async function start(ctx: AdapterContext): Promise<void> {
@@ -83,6 +140,34 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
       try {
         for await (const update of feed) {
           if (signal.aborted) break
+
+          // Inline-keyboard / callback_query → route through the
+          // ConnectorBus callback channel (G4). The bus dedups via
+          // namespace="callback", recovers surfaceId/componentId via
+          // `connectorCallbackBindings`, and forwards through the
+          // a2ui-bridge MCP server to drive the next assistant turn.
+          if (update.callback_query !== undefined) {
+            const callback = parseTelegramCallbackQuery(opts.id, opts.selfId, update)
+            if (callback) {
+              lastActivityAt = Date.now()
+              await getBus().dispatchConnectorCallback(callback)
+              // Best-effort ack so the Telegram client stops the
+              // "loading" spinner on the button. Failure is logged but
+              // does not block — the callback was already processed.
+              try {
+                await doSend("answerCallbackQuery", {
+                  callback_query_id: update.callback_query.id,
+                })
+              } catch (err) {
+                ctx.logger.warn("telegram:answerCallbackQuery failed", {
+                  reason: err instanceof Error ? err.message : String(err),
+                })
+              }
+            }
+            continue
+          }
+
+          // Regular message / edit / reaction → message event.
           const event = parseTelegramUpdate(opts.id, opts.selfId, update)
           if (event) {
             lastActivityAt = Date.now()
@@ -112,7 +197,7 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
   }
 
   async function send(req: OutboundRequest): Promise<OutboundResult> {
-    const calls = serializeOutbound(req)
+    const calls = await serializeOutboundAsync(req, opts.id)
     let platformMessageId: string | undefined
 
     try {
@@ -124,6 +209,21 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
       }
       return { ok: true, platformMessageId }
     } catch (err) {
+      // Surface rate-limit retryAfter so the outbound runner's circuit
+      // breaker + backoff honour Telegram's explicit cool-down.
+      if (err instanceof TelegramApiError) {
+        const code =
+          err.status === 429 ? "rate_limited" : err.status >= 500 ? "platform_5xx" : "platform_4xx"
+        return {
+          ok: false,
+          error: {
+            code,
+            message: err.message,
+            retryable: code !== "platform_4xx",
+            retryAfterMs: err.retryAfterMs,
+          },
+        }
+      }
       return {
         ok: false,
         error: {
@@ -201,5 +301,6 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
     delete: deleteMessage,
     setTyping,
     refreshCredentials,
+    a2uiCapability: () => TELEGRAM_A2UI_CAPABILITY,
   }
 }

@@ -632,23 +632,20 @@ export interface AppSettings {
     defaultPropagation: AgentId[]
   }
   /**
-   * Claude subscription (OAuth) settings — drives the Settings → Subscription
-   * section. The credential itself lives in the OS keyring (Tauri-only); only
-   * cadence + threshold preferences are stored here. See
-   * `lib/anthropic-subscription/types.ts:SubscriptionSettings` for field-level
-   * docs and {@link DEFAULT_SUBSCRIPTION_SETTINGS} for defaults.
+   * Claude subscription settings — drives the Settings → Subscription →
+   * Claude probe-loop preferences. The credentials themselves live in the
+   * OS keyring (Tauri-only); only cadence + threshold preferences are
+   * stored here. See ADR-0025 and
+   * `lib/subscription/core/types.ts:AnthropicSubscriptionSettings`.
    */
-  subscriptionSettings?: import("@/lib/anthropic-subscription/types").SubscriptionSettings
+  subscriptionSettings?: import("@/lib/subscription/core/types").AnthropicSubscriptionSettings
   /**
-   * Codex (OpenAI) subscription settings — drives the Settings → Codex
-   * Subscription section. The credential itself lives in the OS keyring
-   * (Tauri-only); only renderer-side preferences (discovery preference,
-   * auto-refresh) are stored here. See
-   * `lib/codex-subscription/types.ts:CodexSubscriptionSettings` for
-   * field-level docs and {@link DEFAULT_CODEX_SUBSCRIPTION_SETTINGS} for
-   * defaults.
+   * Codex (OpenAI) subscription preferences — discovery fallback + refresh
+   * cadence. Credentials live in the OS keyring; only renderer-side toggles
+   * are stored here. See ADR-0025 and
+   * `lib/subscription/core/types.ts:CodexSubscriptionSettings`.
    */
-  codexSubscriptionSettings?: import("@/lib/codex-subscription/types").CodexSubscriptionSettings
+  codexSubscriptionSettings?: import("@/lib/subscription/core/types").CodexSubscriptionSettings
   /** Last time the auto-updater check ran (ms since epoch). Daily debounce. */
   lastUpdateCheckAt?: number
   /** UI theme; "system" follows OS preference. */
@@ -1004,6 +1001,69 @@ export interface AppSettings {
    * action's caller passes `fallthroughWhenUnavailable: false`.
    */
   biometricRequiredFor?: BiometricGuardPolicy
+
+  /**
+   * Developer-only knobs. Surfaced under Settings → Developer in dev
+   * builds; hidden in production builds (gate via `NODE_ENV`). Each
+   * toggle relaxes a safety check that exists for a reason — never
+   * enable them by default.
+   */
+  developer?: DeveloperSettings
+}
+
+/**
+ * Settings that loosen safety gates for development workflows. Each
+ * field defaults to `undefined`/`false` and is hidden from production
+ * UIs.
+ */
+export interface DeveloperSettings {
+  /**
+   * When `true`, the VS Code LSP binary policy
+   * (`lib/plugin/vscode-shim/lsp-binary-policy.ts`) allows unsigned LSP
+   * binaries to spawn after a single in-session consent prompt instead
+   * of refusing them outright. Every spawn is still audit-logged with
+   * `decision: "dev-allow"`.
+   *
+   * **Safety note:** intended for plugin authors testing their own
+   * extensions before signing. Never enable on a machine where you
+   * install third-party `.vsix` files you haven't audited.
+   */
+  unsignedLspAllowed?: boolean
+
+  /**
+   * User-managed Language Server entries — Phase B of the LSP reuse
+   * work. Each entry is a `PluginLspServerDef` owned by `"user"` (vs.
+   * plugin-contributed servers owned by a plugin id). The bootstrap at
+   * `lib/plugin/lsp/lsp-user-servers.ts` registers them with the
+   * `lsp-registry` on app start and re-registers when this list
+   * changes.
+   *
+   * Stored in the settings singleton (rather than a dedicated Dexie
+   * table) because the typical user has at most a handful of entries
+   * and the existing settings store already gives us atomic save +
+   * cross-tab sync for free.
+   */
+  userLspServers?: UserLspServerEntry[]
+}
+
+/**
+ * One entry in `DeveloperSettings.userLspServers`. Shape mirrors
+ * `PluginLspServerDef` from `@/types/plugin` — kept inline so the
+ * types module avoids a circular dependency on the plugin barrel.
+ */
+export interface UserLspServerEntry {
+  id: string
+  name: string
+  languages: string[]
+  command: string
+  args?: string[]
+  env?: Record<string, string>
+  transport?: "stdio"
+  initializationOptions?: Record<string, unknown>
+  settings?: Record<string, unknown>
+  workspaceFolderRequired?: boolean
+  /** When `false`, the registry skips this entry on bootstrap. Default true. */
+  enabled?: boolean
 }
 
 export interface BiometricGuardPolicy {

@@ -172,16 +172,14 @@ export async function hasApiKey(): Promise<boolean> {
   return transport.call<boolean>("claude_has_api_key")
 }
 
-/**
- * Push the Claude OAuth bearer (Pro/Max subscription or Console flow) into
- * the in-process Rust state. The sidecar reads this on its next spawn and
- * forwards it as `CLAUDE_CODE_OAUTH_TOKEN` to the agent SDK. Pass `null` to
- * clear; the caller is responsible for triggering a sidecar restart so the
- * change takes effect.
- */
-export async function setOauthBearer(token: string | null): Promise<void> {
-  await transport.call("claude_set_oauth_bearer", { token })
-}
+// `setOauthBearer` was removed in ADR-0025 — the unified subscription module
+// pushes the bearer into `ApiKeyState` server-side via `subscription_set_active`.
+// Renderers that previously called `setOauthBearer(token)` + `restartSidecar()`
+// now call `subscription_set_active("anthropic", accountId)` (see
+// `lib/subscription/anthropic/sidecar-sync.ts`). The Rust-side
+// `claude_set_oauth_bearer` command continues to exist for the diagnostics
+// `hasOauthBearer()` read below and as a transitional surface during the
+// migration window, but no renderer code calls it directly.
 
 export async function hasOauthBearer(): Promise<boolean> {
   return transport.call<boolean>("claude_has_oauth_bearer")

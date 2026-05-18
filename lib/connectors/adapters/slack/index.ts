@@ -15,11 +15,11 @@ import type {
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
-import { SLACK_CAPS } from "./capability"
-import { parseSlackEventCallback } from "./parse"
-import type { SlackEventEnvelope } from "./parse"
+import { SLACK_A2UI_CAPABILITY, SLACK_CAPS } from "./capability"
+import { parseSlackEventCallback, parseSlackInteractivePayload } from "./parse"
+import type { SlackEventEnvelope, SlackInteractivePayload } from "./parse"
 import {
-  serializeOutbound,
+  serializeOutboundAsync,
   serializeUpdate,
   serializeDeleteMessage,
   serializeReaction,
@@ -30,6 +30,7 @@ import { startSocketMode } from "./transport-socket-mode"
 import { startSlackWebhookTransport } from "./transport-webhook"
 import { parseConversationKey } from "@/types/connectors/event"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
+import { getBus } from "@/lib/connectors/bus"
 
 export interface SlackAdapterOptions {
   id: string
@@ -192,7 +193,7 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
 
   async function send(req: OutboundRequest): Promise<OutboundResult> {
     try {
-      const call = serializeOutbound(req)
+      const call = await serializeOutboundAsync(req, opts.id)
       const result = (await doRequest("POST", "chat.postMessage", call.payload)) as {
         ts?: string
       } | null
@@ -207,6 +208,19 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
         },
       }
     }
+  }
+
+  /**
+   * Public entry point for the Tauri webhook dispatcher / Socket Mode
+   * dispatcher to hand a Slack interactive payload to the bus callback
+   * channel. Mirrors the `ctx.emit` shape but produces a
+   * `ConnectorCallbackEvent` instead of a message event.
+   */
+  async function handleInteractivePayload(payload: SlackInteractivePayload): Promise<void> {
+    const callback = parseSlackInteractivePayload(opts.id, opts.selfId, payload)
+    if (!callback) return
+    lastActivityAt = Date.now()
+    await getBus().dispatchConnectorCallback(callback)
   }
 
   async function edit(messageId: string, patch: OutboundRequest): Promise<OutboundResult> {
@@ -387,8 +401,14 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
     fetchHistory,
     setTyping,
     refreshCredentials,
+    a2uiCapability: () => SLACK_A2UI_CAPABILITY,
     addReaction,
     setSuggestedPrompts,
+    handleInteractivePayload,
+  } as PlatformAdapter & {
+    addReaction?: typeof addReaction
+    setSuggestedPrompts?: typeof setSuggestedPrompts
+    handleInteractivePayload?: typeof handleInteractivePayload
   }
 
   return adapter

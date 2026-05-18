@@ -6,7 +6,7 @@
  */
 
 import type { OutboundRequest } from "@/types/connectors/outbound"
-import { segmentsToLarkBody } from "./card"
+import { segmentsToLarkBody, segmentsToLarkBodyAsync } from "./card"
 
 const LARK_API_BASE = "https://open.feishu.cn/open-apis"
 
@@ -124,4 +124,51 @@ export function serializeReaction(messageId: string, emojiType: string): Seriali
  */
 export function serializeOutbound(req: OutboundRequest): SerializedLarkCall {
   return serializeSend(req)
+}
+
+/**
+ * Async outbound serializer used by the production adapter `send()`.
+ * Routes a2ui segments through `segmentsToLarkBodyAsync` so the body
+ * becomes a single Lark Interactive Card with `connectorCallbackBindings`
+ * persisted for every interactive element.
+ */
+export async function serializeOutboundAsync(
+  req: OutboundRequest,
+  adapterId: string
+): Promise<SerializedLarkCall> {
+  const chatId = chatIdFromRef(req)
+  const threadId = threadIdFromRef(req)
+  const { receiveIdType, receiveId } = buildReceiveIdParams(chatId)
+
+  const body = await segmentsToLarkBodyAsync(req.segments, {
+    adapterId,
+    conversationKey: buildConversationKeyFromRef(req, chatId, threadId),
+  })
+
+  const payload: Record<string, unknown> = {
+    receive_id: receiveId,
+    msg_type: body.msg_type,
+    content: body.content,
+  }
+  if (threadId) {
+    payload["reply_in_thread"] = true
+    payload["parent_id"] = threadId
+  }
+
+  return {
+    method: "POST",
+    url: `${LARK_API_BASE}/im/v1/messages?receive_id_type=${receiveIdType}`,
+    payload,
+  }
+}
+
+function buildConversationKeyFromRef(
+  req: OutboundRequest,
+  chatId: string,
+  threadId: string | undefined
+): string | undefined {
+  const ref = req.conversationRef as Record<string, unknown>
+  const adapterId = typeof ref["adapterId"] === "string" ? ref["adapterId"] : ""
+  if (!adapterId || !chatId) return undefined
+  return threadId ? `lark:${adapterId}:${chatId}:${threadId}` : `lark:${adapterId}:${chatId}`
 }

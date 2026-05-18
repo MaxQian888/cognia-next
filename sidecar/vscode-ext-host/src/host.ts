@@ -68,6 +68,33 @@ const PROVIDER_CALLBACKS = new Map<string, (payload: unknown) => Promise<unknown
 
 const connection = new RpcConnection(process.stdin, process.stdout)
 
+// Phase B of the LSP reuse work — see
+// `lib/plugin/lsp/lsp-registry.ts` and
+// `~/.claude/plans/vscode-lsp-mighty-robin.md`. The service is wired
+// lazily so the existing `extension:*` flow stays untouched: it's
+// only instantiated the first time the renderer sends an `lsp:*`
+// frame.
+let lspService: import("./lsp-service").LspService | null = null
+function ensureLspService(): import("./lsp-service").LspService {
+  if (lspService) return lspService
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { LspService } = require("./lsp-service") as typeof import("./lsp-service")
+  lspService = new LspService(
+    (method, params) => {
+      connection.sendNotification(method, params)
+    },
+    {
+      info: (msg, ctx) =>
+        process.stderr.write(`[lsp-service] ${msg} ${JSON.stringify(ctx ?? {})}\n`),
+      warn: (msg, ctx) =>
+        process.stderr.write(`[lsp-service] WARN ${msg} ${JSON.stringify(ctx ?? {})}\n`),
+      error: (msg, ctx) =>
+        process.stderr.write(`[lsp-service] ERROR ${msg} ${JSON.stringify(ctx ?? {})}\n`),
+    }
+  )
+  return lspService
+}
+
 // Wire the permission gate to the host: every sensitive require triggers
 // an RPC back to the renderer, which surfaces cognia's permission prompt.
 const gate: PermissionGate = {
@@ -175,6 +202,56 @@ connection.onRequest("extension:call", async (params) => {
   }
   const result = await cb(req.payload)
   return result ?? null
+})
+
+// ────────────────────────────────────────────────────────────────────────
+// Phase B — standalone LSP RPC surface (lsp:*). See `lsp-service.ts`.
+// ────────────────────────────────────────────────────────────────────────
+
+connection.onRequest("lsp:start", async (params) => {
+  return ensureLspService().start(
+    params as Parameters<
+      typeof ensureLspService extends () => infer S
+        ? S extends { start: (p: infer P) => unknown }
+          ? (p: P) => unknown
+          : never
+        : never
+    >[0]
+  )
+})
+
+connection.onRequest("lsp:stop", async (params) => {
+  const p = params as { ownerId: string; serverId: string }
+  return ensureLspService().stop(p.ownerId, p.serverId)
+})
+
+connection.onRequest("lsp:didOpen", async (params) => {
+  ensureLspService().didOpen(params as Parameters<import("./lsp-service").LspService["didOpen"]>[0])
+  return { ok: true }
+})
+
+connection.onRequest("lsp:didChange", async (params) => {
+  ensureLspService().didChange(
+    params as Parameters<import("./lsp-service").LspService["didChange"]>[0]
+  )
+  return { ok: true }
+})
+
+connection.onRequest("lsp:didClose", async (params) => {
+  ensureLspService().didClose(
+    params as Parameters<import("./lsp-service").LspService["didClose"]>[0]
+  )
+  return { ok: true }
+})
+
+connection.onRequest("lsp:request", async (params) => {
+  return ensureLspService().request(
+    params as Parameters<import("./lsp-service").LspService["request"]>[0]
+  )
+})
+
+connection.onRequest("lsp:list", async () => {
+  return ensureLspService().list()
 })
 
 // ────────────────────────────────────────────────────────────────────────
@@ -325,6 +402,11 @@ process.on("SIGTERM", () => {
     } catch {
       /* swallow */
     }
+  }
+  // Phase B — also tear down any LSP clients before exit so child
+  // processes don't outlive the sidecar.
+  if (lspService) {
+    void lspService.stopAll()
   }
   process.exit(0)
 })

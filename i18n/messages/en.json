@@ -1349,7 +1349,7 @@
       "slashCommands": "Built-in, custom, and plugin-contributed slash commands — browse, search, and copy a command into the composer.",
       "tools": "Built-in shell, filesystem, git, process and environment tools — global on/off, risk levels, and always-allow management.",
       "search": "Web search providers (Tavily, Brave, Bing, Google, Perplexity, Exa…), defaults, cache, safety and source verification.",
-      "ocr": "OCR providers (Mistral OCR, Google Vision, AWS Textract, Azure DI, Claude / GPT / Gemini vision, Mathpix, OCR.space, ABBYY, Nanonets, Lark) plus on-device engines (Tesseract WASM/native, Windows.Media.Ocr, Apple Vision, Android ML Kit). Includes auto-router, PDF fast-path, and result cache.",
+      "ocr": "OCR providers (Mistral OCR, Google Vision, AWS Textract, Azure DI, Claude / GPT / Gemini vision, Mathpix, OCR.space, ABBYY, Nanonets, Lark) plus on-device engines (Tesseract WASM/native, Windows.Media.Ocr, Apple Vision, Android ML Kit, ocrs, PaddleOCR) and the self-hosted HTTP adapter. Includes auto-router, PDF fast-path, and result cache.",
       "speech": "Voice input (STT) language and microphone, plus read-aloud (TTS) provider, voice and auto-play.",
       "characters": "Reusable personas with their own model and skills.",
       "skills": "Reusable instruction blobs appended to system prompts.",
@@ -3784,6 +3784,59 @@
         "saving": "Saving…",
         "enterField": "Enter {label}"
       }
+    },
+    "developer": {
+      "lsp": {
+        "title": "Allow unsigned LSP binaries",
+        "description": "When enabled, the VS Code extension LSP binary policy lets unsigned servers spawn after one in-session consent prompt instead of refusing them outright. Useful when developing your own .vsix.",
+        "warning": "Never enable on a machine where you install third-party .vsix files you have not audited. Every spawn is still recorded in the automation audit log.",
+        "toggleAriaLabel": "Toggle unsigned LSP binary allow"
+      }
+    },
+    "lspServers": {
+      "title": "Language Servers",
+      "description": "Add Language Server Protocol (LSP) servers — they power completion, hover, diagnostics, and go-to-definition in the Skills, Canvas, and Artifact editors. Servers added here run on every cognia launch.",
+      "addButton": "Add server",
+      "addAriaLabel": "Add a new Language Server",
+      "empty": "No Language Servers configured yet. Click \"Add server\" to point cognia at a binary you have installed (e.g. eslint-server, pyright-langserver, rust-analyzer).",
+      "tableAriaLabel": "Configured Language Servers",
+      "enabledAriaLabel": "Toggle {name}",
+      "removeAriaLabel": "Remove {name}",
+      "col": {
+        "name": "Name",
+        "languages": "Languages",
+        "command": "Command",
+        "enabled": "Enabled",
+        "actions": "Actions"
+      },
+      "add": {
+        "title": "Add Language Server",
+        "description": "Point cognia at an LSP-compatible binary on your machine. Cognia spawns the binary in the sidecar and bridges its diagnostics into the editor.",
+        "field": {
+          "name": "Display name",
+          "languages": "Languages",
+          "command": "Command",
+          "args": "Arguments"
+        },
+        "placeholder": {
+          "name": "ESLint",
+          "languages": "typescript, javascript",
+          "command": "/usr/local/bin/eslint-server or node_modules/.bin/eslint-server",
+          "args": "one argument per line, e.g. --stdio"
+        },
+        "hint": {
+          "languages": "Comma-separated list of Monaco language ids.",
+          "command": "Absolute path or a path relative to your cognia install.  substitution is supported.",
+          "args": "One argument per line.  substitution is supported."
+        },
+        "error": {
+          "name": "Name is required.",
+          "command": "Command is required.",
+          "languages": "At least one language is required."
+        },
+        "submit": "Add",
+        "cancel": "Cancel"
+      }
     }
   },
   "presets": {
@@ -4913,6 +4966,205 @@
       "actions": {
         "save": "Save",
         "reset": "Reset to defaults"
+      }
+    },
+    "providers": {
+      "anthropic": "Claude",
+      "codex": "Codex",
+      "opencode": "OpenCode"
+    },
+    "migration": {
+      "toastTitle": "Subscription module upgraded",
+      "toastBody": "Migrated {count, plural, =1 {1 legacy account} other {# legacy accounts}} into the new vault."
+    },
+    "common": {
+      "accountList": {
+        "title": "Accounts",
+        "empty": "No accounts yet. Add one to start using this provider.",
+        "addAccount": "Add account",
+        "active": "Active",
+        "setActive": "Set active",
+        "rename": "Rename",
+        "renameDialogTitle": "Rename account",
+        "renameLabel": "Label",
+        "renamePlaceholder": "e.g. Company Pro",
+        "renameClearHint": "Leave blank to fall back to the default plan-derived label.",
+        "remove": "Remove",
+        "removeDialogTitle": "Remove this account?",
+        "removeDialogBody": "The credential will be deleted from the OS keychain. You can sign in again at any time.",
+        "cancel": "Cancel",
+        "confirm": "Save",
+        "removeConfirm": "Remove",
+        "secretsHidden": "Token is hidden — view the OS keychain to inspect."
+      },
+      "preset": {
+        "title": "Third-party endpoint",
+        "description": "Override the upstream base URL. Useful for AWS Bedrock, Azure OpenAI, OpenRouter, and other relays.",
+        "noPreset": "No preset configured.",
+        "addPreset": "Add preset",
+        "editPreset": "Edit preset",
+        "removePreset": "Remove preset",
+        "labelField": "Label",
+        "labelPlaceholder": "e.g. AWS Bedrock",
+        "baseUrlField": "Base URL",
+        "baseUrlPlaceholder": "https://bedrock-runtime.us-west-2.amazonaws.com",
+        "headersField": "Extra headers (optional)",
+        "headersHint": "One per line, `Key: Value`. Sent on every request.",
+        "save": "Save preset",
+        "cancel": "Cancel",
+        "validationEmptyBaseUrl": "Base URL is required.",
+        "validationInvalidUrl": "Base URL must be a valid URL.",
+        "validationEmptyKey": "Header keys must not be blank.",
+        "presetActive": "Preset active",
+        "presetInactive": "Direct endpoint"
+      },
+      "importExport": {
+        "title": "Backup",
+        "description": "Export your subscription vaults as an encrypted file so you can restore them on another machine.",
+        "exportButton": "Export…",
+        "importButton": "Import…",
+        "exportDialogTitle": "Export subscription vaults",
+        "exportDialogBody": "Pick a passphrase. The file is encrypted with AES-GCM using PBKDF2-SHA256 (600 000 iterations) so the passphrase is the only thing standing between this backup and your tokens.",
+        "passphraseField": "Passphrase",
+        "passphraseConfirmField": "Confirm passphrase",
+        "passphraseMismatch": "Passphrases do not match.",
+        "passphraseEmpty": "Passphrase must not be empty.",
+        "downloading": "Preparing download…",
+        "exportSuccess": "Saved encrypted backup.",
+        "exportFailed": "Export failed: {error}",
+        "importDialogTitle": "Import subscription vaults",
+        "importDialogBody": "Pick an encrypted backup file and enter the passphrase used when it was created.",
+        "fileField": "Backup file",
+        "fileFieldHint": "Drop a `.cogniabak` file here or click to choose.",
+        "importSuccess": "Imported {count, plural, =1 {1 account} other {# accounts}}.",
+        "importFailed": "Import failed: {error}",
+        "passphraseWrong": "The passphrase didn't decrypt this file.",
+        "confirmImport": "Import",
+        "cancel": "Cancel"
+      },
+      "switchToast": {
+        "switched": "Active account switched to {label}.",
+        "cleared": "Active account cleared.",
+        "switchFailed": "Couldn't switch active account: {error}"
+      }
+    },
+    "codex": {
+      "title": "Codex (OpenAI)",
+      "description": "Sign in with your ChatGPT account or paste an OpenAI API key. The active account is used by the codex external agent.",
+      "webModeBanner": "Codex credentials are stored in your OS keychain — only available in the desktop app.",
+      "login": {
+        "title": "Sign in with Codex",
+        "modeGroupLabel": "Sign-in mode",
+        "modes": {
+          "reuse": {
+            "label": "Reuse codex-cli",
+            "description": "Adopt an existing credential from `~/.codex/auth.json` or codex-cli's keyring entry. Read-only — we never write back."
+          },
+          "oauth": {
+            "label": "Device-code OAuth",
+            "description": "Start a fresh sign-in with ChatGPT. Opens auth.openai.com with the codex-cli first-party client_id."
+          }
+        },
+        "reuse": {
+          "scanning": "Looking for codex-cli credentials…",
+          "noneFound": "No codex-cli credential found. Either install codex-cli and run `codex login`, or switch to the OAuth flow.",
+          "sourceLabel": "Source",
+          "sourceFile": "~/.codex/auth.json",
+          "sourceKeyring": "codex-cli OS keyring entry",
+          "authMode": "Auth mode",
+          "email": "Email",
+          "plan": "Plan",
+          "lastRefresh": "Last refresh",
+          "adopt": "Adopt this credential",
+          "adopted": "Adopted.",
+          "adoptFailed": "Couldn't adopt the credential: {error}",
+          "rescan": "Re-scan",
+          "notAdoptable": "This credential has neither a ChatGPT bearer nor an OpenAI API key — we can't adopt it. Run `codex login` to refresh.",
+          "authJsonPath": "auth.json path"
+        },
+        "oauth": {
+          "starting": "Requesting a device code from auth.openai.com…",
+          "userCodeLabel": "User code",
+          "verificationUriLabel": "Verification URL",
+          "openVerificationUri": "Open verification page",
+          "pasteHint": "Visit the page, paste the user code shown above, and wait. We're polling for you.",
+          "polling": "Waiting for the OAuth server to confirm…",
+          "expired": "The device code expired. Restart the sign-in.",
+          "accessDenied": "Sign-in cancelled at the OpenAI side.",
+          "granted": "Signed in.",
+          "saveFailed": "Couldn't save the credential: {error}"
+        },
+        "actions": {
+          "cancel": "Cancel",
+          "startOauth": "Start OAuth",
+          "close": "Close"
+        }
+      },
+      "overview": {
+        "signedOutTitle": "No active Codex account",
+        "signedOutBody": "Add a Codex account to enable the codex external agent.",
+        "signInCta": "Add account",
+        "activeTitle": "Active Codex account",
+        "authMode": "Auth mode",
+        "authModeChatGpt": "ChatGPT",
+        "authModeApiKey": "API key",
+        "noUsageTitle": "Usage isn't surfaced for Codex",
+        "noUsageBody": "OpenAI doesn't expose the unified rate-limit headers Claude does. The Account tab still shows the credential's plan + expiry."
+      },
+      "account": {
+        "signedOutTitle": "No accounts yet",
+        "signedOutBody": "Sign in to use Codex as an external agent.",
+        "unknownEmail": "(no email reported)",
+        "planLine": "{plan} · {mode}",
+        "expiresLabel": "Token expires",
+        "refresh": "Refresh token now",
+        "revokeOnSignOut": "Revoke server-side",
+        "revokeOnSignOutHint": "Also tells auth.openai.com to invalidate this token. Off by default — local-only sign out is reversible."
+      },
+      "settings": {
+        "preferDiscovered": {
+          "title": "Reuse codex-cli when our vault is empty",
+          "description": "When no Codex account is registered in cognia, read `~/.codex/auth.json` on each agent spawn. Kept as a UX hint — the runtime no longer auto-adopts; the Account tab still surfaces the discovered credential.",
+          "label": "Show codex-cli credentials in the Reuse flow"
+        },
+        "autoRefresh": {
+          "title": "Refresh tokens near expiry",
+          "description": "Refresh ChatGPT bearers automatically when ~5 minutes remain. Off uses lazy refresh on the next 401.",
+          "label": "Refresh automatically near expiry"
+        }
+      }
+    },
+    "opencode": {
+      "title": "OpenCode",
+      "description": "Discover credentials from `~/.local/share/opencode/auth.json` and paste an OpenCode-Zen subscription key. OpenCode itself manages many providers; we surface only the whitelisted ones.",
+      "webModeBanner": "OpenCode credentials are stored in your OS keychain — only available in the desktop app.",
+      "discovery": {
+        "title": "Discovered in OpenCode",
+        "description": "Read-only probe of the OpenCode CLI's auth.json. We never write back.",
+        "scanning": "Scanning auth.json…",
+        "empty": "No whitelisted entries in auth.json. Run `opencode auth` for one of: Anthropic, OpenAI, or OpenCode-Zen.",
+        "pathLabel": "auth.json",
+        "subProviderLabel": "Provider",
+        "kindLabel": "Kind",
+        "kindApiKey": "API key",
+        "kindOauth": "OAuth",
+        "kindUnknown": "Unknown",
+        "rescan": "Re-scan"
+      },
+      "zen": {
+        "title": "OpenCode-Zen subscription",
+        "description": "Paste the API key shown by opencode.ai/auth. Full OAuth into Zen is on the roadmap once the endpoint surface is documented.",
+        "pasteKey": "Paste Zen API key",
+        "addKey": "Add Zen key",
+        "accessTokenField": "Zen API key",
+        "accessTokenPlaceholder": "Paste the key opencode.ai/auth showed you",
+        "baseUrlField": "Base URL (optional)",
+        "baseUrlPlaceholder": "Leave blank to use the default Zen endpoint",
+        "labelField": "Label (optional)",
+        "labelPlaceholder": "OpenCode Zen",
+        "save": "Save Zen key",
+        "cancel": "Cancel",
+        "saveFailed": "Couldn't save the key: {error}"
       }
     }
   },
@@ -8482,6 +8734,18 @@
       "mlkit-android": {
         "label": "ML Kit Text Recognition",
         "description": "Capacitor (Android) only. Latin, Chinese, Devanagari, Japanese, and Korean scripts."
+      },
+      "ocrs": {
+        "label": "ocrs (local)",
+        "description": "Pure-Rust cross-platform OCR via ocrs + RTen. No system dependencies; English-biased. Models (~12 MB) download on first use."
+      },
+      "paddle-ocr": {
+        "label": "PaddleOCR (local)",
+        "description": "PP-OCRv5 via oar-ocr + ONNX Runtime. Strongest open CJK accuracy. Models (~17 MB) download on first use."
+      },
+      "local-http": {
+        "label": "Local HTTP (self-hosted)",
+        "description": "Adapter for self-hosted OCR servers (Umi-OCR, PaddleOCR-Server). Configure the endpoint URL and request dialect."
       }
     },
     "params": {
@@ -8527,6 +8791,20 @@
       "enableForms": {
         "label": "Extract form key/value pairs",
         "description": "Request structured form output. Increases per-page cost."
+      },
+      "dialect": {
+        "label": "Request dialect",
+        "description": "Which self-hosted server protocol to speak. Umi-OCR uses JSON; PaddleOCR-Server uses its serving API.",
+        "umi-ocr": "Umi-OCR",
+        "paddleocr-server": "PaddleOCR-Server"
+      },
+      "apiKey": {
+        "label": "Bearer token (optional)",
+        "description": "Sent as Authorization: Bearer when present. Leave empty for unauthenticated LAN servers."
+      },
+      "timeoutMs": {
+        "label": "Timeout (ms)",
+        "description": "Abort the request after this many milliseconds. Default 30 seconds."
       }
     },
     "health": {
@@ -8541,6 +8819,20 @@
       "clearProvider": "Clear cache for this provider",
       "itemsLabel": "{count} entries · {bytes} bytes",
       "description": "Cached by SHA-256 of the input file, provider, and language list."
+    },
+    "modelStatus": {
+      "title": "Local models",
+      "description": "Pure-Rust OCR engines ship without weights to keep the installer slim. Models are downloaded to your user data directory on first use.",
+      "installed": "Models ready",
+      "missing": "{count} model file(s) missing",
+      "downloading": "Downloading {file} ({percent}%)",
+      "downloadingDetail": "{bytesDone} / {bytesTotal} bytes — file {index} of {count}",
+      "download": "Download models",
+      "downloadAll": "Download all model files",
+      "redownload": "Re-download",
+      "modelDir": "Stored in: {path}",
+      "downloadFailed": "Download failed: {message}",
+      "downloadComplete": "Models ready ({bytes} bytes total)"
     },
     "composer": {
       "menu": {
@@ -10999,7 +11291,9 @@
       "markdownPlaceholder": "Draft markdown…",
       "approveAndSend": "Approve & Send",
       "reject": "Reject",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "a2uiBadge": "A2UI",
+      "a2uiEmptyMirror": "(no text mirror — interactive surface)"
     },
     "conversationHeader": {
       "modeSwitchDesktopOnly": "Mode switching requires the desktop app"

@@ -10,7 +10,13 @@
  *  - <@userId> is the canonical mention format
  */
 
-import type { MessageSegment } from "@/types/connectors/segment"
+import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segment"
+import {
+  buildActionId,
+  recordCallbackBinding,
+  walkA2UISurface,
+  type A2UIWalkNode,
+} from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 
 // ---------------------------------------------------------------------------
 // Block Kit types (minimal subset)
@@ -110,9 +116,348 @@ export function segmentToBlock(seg: MessageSegment): SlackBlock | null {
       // Unsupported in Phase 1 — drop
       return null
 
+    case "a2ui":
+      // Sync path: fall back to the pre-baked text mirror. The async
+      // serializer routes a2ui segments through `buildSlackA2UIBlocks`
+      // which produces the full Block Kit projection (header / section /
+      // actions / input blocks + callback bindings).
+      return sectionBlock(escapeSlackMrkdwn(seg.plainTextMirror))
+
     default:
       return null
   }
+}
+
+// ---------------------------------------------------------------------------
+// Slack A2UI mapper (G3.3)
+// ---------------------------------------------------------------------------
+
+export interface SlackA2UIMapperInput {
+  adapterId: string
+  surfaceId: string
+  surface: A2UISegmentContent
+  conversationKey?: string
+}
+
+interface ActionsBlock {
+  type: "actions"
+  block_id?: string
+  elements: Array<Record<string, unknown>>
+}
+
+interface InputBlock {
+  type: "input"
+  block_id?: string
+  label: { type: "plain_text"; text: string }
+  element: Record<string, unknown>
+  optional?: boolean
+}
+
+interface HeaderBlock {
+  type: "header"
+  text: { type: "plain_text"; text: string }
+}
+
+interface DividerBlock {
+  type: "divider"
+}
+
+interface ContextBlock {
+  type: "context"
+  elements: Array<{ type: "mrkdwn" | "plain_text" | "image"; [k: string]: unknown }>
+}
+
+export type SlackAnyBlock =
+  | SlackBlock
+  | ActionsBlock
+  | InputBlock
+  | HeaderBlock
+  | DividerBlock
+  | ContextBlock
+
+/**
+ * Project an A2UI surface into Slack Block Kit blocks. Async because
+ * each interactive component persists a `connectorCallbackBindings` row
+ * so the inbound `block_actions` payload can route back to the right
+ * surface/component.
+ *
+ * Covers Slack's richest native subset:
+ *   - Card title → header block
+ *   - Text / Link / Divider → section / divider
+ *   - Image → image block (or section accessory when small)
+ *   - Button / ButtonGroup → actions block with one element per Button
+ *   - Select / RadioGroup / Checkbox / DatePicker / TimePicker /
+ *     TextField / TextArea → input block (the inbound view_submission
+ *     gathers their state on submit)
+ *   - Alert → section with `:warning:` prefix
+ */
+export async function buildSlackA2UIBlocks(input: SlackA2UIMapperInput): Promise<SlackAnyBlock[]> {
+  const out: SlackAnyBlock[] = []
+  let pendingActions: ActionsBlock | null = null
+
+  const flushActions = () => {
+    if (pendingActions) {
+      if (pendingActions.elements.length > 0) out.push(pendingActions)
+      pendingActions = null
+    }
+  }
+
+  const nodes: A2UIWalkNode[] = []
+  walkA2UISurface(input.surface, (node) => {
+    nodes.push(node)
+  })
+
+  for (const node of nodes) {
+    switch (node.component) {
+      case "Card": {
+        flushActions()
+        const title = stringValue(node.raw.title)
+        if (title) {
+          out.push({ type: "header", text: { type: "plain_text", text: title } })
+        }
+        break
+      }
+      case "Alert": {
+        flushActions()
+        const title = stringValue(node.raw.title)
+        const text = stringValue(node.raw.text)
+        const body = [title ? `*${title}*` : "", text].filter(Boolean).join(" — ")
+        out.push(sectionBlock(`:warning: ${escapeSlackMrkdwn(body)}`))
+        break
+      }
+      case "Text": {
+        flushActions()
+        const text = stringValue(node.raw.text)
+        if (!text) break
+        const variant = stringValue(node.raw.variant)
+        if (variant === "heading1" || variant === "heading2") {
+          out.push({ type: "header", text: { type: "plain_text", text } })
+        } else if (variant === "heading3") {
+          out.push(sectionBlock(`*${escapeSlackMrkdwn(text)}*`))
+        } else {
+          out.push(sectionBlock(escapeSlackMrkdwn(text)))
+        }
+        break
+      }
+      case "Link": {
+        flushActions()
+        const text = stringValue(node.raw.text) || stringValue(node.raw.href)
+        const href = stringValue(node.raw.href)
+        if (!href) break
+        out.push(sectionBlock(`<${href}|${escapeSlackMrkdwn(text || href)}>`))
+        break
+      }
+      case "Divider": {
+        flushActions()
+        out.push({ type: "divider" })
+        break
+      }
+      case "Image": {
+        flushActions()
+        const url = stringValue(node.raw.src) || stringValue(node.raw.url)
+        if (!url) break
+        out.push({
+          type: "image",
+          image_url: url,
+          alt_text: stringValue(node.raw.alt) || "image",
+        })
+        break
+      }
+      case "Button": {
+        const label = stringValue(node.raw.text) || stringValue(node.raw.action) || "Button"
+        const action = stringValue(node.raw.action) || node.id
+        const fullId = buildActionId(input.surfaceId, node.id, action)
+        await recordCallbackBinding({
+          adapterId: input.adapterId,
+          actionId: fullId,
+          surfaceId: input.surfaceId,
+          componentId: node.id,
+          conversationKey: input.conversationKey,
+        })
+        const variant = stringValue(node.raw.variant)
+        const style =
+          variant === "primary" ? "primary" : variant === "destructive" ? "danger" : undefined
+        const href = stringValue(node.raw.href) || stringValue(node.raw.url)
+        if (!pendingActions) {
+          pendingActions = { type: "actions", elements: [] }
+        }
+        const element: Record<string, unknown> = {
+          type: "button",
+          text: { type: "plain_text", text: label },
+          action_id: fullId,
+          ...(style ? { style } : {}),
+        }
+        if (href) element.url = href
+        else element.value = action
+        pendingActions.elements.push(element)
+        break
+      }
+      case "Select":
+      case "RadioGroup": {
+        flushActions()
+        const action = stringValue(node.raw.action) || node.id
+        const fullId = buildActionId(input.surfaceId, node.id, action)
+        await recordCallbackBinding({
+          adapterId: input.adapterId,
+          actionId: fullId,
+          surfaceId: input.surfaceId,
+          componentId: node.id,
+          conversationKey: input.conversationKey,
+        })
+        const options = Array.isArray(node.raw.options)
+          ? (node.raw.options as Array<Record<string, unknown>>)
+              .filter((o) => o && (typeof o.value === "string" || typeof o.value === "number"))
+              .map((o) => ({
+                text: {
+                  type: "plain_text" as const,
+                  text: stringValue(o.label) || stringValue(o.value),
+                },
+                value: String(o.value),
+              }))
+          : []
+        if (options.length === 0) break
+        const label = stringValue(node.raw.label) || "Select"
+        out.push({
+          type: "input",
+          block_id: `b_${node.id}`,
+          label: { type: "plain_text", text: label },
+          element: {
+            type: node.component === "RadioGroup" ? "radio_buttons" : "static_select",
+            action_id: fullId,
+            options,
+            ...(node.component === "Select" && stringValue(node.raw.placeholder)
+              ? {
+                  placeholder: {
+                    type: "plain_text" as const,
+                    text: stringValue(node.raw.placeholder),
+                  },
+                }
+              : {}),
+          },
+        })
+        break
+      }
+      case "Checkbox": {
+        flushActions()
+        const action = stringValue(node.raw.action) || node.id
+        const fullId = buildActionId(input.surfaceId, node.id, action)
+        await recordCallbackBinding({
+          adapterId: input.adapterId,
+          actionId: fullId,
+          surfaceId: input.surfaceId,
+          componentId: node.id,
+          conversationKey: input.conversationKey,
+        })
+        const label = stringValue(node.raw.label) || "Checkbox"
+        out.push({
+          type: "input",
+          block_id: `b_${node.id}`,
+          label: { type: "plain_text", text: label },
+          element: {
+            type: "checkboxes",
+            action_id: fullId,
+            options: [{ text: { type: "plain_text", text: label }, value: "true" }],
+          },
+          optional: true,
+        })
+        break
+      }
+      case "DatePicker": {
+        flushActions()
+        const action = stringValue(node.raw.action) || node.id
+        const fullId = buildActionId(input.surfaceId, node.id, action)
+        await recordCallbackBinding({
+          adapterId: input.adapterId,
+          actionId: fullId,
+          surfaceId: input.surfaceId,
+          componentId: node.id,
+          conversationKey: input.conversationKey,
+        })
+        const label = stringValue(node.raw.label) || "Date"
+        out.push({
+          type: "input",
+          block_id: `b_${node.id}`,
+          label: { type: "plain_text", text: label },
+          element: { type: "datepicker", action_id: fullId },
+          optional: !node.raw.required,
+        })
+        break
+      }
+      case "TimePicker": {
+        flushActions()
+        const action = stringValue(node.raw.action) || node.id
+        const fullId = buildActionId(input.surfaceId, node.id, action)
+        await recordCallbackBinding({
+          adapterId: input.adapterId,
+          actionId: fullId,
+          surfaceId: input.surfaceId,
+          componentId: node.id,
+          conversationKey: input.conversationKey,
+        })
+        const label = stringValue(node.raw.label) || "Time"
+        out.push({
+          type: "input",
+          block_id: `b_${node.id}`,
+          label: { type: "plain_text", text: label },
+          element: { type: "timepicker", action_id: fullId },
+          optional: !node.raw.required,
+        })
+        break
+      }
+      case "TextField":
+      case "TextArea": {
+        flushActions()
+        const action = stringValue(node.raw.action) || node.id
+        const fullId = buildActionId(input.surfaceId, node.id, action)
+        await recordCallbackBinding({
+          adapterId: input.adapterId,
+          actionId: fullId,
+          surfaceId: input.surfaceId,
+          componentId: node.id,
+          conversationKey: input.conversationKey,
+        })
+        const label = stringValue(node.raw.label) || "Input"
+        out.push({
+          type: "input",
+          block_id: `b_${node.id}`,
+          label: { type: "plain_text", text: label },
+          element: {
+            type: "plain_text_input",
+            action_id: fullId,
+            multiline: node.component === "TextArea",
+            ...(stringValue(node.raw.placeholder)
+              ? {
+                  placeholder: {
+                    type: "plain_text" as const,
+                    text: stringValue(node.raw.placeholder),
+                  },
+                }
+              : {}),
+          },
+          optional: !node.raw.required,
+        })
+        break
+      }
+      // Layout-only — children traverse via the walker.
+      case "Row":
+      case "Column":
+      case "List":
+      case "ButtonGroup":
+        flushActions()
+        break
+      default:
+        break
+    }
+  }
+  flushActions()
+
+  return out
+}
+
+function stringValue(v: unknown): string {
+  if (typeof v === "string") return v
+  if (typeof v === "number" || typeof v === "boolean") return String(v)
+  return ""
 }
 
 /**

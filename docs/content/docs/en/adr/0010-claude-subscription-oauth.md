@@ -5,8 +5,8 @@ description: "cognia-next gains first-class support for Claude Pro/Max OAuth log
 
 # ADR 0010 — Claude Subscription OAuth + Usage Tracking
 
-**Status:** Accepted
-**Date:** 2026-05-06
+**Status:** Accepted — storage & multi-account portions **superseded by [ADR 0025](/docs/en/adr/0025-unified-subscription-module)**. The usage-tracking pipeline (`parser.ts`, `usage-collector.ts`, `usage-probe.ts`, the `subscriptionUsage` Dexie table) **remains canonical** and is the only Anthropic-specific bit kept out of the unified module on purpose.
+**Date:** 2026-05-06 (revised 2026-05-18 alongside ADR 0025)
 **Branch:** `feat/claude-subscription-oauth`
 
 ---

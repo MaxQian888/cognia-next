@@ -165,13 +165,6 @@ const SubscriptionSection = dynamic(
   () => import("./subscription/subscription-section").then((m) => m.SubscriptionSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
-const CodexSubscriptionSection = dynamic(
-  () =>
-    import("./codex-subscription/codex-subscription-section").then(
-      (m) => m.CodexSubscriptionSection
-    ),
-  { ssr: false, loading: () => <SectionLoading /> }
-)
 const ConnectionsSection = dynamic(
   () => import("./connections/connections-section").then((m) => m.ConnectionsSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -304,8 +297,6 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <ProvidersSection />
     case "subscription":
       return <SubscriptionSection />
-    case "codex-subscription":
-      return <CodexSubscriptionSection />
     case "ccswitch":
       return <CcswitchSection />
     case "agents":

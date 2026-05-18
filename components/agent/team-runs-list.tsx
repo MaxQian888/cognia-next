@@ -15,6 +15,7 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
 import { getDb } from "@/lib/db/schema"
+import type { WorkflowRunRow } from "@/types/workflow/visual"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 
@@ -48,7 +49,7 @@ export function TeamRunsList({ teamId }: TeamRunsListProps): React.ReactElement 
       })
     },
     [teamId],
-    [] as Awaited<ReturnType<typeof getDb>["workflowRuns"]["toArray"]>
+    [] as WorkflowRunRow[]
   )
 
   if (!runs || runs.length === 0) {

@@ -220,4 +220,155 @@ describe("runAndCaptureAssistantReply", () => {
     expect(err.code).toBe("send_failed")
     expect(err.name).toBe("RunAndCaptureError")
   })
+
+  // ── A2UI surface accumulator (G2 addition) ────────────────────────────
+
+  const a2uiToolCall = (
+    name: string,
+    input: Record<string, unknown>,
+    opts?: { uuid?: string; text?: string }
+  ): ClaudeEvent =>
+    ({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "assistant",
+        uuid: opts?.uuid ?? "uuid-asst-tool",
+        session_id: SESSION,
+        message: {
+          id: "m-tool",
+          role: "assistant",
+          content: [
+            ...(opts?.text ? [{ type: "text", text: opts.text }] : []),
+            { type: "tool_use", id: "tu_1", name, input },
+          ],
+        },
+      },
+    }) as unknown as ClaudeEvent
+
+  it("captures A2UI surfaces from a2ui_create_surface tool_use blocks", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await Promise.resolve()
+    fire(
+      a2uiToolCall(
+        "mcp__a2ui-bridge__a2ui_create_surface",
+        { surfaceId: "sfc1", surfaceType: "inline", title: "Hello" },
+        { text: "here is a card" }
+      )
+    )
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.text).toBe("here is a card")
+    expect(result.a2uiSurfaceOrder).toEqual(["sfc1"])
+    expect(result.a2uiSurfaces["sfc1"]).toMatchObject({
+      surfaceType: "inline",
+      title: "Hello",
+      rootId: "root",
+    })
+  })
+
+  it("merges a2ui_update_components into the surface map", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await Promise.resolve()
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_create_surface", {
+        surfaceId: "sfc1",
+        surfaceType: "inline",
+      })
+    )
+    fire(
+      a2uiToolCall(
+        "mcp__a2ui-bridge__a2ui_update_components",
+        {
+          surfaceId: "sfc1",
+          components: [
+            { id: "root", component: "Card", title: "T", children: ["t1"] },
+            { id: "t1", component: "Text", text: "hi" },
+          ],
+        },
+        { text: "done", uuid: "uuid-asst-2" }
+      )
+    )
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.a2uiSurfaces["sfc1"].components.root).toMatchObject({
+      component: "Card",
+      title: "T",
+    })
+    expect(result.a2uiSurfaces["sfc1"].components.t1).toMatchObject({
+      component: "Text",
+      text: "hi",
+    })
+  })
+
+  it("supports surface-only turns (no text + at least one surface)", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await Promise.resolve()
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_create_surface", {
+        surfaceId: "sfc_only",
+        surfaceType: "panel",
+      })
+    )
+    fire(sessionEnded())
+    const result = await promise
+    // No text was emitted — should NOT throw no_assistant_text.
+    expect(result.text).toBe("")
+    expect(result.a2uiSurfaceOrder).toEqual(["sfc_only"])
+  })
+
+  it("data_model_update merges (default) or replaces dataModel based on `merge`", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await Promise.resolve()
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_create_surface", {
+        surfaceId: "sfc",
+        surfaceType: "inline",
+      })
+    )
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_data_model_update", {
+        surfaceId: "sfc",
+        data: { name: "Alice", age: 30 },
+      })
+    )
+    fire(
+      a2uiToolCall(
+        "mcp__a2ui-bridge__a2ui_data_model_update",
+        { surfaceId: "sfc", data: { age: 31 } },
+        { text: "ok" }
+      )
+    )
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.a2uiSurfaces["sfc"].dataModel).toEqual({ name: "Alice", age: 31 })
+  })
+
+  it("a2ui_delete_surface removes from accumulator and order", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await Promise.resolve()
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_create_surface", {
+        surfaceId: "sfc",
+        surfaceType: "inline",
+      })
+    )
+    fire(
+      a2uiToolCall("mcp__a2ui-bridge__a2ui_delete_surface", { surfaceId: "sfc" }, { text: "done" })
+    )
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.a2uiSurfaceOrder).toEqual([])
+    expect(result.a2uiSurfaces).toEqual({})
+  })
+
+  it("ignores tool_use blocks that aren't a2ui-bridge tools", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await Promise.resolve()
+    fire(a2uiToolCall("mcp__some-other-server__some_tool", { stuff: 1 }, { text: "hi" }))
+    fire(sessionEnded())
+    const result = await promise
+    expect(result.a2uiSurfaceOrder).toEqual([])
+    expect(result.text).toBe("hi")
+  })
 })

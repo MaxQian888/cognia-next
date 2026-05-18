@@ -49,9 +49,13 @@ jest.mock("@/lib/monaco/snippets", () => ({
   registerEmmetSupport: (...a: unknown[]) => registerEmmetMock(...a),
 }))
 
-const bindContextMock = jest.fn((..._a: unknown[]) => ({ dispose: jest.fn() }))
-jest.mock("@/lib/editor-workbench/monaco-context-binding", () => ({
-  bindMonacoEditorContext: (ctx: unknown) => bindContextMock(ctx),
+const mountWorkbenchMock = jest.fn((..._a: unknown[]) => ({
+  uri: "canvas:///default/doc-1.ts",
+  dispose: jest.fn(),
+}))
+jest.mock("@/lib/editor-workbench/monaco-workbench", () => ({
+  mountMonacoWorkbench: (editor: unknown, monaco: unknown, spec: unknown) =>
+    mountWorkbenchMock(editor, monaco, spec),
 }))
 
 jest.mock("@/lib/logger", () => ({
@@ -67,7 +71,9 @@ beforeEach(() => {
   pluginNotifyMock.mockClear()
   registerAllSnippetsMock.mockClear()
   registerEmmetMock.mockClear()
-  bindContextMock.mockReset().mockReturnValue({ dispose: jest.fn() })
+  mountWorkbenchMock
+    .mockReset()
+    .mockReturnValue({ uri: "canvas:///default/doc-1.ts", dispose: jest.fn() })
   settingsRef.settings.theme = "auto"
 })
 
@@ -79,9 +85,14 @@ describe("useCanvasMonacoSetup", () => {
     expect(result.current.monacoRef).toBeDefined()
   })
 
-  it("onMount registers snippets, themes, symbols, and binds context", () => {
+  it("onMount registers snippets, themes, symbols, and mounts the workbench", () => {
     const { result } = renderHook(() =>
-      useCanvasMonacoSetup({ documentId: "doc-1", language: "ts" })
+      useCanvasMonacoSetup({
+        documentId: "doc-1",
+        sessionId: "sess-A",
+        language: "ts",
+        initialContent: "code",
+      })
     )
     const editor = { getValue: () => "code" } as never
     const monaco = {
@@ -94,9 +105,25 @@ describe("useCanvasMonacoSetup", () => {
     expect(registerSnippetsMock).toHaveBeenCalledWith(monaco)
     expect(symbolRegisterMock).toHaveBeenCalledWith(monaco, "ts")
     expect(pluginNotifyMock).toHaveBeenCalledWith({ editor, monaco })
-    expect(bindContextMock).toHaveBeenCalledWith(
-      expect.objectContaining({ editorId: "doc-1", documentId: "doc-1", language: "ts" })
+    expect(mountWorkbenchMock).toHaveBeenCalledWith(
+      editor,
+      monaco,
+      expect.objectContaining({
+        surface: "canvas",
+        documentId: "doc-1",
+        sessionId: "sess-A",
+        language: "ts",
+        initialContent: "code",
+      })
     )
+  })
+
+  it("skips workbench mount when documentId is omitted", () => {
+    const { result } = renderHook(() => useCanvasMonacoSetup({ language: "ts" }))
+    const editor = { getValue: () => "" } as never
+    const monaco = { editor: { setTheme: jest.fn() } } as never
+    result.current.onMount(editor, monaco)
+    expect(mountWorkbenchMock).not.toHaveBeenCalled()
   })
 
   it("onMount swallows registry errors and warns", () => {

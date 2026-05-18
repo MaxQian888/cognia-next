@@ -74,76 +74,54 @@ export function isInQuietHours(nowMs: number, from: string, to: string, tz: stri
 }
 
 /**
- * Return the ms timestamp at which the quiet window closes (next `to` time).
+ * Return the ms duration until the quiet window's `to` time next occurs in
+ * the supplied timezone.
+ *
+ * O(1) implementation: we ask the platform's Intl.DateTimeFormat for the
+ * current wall-clock (hour:minute:second) in `tz`, compute the delta to
+ * the target `to` time on the same wall-clock day, and roll over by 24h
+ * when the target is already past. Avoids the prior 1440-iteration
+ * minute-stepping loop and its "should never happen" 24h fallback.
+ *
+ * DST: across a "spring forward" boundary the wall-clock gap can be off
+ * by an hour, but quiet-hours wakeups are coarse enough that the runner
+ * simply re-evaluates `isInQuietHours` after the deferral; an extra check
+ * is much cheaper than handling DST exactly. Across "fall back" the same
+ * tolerance applies — at most a one-hour delay before next attempt.
  */
 export function msUntilQuietEnd(nowMs: number, to: string, tz: string): number {
-  const [toH, toM] = to.split(":").map(Number)
+  const [rawToH, rawToM] = to.split(":").map(Number)
+  const toH = rawToH ?? 0
+  const toM = rawToM ?? 0
 
-  const now = new Date(nowMs)
-  // Construct today's window-close in the target tz by manipulating UTC offset
-  // We do this by getting the current date parts in tz then building a Date.
-  const todayParts = new Intl.DateTimeFormat("en-US", {
+  const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: tz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
     hour12: false,
-  }).formatToParts(now)
+  }).formatToParts(new Date(nowMs))
 
-  const partMap: Record<string, string> = {}
-  for (const p of todayParts) {
-    partMap[p.type] = p.value
+  let curH = 0
+  let curM = 0
+  let curS = 0
+  for (const p of parts) {
+    if (p.type === "hour") curH = parseInt(p.value, 10) % 24
+    else if (p.type === "minute") curM = parseInt(p.value, 10)
+    else if (p.type === "second") curS = parseInt(p.value, 10)
   }
 
-  // Build ISO string in tz then convert to UTC via Date constructor
-  const isoDate = `${partMap.year}-${partMap.month}-${partMap.day}`
-  const candidateStr = `${isoDate}T${String(toH ?? 0).padStart(2, "0")}:${String(toM ?? 0).padStart(2, "0")}:00`
-
-  // Parse in tz via temporary offset
-  const tzDate = new Date(new Date(candidateStr).toLocaleString("en-US", { timeZone: "UTC" }))
-
-  // Adjust for tz offset: offset = local_utc_for_candidate - utc_at_candidate
-  const utcCandidate = Date.parse(candidateStr + "Z")
-  const localCandidate = Date.parse(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone: tz,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    })
-      .format(new Date(utcCandidate))
-      .replace(/(\d+)\/(\d+)\/(\d+), /, "$3-$1-$2T")
-      .replace(",", "")
-  )
-
-  void tzDate
-  void localCandidate
-
-  // Simpler, robust approach: compute the next "to" time wall-clock ms using
-  // a brute-force offset derivation. We know the desired local HH:MM in tz,
-  // so we step through candidate UTC timestamps until the local time matches.
-  // For typical timezones this converges in ≤ 1 iteration.
-  const MINUTE = 60_000
-  let candidate = Math.ceil(nowMs / MINUTE) * MINUTE // round up to next minute
-  for (let i = 0; i < 1440; i++) {
-    const localHHMM = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz,
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).format(new Date(candidate))
-    const [lh, lm] = localHHMM.split(":").map(Number)
-    if ((lh ?? 0) === (toH ?? 0) && (lm ?? 0) === (toM ?? 0)) {
-      return candidate - nowMs
-    }
-    candidate += MINUTE
-  }
-  // Fallback: 24h (should never happen)
-  return 24 * 60 * MINUTE
+  const SECOND = 1_000
+  const DAY = 86_400
+  const curTotal = curH * 3600 + curM * 60 + curS
+  const targetTotal = toH * 3600 + toM * 60
+  let deltaSec = targetTotal - curTotal
+  // If the target is already past today (or exactly now), roll over.
+  // Strict `<= 0` matches the prior loop's "round up to next minute"
+  // behaviour — the quiet window has closed; the runner should fire
+  // again at the next occurrence, not zero-defer in an infinite loop.
+  if (deltaSec <= 0) deltaSec += DAY
+  return deltaSec * SECOND
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────

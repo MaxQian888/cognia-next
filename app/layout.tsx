@@ -14,6 +14,7 @@ import { TauriProvider } from "@/components/providers/tauri-provider"
 import { LoggerProvider } from "@/components/providers/logger-provider"
 import { ExternalAgentInitializer } from "@/components/providers/initializers/external-agent-initializer"
 import { AgentTeamRuntimeInitializer } from "@/components/providers/initializers/agent-team-runtime-initializer"
+import { SubscriptionInitializer } from "@/components/providers/initializers/subscription-initializer"
 import { SchedulerInitializer } from "@/components/scheduler"
 import { BackupSchedulerProvider } from "@/components/providers/backup-scheduler-provider"
 import { CompanionBootProvider } from "@/components/providers/companion-boot-provider"
@@ -83,6 +84,7 @@ export default async function RootLayout({
               <TauriProvider>
                 <TooltipProvider>
                   <LoggerProvider>
+                    <SubscriptionInitializer />
                     <ExternalAgentInitializer />
                     <AgentTeamRuntimeInitializer />
                     <SchedulerInitializer />

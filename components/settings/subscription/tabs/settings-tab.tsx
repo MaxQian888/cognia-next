@@ -14,10 +14,10 @@ import { Switch } from "@/components/ui/switch"
 import { SettingsAlert, SettingsCard } from "@/components/settings/common/settings-section"
 
 import {
-  DEFAULT_SUBSCRIPTION_SETTINGS,
-  type SubscriptionSettings,
-} from "@/lib/anthropic-subscription/types"
-import { PROBE_CADENCE_FLOOR_MS, clampCadence } from "@/lib/anthropic-subscription/scheduler"
+  DEFAULT_ANTHROPIC_SUBSCRIPTION_SETTINGS as DEFAULT_SUBSCRIPTION_SETTINGS,
+  type AnthropicSubscriptionSettings as SubscriptionSettings,
+} from "@/lib/subscription/core/types"
+import { PROBE_CADENCE_FLOOR_MS, clampCadence } from "@/lib/subscription/anthropic/scheduler"
 import { isTauri } from "@/lib/tauri"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 

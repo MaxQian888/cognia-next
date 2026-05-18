@@ -260,6 +260,78 @@ describe("vscode-loader — Tauri mode", () => {
     const { unloadVscodeExtension } = await import("./vscode-loader")
     await expect(unloadVscodeExtension("cognia.test-ext")).resolves.toBeUndefined()
   })
+
+  it("bootstraps configureMonacoBridge with monaco-editor + dispatchRpc on first load", async () => {
+    const invoke = jest.fn(async (cmd: string) => {
+      if (cmd === "plugin_load_vscode") return undefined
+      if (cmd === "plugin_activate_vscode")
+        return {
+          registeredCommands: [],
+          registeredWebviewViews: [],
+          registeredLanguageProviders: [],
+          sidecarPid: 1,
+        }
+      return undefined
+    })
+    jest.doMock("@tauri-apps/api/core", () => ({ invoke }))
+
+    const fakeLanguages = { registerCompletionItemProvider: jest.fn() }
+    const fakeSetModelMarkers = jest.fn()
+    jest.doMock("monaco-editor", () => ({
+      languages: fakeLanguages,
+      editor: { setModelMarkers: fakeSetModelMarkers },
+    }))
+
+    const configureMonacoBridge = jest.fn()
+    jest.doMock("@/lib/plugin/vscode-shim/monaco-bridge", () => ({
+      configureMonacoBridge,
+    }))
+
+    const { loadVscodeDefinition } = await import("./vscode-loader")
+    await loadVscodeDefinition(baseManifest, "/tmp/plugin")
+
+    expect(configureMonacoBridge).toHaveBeenCalledTimes(1)
+    const arg = configureMonacoBridge.mock.calls[0][0]
+    expect(arg.monacoApi).toBeDefined()
+    expect(typeof arg.dispatchRpc).toBe("function")
+    // dispatchRpc closure routes through plugin_invoke_vscode_rpc.
+    invoke.mockResolvedValueOnce(JSON.stringify({ ok: true }))
+    const out = await arg.dispatchRpc("cognia.test-ext", "anyMethod", { x: 1 })
+    expect(invoke).toHaveBeenCalledWith(
+      "plugin_invoke_vscode_rpc",
+      expect.objectContaining({ pluginId: "cognia.test-ext", method: "anyMethod" })
+    )
+    expect(out).toEqual({ ok: true })
+  })
+
+  it("survives monaco-editor failing to load (logs warn + continues activation)", async () => {
+    const invoke = jest.fn(async (cmd: string) => {
+      if (cmd === "plugin_load_vscode") return undefined
+      if (cmd === "plugin_activate_vscode")
+        return {
+          registeredCommands: [],
+          registeredWebviewViews: [],
+          registeredLanguageProviders: [],
+          sidecarPid: 1,
+        }
+      return undefined
+    })
+    jest.doMock("@tauri-apps/api/core", () => ({ invoke }))
+    // Simulate an environment where the lazy import throws (e.g. monaco
+    // assets are missing in CI).
+    jest.doMock("monaco-editor", () => {
+      throw new Error("monaco unavailable")
+    })
+
+    const configureMonacoBridge = jest.fn()
+    jest.doMock("@/lib/plugin/vscode-shim/monaco-bridge", () => ({
+      configureMonacoBridge,
+    }))
+
+    const { loadVscodeDefinition } = await import("./vscode-loader")
+    await expect(loadVscodeDefinition(baseManifest, "/tmp/plugin")).resolves.toBeDefined()
+    expect(configureMonacoBridge).not.toHaveBeenCalled()
+  })
 })
 
 describe("vscode-loader — invokeVscodeRpc without Tauri", () => {

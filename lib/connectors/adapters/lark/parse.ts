@@ -20,6 +20,11 @@ import type { NormalizedInboundEvent, PlatformIdentity } from "@/types/connector
 import { buildConversationKey } from "@/types/connectors/event"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { segmentsToPlainText } from "@/types/connectors/segment"
+import { MentionAccumulator } from "@/lib/connectors/adapters/_shared/mention-extractor"
+import type {
+  ConnectorCallbackActionType,
+  ConnectorCallbackEvent,
+} from "@/types/connectors/interaction"
 
 // ---------------------------------------------------------------------------
 // Lark event envelope types
@@ -110,22 +115,11 @@ function detectMentions(
   selfBotOpenId: string,
   message: LarkMessage
 ): { selfMentioned: boolean; users: string[] } {
-  const users: string[] = []
-  let selfMentioned = false
-
+  const acc = new MentionAccumulator(selfBotOpenId)
   for (const mention of message.mentions ?? []) {
-    const mentionOpenId = mention.id?.open_id
-    if (mentionOpenId) {
-      if (!users.includes(mentionOpenId)) {
-        users.push(mentionOpenId)
-      }
-      if (mentionOpenId === selfBotOpenId) {
-        selfMentioned = true
-      }
-    }
+    acc.add(mention.id?.open_id)
   }
-
-  return { selfMentioned, users }
+  return acc.finalize()
 }
 
 function buildSegments(message: LarkMessage): MessageSegment[] {
@@ -353,6 +347,122 @@ export function parseLarkEventEnvelope(
     replyTo: undefined,
     mentions: { selfMentioned, users },
     timestamp: createTimeMs,
+    raw: envelope,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Interactive card callback parser — G3.4
+// ---------------------------------------------------------------------------
+
+export interface LarkInteractiveValue {
+  /** Baked by `buildLarkA2UICard`: long action_id string. */
+  actionId?: string
+  surfaceId?: string
+  componentId?: string
+  [k: string]: unknown
+}
+
+export interface LarkInteractiveAction {
+  /** "button" | "select_static" | "picker_date" | "picker_time" | "input" | ... */
+  tag?: string
+  value?: LarkInteractiveValue
+  /** select_static — the chosen option value. */
+  option?: string
+  /** picker_date — selected date in ISO 8601. */
+  selected_date?: string
+  /** picker_time — selected time HH:mm. */
+  selected_time?: string
+  /** input — submitted text. */
+  input_value?: string
+  /** select_static — display label of the chosen option. */
+  text?: { content?: string }
+}
+
+export interface LarkInteractiveEvent {
+  operator?: LarkSenderId
+  action?: LarkInteractiveAction
+  open_message_id?: string
+  open_chat_id?: string
+  tenant_key?: string
+  /** Token Lark expects on the response when the bot updates the card. */
+  token?: string
+  /** Card-level callback id (rare). */
+  callback_id?: string
+}
+
+/**
+ * Project an `im.interactive_message.action_triggered_v1` envelope into
+ * a `ConnectorCallbackEvent` for the bus callback channel.
+ *
+ * The `action.value.actionId` we baked at outbound time becomes the
+ * `triggerId` so `ConnectorBus.dispatchConnectorCallback` resolves the
+ * surface/component binding from `connectorCallbackBindings`.
+ *
+ * Returns null for unrecognised events or malformed envelopes.
+ */
+export function parseLarkInteractiveCallback(
+  adapterId: string,
+  selfBotOpenId: string,
+  envelope: LarkEventEnvelope
+): ConnectorCallbackEvent | null {
+  if (envelope.header?.event_type !== "im.interactive_message.action_triggered_v1") return null
+  const event = envelope.event as unknown as LarkInteractiveEvent
+  const action = event.action
+  if (!action) return null
+  const operator = event.operator
+  if (!operator?.open_id) return null
+  const triggerId = action.value?.actionId ?? envelope.header.event_id
+  if (!triggerId) return null
+
+  let actionType: ConnectorCallbackActionType = "button"
+  let value = ""
+  let payload: Record<string, unknown> | undefined
+  if (action.tag === "select_static") {
+    actionType = "select"
+    value = action.option ?? ""
+  } else if (action.tag === "picker_date" || action.tag === "picker_time") {
+    actionType = "input"
+    value =
+      action.tag === "picker_date" ? (action.selected_date ?? "") : (action.selected_time ?? "")
+  } else if (action.tag === "input") {
+    actionType = "input"
+    value = action.input_value ?? ""
+  } else if (action.tag === "checkbox") {
+    actionType = "checkbox"
+    value = action.option ?? ""
+  } else if (action.tag === "button") {
+    actionType = "button"
+    value =
+      typeof action.value === "object" && action.value && "action" in action.value
+        ? String((action.value as Record<string, unknown>).action ?? "")
+        : ""
+    payload = action.value
+  }
+
+  const chatId = event.open_chat_id
+  const conversationKey = chatId ? buildConversationKey("lark", adapterId, chatId) : undefined
+  const user: PlatformIdentity = {
+    id: `lark:${operator.open_id}`,
+    platform: "lark",
+    adapterId,
+    remoteUserId: operator.open_id,
+  }
+
+  return {
+    platform: "lark",
+    adapterId,
+    selfId: selfBotOpenId,
+    triggerId,
+    surfaceId: action.value?.surfaceId ?? "",
+    componentId: action.value?.componentId,
+    actionType,
+    value,
+    payload,
+    originatingMessageId: event.open_message_id,
+    conversationKey,
+    user,
+    timestamp: envelope.header.create_time ? parseInt(envelope.header.create_time, 10) : Date.now(),
     raw: envelope,
   }
 }

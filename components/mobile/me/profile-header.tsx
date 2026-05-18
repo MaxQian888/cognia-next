@@ -7,23 +7,40 @@ import { useTranslations } from "next-intl"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
-import { loadCredential } from "@/lib/anthropic-subscription/credential-store"
+import { getAccount, getActiveAccount } from "@/lib/subscription/core/transport"
 import { isTauri } from "@/lib/tauri"
-import type { SubscriptionCredential } from "@/lib/anthropic-subscription/types"
+import type { AnthropicCredentialData } from "@/lib/subscription/core/types"
 import { deterministicColor, initials } from "@/lib/ui/avatar"
 
 export interface ProfileHeaderProps {
   /** Override credential loading — primarily for tests. */
-  credentialLoader?: () => Promise<SubscriptionCredential | null>
+  credentialLoader?: () => Promise<AnthropicCredentialData | null>
+}
+
+async function loadActiveAnthropicCredential(): Promise<AnthropicCredentialData | null> {
+  if (!isTauri()) return null
+  const snapshot = await getActiveAccount("anthropic")
+  if (!snapshot.activeAccountId) return null
+  const account = await getAccount("anthropic", snapshot.activeAccountId)
+  if (!account || account.credential.provider !== "anthropic") return null
+  return {
+    accessToken: account.credential.accessToken,
+    refreshToken: account.credential.refreshToken,
+    expiresAtMs: account.credential.expiresAtMs,
+    mode: account.credential.mode,
+    scope: account.credential.scope,
+    email: account.credential.email,
+    plan: account.credential.plan,
+    storedAtMs: account.credential.storedAtMs,
+  }
 }
 
 export function ProfileHeader({ credentialLoader }: ProfileHeaderProps = {}) {
   const t = useTranslations("mobile.me.profile")
-  const [credential, setCredential] = useState<SubscriptionCredential | null>(null)
+  const [credential, setCredential] = useState<AnthropicCredentialData | null>(null)
 
   useEffect(() => {
-    const loader =
-      credentialLoader ?? (() => (isTauri() ? loadCredential() : Promise.resolve(null)))
+    const loader = credentialLoader ?? loadActiveAnthropicCredential
     let cancelled = false
     loader()
       .then((c) => {

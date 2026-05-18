@@ -1,0 +1,39 @@
+{
+  "id": "cognia-test-lsp-contribution",
+  "name": "Test LSP Contribution (fixture)",
+  "version": "0.1.0",
+  "description": "Fixture plugin that demonstrates the Phase B LSP contribution pathway (manifest.lspServers + lsp-registry). Ships a single echo-style LSP that responds to initialize, textDocument/completion, hover, and publishDiagnostics — sourced from the same in-process fixture the sidecar tests use. Use this when verifying the end-to-end Skills/Canvas/Artifact LSP plumbing without needing to install a real .vsix.",
+  "type": "frontend",
+  "capabilities": ["lsp-server"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": { "cognia": ">=0.1.0" },
+  "permissions": ["process:spawn", "filesystem:read"],
+  "activationEvents": ["onStartup"],
+  "lspServers": [
+    {
+      "id": "echo",
+      "name": "Echo LSP (fixture)",
+      "languages": ["plaintext"],
+      "command": "tests/fixtures/echo-lsp.mjs",
+      "args": [],
+      "transport": "stdio",
+      "workspaceFolderRequired": false,
+      "initializationOptions": {
+        "note": "Fixture only. Real plugin contributions should supply absolute paths or relative paths that anchor against the plugin install directory."
+      }
+    }
+  ],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "blocked",
+      "hint": "LSP servers spawn through the Node sidecar — desktop only."
+    },
+    "tauri": {
+      "availability": "experimental",
+      "entrypoint": "src/index.ts",
+      "hint": "Plugin manager registers the echo LSP through lib/plugin/lsp/lsp-registry on enable; the sidecar's CogniaLspClient spawns the fixture as a child process."
+    }
+  }
+}

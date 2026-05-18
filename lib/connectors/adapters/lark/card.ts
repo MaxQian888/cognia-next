@@ -11,7 +11,13 @@
  * Lark supports: **bold**, *italic*, [link](url), line breaks (\n).
  */
 
-import type { MessageSegment } from "@/types/connectors/segment"
+import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segment"
+import {
+  buildActionId,
+  recordCallbackBinding,
+  walkA2UISurface,
+  type A2UIWalkNode,
+} from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 
 // ---------------------------------------------------------------------------
 // Lark message body shape (im/v1/messages)
@@ -154,6 +160,15 @@ export function segmentToLarkBody(seg: MessageSegment): LarkMessageBody | null {
         content: JSON.stringify({ text: "[card]" }),
       }
 
+    case "a2ui":
+      // Sync fallback: plain text mirror. `serializeOutboundAsync`
+      // routes a2ui segments through `buildLarkA2UICard` for the full
+      // Lark Interactive Card projection.
+      return {
+        msg_type: "text",
+        content: JSON.stringify({ text: seg.plainTextMirror }),
+      }
+
     case "reply":
     case "emoji":
     case "location":
@@ -162,6 +177,351 @@ export function segmentToLarkBody(seg: MessageSegment): LarkMessageBody | null {
 
     default:
       return null
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Lark A2UI mapper — Interactive Card projection (G3.4)
+// ---------------------------------------------------------------------------
+
+export interface LarkA2UIMapperInput {
+  adapterId: string
+  surfaceId: string
+  surface: A2UISegmentContent
+  conversationKey?: string
+}
+
+interface LarkCardElement {
+  tag: string
+  [k: string]: unknown
+}
+
+/**
+ * Project an A2UI surface into a Lark Interactive Card body.
+ *
+ * Native rendering:
+ *   - Card title → `header.title.content`
+ *   - Text / Link → `div` + `lark_md`
+ *   - Divider → `hr`
+ *   - Image → `img`
+ *   - Button / ButtonGroup → `action` with `button` actions
+ *   - Select → `select_static` inside `action`
+ *   - DatePicker / TimePicker → `picker_date` / `picker_time` inside `action`
+ *   - TextField / TextArea → `input` element
+ *   - Alert → coloured `div` with prefix
+ *
+ * Returns a single `LarkMessageBody` with `msg_type=interactive`. When
+ * the surface has no native components the body is a plain text mirror.
+ */
+export async function buildLarkA2UICard(input: LarkA2UIMapperInput): Promise<LarkMessageBody> {
+  const elements: LarkCardElement[] = []
+  let header: { title: { content: string; tag: string } } | undefined
+  let currentAction: { tag: string; actions: LarkCardElement[] } | null = null
+
+  const flushAction = () => {
+    if (currentAction && currentAction.actions.length > 0) {
+      elements.push(currentAction as unknown as LarkCardElement)
+      currentAction = null
+    } else if (currentAction) {
+      currentAction = null
+    }
+  }
+  const ensureAction = () => {
+    if (!currentAction) currentAction = { tag: "action", actions: [] }
+    return currentAction
+  }
+
+  const nodes: A2UIWalkNode[] = []
+  walkA2UISurface(input.surface, (node) => {
+    nodes.push(node)
+  })
+
+  for (const node of nodes) {
+    switch (node.component) {
+      case "Card": {
+        flushAction()
+        const title = stringValue(node.raw.title)
+        if (title) {
+          header = { title: { content: title, tag: "plain_text" } }
+        }
+        break
+      }
+      case "Alert": {
+        flushAction()
+        const title = stringValue(node.raw.title)
+        const text = stringValue(node.raw.text)
+        elements.push({
+          tag: "div",
+          text: {
+            tag: "lark_md",
+            content: `⚠️ **${escapeLarkMarkdown(title || "Alert")}**${title && text ? " — " : ""}${escapeLarkMarkdown(text)}`,
+          },
+        })
+        break
+      }
+      case "Text": {
+        flushAction()
+        const text = stringValue(node.raw.text)
+        if (!text) break
+        const variant = stringValue(node.raw.variant)
+        const md =
+          variant === "heading1" || variant === "heading2" || variant === "heading3"
+            ? `**${escapeLarkMarkdown(text)}**`
+            : escapeLarkMarkdown(text)
+        elements.push({ tag: "div", text: { tag: "lark_md", content: md } })
+        break
+      }
+      case "Link": {
+        flushAction()
+        const text = stringValue(node.raw.text) || stringValue(node.raw.href)
+        const href = stringValue(node.raw.href)
+        if (!href) break
+        elements.push({
+          tag: "div",
+          text: { tag: "lark_md", content: `[${escapeLarkMarkdown(text || href)}](${href})` },
+        })
+        break
+      }
+      case "Divider": {
+        flushAction()
+        elements.push({ tag: "hr" })
+        break
+      }
+      case "Image": {
+        flushAction()
+        const url = stringValue(node.raw.src) || stringValue(node.raw.url)
+        if (!url) break
+        // Lark `img` requires an `img_key` (file_key) — bare URLs aren't
+        // accepted by the card runtime. Until upload pre-pass is wired
+        // for cards we fall back to a markdown link.
+        if (!url.includes("://")) {
+          elements.push({
+            tag: "img",
+            img_key: url,
+            alt: { tag: "plain_text", content: stringValue(node.raw.alt) || "image" },
+          })
+        } else {
+          elements.push({
+            tag: "div",
+            text: {
+              tag: "lark_md",
+              content: `[${escapeLarkMarkdown(stringValue(node.raw.alt) || "image")}](${url})`,
+            },
+          })
+        }
+        break
+      }
+      case "Button": {
+        const label = stringValue(node.raw.text) || stringValue(node.raw.action) || "Button"
+        const action = stringValue(node.raw.action) || node.id
+        const fullId = buildActionId(input.surfaceId, node.id, action)
+        await recordCallbackBinding({
+          adapterId: input.adapterId,
+          actionId: fullId,
+          surfaceId: input.surfaceId,
+          componentId: node.id,
+          conversationKey: input.conversationKey,
+        })
+        const variant = stringValue(node.raw.variant)
+        const type =
+          variant === "primary" ? "primary" : variant === "destructive" ? "danger" : "default"
+        const href = stringValue(node.raw.href) || stringValue(node.raw.url)
+        const row = ensureAction()
+        row.actions.push({
+          tag: "button",
+          text: { tag: "plain_text", content: label },
+          type,
+          ...(href
+            ? { url: href }
+            : { value: { actionId: fullId, surfaceId: input.surfaceId, componentId: node.id } }),
+        })
+        break
+      }
+      case "Select":
+      case "RadioGroup": {
+        flushAction()
+        const action = stringValue(node.raw.action) || node.id
+        const fullId = buildActionId(input.surfaceId, node.id, action)
+        await recordCallbackBinding({
+          adapterId: input.adapterId,
+          actionId: fullId,
+          surfaceId: input.surfaceId,
+          componentId: node.id,
+          conversationKey: input.conversationKey,
+        })
+        const options = Array.isArray(node.raw.options)
+          ? (node.raw.options as Array<Record<string, unknown>>)
+              .filter((o) => o && (typeof o.value === "string" || typeof o.value === "number"))
+              .map((o) => ({
+                text: { tag: "plain_text", content: stringValue(o.label) || stringValue(o.value) },
+                value: String(o.value),
+              }))
+          : []
+        if (options.length === 0) break
+        const row = ensureAction()
+        row.actions.push({
+          tag: "select_static",
+          placeholder: {
+            tag: "plain_text",
+            content: stringValue(node.raw.placeholder) || stringValue(node.raw.label) || "Select",
+          },
+          options,
+          value: { actionId: fullId, surfaceId: input.surfaceId, componentId: node.id },
+        })
+        flushAction()
+        break
+      }
+      case "DatePicker":
+      case "TimePicker": {
+        flushAction()
+        const action = stringValue(node.raw.action) || node.id
+        const fullId = buildActionId(input.surfaceId, node.id, action)
+        await recordCallbackBinding({
+          adapterId: input.adapterId,
+          actionId: fullId,
+          surfaceId: input.surfaceId,
+          componentId: node.id,
+          conversationKey: input.conversationKey,
+        })
+        const row = ensureAction()
+        row.actions.push({
+          tag: node.component === "DatePicker" ? "picker_date" : "picker_time",
+          placeholder: {
+            tag: "plain_text",
+            content:
+              stringValue(node.raw.label) || (node.component === "DatePicker" ? "Date" : "Time"),
+          },
+          value: { actionId: fullId, surfaceId: input.surfaceId, componentId: node.id },
+        })
+        flushAction()
+        break
+      }
+      case "TextField":
+      case "TextArea": {
+        flushAction()
+        const action = stringValue(node.raw.action) || node.id
+        const fullId = buildActionId(input.surfaceId, node.id, action)
+        await recordCallbackBinding({
+          adapterId: input.adapterId,
+          actionId: fullId,
+          surfaceId: input.surfaceId,
+          componentId: node.id,
+          conversationKey: input.conversationKey,
+        })
+        elements.push({
+          tag: "input",
+          placeholder: {
+            tag: "plain_text",
+            content: stringValue(node.raw.placeholder) || stringValue(node.raw.label) || "Input",
+          },
+          rows: node.component === "TextArea" ? 4 : 1,
+          value: { actionId: fullId, surfaceId: input.surfaceId, componentId: node.id },
+        })
+        break
+      }
+      case "Row":
+      case "Column":
+      case "List":
+      case "ButtonGroup":
+        flushAction()
+        break
+      default:
+        break
+    }
+  }
+  flushAction()
+
+  if (elements.length === 0 && !header) {
+    return {
+      msg_type: "text",
+      content: JSON.stringify({ text: "[empty]" }),
+    }
+  }
+
+  const card: Record<string, unknown> = { elements }
+  if (header) card.header = header
+  return {
+    msg_type: "interactive",
+    content: JSON.stringify(card),
+  }
+}
+
+function stringValue(v: unknown): string {
+  if (typeof v === "string") return v
+  if (typeof v === "number" || typeof v === "boolean") return String(v)
+  return ""
+}
+
+/**
+ * Async serializer used by the production adapter `send()`. When a
+ * segment list contains any `a2ui` segment, the whole message collapses
+ * into a single Lark Interactive Card (composed from each a2ui surface
+ * + the text/markdown tail). Otherwise delegates to the sync
+ * `segmentsToLarkBody`.
+ *
+ * Lark's `/im/v1/messages` accepts one body per call, so combining
+ * everything into a single interactive card preserves the assistant's
+ * intended layout without an extra round-trip.
+ */
+export async function segmentsToLarkBodyAsync(
+  segments: MessageSegment[],
+  ctx: {
+    adapterId: string
+    /** Conversation key persisted on each callback binding row. */
+    conversationKey?: string
+  }
+): Promise<LarkMessageBody> {
+  const hasA2UI = segments.some((s) => s.type === "a2ui")
+  if (!hasA2UI) return segmentsToLarkBody(segments)
+
+  // Compose a single interactive card that interleaves text/markdown
+  // segments as `div` elements with each a2ui surface's projected
+  // elements. Header taken from the first a2ui surface's `title`.
+  const combinedElements: Record<string, unknown>[] = []
+  let header: Record<string, unknown> | undefined
+
+  for (const seg of segments) {
+    if (seg.type === "a2ui") {
+      const body = await buildLarkA2UICard({
+        adapterId: ctx.adapterId,
+        surfaceId: seg.surfaceId,
+        surface: seg.content,
+        conversationKey: ctx.conversationKey,
+      })
+      if (body.msg_type === "interactive") {
+        const parsed = JSON.parse(body.content) as {
+          header?: Record<string, unknown>
+          elements?: Record<string, unknown>[]
+        }
+        if (!header && parsed.header) header = parsed.header
+        if (parsed.elements) combinedElements.push(...parsed.elements)
+      }
+      continue
+    }
+    if (seg.type === "text" || seg.type === "markdown") {
+      const text = seg.type === "text" ? seg.text : seg.md
+      if (!text) continue
+      combinedElements.push({
+        tag: "div",
+        text: { tag: "lark_md", content: escapeLarkMarkdown(text) },
+      })
+      continue
+    }
+    // Other segments (image / file / etc.): fall through to a textual
+    // placeholder element. The richer projection lives in `card.ts`
+    // sync `segmentToLarkBody` but Lark cards can't host an image_key
+    // mid-card without first uploading bytes.
+    combinedElements.push({
+      tag: "div",
+      text: { tag: "lark_md", content: `[${seg.type}]` },
+    })
+  }
+
+  const card: Record<string, unknown> = { elements: combinedElements }
+  if (header) card.header = header
+  return {
+    msg_type: "interactive",
+    content: JSON.stringify(card),
   }
 }
 

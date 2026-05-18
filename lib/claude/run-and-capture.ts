@@ -24,6 +24,7 @@
 
 import { sendPrompt, interruptSession, onClaudeMessage } from "./ipc"
 import type { ClaudeEvent, SendContent, SendOptions } from "./types"
+import type { A2UISegmentContent } from "@/types/connectors/segment"
 
 export interface RunAndCaptureResult {
   /** The accumulated assistant reply text (concatenated text blocks). */
@@ -33,6 +34,127 @@ export interface RunAndCaptureResult {
    * caller as a stable idempotency key so retries don't double-send.
    */
   messageId: string
+  /**
+   * A2UI surfaces created or updated during this turn, keyed by
+   * `surfaceId`. The keys mirror the order the assistant emitted them
+   * in `a2uiSurfaceOrder`. Populated when the assistant calls the
+   * `builtin:a2ui-bridge` MCP tools (`a2ui_create_surface` /
+   * `a2ui_update_components` / `a2ui_data_model_update`); empty when the
+   * reply is plain text.
+   *
+   * The connector auto-mode loop reads these to project A2UI segments
+   * into the outbound MessageSegment[] via `assistantReplyToSegments`.
+   */
+  a2uiSurfaces: Record<string, A2UISegmentContent>
+  /**
+   * Surface ids in the order the assistant first introduced them. Used
+   * by `assistantReplyToSegments` to keep delivery order deterministic
+   * across retries.
+   */
+  a2uiSurfaceOrder: string[]
+}
+
+/**
+ * Internal accumulator: tracks A2UI surface state across the assistant
+ * stream so deletion + create-after-delete works correctly. The runner
+ * mirrors the same dispatch table the renderer uses, but in memory only —
+ * the surfaces are NEVER written to Dexie from this code path. Persistence
+ * is the renderer's job; the auto-mode loop just needs to hand the
+ * surfaces to the outbound runner.
+ */
+interface SurfaceAccumulator {
+  surfaces: Map<string, A2UISegmentContent>
+  order: string[]
+}
+
+const A2UI_TOOL_PREFIX = "mcp__a2ui-bridge__"
+
+function applyA2UIToolCall(
+  acc: SurfaceAccumulator,
+  toolName: string,
+  input: Record<string, unknown>
+): void {
+  if (!toolName.startsWith(A2UI_TOOL_PREFIX)) return
+  const op = toolName.slice(A2UI_TOOL_PREFIX.length)
+  const surfaceId = typeof input.surfaceId === "string" ? input.surfaceId : null
+  if (!surfaceId) return
+
+  switch (op) {
+    case "a2ui_create_surface": {
+      const surface: A2UISegmentContent = {
+        components: {},
+        dataModel: {},
+        rootId: "root",
+        surfaceType: (input.surfaceType as A2UISegmentContent["surfaceType"]) ?? "inline",
+        catalogId: typeof input.catalogId === "string" ? input.catalogId : undefined,
+        title: typeof input.title === "string" ? input.title : undefined,
+        widget:
+          input.widget && typeof input.widget === "object"
+            ? (input.widget as Record<string, unknown>)
+            : undefined,
+      }
+      // Re-create overwrites any prior in-flight state for this surfaceId
+      // — mirrors the renderer dispatch.
+      acc.surfaces.set(surfaceId, surface)
+      if (!acc.order.includes(surfaceId)) acc.order.push(surfaceId)
+      break
+    }
+    case "a2ui_update_components": {
+      const existing =
+        acc.surfaces.get(surfaceId) ??
+        ({
+          components: {},
+          dataModel: {},
+          rootId: "root",
+          surfaceType: "inline",
+        } as A2UISegmentContent)
+      const components = Array.isArray(input.components)
+        ? (input.components as Array<Record<string, unknown>>)
+        : []
+      const map: Record<string, Record<string, unknown>> = { ...existing.components } as Record<
+        string,
+        Record<string, unknown>
+      >
+      for (const comp of components) {
+        if (comp && typeof comp.id === "string") {
+          map[comp.id] = comp
+        }
+      }
+      // Pick a sensible root: first component's id if no `root` key
+      // present yet. Mirrors the renderer's "first component is root"
+      // convention for assistant-emitted updates.
+      const firstId = components[0]?.id as string | undefined
+      const rootId = "root" in map ? "root" : (firstId ?? existing.rootId)
+      acc.surfaces.set(surfaceId, { ...existing, components: map, rootId })
+      if (!acc.order.includes(surfaceId)) acc.order.push(surfaceId)
+      break
+    }
+    case "a2ui_data_model_update": {
+      const existing =
+        acc.surfaces.get(surfaceId) ??
+        ({
+          components: {},
+          dataModel: {},
+          rootId: "root",
+          surfaceType: "inline",
+        } as A2UISegmentContent)
+      const data =
+        input.data && typeof input.data === "object" ? (input.data as Record<string, unknown>) : {}
+      const merge = input.merge !== false // default true
+      const dataModel = merge ? { ...existing.dataModel, ...data } : data
+      acc.surfaces.set(surfaceId, { ...existing, dataModel })
+      if (!acc.order.includes(surfaceId)) acc.order.push(surfaceId)
+      break
+    }
+    case "a2ui_delete_surface": {
+      acc.surfaces.delete(surfaceId)
+      acc.order = acc.order.filter((id) => id !== surfaceId)
+      break
+    }
+    default:
+      // Unknown A2UI tool — ignore so future additions don't break the loop.
+      break
+  }
 }
 
 export class RunAndCaptureError extends Error {
@@ -87,6 +209,7 @@ export async function runAndCaptureAssistantReply(
     // case), we keep the last non-empty one.
     let assembledText = ""
     let lastMessageId = ""
+    const surfaceAcc: SurfaceAccumulator = { surfaces: new Map(), order: [] }
 
     const cleanup = () => {
       if (settled) return
@@ -182,7 +305,12 @@ export async function runAndCaptureAssistantReply(
         // the model's exact output blocks. Fall back to the SDK result's
         // `.result` string if the assistant blocks were empty (rare).
         const text = assembledText.trim() || evt.result?.result?.trim() || ""
-        if (!text) {
+        if (!text && surfaceAcc.surfaces.size === 0) {
+          // Genuine no-content turn: no text AND no A2UI surfaces. Older
+          // contract: error out. Surface-only turns (assistant called
+          // a2ui_create_surface but emitted no text) are a legitimate
+          // outcome now — `assistantReplyToSegments` will handle the
+          // text-less case by emitting only the a2ui segments.
           finishErr(
             new RunAndCaptureError(
               `session ${sessionId} ended with no assistant text`,
@@ -192,7 +320,12 @@ export async function runAndCaptureAssistantReply(
           return
         }
         const id = lastMessageId || evt.result?.uuid || crypto.randomUUID()
-        finishOk({ text, messageId: id })
+        finishOk({
+          text,
+          messageId: id,
+          a2uiSurfaces: Object.fromEntries(surfaceAcc.surfaces),
+          a2uiSurfaceOrder: [...surfaceAcc.order],
+        })
         return
       }
 
@@ -200,17 +333,33 @@ export async function runAndCaptureAssistantReply(
         const inner = evt.event as { type?: string; message?: unknown; uuid?: string }
         if (inner.type === "assistant") {
           // SDKAssistantMessage shape: message.content is BetaContentBlock[].
-          // Extract every `text` block and join with empty string —
-          // matches the way the SDK surfaces split blocks (preamble,
-          // tool-use, follow-up text, etc.).
+          // Extract every `text` block + every `tool_use` block —
+          // text accumulates to the model's exact output; tool_use
+          // blocks for the a2ui-bridge MCP server get applied to the
+          // surface accumulator so the auto-mode loop sees the final
+          // surfaces alongside the text.
           const message = inner.message as
-            | { content?: Array<{ type?: string; text?: string }> }
+            | {
+                content?: Array<{
+                  type?: string
+                  text?: string
+                  name?: string
+                  input?: Record<string, unknown>
+                }>
+              }
             | undefined
           if (Array.isArray(message?.content)) {
             const parts: string[] = []
             for (const block of message.content) {
               if (block?.type === "text" && typeof block.text === "string") {
                 parts.push(block.text)
+              } else if (
+                block?.type === "tool_use" &&
+                typeof block.name === "string" &&
+                block.input &&
+                typeof block.input === "object"
+              ) {
+                applyA2UIToolCall(surfaceAcc, block.name, block.input)
               }
             }
             const text = parts.join("")
@@ -219,6 +368,10 @@ export async function runAndCaptureAssistantReply(
               if (typeof inner.uuid === "string" && inner.uuid.length > 0) {
                 lastMessageId = inner.uuid
               }
+            } else if (typeof inner.uuid === "string" && inner.uuid.length > 0) {
+              // tool-only assistant turn (no text) — still remember the
+              // message id so session_ended can attribute correctly.
+              lastMessageId = inner.uuid
             }
           }
         }

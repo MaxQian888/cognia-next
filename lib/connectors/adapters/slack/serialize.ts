@@ -7,7 +7,7 @@
  */
 
 import type { OutboundRequest } from "@/types/connectors/outbound"
-import { segmentsToBlocks } from "./block-kit"
+import { buildSlackA2UIBlocks, segmentsToBlocks, type SlackAnyBlock } from "./block-kit"
 
 const SLACK_API_BASE = "https://slack.com/api"
 
@@ -31,7 +31,9 @@ function threadTsFromRef(req: OutboundRequest): string | undefined {
 }
 
 /**
- * Build a chat.postMessage call.
+ * Build a chat.postMessage call (sync path). a2ui segments fall back to
+ * `plainTextMirror` via `segmentsToBlocks`; use the async variant for
+ * full Block Kit projection.
  */
 export function serializePostMessage(req: OutboundRequest): SerializedSlackCall {
   const channel = channelIdFromRef(req)
@@ -48,6 +50,62 @@ export function serializePostMessage(req: OutboundRequest): SerializedSlackCall 
     url: `${SLACK_API_BASE}/chat.postMessage`,
     payload,
   }
+}
+
+/**
+ * Async variant — projects a2ui segments through `buildSlackA2UIBlocks`
+ * (Header / Section / Image / Actions / Input + callback bindings). All
+ * other segment types delegate to the sync `segmentsToBlocks`.
+ *
+ * Returns one chat.postMessage call carrying the merged blocks list.
+ */
+export async function serializePostMessageAsync(
+  req: OutboundRequest,
+  adapterId: string
+): Promise<SerializedSlackCall> {
+  const channel = channelIdFromRef(req)
+  const threadTs = threadTsFromRef(req)
+  const blocks: SlackAnyBlock[] = []
+
+  for (const seg of req.segments) {
+    if (seg.type === "a2ui") {
+      const a2uiBlocks = await buildSlackA2UIBlocks({
+        adapterId,
+        surfaceId: seg.surfaceId,
+        surface: seg.content,
+        conversationKey: buildConversationKeyFromRef(req, channel),
+      })
+      if (a2uiBlocks.length === 0) {
+        // Fall back to the text mirror as a single section.
+        const fallback = segmentsToBlocks([seg])
+        blocks.push(...fallback)
+      } else {
+        blocks.push(...a2uiBlocks)
+      }
+    } else {
+      const generic = segmentsToBlocks([seg])
+      blocks.push(...generic)
+    }
+  }
+
+  const payload: Record<string, unknown> = { channel, blocks }
+  if (threadTs) payload["thread_ts"] = threadTs
+
+  return {
+    method: "POST",
+    url: `${SLACK_API_BASE}/chat.postMessage`,
+    payload,
+  }
+}
+
+function buildConversationKeyFromRef(req: OutboundRequest, channelId: string): string | undefined {
+  const ref = req.conversationRef as Record<string, unknown>
+  const adapterId = typeof ref["adapterId"] === "string" ? ref["adapterId"] : ""
+  if (!adapterId || !channelId) return undefined
+  const threadTs = typeof ref["threadTs"] === "string" ? ref["threadTs"] : undefined
+  return threadTs
+    ? `slack:${adapterId}:${channelId}:${threadTs}`
+    : `slack:${adapterId}:${channelId}`
 }
 
 /**
@@ -154,4 +212,15 @@ export function serializeTyping(_channel: string, _threadTs?: string): Serialize
  */
 export function serializeOutbound(req: OutboundRequest): SerializedSlackCall {
   return serializePostMessage(req)
+}
+
+/**
+ * Async outbound serializer used by the production adapter `send()`.
+ * Routes a2ui segments through `buildSlackA2UIBlocks`.
+ */
+export async function serializeOutboundAsync(
+  req: OutboundRequest,
+  adapterId: string
+): Promise<SerializedSlackCall> {
+  return serializePostMessageAsync(req, adapterId)
 }

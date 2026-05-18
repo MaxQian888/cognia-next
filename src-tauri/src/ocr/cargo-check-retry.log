@@ -1,0 +1,73 @@
+[rtk] /!\ No hook installed — run `rtk init -g` for automatic token savings
+cargo build: 0 errors, 9 warnings (1 crates)
+═══════════════════════════════════════
+warning: unused import: `crate::subscription::vault::AnthropicCredentialData`
+ --> src\subscription\anthropic\credential.rs:7:9
+  |
+7 | pub use crate::subscription::vault::AnthropicCredentialData;
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `crate::subscription::vault::CodexCredentialData`
+ --> src\subscription\codex\credential.rs:5:9
+  |
+5 | pub use crate::subscription::vault::CodexCredentialData;
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `OpencodeDiscoveredData` and `OpencodeZenData`
+ --> src\subscription\opencode\credential.rs:3:38
+  |
+3 | pub use crate::subscription::vault::{OpencodeDiscoveredData, OpencodeZenData};
+  |                                      ^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^
+
+warning: unused import: `preset::ProviderPreset`
+  --> src\subscription\mod.rs:34:9
+   |
+34 | pub use preset::ProviderPreset;
+   |         ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `ProviderId` and `SubscriptionProvider`
+  --> src\subscription\mod.rs:35:20
+   |
+35 | pub use provider::{ProviderId, SubscriptionProvider};
+   |                    ^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `AccountSummary`, `Account`, `AnthropicCredentialData`, `CodexCredentialData`, `OpencodeDiscoveredData`, `OpencodeZenData`, `ProviderCredential`, `ProviderVault`, `SCHEMA_VERSION`, and `SERVICE`
+  --> src\subscription\mod.rs:36:17
+   |
+36 | pub use vault::{Account, AccountSummary, AnthropicCredentialData, CodexCredentialData,
+   |                 ^^^^^^^  ^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^
+37 |                 OpencodeDiscoveredData, OpencodeZenData, ProviderCredential, ProviderVault,
+   |                 ^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^
+38 |                 SCHEMA_VERSION, SERVICE};
+   |                 ^^^^^^^^^^^^^^  ^^^^^^^
+
+warning: methods `env_for` and `clear_all` are never used
+  --> src\subscription\active.rs:76:18
+   |
+50 | impl ActiveAccountState {
+   | ----------------------- methods in this implementation
+...
+76 |     pub async fn env_for(&self, provider: ProviderId) -> Vec<(String, String)> {
+   |                  ^^^^^^^
+...
+82 |     pub async fn clear_all(&self) {
+   |                  ^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `id` is never used
+  --> src\subscription\provider.rs:47:8
+   |
+45 | pub trait SubscriptionProvider: Send + Sync {
+   |           -------------------- method in this trait
+46 |     /// Stable id. Used as the keyring `account` field.
+47 |     fn id(&self) -> ProviderId;
+   |        ^^
+
+warning: function `clear` is never used
+   --> src\subscription\vault.rs:347:8
+    |
+347 | pub fn clear(provider: ProviderId) -> Result<(), String> {
+    |        ^^^^^

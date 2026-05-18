@@ -132,6 +132,40 @@ describe("DraftEditor", () => {
     expect(screen.getByTestId("draft-segment-readonly-0")).toHaveTextContent("[segment]")
   })
 
+  it("a2ui segments render as a read-only preview with the plain-text mirror (G5)", () => {
+    const draft = makeDraft([
+      {
+        type: "a2ui",
+        surfaceId: "sfc_42",
+        content: {
+          components: { root: { id: "root", component: "Card", title: "Daily" } },
+          dataModel: {},
+          rootId: "root",
+        },
+        plainTextMirror: "# Daily\n[Go]",
+      },
+    ])
+    render(<DraftEditor draft={draft} onClose={() => {}} />)
+    const preview = screen.getByTestId("draft-segment-a2ui-0")
+    expect(preview).toHaveTextContent("sfc_42")
+    expect(preview).toHaveTextContent("# Daily")
+    expect(preview).toHaveTextContent("[Go]")
+  })
+
+  it("a2ui segment with empty plainTextMirror falls back to the localized hint", () => {
+    const draft = makeDraft([
+      {
+        type: "a2ui",
+        surfaceId: "sfc_empty",
+        content: { components: {}, dataModel: {}, rootId: "root" },
+        plainTextMirror: "",
+      },
+    ])
+    render(<DraftEditor draft={draft} onClose={() => {}} />)
+    const preview = screen.getByTestId("draft-segment-a2ui-0")
+    expect(preview).toHaveTextContent(/no text mirror|interactive surface|无文本镜像/i)
+  })
+
   it("approve skips enqueueOutbound when the draft has no outboundPreview", async () => {
     const draft = makeDraft([{ type: "text", text: "hi" }], false)
     const onClose = jest.fn()

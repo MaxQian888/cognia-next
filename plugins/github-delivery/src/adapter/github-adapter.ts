@@ -23,6 +23,7 @@ import type {
   PlatformAdapter,
 } from "@/types/connectors/adapter"
 import type { OutboundError, OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
+import { buildA2UICapabilityMatrix, type A2UICapabilityMatrix } from "@/types/connectors/capability"
 import {
   GITHUB_ADAPTER_ID,
   type GhConversationCoords,
@@ -39,6 +40,15 @@ export const GITHUB_ADAPTER_META: AdapterMeta = {
   // configured under Settings → GitHub Delivery → Credentials.
   configSchema: { type: "object", properties: {}, additionalProperties: false },
 }
+
+/**
+ * GitHub renders Markdown-rich comments natively; A2UI surfaces all
+ * degrade to `plainTextMirror` which becomes the comment body via
+ * `extractText(req.segments)`. No interactive A2UI components are
+ * available because GitHub issue/PR comments have no button or form
+ * affordance — only Markdown.
+ */
+export const GITHUB_A2UI_CAPABILITY: A2UICapabilityMatrix = buildA2UICapabilityMatrix({})
 
 export interface GithubAdapterDeps {
   /** Resolve an octokit instance for a fully-qualified repo name. */
@@ -69,6 +79,10 @@ export class GithubAdapter implements PlatformAdapter {
 
   health(): AdapterHealth {
     return this.health_
+  }
+
+  a2uiCapability(): A2UICapabilityMatrix {
+    return GITHUB_A2UI_CAPABILITY
   }
 
   async send(req: OutboundRequest): Promise<OutboundResult> {

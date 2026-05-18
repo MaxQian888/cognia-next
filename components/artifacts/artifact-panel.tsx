@@ -10,9 +10,16 @@
  */
 
 import dynamic from "next/dynamic"
+import { useEffect, useRef } from "react"
 import { Maximize2, Minimize2, MoreHorizontal, Pencil, Save, X, FileCode } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  mountMonacoWorkbench,
+  type IMonacoEditor,
+  type MonacoNamespace,
+  type MonacoWorkbenchHandle,
+} from "@/lib/editor-workbench/monaco-workbench"
 
 // Dynamically import Monaco to avoid SSR issues
 const MonacoEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.default), {
@@ -110,6 +117,19 @@ export function ArtifactPanel() {
     handleDownload,
     handleRevealInExplorer,
   } = useArtifactPanelState()
+
+  // Workbench wiring for the VS Code reuse layer: when the artifact's
+  // Monaco editor mounts, attach a stable `artifact:///{id}.{ext}` URI so
+  // LSP providers (completion, diagnostics, hover, formatting) bind to it.
+  // Tear it down when the active artifact changes or the panel unmounts.
+  const workbenchHandleRef = useRef<MonacoWorkbenchHandle | null>(null)
+  const activeArtifactId = activeArtifact?.id ?? null
+  useEffect(() => {
+    return () => {
+      workbenchHandleRef.current?.dispose()
+      workbenchHandleRef.current = null
+    }
+  }, [activeArtifactId])
 
   const artifactMetadata = activeArtifact
     ? `v${activeArtifact.version} · ${activeArtifact.language || activeArtifact.type}${
@@ -325,6 +345,18 @@ export function ArtifactPanel() {
                   theme={getMonacoTheme(theme)}
                   value={editContent}
                   onChange={handleEditorChange}
+                  onMount={(editor, monaco) => {
+                    workbenchHandleRef.current = mountMonacoWorkbench(
+                      editor as unknown as IMonacoEditor,
+                      monaco as unknown as MonacoNamespace,
+                      {
+                        surface: "artifact",
+                        documentId: activeArtifact.id,
+                        language: getMonacoLanguage(activeArtifact.language || "plaintext"),
+                        initialContent: editContent,
+                      }
+                    )
+                  }}
                   options={{
                     minimap: { enabled: isFullscreen },
                     wordWrap: "on",

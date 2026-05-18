@@ -60,7 +60,29 @@ interface PolicyDeps {
     fingerprint: string
   ) => Promise<TrustedPublisherRow | undefined>
   appendAudit: (row: AutomationAuditLogRow) => Promise<void>
+  /**
+   * Returns `true` when the user has opted-in to "allow unsigned LSP
+   * binaries with one-time consent" in Settings → Developer. Production
+   * builds always return `false`; dev builds consult the settings store.
+   *
+   * Default implementation reads `settings.developer.unsignedLspAllowed`
+   * via the settings store. Tests override this with a synchronous
+   * boolean.
+   */
+  isUnsignedLspAllowed: () => Promise<boolean>
   now: () => number
+}
+
+async function defaultIsUnsignedLspAllowed(): Promise<boolean> {
+  // Production builds hide the toggle entirely — short-circuit so the
+  // settings store import never even loads in a release bundle.
+  if (typeof process !== "undefined" && process.env.NODE_ENV === "production") return false
+  try {
+    const settings = await getDb().settings.get("singleton")
+    return Boolean(settings?.developer?.unsignedLspAllowed)
+  } catch {
+    return false
+  }
 }
 
 let deps: PolicyDeps = {
@@ -70,6 +92,7 @@ let deps: PolicyDeps = {
   appendAudit: async (row) => {
     await getDb().automationAuditLog.add(row)
   },
+  isUnsignedLspAllowed: defaultIsUnsignedLspAllowed,
   now: () => Date.now(),
 }
 
@@ -85,6 +108,7 @@ export function __resetLspBinaryPolicyForTesting(): void {
     appendAudit: async (row) => {
       await getDb().automationAuditLog.add(row)
     },
+    isUnsignedLspAllowed: defaultIsUnsignedLspAllowed,
     now: () => Date.now(),
   }
 }
@@ -140,6 +164,28 @@ export async function evaluateLspBinary(
       allowed: false,
       requiresPrompt: true,
       reason: "Plugin manifest has no publisher fingerprint; explicit user consent required.",
+    }
+  }
+
+  // Dev-mode override: if the user has explicitly opted-in to "allow
+  // unsigned LSP binaries" in Settings → Developer, replace any
+  // `allowed: false, requiresPrompt: true` decision with a one-time
+  // prompt + allow grant. Already-trusted decisions and the unprompted
+  // happy path are untouched. The audit reason makes the override
+  // visible.
+  if (!decision.allowed && decision.requiresPrompt) {
+    try {
+      const dev = await deps.isUnsignedLspAllowed()
+      if (dev) {
+        decision = {
+          allowed: true,
+          requiresPrompt: true,
+          reason: `Dev-mode override (settings.developer.unsignedLspAllowed). Original reason: ${decision.reason}`,
+        }
+      }
+    } catch {
+      // Failure to read the toggle is treated as "off" — never relax
+      // the gate when the settings store is unreadable.
     }
   }
 

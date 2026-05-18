@@ -25,6 +25,11 @@ export type AuditKind =
   | "adapter.started"
   | "adapter.stopped"
   | "adapter.error"
+  // ── Connector callback channel (G4) ──────────────────────────────────
+  | "callback.received"
+  | "callback.deduped"
+  | "callback.unbound"
+  | "callback.handler_failed"
 
 export interface AuditEntry {
   id: string

@@ -1,36 +1,57 @@
 /**
- * Dedup ledger for inbound platform messages (schema v18).
+ * Dedup ledger for inbound platform messages (schema v18; v38 added the
+ * `namespace` field so the same machinery serves connector callbacks too).
  *
- * `recordInbound` stores a row keyed by `[adapterId+platformMessageId]` and
- * returns `true` if the message is newly recorded, `false` if it is a
- * duplicate. The table is capped at 10,000 newest rows by `pruneOldest`; the
- * cap is applied on demand (not per-write) so callers can batch-prune.
+ * `recordInbound(adapterId, platformMessageId, namespace?)` stores a row
+ * keyed by the compound index `[adapterId+namespace+platformMessageId]`
+ * and returns `true` if it is newly recorded, `false` if it is a
+ * duplicate. `namespace` defaults to `"inbound"` so every existing caller
+ * keeps its pre-v38 semantics. Callers handling connector callbacks pass
+ * `"callback"`.
+ *
+ * The table is capped at 10,000 newest rows by `pruneOldest`; the cap is
+ * applied on demand (not per-write) so callers can batch-prune.
  */
 
-import type { InboundLedgerRow } from "./connector-types"
+import type { InboundLedgerNamespace, InboundLedgerRow } from "./connector-types"
 import { getDb } from "./schema"
 
 const DEFAULT_CAP = 10_000
 
 /**
- * Record an inbound message. Returns `true` if newly recorded, `false` if
- * already present (duplicate / redelivery).
+ * Record a sliding-window-deduped event.
+ *
+ * Returns `true` if the (adapterId, namespace, platformMessageId) triple
+ * was newly recorded, `false` if it is a redelivery/duplicate.
+ *
+ * @param adapterId         the adapter instance the event belongs to.
+ * @param platformMessageId the platform-native identifier we dedupe on —
+ *                          message id for inbound messages, trigger id
+ *                          for connector callbacks, etc.
+ * @param namespace         sliding-window namespace; defaults to
+ *                          `"inbound"`.
  */
 export async function recordInbound(
   adapterId: string,
-  platformMessageId: string
+  platformMessageId: string,
+  namespace: InboundLedgerNamespace = "inbound"
 ): Promise<boolean> {
   const db = getDb()
-  // O(1) duplicate check via [adapterId+platformMessageId] compound index.
+  // O(1) duplicate check via the v38 compound index.
   const existing = await db.inboundLedger
-    .where("[adapterId+platformMessageId]")
-    .equals([adapterId, platformMessageId])
+    .where("[adapterId+namespace+platformMessageId]")
+    .equals([adapterId, namespace, platformMessageId])
     .first()
   if (existing) return false
 
   const row: InboundLedgerRow = {
-    id: `${adapterId}:${platformMessageId}`,
+    // Embed namespace in the primary key so two namespaces can store the
+    // same platformMessageId without colliding. Pre-v38 rows keep their
+    // legacy `${adapterId}:${platformMessageId}` ids; the compound index
+    // makes them queryable too, so we never need to rename them.
+    id: `${adapterId}:${namespace}:${platformMessageId}`,
     adapterId,
+    namespace,
     platformMessageId,
     receivedAt: Date.now(),
   }
@@ -40,7 +61,8 @@ export async function recordInbound(
 
 /**
  * Keep `cap` newest rows (by `receivedAt`), delete the rest.
- * Defaults to 10,000.
+ * Defaults to 10,000. Applied across all namespaces — the cap is global,
+ * not per-namespace, matching the v18 semantics.
  */
 export async function pruneOldest(cap = DEFAULT_CAP): Promise<void> {
   const db = getDb()
