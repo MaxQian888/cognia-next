@@ -53,6 +53,27 @@ export type MessagesScenario =
   | { kind: "server-error"; status: number; message: string }
   | { kind: "stream-text"; chunks: string[] }
 
+export type OauthScenario =
+  | {
+      kind: "granted"
+      accessToken?: string
+      refreshToken?: string
+      expiresIn?: number
+      email?: string
+      plan?: string
+    }
+  | { kind: "invalid-grant" }
+  | { kind: "server-error"; status: number; message: string }
+
+export interface OauthTokenRequest {
+  grantType: string
+  code?: string
+  refreshToken?: string
+  codeVerifier?: string
+  clientId?: string
+  redirectUri?: string
+}
+
 export interface MockAnthropicServer {
   start(port?: number): Promise<void>
   stop(): Promise<void>
@@ -62,6 +83,8 @@ export interface MockAnthropicServer {
   setMessagesScenario(scenario: MessagesScenario): void
   /** Set the embedding vector returned by /v1/embeddings calls. */
   setEmbeddingVector(vector: number[]): void
+  /** Configure the response shape for /v1/oauth/token. Defaults to `granted`. */
+  setOauthScenario(scenario: OauthScenario): void
 
   /** Wait until N message calls have been captured. */
   waitForMessages(count: number, timeoutMs?: number): Promise<MessagesRequestPayload[]>
@@ -69,6 +92,8 @@ export interface MockAnthropicServer {
   readonly messagesCalls: MessagesRequestPayload[]
   /** All /v1/embeddings payloads captured so far. */
   readonly embeddingsCalls: Array<{ model: string; input: string | string[] }>
+  /** All /v1/oauth/token payloads captured so far. */
+  readonly oauthCalls: OauthTokenRequest[]
   /** Reset captured calls + scenario back to echo. */
   reset(): void
 }
@@ -79,13 +104,19 @@ export function createMockAnthropicServer(): MockAnthropicServer {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const express = require("express") as typeof import("express")
   app.use(express.json({ limit: "8mb" }))
+  // OAuth token endpoint speaks application/x-www-form-urlencoded — the
+  // anthropic OAuth module posts the body as form-encoded per the upstream
+  // platform.claude.com behaviour.
+  app.use(express.urlencoded({ extended: true, limit: "1mb" }))
 
   let server: Server | null = null
   let _port = 0
   let scenario: MessagesScenario = { kind: "echo" }
+  let oauthScenario: OauthScenario = { kind: "granted" }
   let embeddingVector: number[] = Array.from({ length: 16 }, (_, i) => (i + 1) / 16)
   const messagesCalls: MessagesRequestPayload[] = []
   const embeddingsCalls: Array<{ model: string; input: string | string[] }> = []
+  const oauthCalls: OauthTokenRequest[] = []
   const messagesResolvers: Array<{ count: number; resolve: () => void }> = []
 
   const renderText = (req: MessagesRequestPayload): string => {
@@ -142,12 +173,10 @@ export function createMockAnthropicServer(): MockAnthropicServer {
           .json({ type: "error", error: { type: "overloaded_error", message: "overloaded" } })
         return
       case "auth-error":
-        res
-          .status(401)
-          .json({
-            type: "error",
-            error: { type: "authentication_error", message: "invalid api key" },
-          })
+        res.status(401).json({
+          type: "error",
+          error: { type: "authentication_error", message: "invalid api key" },
+        })
         return
       case "server-error":
         res
@@ -205,6 +234,68 @@ export function createMockAnthropicServer(): MockAnthropicServer {
     }
   })
 
+  // ── POST /v1/oauth/token (form-encoded; PKCE exchange + refresh) ─────────
+  // The anthropic OAuth module redirects here when the E2E renderer publishes
+  // `window.__cogniaMockBaseUrls.anthropic` — both the `authorization_code`
+  // exchange and refresh paths land at the same endpoint upstream.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.post("/v1/oauth/token", (req: any, res: any) => {
+    const body = req.body as Record<string, string | undefined>
+    const captured: OauthTokenRequest = {
+      grantType: String(body.grant_type ?? ""),
+      code: body.code,
+      refreshToken: body.refresh_token,
+      codeVerifier: body.code_verifier,
+      clientId: body.client_id,
+      redirectUri: body.redirect_uri,
+    }
+    oauthCalls.push(captured)
+
+    switch (oauthScenario.kind) {
+      case "invalid-grant":
+        res
+          .status(400)
+          .json({ error: "invalid_grant", error_description: "authorization code expired" })
+        return
+      case "server-error":
+        res
+          .status(oauthScenario.status)
+          .json({ error: "server_error", error_description: oauthScenario.message })
+        return
+      case "granted":
+      default: {
+        const out = {
+          access_token:
+            oauthScenario.kind === "granted" && oauthScenario.accessToken
+              ? oauthScenario.accessToken
+              : `mock-anthropic-access-${Math.random().toString(36).slice(2, 10)}`,
+          refresh_token:
+            oauthScenario.kind === "granted" && oauthScenario.refreshToken
+              ? oauthScenario.refreshToken
+              : `mock-anthropic-refresh-${Math.random().toString(36).slice(2, 10)}`,
+          expires_in:
+            oauthScenario.kind === "granted" && typeof oauthScenario.expiresIn === "number"
+              ? oauthScenario.expiresIn
+              : 8 * 3600,
+          scope: "user:profile user:inference user:sessions:claude_code",
+          account: {
+            email:
+              oauthScenario.kind === "granted" && oauthScenario.email
+                ? oauthScenario.email
+                : "mock-user@example.com",
+            uuid: "00000000-0000-0000-0000-000000000001",
+            plan:
+              oauthScenario.kind === "granted" && oauthScenario.plan
+                ? oauthScenario.plan
+                : "claude_pro",
+          },
+        }
+        res.json(out)
+        return
+      }
+    }
+  })
+
   // ── POST /v1/embeddings (OpenAI-style, used by the AI SDK shim) ──────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.post("/v1/embeddings", (req: any, res: any) => {
@@ -253,6 +344,12 @@ export function createMockAnthropicServer(): MockAnthropicServer {
     setEmbeddingVector(vector) {
       embeddingVector = vector.slice()
     },
+    setOauthScenario(next) {
+      oauthScenario = next
+    },
+    get oauthCalls() {
+      return oauthCalls
+    },
     waitForMessages(count, timeoutMs = 5_000) {
       if (messagesCalls.length >= count) return Promise.resolve(messagesCalls.slice(0, count))
       return new Promise<MessagesRequestPayload[]>((resolve, reject) => {
@@ -278,9 +375,11 @@ export function createMockAnthropicServer(): MockAnthropicServer {
     },
     reset() {
       scenario = { kind: "echo" }
+      oauthScenario = { kind: "granted" }
       embeddingVector = Array.from({ length: 16 }, (_, i) => (i + 1) / 16)
       messagesCalls.length = 0
       embeddingsCalls.length = 0
+      oauthCalls.length = 0
       messagesResolvers.length = 0
     },
   }

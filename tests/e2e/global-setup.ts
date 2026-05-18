@@ -29,7 +29,7 @@ import { createMockAnthropicServer, type MockAnthropicServer } from "./mocks/ant
 import { createMockGithubServer, type MockGithubServer } from "./mocks/github/server"
 import { createMockLarkServer, type MockLarkServer } from "./mocks/lark/server"
 import { createMockVectorDbServer, type MockVectorDbServer } from "./mocks/vector-db/server"
-import { launchTauriDriver, type TauriDriverHandle } from "./helpers/tauri-driver-launch"
+import { launchTauriCdp, type TauriCdpHandle } from "./helpers/tauri-cdp-launch"
 
 interface Booted {
   v2?: MockV2Server
@@ -37,7 +37,7 @@ interface Booted {
   github?: MockGithubServer
   lark?: MockLarkServer
   vectorDb?: MockVectorDbServer
-  tauri?: TauriDriverHandle
+  tauri?: TauriCdpHandle
 }
 
 const state: Booted = {}
@@ -97,9 +97,11 @@ async function globalSetup(_config: FullConfig): Promise<() => Promise<void>> {
     process.env.E2E_VECTOR_DB_PORT_RESOLVED = String(state.vectorDb.port)
   }
 
-  // Boot tauri-driver only when the project is opted into via env.
-  if (process.env.PLAYWRIGHT_TAURI_DRIVER === "1") {
-    state.tauri = await launchTauriDriver()
+  // Boot the Tauri debug binary + CDP bridge only when the `tauri` project
+  // is opted into via env. PLAYWRIGHT_TAURI is the canonical switch;
+  // PLAYWRIGHT_TAURI_DRIVER is honored as a legacy alias for one release cycle.
+  if (process.env.PLAYWRIGHT_TAURI === "1" || process.env.PLAYWRIGHT_TAURI_DRIVER === "1") {
+    state.tauri = await launchTauriCdp()
     process.env.PLAYWRIGHT_TAURI_CDP_WS = state.tauri.cdpWsEndpoint
   }
 

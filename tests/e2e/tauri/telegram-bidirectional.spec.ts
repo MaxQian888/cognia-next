@@ -14,7 +14,7 @@
  *   5. Assert: mock server has captured a sendMessage; reply text matches.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "./fixtures"
 import { createTelegramMockServer, makeTelegramUpdate } from "../connectors/telegram-mock-server"
 import { resetCogniaDb } from "../helpers/db-reset"
 import { configureMockBaseUrls } from "../helpers/seed-workflow"

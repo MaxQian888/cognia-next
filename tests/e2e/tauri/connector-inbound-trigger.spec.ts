@@ -15,7 +15,7 @@
  *      tab.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "./fixtures"
 import { resetCogniaDb } from "../helpers/db-reset"
 import { seedAndOpenWorkflow } from "../helpers/seed-workflow"
 import { createTelegramMockServer, makeTelegramUpdate } from "../connectors/telegram-mock-server"

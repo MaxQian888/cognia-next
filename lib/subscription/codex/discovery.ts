@@ -17,8 +17,20 @@ export type { DiscoveredCodexAuth, DiscoveredCodexTokens }
  * when no codex-cli credential is present anywhere; the rejected case is
  * reserved for actual parse failures (renderer surfaces as "credential
  * corrupted").
+ *
+ * E2E hook: under `NEXT_PUBLIC_E2E=1` the renderer may publish a synthetic
+ * payload via `window.__cogniaE2ECodexDiscovery` to drive the adopt flow
+ * without writing to the real `~/.codex/auth.json`. Setting it to `null`
+ * exercises the "no credential found" branch; setting it to `undefined`
+ * (or omitting it entirely) falls through to the Rust command.
  */
 export async function discoverCodexAuth(): Promise<DiscoveredCodexAuth | null> {
+  if (typeof window !== "undefined") {
+    const w = window as { __cogniaE2ECodexDiscovery?: DiscoveredCodexAuth | null }
+    if (w.__cogniaE2ECodexDiscovery !== undefined) {
+      return w.__cogniaE2ECodexDiscovery
+    }
+  }
   return await codexOauthDiscover()
 }
 

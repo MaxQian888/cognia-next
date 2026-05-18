@@ -10,13 +10,13 @@
  *   pnpm test:e2e:workflows             # workflow editor specs only
  *   pnpm test:e2e:mobile                # mobile (Pixel 7) specs only
  *   pnpm test:e2e:mobile:ios            # mobile (iPhone 13 / WebKit) specs
- *   pnpm test:e2e:tauri                 # tauri-driver project (opt-in)
+ *   pnpm test:e2e:tauri                 # tauri project (opt-in, Windows-only)
  *
- * The `tauri-driver` project is gated by `PLAYWRIGHT_TAURI_DRIVER=1` because
- * it requires a built Tauri debug binary plus the `tauri-driver` binary on
- * PATH (see `tests/e2e/helpers/tauri-driver-launch.ts`). Set the env var to
- * include it in the matrix; otherwise the project's specs are skipped at
- * project-resolution time.
+ * The `tauri` project is gated by `PLAYWRIGHT_TAURI=1`. It boots the Tauri
+ * debug binary with WebView2 CDP enabled and connects via
+ * `chromium.connectOverCDP` from a per-test fixture
+ * (see `tests/e2e/helpers/tauri-cdp-launch.ts` and `tests/e2e/tauri/fixtures.ts`).
+ * `PLAYWRIGHT_TAURI_DRIVER=1` is honored as a legacy alias for one release cycle.
  *
  * By default Playwright manages the Next.js dev server lifecycle via the
  * `webServer` block. Set PLAYWRIGHT_NO_SERVER=1 to opt out (when you already
@@ -29,7 +29,8 @@
 
 import { defineConfig, devices } from "@playwright/test"
 
-const tauriDriverEnabled = process.env.PLAYWRIGHT_TAURI_DRIVER === "1"
+const tauriEnabled =
+  process.env.PLAYWRIGHT_TAURI === "1" || process.env.PLAYWRIGHT_TAURI_DRIVER === "1"
 const iosEnabled = process.env.PLAYWRIGHT_MOBILE_IOS === "1"
 
 export default defineConfig({
@@ -87,23 +88,17 @@ export default defineConfig({
           },
         ]
       : []),
-    // Tauri-driver project — runs the four originally-skipped flows against
-    // a real Tauri shell over CDP (see `tests/e2e/tauri/global-setup.ts`).
-    // Opt in with PLAYWRIGHT_TAURI_DRIVER=1.
-    ...(tauriDriverEnabled
+    // Tauri project — runs IPC-bound flows against a real Tauri shell
+    // over WebView2 CDP. The per-test fixture in `tests/e2e/tauri/fixtures.ts`
+    // calls `chromium.connectOverCDP(process.env.PLAYWRIGHT_TAURI_CDP_WS)`
+    // (the env is published by `tests/e2e/global-setup.ts` after spawning the
+    // Tauri debug binary via `tests/e2e/helpers/tauri-cdp-launch.ts`). Opt in
+    // with PLAYWRIGHT_TAURI=1.
+    ...(tauriEnabled
       ? [
           {
-            name: "tauri-driver",
+            name: "tauri",
             testDir: "./tests/e2e/tauri",
-            use: {
-              // Tauri attaches Playwright over Chromium DevTools Protocol;
-              // the per-test fixture in tests/e2e/tauri/fixtures.ts swaps the
-              // browser instance for the connected one.
-              browserName: "chromium",
-              connectOptions: {
-                wsEndpoint: process.env.PLAYWRIGHT_TAURI_CDP_WS ?? "",
-              },
-            },
           },
         ]
       : []),

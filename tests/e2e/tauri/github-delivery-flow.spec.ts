@@ -15,7 +15,7 @@
  *      and workflowAudit shows the run row.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "./fixtures"
 import crypto from "node:crypto"
 import { resetCogniaDb } from "../helpers/db-reset"
 import { seedAndOpenWorkflow, configureMockBaseUrls } from "../helpers/seed-workflow"

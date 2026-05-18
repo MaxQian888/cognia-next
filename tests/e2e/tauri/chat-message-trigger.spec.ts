@@ -14,7 +14,7 @@
  *      response surfaces in the chat thread.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "./fixtures"
 import { resetCogniaDb } from "../helpers/db-reset"
 import { seedAndOpenWorkflow, configureMockBaseUrls } from "../helpers/seed-workflow"
 

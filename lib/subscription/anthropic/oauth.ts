@@ -131,13 +131,32 @@ function buildCredential(
   }
 }
 
+/**
+ * Resolve the OAuth token endpoint. In production this is the upstream
+ * `platform.claude.com` URL. Under E2E (`NEXT_PUBLIC_E2E=1`) the renderer
+ * may publish a mock base URL via `window.__cogniaMockBaseUrls.anthropic`;
+ * when present the token POST is redirected to `${mock}/v1/oauth/token`
+ * so specs can drive the flow without hitting the real Anthropic endpoint.
+ * Outside the browser (SSR / sidecar) the override is never consulted.
+ */
+function resolveTokenUrl(): string {
+  if (typeof window !== "undefined") {
+    const w = window as {
+      __cogniaMockBaseUrls?: { anthropic?: string }
+    }
+    const mock = w.__cogniaMockBaseUrls?.anthropic
+    if (mock) return `${mock.replace(/\/$/, "")}/v1/oauth/token`
+  }
+  return CLAUDE_OAUTH_TOKEN_URL
+}
+
 async function postTokenForm(body: URLSearchParams): Promise<RawTokenResponse> {
   // Routed through `proxyFetch` so users behind a corporate firewall or
   // CN network can still reach `platform.claude.com`. In Tauri the call
   // hops through the Rust `proxy_http_request` command; in the browser
   // build the system proxy is honoured automatically.
   const { proxyFetch } = await import("@/lib/network/proxy-fetch")
-  const res = await proxyFetch(CLAUDE_OAUTH_TOKEN_URL, {
+  const res = await proxyFetch(resolveTokenUrl(), {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,

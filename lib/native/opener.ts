@@ -17,6 +17,19 @@ export interface OpenUrlOptions {
 }
 
 export async function openUrl(url: string, options: OpenUrlOptions = {}): Promise<void> {
+  // E2E hook: when the dev bridge has installed `__cogniaE2EOpenUrl`, route
+  // the call through it instead of the OS browser. Specs use this to assert
+  // an OAuth flow opened the right authorize URL without popping a real
+  // browser window. Dead-code-eliminated in production builds because the
+  // global is only ever populated under `NEXT_PUBLIC_E2E=1`.
+  if (typeof window !== "undefined") {
+    const w = window as { __cogniaE2EOpenUrl?: (url: string) => void }
+    if (typeof w.__cogniaE2EOpenUrl === "function") {
+      w.__cogniaE2EOpenUrl(url)
+      return
+    }
+  }
+
   if (!options.forceWebFallback && isTauri()) {
     try {
       const mod = await import("@tauri-apps/plugin-opener")

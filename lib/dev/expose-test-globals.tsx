@@ -50,6 +50,35 @@ declare global {
     ) => Promise<string>
     __cogniaSetMockBaseUrls?: (urls: MockBaseUrls) => Promise<void>
     __cogniaMockBaseUrls?: MockBaseUrls
+    /**
+     * Captures URLs that the renderer asks the OS to open. When set, the
+     * native `openUrl` helper invokes this instead of dispatching to the
+     * Tauri opener plugin — specs use it to assert the OAuth authorize
+     * URL was built correctly without popping a real browser window.
+     */
+    __cogniaE2EOpenUrl?: (url: string) => void
+    __cogniaE2EOpenUrlCalls?: string[]
+    /**
+     * Wipe every persisted subscription account across all providers and
+     * clear the active-account pointer. Keyring entries survive
+     * `__cogniaResetDb` because they live outside Dexie, so subscription
+     * specs call this to keep the in-process vault clean between tests.
+     */
+    __cogniaResetSubscriptionState?: () => Promise<void>
+    /**
+     * E2E override consulted by `discoverCodexAuth`. When set (even to
+     * `null`) the renderer skips the Rust `codex_oauth_discover` command
+     * and returns the override verbatim — lets specs drive the codex
+     * "Reuse" adopt flow without writing to `~/.codex/auth.json`.
+     */
+    __cogniaE2ECodexDiscovery?: unknown
+    /**
+     * E2E short-circuit for `lib/ocr/extract()`. When set to a function,
+     * `extract()` skips provider selection / cache / credentials entirely
+     * and returns whatever the mock produces. Specs use this to drive UI
+     * flow without depending on cloud keys or native binaries.
+     */
+    __cogniaE2EOcrMock?: (input: unknown) => unknown
     __cogniaSaveCompanionConfig?: (config: {
       baseUrl: string
       deviceJwt: string
@@ -208,6 +237,39 @@ export function ExposeTestGlobals(): null {
         await companionStorage().clear()
       }
 
+      // Subscription cleanup helper — wipes every per-provider account in the
+      // OS keyring. Specs call this from `beforeEach` (after the Dexie reset)
+      // so each test sees an empty vault even though the keyring sits outside
+      // of Dexie's transactional reset.
+      window.__cogniaE2EOpenUrlCalls = []
+      window.__cogniaE2EOpenUrl = (url) => {
+        window.__cogniaE2EOpenUrlCalls!.push(url)
+      }
+      window.__cogniaResetSubscriptionState = async () => {
+        const { listAccounts, deleteAccount, setActiveAccount } =
+          await import("@/lib/subscription/core/transport")
+        const { ALL_PROVIDER_IDS } = await import("@/lib/subscription/core/types")
+        for (const provider of ALL_PROVIDER_IDS) {
+          try {
+            await setActiveAccount(provider, null)
+          } catch {
+            // best-effort — provider may have no active pointer yet
+          }
+          try {
+            const accounts = await listAccounts(provider)
+            for (const acct of accounts) {
+              try {
+                await deleteAccount(provider, acct.id)
+              } catch {
+                // best-effort
+              }
+            }
+          } catch {
+            // best-effort — provider may not be initialized
+          }
+        }
+      }
+
       // Rehydrate any previously-set mock base URLs so a navigation that
       // re-mounts the bridge doesn't drop the configuration.
       try {
@@ -238,6 +300,11 @@ export function ExposeTestGlobals(): null {
       delete window.__cogniaMockBaseUrls
       delete window.__cogniaSaveCompanionConfig
       delete window.__cogniaClearCompanionConfig
+      delete window.__cogniaE2EOpenUrl
+      delete window.__cogniaE2EOpenUrlCalls
+      delete window.__cogniaResetSubscriptionState
+      delete window.__cogniaE2ECodexDiscovery
+      delete window.__cogniaE2EOcrMock
       window.__cogniaTestGlobalsReady = false
     }
   }, [])
