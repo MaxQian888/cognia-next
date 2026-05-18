@@ -178,6 +178,9 @@ export interface OcrProvider {
   extract(input: OcrInput, ctx: OcrProviderContext): Promise<OcrResult>
 }
 
+/** Per-OS local-engine ranking override keys. Mirrors `AutoRouterDeps.localPreference`. */
+export type OcrPlatformOverrideKey = "windows" | "macos" | "linux" | "ios" | "android" | "browser"
+
 /** Settings store shape (persisted under settings table key "ocr"). */
 export interface UserOcrSettings {
   /** Provider id selected when `OcrInput.providerId` is undefined. "auto" enables the auto-router. */
@@ -200,6 +203,19 @@ export interface UserOcrSettings {
   defaultLanguages: string[]
   /** Maximum image long-edge in px before downscale (LLM-vision cost guard). */
   maxImageDimension: number
+  /**
+   * Per-OS local-engine preference override. Each entry is an ordered list of
+   * provider ids (head = strongest preference). Merges *over*
+   * `DEFAULT_LOCAL_PREFERENCE` — keys you don't set fall back to the default.
+   * The settings UI's Platform Overrides tab drives this.
+   */
+  platformOverrides?: Partial<Record<OcrPlatformOverrideKey, string[]>>
+  /**
+   * True once the user has interacted with the first-visit setup wizard (either
+   * applying a preset or dismissing it). The wizard stays out of their way
+   * forever after that, except via the explicit "Open setup wizard" button.
+   */
+  ocrWizardDismissed?: boolean
 }
 
 export const DEFAULT_OCR_SETTINGS: UserOcrSettings = {
@@ -213,4 +229,6 @@ export const DEFAULT_OCR_SETTINGS: UserOcrSettings = {
   cacheTtlDays: 30,
   defaultLanguages: ["en"],
   maxImageDimension: 2000,
+  platformOverrides: {},
+  ocrWizardDismissed: false,
 }

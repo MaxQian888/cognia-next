@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { detectNativePlatform, type NativePlatform } from "@/lib/capacitor/_shared"
 import type { ProbeOutcome } from "@/lib/ocr/probe"
+import type { ExtractDeps } from "@/lib/ocr/index"
 import {
   DEFAULT_OCR_SETTINGS,
   type OcrProviderCategory,
@@ -31,6 +32,7 @@ import {
 import { OcrDetailPanel } from "./ocr-detail-panel"
 import {
   OCR_AUTO_ROUTER_ID,
+  OCR_COMPARE_ID,
   OcrSidebar,
   type OcrCategoryFilter,
   type OcrSidebarProvider,
@@ -40,6 +42,10 @@ import { OcrAutoRouterPanel } from "./tabs/ocr-auto-router-panel"
 import { OcrAdvancedTab } from "./tabs/ocr-advanced-tab"
 import { OcrConfigTab } from "./tabs/ocr-config-tab"
 import { BACKENDS_WITH_MANAGED_MODELS, OcrModelsTab } from "./tabs/ocr-models-tab"
+import { OcrCapabilitiesTab } from "./tabs/ocr-capabilities-tab"
+import { OcrTryItTab } from "./tabs/ocr-try-it-tab"
+import { OcrCompareView } from "./ocr-compare-view"
+import { OcrSetupWizard, hasNoCloudCredentials } from "./ocr-setup-wizard"
 
 // Re-export the model-manager API so external consumers (and the existing
 // test suite at the time of the redesign) keep their import paths working.
@@ -158,6 +164,16 @@ export const OCR_PROVIDER_REGISTRY: ReadonlyArray<OcrProviderDescriptor> = [
   { id: "local-http", category: "local", credentialKeys: [], shells: SHELLS_ALL },
 ]
 
+/**
+ * Provider ids whose presence in the credential map signals the user has
+ * already configured a cloud OCR backend. Used by the wizard's first-visit
+ * auto-open guard so we don't pop the wizard when the user clearly already
+ * knows what they're doing.
+ */
+const CLOUD_PROVIDER_IDS: ReadonlyArray<string> = OCR_PROVIDER_REGISTRY.filter(
+  (p) => p.category === "document-cloud" || p.category === "specialist" || p.category === "lark"
+).map((p) => p.id)
+
 export interface OcrSectionProps {
   settings?: UserOcrSettings
   onChange?: (next: UserOcrSettings) => void
@@ -184,6 +200,12 @@ export interface OcrSectionProps {
   onCredentialChange?: (providerId: string, key: string, value: string) => void
   /** Override platform detection (tests). Defaults to runtime detection. */
   platform?: NativePlatform
+  /**
+   * Factory yielding OCR ExtractDeps for the Try It / Compare flows. When
+   * omitted, those tabs render but the Run button surfaces a "runtime not
+   * ready" alert. Tests pass a stub.
+   */
+  ocrDepsFactory?: () => ExtractDeps | null
 }
 
 export function OcrSection(props: OcrSectionProps): React.ReactElement {
@@ -200,8 +222,21 @@ export function OcrSection(props: OcrSectionProps): React.ReactElement {
   const [probeResults, setProbeResults] = useState<Record<string, ProbeOutcome>>({})
   const [probingId, setProbingId] = useState<string | null>(null)
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
+  // First-visit auto-open: derive the initial value so we don't need a
+  // useEffect+setState dance (react-hooks/set-state-in-effect). The wizard
+  // surfaces once on mount when the user hasn't dismissed it AND no cloud
+  // credential is present anywhere yet. Manual re-open stays available via
+  // the Auto-Router panel header.
+  const [wizardOpen, setWizardOpen] = useState(() => {
+    const initialSettings = props.settings ?? DEFAULT_OCR_SETTINGS
+    if (initialSettings.ocrWizardDismissed) return false
+    const initialCredentials = props.credentials ?? {}
+    return hasNoCloudCredentials(initialCredentials, CLOUD_PROVIDER_IDS)
+  })
 
   const platform = props.platform ?? detectNativePlatform()
+
+  const depsFactory = props.ocrDepsFactory ?? (() => null)
 
   const handleChange = useCallback(
     (next: UserOcrSettings) => {
@@ -295,6 +330,15 @@ export function OcrSection(props: OcrSectionProps): React.ReactElement {
   )
 
   const detailNode = (() => {
+    if (selectedId === OCR_COMPARE_ID) {
+      return (
+        <OcrCompareView
+          providers={autoRouterOptions}
+          onBack={() => setSelectedId(OCR_AUTO_ROUTER_ID)}
+          depsFactory={depsFactory}
+        />
+      )
+    }
     if (selectedId === OCR_AUTO_ROUTER_ID) {
       return (
         <OcrAutoRouterPanel
@@ -302,6 +346,7 @@ export function OcrSection(props: OcrSectionProps): React.ReactElement {
           onChange={handleChange}
           providers={autoRouterOptions}
           onClearCache={() => void props.onClearCache?.()}
+          onOpenWizard={() => setWizardOpen(true)}
         />
       )
     }
@@ -373,6 +418,13 @@ export function OcrSection(props: OcrSectionProps): React.ReactElement {
             onClearProviderCache={() => void props.onClearProviderCache?.(selectedProvider.id)}
           />
         }
+        capabilitiesTab={
+          <OcrCapabilitiesTab
+            providerId={selectedProvider.id}
+            onCompareClick={() => setSelectedId(OCR_COMPARE_ID)}
+          />
+        }
+        tryItTab={<OcrTryItTab providerId={selectedProvider.id} depsFactory={depsFactory} />}
       />
     )
   })()
@@ -384,7 +436,7 @@ export function OcrSection(props: OcrSectionProps): React.ReactElement {
         <p className="text-sm text-muted-foreground">{t("settings.descriptions.ocr")}</p>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[320px_1fr]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[360px_1fr]">
         {/* Desktop sidebar */}
         <div className="hidden min-h-0 md:flex md:flex-col md:overflow-hidden md:rounded-lg md:border">
           {sidebarNode}
@@ -415,7 +467,9 @@ export function OcrSection(props: OcrSectionProps): React.ReactElement {
             <p className="truncate text-sm font-medium">
               {selectedId === OCR_AUTO_ROUTER_ID
                 ? t("ocr.autoRouter.label")
-                : t(`ocr.providers.${selectedId}.label`)}
+                : selectedId === OCR_COMPARE_ID
+                  ? t("ocr.compare.sidebarLabel")
+                  : t(`ocr.providers.${selectedId}.label`)}
             </p>
           </div>
         </div>
@@ -423,6 +477,14 @@ export function OcrSection(props: OcrSectionProps): React.ReactElement {
         {/* Detail panel */}
         <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">{detailNode}</div>
       </div>
+
+      <OcrSetupWizard
+        open={wizardOpen}
+        onOpenChange={setWizardOpen}
+        settings={settings}
+        onApply={handleChange}
+        onDismiss={() => handleChange({ ...settings, ocrWizardDismissed: true })}
+      />
     </div>
   )
 }
@@ -444,6 +506,7 @@ function buildSidebarRow(
     name: t(`ocr.providers.${provider.id}.label`),
     subtitle: t(`ocr.categories.${provider.category}`),
     status,
+    category: provider.category,
     disabled,
   }
 }

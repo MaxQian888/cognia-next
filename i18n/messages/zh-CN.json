@@ -8912,7 +8912,26 @@
       "cleared": "OCR 缓存已清空。",
       "clearProvider": "清空该 provider 的缓存",
       "itemsLabel": "{count} 条 · {bytes} 字节",
-      "description": "按文件 SHA-256、provider、语言列表组合索引。"
+      "description": "按输入文件、Provider、语言列表的 SHA-256 缓存。",
+      "totalCount": "{count} 条",
+      "totalBytes": "{bytes} 字节",
+      "filterAllProviders": "全部 Provider",
+      "empty": "暂无 OCR 缓存。",
+      "tableHeaders": {
+        "provider": "Provider",
+        "langs": "语言",
+        "sizeBytes": "大小",
+        "age": "时长",
+        "actions": "操作"
+      },
+      "actions": {
+        "delete": "删除该条",
+        "clearProvider": "清空 {provider} 的缓存",
+        "clearAll": "清空全部"
+      },
+      "toastRowDeleted": "已删除缓存条目。",
+      "toastProviderCleared": "已清空该 Provider 的 {count} 条缓存。",
+      "toastAllCleared": "已清空 {count} 条缓存。"
     },
     "modelStatus": {
       "title": "本地模型",
@@ -8954,7 +8973,9 @@
       "shellSupportBrowser": "浏览器",
       "shellSupportDesktop": "桌面",
       "shellSupportMobile": "移动",
-      "noCredentials": "该引擎无需凭据。"
+      "noCredentials": "该引擎无需凭据。",
+      "tabsCapabilities": "能力",
+      "tabsTryIt": "试用"
     },
     "credentials": {
       "apiKey": "API key",
@@ -9041,7 +9062,12 @@
       "cacheTtlDays": "缓存有效期（天）",
       "cacheTtlHint": "0 表示永不过期。默认 30。",
       "clearAllCache": "清空全部 OCR 缓存",
-      "noFallbackProvider": "未选择云端 provider"
+      "noFallbackProvider": "未选择云端 provider",
+      "tabs": {
+        "defaults": "默认设置",
+        "platformOverrides": "平台优先级",
+        "cache": "缓存"
+      }
     },
     "langPacks": {
       "manageButton": "管理语言包",
@@ -9057,6 +9083,191 @@
           "description": "调用已配置的 OCR provider 链，返回逐页 Markdown 与可选 bbox。"
         }
       }
+    },
+    "capabilities": {
+      "title": "能力",
+      "description": "该 Provider 擅长什么、不擅长什么。",
+      "empty": "未注册的 Provider。",
+      "footnote": "仅供参考——实际效果取决于输入。建议用 “试用” 看真实输出。",
+      "compareCta": "对比…",
+      "values": {
+        "yes": "支持",
+        "no": "不支持",
+        "partial": "部分",
+        "free": "免费"
+      },
+      "fields": {
+        "handwriting": {
+          "label": "手写体",
+          "description": "草书或印刷手写文字识别。"
+        },
+        "tables": {
+          "label": "表格",
+          "description": "识别表格行/列/单元格结构。"
+        },
+        "math": {
+          "label": "数学公式",
+          "description": "数学公式 / LaTeX 输出。"
+        },
+        "cjk": {
+          "label": "中日韩",
+          "description": "支持中文 / 日文 / 韩文。"
+        },
+        "layout": {
+          "label": "版面",
+          "description": "保留段落、栏目、阅读顺序。"
+        },
+        "offline": {
+          "label": "离线",
+          "description": "无需联网即可运行。"
+        },
+        "multilang": {
+          "label": "支持语言数",
+          "description": "厂商声称的可识别语言大致数量。"
+        },
+        "structuredOutput": {
+          "label": "结构化输出",
+          "description": "除文本外还返回 blocks / JSON。"
+        },
+        "pdfNative": {
+          "label": "原生 PDF",
+          "description": "原生支持多页 PDF,不必逐页栅格化。"
+        },
+        "costTier": {
+          "label": "成本档",
+          "description": "价格区间——免费 / $$ / $$$$ / $$$$$$。"
+        },
+        "maxPagesPerCall": {
+          "label": "单次最大页数",
+          "description": "厂商对单次请求页数的上限。"
+        }
+      }
+    },
+    "tryIt": {
+      "title": "试用",
+      "description": "拖入文件,完整跑一次该 Provider。使用你已配置的凭证。",
+      "dropHere": "把图片或 PDF 拖到这里。",
+      "pickFile": "选择文件…",
+      "clearFile": "移除文件",
+      "runButton": "运行 OCR",
+      "running": "运行中…",
+      "abort": "取消",
+      "confirm": {
+        "title": "用 {provider} 跑 OCR?",
+        "estimatedCost": "{provider} 处理 {pages} 页的预估费用:{cost}。将使用你已配置的 API 凭证。",
+        "cta": "运行",
+        "cancel": "取消",
+        "free": "免费"
+      },
+      "result": {
+        "empty": "尚无结果。",
+        "copyAll": "复制合并后的 Markdown",
+        "copyPage": "复制",
+        "cached": "来自缓存",
+        "pageHeader": "第 {page} 页",
+        "fromTextLayer": "来自 PDF 文本层"
+      },
+      "errors": {
+        "noProvider": "请先选择 Provider。",
+        "unsupportedFile": "不支持的文件类型——请选择图片或 PDF。",
+        "aborted": "已取消。"
+      }
+    },
+    "compare": {
+      "title": "对比 Provider",
+      "sidebarLabel": "对比",
+      "sidebarSubtitle": "并排对比 OCR 效果",
+      "back": "返回",
+      "maxSelected": "最多 {max} 个 Provider。",
+      "addProvider": "添加 Provider",
+      "removeProvider": "移除 {provider}",
+      "runAll": "全部运行",
+      "running": "运行中…",
+      "abort": "取消",
+      "noProvidersSelected": "请在上方选 2-3 个 Provider 进行并排对比。",
+      "tooManyProviders": "最多选 {max} 个。",
+      "columnIdle": "拖入文件后点击 “全部运行”。",
+      "errorColumn": "该 Provider 返回了错误。",
+      "runtimeNotReady": "OCR 运行时尚未就绪。",
+      "dropHere": "把图片或 PDF 拖到这里。",
+      "pickFile": "选择文件…",
+      "clearFile": "移除文件",
+      "confirm": {
+        "title": "对 {count} 个 Provider 同时跑 OCR?",
+        "body": "{count} 个 Provider × {pages} 页的预估总费用:{cost}。将使用你已配置的 API 凭证。",
+        "cta": "全部运行",
+        "cancel": "取消",
+        "free": "免费"
+      }
+    },
+    "platformOverrides": {
+      "title": "平台优先级",
+      "description": "auto-router 在不同操作系统上使用的本地 OCR 引擎顺序。拖拽调整顺序,移除你不想用的引擎。留空则使用内置默认值。",
+      "dragHint": "拖动行调整优先级,顶部优先级最高。",
+      "usingDefault": "当前使用内置默认顺序。",
+      "usingOverride": "当前使用你自定义的顺序。",
+      "emptyBucket": "该系统下没有可用引擎。",
+      "resetToDefaults": "恢复默认",
+      "unsavedChanges": "有未保存的更改",
+      "oses": {
+        "windows": "Windows",
+        "macos": "macOS",
+        "linux": "Linux",
+        "ios": "iOS",
+        "android": "Android",
+        "browser": "浏览器"
+      }
+    },
+    "wizard": {
+      "title": "OCR 初始设置",
+      "description": "选一个使用场景,我们会推荐一组合适的起点配置。",
+      "openButton": "初始向导",
+      "step": {
+        "useCase": "用例",
+        "preset": "预览",
+        "apply": "应用"
+      },
+      "useCasePrompt": "你主要想 OCR 哪类内容?",
+      "useCases": {
+        "chineseReceipts": {
+          "label": "中文票据 / 发票",
+          "description": "中英文混排,逐行版面,印刷字与盖章混合。"
+        },
+        "handwriting": {
+          "label": "手写笔记",
+          "description": "白板、笔记本、表单上的手写或草书文字。"
+        },
+        "formulas": {
+          "label": "数学公式 / 科技 PDF",
+          "description": "高质量数学公式 / LaTeX,多栏科技文献版面。"
+        },
+        "scannedContracts": {
+          "label": "扫描合同 / 表单",
+          "description": "结构化文档,含表格、字段、签名。"
+        },
+        "webScreenshots": {
+          "label": "网页截图 / UI 文字",
+          "description": "网站、App、聊天界面的随手截图。"
+        },
+        "mixed": {
+          "label": "混合 / 拿不准",
+          "description": "覆盖大多数日常 OCR 场景的合理默认。"
+        }
+      },
+      "presetIntro": "该场景推荐的 Provider 和默认值:",
+      "preset": {
+        "providers": "Provider",
+        "defaultBadge": "默认",
+        "format": "输出格式",
+        "languages": "语言"
+      },
+      "applyIntro": "应用此预设到 OCR 设置?",
+      "applyDetail": "默认 Provider 将设为 {provider}。云端回退保持开启。所有项后续都可修改。",
+      "apply": "应用预设",
+      "dismiss": "暂不",
+      "back": "返回",
+      "next": "下一步",
+      "reopenLater": "你可以随时从 Auto-Router 面板重新打开本向导。"
     }
   },
   "twin": {

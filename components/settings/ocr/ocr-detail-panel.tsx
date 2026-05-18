@@ -31,6 +31,10 @@ interface OcrDetailPanelProps {
   configTab: React.ReactNode
   modelsTab: React.ReactNode
   advancedTab: React.ReactNode
+  /** Capability matrix tab. When omitted, the tab is hidden. */
+  capabilitiesTab?: React.ReactNode
+  /** Playground tab. When omitted, the tab is hidden. */
+  tryItTab?: React.ReactNode
 }
 
 export function OcrDetailPanel({
@@ -41,6 +45,8 @@ export function OcrDetailPanel({
   configTab,
   modelsTab,
   advancedTab,
+  capabilitiesTab,
+  tryItTab,
 }: OcrDetailPanelProps): React.ReactElement {
   const t = useTranslations()
 
@@ -69,8 +75,18 @@ export function OcrDetailPanel({
 
       {/* Tabs */}
       <Tabs defaultValue="config" className="flex flex-1 flex-col overflow-hidden">
-        <TabsList className="w-full shrink-0 justify-start rounded-none border-b bg-transparent px-4">
+        <TabsList className="w-full shrink-0 justify-start overflow-x-auto rounded-none border-b bg-transparent px-4">
           <TabsTrigger value="config">{t("ocr.detail.tabsConfig")}</TabsTrigger>
+          {capabilitiesTab && (
+            <TabsTrigger value="capabilities" data-testid="ocr-detail-tab-capabilities">
+              {t("ocr.detail.tabsCapabilities")}
+            </TabsTrigger>
+          )}
+          {tryItTab && (
+            <TabsTrigger value="try-it" data-testid="ocr-detail-tab-try-it">
+              {t("ocr.detail.tabsTryIt")}
+            </TabsTrigger>
+          )}
           <TabsTrigger value="models">{t("ocr.detail.tabsModels")}</TabsTrigger>
           <TabsTrigger value="advanced">{t("ocr.detail.tabsAdvanced")}</TabsTrigger>
         </TabsList>
@@ -78,6 +94,16 @@ export function OcrDetailPanel({
           <TabsContent value="config" className="m-0 p-4">
             {configTab}
           </TabsContent>
+          {capabilitiesTab && (
+            <TabsContent value="capabilities" className="m-0 p-4">
+              {capabilitiesTab}
+            </TabsContent>
+          )}
+          {tryItTab && (
+            <TabsContent value="try-it" className="m-0 p-4">
+              {tryItTab}
+            </TabsContent>
+          )}
           <TabsContent value="models" className="m-0 p-4">
             {modelsTab}
           </TabsContent>

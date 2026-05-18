@@ -33,10 +33,13 @@ const SearchSettings = dynamic(
   () => import("./search/search-settings").then((m) => m.SearchSettings),
   { ssr: false, loading: () => <SectionLoading /> }
 )
-const OcrSection = dynamic(() => import("./ocr/ocr-section").then((m) => m.OcrSection), {
-  ssr: false,
-  loading: () => <SectionLoading />,
-})
+const OcrSection = dynamic(
+  () => import("./ocr/ocr-section-persisted").then((m) => m.OcrSectionPersisted),
+  {
+    ssr: false,
+    loading: () => <SectionLoading />,
+  }
+)
 const AppearanceSection = dynamic(() => import("./appearance").then((m) => m.AppearanceSection), {
   ssr: false,
   loading: () => <SectionLoading />,

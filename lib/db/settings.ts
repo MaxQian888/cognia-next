@@ -8,6 +8,7 @@ import {
 } from "@/lib/search/types"
 import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 import { DEFAULT_NETWORK_PROXY_SETTINGS } from "@/types/network/proxy"
+import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/lib/ocr/types"
 import { getDb } from "./schema"
 
 const SINGLETON_ID = "singleton" as const
@@ -113,6 +114,10 @@ const DEFAULTS: AppSettings = {
   // (matches the existing pair-onboarding behavior); export and reveal
   // are off until the user opts in via Settings → 应用安全.
   biometricRequiredFor: { ...DEFAULT_BIOMETRIC_GUARD },
+
+  // OCR subsystem preferences. Driven by the settings page at
+  // `components/settings/ocr/*`. Mirrors `lib/ocr/types.ts:DEFAULT_OCR_SETTINGS`.
+  ocrSettings: { ...DEFAULT_OCR_SETTINGS },
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -137,8 +142,25 @@ export async function getSettings(): Promise<AppSettings> {
       ...DEFAULT_BIOMETRIC_GUARD,
       ...(row.biometricRequiredFor ?? {}),
     },
+    ocrSettings: mergeOcrSettings(row.ocrSettings),
     id: SINGLETON_ID,
   }
+}
+
+/**
+ * Forward-compat merge for OCR settings. Nested `platformOverrides` is shallow-
+ * merged so adding a new OS bucket in DEFAULT_OCR_SETTINGS surfaces on existing
+ * installs without losing the user's manual reorderings.
+ */
+function mergeOcrSettings(stored: UserOcrSettings | undefined): UserOcrSettings {
+  const merged: UserOcrSettings = { ...DEFAULT_OCR_SETTINGS, ...(stored ?? {}) }
+  merged.platformOverrides = {
+    ...(DEFAULT_OCR_SETTINGS.platformOverrides ?? {}),
+    ...(stored?.platformOverrides ?? {}),
+  }
+  merged.providerConfig = { ...(stored?.providerConfig ?? {}) }
+  merged.providerEnabled = { ...(stored?.providerEnabled ?? {}) }
+  return merged
 }
 
 function mergeBuiltinTools(stored: BuiltinToolsConfig | undefined): BuiltinToolsConfig {

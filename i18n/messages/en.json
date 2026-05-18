@@ -8912,7 +8912,26 @@
       "cleared": "OCR cache cleared.",
       "clearProvider": "Clear cache for this provider",
       "itemsLabel": "{count} entries · {bytes} bytes",
-      "description": "Cached by SHA-256 of the input file, provider, and language list."
+      "description": "Cached by SHA-256 of the input file, provider, and language list.",
+      "totalCount": "{count} entries",
+      "totalBytes": "{bytes} bytes total",
+      "filterAllProviders": "All providers",
+      "empty": "No cached OCR results yet.",
+      "tableHeaders": {
+        "provider": "Provider",
+        "langs": "Languages",
+        "sizeBytes": "Size",
+        "age": "Age",
+        "actions": "Actions"
+      },
+      "actions": {
+        "delete": "Delete row",
+        "clearProvider": "Clear cache for {provider}",
+        "clearAll": "Clear all"
+      },
+      "toastRowDeleted": "Cache entry deleted.",
+      "toastProviderCleared": "Cleared {count} cache entr(y/ies) for this provider.",
+      "toastAllCleared": "Cleared {count} cache entr(y/ies)."
     },
     "modelStatus": {
       "title": "Local models",
@@ -8954,7 +8973,9 @@
       "shellSupportBrowser": "Browser",
       "shellSupportDesktop": "Desktop",
       "shellSupportMobile": "Mobile",
-      "noCredentials": "No credentials required for this engine."
+      "noCredentials": "No credentials required for this engine.",
+      "tabsCapabilities": "Capabilities",
+      "tabsTryIt": "Try it"
     },
     "credentials": {
       "apiKey": "API key",
@@ -9041,7 +9062,12 @@
       "cacheTtlDays": "Cache TTL (days)",
       "cacheTtlHint": "0 = no expiry. Default 30.",
       "clearAllCache": "Clear all OCR cache",
-      "noFallbackProvider": "No cloud provider selected"
+      "noFallbackProvider": "No cloud provider selected",
+      "tabs": {
+        "defaults": "Defaults",
+        "platformOverrides": "Platform overrides",
+        "cache": "Cache"
+      }
     },
     "langPacks": {
       "manageButton": "Manage language packs",
@@ -9057,6 +9083,191 @@
           "description": "Calls the configured OCR provider chain and returns per-page Markdown plus optional bounding boxes."
         }
       }
+    },
+    "capabilities": {
+      "title": "Capabilities",
+      "description": "What this provider does well, and where it falls short.",
+      "empty": "This provider is not registered.",
+      "footnote": "Heuristic guidance only — actual quality depends on your input. Use Try It to see real output.",
+      "compareCta": "Compare with…",
+      "values": {
+        "yes": "Yes",
+        "no": "No",
+        "partial": "Partial",
+        "free": "Free"
+      },
+      "fields": {
+        "handwriting": {
+          "label": "Handwriting",
+          "description": "Cursive or printed handwriting recognition."
+        },
+        "tables": {
+          "label": "Tables",
+          "description": "Detects row / column / cell structure."
+        },
+        "math": {
+          "label": "Math",
+          "description": "Mathematical formulas / LaTeX output."
+        },
+        "cjk": {
+          "label": "CJK",
+          "description": "Chinese / Japanese / Korean script support."
+        },
+        "layout": {
+          "label": "Layout",
+          "description": "Preserves paragraphs, columns, reading order."
+        },
+        "offline": {
+          "label": "Offline",
+          "description": "Runs without a network call."
+        },
+        "multilang": {
+          "label": "Languages supported",
+          "description": "Approximate count of vendor-supported languages."
+        },
+        "structuredOutput": {
+          "label": "Structured output",
+          "description": "Returns blocks / JSON in addition to text."
+        },
+        "pdfNative": {
+          "label": "Native PDF",
+          "description": "Multi-page PDFs accepted without rasterization."
+        },
+        "costTier": {
+          "label": "Cost tier",
+          "description": "Pricing band — Free / $$ / $$$$ / $$$$$$."
+        },
+        "maxPagesPerCall": {
+          "label": "Max pages per call",
+          "description": "Vendor cap on pages submitted per request."
+        }
+      }
+    },
+    "tryIt": {
+      "title": "Try it",
+      "description": "Drop a file and run this provider end-to-end. Uses your configured credentials.",
+      "dropHere": "Drop an image or PDF here.",
+      "pickFile": "Pick a file…",
+      "clearFile": "Remove file",
+      "runButton": "Run OCR",
+      "running": "Running…",
+      "abort": "Cancel",
+      "confirm": {
+        "title": "Run OCR with {provider}?",
+        "estimatedCost": "Estimated cost for {pages} page(s) on {provider}: {cost}. Uses your configured API credentials.",
+        "cta": "Run",
+        "cancel": "Cancel",
+        "free": "Free"
+      },
+      "result": {
+        "empty": "No result yet.",
+        "copyAll": "Copy combined Markdown",
+        "copyPage": "Copy",
+        "cached": "Cached",
+        "pageHeader": "Page {page}",
+        "fromTextLayer": "from PDF text layer"
+      },
+      "errors": {
+        "noProvider": "Select a provider first.",
+        "unsupportedFile": "Unsupported file type — pick an image or PDF.",
+        "aborted": "Cancelled."
+      }
+    },
+    "compare": {
+      "title": "Compare providers",
+      "sidebarLabel": "Compare",
+      "sidebarSubtitle": "Side-by-side OCR runs",
+      "back": "Back",
+      "maxSelected": "Up to {max} providers.",
+      "addProvider": "Add provider",
+      "removeProvider": "Remove {provider}",
+      "runAll": "Run all",
+      "running": "Running…",
+      "abort": "Cancel",
+      "noProvidersSelected": "Pick 2-3 providers above to compare them side by side.",
+      "tooManyProviders": "Selection capped at {max}.",
+      "columnIdle": "Drop a file and press Run to extract.",
+      "errorColumn": "This provider returned an error.",
+      "runtimeNotReady": "OCR runtime is not ready.",
+      "dropHere": "Drop an image or PDF here.",
+      "pickFile": "Pick a file…",
+      "clearFile": "Remove file",
+      "confirm": {
+        "title": "Run OCR across {count} providers?",
+        "body": "Estimated total for {pages} page(s) across {count} providers: {cost}. Uses your configured API credentials.",
+        "cta": "Run all",
+        "cancel": "Cancel",
+        "free": "Free"
+      }
+    },
+    "platformOverrides": {
+      "title": "Platform overrides",
+      "description": "Per-OS local-engine ordering used by the auto-router. Drag to reorder; remove engines you don't want. Empty buckets fall back to the built-in defaults.",
+      "dragHint": "Drag a row to change priority. Highest priority is on top.",
+      "usingDefault": "Using built-in defaults for this OS.",
+      "usingOverride": "Custom order in effect for this OS.",
+      "emptyBucket": "No engines configured for this OS.",
+      "resetToDefaults": "Reset to defaults",
+      "unsavedChanges": "Unsaved changes",
+      "oses": {
+        "windows": "Windows",
+        "macos": "macOS",
+        "linux": "Linux",
+        "ios": "iOS",
+        "android": "Android",
+        "browser": "Browser"
+      }
+    },
+    "wizard": {
+      "title": "OCR setup",
+      "description": "Pick a use-case and we'll suggest a sensible starting configuration.",
+      "openButton": "Setup wizard",
+      "step": {
+        "useCase": "Use case",
+        "preset": "Preview",
+        "apply": "Apply"
+      },
+      "useCasePrompt": "What do you mostly want to OCR?",
+      "useCases": {
+        "chineseReceipts": {
+          "label": "Chinese receipts / invoices",
+          "description": "Bilingual zh/en, line-item layout, mixed printed and stamped text."
+        },
+        "handwriting": {
+          "label": "Handwritten notes",
+          "description": "Cursive or printed handwriting on whiteboards, notebooks, forms."
+        },
+        "formulas": {
+          "label": "Math formulas / scientific PDFs",
+          "description": "LaTeX-quality math, multi-column scientific layouts."
+        },
+        "scannedContracts": {
+          "label": "Scanned contracts / forms",
+          "description": "Structured documents with tables, fields, and signatures."
+        },
+        "webScreenshots": {
+          "label": "Web screenshots / UI text",
+          "description": "Casual screenshots of websites, apps, and chat messages."
+        },
+        "mixed": {
+          "label": "Mixed / not sure",
+          "description": "Reasonable defaults that cover most everyday OCR needs."
+        }
+      },
+      "presetIntro": "Suggested providers and defaults for this use case:",
+      "preset": {
+        "providers": "Providers",
+        "defaultBadge": "default",
+        "format": "Output format",
+        "languages": "Languages"
+      },
+      "applyIntro": "Apply this preset to your OCR settings?",
+      "applyDetail": "Default provider will become {provider}. Cloud fallback stays enabled. You can change everything later.",
+      "apply": "Apply preset",
+      "dismiss": "Not now",
+      "back": "Back",
+      "next": "Next",
+      "reopenLater": "You can reopen this wizard from the Auto-Router panel."
     }
   },
   "twin": {

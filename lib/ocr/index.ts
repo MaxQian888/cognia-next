@@ -175,6 +175,23 @@ function rebuildResult(raw: OcrResult, providerId: string, durationMs: number): 
 }
 
 /**
+ * E2E hook: when running under `NEXT_PUBLIC_E2E=1` the renderer may publish
+ * `window.__cogniaE2EOcrMock` (a function `(input) => Promise<OcrResult> |
+ * OcrResult`) to short-circuit provider selection entirely. The mock's
+ * return value is forwarded through the standard `onResult` callback and
+ * caching path is skipped. Dead-code-eliminated in production because the
+ * global is only installed by the dev-only bridge in
+ * `lib/dev/expose-test-globals.tsx`.
+ */
+function readOcrMockHook(): ((input: OcrInput) => Promise<OcrResult> | OcrResult) | null {
+  if (typeof window === "undefined") return null
+  const w = window as {
+    __cogniaE2EOcrMock?: (input: OcrInput) => Promise<OcrResult> | OcrResult
+  }
+  return typeof w.__cogniaE2EOcrMock === "function" ? w.__cogniaE2EOcrMock : null
+}
+
+/**
  * The single public entry point used by composer / slash command / plugin tool.
  * `deps` carries every dependency (registry, settings, platform, credentials)
  * so tests can stub each independently. Callers in app code construct deps
@@ -183,6 +200,13 @@ function rebuildResult(raw: OcrResult, providerId: string, durationMs: number): 
 export async function extract(input: OcrInput, deps: ExtractDeps): Promise<OcrResult> {
   if (input.signal?.aborted) {
     throw new OcrError("aborted", "extract", "OCR cancelled before dispatch.")
+  }
+
+  const mock = readOcrMockHook()
+  if (mock) {
+    const out = await mock(input)
+    deps.onResult?.(out)
+    return out
   }
 
   const resolved = await resolveSource(input.source, deps)
@@ -198,6 +222,7 @@ export async function extract(input: OcrInput, deps: ExtractDeps): Promise<OcrRe
           settings: deps.settings,
           platform: deps.platform,
           osTag: deps.osTag,
+          localPreference: deps.settings.platformOverrides,
         })
 
   // Cache lookup.

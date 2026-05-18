@@ -8,18 +8,21 @@ const SAMPLE: OcrSidebarProvider[] = [
     name: "Mistral OCR",
     subtitle: "Document OCR (cloud)",
     status: "connected",
+    category: "document-cloud",
   },
   {
     id: "ocrs",
     name: "ocrs (local)",
     subtitle: "On-device",
     status: "ready",
+    category: "local",
   },
   {
     id: "anthropic-vision",
     name: "Claude (vision)",
     subtitle: "LLM vision (cloud)",
     status: "not-configured",
+    category: "llm-vision",
   },
 ]
 

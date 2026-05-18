@@ -9,9 +9,20 @@
  */
 
 import React, { useCallback } from "react"
-import { AlertTriangle, Ban, Check, Circle, X } from "lucide-react"
+import {
+  AlertTriangle,
+  Ban,
+  Check,
+  Circle,
+  CloudOff,
+  PenLine,
+  Sigma,
+  Table as TableIcon,
+  X,
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { topSidebarCapabilities, type OcrCapabilityFields } from "@/lib/ocr/capabilities"
 
 export type OcrProviderStatus = "ready" | "connected" | "not-configured" | "unsupported" | "error"
 
@@ -106,6 +117,7 @@ export const OcrSidebarItem = React.memo(function OcrSidebarItem({
   const handleClick = useCallback(() => onClick(providerId), [onClick, providerId])
   const statusCfg = STATUS_CONFIG[status]
   const StatusIcon = statusCfg.icon
+  const capBadges = topSidebarCapabilities(providerId)
 
   // Render `disabled` on the wrapper without `disabled` attribute — the row
   // is still clickable so users can re-enable from the detail panel.
@@ -146,12 +158,20 @@ export const OcrSidebarItem = React.memo(function OcrSidebarItem({
           {subtitle}
         </span>
       </div>
+      <div
+        className="flex shrink-0 items-center gap-0.5"
+        data-testid={`ocr-sidebar-item-caps-${providerId}`}
+      >
+        {capBadges.map((cap) => (
+          <CapabilityMicroBadge key={cap} cap={cap} isSelected={isSelected} />
+        ))}
+      </div>
       <Badge
         variant="outline"
         className={cn("shrink-0 gap-1 text-[10px] px-1.5 py-0", statusCfg.className)}
       >
         <StatusIcon className="h-3 w-3" />
-        <span className="hidden sm:inline">{statusLabel}</span>
+        <span className="truncate">{statusLabel}</span>
       </Badge>
       {disabled && (
         <AlertTriangle className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -162,4 +182,45 @@ export const OcrSidebarItem = React.memo(function OcrSidebarItem({
 
 function AriaWhen(value: boolean): "true" | undefined {
   return value ? "true" : undefined
+}
+
+const CAP_ICON: Record<
+  keyof OcrCapabilityFields,
+  React.ComponentType<{ className?: string }> | null
+> = {
+  handwriting: PenLine,
+  tables: TableIcon,
+  math: Sigma,
+  offline: CloudOff,
+  cjk: null,
+  structuredOutput: null,
+  layout: null,
+  pdfNative: null,
+  multilang: null,
+  costTier: null,
+  maxPagesPerCall: null,
+  category: null,
+}
+
+function CapabilityMicroBadge({
+  cap,
+  isSelected,
+}: {
+  cap: keyof OcrCapabilityFields
+  isSelected: boolean
+}) {
+  const Icon = CAP_ICON[cap]
+  if (!Icon) return null
+  return (
+    <span
+      className={cn(
+        "flex h-4 w-4 items-center justify-center rounded text-[10px]",
+        isSelected ? "text-primary-foreground/80" : "text-muted-foreground"
+      )}
+      aria-label={cap}
+      data-cap={cap}
+    >
+      <Icon className="h-3 w-3" />
+    </span>
+  )
 }

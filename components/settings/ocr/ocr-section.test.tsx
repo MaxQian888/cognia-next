@@ -14,7 +14,13 @@ function renderSection(
   modelBridge: OcrModelBridge | null = null,
   extra: Partial<React.ComponentProps<typeof OcrSection>> = {}
 ) {
-  const settings: UserOcrSettings = { ...DEFAULT_OCR_SETTINGS, ...overrides }
+  // Default to wizard-dismissed in tests so the auto-open Dialog doesn't add
+  // pointer-events: none to the body and break unrelated sidebar interactions.
+  const settings: UserOcrSettings = {
+    ...DEFAULT_OCR_SETTINGS,
+    ocrWizardDismissed: true,
+    ...overrides,
+  }
   const onChange = jest.fn()
   const onClearCache = jest.fn()
   const onClearProviderCache = jest.fn()

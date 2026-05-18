@@ -59,6 +59,37 @@ describe("getSettings", () => {
     expect(s.background?.position).toBe("cover")
   })
 
+  it("returns DEFAULT_OCR_SETTINGS for fresh installs", async () => {
+    const s = await getSettings()
+    expect(s.ocrSettings).toBeDefined()
+    expect(s.ocrSettings?.defaultProviderId).toBe("auto")
+    expect(s.ocrSettings?.cloudFallbackProviderId).toBe("mistral-ocr")
+    expect(s.ocrSettings?.cacheTtlDays).toBe(30)
+    expect(s.ocrSettings?.ocrWizardDismissed).toBe(false)
+    expect(s.ocrSettings?.platformOverrides).toEqual({})
+  })
+
+  it("merges user-supplied OCR overrides under the defaults", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      ocrSettings: {
+        defaultProviderId: "mistral-ocr",
+        platformOverrides: { windows: ["ocrs", "tesseract-wasm"] },
+        ocrWizardDismissed: true,
+      },
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+    const s = await getSettings()
+    // Persisted fields win.
+    expect(s.ocrSettings?.defaultProviderId).toBe("mistral-ocr")
+    expect(s.ocrSettings?.platformOverrides?.windows).toEqual(["ocrs", "tesseract-wasm"])
+    expect(s.ocrSettings?.ocrWizardDismissed).toBe(true)
+    // Missing fields filled from defaults.
+    expect(s.ocrSettings?.cacheTtlDays).toBe(30)
+    expect(s.ocrSettings?.defaultFormat).toBe("markdown")
+  })
+
   it("defaults onboardingDismissedAt to undefined for fresh installs", async () => {
     const s = await getSettings()
     expect(s.onboardingDismissedAt).toBeUndefined()

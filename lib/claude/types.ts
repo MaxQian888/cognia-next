@@ -586,6 +586,14 @@ export type AppLanguage = "en" | "zh-CN"
 
 export interface AppSettings {
   id: "singleton"
+  /**
+   * OCR subsystem preferences (default provider, cloud fallback, per-provider
+   * config, cache TTL, platform overrides, wizard dismissal). Merged forward
+   * by `lib/db/settings.ts:getSettings()` so older installs pick up new
+   * defaults without a schema migration. Defaults to `DEFAULT_OCR_SETTINGS`
+   * from `lib/ocr/types.ts`.
+   */
+  ocrSettings?: import("@/lib/ocr/types").UserOcrSettings
   defaultModel?: string
   defaultSystemPrompt?: string
   defaultWorkingDir?: string

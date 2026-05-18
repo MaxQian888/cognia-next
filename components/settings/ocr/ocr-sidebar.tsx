@@ -14,7 +14,7 @@
 
 import React from "react"
 import { useTranslations } from "next-intl"
-import { Eraser, Search, Sparkles } from "lucide-react"
+import { Eraser, Layers, Search, Sparkles } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -24,6 +24,7 @@ import type { OcrProviderCategory } from "@/lib/ocr/types"
 import { OcrSidebarItem, type OcrProviderStatus } from "./ocr-sidebar-item"
 
 export const OCR_AUTO_ROUTER_ID = "__auto__"
+export const OCR_COMPARE_ID = "__compare__"
 
 export type OcrCategoryFilter = "all" | OcrProviderCategory
 
@@ -32,6 +33,8 @@ export interface OcrSidebarProvider {
   name: string
   subtitle: string
   status: OcrProviderStatus
+  /** Mirrors OcrProvider.category — drives the "All" grouping. */
+  category: OcrProviderCategory
   disabled?: boolean
 }
 
@@ -47,6 +50,14 @@ interface OcrSidebarProps {
   onClearCache: () => void | Promise<void>
   stats: { enabled: number; local: number; cloud: number }
 }
+
+const CATEGORY_ORDER: ReadonlyArray<OcrProviderCategory> = [
+  "document-cloud",
+  "llm-vision",
+  "specialist",
+  "lark",
+  "local",
+]
 
 const CATEGORY_TABS: ReadonlyArray<OcrCategoryFilter> = [
   "all",
@@ -104,70 +115,48 @@ export function OcrSidebar({
         </Tabs>
       </div>
 
-      {/* 3 + 4. Auto-Router + scrollable list */}
+      {/* 3 + 4. Pinned entries + scrollable list */}
       <div
         className="flex-1 overflow-x-hidden overflow-y-auto p-1"
         role="list"
         aria-label="OCR providers"
       >
-        {/* Auto-Router pinned item */}
-        <button
-          type="button"
-          onClick={() => onSelect(OCR_AUTO_ROUTER_ID)}
-          data-testid="ocr-auto-router-item"
-          className={cn(
-            "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all duration-200",
-            selectedId === OCR_AUTO_ROUTER_ID
-              ? "border-l-2 border-l-primary bg-primary text-primary-foreground"
-              : "hover:bg-muted/50"
-          )}
-        >
-          <div
-            className={cn(
-              "flex h-7 w-7 shrink-0 items-center justify-center rounded-md",
-              selectedId === OCR_AUTO_ROUTER_ID ? "bg-primary-foreground/20" : "bg-muted"
-            )}
-          >
-            <Sparkles className="h-4 w-4" aria-hidden="true" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium">{t("ocr.autoRouter.label")}</span>
-            <span
-              className={cn(
-                "block truncate text-xs",
-                selectedId === OCR_AUTO_ROUTER_ID
-                  ? "text-primary-foreground/70"
-                  : "text-muted-foreground"
-              )}
-            >
-              {autoRouterSubtitle}
-            </span>
-          </div>
-          <Badge
-            variant="outline"
-            className={cn(
-              "shrink-0 text-[10px] px-1.5 py-0",
-              selectedId === OCR_AUTO_ROUTER_ID &&
-                "bg-primary-foreground/20 text-primary-foreground border-primary-foreground/30"
-            )}
-          >
-            {t("ocr.autoRouter.defaultBadge")}
-          </Badge>
-        </button>
+        {/* Compare pinned item */}
+        <PinnedRow
+          isSelected={selectedId === OCR_COMPARE_ID}
+          onClick={() => onSelect(OCR_COMPARE_ID)}
+          icon={<Layers className="h-4 w-4" aria-hidden="true" />}
+          label={t("ocr.compare.sidebarLabel")}
+          subtitle={t("ocr.compare.sidebarSubtitle")}
+          testId="ocr-compare-item"
+        />
 
-        {providers.map((p) => (
-          <OcrSidebarItem
-            key={p.id}
-            providerId={p.id}
-            name={p.name}
-            subtitle={p.subtitle}
-            status={p.status}
-            disabled={p.disabled}
-            isSelected={p.id === selectedId}
-            onClick={onSelect}
-            statusLabel={t(`ocr.status.${statusKey(p.status)}`)}
-          />
-        ))}
+        {/* Auto-Router pinned item */}
+        <PinnedRow
+          isSelected={selectedId === OCR_AUTO_ROUTER_ID}
+          onClick={() => onSelect(OCR_AUTO_ROUTER_ID)}
+          icon={<Sparkles className="h-4 w-4" aria-hidden="true" />}
+          label={t("ocr.autoRouter.label")}
+          subtitle={autoRouterSubtitle}
+          badge={t("ocr.autoRouter.defaultBadge")}
+          testId="ocr-auto-router-item"
+        />
+
+        {categoryFilter === "all"
+          ? renderGroupedProviders(providers, selectedId, onSelect, t)
+          : providers.map((p) => (
+              <OcrSidebarItem
+                key={p.id}
+                providerId={p.id}
+                name={p.name}
+                subtitle={p.subtitle}
+                status={p.status}
+                disabled={p.disabled}
+                isSelected={p.id === selectedId}
+                onClick={onSelect}
+                statusLabel={t(`ocr.status.${statusKey(p.status)}`)}
+              />
+            ))}
       </div>
 
       {/* 5. Clear cache footer */}
@@ -198,4 +187,106 @@ function statusKey(status: OcrProviderStatus): string {
     default:
       return status
   }
+}
+
+interface PinnedRowProps {
+  isSelected: boolean
+  onClick: () => void
+  icon: React.ReactNode
+  label: string
+  subtitle: string
+  badge?: string
+  testId: string
+}
+
+function PinnedRow({ isSelected, onClick, icon, label, subtitle, badge, testId }: PinnedRowProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testId}
+      className={cn(
+        "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all duration-200",
+        isSelected
+          ? "border-l-2 border-l-primary bg-primary text-primary-foreground"
+          : "hover:bg-muted/50"
+      )}
+    >
+      <div
+        className={cn(
+          "flex h-7 w-7 shrink-0 items-center justify-center rounded-md",
+          isSelected ? "bg-primary-foreground/20" : "bg-muted"
+        )}
+      >
+        {icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium">{label}</span>
+        <span
+          className={cn(
+            "block truncate text-xs",
+            isSelected ? "text-primary-foreground/70" : "text-muted-foreground"
+          )}
+        >
+          {subtitle}
+        </span>
+      </div>
+      {badge && (
+        <Badge
+          variant="outline"
+          className={cn(
+            "shrink-0 text-[10px] px-1.5 py-0",
+            isSelected &&
+              "bg-primary-foreground/20 text-primary-foreground border-primary-foreground/30"
+          )}
+        >
+          {badge}
+        </Badge>
+      )}
+    </button>
+  )
+}
+
+function renderGroupedProviders(
+  providers: readonly OcrSidebarProvider[],
+  selectedId: string | null,
+  onSelect: (id: string) => void,
+  t: ReturnType<typeof useTranslations>
+): React.ReactNode {
+  const groups = new Map<OcrProviderCategory, OcrSidebarProvider[]>()
+  for (const cat of CATEGORY_ORDER) groups.set(cat, [])
+  for (const p of providers) {
+    const list = groups.get(p.category)
+    if (list) list.push(p)
+  }
+  const out: React.ReactNode[] = []
+  for (const cat of CATEGORY_ORDER) {
+    const list = groups.get(cat) ?? []
+    if (list.length === 0) continue
+    out.push(
+      <div
+        key={`hdr-${cat}`}
+        className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+        data-testid={`ocr-sidebar-group-${cat}`}
+      >
+        {t(`ocr.categories.${cat}`)}
+      </div>
+    )
+    for (const p of list) {
+      out.push(
+        <OcrSidebarItem
+          key={p.id}
+          providerId={p.id}
+          name={p.name}
+          subtitle={p.subtitle}
+          status={p.status}
+          disabled={p.disabled}
+          isSelected={p.id === selectedId}
+          onClick={onSelect}
+          statusLabel={t(`ocr.status.${statusKey(p.status)}`)}
+        />
+      )
+    }
+  }
+  return out
 }
