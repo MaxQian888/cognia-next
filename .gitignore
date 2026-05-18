@@ -78,3 +78,6 @@ coverage_output.txt
 .lint-output.*
 batch-final-verify-*.png
 dist
+
+# IDE-local data (Tallycode VSCode extension cache)
+.vscode/.tallycode/
