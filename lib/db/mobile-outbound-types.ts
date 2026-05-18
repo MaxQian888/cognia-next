@@ -1,23 +1,37 @@
 // Mobile outbound queue row shapes (Wave 2.1, schema v25).
 //
 // One row per write operation enqueued from the phone — chat sends, draft
-// approvals, workflow triggers, twin ingests, backup exports — that needs
-// to round-trip to the desktop server via `transport.call()`. Lives in its
-// own table (`mobileOutboundQueue`) so the connector outbound queue stays
-// decoupled.
-
+// approvals, workflow triggers, twin ingests — that needs to round-trip
+// to the desktop server via `transport.call()`. Lives in its own table
+// (`mobileOutboundQueue`) so the connector outbound queue stays decoupled.
+//
+// SINGLE SOURCE OF TRUTH for the mobile outbound command surface. Every
+// entry below MUST satisfy three invariants:
+//   1. At least one production UI surface enqueues it (grep `enqueue\({`
+//      across components/mobile + app/share-target).
+//   2. The Rust RPC dispatcher (`src-tauri/src/companion_api/rpc.rs`) lists
+//      the same name in `KNOWN_COMMANDS` AND has a `match` arm that routes
+//      it to a real handler. Drift here surfaces as 404 unknown_command
+//      when the queue runner drains.
+//   3. The TS-side dispatch lives either in `lib/companion/desktop-write-source.ts`
+//      (mutations against desktop Dexie) or in a direct Tauri command
+//      (`claude_*`, `read_agent_config`, etc.).
+//
+// Audit-pass 2026-05-17 trimmed `session_send` / `session_delete` /
+// `session_pin` / `session_mute` / `backup_export` / `rpc_generic` from the
+// list — none had a production UI enqueue site, and `message_send` covers
+// the chat-send path. Re-add an entry here ONLY together with its UI
+// trigger, RPC dispatch arm, and handler.
 export const MOBILE_OUTBOUND_COMMANDS = [
+  // Connector subsystem (share-target + draft approval panel).
   "connector_send",
   "connector_approve_draft",
   "connector_reject_draft",
+  // Workflow subsystem (mobile trigger button).
   "workflow_trigger_manual",
+  // Twin subsystem (twin-sources + twin-drafts panels).
   "twin_ingest_source",
-  "backup_export",
-  "session_send",
-  "session_delete",
-  "session_pin",
-  "session_mute",
-  // Wave 2 mutating RPCs that the phone may queue while offline.
+  // Wave 2 desktop-write mutating RPCs.
   "character_upsert",
   "character_delete",
   "character_bind_twin",
@@ -25,7 +39,6 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   "plugin_set_enabled",
   "adapter_update_policy",
   "app_settings_update",
-  "rpc_generic",
 ] as const
 
 export type MobileOutboundCommand = (typeof MOBILE_OUTBOUND_COMMANDS)[number]

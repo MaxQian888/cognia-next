@@ -157,7 +157,7 @@ describe("resolveSkillMarkdown (M4)", () => {
     expect(body).toBeUndefined()
   })
 
-  it("returns a browser-mode placeholder for local-folder when isTauri is false", async () => {
+  it("drops local-folder in browser mode and warns instead of polluting the prompt", async () => {
     const def: PluginSkillDef = {
       id: "local-test",
       name: "Local Test",
@@ -165,12 +165,15 @@ describe("resolveSkillMarkdown (M4)", () => {
       source: { kind: "local-folder", path: "/tmp/skills/local-test" },
     }
     mIsTauri.mockReturnValue(false)
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
     const body = await resolveSkillMarkdown(def)
-    expect(body).toContain("local-test")
-    expect(body).toContain("not available in browser mode")
+    expect(body).toBeUndefined()
+    expect(warn).toHaveBeenCalled()
+    expect((warn.mock.calls[0]?.[0] as string).includes("local-test")).toBe(true)
+    warn.mockRestore()
   })
 
-  it("returns an error placeholder when the local-folder read throws in Tauri", async () => {
+  it("drops the skill with a warning when the local-folder read fails in Tauri", async () => {
     const def: PluginSkillDef = {
       id: "broken",
       name: "Broken",
@@ -178,10 +181,41 @@ describe("resolveSkillMarkdown (M4)", () => {
       source: { kind: "local-folder", path: "/no/such/path" },
     }
     mIsTauri.mockReturnValue(true)
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
     // In jest/jsdom there's no @tauri-apps/plugin-fs runtime — the dynamic
-    // import throws which is caught by the try/catch and produces a
-    // user-friendly placeholder rather than escaping to the caller.
+    // import throws which is caught and reported via console.warn; the
+    // resolver returns undefined so the renderer drops the skill instead
+    // of injecting an `[skill "…": failed to read]` placeholder into the
+    // system prompt.
     const body = await resolveSkillMarkdown(def)
-    expect(body).toMatch(/^\[skill "broken": failed to read SKILL\.md:/)
+    expect(body).toBeUndefined()
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+})
+
+describe("parseSkillMarkdown — frontmatter warnings", () => {
+  it("warns on unknown frontmatter keys", () => {
+    const { warnings } = parseSkillMarkdown("---\nname: A\nfoo: bar\nbaz: qux\n---\nBody.")
+    const joined = warnings.join("\n")
+    expect(joined).toMatch(/"foo"/)
+    expect(joined).toMatch(/"baz"/)
+  })
+
+  it("flags Claude Code dynamic-trigger keys (priority, promptSignals, etc.) as known-but-unmodelled", () => {
+    const { warnings } = parseSkillMarkdown(
+      "---\nname: A\npriority: 10\npromptSignals:\n  phrases: [x]\n---\nBody."
+    )
+    const joined = warnings.join("\n")
+    expect(joined).toMatch(/priority/)
+    expect(joined).toMatch(/promptSignals/)
+    expect(joined).toMatch(/dynamic-activation/i)
+  })
+
+  it("does not warn for known keys including the allowedTools camelCase alias", () => {
+    const { warnings } = parseSkillMarkdown(
+      "---\nname: A\nallowedTools: [Read]\nversion: '1.0'\nauthor: Jane\nlicense: MIT\n---\nBody."
+    )
+    expect(warnings).toEqual([])
   })
 })

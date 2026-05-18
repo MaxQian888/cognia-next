@@ -281,6 +281,12 @@ export interface NativeSkill {
   filePath: string
   content: string
   resources: NativeSkillResource[]
+  /**
+   * SKILL.md mtime in milliseconds since epoch. Zero when filesystem
+   * metadata couldn't be read (handled as "unknown" by sync — pull
+   * conservatively).
+   */
+  mtimeMs: number
 }
 
 export interface RegistrySkillEntry {

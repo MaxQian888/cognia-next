@@ -89,10 +89,24 @@ interface SecureStoragePluginShape {
   remove(opts: { key: string }): Promise<unknown>
 }
 
-/** Lazy import so the plugin is only loaded inside Capacitor. */
+/** Lazy import so the plugin is only loaded inside Capacitor.
+ *
+ * Package name MUST stay in lockstep with `mobile/package.json` —
+ * mismatches fail silently here (the try/catch swallows MODULE_NOT_FOUND)
+ * so the bug surfaces only as "TURN credentials never persist on mobile".
+ * `turn-credentials.test.ts:CapacitorSecureStore package name` pins both
+ * sides of the lockstep.
+ *
+ * The plugin is declared by the `mobile/` workspace, not by the root, so
+ * the root tsconfig cannot resolve its types. The runtime resolution is
+ * expected only inside Capacitor; on web / jsdom the import() rejects
+ * and the surrounding try/catch returns null. A dynamic module-id string
+ * lets the bundler skip static analysis (mirrors the same pattern in
+ * `lib/tauri/companion-storage.ts:109-121`). */
 async function loadSecureStorage(): Promise<SecureStoragePluginShape | null> {
   try {
-    const mod = (await import(/* @vite-ignore */ "@capacitor-community/secure-storage-plugin")) as {
+    const moduleId = "capacitor-secure-storage-plugin"
+    const mod = (await import(/* webpackIgnore: true */ moduleId)) as {
       SecureStoragePlugin?: SecureStoragePluginShape
     }
     return mod.SecureStoragePlugin ?? null

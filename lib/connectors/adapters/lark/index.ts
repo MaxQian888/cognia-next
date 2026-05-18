@@ -20,6 +20,7 @@ import { parseLarkEventEnvelope } from "./parse"
 import type { LarkEventEnvelope } from "./parse"
 import { serializeOutbound, serializeEdit, serializeDelete, serializeReaction } from "./serialize"
 import { getTenantAccessToken } from "./auth"
+import { resolveLarkMediaKeys } from "./upload"
 import { startLarkLongConn } from "./transport-long-conn"
 import { startLarkWebhookTransport } from "./transport-webhook"
 import { parseConversationKey } from "@/types/connectors/event"
@@ -74,6 +75,10 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
   let healthState: AdapterHealthState = "starting"
   let lastActivityAt: number | undefined = undefined
   let stopCalled = false
+
+  // Per-adapter-session URL → file_key / image_key cache so repeated sends
+  // of the same media don't re-upload. Cleared on `stop()`.
+  const uploadCache = new Map<string, string>()
 
   async function getTat(): Promise<string> {
     const [appId, appSecret] = await Promise.all([opts.appId(), opts.appSecret()])
@@ -178,6 +183,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     abortController?.abort()
     abortController = null
     healthState = "down"
+    uploadCache.clear()
   }
 
   function health(): AdapterHealth {
@@ -186,7 +192,11 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
 
   async function send(req: OutboundRequest): Promise<OutboundResult> {
     try {
-      const call = serializeOutbound(req)
+      const resolvedSegments = await resolveLarkMediaKeys(req.segments, {
+        getAccessToken: getTat,
+        uploadCache,
+      })
+      const call = serializeOutbound({ ...req, segments: resolvedSegments })
       const urlPath = call.url.replace(LARK_API_BASE, "")
       await doRequest(call.method, urlPath, call.payload)
       return { ok: true }
@@ -204,7 +214,11 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
 
   async function edit(messageId: string, patch: OutboundRequest): Promise<OutboundResult> {
     try {
-      const call = serializeEdit(messageId, patch)
+      const resolvedSegments = await resolveLarkMediaKeys(patch.segments, {
+        getAccessToken: getTat,
+        uploadCache,
+      })
+      const call = serializeEdit(messageId, { ...patch, segments: resolvedSegments })
       const urlPath = call.url.replace(LARK_API_BASE, "")
       await doRequest(call.method, urlPath, call.payload)
       return { ok: true }

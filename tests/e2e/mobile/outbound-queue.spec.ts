@@ -6,6 +6,11 @@
  * inserts a row directly into mobileOutboundQueue so we don't depend on
  * the calling UI surface (which is exercised separately in its dedicated
  * spec, e.g. workflow-surface for workflow_trigger_manual).
+ *
+ * The command list MUST stay in lockstep with
+ * `lib/db/mobile-outbound-types.ts:MOBILE_OUTBOUND_COMMANDS` — drift here
+ * silently passes the spec while production commands rot. The
+ * `outbound-queue-spec-parity` unit test pins both sides.
  */
 
 import { expect, test } from "@playwright/test"
@@ -13,17 +18,22 @@ import { resetCogniaDb } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
 
 const COMMAND_KINDS = [
+  // Connector subsystem
   "connector_send",
   "connector_approve_draft",
-  "connector_discard_draft",
+  "connector_reject_draft",
+  // Workflow subsystem
   "workflow_trigger_manual",
+  // Twin subsystem
   "twin_ingest_source",
-  "twin_approve_draft",
-  "backup_export",
-  "backup_import",
-  "github_comment_pr",
-  "github_label_issue",
-  "settings_patch",
+  // Wave 2 desktop-write mutating RPCs
+  "character_upsert",
+  "character_delete",
+  "character_bind_twin",
+  "skill_set_enabled",
+  "plugin_set_enabled",
+  "adapter_update_policy",
+  "app_settings_update",
 ] as const
 
 test.describe("mobile — outbound queue per command", () => {

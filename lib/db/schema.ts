@@ -54,6 +54,8 @@ import type { PairedDeviceRow } from "@/types/mobile/paired-device"
 import type { SessionUsageRow } from "./session-usage"
 import type { ChatDraftRow } from "./chat-drafts"
 import type { Goal, GoalEvent } from "@/types/goal"
+import type { OcrResultRow } from "./ocr-results"
+import type { PluginSkillUsageRow } from "./plugin-skill-usage"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -172,6 +174,21 @@ export class CogniaDB extends Dexie {
    * hook needed.
    */
   workflowViewportBookmarks!: Table<WorkflowViewportBookmarkRow, string>
+  /**
+   * v36 — OCR result cache (ADR-0024). Primary key is the canonical
+   * `${sha256(file)}|${providerId}|${sortedLangs.join(",")}` id built by
+   * `buildOcrCacheId()`. Indexed by `providerId` so the settings page can
+   * purge per-provider, and by `createdAt` for TTL-based cleanup. Pure
+   * additive; no upgrade hook needed.
+   */
+  ocrResults!: Table<OcrResultRow, string>
+  /**
+   * v37 — Plugin-skill usage telemetry. One row per plugin-contributed
+   * skill id. Written by `lib/db/plugin-skill-usage.ts:recordPluginSkillUsage`
+   * on each chat send that resolves the plugin skill; read by plugin
+   * telemetry surfaces. Pure additive; no upgrade hook needed.
+   */
+  pluginSkillUsage!: Table<PluginSkillUsageRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -1041,6 +1058,27 @@ export class CogniaDB extends Dexie {
     //   • `[workflowId+createdAt]`    — newest-first dropdown listing.
     this.version(35).stores({
       workflowViewportBookmarks: "&id, workflowId, [workflowId+createdAt]",
+    })
+
+    // v36 — OCR result cache (ADR-0024). Indexed columns:
+    //   • `&id`         — primary key `${sha256(file)}|${providerId}|${langs}`.
+    //   • `providerId`  — per-provider purge in settings.
+    //   • `createdAt`   — TTL purge.
+    //   • `fileSha`     — "delete every cached result for this file".
+    this.version(36).stores({
+      ocrResults: "&id, providerId, createdAt, fileSha",
+    })
+
+    // v37 — Plugin-skill usage telemetry. Mirrors the per-row
+    // `usageCount` / `lastUsedAt` columns on `skills`, but for plugin-
+    // contributed runtime skills which have no Dexie row of their own.
+    // One row per plugin skill id; the writer `recordPluginSkillUsage`
+    // upserts on each chat send that resolves the plugin skill.
+    //   • `&pluginSkillId` — primary key (the plugin's skill id string).
+    //   • `lastUsedAt`     — newest-first listing in plugin telemetry UIs.
+    //   • `pluginId`       — bulk-purge on plugin uninstall.
+    this.version(37).stores({
+      pluginSkillUsage: "&pluginSkillId, lastUsedAt, pluginId",
     })
   }
 

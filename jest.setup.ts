@@ -130,6 +130,40 @@ if (typeof Element !== "undefined") {
   }
 }
 
+// jsdom omits the WHATWG `Response` constructor (jest-environment-jsdom v30
+// masks it). Provide a minimal stand-in tailored to the shape `cloudFetch`
+// reads — status, ok, text(), headers — so OCR provider tests that mock
+// `fetch` with `new Response(...)` work.
+if (typeof (globalThis as { Response?: unknown }).Response === "undefined") {
+  class MinimalResponse {
+    readonly status: number
+    readonly statusText: string
+    readonly ok: boolean
+    readonly headers: Headers
+    private _body: string
+
+    constructor(
+      body: string | Uint8Array | undefined,
+      init: { status?: number; statusText?: string; headers?: Record<string, string> } = {}
+    ) {
+      this.status = init.status ?? 200
+      this.statusText = init.statusText ?? ""
+      this.ok = this.status >= 200 && this.status < 300
+      this.headers = new Headers(init.headers)
+      this._body =
+        body === undefined ? "" : typeof body === "string" ? body : new TextDecoder().decode(body)
+    }
+
+    async text(): Promise<string> {
+      return this._body
+    }
+    async json(): Promise<unknown> {
+      return JSON.parse(this._body) as unknown
+    }
+  }
+  ;(globalThis as unknown as { Response: typeof MinimalResponse }).Response = MinimalResponse
+}
+
 // jsdom doesn't expose structuredClone, but Node.js 17+ has it on the global
 // scope. Make it visible to jsdom-environment tests so fake-indexeddb (which
 // clones values for insertion) works inside the IndexedDB transport tests.

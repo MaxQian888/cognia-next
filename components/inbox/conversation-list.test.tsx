@@ -209,7 +209,9 @@ describe("ConversationList", () => {
     // The trigger must be visually hidden on md+ viewports so the desktop
     // three-pane layout keeps its existing chrome.
     expect(trigger).toHaveClass("md:hidden")
-    expect(trigger).toHaveAccessibleName(/open adapters/i)
+    // ConversationList mounts NextIntlClientProvider with the real en
+    // messages, so the trigger resolves to the translation, not the key.
+    expect(trigger).toHaveAccessibleName(/open conversations list/i)
   })
 
   it("row uses responsive touch-target sizing", () => {

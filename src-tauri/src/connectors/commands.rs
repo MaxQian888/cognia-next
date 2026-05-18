@@ -175,3 +175,38 @@ pub async fn connectors_attachment_fetch(
 ) -> Result<super::attachments::AttachmentRef, String> {
     super::attachments::fetch_attachment(adapter_id, remote_ref, source_url).await
 }
+
+// ---------------------------------------------------------------------------
+// Lark media upload — voice / video / file / image
+//
+// The TS adapter caches the tenant access token (`lark/auth.ts`) and passes
+// it here; this command does the URL fetch + multipart POST to Lark in one
+// round-trip and returns the opaque `file_key` / `image_key`.
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn connectors_lark_upload_file(
+    access_token: String,
+    source_url: String,
+    file_type: String,
+    file_name: String,
+    duration_ms: Option<u64>,
+) -> Result<String, String> {
+    super::lark_upload::upload_file(
+        &access_token,
+        &source_url,
+        &file_type,
+        &file_name,
+        duration_ms,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn connectors_lark_upload_image(
+    access_token: String,
+    source_url: String,
+    image_type: Option<String>,
+) -> Result<String, String> {
+    super::lark_upload::upload_image(&access_token, &source_url, image_type.as_deref()).await
+}

@@ -70,7 +70,9 @@ export function installMobileSignalingController(
 
   const sub: Subscription = liveQuery(() => getSettings()).subscribe({
     next: (settings) => {
-      applySettings(tx, settings)
+      void applySettings(tx, settings).catch((err) => {
+        console.warn("mobile-signaling-controller: applySettings failed", err)
+      })
     },
     error: (err) => {
       console.warn("mobile-signaling-controller: settings query error", err)
@@ -84,11 +86,18 @@ export function installMobileSignalingController(
 
 /**
  * Project an `AppSettings` snapshot onto the transport — exported for unit
- * testing without the `dexie.liveQuery` indirection. Test consumers call
+ * testing without the `dexie.liveQuery` indirection. Test consumers `await`
  * this directly with handcrafted settings objects; the production caller
- * uses [`installMobileSignalingController`].
+ * uses [`installMobileSignalingController`] and fires-and-forgets via
+ * `.catch`.
+ *
+ * Returns a promise so callers (and tests) can observe completion. The
+ * async path is needed because `resolveTurnServerCredentials` reads from
+ * the OS keyring (`turn-credentials.ts`) — synchronously yielding before
+ * `enableWebRtcTier` would skip credential resolution and surface as
+ * "TURN auth failed" during ICE.
  */
-export function applySettings(tx: CompanionTransport, settings: AppSettings): void {
+export async function applySettings(tx: CompanionTransport, settings: AppSettings): Promise<void> {
   const enabled = settings.webrtcEnabled ?? true
   const signalingUrl = settings.signalingUrl ?? DEFAULT_SIGNALING_URL
   const ice = settings.iceServers ?? DEFAULT_STUN
@@ -97,18 +106,10 @@ export function applySettings(tx: CompanionTransport, settings: AppSettings): vo
     tx.disableWebRtcTier()
     return
   }
-  // Resolve any keyring-backed TURN credentials before handing them to
-  // `RTCPeerConnection`. The fetch is async; `enableWebRtcTier` is
-  // already fire-and-forget, so we wrap it in the same self-invoking
-  // chain.
-  void (async () => {
-    const resolvedTurn = await resolveTurnServerCredentials(turn)
-    const iceServers: RTCIceServer[] = [...ice, ...resolvedTurn]
-    await tx.enableWebRtcTier({
-      signalingUrl,
-      rtcConfiguration: { iceServers },
-    })
-  })().catch((err) => {
-    console.warn("mobile-signaling-controller: enableWebRtcTier failed", err)
+  const resolvedTurn = await resolveTurnServerCredentials(turn)
+  const iceServers: RTCIceServer[] = [...ice, ...resolvedTurn]
+  await tx.enableWebRtcTier({
+    signalingUrl,
+    rtcConfiguration: { iceServers },
   })
 }

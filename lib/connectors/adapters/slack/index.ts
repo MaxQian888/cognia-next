@@ -27,6 +27,7 @@ import {
   serializeAssistantSuggestedPrompts,
 } from "./serialize"
 import { startSocketMode } from "./transport-socket-mode"
+import { startSlackWebhookTransport } from "./transport-webhook"
 import { parseConversationKey } from "@/types/connectors/event"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 
@@ -151,9 +152,30 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
         }
       })()
     } else {
-      // events-api-webhook: stub in Phase 1
-      // The webhook endpoint is handled by the Tauri Rust HTTP proxy;
-      // nothing to drive here in Phase 1.
+      // events-api-webhook: Rust (axum + verify_slack) terminates the HMAC
+      // signature check and emits the parsed body on
+      // `connectors://webhook/<adapterId>`. We subscribe here and route each
+      // envelope through the same parser the socket-mode path uses.
+      ;(async () => {
+        try {
+          const generator = startSlackWebhookTransport({ adapterId: opts.id, signal })
+          for await (const envelope of generator) {
+            if (signal.aborted) break
+            const event = parseSlackEventCallback(opts.id, opts.selfId, envelope)
+            if (event) {
+              lastActivityAt = Date.now()
+              await ctx.emit(event)
+            }
+          }
+          if (!stopCalled) {
+            healthState = "down"
+          }
+        } catch {
+          if (!stopCalled) {
+            healthState = "degraded"
+          }
+        }
+      })()
     }
   }
 

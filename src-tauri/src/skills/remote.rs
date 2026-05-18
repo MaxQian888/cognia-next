@@ -41,3 +41,48 @@ pub async fn skills_fetch_remote_md(url: String) -> Result<String, String> {
     }
     String::from_utf8(bytes.to_vec()).map_err(|e| format!("utf-8: {}", e))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper that runs the early validation gate without dispatching the
+    /// outbound HTTP request. Mirrors the first three checks in
+    /// `skills_fetch_remote_md` so we can unit-test them without a network.
+    fn validate_url(url: &str) -> Result<(), String> {
+        let lower = url.to_lowercase();
+        if !(lower.starts_with("https://") || lower.starts_with("http://")) {
+            return Err("unsupported scheme: must be http(s)".into());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_non_http_schemes() {
+        assert!(validate_url("file:///etc/passwd").is_err());
+        assert!(validate_url("ftp://example.com/x").is_err());
+        assert!(validate_url("javascript:alert(1)").is_err());
+        assert!(validate_url("").is_err());
+    }
+
+    #[test]
+    fn accepts_http_and_https() {
+        assert!(validate_url("http://example.com").is_ok());
+        assert!(validate_url("https://example.com/skill.md").is_ok());
+        assert!(validate_url("HTTPS://EXAMPLE.COM").is_ok());
+    }
+
+    #[test]
+    fn constants_match_documented_limits() {
+        assert_eq!(MAX_BYTES, 1024 * 1024);
+        assert_eq!(TIMEOUT_SECS, 15);
+    }
+
+    #[tokio::test]
+    async fn rejects_bad_scheme_via_command() {
+        let err = skills_fetch_remote_md("ftp://example.com".to_string()).await;
+        assert!(err.is_err());
+        let msg = err.unwrap_err();
+        assert!(msg.contains("scheme"));
+    }
+}

@@ -1,9 +1,13 @@
 /**
  * Slack Events API event_callback → NormalizedInboundEvent parser.
  *
- * Handles message events in Phase 1.
- * Ignores bot_message / message_changed subtypes.
- * Returns null for unsupported event types.
+ * Handles:
+ *   - message create (no subtype)
+ *   - message_changed → kind="edit" with replacesMessageId
+ *   - message_deleted → kind="delete" with replacesMessageId
+ *
+ * Ignores bot_message and other unsupported subtypes.
+ * Returns null for unsupported event types or malformed envelopes.
  */
 
 import type { NormalizedInboundEvent, PlatformIdentity } from "@/types/connectors/event"
@@ -47,6 +51,15 @@ export interface SlackMessageEvent {
   subtype?: string
   files?: SlackFile[]
   blocks?: SlackBlock[]
+  /**
+   * For subtype === "message_changed": the *updated* message body. Its `ts`
+   * is the ORIGINAL message's ts (the one being edited), not the event ts.
+   */
+  message?: SlackMessageEvent
+  /** For subtype === "message_changed" / "message_deleted": prior content. */
+  previous_message?: SlackMessageEvent
+  /** For subtype === "message_deleted": ts of the message that was removed. */
+  deleted_ts?: string
 }
 
 export interface SlackEventEnvelope {
@@ -160,7 +173,7 @@ function buildSegments(event: SlackMessageEvent): MessageSegment[] {
  * Returns null for:
  * - Non-message event types
  * - bot_message subtype
- * - message_changed subtype
+ * - Malformed message_changed / message_deleted envelopes (missing required fields)
  */
 export function parseSlackEventCallback(
   adapterId: string,
@@ -172,8 +185,111 @@ export function parseSlackEventCallback(
   const event = envelope.event
   if (event.type !== "message") return null
 
-  // Ignore bot messages and message edits in Phase 1
-  if (event.subtype === "bot_message" || event.subtype === "message_changed") return null
+  // Edit: the nested `message` carries the updated content. Its `ts` is the
+  // original message's ts (the one being mutated).
+  if (event.subtype === "message_changed") {
+    const updated = event.message
+    if (!updated || !updated.ts) return null
+    const userId = updated.user
+    if (!userId) return null
+    const channel = event.channel
+    const threadTs = updated.thread_ts !== updated.ts ? updated.thread_ts : undefined
+    const conversationKey = buildConversationKey("slack", adapterId, channel, threadTs)
+    const sender = buildPlatformIdentity(adapterId, userId)
+    const { selfMentioned, users } = detectMentions(selfId, updated)
+    const segments = buildSegments(updated)
+    const plainText = segmentsToPlainText(segments)
+    const channelType = event.channel_type
+    const channelKind: "private" | "group" | "channel" | "thread" =
+      threadTs !== undefined
+        ? "thread"
+        : channelType === "im"
+          ? "private"
+          : channelType === "group"
+            ? "group"
+            : "channel"
+
+    return {
+      platform: "slack",
+      adapterId,
+      selfId,
+      messageId: updated.ts,
+      conversationRef: {
+        platform: "slack",
+        adapterId,
+        channelId: channel,
+        threadTs,
+      },
+      conversationKey,
+      sender,
+      channel: {
+        id: conversationKey,
+        kind: channelKind,
+        platformChannelId: channel,
+      },
+      segments,
+      plainText,
+      replyTo: undefined,
+      mentions: { selfMentioned, users },
+      timestamp: Math.round(parseFloat(event.ts) * 1000),
+      raw: envelope,
+      kind: "edit",
+      replacesMessageId: updated.ts,
+    }
+  }
+
+  // Delete: pull the deleted ts and recover sender / channel kind from
+  // previous_message when available.
+  if (event.subtype === "message_deleted") {
+    const deletedTs = event.deleted_ts
+    if (!deletedTs) return null
+    const channel = event.channel
+    const previous = event.previous_message
+    const userId = previous?.user ?? "unknown"
+    const threadTs = previous?.thread_ts !== previous?.ts ? previous?.thread_ts : undefined
+    const conversationKey = buildConversationKey("slack", adapterId, channel, threadTs)
+    const sender = buildPlatformIdentity(adapterId, userId)
+    const channelType = event.channel_type
+    const channelKind: "private" | "group" | "channel" | "thread" =
+      threadTs !== undefined
+        ? "thread"
+        : channelType === "im"
+          ? "private"
+          : channelType === "group"
+            ? "group"
+            : "channel"
+
+    return {
+      platform: "slack",
+      adapterId,
+      selfId,
+      messageId: deletedTs,
+      conversationRef: {
+        platform: "slack",
+        adapterId,
+        channelId: channel,
+        threadTs,
+      },
+      conversationKey,
+      sender,
+      channel: {
+        id: conversationKey,
+        kind: channelKind,
+        platformChannelId: channel,
+      },
+      segments: [],
+      plainText: "",
+      replyTo: undefined,
+      mentions: { selfMentioned: false, users: [] },
+      timestamp: Math.round(parseFloat(event.ts) * 1000),
+      raw: envelope,
+      kind: "delete",
+      replacesMessageId: deletedTs,
+    }
+  }
+
+  // Ignore bot messages
+  if (event.subtype === "bot_message") return null
 
   const userId = event.user
   if (!userId) return null

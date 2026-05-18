@@ -1,4 +1,4 @@
 {
   "title": "Plugins",
-  "pages": ["desktop-handlers"]
+  "pages": ["desktop-handlers", "ocr"]
 }

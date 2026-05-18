@@ -167,6 +167,48 @@ export function serializeDeleteV12(messageId: string, _selfId: string): Serializ
 }
 
 // ---------------------------------------------------------------------------
+// history fetch (v11 NapCat / go-cqhttp extension)
+// ---------------------------------------------------------------------------
+
+/**
+ * Serialise a `get_group_msg_history` call.
+ *
+ * Per NapCat / go-cqhttp: omitting `message_seq` fetches the most recent page;
+ * passing a seq returns up to `count` messages *before* that seq (older
+ * messages). The response carries `messages` ordered oldest-first within the
+ * page.
+ */
+export function serializeGetGroupMsgHistoryV11(
+  groupId: string | number,
+  messageSeq?: number,
+  count = 20
+): SerializedOneBotCall {
+  const params: Record<string, unknown> = {
+    group_id: typeof groupId === "string" ? Number(groupId) : groupId,
+    count,
+  }
+  if (messageSeq !== undefined) params.message_seq = messageSeq
+  return { action: "get_group_msg_history", echo: nextEcho(), params }
+}
+
+/**
+ * Serialise a `get_friend_msg_history` call. Same cursor semantics as the
+ * group variant.
+ */
+export function serializeGetFriendMsgHistoryV11(
+  userId: string | number,
+  messageSeq?: number,
+  count = 20
+): SerializedOneBotCall {
+  const params: Record<string, unknown> = {
+    user_id: typeof userId === "string" ? Number(userId) : userId,
+    count,
+  }
+  if (messageSeq !== undefined) params.message_seq = messageSeq
+  return { action: "get_friend_msg_history", echo: nextEcho(), params }
+}
+
+// ---------------------------------------------------------------------------
 // edit — NOT SUPPORTED
 // ---------------------------------------------------------------------------
 

@@ -30,10 +30,10 @@ describe("createOutboundRunner", () => {
       dispatcher: { call },
       enforceMobile: false,
     })
-    await enqueue({ command: "rpc_generic", payload: { x: 1 } })
+    await enqueue({ command: "connector_send", payload: { x: 1 } })
     await runner.kick()
     expect(call).toHaveBeenCalledWith(
-      "rpc_generic",
+      "connector_send",
       { x: 1 },
       expect.objectContaining({ idempotencyKey: expect.any(String) })
     )
@@ -51,7 +51,7 @@ describe("createOutboundRunner", () => {
       random: () => 0,
     })
     // Match the runner's mocked now() so claimNext picks the row up.
-    await enqueue({ command: "rpc_generic", payload: {}, nowMs: 0 })
+    await enqueue({ command: "connector_send", payload: {}, nowMs: 0 })
     await runner.kick()
     const pending = await listByStatus("pending")
     expect(pending).toHaveLength(1)
@@ -66,7 +66,7 @@ describe("createOutboundRunner", () => {
       dispatcher: { call },
       enforceMobile: false,
     })
-    await enqueue({ command: "rpc_generic", payload: {} })
+    await enqueue({ command: "connector_send", payload: {} })
     await runner.kick()
     const dead = await listByStatus("deadlettered")
     expect(dead).toHaveLength(1)
@@ -83,7 +83,7 @@ describe("createOutboundRunner", () => {
     })
     await getDb().mobileOutboundQueue.put({
       id: "future",
-      command: "rpc_generic",
+      command: "connector_send",
       payload: {},
       status: "pending",
       attempts: 0,
@@ -102,9 +102,9 @@ describe("createOutboundRunner", () => {
       dispatcher: { call },
       enforceMobile: false,
     })
-    await enqueue({ command: "rpc_generic", payload: { i: 1 } })
-    await enqueue({ command: "rpc_generic", payload: { i: 2 } })
-    await enqueue({ command: "rpc_generic", payload: { i: 3 } })
+    await enqueue({ command: "connector_send", payload: { i: 1 } })
+    await enqueue({ command: "connector_send", payload: { i: 2 } })
+    await enqueue({ command: "connector_send", payload: { i: 3 } })
     await runner.kick()
     expect(call).toHaveBeenCalledTimes(3)
     runner.stop()
@@ -121,7 +121,7 @@ describe("createOutboundRunner", () => {
     const { createOutboundRunner: factory } = await import("./outbound-queue")
     const call = jest.fn()
     const runner = factory({ dispatcher: { call }, enforceMobile: true })
-    await enqueue({ command: "rpc_generic", payload: {} })
+    await enqueue({ command: "connector_send", payload: {} })
     await runner.kick()
     expect(call).not.toHaveBeenCalled()
     runner.stop()
@@ -141,7 +141,7 @@ describe("createOutboundRunner", () => {
       dispatcher: { call },
       enforceMobile: false,
     })
-    await enqueue({ command: "rpc_generic", payload: {} })
+    await enqueue({ command: "connector_send", payload: {} })
     const p = runner.kick()
     // Wait for `dispatcher.call` to be reached (Dexie txn settles in a few
     // microtasks). Give up after 50 ticks so a real bug doesn't hang.

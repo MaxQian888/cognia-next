@@ -1086,6 +1086,20 @@ export class PluginManager {
       })
       loggers.manager.debug(`[plugin:${pluginId}] enabled (${reason})`)
     } catch (error) {
+      // Rollback: if `registerPluginContributions` (or anything after it)
+      // threw partway, registries may have entries we never cleaned up.
+      // Running `unregisterPluginContributions` here is safe — every
+      // `unregister*ByPlugin` is idempotent and a no-op for plugins that
+      // never registered. Without this, a failed activation leaks skill /
+      // tool / preset / character-attachment state into the next enable.
+      try {
+        await this.unregisterPluginContributions(pluginId)
+      } catch (rollbackError) {
+        loggers.manager.warn(
+          `[plugin:${pluginId}] rollback after failed enable also failed:`,
+          rollbackError
+        )
+      }
       store.setPluginError(pluginId, String(error))
       this.recordPluginVerification(pluginId, {
         status: "error",
@@ -1907,6 +1921,10 @@ export class PluginManager {
           loggers.manager.warn(`[plugin:${pluginId}] failed to register skill ${def.id}:`, err)
         }
       }
+      // Pre-attach plugin skills to characters that opted in via
+      // `attachToCharacterIds`. Idempotent — duplicates are deduped per
+      // character row. Errors are warned but never block plugin enable.
+      await this.attachPluginSkillsToCharacters(pluginId, plugin.manifest.skills)
     }
     if (plugin.manifest.externalAgentPresets?.length) {
       for (const def of plugin.manifest.externalAgentPresets) {
@@ -1919,6 +1937,79 @@ export class PluginManager {
             err
           )
         }
+      }
+    }
+  }
+
+  /**
+   * Append each plugin skill's id to the `pluginSkillIds` list on every
+   * character it declares via `attachToCharacterIds`. Idempotent — running
+   * twice doesn't duplicate the entry. Skill rows that don't declare
+   * `attachToCharacterIds` (or declare an empty list) are no-ops here.
+   */
+  private async attachPluginSkillsToCharacters(
+    pluginId: string,
+    skills: ReadonlyArray<import("@/types/plugin/plugin-skill").PluginSkillDef>
+  ): Promise<void> {
+    const { getCharacter, updateCharacter } = await import("@/lib/db/characters")
+    // Build a per-character bag of skill ids to add. Done in two passes so
+    // a character mentioned by N skills incurs only one update.
+    const toAdd = new Map<string, string[]>()
+    for (const def of skills) {
+      const targets = def.attachToCharacterIds ?? []
+      for (const characterId of targets) {
+        const bag = toAdd.get(characterId) ?? []
+        bag.push(def.id)
+        toAdd.set(characterId, bag)
+      }
+    }
+    for (const [characterId, skillIds] of toAdd) {
+      try {
+        const row = await getCharacter(characterId)
+        if (!row) {
+          loggers.manager.warn(
+            `[plugin:${pluginId}] attachToCharacterIds references missing character ${characterId}`
+          )
+          continue
+        }
+        const existing = new Set(row.pluginSkillIds ?? [])
+        for (const id of skillIds) existing.add(id)
+        await updateCharacter(characterId, { pluginSkillIds: [...existing] })
+      } catch (err) {
+        loggers.manager.warn(
+          `[plugin:${pluginId}] failed to attach skill(s) to character ${characterId}:`,
+          err
+        )
+      }
+    }
+  }
+
+  /**
+   * Remove each plugin skill's id from every character that referenced it.
+   * Mirrors `attachPluginSkillsToCharacters` so disable / re-enable is a
+   * clean round-trip.
+   */
+  private async detachPluginSkillsFromCharacters(
+    skills: ReadonlyArray<import("@/types/plugin/plugin-skill").PluginSkillDef>
+  ): Promise<void> {
+    const { listCharacters, updateCharacter } = await import("@/lib/db/characters")
+    const drop = new Set(skills.map((s) => s.id))
+    if (drop.size === 0) return
+    const all = await listCharacters()
+    for (const character of all) {
+      if (!character.pluginSkillIds?.length) continue
+      const before = character.pluginSkillIds
+      const after = before.filter((id) => !drop.has(id))
+      if (after.length === before.length) continue
+      try {
+        await updateCharacter(character.id, {
+          pluginSkillIds: after.length > 0 ? after : undefined,
+        })
+      } catch (err) {
+        loggers.manager.warn(
+          `failed to detach plugin skill(s) from character ${character.id}:`,
+          err
+        )
       }
     }
   }
@@ -1975,7 +2066,21 @@ export class PluginManager {
     // diagnostic surface could surface it.
     unregisterMcpServerPresetsByPlugin(pluginId)
     unregisterNativeAnthropicToolsByPlugin(pluginId)
+    // Remove this plugin's skill ids from every character's
+    // `pluginSkillIds` before the overlay is dropped so a re-enable
+    // re-attaches cleanly.
+    if (plugin.manifest.skills?.length) {
+      await this.detachPluginSkillsFromCharacters(plugin.manifest.skills)
+    }
     unregisterSkillsByPlugin(pluginId)
+    // Bulk-drop telemetry rows for this plugin's skills so usage counters
+    // don't outlive the plugin.
+    try {
+      const { deletePluginSkillUsageByPlugin } = await import("@/lib/db/plugin-skill-usage")
+      await deletePluginSkillUsageByPlugin(pluginId)
+    } catch (err) {
+      loggers.manager.warn(`[plugin:${pluginId}] failed to purge skill usage rows:`, err)
+    }
     unregisterExternalAgentPresetsByPlugin(pluginId)
 
     // System-tray cleanup — drops any items the plugin contributed via

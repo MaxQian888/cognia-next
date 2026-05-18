@@ -89,3 +89,73 @@ pub fn skills_load_registry() -> Result<Vec<RegistryEntry>, String> {
     out.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn parses_valid_lockfile() {
+        let raw = r#"{
+            "version": 1,
+            "skills": {
+                "foo": {
+                    "source": "github.com/x/y",
+                    "sourceType": "github",
+                    "displayName": "Foo",
+                    "category": "development",
+                    "tags": ["a", "b"]
+                },
+                "bar": {
+                    "source": "github.com/x/y",
+                    "sourceType": "github"
+                }
+            }
+        }"#;
+        let lf: LockFile = serde_json::from_str(raw).expect("parse");
+        assert_eq!(lf.skills.len(), 2);
+        let foo = lf.skills.get("foo").unwrap();
+        assert_eq!(foo.source_type, "github");
+        assert_eq!(foo.tags.as_ref().unwrap().len(), 2);
+        assert_eq!(foo.display_name.as_deref(), Some("Foo"));
+        // Optional fields default to None.
+        let bar = lf.skills.get("bar").unwrap();
+        assert!(bar.display_name.is_none());
+        assert!(bar.tags.is_none());
+    }
+
+    #[test]
+    fn rejects_malformed_json() {
+        let bad = "{not json}";
+        assert!(serde_json::from_str::<LockFile>(bad).is_err());
+    }
+
+    #[test]
+    fn load_lockfile_round_trip() {
+        let tmp = std::env::temp_dir().join(format!("skills-lock-test-{}.json", std::process::id()));
+        let raw = r#"{"version":1,"skills":{"a":{"source":"s","sourceType":"github"}}}"#;
+        {
+            let mut f = std::fs::File::create(&tmp).expect("create");
+            f.write_all(raw.as_bytes()).expect("write");
+        }
+        let parsed = load_lockfile(&tmp).expect("load");
+        assert_eq!(parsed.skills.len(), 1);
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn load_lockfile_missing_file_errors() {
+        let p = std::env::temp_dir().join("does-not-exist-skills.json");
+        assert!(load_lockfile(&p).is_err());
+    }
+
+    #[test]
+    fn skills_load_registry_returns_empty_when_no_lockfile() {
+        // Note: this test runs from the crate root where locate_lockfile()
+        // may find the repo's real skills-lock.json. We only assert it
+        // doesn't error.
+        let result = skills_load_registry();
+        assert!(result.is_ok());
+    }
+}

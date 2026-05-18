@@ -1307,6 +1307,7 @@
       "slashCommands": "斜杠命令",
       "tools": "内置工具",
       "search": "联网搜索",
+      "ocr": "OCR 文字识别",
       "speech": "语音",
       "characters": "角色",
       "skills": "技能",
@@ -1348,6 +1349,7 @@
       "slashCommands": "内置、自定义、插件贡献的斜杠命令统一浏览,可搜索并将命令复制到聊天输入框。",
       "tools": "内置 shell、文件系统、git、进程与环境工具 — 全局开关、风险等级与「始终允许」管理。",
       "search": "联网搜索 provider（Tavily、Brave、Bing、Google、Perplexity、Exa…）、默认参数、缓存、安全与来源验证。",
+      "ocr": "OCR 服务提供商（Mistral OCR、Google Vision、AWS Textract、Azure DI、Claude / GPT / Gemini 视觉、Mathpix、OCR.space、ABBYY、Nanonets、飞书）以及本地引擎（Tesseract WASM/原生、Windows.Media.Ocr、Apple Vision、Android ML Kit）。含自动路由、PDF 文本层快速路径与结果缓存。",
       "speech": "语音输入（STT）的语言与麦克风，朗读（TTS）的提供商、音色与自动播放。",
       "characters": "复用的角色，可独立配置模型与技能。",
       "skills": "拼接到系统提示词的可复用指令片段。",
@@ -8392,6 +8394,201 @@
     },
     "invalidJson": "JSON 格式不正确",
     "outOfRange": "值须在 {min} 到 {max} 之间"
+  },
+  "ocr": {
+    "defaults": {
+      "title": "默认设置",
+      "defaultProvider": "默认 provider",
+      "auto": "自动（按当前平台优选）",
+      "cloudFallback": "云端回退",
+      "cloudFallbackHint": "本地引擎不可用时使用云端 provider。",
+      "pdfFastPath": "PDF 文本层快速路径",
+      "pdfFastPathHint": "PDF 页面已有文本层时跳过 OCR。"
+    },
+    "categories": {
+      "document-cloud": "文档 OCR（云端）",
+      "llm-vision": "大模型视觉（云端）",
+      "specialist": "专项 OCR（云端）",
+      "lark": "飞书 / Lark",
+      "local": "本地引擎"
+    },
+    "providers": {
+      "title": "Provider 列表",
+      "enabled": "启用",
+      "mistral-ocr": {
+        "label": "Mistral OCR",
+        "description": "以 Markdown 为主的文档 OCR，对表格保留良好。支持多页 PDF 与手写。"
+      },
+      "google-vision": {
+        "label": "Google Cloud Vision",
+        "description": "文档级文字检测，返回段落级 bbox 与逐词置信度。"
+      },
+      "aws-textract": {
+        "label": "AWS Textract",
+        "description": "图片 OCR 加结构化表单 / 表格识别。使用 SigV4 签名。PDF 需先栅格化。"
+      },
+      "azure-document-intelligence": {
+        "label": "Azure AI Document Intelligence",
+        "description": "异步分析接口，返回 Markdown 和段落块。可选模型：prebuilt-read / prebuilt-layout / prebuilt-invoice / 自定义。"
+      },
+      "anthropic-vision": {
+        "label": "Claude（视觉）",
+        "description": "复用主 Anthropic API key。仅返回 Markdown，无 bbox。"
+      },
+      "openai-vision": {
+        "label": "OpenAI（视觉）",
+        "description": "复用主 OpenAI API key。仅返回 Markdown，无 bbox。"
+      },
+      "gemini-vision": {
+        "label": "Gemini（视觉）",
+        "description": "复用主 Gemini / Google AI API key。仅返回 Markdown，无 bbox。"
+      },
+      "mathpix": {
+        "label": "Mathpix",
+        "description": "数学、化学公式与手写专项。输出 LaTeX / Markdown。"
+      },
+      "ocr-space": {
+        "label": "OCR.space",
+        "description": "免费额度大，支持 200+ 语言。Engine 3 覆盖最广。"
+      },
+      "abbyy-cloud": {
+        "label": "ABBYY 云 OCR",
+        "description": "企业级 OCR，覆盖 200+ 语言。提交 + 轮询两段式 API。"
+      },
+      "nanonets": {
+        "label": "Nanonets",
+        "description": "通用 OCR 模型或自训抽取模型。返回纯文本 + bbox。"
+      },
+      "lark-basic": {
+        "label": "飞书 / Lark",
+        "description": "Lark 开放平台 basic_recognize — App ID + App Secret。最适合中英文短文本。"
+      },
+      "tesseract-wasm": {
+        "label": "Tesseract（WASM）",
+        "description": "浏览器侧 OCR，基于 tesseract.js。离线可用，核心约 2 MB WASM。"
+      },
+      "tesseract-native": {
+        "label": "Tesseract（原生）",
+        "description": "仅 Tauri 桌面端。通过 tesseract-rs 静态链接 libtesseract + leptonica。"
+      },
+      "windows-media-ocr": {
+        "label": "Windows.Media.Ocr",
+        "description": "Windows 自带 OCR，经 winocr crate 调用。需要 MSIX 打包的构建。"
+      },
+      "apple-vision": {
+        "label": "Apple Vision",
+        "description": "Tauri（macOS）经 Swift sidecar；Capacitor（iOS）经 VNRecognizeTextRequest。"
+      },
+      "mlkit-android": {
+        "label": "ML Kit 文字识别",
+        "description": "仅 Capacitor（Android）。覆盖拉丁、中文、天城文、日文、韩文等脚本。"
+      }
+    },
+    "params": {
+      "languages": {
+        "label": "语言",
+        "description": "逗号分隔的语言代码（例如 en, zh）。"
+      },
+      "format": {
+        "label": "输出格式",
+        "description": "Markdown 是 2026 的跨 provider 通用标准。纯文本会丢失表格结构。",
+        "markdown": "Markdown",
+        "text": "纯文本",
+        "blocks": "结构化块"
+      },
+      "pageRange": {
+        "label": "页码范围",
+        "description": "可选。语法如 \"1,3-5\"。留空则处理全部页。"
+      },
+      "maxImageDimension": {
+        "label": "最大图像边长（像素）",
+        "description": "发送前降采样。用于约束大模型视觉的 token 成本。"
+      },
+      "promptTemplate": {
+        "label": "提示词模板",
+        "description": "供大模型视觉 provider（Claude / GPT / Gemini）使用。"
+      },
+      "model": {
+        "label": "模型",
+        "description": "Provider 专属的模型 id。"
+      },
+      "region": {
+        "label": "区域",
+        "description": "AWS 区域标识（如 us-east-1）。"
+      },
+      "endpoint": {
+        "label": "端点",
+        "description": "自定义 API 端点 URL。"
+      },
+      "enableTables": {
+        "label": "抽取表格",
+        "description": "请求结构化表格输出（Textract / Document AI / Vision）。"
+      },
+      "enableForms": {
+        "label": "抽取表单字段",
+        "description": "请求结构化表单 key/value。会提升每页成本。"
+      }
+    },
+    "health": {
+      "connectionOk": "已连接",
+      "connectionFailed": "连接失败",
+      "lastDurationMs": "上次耗时：{ms} ms"
+    },
+    "cache": {
+      "title": "缓存",
+      "clear": "清空 OCR 缓存",
+      "cleared": "OCR 缓存已清空。",
+      "clearProvider": "清空该 provider 的缓存",
+      "itemsLabel": "{count} 条 · {bytes} 字节",
+      "description": "按文件 SHA-256、provider、语言列表组合索引。"
+    },
+    "composer": {
+      "menu": {
+        "extractToInput": "提取文字到输入框",
+        "viewResult": "查看提取结果"
+      },
+      "resultSheet": {
+        "title": "提取出的文字",
+        "copy": "复制全部",
+        "copyPage": "复制本页",
+        "empty": "没有识别到文字。"
+      }
+    },
+    "errors": {
+      "unsupportedShell": "当前应用环境不支持该 OCR provider。",
+      "missingCredentials": "请在「设置 → OCR」中为该 provider 添加凭据。",
+      "rateLimited": "OCR provider 达到了速率限制，请稍后重试。",
+      "providerFailed": "OCR provider 失败：{message}",
+      "unsupportedLanguage": "该 OCR provider 不支持所选语言。",
+      "invalidInput": "OCR 输入不是受支持的图像或 PDF。",
+      "aborted": "OCR 已取消。"
+    },
+    "slash": {
+      "usage": "用法：/ocr <文件路径或附件 id> [--provider auto|<id>] [--lang en,zh] [--pages 1-3] [--format markdown|text|blocks]",
+      "providerFlag": "Provider id（或 \"auto\"）",
+      "langFlag": "逗号分隔的语言代码",
+      "pagesFlag": "页码范围，如 1,3-5",
+      "formatFlag": "输出格式"
+    },
+    "autoRouter": {
+      "fellBackToCloud": "本地 OCR 引擎不可用，已切换到 {provider}。",
+      "fellBackToWasm": "回退到浏览器内的 Tesseract。"
+    },
+    "langPacks": {
+      "manageButton": "管理语言包",
+      "downloadingLabel": "正在下载 {lang}…",
+      "installedLabel": "已安装"
+    },
+    "plugin": {
+      "label": "OCR",
+      "description": "从任意图片或 PDF 提取文字与结构化 Markdown。",
+      "tool": {
+        "extract": {
+          "label": "从图片或 PDF 提取文字",
+          "description": "调用已配置的 OCR provider 链，返回逐页 Markdown 与可选 bbox。"
+        }
+      }
+    }
   },
   "twin": {
     "panel": {

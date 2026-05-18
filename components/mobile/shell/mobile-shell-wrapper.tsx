@@ -21,6 +21,7 @@ import { usePathname } from "next/navigation"
 import { useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
+import { MobileOutboundRunnerProvider } from "@/components/mobile/mobile-outbound-runner-provider"
 import { OfflineBanner } from "@/components/mobile/offline-banner"
 import { usePlatform } from "@/hooks/use-platform"
 import { getDb } from "@/lib/db/schema"
@@ -77,6 +78,7 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
         <OfflineBanner />
         {children}
       </div>
+      <MobileOutboundRunnerProvider />
       {showTabBar ? <MobileTabBar badges={mergedBadges} /> : null}
     </div>
   )

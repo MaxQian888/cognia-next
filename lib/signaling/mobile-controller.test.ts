@@ -40,9 +40,9 @@ function settings(patch: Partial<AppSettings> = {}): AppSettings {
 }
 
 describe("applySettings", () => {
-  it("calls enableWebRtcTier with the configured signaling URL and merged ICE/TURN list", () => {
+  it("calls enableWebRtcTier with the configured signaling URL and merged ICE/TURN list", async () => {
     const tx = new FakeTransport()
-    applySettings(
+    await applySettings(
       tx as unknown as Tx,
       settings({
         webrtcEnabled: true,
@@ -59,9 +59,9 @@ describe("applySettings", () => {
     ])
   })
 
-  it("falls back to defaults when no signaling URL or ICE servers are set", () => {
+  it("falls back to defaults when no signaling URL or ICE servers are set", async () => {
     const tx = new FakeTransport()
-    applySettings(tx as unknown as Tx, settings({ webrtcEnabled: true }))
+    await applySettings(tx as unknown as Tx, settings({ webrtcEnabled: true }))
     expect(tx.enableCalls.length).toBe(1)
     expect(tx.enableCalls[0].signalingUrl).toBe("wss://signaling.cognia.app/v1/signaling")
     expect(tx.enableCalls[0].rtcConfiguration?.iceServers).toEqual([
@@ -70,16 +70,16 @@ describe("applySettings", () => {
     ])
   })
 
-  it("disables the tier when webrtcEnabled is false", () => {
+  it("disables the tier when webrtcEnabled is false", async () => {
     const tx = new FakeTransport()
-    applySettings(tx as unknown as Tx, settings({ webrtcEnabled: false }))
+    await applySettings(tx as unknown as Tx, settings({ webrtcEnabled: false }))
     expect(tx.disableCount).toBe(1)
     expect(tx.enableCalls).toEqual([])
   })
 
-  it("treats undefined webrtcEnabled as opt-in default", () => {
+  it("treats undefined webrtcEnabled as opt-in default", async () => {
     const tx = new FakeTransport()
-    applySettings(tx as unknown as Tx, settings())
+    await applySettings(tx as unknown as Tx, settings())
     expect(tx.enableCalls.length).toBe(1)
     expect(tx.disableCount).toBe(0)
   })

@@ -38,6 +38,7 @@ export type SkillDraft = Pick<Skill, "name" | "content"> &
       | "nativeDirectory"
       | "syncOrigin"
       | "syncFingerprint"
+      | "validationErrors"
     >
   >
 

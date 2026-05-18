@@ -119,6 +119,121 @@ describe("parseSlackEventCallback", () => {
     })
   })
 
+  describe("message_changed (edit)", () => {
+    const envelope: SlackEventEnvelope = {
+      type: "event_callback",
+      event: {
+        type: "message",
+        channel: "C123CHANNEL",
+        channel_type: "channel",
+        ts: "1714900005.000200",
+        subtype: "message_changed",
+        message: {
+          type: "message",
+          channel: "C123CHANNEL",
+          user: "U222USER",
+          text: "edited text",
+          ts: "1714900000.000100",
+        },
+        previous_message: {
+          type: "message",
+          channel: "C123CHANNEL",
+          user: "U222USER",
+          text: "original text",
+          ts: "1714900000.000100",
+        },
+      },
+    }
+    const result = parseSlackEventCallback(ADAPTER_ID, SELF_ID, envelope)
+
+    it("returns a non-null event", () => {
+      expect(result).not.toBeNull()
+    })
+
+    it("kind is edit", () => {
+      expect(result!.kind).toBe("edit")
+    })
+
+    it("replacesMessageId is the original ts", () => {
+      expect(result!.replacesMessageId).toBe("1714900000.000100")
+    })
+
+    it("messageId matches the original ts (the one being edited)", () => {
+      expect(result!.messageId).toBe("1714900000.000100")
+    })
+
+    it("segments carry the updated text", () => {
+      expect(result!.segments).toEqual([{ type: "text", text: "edited text" }])
+    })
+
+    it("sender is preserved from the updated message", () => {
+      expect(result!.sender.remoteUserId).toBe("U222USER")
+    })
+
+    it("timestamp comes from the event ts (when the edit happened)", () => {
+      expect(result!.timestamp).toBe(1714900005000)
+    })
+  })
+
+  describe("message_deleted (delete)", () => {
+    const envelope: SlackEventEnvelope = {
+      type: "event_callback",
+      event: {
+        type: "message",
+        channel: "C123CHANNEL",
+        channel_type: "channel",
+        ts: "1714900010.000300",
+        subtype: "message_deleted",
+        deleted_ts: "1714900000.000100",
+        previous_message: {
+          type: "message",
+          channel: "C123CHANNEL",
+          user: "U222USER",
+          text: "original",
+          ts: "1714900000.000100",
+        },
+      },
+    }
+    const result = parseSlackEventCallback(ADAPTER_ID, SELF_ID, envelope)
+
+    it("returns a non-null event", () => {
+      expect(result).not.toBeNull()
+    })
+
+    it("kind is delete", () => {
+      expect(result!.kind).toBe("delete")
+    })
+
+    it("replacesMessageId is the deleted_ts", () => {
+      expect(result!.replacesMessageId).toBe("1714900000.000100")
+    })
+
+    it("messageId matches deleted_ts", () => {
+      expect(result!.messageId).toBe("1714900000.000100")
+    })
+
+    it("segments are empty (no payload on delete)", () => {
+      expect(result!.segments).toEqual([])
+    })
+
+    it("sender is recovered from previous_message", () => {
+      expect(result!.sender.remoteUserId).toBe("U222USER")
+    })
+
+    it("returns null when deleted_ts is missing", () => {
+      const bad: SlackEventEnvelope = {
+        type: "event_callback",
+        event: {
+          type: "message",
+          channel: "C123",
+          ts: "1714900010.000300",
+          subtype: "message_deleted",
+        },
+      }
+      expect(parseSlackEventCallback(ADAPTER_ID, SELF_ID, bad)).toBeNull()
+    })
+  })
+
   describe("unsupported subtypes", () => {
     it("returns null for bot_message subtype", () => {
       const envelope: SlackEventEnvelope = {
@@ -134,7 +249,7 @@ describe("parseSlackEventCallback", () => {
       expect(parseSlackEventCallback(ADAPTER_ID, SELF_ID, envelope)).toBeNull()
     })
 
-    it("returns null for message_changed subtype", () => {
+    it("returns null for malformed message_changed (missing nested message)", () => {
       const envelope: SlackEventEnvelope = {
         type: "event_callback",
         event: {

@@ -32,6 +32,36 @@ const VALID_CATEGORIES: SkillCategory[] = [
   "custom",
 ]
 
+/**
+ * The full set of frontmatter keys this parser recognises. Anything else
+ * surfaces as a warning so users notice typos (e.g. `tag` vs `tags`) and
+ * Claude Code-only dynamic-trigger keys (`priority`, `sessionStart`,
+ * `pathPatterns`, `bashPatterns`, `importPatterns`, `promptSignals`) don't
+ * get silently dropped — they're listed here as "known but not modelled"
+ * so the warning is honest.
+ */
+const KNOWN_FRONTMATTER_KEYS = new Set<string>([
+  "name",
+  "description",
+  "allowed-tools",
+  "allowedTools",
+  "tags",
+  "category",
+  "version",
+  "author",
+  "license",
+])
+
+const KNOWN_BUT_UNMODELLED_KEYS = new Set<string>([
+  "priority",
+  "sessionStart",
+  "pathPatterns",
+  "bashPatterns",
+  "importPatterns",
+  "promptSignals",
+  "metadata",
+])
+
 export interface ParseResult {
   draft: SkillDraft
   /** Issues encountered during parsing (e.g., name fallback). Non-fatal. */
@@ -134,6 +164,17 @@ export function parseSkillMarkdown(
   const author = stringOrUndef(fm.author)
   const license = stringOrUndef(fm.license)
 
+  for (const key of Object.keys(fm)) {
+    if (KNOWN_FRONTMATTER_KEYS.has(key)) continue
+    if (KNOWN_BUT_UNMODELLED_KEYS.has(key)) {
+      warnings.push(
+        `Frontmatter key "${key}" is recognised by Claude Code's dynamic-activation model but not supported by cognia-next — the value will be ignored.`
+      )
+      continue
+    }
+    warnings.push(`Unknown frontmatter key "${key}" — ignored.`)
+  }
+
   return {
     draft: {
       name,
@@ -209,16 +250,23 @@ function parseList(v: unknown): string[] | undefined {
  * - `anthropic-managed`: returns `undefined` (the skill content lives in
  *   Anthropic's container and is referenced by `containerSkillId` instead).
  * - `local-folder`: read `<path>/SKILL.md` off disk. Tauri only. In browser
- *   mode this returns a placeholder string explaining the limitation —
- *   the same defensive shape it uses when fs read fails so resolver
- *   callers never see a thrown error.
+ *   mode this returns `undefined` (the resolver caller filters undefined
+ *   bodies out of the rendered system prompt, so the user gets nothing
+ *   appended rather than an inline `[skill … not available]` placeholder
+ *   leaking into Claude's context). A `console.warn` is emitted so the
+ *   developer console surfaces the dropped skill. The same `undefined`
+ *   path is used when fs read fails so resolver callers never see a
+ *   thrown error.
  */
 export async function resolveSkillMarkdown(def: PluginSkillDef): Promise<string | undefined> {
   if (def.source.kind === "inline") return def.source.markdown
   if (def.source.kind === "anthropic-managed") return undefined
   if (def.source.kind === "local-folder") {
     if (!isTauri()) {
-      return `[skill "${def.id}": local-folder source not available in browser mode]`
+      console.warn(
+        `[skills-io] skill "${def.id}" has a local-folder source; dropped in browser mode`
+      )
+      return undefined
     }
     try {
       const { readTextFile } = await import("@tauri-apps/plugin-fs")
@@ -226,7 +274,10 @@ export async function resolveSkillMarkdown(def: PluginSkillDef): Promise<string 
       const fullPath = `${root}/SKILL.md`
       return await readTextFile(fullPath)
     } catch (err) {
-      return `[skill "${def.id}": failed to read SKILL.md: ${err instanceof Error ? err.message : String(err)}]`
+      console.warn(
+        `[skills-io] skill "${def.id}" SKILL.md read failed; dropped from prompt: ${err instanceof Error ? err.message : String(err)}`
+      )
+      return undefined
     }
   }
   return undefined

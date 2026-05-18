@@ -38,13 +38,13 @@ export async function createResource(draft: SkillResourceDraft): Promise<SkillRe
   if (draft.path.includes("..")) {
     throw new Error("Resource path must not contain '..'.")
   }
-  // Enforce per-skill path uniqueness (Dexie's compound index does NOT enforce
-  // uniqueness; check explicitly).
-  const existing = await getDb()
-    .skillResources.where("[skillId+path]")
-    .equals([draft.skillId, draft.path])
-    .first()
-  if (existing) {
+  // Enforce per-skill path uniqueness CASE-INSENSITIVELY (Dexie's compound
+  // index does NOT enforce uniqueness; check explicitly). Matches the
+  // validator at `lib/skills/validate.ts:69` so `Scripts/foo.sh` and
+  // `scripts/foo.sh` can never coexist regardless of which gate runs first.
+  const draftLower = draft.path.toLowerCase()
+  const siblings = await getDb().skillResources.where("skillId").equals(draft.skillId).toArray()
+  if (siblings.some((r) => r.path.toLowerCase() === draftLower)) {
     throw new Error(`A resource at "${draft.path}" already exists for this skill.`)
   }
   const size =
@@ -74,6 +74,23 @@ export async function updateResource(
 ): Promise<void> {
   if (patch.path?.includes("..")) {
     throw new Error("Resource path must not contain '..'.")
+  }
+  // When the path changes, enforce the same case-insensitive uniqueness
+  // gate as `createResource` so an "edit" can't bypass dedup.
+  if (patch.path !== undefined) {
+    const target = await getDb().skillResources.get(id)
+    if (target) {
+      const patchLower = patch.path.toLowerCase()
+      if (target.path.toLowerCase() !== patchLower) {
+        const siblings = await getDb()
+          .skillResources.where("skillId")
+          .equals(target.skillId)
+          .toArray()
+        if (siblings.some((r) => r.id !== id && r.path.toLowerCase() === patchLower)) {
+          throw new Error(`A resource at "${patch.path}" already exists for this skill.`)
+        }
+      }
+    }
   }
   await getDb().skillResources.update(id, {
     ...patch,

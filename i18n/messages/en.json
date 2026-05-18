@@ -1307,6 +1307,7 @@
       "slashCommands": "Slash commands",
       "tools": "Tools",
       "search": "Web search",
+      "ocr": "OCR",
       "speech": "Speech",
       "characters": "Characters",
       "skills": "Skills",
@@ -1348,6 +1349,7 @@
       "slashCommands": "Built-in, custom, and plugin-contributed slash commands — browse, search, and copy a command into the composer.",
       "tools": "Built-in shell, filesystem, git, process and environment tools — global on/off, risk levels, and always-allow management.",
       "search": "Web search providers (Tavily, Brave, Bing, Google, Perplexity, Exa…), defaults, cache, safety and source verification.",
+      "ocr": "OCR providers (Mistral OCR, Google Vision, AWS Textract, Azure DI, Claude / GPT / Gemini vision, Mathpix, OCR.space, ABBYY, Nanonets, Lark) plus on-device engines (Tesseract WASM/native, Windows.Media.Ocr, Apple Vision, Android ML Kit). Includes auto-router, PDF fast-path, and result cache.",
       "speech": "Voice input (STT) language and microphone, plus read-aloud (TTS) provider, voice and auto-play.",
       "characters": "Reusable personas with their own model and skills.",
       "skills": "Reusable instruction blobs appended to system prompts.",
@@ -8392,6 +8394,201 @@
     },
     "invalidJson": "Invalid JSON format",
     "outOfRange": "Value must be between {min} and {max}"
+  },
+  "ocr": {
+    "defaults": {
+      "title": "Defaults",
+      "defaultProvider": "Default provider",
+      "auto": "Auto (pick best for current platform)",
+      "cloudFallback": "Cloud fallback",
+      "cloudFallbackHint": "Use a cloud provider when local engines are unavailable.",
+      "pdfFastPath": "PDF text-layer fast-path",
+      "pdfFastPathHint": "Skip OCR on PDF pages that already have a text layer."
+    },
+    "categories": {
+      "document-cloud": "Document OCR (cloud)",
+      "llm-vision": "LLM vision (cloud)",
+      "specialist": "Specialist (cloud)",
+      "lark": "Feishu / Lark",
+      "local": "On-device"
+    },
+    "providers": {
+      "title": "Providers",
+      "enabled": "Enabled",
+      "mistral-ocr": {
+        "label": "Mistral OCR",
+        "description": "Markdown-first document OCR with strong table preservation. Handles multi-page PDFs and handwritten text."
+      },
+      "google-vision": {
+        "label": "Google Cloud Vision",
+        "description": "Document text detection with paragraph-level bounding boxes and per-word confidence."
+      },
+      "aws-textract": {
+        "label": "AWS Textract",
+        "description": "Image OCR plus structured forms / tables. Uses SigV4 signing. PDFs must be rasterized first."
+      },
+      "azure-document-intelligence": {
+        "label": "Azure AI Document Intelligence",
+        "description": "Asynchronous analyze API with Markdown + paragraph blocks. Models: prebuilt-read, prebuilt-layout, prebuilt-invoice, custom."
+      },
+      "anthropic-vision": {
+        "label": "Claude (vision)",
+        "description": "Uses your main Anthropic API key. Returns Markdown only — no bounding boxes."
+      },
+      "openai-vision": {
+        "label": "OpenAI (vision)",
+        "description": "Uses your main OpenAI API key. Returns Markdown only — no bounding boxes."
+      },
+      "gemini-vision": {
+        "label": "Gemini (vision)",
+        "description": "Uses your main Gemini / Google AI API key. Returns Markdown only — no bounding boxes."
+      },
+      "mathpix": {
+        "label": "Mathpix",
+        "description": "Math, chemistry, and handwriting specialist. Outputs LaTeX/Markdown."
+      },
+      "ocr-space": {
+        "label": "OCR.space",
+        "description": "Generous free tier; 200+ languages. Engine 3 supports the broadest language set."
+      },
+      "abbyy-cloud": {
+        "label": "ABBYY Cloud OCR",
+        "description": "Enterprise-grade OCR with 200+ languages. Two-stage submit + poll API."
+      },
+      "nanonets": {
+        "label": "Nanonets",
+        "description": "Generic OCR model or custom-trained extraction. Returns plain text plus bounding boxes."
+      },
+      "lark-basic": {
+        "label": "Feishu / Lark",
+        "description": "Lark Open Platform basic_recognize — App ID + App Secret. Best for Chinese + English short text."
+      },
+      "tesseract-wasm": {
+        "label": "Tesseract (WASM)",
+        "description": "Browser-side OCR powered by tesseract.js. Works offline; ships ~2 MB WASM core."
+      },
+      "tesseract-native": {
+        "label": "Tesseract (native)",
+        "description": "Tauri desktop only. Statically linked libtesseract + leptonica via tesseract-rs."
+      },
+      "windows-media-ocr": {
+        "label": "Windows.Media.Ocr",
+        "description": "Windows-bundled OCR via the winocr crate. Requires an MSIX-packaged build."
+      },
+      "apple-vision": {
+        "label": "Apple Vision",
+        "description": "Tauri (macOS) via a Swift sidecar, or Capacitor (iOS) via VNRecognizeTextRequest."
+      },
+      "mlkit-android": {
+        "label": "ML Kit Text Recognition",
+        "description": "Capacitor (Android) only. Latin, Chinese, Devanagari, Japanese, and Korean scripts."
+      }
+    },
+    "params": {
+      "languages": {
+        "label": "Languages",
+        "description": "Comma-separated language codes (e.g. en, zh)."
+      },
+      "format": {
+        "label": "Output format",
+        "description": "Markdown is the 2026 cross-provider standard. Plain text drops table structure.",
+        "markdown": "Markdown",
+        "text": "Plain text",
+        "blocks": "Structured blocks"
+      },
+      "pageRange": {
+        "label": "Page range",
+        "description": "Optional. \"1,3-5\" syntax. Leave empty to process every page."
+      },
+      "maxImageDimension": {
+        "label": "Max image dimension (px)",
+        "description": "Downscale before sending. Bounds LLM-vision token cost."
+      },
+      "promptTemplate": {
+        "label": "Prompt template",
+        "description": "Used by LLM-vision providers (Claude / GPT / Gemini) to instruct the model."
+      },
+      "model": {
+        "label": "Model",
+        "description": "Provider-specific model id."
+      },
+      "region": {
+        "label": "Region",
+        "description": "AWS region identifier (e.g. us-east-1)."
+      },
+      "endpoint": {
+        "label": "Endpoint",
+        "description": "Custom API endpoint URL."
+      },
+      "enableTables": {
+        "label": "Extract tables",
+        "description": "Request structured table output (Textract / Document AI / Vision)."
+      },
+      "enableForms": {
+        "label": "Extract form key/value pairs",
+        "description": "Request structured form output. Increases per-page cost."
+      }
+    },
+    "health": {
+      "connectionOk": "Connected",
+      "connectionFailed": "Connection failed",
+      "lastDurationMs": "Last call: {ms} ms"
+    },
+    "cache": {
+      "title": "Cache",
+      "clear": "Clear OCR cache",
+      "cleared": "OCR cache cleared.",
+      "clearProvider": "Clear cache for this provider",
+      "itemsLabel": "{count} entries · {bytes} bytes",
+      "description": "Cached by SHA-256 of the input file, provider, and language list."
+    },
+    "composer": {
+      "menu": {
+        "extractToInput": "Extract text to input",
+        "viewResult": "View extracted text"
+      },
+      "resultSheet": {
+        "title": "Extracted text",
+        "copy": "Copy all",
+        "copyPage": "Copy page",
+        "empty": "No text was recognized."
+      }
+    },
+    "errors": {
+      "unsupportedShell": "This OCR provider is not available in the current app shell.",
+      "missingCredentials": "Add credentials for this OCR provider in Settings → OCR.",
+      "rateLimited": "OCR provider rate limit hit. Try again later.",
+      "providerFailed": "OCR provider failed: {message}",
+      "unsupportedLanguage": "Language not supported by this OCR provider.",
+      "invalidInput": "OCR input is not a supported image or PDF.",
+      "aborted": "OCR cancelled."
+    },
+    "slash": {
+      "usage": "Usage: /ocr <file path or attachment id> [--provider auto|<id>] [--lang en,zh] [--pages 1-3] [--format markdown|text|blocks]",
+      "providerFlag": "Provider id (or \"auto\")",
+      "langFlag": "Comma-separated language codes",
+      "pagesFlag": "Page range, e.g. 1,3-5",
+      "formatFlag": "Output format"
+    },
+    "autoRouter": {
+      "fellBackToCloud": "Local OCR engine unavailable. Using {provider}.",
+      "fellBackToWasm": "Falling back to in-browser Tesseract."
+    },
+    "langPacks": {
+      "manageButton": "Manage language packs",
+      "downloadingLabel": "Downloading {lang}…",
+      "installedLabel": "Installed"
+    },
+    "plugin": {
+      "label": "OCR",
+      "description": "Extract text and structured Markdown from any image or PDF.",
+      "tool": {
+        "extract": {
+          "label": "Extract text from an image or PDF",
+          "description": "Calls the configured OCR provider chain and returns per-page Markdown plus optional bounding boxes."
+        }
+      }
+    }
   },
   "twin": {
     "panel": {

@@ -47,6 +47,7 @@ export type SettingsSectionId =
   | "general"
   | "api-key"
   | "providers"
+  | "ocr"
   | "subscription"
   | "codex-subscription"
   | "ccswitch"
@@ -119,6 +120,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "providers",
     group: "ai",
     icon: ServerCogIcon,
+  },
+  {
+    id: "ocr",
+    labelKey: "ocr",
+    descriptionKey: "ocr",
+    group: "ai",
+    icon: ScrollTextIcon,
   },
   {
     id: "subscription",
@@ -549,6 +557,30 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "approval",
     "工具",
     "内置工具",
+  ],
+  ocr: [
+    "ocr",
+    "image",
+    "pdf",
+    "extract text",
+    "tesseract",
+    "mistral ocr",
+    "google vision",
+    "aws textract",
+    "azure document",
+    "mathpix",
+    "abbyy",
+    "nanonets",
+    "windows ocr",
+    "apple vision",
+    "ml kit",
+    "feishu",
+    "lark",
+    "光学字符识别",
+    "图片识别",
+    "扫描",
+    "PDF 文字",
+    "识别图片文字",
   ],
   search: [
     "web search",

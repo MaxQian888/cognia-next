@@ -19,9 +19,12 @@
 
 import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/characters"
 import type { CharacterDraft } from "@/lib/db/characters"
+import { approveDraft, rejectDraft } from "@/lib/db/connector-drafts"
 import { getDb } from "@/lib/db/schema"
 import { getSettings, saveSettings } from "@/lib/db/settings"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings, StoredMessage } from "@/lib/claude/types"
+import { enqueueIngestJob } from "@/lib/twin/ingest"
+import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
 
@@ -109,6 +112,24 @@ export async function dispatchCommand(
       return appSettingsUpdate(payload)
     case "twin_profile_get":
       return twinProfileGet(payload)
+    // Mobile outbound-queue commands (Gap 3 reconciliation) — these go
+    // through the same generic desktop_writes_bridge but land in
+    // subsystem-specific dispatch arms below. Production callers:
+    //   - connector_send         → app/share-target/page.tsx
+    //   - connector_approve_draft → components/mobile/connector/draft-approval-panel.tsx
+    //   - connector_reject_draft  → components/mobile/connector/draft-approval-panel.tsx
+    //   - workflow_trigger_manual → components/mobile/workflow/trigger-button.tsx
+    //   - twin_ingest_source      → components/mobile/discover/twin-{sources,drafts}-panel.tsx
+    case "connector_send":
+      return connectorSend(payload)
+    case "connector_approve_draft":
+      return connectorApproveDraft(payload)
+    case "connector_reject_draft":
+      return connectorRejectDraft(payload)
+    case "workflow_trigger_manual":
+      return workflowTriggerManual(payload)
+    case "twin_ingest_source":
+      return twinIngestSource(payload)
     default:
       throw new Error(`unknown desktop-write command: ${command}`)
   }
@@ -230,6 +251,86 @@ async function twinProfileGet(payload: Record<string, unknown>): Promise<unknown
   if (!twinId) throw new Error("twin_profile_get.twinId is required")
   const profile = await getDb().twinProfile.get(twinId)
   return { profile: profile ?? null }
+}
+
+// ---------------------------------------------------------------------------
+// Mobile outbound-queue handlers (Gap 3 reconciliation)
+// ---------------------------------------------------------------------------
+
+type ConnectorSegment = { type?: string; text?: string }
+
+/** Insert a user-authored message into the named session. Production caller
+ *  is the share-target page, which receives a piece of shared text/url from
+ *  the OS and routes it to a selected chat session. */
+async function connectorSend(payload: Record<string, unknown>): Promise<{ messageId: string }> {
+  const sessionId = payload.sessionId as string | undefined
+  const segmentsRaw = payload.segments as unknown
+  if (!sessionId) throw new Error("connector_send.sessionId is required")
+  if (!Array.isArray(segmentsRaw)) {
+    throw new Error("connector_send.segments must be an array")
+  }
+  const text = (segmentsRaw as ConnectorSegment[])
+    .map((s) => (typeof s.text === "string" ? s.text : ""))
+    .filter((s) => s.length > 0)
+    .join("\n")
+  if (text.length === 0) {
+    throw new Error("connector_send.segments yielded no text content")
+  }
+  const id = "m_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
+  const row: StoredMessage = {
+    id,
+    sessionId,
+    role: "user",
+    parts: [{ type: "text", text }],
+    createdAt: Date.now(),
+  }
+  await getDb().messages.add(row)
+  return { messageId: id }
+}
+
+/** Approve a pending connector draft so the connector outbound runner can
+ *  pick it up for the real platform send. */
+async function connectorApproveDraft(payload: Record<string, unknown>): Promise<null> {
+  const draftId = payload.draftId as string | undefined
+  if (!draftId) throw new Error("connector_approve_draft.draftId is required")
+  await approveDraft(draftId)
+  return null
+}
+
+/** Reject a pending connector draft. */
+async function connectorRejectDraft(payload: Record<string, unknown>): Promise<null> {
+  const draftId = payload.draftId as string | undefined
+  if (!draftId) throw new Error("connector_reject_draft.draftId is required")
+  await rejectDraft(draftId)
+  return null
+}
+
+/** Trigger a workflow run manually from the mobile shell. Routes through the
+ *  same orchestrator path the desktop UI / cron daemon use. The trigger
+ *  `kind` matches the canonical workflow-node identifier `"trigger.manual"`
+ *  declared in `types/workflow/visual.ts:WorkflowNodeKind`. */
+async function workflowTriggerManual(payload: Record<string, unknown>): Promise<null> {
+  const workflowId = payload.workflowId as string | undefined
+  if (!workflowId) throw new Error("workflow_trigger_manual.workflowId is required")
+  await dispatchTrigger({
+    workflowId,
+    kind: "trigger.manual",
+    payload: payload.input ?? null,
+    originAt: Date.now(),
+  })
+  return null
+}
+
+/** Enqueue a twin ingest job. The desktop's twin scheduler picks it up
+ *  asynchronously and walks the redact → chunk → embed → persist pipeline. */
+async function twinIngestSource(payload: Record<string, unknown>): Promise<{ jobId: string }> {
+  const twinId = payload.twinId as string | undefined
+  if (!twinId) throw new Error("twin_ingest_source.twinId is required")
+  const job = await enqueueIngestJob({
+    twinId,
+    sourceIds: [],
+  })
+  return { jobId: job.id }
 }
 
 void getSettings // keep import alive for tests that mock the module

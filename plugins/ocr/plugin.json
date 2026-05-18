@@ -1,0 +1,30 @@
+{
+  "id": "cognia-ocr",
+  "name": "OCR",
+  "version": "0.1.0",
+  "description": "Extract text and structured Markdown from any image or PDF. Wraps the cognia-next OCR subsystem (ADR-0024) and exposes it as an agent tool plus a /ocr slash command.",
+  "type": "frontend",
+  "capabilities": ["tools", "commands"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": [],
+  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  }
+}

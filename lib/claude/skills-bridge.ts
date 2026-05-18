@@ -119,22 +119,34 @@ export async function resolveSkillsForCharacter(skillIds: string[]): Promise<Res
 }
 
 /**
+ * Anthropic's `container.skill_id` API caps the request at 8 entries. Any
+ * resolved set exceeding the cap is truncated FIFO with a `console.warn`
+ * so users notice in dev consoles / log capture.
+ */
+export const MAX_CONTAINER_SKILLS = 8
+
+/**
  * Extract Anthropic `container.skill_id` entries from a resolved set. Used
  * by `build-options.ts` to populate `SendOptions.containerSkillIds`, which
- * the sidecar forwards to the SDK.
- *
- * Anthropic caps the request at 8 container skills — callers should
- * truncate before forwarding when the user attaches more.
+ * the sidecar forwards to the SDK. Truncates to `MAX_CONTAINER_SKILLS`.
  */
 export function extractContainerSkillIds(
   resolved: ResolvedSkill[]
 ): Array<{ skill_id: string; version?: string }> {
-  return resolved
+  const all = resolved
     .filter((s): s is ResolvedSkill & { containerSkillId: string } => Boolean(s.containerSkillId))
     .map((s) => ({
       skill_id: s.containerSkillId,
       version: s.containerSkillVersion,
     }))
+  if (all.length > MAX_CONTAINER_SKILLS) {
+    const dropped = all.slice(MAX_CONTAINER_SKILLS).map((s) => s.skill_id)
+    console.warn(
+      `[skills-bridge] Anthropic accepts at most ${MAX_CONTAINER_SKILLS} container skills; dropping: ${dropped.join(", ")}`
+    )
+    return all.slice(0, MAX_CONTAINER_SKILLS)
+  }
+  return all
 }
 
 /**

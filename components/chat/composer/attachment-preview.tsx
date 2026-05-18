@@ -9,10 +9,22 @@ import { usePromptInputAttachments } from "@/components/ai-elements/prompt-input
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { cn } from "@/lib/utils"
 import { FileIcon, XIcon } from "lucide-react"
+import { OcrMenu, isOcrEligible } from "./ocr-menu"
 
 const IMAGE_PREFIX = "image/"
 
-export function AttachmentPreview() {
+export interface AttachmentPreviewProps {
+  /**
+   * Optional handler — when supplied, image/PDF attachments grow a hover-only
+   * OCR menu next to the remove button. Without a handler the menu is hidden
+   * so the old behaviour is unchanged.
+   */
+  onOcrSelect?: (action: "extract-to-input" | "view-result", attachmentId: string) => void
+  /** Disable the OCR menu trigger while a call is in flight. */
+  ocrBusy?: boolean
+}
+
+export function AttachmentPreview(props: AttachmentPreviewProps = {}) {
   const t = useTranslations("chat.composer.attachments")
   const attachments = usePromptInputAttachments()
   if (attachments.files.length === 0) return null
@@ -21,6 +33,7 @@ export function AttachmentPreview() {
       {attachments.files.map((f) => {
         const isImage = (f.mediaType ?? "").startsWith(IMAGE_PREFIX)
         const displayName = f.filename ?? t("fallbackName")
+        const showOcr = !!props.onOcrSelect && isOcrEligible(f.mediaType ?? null)
         return (
           <div
             key={f.id}
@@ -40,6 +53,16 @@ export function AttachmentPreview() {
                 </span>
               </>
             )}
+            {showOcr ? (
+              <div className="absolute right-7 top-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                <OcrMenu
+                  attachmentId={f.id}
+                  mediaType={f.mediaType ?? ""}
+                  onSelect={props.onOcrSelect!}
+                  disabled={props.ocrBusy}
+                />
+              </div>
+            ) : null}
             <TooltipIconButton
               type="button"
               onClick={() => attachments.remove(f.id)}

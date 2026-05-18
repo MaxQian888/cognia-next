@@ -1,0 +1,110 @@
+---
+title: "OCR Plugin Tool"
+description: "Calling the built-in ocr.extract tool from a custom plugin or external MCP client."
+---
+
+# OCR Plugin Tool
+
+The built-in `cognia-ocr` plugin (`plugins/ocr/`) exposes a single agent tool —
+`ocr.extract` — wired into every shell. This guide covers the call shape for
+plugin authors that want their own tool to chain into OCR, plus how to invoke
+the slash command from another plugin.
+
+## Tool surface
+
+```ts
+// Schema registered by plugins/ocr/src/index.ts
+{
+  name: "ocr.extract",
+  description: "Extract text and structured Markdown from any image or PDF.",
+  input_schema: {
+    type: "object",
+    properties: {
+      source: {
+        type: "object",
+        required: ["kind", "value"],
+        properties: {
+          kind: { type: "string", enum: ["attachment_id", "data_url", "file_path"] },
+          value: { type: "string" },
+        },
+      },
+      languages: { type: "array", items: { type: "string" } },
+      format: { type: "string", enum: ["markdown", "text", "blocks"] },
+      provider: { type: "string" },
+      pageRange: { type: "string" },
+    },
+    required: ["source"],
+  },
+}
+```
+
+The tool returns `{ ok: true, result }` on success or `{ ok: false, error, code }`
+on failure. The `code` is one of:
+
+- `unsupported_shell`
+- `missing_credentials`
+- `rate_limited`
+- `provider_failed`
+- `unsupported_language`
+- `invalid_input`
+- `aborted`
+
+When `provider` is absent or `"auto"` the auto-router (`lib/ocr/auto-router.ts`)
+picks a provider based on the current shell and the user's settings. Otherwise
+the supplied id must match one of the 17 registered providers (see ADR 0024).
+
+## Calling from another plugin
+
+```ts
+import type { PluginContext } from "@/types/plugin"
+
+export const myPlugin = {
+  manifest: { /* ... */ },
+  activate: async (ctx: PluginContext) => {
+    ctx.agent?.registerTool?.({
+      name: "summarize_screenshot",
+      pluginId: ctx.pluginId,
+      definition: { /* ... */ },
+      execute: async ({ attachment_id }: { attachment_id: string }) => {
+        // Chain into the OCR tool registered by `cognia-ocr`.
+        const ocr = await ctx.agent?.invokeTool?.("ocr.extract", {
+          source: { kind: "attachment_id", value: attachment_id },
+          format: "markdown",
+        })
+        if (!ocr?.ok) return { error: ocr?.error ?? "OCR failed" }
+        return summarize(ocr.result.combinedMarkdown)
+      },
+    })
+  },
+}
+```
+
+The `ctx.agent.invokeTool` API is provided by the plugin runtime when both
+plugins are activated in the same session.
+
+## Slash command
+
+`/ocr` is registered by the same plugin. From inside another plugin you can
+dispatch it through `ctx.chat?.runSlashCommand?.("/ocr", argv)` — argv is the
+raw string after the command name (e.g. `"att_123 --provider mistral-ocr"`).
+
+## Native OCR backends
+
+Tauri builds can opt into native OCR engines through Cargo features:
+
+| Feature          | Backend                                                            |
+| ---------------- | ------------------------------------------------------------------ |
+| `ocr-tesseract`  | Cross-platform Tesseract via the `tesseract-rs` crate.             |
+| `ocr-windows`    | `Windows.Media.Ocr` via the `winocr` crate. Requires an MSIX build. |
+| `ocr-apple`      | Apple Vision via the Swift sidecar at `src-tauri/sidecars/apple-vision-ocr/`. |
+
+Without these features the registry advertises placeholder backends that report
+`MissingBinding`. The TS layer surfaces that as `unsupported_shell` and the
+auto-router falls through to the next candidate.
+
+## See also
+
+- ADR 0024 — OCR subsystem
+- `lib/ocr/index.ts` — public `extract()` surface
+- `lib/ocr/auto-router.ts` — selection rules
+- `lib/db/ocr-results.ts` — Dexie cache

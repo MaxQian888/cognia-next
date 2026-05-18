@@ -33,6 +33,10 @@ const SearchSettings = dynamic(
   () => import("./search/search-settings").then((m) => m.SearchSettings),
   { ssr: false, loading: () => <SectionLoading /> }
 )
+const OcrSection = dynamic(() => import("./ocr/ocr-section").then((m) => m.OcrSection), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
 const AppearanceSection = dynamic(() => import("./appearance").then((m) => m.AppearanceSection), {
   ssr: false,
   loading: () => <SectionLoading />,
@@ -320,6 +324,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <ToolSettingsSection />
     case "search":
       return <SearchSettings />
+    case "ocr":
+      return <OcrSection />
     case "appearance":
       return <AppearanceSection />
     case "speech":

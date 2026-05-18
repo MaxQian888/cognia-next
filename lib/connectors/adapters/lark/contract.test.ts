@@ -165,8 +165,17 @@ describe("Lark adapter contract suite", () => {
   // -------------------------------------------------------------------------
 
   describe("send.file capability", () => {
-    it("file segment produces msg_type=text with file link", async () => {
-      mockInvoke.mockResolvedValueOnce(makeTatOkResp()).mockResolvedValueOnce(makeSendOkResp())
+    it("file segment with remote URL: uploads + msg_type=file with file_key", async () => {
+      // Command-dispatched mock so the test doesn't depend on whether the
+      // module-level TAT cache is warm from a previous test.
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "connectors_lark_upload_file") return "file_v3_uploaded_pdf"
+        if (cmd === "connectors_http_request") return makeSendOkResp()
+        return undefined
+      })
+      // Force a cache miss so the TAT fetch path is exercised at least once
+      // somewhere in the suite, but otherwise irrelevant to the assertion.
+      // (Default mock returns send-shaped JSON which Lark code accepts.)
 
       const adapter = makeAdapter()
       const req: OutboundRequest = {
@@ -189,9 +198,126 @@ describe("Lark adapter contract suite", () => {
 
       await adapter.send(req)
       const call = lastSendCall()
-      expect(call.body["msg_type"]).toBe("text")
-      const content = JSON.parse(call.body["content"] as string) as { text: string }
-      expect(content.text).toContain("report.pdf")
+      expect(call.body["msg_type"]).toBe("file")
+      const content = JSON.parse(call.body["content"] as string) as {
+        file_key: string
+        file_name: string
+      }
+      expect(content.file_key).toBe("file_v3_uploaded_pdf")
+      expect(content.file_name).toBe("report.pdf")
+
+      // Verify the upload was invoked with the right shape.
+      const uploadCalls = mockInvoke.mock.calls.filter(
+        ([c]: [string]) => c === "connectors_lark_upload_file"
+      )
+      expect(uploadCalls).toHaveLength(1)
+      const args = uploadCalls[0][1] as { fileType: string; sourceUrl: string }
+      expect(args.fileType).toBe("pdf")
+      expect(args.sourceUrl).toBe("https://example.com/report.pdf")
+    })
+
+    it("file segment with already-resolved file_key skips upload entirely", async () => {
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "connectors_http_request") return makeSendOkResp()
+        return undefined
+      })
+
+      const adapter = makeAdapter()
+      const req: OutboundRequest = {
+        conversationRef: {
+          platform: "lark",
+          adapterId: "lark-contract",
+          channelId: "oc_chat_001",
+        },
+        segments: [
+          {
+            type: "file",
+            url: "file_v3_existing",
+            name: "report.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 12345,
+          },
+        ],
+        metadata: { idempotencyKey: "k4b" },
+      }
+
+      await adapter.send(req)
+      const call = lastSendCall()
+      expect(call.body["msg_type"]).toBe("file")
+      const content = JSON.parse(call.body["content"] as string) as { file_key: string }
+      expect(content.file_key).toBe("file_v3_existing")
+
+      const uploadCalls = mockInvoke.mock.calls.filter(
+        ([c]: [string]) => c === "connectors_lark_upload_file"
+      )
+      expect(uploadCalls).toHaveLength(0)
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // send.voice + send.video (full upload pipeline)
+  // -------------------------------------------------------------------------
+
+  describe("send.voice + send.video capabilities", () => {
+    it("voice segment uploads as opus → msg_type=audio with file_key", async () => {
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "connectors_lark_upload_file") return "file_v3_voice_key"
+        if (cmd === "connectors_http_request") return makeSendOkResp()
+        return undefined
+      })
+
+      const adapter = makeAdapter()
+      const req: OutboundRequest = {
+        conversationRef: {
+          platform: "lark",
+          adapterId: "lark-contract",
+          channelId: "oc_chat_001",
+        },
+        segments: [{ type: "voice", url: "https://media.example.com/clip.opus", durationSec: 4 }],
+        metadata: { idempotencyKey: "kv1" },
+      }
+      await adapter.send(req)
+
+      const call = lastSendCall()
+      expect(call.body["msg_type"]).toBe("audio")
+      const content = JSON.parse(call.body["content"] as string) as { file_key: string }
+      expect(content.file_key).toBe("file_v3_voice_key")
+
+      const uploadArgs = mockInvoke.mock.calls.find(
+        ([c]: [string]) => c === "connectors_lark_upload_file"
+      )![1] as { fileType: string; durationMs?: number }
+      expect(uploadArgs.fileType).toBe("opus")
+      expect(uploadArgs.durationMs).toBe(4000)
+    })
+
+    it("video segment uploads as mp4 → msg_type=media with file_key", async () => {
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "connectors_lark_upload_file") return "file_v3_video_key"
+        if (cmd === "connectors_http_request") return makeSendOkResp()
+        return undefined
+      })
+
+      const adapter = makeAdapter()
+      const req: OutboundRequest = {
+        conversationRef: {
+          platform: "lark",
+          adapterId: "lark-contract",
+          channelId: "oc_chat_001",
+        },
+        segments: [{ type: "video", url: "https://media.example.com/demo.mp4" }],
+        metadata: { idempotencyKey: "kvv1" },
+      }
+      await adapter.send(req)
+
+      const call = lastSendCall()
+      expect(call.body["msg_type"]).toBe("media")
+      const content = JSON.parse(call.body["content"] as string) as { file_key: string }
+      expect(content.file_key).toBe("file_v3_video_key")
+
+      const uploadArgs = mockInvoke.mock.calls.find(
+        ([c]: [string]) => c === "connectors_lark_upload_file"
+      )![1] as { fileType: string }
+      expect(uploadArgs.fileType).toBe("mp4")
     })
   })
 

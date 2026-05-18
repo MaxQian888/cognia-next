@@ -338,13 +338,213 @@ describe("OneBot adapter contract suite", () => {
   })
 
   // ---------------------------------------------------------------------------
-  // history.fetch — not implemented (method absent in Phase 1)
+  // history.fetch — v11 get_group_msg_history / get_friend_msg_history
   // ---------------------------------------------------------------------------
 
   describe("history.fetch capability", () => {
-    it("fetchHistory is undefined (Phase 1 stub)", () => {
-      const adapter = createOneBotAdapter({ id: "ob-hist", displayName: "H", selfBotUin: "1" })
-      expect(adapter.fetchHistory).toBeUndefined()
+    it("fetchHistory is exposed on the adapter", () => {
+      const adapter = createOneBotAdapter({ id: "ob-hist-decl", displayName: "H", selfBotUin: "1" })
+      expect(adapter.fetchHistory).toBeDefined()
+    })
+
+    it("walks group history with message_seq cursor pagination", async () => {
+      const bus = createEventBus()
+      mockListen.mockImplementation(bus.listenImpl)
+      const { adapter } = await setupAdapter(bus, "ob-hist-g")
+
+      // Each emit returns a 2-message page; second emit returns empty to stop.
+      let call = 0
+      mockEmit.mockImplementation(async (_topic: string, payload: string) => {
+        const c = JSON.parse(payload) as {
+          echo: string
+          action: string
+          params: { message_seq?: number }
+        }
+        expect(c.action).toBe("get_group_msg_history")
+        call++
+        const messages =
+          call === 1
+            ? [
+                {
+                  time: 1700000100,
+                  self_id: 100000,
+                  post_type: "message",
+                  message_type: "group",
+                  message_id: 11,
+                  message_seq: 11,
+                  group_id: 300001,
+                  user_id: 200001,
+                  sender: { user_id: 200001, nickname: "Alice" },
+                  message: [{ type: "text", data: { text: "older-1" } }],
+                },
+                {
+                  time: 1700000200,
+                  self_id: 100000,
+                  post_type: "message",
+                  message_type: "group",
+                  message_id: 12,
+                  message_seq: 12,
+                  group_id: 300001,
+                  user_id: 200001,
+                  sender: { user_id: 200001, nickname: "Alice" },
+                  message: [{ type: "text", data: { text: "older-2" } }],
+                },
+              ]
+            : []
+        setTimeout(() => {
+          bus.trigger(
+            `connectors://onebot/ob-hist-g/response`,
+            JSON.stringify({ status: "ok", retcode: 0, data: { messages }, echo: c.echo })
+          )
+        }, 0)
+      })
+
+      const collected: string[] = []
+      for await (const ev of adapter.fetchHistory!(`onebot:ob-hist-g:g:300001`, {})) {
+        collected.push(ev.plainText)
+      }
+
+      expect(collected).toEqual(["older-1", "older-2"])
+      expect(call).toBe(2) // first page yields, second page empties → stops
+
+      await adapter.stop()
+    })
+
+    it("walks friend history when conversationKey is p:<userId>", async () => {
+      const bus = createEventBus()
+      mockListen.mockImplementation(bus.listenImpl)
+      const { adapter } = await setupAdapter(bus, "ob-hist-p")
+
+      const actions: string[] = []
+      mockEmit.mockImplementation(async (_topic: string, payload: string) => {
+        const c = JSON.parse(payload) as { echo: string; action: string }
+        actions.push(c.action)
+        setTimeout(() => {
+          bus.trigger(
+            `connectors://onebot/ob-hist-p/response`,
+            JSON.stringify({ status: "ok", retcode: 0, data: { messages: [] }, echo: c.echo })
+          )
+        }, 0)
+      })
+
+      const events: unknown[] = []
+      for await (const ev of adapter.fetchHistory!(`onebot:ob-hist-p:p:200001`, {})) {
+        events.push(ev)
+      }
+
+      expect(actions).toEqual(["get_friend_msg_history"])
+      expect(events).toHaveLength(0)
+
+      await adapter.stop()
+    })
+
+    it("respects opts.max as a yield cap", async () => {
+      const bus = createEventBus()
+      mockListen.mockImplementation(bus.listenImpl)
+      const { adapter } = await setupAdapter(bus, "ob-hist-cap")
+
+      mockEmit.mockImplementation(async (_topic: string, payload: string) => {
+        const c = JSON.parse(payload) as { echo: string }
+        setTimeout(() => {
+          bus.trigger(
+            `connectors://onebot/ob-hist-cap/response`,
+            JSON.stringify({
+              status: "ok",
+              retcode: 0,
+              data: {
+                messages: [
+                  {
+                    time: 1700001000,
+                    self_id: 100000,
+                    post_type: "message",
+                    message_type: "group",
+                    message_id: 21,
+                    message_seq: 21,
+                    group_id: 300002,
+                    user_id: 200002,
+                    sender: { user_id: 200002, nickname: "Bob" },
+                    message: [{ type: "text", data: { text: "m1" } }],
+                  },
+                  {
+                    time: 1700001100,
+                    self_id: 100000,
+                    post_type: "message",
+                    message_type: "group",
+                    message_id: 22,
+                    message_seq: 22,
+                    group_id: 300002,
+                    user_id: 200002,
+                    sender: { user_id: 200002, nickname: "Bob" },
+                    message: [{ type: "text", data: { text: "m2" } }],
+                  },
+                ],
+              },
+              echo: c.echo,
+            })
+          )
+        }, 0)
+      })
+
+      const collected: string[] = []
+      for await (const ev of adapter.fetchHistory!(`onebot:ob-hist-cap:g:300002`, { max: 1 })) {
+        collected.push(ev.plainText)
+      }
+      expect(collected).toEqual(["m1"])
+
+      await adapter.stop()
+    })
+
+    it("rejects v12 conversations (no portable history action)", async () => {
+      const bus = createEventBus()
+      mockListen.mockImplementation(bus.listenImpl)
+
+      const adapter = createOneBotAdapter({
+        id: "ob-hist-v12",
+        displayName: "V12",
+        selfBotUin: "100000",
+      })
+      const { ctx } = makeCtx()
+      await adapter.start(ctx)
+
+      // Seed v12 variant cache
+      const seedV12 = {
+        time: 1700000000,
+        type: "message",
+        detail_type: "group",
+        self: { platform: "qq", user_id: "100000" },
+        id: "evt-1",
+        message_id: "m-1",
+        user_id: "200003",
+        group_id: "300003",
+        message: [{ type: "text", data: { text: "v12 seed" } }],
+      }
+      bus.trigger(`connectors://onebot/ob-hist-v12/event`, JSON.stringify(seedV12))
+      await new Promise((r) => setTimeout(r, 20))
+
+      const iter = adapter.fetchHistory!(`onebot:ob-hist-v12:g:300003`, {})
+      // Generator throws on first .next()
+      await expect(
+        (async () => {
+          for await (const _ of iter) void _
+        })()
+      ).rejects.toThrow(/v12 does not define a portable message-history/)
+
+      await adapter.stop()
+    })
+
+    it("rejects conversationKey without chatType:chatId encoding", async () => {
+      const bus = createEventBus()
+      mockListen.mockImplementation(bus.listenImpl)
+      const { adapter } = await setupAdapter(bus, "ob-hist-bad")
+
+      const iter = adapter.fetchHistory!(`onebot:ob-hist-bad:malformed`, {})
+      await expect(
+        (async () => {
+          for await (const _ of iter) void _
+        })()
+      ).rejects.toThrow(/must encode chatType:chatId/)
+
+      await adapter.stop()
     })
   })
 })

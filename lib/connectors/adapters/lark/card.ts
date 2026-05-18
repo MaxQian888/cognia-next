@@ -17,7 +17,7 @@ import type { MessageSegment } from "@/types/connectors/segment"
 // Lark message body shape (im/v1/messages)
 // ---------------------------------------------------------------------------
 
-export type LarkMsgType = "text" | "interactive" | "image" | "post"
+export type LarkMsgType = "text" | "interactive" | "image" | "post" | "audio" | "media" | "file"
 
 export interface LarkMessageBody {
   msg_type: LarkMsgType
@@ -46,8 +46,13 @@ export function escapeLarkMarkdown(text: string): string {
 /**
  * Render a single MessageSegment as a LarkMessageBody.
  *
- * Returns null for segment types that are not representable in Phase 1
- * (voice, video, location, poll, emoji, reply — all dropped).
+ * Voice/video/file/image segments must already carry a Lark-resolved key
+ * (no `://` in the URL) — `resolveLarkMediaKeys` in `upload.ts` performs
+ * the upload pre-pass. Segments whose URL is still a remote URL fall back
+ * to a text-link rendering so the message is never silently dropped.
+ *
+ * `reply`, `emoji`, `location`, `poll` have no native Lark representation
+ * and return null (the multi-segment combiner emits a `[type]` placeholder).
  */
 export function segmentToLarkBody(seg: MessageSegment): LarkMessageBody | null {
   switch (seg.type) {
@@ -58,8 +63,6 @@ export function segmentToLarkBody(seg: MessageSegment): LarkMessageBody | null {
       }
 
     case "markdown": {
-      // Lark "post" (rich text) can embed markdown; for Phase 1 we use the
-      // interactive card's markdown element.
       const escaped = escapeLarkMarkdown(seg.md)
       return {
         msg_type: "interactive",
@@ -75,19 +78,58 @@ export function segmentToLarkBody(seg: MessageSegment): LarkMessageBody | null {
     }
 
     case "image":
-      // image_key-based card; URL-uploaded images are Phase 2.
-      // If the url looks like an image_key (no scheme prefix), use directly.
-      // Otherwise fall back to a text message with the URL.
+      // image_key body when the upload pre-pass has resolved the key;
+      // otherwise fall back to a text-link rendering.
       if (!seg.url.includes("://")) {
         return {
           msg_type: "image",
           content: JSON.stringify({ image_key: seg.url }),
         }
       }
-      // URL-form image — render as text link in Phase 1
       return {
         msg_type: "text",
         content: JSON.stringify({ text: `[image](${seg.url})` }),
+      }
+
+    case "voice":
+      // Lark requires opus voice via msg_type=audio + file_key. The upload
+      // pre-pass resolves the key; bare URLs degrade to a text-link.
+      if (!seg.url.includes("://")) {
+        return {
+          msg_type: "audio",
+          content: JSON.stringify({ file_key: seg.url }),
+        }
+      }
+      return {
+        msg_type: "text",
+        content: JSON.stringify({ text: `[voice](${seg.url})` }),
+      }
+
+    case "video":
+      // msg_type=media for short-video file_keys. Bare URLs degrade to text.
+      if (!seg.url.includes("://")) {
+        return {
+          msg_type: "media",
+          content: JSON.stringify({ file_key: seg.url }),
+        }
+      }
+      return {
+        msg_type: "text",
+        content: JSON.stringify({ text: `[video](${seg.url})` }),
+      }
+
+    case "file":
+      // msg_type=file requires the uploaded file_key + file_name; URLs
+      // degrade to a markdown-style link in text.
+      if (!seg.url.includes("://")) {
+        return {
+          msg_type: "file",
+          content: JSON.stringify({ file_key: seg.url, file_name: seg.name }),
+        }
+      }
+      return {
+        msg_type: "text",
+        content: JSON.stringify({ text: `[${seg.name}](${seg.url})` }),
       }
 
     case "code": {
@@ -112,17 +154,8 @@ export function segmentToLarkBody(seg: MessageSegment): LarkMessageBody | null {
         content: JSON.stringify({ text: "[card]" }),
       }
 
-    case "file":
-      // Phase 1: link in text
-      return {
-        msg_type: "text",
-        content: JSON.stringify({ text: `[${seg.name}](${seg.url})` }),
-      }
-
     case "reply":
     case "emoji":
-    case "voice":
-    case "video":
     case "location":
     case "poll":
       return null

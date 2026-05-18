@@ -212,11 +212,10 @@ describe("Telegram adapter contract suite", () => {
     })
   })
 
-  describe("history.fetch capability", () => {
-    it("is declared but the adapter does not implement fetchHistory in Phase 1", () => {
+  describe("history.fetch capability (intentionally absent)", () => {
+    it("is NOT declared (Telegram Bot API exposes no chat-history endpoint)", () => {
       const adapter = makeAdapter()
-      // Phase 1: Telegram bots can't fetch history via Bot API; we declare the
-      // flag for the contract suite but leave the optional method off.
+      expect(adapter.meta.capabilities).not.toContain("history.fetch")
       expect(adapter.fetchHistory).toBeUndefined()
     })
   })

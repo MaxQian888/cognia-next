@@ -215,8 +215,54 @@ export async function pullAllFromNative(): Promise<SyncResult> {
       const existing = matchByDir ?? matchByName
 
       if (existing) {
-        const stale = (existing.updatedAt ?? 0) < Date.now() - TIMESTAMP_FUDGE_MS // assume native wins unless our row is fresher
-        if (!stale) {
+        // Native wins when the on-disk SKILL.md was modified after our last
+        // recorded sync. `mtimeMs === 0` means the filesystem didn't expose
+        // mtime — fall back to fingerprint comparison to decide. When the
+        // user has edited the Dexie row after the last sync, we keep ours.
+        const nativeMtime = skill.mtimeMs || 0
+        const lastSynced = existing.lastSyncedAt ?? 0
+        const localChangedSinceSync = (existing.updatedAt ?? 0) > lastSynced + TIMESTAMP_FUDGE_MS
+        const nativeNewer = nativeMtime > 0 ? nativeMtime > lastSynced + TIMESTAMP_FUDGE_MS : true
+        if (!nativeNewer || localChangedSinceSync) {
+          result.skipped += 1
+          continue
+        }
+        // Second gate: recompute fingerprint after a candidate-update build
+        // and skip if it matches what we already stored. Avoids needless
+        // Dexie writes when only mtime changed (e.g., touch).
+        const candidateResources = fromNativeResources(skill.resources, existing.id)
+        const fpInput: Skill = {
+          ...existing,
+          name: drafts[0].name,
+          description: drafts[0].description,
+          content: drafts[0].content,
+          allowedTools: drafts[0].allowedTools,
+          tags: drafts[0].tags,
+          category: drafts[0].category ?? existing.category,
+          version: drafts[0].version,
+          author: drafts[0].author,
+          license: drafts[0].license,
+        }
+        const candidateFp = await fingerprint(
+          fpInput,
+          candidateResources.map((r, i) => ({
+            id: `tmp-${i}`,
+            skillId: existing.id,
+            kind: r.kind,
+            name: r.name,
+            path: r.path,
+            content: r.content,
+            encoding: r.encoding ?? "utf-8",
+            mimeType: r.mimeType,
+            size: r.size ?? 0,
+            createdAt: 0,
+            updatedAt: 0,
+          }))
+        )
+        if (existing.syncFingerprint && existing.syncFingerprint === candidateFp) {
+          // Bump the lastSyncedAt timestamp so future pulls don't re-evaluate
+          // the same file every run, but skip the row + resource churn.
+          await updateSkill(existing.id, { lastSyncedAt: Date.now(), lastSyncError: null })
           result.skipped += 1
           continue
         }
@@ -233,13 +279,11 @@ export async function pullAllFromNative(): Promise<SyncResult> {
           source: "imported",
           syncOrigin: "native",
           nativeDirectory: drafts[0].nativeDirectory,
+          syncFingerprint: candidateFp,
           lastSyncedAt: Date.now(),
           lastSyncError: null,
         })
-        await replaceResourcesForSkill(
-          existing.id,
-          fromNativeResources(skill.resources, existing.id)
-        )
+        await replaceResourcesForSkill(existing.id, candidateResources)
       } else {
         const report = await bulkImportSkills(drafts, "skip")
         if (report.created > 0) {
@@ -249,10 +293,33 @@ export async function pullAllFromNative(): Promise<SyncResult> {
             (r) => r.name.toLowerCase() === drafts[0].name.toLowerCase()
           )
           if (created) {
-            await replaceResourcesForSkill(
-              created.id,
-              fromNativeResources(skill.resources, created.id)
-            )
+            const drafts2 = fromNativeResources(skill.resources, created.id)
+            await replaceResourcesForSkill(created.id, drafts2)
+            // Compute the fingerprint from the drafts directly — the
+            // replaceResourcesForSkill return value is the stored rows but
+            // we don't need to read those back (the fields contributing to
+            // the fingerprint are identical between draft and stored
+            // shape). This keeps the post-import update independent of
+            // whatever shape the replacer returns in tests.
+            const fpResources: SkillResource[] = drafts2.map((d, i) => ({
+              id: `tmp-${i}`,
+              skillId: created.id,
+              kind: d.kind,
+              name: d.name,
+              path: d.path,
+              content: d.content,
+              encoding: d.encoding ?? "utf-8",
+              mimeType: d.mimeType,
+              size: d.size ?? 0,
+              createdAt: 0,
+              updatedAt: 0,
+            }))
+            const fp = await fingerprint(created, fpResources)
+            await updateSkill(created.id, {
+              syncFingerprint: fp,
+              lastSyncedAt: Date.now(),
+              lastSyncError: null,
+            })
           }
         }
       }

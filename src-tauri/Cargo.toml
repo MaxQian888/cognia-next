@@ -78,7 +78,7 @@ gray_matter = { version = "0.2", default-features = false, features = ["yaml"] }
 wait-timeout = "0.2"
 regex = "1"
 toml_edit = { version = "0.22", features = ["serde"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2", "multipart"] }
 tokio-socks = "0.5"
 tokio-rustls = "0.26"
 rustls-pki-types = "1"
@@ -247,3 +247,18 @@ enigo = "0.6"
 tempfile = "3"
 # HTTP mock server for connectors::http_client and attachments tests.
 wiremock = "0.6"
+
+# ADR-0024 — OCR backend opt-in features. The default build ships
+# placeholder backends so the dispatch table compiles everywhere; each
+# feature flag links a real binding for one platform.
+[features]
+default = []
+# Cross-platform Tesseract via `tesseract-rs` (statically links libtesseract
+# + leptonica). Requires CMake + a C++ toolchain on Linux.
+ocr-tesseract = []
+# Windows.Media.Ocr via the `winocr` crate. Requires the running process to
+# have an MSIX package identity; see `tauri.conf.json` bundle targets.
+ocr-windows = []
+# Apple Vision via the Swift sidecar at `sidecars/apple-vision-ocr/`. The
+# binary is bundled through `tauri.conf.json` `bundle.externalBin`.
+ocr-apple = []

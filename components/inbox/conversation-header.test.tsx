@@ -200,8 +200,11 @@ describe("ConversationHeader", () => {
     expect(trigger).toBeInTheDocument()
     expect(back).toHaveClass("md:hidden")
     expect(trigger).toHaveClass("md:hidden")
-    expect(back).toHaveAccessibleName(/back to list/i)
-    expect(trigger).toHaveAccessibleName(/open adapters/i)
+    // i18n keys: backToList / openSidebar — the test render uses the
+    // NextIntlClientProvider fallback (key passthrough) since messages
+    // aren't mounted in this unit test, so the accessible name is the key.
+    expect(back).toHaveAccessibleName(/backToList/i)
+    expect(trigger).toHaveAccessibleName(/openSidebar/i)
   })
 
   it("back button calls router.back() when history has more than one entry", () => {

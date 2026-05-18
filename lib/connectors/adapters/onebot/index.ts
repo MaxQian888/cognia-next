@@ -22,13 +22,17 @@ import type {
   AdapterHealthState,
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
+import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import { ONEBOT_CAPS } from "./capability"
 import { parseOneBotEvent, clearVariantCache } from "./parse"
+import { parseV11Event, type OneBotV11Event } from "./v11"
 import {
   serializeOutboundV11,
   serializeOutboundV12,
   serializeDeleteV11,
   serializeDeleteV12,
+  serializeGetGroupMsgHistoryV11,
+  serializeGetFriendMsgHistoryV11,
 } from "./serialize"
 import {
   subscribeOneBotEvents,
@@ -213,6 +217,92 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     // bearerToken is resolved on each call; nothing to refresh eagerly
   }
 
+  /**
+   * Walk `get_group_msg_history` / `get_friend_msg_history` (NapCat /
+   * go-cqhttp extension) with `message_seq` cursor pagination. Each returned
+   * message is projected through `parseV11Event`, the same parser the live
+   * reverse-WS path uses, so the consumer sees identical
+   * `NormalizedInboundEvent` shapes.
+   *
+   * v12 has no portable history action — calling fetchHistory on a v12
+   * adapter throws because there is no honest result to yield.
+   *
+   * Bounds:
+   *   - per-page size = 20 (NapCat / go-cqhttp default cap)
+   *   - max pages    = 50 (safety stop)
+   *   - `opts.before` is forwarded as the starting `message_seq` (fetches
+   *     older messages strictly before that seq).
+   *   - `opts.max` further caps total events yielded.
+   */
+  async function* fetchHistory(
+    conversationKey: string,
+    historyOpts: { before?: string; after?: string; max?: number }
+  ): AsyncIterable<NormalizedInboundEvent> {
+    const variant = getVariant()
+    if (variant !== "v11") {
+      throw new Error(
+        "OneBot v12 does not define a portable message-history action; fetchHistory is v11-only."
+      )
+    }
+
+    // OneBot conversationKey shape: `onebot:<adapterId>:<chatType>:<chatId>`
+    // where chatType ∈ {"g", "p"}. The chatKey segment itself contains a
+    // colon, so we can't reuse `parseConversationKey` (it would put "g" into
+    // remoteChatId and the id into threadId).
+    const segs = conversationKey.split(":")
+    if (segs.length !== 4 || segs[0] !== "onebot") {
+      throw new Error(
+        `OneBot conversationKey must encode chatType:chatId (got "${conversationKey}").`
+      )
+    }
+    const chatType = segs[2]
+    const chatId = segs[3]
+    if (!chatId || (chatType !== "g" && chatType !== "p")) {
+      throw new Error(
+        `OneBot conversationKey must encode chatType:chatId (got "${conversationKey}").`
+      )
+    }
+
+    const pageSize = 20
+    const maxPages = 50
+    const overallCap = historyOpts.max ?? Number.POSITIVE_INFINITY
+
+    let cursor: number | undefined = historyOpts.before ? Number(historyOpts.before) : undefined
+    let yielded = 0
+
+    for (let page = 0; page < maxPages; page++) {
+      const call =
+        chatType === "g"
+          ? serializeGetGroupMsgHistoryV11(chatId, cursor, pageSize)
+          : serializeGetFriendMsgHistoryV11(chatId, cursor, pageSize)
+
+      const resp = await sendToOneBot(opts.id, call)
+      if (resp.status !== "ok") return
+
+      const data = resp.data as { messages?: OneBotV11Event[] } | null
+      const messages = data?.messages ?? []
+      if (messages.length === 0) return
+
+      for (const msg of messages) {
+        if (yielded >= overallCap) return
+        const event = parseV11Event(opts.id, msg)
+        if (event) {
+          yielded++
+          yield event
+        }
+      }
+
+      // Page returned in chronological order — oldest message's seq becomes
+      // the new cursor for the next (older) page. NapCat exposes message_seq
+      // alongside message_id; fall back to the oldest message_id if absent
+      // (go-cqhttp legacy behaviour).
+      const oldest = messages[0] as OneBotV11Event & { message_seq?: number }
+      const nextCursor = oldest.message_seq ?? oldest.message_id
+      if (nextCursor === undefined || nextCursor === cursor) return
+      cursor = nextCursor as number
+    }
+  }
+
   return {
     get meta() {
       return {
@@ -233,5 +323,6 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     delete: deleteMessage,
     setTyping,
     refreshCredentials,
+    fetchHistory,
   }
 }

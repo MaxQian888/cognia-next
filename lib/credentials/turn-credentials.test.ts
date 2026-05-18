@@ -1,3 +1,6 @@
+import fs from "node:fs/promises"
+import path from "node:path"
+
 import {
   KEYRING_CREDENTIAL_PREFIX,
   __setTurnCredentialBackend,
@@ -232,5 +235,32 @@ describe("resolveTurnServerCredentials", () => {
       credential: "p",
     })
     expect(out[3]).toMatchObject({ username: "bob", credential: "h0nk" })
+  })
+})
+
+describe("CapacitorSecureStore package name", () => {
+  // Regression gate for the wrong-name bug
+  // (`@capacitor-community/secure-storage-plugin`). The dynamic import in
+  // `loadSecureStorage()` is wrapped in try/catch, so a MODULE_NOT_FOUND
+  // surfaces silently as "TURN credentials never persist on mobile". The
+  // audit caught this once; this assertion keeps it from coming back.
+  //
+  // The package name MUST match `mobile/package.json`'s installed entry
+  // because Capacitor builds resolve modules through the mobile workspace.
+  it("imports the package name that mobile/package.json actually installs", async () => {
+    const src = await fs.readFile(path.join(__dirname, "turn-credentials.ts"), "utf8")
+    // The loader uses a `const moduleId = "..."` indirection (mirrors
+    // lib/tauri/companion-storage.ts) so the literal can appear either
+    // inline or aliased. Either form must use the correct package.
+    expect(src).toContain('"capacitor-secure-storage-plugin"')
+    expect(src).not.toContain("@capacitor-community/secure-storage-plugin")
+
+    const mobilePkgPath = path.join(__dirname, "..", "..", "mobile", "package.json")
+    const mobilePkgRaw = await fs.readFile(mobilePkgPath, "utf8")
+    const mobilePkg = JSON.parse(mobilePkgRaw) as {
+      dependencies?: Record<string, string>
+    }
+    expect(mobilePkg.dependencies?.["capacitor-secure-storage-plugin"]).toBeDefined()
+    expect(mobilePkg.dependencies?.["@capacitor-community/secure-storage-plugin"]).toBeUndefined()
   })
 })

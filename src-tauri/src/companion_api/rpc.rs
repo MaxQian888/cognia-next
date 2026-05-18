@@ -191,6 +191,16 @@ const KNOWN_COMMANDS: &[&str] = &[
     "app_settings_update",
     // Wave 2 read-only projection routed through desktop_writes_bridge.
     "twin_profile_get",
+    // Mobile outbound-queue RPCs — round-trip through desktop_writes_bridge.
+    // Mirror `MOBILE_OUTBOUND_COMMANDS` in `lib/db/mobile-outbound-types.ts`.
+    // Spec-parity test (`spec_parity.rs`) asserts these stay in lockstep
+    // with the OpenAPI spec; the in-file `mobile_queue_commands_are_known`
+    // test below asserts they stay in lockstep with the TS enum.
+    "connector_send",
+    "connector_approve_draft",
+    "connector_reject_draft",
+    "workflow_trigger_manual",
+    "twin_ingest_source",
 ];
 
 /// Public read-only accessor for the dispatch allowlist. Used by the
@@ -769,7 +779,14 @@ pub(super) async fn dispatch(
         | "skill_set_enabled"
         | "plugin_set_enabled"
         | "adapter_update_policy"
-        | "twin_profile_get" => {
+        | "twin_profile_get"
+        // Mobile outbound-queue RPCs — same generic bridge, different
+        // TS-side dispatch arms in `lib/companion/desktop-write-source.ts`.
+        | "connector_send"
+        | "connector_approve_draft"
+        | "connector_reject_draft"
+        | "workflow_trigger_manual"
+        | "twin_ingest_source" => {
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
             bridge
                 .dispatch(

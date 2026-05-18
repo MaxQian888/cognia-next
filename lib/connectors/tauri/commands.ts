@@ -159,3 +159,44 @@ export async function connectorsAttachmentFetch(
 ): Promise<AttachmentRef> {
   return invoke<AttachmentRef>("connectors_attachment_fetch", { adapterId, remoteRef, sourceUrl })
 }
+
+// ---------------------------------------------------------------------------
+// Lark media upload — voice / video / file / image
+// ---------------------------------------------------------------------------
+
+export interface LarkFileUploadRequest {
+  accessToken: string
+  sourceUrl: string
+  /** Lark file_type discriminator: opus | mp4 | stream | pdf | doc | xls | ppt */
+  fileType: string
+  fileName: string
+  /** Required by Lark for opus voice uploads; ignored otherwise. */
+  durationMs?: number
+}
+
+/** Returns the opaque Lark `file_key`. */
+export async function connectorsLarkUploadFile(req: LarkFileUploadRequest): Promise<string> {
+  return invoke<string>("connectors_lark_upload_file", {
+    accessToken: req.accessToken,
+    sourceUrl: req.sourceUrl,
+    fileType: req.fileType,
+    fileName: req.fileName,
+    durationMs: req.durationMs,
+  })
+}
+
+export interface LarkImageUploadRequest {
+  accessToken: string
+  sourceUrl: string
+  /** Defaults to "message" (chat-image scope). Use "avatar" for profile pics. */
+  imageType?: "message" | "avatar"
+}
+
+/** Returns the opaque Lark `image_key`. */
+export async function connectorsLarkUploadImage(req: LarkImageUploadRequest): Promise<string> {
+  return invoke<string>("connectors_lark_upload_image", {
+    accessToken: req.accessToken,
+    sourceUrl: req.sourceUrl,
+    imageType: req.imageType,
+  })
+}

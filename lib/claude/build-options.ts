@@ -9,6 +9,7 @@
 
 import { getCharacter, listCharactersByIds } from "@/lib/db/characters"
 import { listEnabledSkillsByIds, recordSkillUsage, renderSkillsSection } from "@/lib/db/skills"
+import { recordPluginSkillUsage } from "@/lib/db/plugin-skill-usage"
 import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import { getTeam } from "@/lib/db/teams"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
@@ -450,6 +451,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // `container.skill_id` entries on the sidecar request. Best-effort —
   // a resolution failure must never block the send.
   let pluginSkillSection = ""
+  const pluginAllowedTools = new Set<string>()
+  const pluginUsageIds: string[] = []
+  const pluginIdMap = new Map<string, string>()
   if (character?.pluginSkillIds?.length) {
     try {
       const { resolveSkillsForCharacter, extractContainerSkillIds, renderResolvedSkillsSection } =
@@ -460,9 +464,24 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         opts.containerSkillIds = containerSkillIds
       }
       pluginSkillSection = renderResolvedSkillsSection(resolvedPlugin)
+      // Union each plugin skill's allowedTools into the whitelist so a
+      // plugin that declares required tools doesn't get silently denied.
+      // Symmetric with chat skills' allowedTools handling below.
+      for (const r of resolvedPlugin) {
+        for (const t of r.pluginSkill?.allowedTools ?? []) {
+          pluginAllowedTools.add(t)
+        }
+        pluginUsageIds.push(r.id)
+        if (r.pluginId) pluginIdMap.set(r.id, r.pluginId)
+      }
     } catch (err) {
       console.warn("plugin skill resolution failed", err)
     }
+  }
+  // Bump usage counters for plugin skills that resolved. Mirrors the
+  // `recordSkillUsage` call for chat skills above. Fire-and-forget.
+  if (pluginUsageIds.length > 0) {
+    void recordPluginSkillUsage(pluginUsageIds, pluginIdMap).catch(() => undefined)
   }
 
   const systemPrompt = [baseSystem, modeSection, skillSection, pluginSkillSection]
@@ -508,6 +527,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const baseAllowed = memberOverride?.allowedToolsOverride ?? character?.allowedTools
   for (const t of baseAllowed ?? []) allowed.add(t)
   for (const sk of skills) for (const t of sk.allowedTools ?? []) allowed.add(t)
+  // Plugin-contributed skills' allowedTools (Task M4) — same treatment as
+  // chat skills so a plugin declaring required tools isn't silently denied.
+  for (const t of pluginAllowedTools) allowed.add(t)
   // Agent mode tools union in too — picking "Code Generator" should grant
   // execute_code without forcing the user to also tweak the character.
   for (const t of activeMode?.tools ?? []) allowed.add(t)

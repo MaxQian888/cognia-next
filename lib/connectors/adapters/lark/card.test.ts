@@ -99,7 +99,7 @@ describe("segmentToLarkBody", () => {
     expect(content.text).toBe("[card]")
   })
 
-  it("file segment → text with link", () => {
+  it("file segment with remote URL → text with link (degraded)", () => {
     const body = segmentToLarkBody({
       type: "file",
       url: "https://example.com/doc.pdf",
@@ -113,8 +113,46 @@ describe("segmentToLarkBody", () => {
     expect(content.text).toContain("https://example.com/doc.pdf")
   })
 
-  it("voice segment → null (unsupported)", () => {
-    expect(segmentToLarkBody({ type: "voice", url: "https://example.com/audio.ogg" })).toBeNull()
+  it("file segment with resolved file_key → msg_type file with file_key + file_name", () => {
+    const body = segmentToLarkBody({
+      type: "file",
+      url: "file_v3_uploaded_pdf",
+      name: "doc.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 1024,
+    })
+    expect(body!.msg_type).toBe("file")
+    const content = JSON.parse(body!.content) as { file_key: string; file_name: string }
+    expect(content.file_key).toBe("file_v3_uploaded_pdf")
+    expect(content.file_name).toBe("doc.pdf")
+  })
+
+  it("voice segment with resolved file_key → msg_type audio", () => {
+    const body = segmentToLarkBody({ type: "voice", url: "file_v3_voice_abc" })
+    expect(body!.msg_type).toBe("audio")
+    const content = JSON.parse(body!.content) as { file_key: string }
+    expect(content.file_key).toBe("file_v3_voice_abc")
+  })
+
+  it("voice segment with remote URL → text-link fallback (degraded, not silent)", () => {
+    const body = segmentToLarkBody({ type: "voice", url: "https://example.com/audio.opus" })
+    expect(body!.msg_type).toBe("text")
+    const content = JSON.parse(body!.content) as { text: string }
+    expect(content.text).toContain("https://example.com/audio.opus")
+  })
+
+  it("video segment with resolved file_key → msg_type media", () => {
+    const body = segmentToLarkBody({ type: "video", url: "file_v3_video_xyz" })
+    expect(body!.msg_type).toBe("media")
+    const content = JSON.parse(body!.content) as { file_key: string }
+    expect(content.file_key).toBe("file_v3_video_xyz")
+  })
+
+  it("video segment with remote URL → text-link fallback", () => {
+    const body = segmentToLarkBody({ type: "video", url: "https://example.com/clip.mp4" })
+    expect(body!.msg_type).toBe("text")
+    const content = JSON.parse(body!.content) as { text: string }
+    expect(content.text).toContain("https://example.com/clip.mp4")
   })
 
   it("emoji segment → null (unsupported)", () => {

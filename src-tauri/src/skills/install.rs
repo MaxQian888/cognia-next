@@ -134,3 +134,138 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
     }
     Ok(buf)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_dir_name_accepts_kebab_case() {
+        assert!(validate_dir_name("my-skill").is_ok());
+        assert!(validate_dir_name("Skill_v2").is_ok());
+        assert!(validate_dir_name("a").is_ok());
+    }
+
+    #[test]
+    fn validate_dir_name_rejects_empty() {
+        assert!(validate_dir_name("").is_err());
+    }
+
+    #[test]
+    fn validate_dir_name_rejects_too_long() {
+        let long = "a".repeat(65);
+        assert!(validate_dir_name(&long).is_err());
+    }
+
+    #[test]
+    fn validate_dir_name_rejects_leading_or_trailing_dash() {
+        assert!(validate_dir_name("-skill").is_err());
+        assert!(validate_dir_name("skill-").is_err());
+    }
+
+    #[test]
+    fn validate_dir_name_rejects_invalid_chars() {
+        assert!(validate_dir_name("../etc").is_err());
+        assert!(validate_dir_name("with space").is_err());
+        assert!(validate_dir_name("with/slash").is_err());
+        assert!(validate_dir_name("with\\bs").is_err());
+        assert!(validate_dir_name("with.dot").is_err());
+    }
+
+    #[test]
+    fn validate_resource_path_rejects_traversal() {
+        assert!(validate_resource_path("..").is_err());
+        assert!(validate_resource_path("foo/../bar").is_err());
+        assert!(validate_resource_path("../etc/passwd").is_err());
+    }
+
+    #[test]
+    fn validate_resource_path_rejects_empty_components() {
+        assert!(validate_resource_path("").is_err());
+        assert!(validate_resource_path("foo//bar").is_err());
+        assert!(validate_resource_path("foo/./bar").is_err());
+    }
+
+    #[test]
+    fn validate_resource_path_accepts_normal_paths() {
+        assert!(validate_resource_path("scripts/foo.sh").is_ok());
+        assert!(validate_resource_path("references/notes.md").is_ok());
+        assert!(validate_resource_path("assets/logo.png").is_ok());
+        assert!(validate_resource_path("nested/deep/path.txt").is_ok());
+    }
+
+    #[test]
+    fn resolve_resource_path_prepends_kind_subdir() {
+        let dir = PathBuf::from("/skills/x");
+        let r = NativeSkillResource {
+            kind: "script".to_string(),
+            path: "foo.sh".to_string(),
+            name: "foo".to_string(),
+            content: String::new(),
+            encoding: "utf-8".to_string(),
+            mime_type: None,
+            size: 0,
+        };
+        assert_eq!(
+            resolve_resource_path(&dir, &r),
+            PathBuf::from("/skills/x/scripts/foo.sh")
+        );
+    }
+
+    #[test]
+    fn resolve_resource_path_preserves_explicit_prefix() {
+        let dir = PathBuf::from("/skills/x");
+        let r = NativeSkillResource {
+            kind: "reference".to_string(),
+            path: "scripts/already.sh".to_string(),
+            name: "already".to_string(),
+            content: String::new(),
+            encoding: "utf-8".to_string(),
+            mime_type: None,
+            size: 0,
+        };
+        assert_eq!(
+            resolve_resource_path(&dir, &r),
+            PathBuf::from("/skills/x/scripts/already.sh")
+        );
+    }
+
+    #[test]
+    fn resolve_resource_path_falls_back_for_unknown_kind() {
+        let dir = PathBuf::from("/skills/x");
+        let r = NativeSkillResource {
+            kind: "weird".to_string(),
+            path: "blob".to_string(),
+            name: "b".to_string(),
+            content: String::new(),
+            encoding: "utf-8".to_string(),
+            mime_type: None,
+            size: 0,
+        };
+        assert_eq!(
+            resolve_resource_path(&dir, &r),
+            PathBuf::from("/skills/x/files/blob")
+        );
+    }
+
+    #[test]
+    fn base64_decode_round_trip_ascii() {
+        // "Hello" -> SGVsbG8=
+        assert_eq!(base64_decode("SGVsbG8=").unwrap(), b"Hello");
+    }
+
+    #[test]
+    fn base64_decode_handles_whitespace() {
+        assert_eq!(base64_decode("SGVs\nbG8=").unwrap(), b"Hello");
+    }
+
+    #[test]
+    fn base64_decode_rejects_invalid_chars() {
+        assert!(base64_decode("@@@@").is_err());
+    }
+
+    #[test]
+    fn base64_decode_empty_string() {
+        assert_eq!(base64_decode("").unwrap(), Vec::<u8>::new());
+    }
+}

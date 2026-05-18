@@ -1,17 +1,20 @@
 import type { Capability } from "@/types/connectors/capability"
 
 /**
- * Phase-1 capability flags declared by the Lark adapter.
+ * Capability flags declared by the Lark adapter.
  *
  * Kept in alphabetical order for stable diffs.
  *
  * Notes:
- *  - send.typing: Lark has no native typing indicator for bots in Phase 1.
+ *  - send.typing: Lark has no native typing indicator for bots.
  *  - rich-card.lark: Lark interactive card (im v1 cards 2.0).
  *  - history.fetch: /im/v1/messages list with cursor pagination.
- *  - send.voice / send.video: Lark supports these via media_key upload;
- *    Phase 1 ships the capability flag to document intent; full upload path
- *    (key resolution) lands in Phase 2.
+ *  - send.voice / send.video / send.file / send.image: handled by
+ *    `lark/upload.ts` which runs an async upload pre-pass on outbound,
+ *    resolving remote URLs to Lark `file_key` / `image_key` via
+ *    `connectors_lark_upload_file` / `connectors_lark_upload_image` Tauri
+ *    commands. Already-resolved keys (no `://` in the URL) skip the
+ *    upload.
  */
 export const LARK_CAPS: readonly Capability[] = [
   "delete",

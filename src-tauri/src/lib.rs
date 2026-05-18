@@ -18,6 +18,7 @@ mod hooks;
 mod keyring_secrets;
 mod logging;
 mod mcp_server;
+mod ocr;
 mod plugin_api;
 mod plugins;
 mod proxy_config;
@@ -199,6 +200,9 @@ pub fn run() {
         // instance; the renderer pushes device registrations via
         // `companion_signaling_sync_devices` after Dexie hydration completes.
         .manage(companion_api::signaling::SignalingHub::new())
+        // ADR-0024 — Native OCR registry. Backends are populated in the
+        // setup hook after platform detection (Windows MSIX check, etc.).
+        .manage(ocr::NativeOcrRegistry::new())
         // CLI bridge — loopback-only HTTP listener that `cognia-cli` talks
         // to for `install`/`uninstall`/`reload`. Spawned at app boot in the
         // setup hook below; this `.manage(...)` just registers the state
@@ -482,6 +486,8 @@ pub fn run() {
             connectors::commands::connectors_ws_send,
             connectors::commands::connectors_ws_close,
             connectors::commands::connectors_attachment_fetch,
+            connectors::commands::connectors_lark_upload_file,
+            connectors::commands::connectors_lark_upload_image,
             remote_control::commands::remote_control_get_status,
             remote_control::commands::remote_control_start,
             remote_control::commands::remote_control_stop,
@@ -581,6 +587,9 @@ pub fn run() {
             plugins::computer_use::commands::plugin_computer_use_execute,
             plugins::computer_use::commands::plugin_computer_use_bash,
             plugins::computer_use::commands::plugin_computer_use_text_editor,
+            ocr::ocr_extract_native,
+            ocr::ocr_list_native_backends,
+            ocr::msix::ocr_msix_status,
         ])
         .setup(|app| {
             // Bootstrap native logging in *all* builds. Installs tauri-plugin-log
@@ -590,6 +599,17 @@ pub fn run() {
             // `log://log` events.
             if let Err(error) = logging::bootstrap(app) {
                 log::warn!("native_logging bootstrap failed: {error}");
+            }
+
+            // ADR-0024 — install the OCR native backends. Each enabled
+            // Cargo feature (`ocr-tesseract`, `ocr-windows`, `ocr-apple`)
+            // contributes its backend; absent features land a placeholder
+            // that reports `MissingBinding` so the frontend can fall back.
+            {
+                let ocr_state = app.state::<ocr::NativeOcrRegistry>().inner().clone();
+                tauri::async_runtime::spawn(async move {
+                    ocr::install_default_backends(&ocr_state).await;
+                });
             }
 
             // Workflow subsystem (ADR 0011) — construct the cron daemon +

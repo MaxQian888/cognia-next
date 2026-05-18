@@ -20,7 +20,6 @@ describe("TELEGRAM_CAPS", () => {
       "edit",
       "delete",
       "typing",
-      "history.fetch",
       "rich-markdown.telegram",
     ]
     for (const cap of required) {
@@ -28,7 +27,11 @@ describe("TELEGRAM_CAPS", () => {
     }
   })
 
-  it("has exactly 14 entries", () => {
-    expect(TELEGRAM_CAPS).toHaveLength(14)
+  it("does NOT include history.fetch (Bot API does not expose chat history)", () => {
+    expect(TELEGRAM_CAPS).not.toContain("history.fetch")
+  })
+
+  it("has exactly 13 entries", () => {
+    expect(TELEGRAM_CAPS).toHaveLength(13)
   })
 })
