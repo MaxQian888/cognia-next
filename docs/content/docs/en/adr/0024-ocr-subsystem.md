@@ -1,11 +1,14 @@
 ---
 title: ADR 0024 — OCR subsystem
-description: Cross-shell text extraction from images and PDFs. Plumbs 17 OCR providers behind one `extract()` surface, with a platform-aware auto-router, a Dexie-backed result cache, and a PDF text-layer fast-path.
+description: Cross-shell text extraction from images and PDFs. Plumbs 20 OCR providers behind one `extract()` surface, with a platform-aware auto-router, a Dexie-backed result cache, and a PDF text-layer fast-path.
 ---
 
 # ADR 0024 — OCR subsystem
 
-> **Status**: Accepted on 2026-05-18.
+> **Status**: Accepted on 2026-05-18. Revised 2026-05-18 to add three more
+> local providers — `ocrs` (pure-Rust ONNX via RTen), `paddle-ocr`
+> (PP-OCRv5 via `oar-ocr` + ONNX Runtime), and `local-http` (generic
+> adapter for self-hosted servers like Umi-OCR / PaddleOCR-Server).
 
 ## Context
 
@@ -31,15 +34,16 @@ caller — composer menu, `/ocr` slash command, `ocr.extract` plugin tool —
 goes through the same dispatch path so the cache, auto-router, and
 credential lookups stay in one place.
 
-### Provider matrix (17)
+### Provider matrix (20)
 
-| Category            | Providers                                                                                  |
-| ------------------- | ------------------------------------------------------------------------------------------ |
-| Document OCR cloud  | `mistral-ocr`, `google-vision`, `aws-textract`, `azure-document-intelligence`              |
-| LLM vision cloud    | `anthropic-vision`, `openai-vision`, `gemini-vision`                                       |
-| Specialist cloud    | `mathpix`, `ocr-space`, `abbyy-cloud`, `nanonets`                                          |
-| Feishu / Lark cloud | `lark-basic`                                                                               |
-| On-device           | `tesseract-wasm`, `tesseract-native`, `windows-media-ocr`, `apple-vision`, `mlkit-android` |
+| Category            | Providers                                                                                                                  |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Document OCR cloud  | `mistral-ocr`, `google-vision`, `aws-textract`, `azure-document-intelligence`                                              |
+| LLM vision cloud    | `anthropic-vision`, `openai-vision`, `gemini-vision`                                                                       |
+| Specialist cloud    | `mathpix`, `ocr-space`, `abbyy-cloud`, `nanonets`                                                                          |
+| Feishu / Lark cloud | `lark-basic`                                                                                                               |
+| On-device           | `tesseract-wasm`, `tesseract-native`, `windows-media-ocr`, `apple-vision`, `mlkit-android`, `ocrs`, `paddle-ocr`           |
+| Self-hosted HTTP    | `local-http` — generic adapter, dialect-aware (Umi-OCR / PaddleOCR-Server). User-pinned, never auto-selected by the router |
 
 The three LLM-vision providers (`anthropic-vision`, `openai-vision`,
 `gemini-vision`) reuse the main provider keyring entries instead of asking
@@ -107,27 +111,56 @@ clear manually.
 
 ### Native bindings (Rust)
 
-`src-tauri/src/ocr/mod.rs` exposes two Tauri commands:
+`src-tauri/src/ocr/mod.rs` exposes four Tauri commands:
 
 - `ocr_extract_native(payload)` — dispatches by `payload.backend`
-  (`tesseract` / `windows-media-ocr` / `apple-vision`) to the registered
-  `NativeBackend`.
+  (`tesseract` / `windows-media-ocr` / `apple-vision` / `ocrs` /
+  `paddle-ocr`) to the registered `NativeBackend`.
 - `ocr_msix_status()` — reports whether the running Windows process has an
   MSIX package identity. The frontend caches this at boot and uses it to
   gate `windows-media-ocr` in the auto-router.
+- `ocr_model_status(backend)` — reports per-file installation state for
+  backends that download their own weights (`ocrs`, `paddle-ocr`). Returns
+  `{ installed, files[], total_bytes, model_dir }`; the auto-router
+  consults this to skip backends whose models aren't downloaded yet.
+- `ocr_download_model(backend)` — streams the upstream model files into
+  `<app_data>/cognia/ocr/<backend>/`, emitting `ocr://download-progress`
+  events as bytes land. Writes a `manifest.json` with SHA-256s on
+  completion. Idempotent — re-running a successful download is a no-op
+  for files whose digest already matches.
 
-Real bindings ride three Cargo features:
+Real bindings ride five Cargo features (all default-off so the standard
+build stays fast; release pipeline turns on `ocr-ocrs` and `ocr-paddle`):
 
 - `ocr-tesseract` → `tesseract-rs` (cross-platform, statically linked
   libtesseract + leptonica).
 - `ocr-windows` → `winocr` crate (Windows + MSIX).
 - `ocr-apple` → Swift sidecar at `src-tauri/sidecars/apple-vision-ocr/`
   bundled via `tauri.conf.json` `bundle.externalBin`.
+- `ocr-ocrs` → `ocrs` + `rten` (pure-Rust, no system deps).
+- `ocr-paddle` → `oar-ocr` + `ort` (PP-OCRv5 via ONNX Runtime; pinned to
+  `ort = "=2.0.0-rc.12"` to avoid ABI churn between RCs).
 
 When a feature is off the registry advertises a `PlaceholderBackend` that
 returns `MissingBinding(id)`. The TS layer surfaces that as
 `OcrError("unsupported_shell")` and the auto-router falls through to the
 next candidate.
+
+### Model distribution
+
+`ocrs` and `paddle-ocr` would each add ~12–17 MB of weights to the
+installer. Instead the bundle ships without weights and the settings UI
+exposes a "Download models" button per backend. Files land in
+`<app_data>/cognia/ocr/<backend>/` and are advertised to the auto-router
+via `ocr_model_status`. License notes:
+
+- `ocrs` detection + recognition models — Apache-2.0 (trained on HierText,
+  CC-BY-SA 4.0 for the dataset; weights themselves are Apache-2.0).
+- PP-OCRv5_mobile models — Apache-2.0.
+
+The download path goes through the OS's normal HTTPS stack; no signing
+or pinning beyond standard TLS. The optional `manifest.json` written
+alongside the files records SHA-256s for tamper detection on later boots.
 
 ### Testing strategy
 

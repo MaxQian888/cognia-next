@@ -1,5 +1,5 @@
 import type { PlatformKind } from "./platform-kind"
-import type { Capability } from "./capability"
+import type { A2UICapabilityMatrix, Capability } from "./capability"
 import type { NormalizedInboundEvent } from "./event"
 import type { OutboundRequest, OutboundResult } from "./outbound"
 
@@ -124,4 +124,16 @@ export interface PlatformAdapter {
     opts: HistoryFetchOpts
   ): AsyncIterable<NormalizedInboundEvent>
   refreshCredentials?(): Promise<void>
+  /**
+   * Per-adapter A2UI projection matrix. Returned synchronously so
+   * `build-options.ts:resolveSendOptions` can inject a capability-aware
+   * system prompt without an async fan-out at every send.
+   *
+   * Adapters that do not implement any native A2UI projection should still
+   * return a matrix where everything defaults to `"fallback"` — the
+   * assistant remains free to emit A2UI, but every component will degrade
+   * to `plainTextMirror`. Returning `undefined` is reserved for the `stub`
+   * adapter used in tests.
+   */
+  a2uiCapability(): A2UICapabilityMatrix
 }

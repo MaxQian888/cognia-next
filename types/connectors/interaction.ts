@@ -1,0 +1,152 @@
+/**
+ * Unified inbound-callback envelope.
+ *
+ * Platforms that ship interactive rich content (Slack Block Kit buttons /
+ * Lark interactive cards / Telegram inline keyboards / Discord message
+ * components) deliver user actions through platform-specific payloads:
+ *
+ *   - Slack:    `block_actions` POST with `actions[]`, container.message_ts
+ *   - Lark:     `im.interactive_message.action_triggered_v1`
+ *   - Telegram: `callback_query` update with opaque `data` string
+ *   - Discord:  `INTERACTION_CREATE` dispatch (components / modal_submit)
+ *
+ * Each adapter parser normalises its native payload into the shape below
+ * and hands it to `ConnectorBus.dispatchConnectorCallback`. The bus then:
+ *
+ *   1. dedupes against `recordAndCheckInbound(triggerId, "callback")`,
+ *   2. writes an audit row,
+ *   3. routes to the `a2ui-bridge` MCP server's
+ *      `a2ui_handle_connector_action` tool, which injects an A2UI
+ *      ActionEvent on the matching surface so the assistant's next turn
+ *      sees the interaction as if the user had clicked inside the
+ *      browser/Tauri renderer.
+ *
+ * `surfaceId` and `componentId` are recovered by the adapter at parse
+ * time — either by reading the action_id we baked in at outbound (the
+ * mapper assigns IDs like `a2ui:<surfaceId>:<componentId>:<action>` so
+ * round-trip is deterministic), or via the `connectorCallbackBindings`
+ * lookup when the platform forces opaque IDs (Telegram limits
+ * `callback_data` to 64 bytes).
+ *
+ * OneBot is intentionally absent: the OneBot v11 / v12 protocols do not
+ * define an interactive-message concept. Adapters for OneBot never emit
+ * `ConnectorCallbackEvent`.
+ */
+
+import type { PlatformKind } from "./platform-kind"
+import type { PlatformIdentity } from "./event"
+
+export type ConnectorCallbackActionType =
+  // A2UI Button.action — `value` carries the action identifier
+  | "button"
+  // A2UI Select / RadioGroup — `value` is the chosen option key
+  | "select"
+  // A2UI Checkbox / Switch — `value` is "true"/"false"
+  | "checkbox"
+  // A2UI TextField / TextArea inline edit — `value` is the new text
+  | "input"
+  // A2UI Form / modal submit — `payload` holds the full form values
+  | "submit"
+  // Slack view_closed, Lark card dismiss, Discord modal cancel — `value` is empty
+  | "dismiss"
+  // Generic catch-all for platform-specific interactions the bridge
+  // should still surface as an event (e.g., Slack `external_select`
+  // dynamic option requests). `payload` carries the platform-specific
+  // shape; the assistant decides what to do with it.
+  | "platform_specific"
+
+export interface ConnectorCallbackEvent {
+  platform: PlatformKind
+  adapterId: string
+  /** Identifier of the bot/app that received the callback. */
+  selfId: string
+  /**
+   * Unique per-callback id. Used by the dedup ledger (namespace
+   * `"callback"`) and as the audit row primary key. Must be stable
+   * across redeliveries — adapters that don't get a real id from the
+   * platform fabricate one from `(adapterId, signature, payloadHash)`.
+   */
+  triggerId: string
+  /**
+   * A2UI surface this callback targets. Recovered from the
+   * `connectorCallbackBindings` Dexie table or directly parsed out of
+   * the action_id when the platform allows long opaque payloads.
+   */
+  surfaceId: string
+  /**
+   * The A2UI component id (inside the surface's `components` map) that
+   * fired the action. Optional because some platforms emit surface-level
+   * actions (e.g., view dismiss) without a component anchor.
+   */
+  componentId?: string
+  actionType: ConnectorCallbackActionType
+  /**
+   * Primary value for single-value actions (button action id, selected
+   * option key, checkbox boolean as string, etc.). Empty for `submit`
+   * and `platform_specific`.
+   */
+  value: string
+  /**
+   * Full structured payload for multi-value actions (form submissions,
+   * platform_specific events). Adapters keep payload keys aligned with
+   * the A2UI component's dataModel path so the bridge can patch the
+   * surface model directly.
+   */
+  payload?: Record<string, unknown>
+  /**
+   * The platform-side message id this callback originated from. Useful
+   * for adapters that need to ack the platform (`tg.answerCallbackQuery`,
+   * Slack `response_url`, Lark card update) after the assistant responds.
+   */
+  originatingMessageId?: string
+  /**
+   * Optional conversation key — populated when the platform surfaces the
+   * channel where the click happened. The bridge uses it to scope the
+   * assistant's next turn to the right ChatSession.
+   */
+  conversationKey?: string
+  /**
+   * User who triggered the callback. The bridge passes this through to
+   * the assistant so policies (per-user allowlist / blocklist) can apply.
+   */
+  user: PlatformIdentity
+  /** Wall-clock at which the platform fired the event. */
+  timestamp: number
+  /**
+   * Raw platform payload, kept for the audit log and so the adapter's
+   * ack-step can look up its own fields without re-parsing. Bus does not
+   * inspect.
+   */
+  raw: unknown
+}
+
+/**
+ * Persisted association between an outbound A2UI surface and the
+ * platform-specific identifiers we need to route inbound callbacks back
+ * to it.
+ *
+ * Stored in Dexie table `connectorCallbackBindings` added at schema v38.
+ * One row per (adapter, surface, component, action) combination written
+ * by the A2UI mapper at outbound time; read by the parser at callback
+ * arrival.
+ *
+ *   - Slack:    `actionId` = the Slack `action_id` we generated.
+ *   - Lark:     `actionId` = the `value.tag` we baked into the card.
+ *   - Telegram: `actionId` = an opaque short id (Telegram caps
+ *                 callback_data at 64 bytes, so we keep a lookup row).
+ *   - Discord:  `actionId` = the `custom_id` we generated.
+ */
+export interface ConnectorCallbackBindingRow {
+  /** `${adapterId}:${actionId}` */
+  id: string
+  adapterId: string
+  /** Platform-side callback identifier. */
+  actionId: string
+  surfaceId: string
+  componentId?: string
+  conversationKey?: string
+  /** When the binding was written — used by LRU prune to drop old rows. */
+  createdAt: number
+  /** Optional explicit TTL ms-since-epoch. */
+  expiresAt?: number
+}

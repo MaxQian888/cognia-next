@@ -171,9 +171,12 @@ export function SkillEditorWorkspace() {
           <div className="flex flex-1 flex-col">
             {activeFile && (
               <SkillMonacoEditor
+                key={activeFile.id}
                 value={activeFile.draftContent}
                 language={activeFile.language}
                 onChange={(v) => updateDraftContent(activeFile.id, v)}
+                skillId={ws.activeSkillId ?? undefined}
+                documentId={activeFile.id}
               />
             )}
             <div className="flex items-center justify-between gap-2 border-t bg-muted/30 px-3 py-1 font-mono text-[10px] text-muted-foreground">

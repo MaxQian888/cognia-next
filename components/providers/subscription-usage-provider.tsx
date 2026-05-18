@@ -9,7 +9,7 @@
 
 import { useEffect } from "react"
 
-import { subscribeToUsageHeaders } from "@/lib/anthropic-subscription/usage-collector"
+import { subscribeToUsageHeaders } from "@/lib/subscription/anthropic/usage-collector"
 import { isTauri } from "@/lib/tauri"
 
 export function SubscriptionUsageProvider({ children }: { children: React.ReactNode }) {

@@ -54,14 +54,23 @@ export interface AutoRouterDeps {
   hasCredentials?: HasCredentialsFn
 }
 
-/** Built-in defaults — overridable via `AutoRouterDeps.localPreference`. */
+/**
+ * Built-in defaults — overridable via `AutoRouterDeps.localPreference`.
+ *
+ * `ocrs` and `paddle-ocr` are pure-Rust local engines wired through the
+ * `ocr-ocrs` / `ocr-paddle` Cargo features. They sit just behind the
+ * platform-native engines (Windows.Media.Ocr, Apple Vision) and ahead of
+ * Tesseract because they require no system toolchain and emit per-line
+ * bboxes. `local-http` stays out of the preference list — its endpoint
+ * is user-configured, so the user picks it explicitly in settings.
+ */
 export const DEFAULT_LOCAL_PREFERENCE: Required<NonNullable<AutoRouterDeps["localPreference"]>> = {
   tauri: [],
   mobile: [],
   web: ["tesseract-wasm"],
-  windows: ["windows-media-ocr", "tesseract-native", "tesseract-wasm"],
-  macos: ["apple-vision", "tesseract-native", "tesseract-wasm"],
-  linux: ["tesseract-native", "tesseract-wasm"],
+  windows: ["windows-media-ocr", "ocrs", "paddle-ocr", "tesseract-native", "tesseract-wasm"],
+  macos: ["apple-vision", "ocrs", "paddle-ocr", "tesseract-native", "tesseract-wasm"],
+  linux: ["ocrs", "paddle-ocr", "tesseract-native", "tesseract-wasm"],
   ios: ["apple-vision", "tesseract-wasm"],
   android: ["mlkit-android", "tesseract-wasm"],
   browser: ["tesseract-wasm"],

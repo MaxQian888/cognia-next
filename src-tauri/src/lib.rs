@@ -1,14 +1,12 @@
 mod a2ui_bridge;
 pub mod companion_api;
 mod agents;
-mod anthropic_subscription;
 mod api_key;
 mod automation;
 mod canvas;
 mod ccswitch;
 mod claude;
 mod cli_bridge;
-mod codex_subscription;
 mod commands;
 mod connectors;
 mod external_agent;
@@ -27,6 +25,7 @@ mod scheduler;
 mod settings;
 mod shell;
 mod skills;
+mod subscription;
 mod tts;
 mod vector;
 mod wallpaper;
@@ -183,8 +182,20 @@ pub fn run() {
         // generic shell to the renderer.
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        // ADR-pluginset expansion — see `docs/content/docs/en/adr/` once an ADR
+        // exists. `persisted-scope` survives fs/asset grants across restarts;
+        // `upload` ships chunked upload/download with progress events; `positioner`
+        // is the window-placement helper consumed by the tray UI.
+        .plugin(tauri_plugin_persisted_scope::init())
+        .plugin(tauri_plugin_upload::init())
+        .plugin(tauri_plugin_positioner::init())
         .manage(claude::SidecarState::new())
         .manage(ApiKeyState::new())
+        // ADR-0025 — unified subscription module. In-process cache of the
+        // active account + resolved env per provider. Populated lazily by
+        // `subscription_set_active`; readers (sidecar spawn, external-agent
+        // env-builder) consume it via `subscription_get_active`.
+        .manage(subscription::ActiveAccountState::new())
         .manage(WindowBehavior::new())
         .manage(std::sync::Arc::new(shortcuts::ShortcutRegistry::default()))
         .manage(connectors::ConnectorsState::new())
@@ -275,17 +286,26 @@ pub fn run() {
             ccswitch::commands::ccswitch_list_prompts,
             ccswitch::commands::ccswitch_list_skills,
             ccswitch::commands::write_codex_auth_env,
-            anthropic_subscription::commands::claude_sub_save_token,
-            anthropic_subscription::commands::claude_sub_load_token,
-            anthropic_subscription::commands::claude_sub_clear_token,
-            codex_subscription::commands::codex_sub_save_token,
-            codex_subscription::commands::codex_sub_load_token,
-            codex_subscription::commands::codex_sub_clear_token,
-            codex_subscription::commands::codex_sub_discover,
-            codex_subscription::commands::codex_sub_request_device_code,
-            codex_subscription::commands::codex_sub_poll_device_code,
-            codex_subscription::commands::codex_sub_refresh,
-            codex_subscription::commands::codex_sub_revoke,
+            // ADR-0025 — unified subscription module. Provider-agnostic CRUD,
+            // active-pointer management, and provider preset persistence.
+            subscription::commands::subscription_init,
+            subscription::commands::subscription_list_accounts,
+            subscription::commands::subscription_get_account,
+            subscription::commands::subscription_save_account,
+            subscription::commands::subscription_delete_account,
+            subscription::commands::subscription_rename_account,
+            subscription::commands::subscription_set_active,
+            subscription::commands::subscription_get_active,
+            subscription::commands::subscription_get_preset,
+            subscription::commands::subscription_set_preset,
+            subscription::anthropic::commands::anthropic_oauth_save_pkce_result,
+            subscription::codex::commands::codex_oauth_discover,
+            subscription::codex::commands::codex_oauth_request_device_code,
+            subscription::codex::commands::codex_oauth_poll_device_code,
+            subscription::codex::commands::codex_oauth_refresh,
+            subscription::codex::commands::codex_oauth_revoke,
+            subscription::opencode::commands::opencode_oauth_discover,
+            subscription::opencode::commands::opencode_save_zen_key,
             claude_set_api_key,
             claude_set_provider_env,
             claude_set_oauth_bearer,
@@ -589,6 +609,8 @@ pub fn run() {
             plugins::computer_use::commands::plugin_computer_use_text_editor,
             ocr::ocr_extract_native,
             ocr::ocr_list_native_backends,
+            ocr::ocr_model_status,
+            ocr::ocr_download_model,
             ocr::msix::ocr_msix_status,
         ])
         .setup(|app| {

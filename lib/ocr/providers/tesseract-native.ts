@@ -32,7 +32,7 @@ export interface NativeOcrResult {
 export type NativeOcrInvoker = (payload: NativeOcrInvokePayload) => Promise<NativeOcrResult>
 
 export interface NativeOcrInvokePayload {
-  backend: "tesseract" | "windows-media-ocr" | "apple-vision"
+  backend: "tesseract" | "windows-media-ocr" | "apple-vision" | "ocrs" | "paddle-ocr"
   bytes: Uint8Array
   mimeType: string
   languages: string[]

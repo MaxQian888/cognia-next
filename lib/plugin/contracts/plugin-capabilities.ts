@@ -457,6 +457,35 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "plugin-sdk/typescript/src/context/extended.test.ts",
     ],
   },
+  {
+    // Phase B of the VS Code LSP reuse work (~/.claude/plans/
+    // vscode-lsp-mighty-robin.md). A plugin declaring this capability
+    // ships one or more `lspServers[]` entries — each entry produces a
+    // `CogniaLspClient` that the host spawns on plugin enable and tears
+    // down on disable. Every spawn is gated by `lsp-binary-policy`.
+    // Diagnostics + provider responses route through the existing
+    // `monaco-bridge` + `lsp-protocol-adapter` pipeline.
+    id: "lsp-server",
+    support: "supported",
+    manifestFields: ["lspServers"],
+    runtimeBinding: "lib/plugin/lsp/lsp-registry registerPluginLspServers / unregisterByOwner",
+    hostBindings: [
+      "lib/plugin/lsp/lsp-registry.ts",
+      "lib/plugin/vscode-shim/lsp-binary-policy.ts",
+      "lib/plugin/vscode-shim/lsp-workspace-manager.ts",
+      "lib/plugin/vscode-shim/lsp-protocol-adapter.ts",
+      "lib/plugin/vscode-shim/monaco-bridge.ts",
+      "sidecar/vscode-ext-host/src/lsp-client.ts",
+    ],
+    typescriptSdk: [],
+    pythonSdk: [],
+    builtinContributionPaths: ["plugins/test-lsp-contribution/src/index.ts"],
+    docs: "docs/features/plugin-development.md#capabilities",
+    requiredTests: [
+      "lib/plugin/lsp/lsp-registry.test.ts",
+      "sidecar/vscode-ext-host/tests/lsp-client.test.mjs",
+    ],
+  },
 ] as const
 
 export const CANONICAL_PLUGIN_CAPABILITIES = PLUGIN_CAPABILITY_CONTRACTS.map(

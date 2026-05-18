@@ -70,6 +70,7 @@ export type PluginCapability =
   | "workflow" // Contributes custom workflow node executors (ADR 0017)
   | "workflow-trigger" // Contributes custom workflow trigger sources (ADR 0017)
   | "tray" // Contributes items to the desktop system tray menu (ADR-pending)
+  | "lsp-server" // Contributes a Language Server (Phase B of LSP reuse)
 
 /**
  * Plugin status in the lifecycle
@@ -476,6 +477,24 @@ export interface PluginManifest {
   workflows?: import("./plugin-workflow").PluginManifestWorkflowsBlock
 
   /**
+   * Language Server Protocol servers contributed by this plugin (Phase B
+   * of the VS Code LSP reuse work — see
+   * `~/.claude/plans/vscode-lsp-mighty-robin.md`). Each entry declares an
+   * executable + arguments + the Monaco language ids it serves. The
+   * host's `lib/plugin/lsp/lsp-registry.ts` spawns and tears down each
+   * server in lock-step with plugin enable/disable, gates the spawn
+   * through `lsp-binary-policy`, and wires the server's diagnostics +
+   * provider responses through the existing monaco-bridge.
+   *
+   * Distinct from the `.vsix`-bundled LSP path (Phase A): a plugin
+   * contributing `lspServers` does NOT need to ship a VS Code
+   * extension wrapper — cognia spawns the LSP directly.
+   *
+   * The `lsp-server` capability must be present in `capabilities[]`.
+   */
+  lspServers?: PluginLspServerDef[]
+
+  /**
    * Plugin-declared Dexie (IndexedDB) tables. The host's
    * `lib/plugin/dexie-bridge.ts` aggregates declarations across all enabled
    * plugins and bumps the shared CogniaDB schema once on plugin enable.
@@ -570,6 +589,55 @@ export interface PluginConnectorDef {
 export interface PluginExternalAgentPresetDef extends ExternalAgentPresetConfig {
   /** Stable id used as the registry key (e.g. "claude-code", "codex"). */
   id: string
+}
+
+/**
+ * One Language Server contribution inside `PluginManifest.lspServers`.
+ *
+ * Each entry produces a `CogniaLspClient` (`sidecar/vscode-ext-host/src/
+ * lsp-client.ts`) wrapped with the standard LSP↔Monaco type-conversion
+ * layer. The host materialises a per-surface workspace (via
+ * `lsp-workspace-manager`) when the LSP's first document opens.
+ */
+export interface PluginLspServerDef {
+  /**
+   * Stable id within the plugin. Globally namespaced as
+   * `<pluginId>:<id>` — uniqueness is enforced at register time and
+   * surfaced as an install-time validation error otherwise.
+   */
+  id: string
+  /** Display name shown in the Settings → Language Servers list. */
+  name: string
+  /** Monaco language ids this server handles (e.g. `["typescript", "javascript"]`). */
+  languages: string[]
+  /**
+   * Path to the binary. Relative paths resolve against the plugin's
+   * install directory; absolute paths are honoured but only if the user
+   * explicitly granted them via the binary policy.
+   */
+  command: string
+  /**
+   * Arguments. Supports `${workspaceFolder}` substitution — the workspace
+   * manager replaces it with the absolute path of the active
+   * Skill/Canvas/Artifact workspace at spawn time.
+   */
+  args?: string[]
+  /** Environment variables forwarded to the spawned process. */
+  env?: Record<string, string>
+  /** Transport. Stdio is the only supported value today. */
+  transport?: "stdio"
+  /** Optional initialization options forwarded as LSP `initializationOptions`. */
+  initializationOptions?: Record<string, unknown>
+  /** Optional `workspace/configuration` defaults the server reads at startup. */
+  settings?: Record<string, unknown>
+  /**
+   * When `true`, the registry materialises a real on-disk workspace via
+   * `lsp-workspace-manager` before spawning. Set this for servers that
+   * need filesystem access (rust-analyzer, gopls, pylsp); leave it
+   * `false` for pure stdio servers like vscode-eslint that work with
+   * just textDocument/didOpen.
+   */
+  workspaceFolderRequired?: boolean
 }
 
 /**

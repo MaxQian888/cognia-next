@@ -33,7 +33,7 @@ import type {
   PluginScheduledJobRow,
 } from "./plugin-types"
 import type { WikiArticle, WikiSection, WikiManifest, McpAuditLogRow } from "@/types/wiki"
-import type { SubscriptionUsageRow } from "@/lib/anthropic-subscription/types"
+import type { SubscriptionUsageRow } from "@/lib/subscription/core/types"
 import type {
   AdapterInstanceRow,
   PlatformIdentityRow,
@@ -43,6 +43,7 @@ import type {
   ConnectorAuditRow,
   ConnectorDraftRow,
   ConnectorAttachmentRow,
+  ConnectorCallbackBindingRow,
 } from "./connector-types"
 import type {
   WorkflowRow,
@@ -108,6 +109,7 @@ export class CogniaDB extends Dexie {
   connectorAudit!: Table<ConnectorAuditRow, string>
   connectorDrafts!: Table<ConnectorDraftRow, string>
   connectorAttachments!: Table<ConnectorAttachmentRow, string>
+  connectorCallbackBindings!: Table<ConnectorCallbackBindingRow, string>
   // v20 — Claude subscription usage table. One row per `anthropic-ratelimit-
   // unified-*` header snapshot; capped at 1 000 rows newest-first by
   // `lib/anthropic-subscription/usage-collector.ts`.
@@ -1079,6 +1081,67 @@ export class CogniaDB extends Dexie {
     //   • `pluginId`       — bulk-purge on plugin uninstall.
     this.version(37).stores({
       pluginSkillUsage: "&pluginSkillId, lastUsedAt, pluginId",
+    })
+
+    // v38 — A2UI ⇄ IM connector bridge support.
+    //
+    //   • `inboundLedger` gains a `namespace` field so the same dedup
+    //     ledger can serve inbound messages AND connector callbacks (Slack
+    //     block_actions / Lark card actions / Telegram callback_query /
+    //     Discord component interactions). The compound index
+    //     `[adapterId+namespace+platformMessageId]` replaces the v18
+    //     `[adapterId+platformMessageId]` so lookups remain O(1). The
+    //     upgrade hook backfills `namespace = "inbound"` on every legacy
+    //     row so the new query path still finds them.
+    //
+    //   • `connectorCallbackBindings` is a new table — one row per
+    //     (adapter, A2UI surface, component, platform action_id). Written
+    //     by the platform-specific A2UI mapper at outbound send; read by
+    //     the adapter parser when a callback arrives so the bus can route
+    //     it back to the right surface/component without re-parsing the
+    //     outbound payload. Indexed by `[adapterId+actionId]` for O(1)
+    //     callback-arrival lookup, by `surfaceId` for surface-scoped
+    //     cleanup (e.g., when an A2UI surface is destroyed), and by
+    //     `createdAt` for LRU prune.
+    //
+    //   • `adapterInstances` gains an in-row `lastKnownCapabilities`
+    //     column written at adapter start — no index change because the
+    //     resolver always loads the row by primary key.
+    this.version(38)
+      .stores({
+        inboundLedger:
+          "&id, [adapterId+namespace+platformMessageId], adapterId, receivedAt, namespace",
+        connectorCallbackBindings:
+          "&id, [adapterId+actionId], adapterId, surfaceId, conversationKey, createdAt, expiresAt",
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table("inboundLedger")
+          .toCollection()
+          .modify((row: Record<string, unknown>) => {
+            if (typeof row.namespace !== "string") {
+              row.namespace = "inbound"
+            }
+          })
+      })
+
+    // v39 — VS Code-extension LSP binary trust seed (Phase A of the LSP
+    // reuse work). Pre-populates `trustedPublishers` with the public
+    // signing keys of mainstream extension publishers (Microsoft, rust-
+    // lang, golang, palantir, python-lsp, openvsx, dbaeumer, ms-python,
+    // eamodio) so users don't get prompted on every spawn of well-known
+    // LSP binaries. Idempotent: existing user-trusted rows are never
+    // overwritten; placeholder rows from this seed are replaced when a
+    // future release ships verified fingerprints. See
+    // `lib/db/seed/trusted-publishers.ts`.
+    this.version(39).upgrade(async (tx) => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { seedTrustedPublishers } = require("@/lib/db/seed/trusted-publishers") as {
+        seedTrustedPublishers: (
+          tx: unknown
+        ) => Promise<{ inserted: number; updated: number; skipped: number }>
+      }
+      await seedTrustedPublishers(tx as unknown as Parameters<typeof seedTrustedPublishers>[0])
     })
   }
 

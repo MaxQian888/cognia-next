@@ -116,6 +116,46 @@ const ENABLE_FORMS_PARAM: ParameterDefinition = {
   defaultValue: false,
 }
 
+/** Discriminant for the local-http provider — picks request/response shape. */
+const DIALECT_PARAM: ParameterDefinition = {
+  key: "dialect",
+  type: "select",
+  label: `${PROVIDER_PARAM_PREFIX}.dialect.label`,
+  description: `${PROVIDER_PARAM_PREFIX}.dialect.description`,
+  category: "connection",
+  defaultValue: "umi-ocr",
+  validation: {
+    options: [
+      { value: "umi-ocr", label: `${PROVIDER_PARAM_PREFIX}.dialect.umi-ocr` },
+      { value: "paddleocr-server", label: `${PROVIDER_PARAM_PREFIX}.dialect.paddleocr-server` },
+    ],
+  },
+}
+
+/**
+ * Optional bearer token forwarded to the self-hosted OCR server. Stored
+ * in the settings blob rather than the keyring because the endpoint is
+ * intentionally user-controlled — these are LAN keys, not vendor secrets.
+ */
+const OPTIONAL_API_KEY_PARAM: ParameterDefinition = {
+  key: "apiKey",
+  type: "text",
+  label: `${PROVIDER_PARAM_PREFIX}.apiKey.label`,
+  description: `${PROVIDER_PARAM_PREFIX}.apiKey.description`,
+  category: "connection",
+  defaultValue: "",
+}
+
+const TIMEOUT_PARAM: ParameterDefinition = {
+  key: "timeoutMs",
+  type: "number",
+  label: `${PROVIDER_PARAM_PREFIX}.timeoutMs.label`,
+  description: `${PROVIDER_PARAM_PREFIX}.timeoutMs.description`,
+  category: "advanced",
+  defaultValue: 30000,
+  validation: { min: 1000, max: 600000, step: 1000 },
+}
+
 function compose(
   providerId: string,
   providerName: string,
@@ -172,6 +212,14 @@ export const OCR_PARAMETER_SCHEMAS: Record<string, ProviderParameterSchema> = {
   "windows-media-ocr": compose("windows-media-ocr", "Windows.Media.Ocr", []),
   "apple-vision": compose("apple-vision", "Apple Vision", []),
   "mlkit-android": compose("mlkit-android", "ML Kit Text Recognition", []),
+  ocrs: compose("ocrs", "ocrs (local)", []),
+  "paddle-ocr": compose("paddle-ocr", "PaddleOCR (local)", [MODEL_PARAM("PP-OCRv5_mobile")]),
+  "local-http": compose("local-http", "Local HTTP (self-hosted)", [
+    ENDPOINT_PARAM("http://localhost:1224/api/ocr"),
+    DIALECT_PARAM,
+    OPTIONAL_API_KEY_PARAM,
+    TIMEOUT_PARAM,
+  ]),
 }
 
 /** Returns the parameter schema for a provider id, or null when unknown. */

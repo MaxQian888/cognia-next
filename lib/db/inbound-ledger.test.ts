@@ -32,7 +32,7 @@ describe("inbound-ledger", () => {
     expect(second).toBe(true)
   })
 
-  it("persists a row with correct fields", async () => {
+  it("persists a row with correct fields including the default inbound namespace", async () => {
     const before = Date.now()
     await recordInbound("adp_1", "msg_xyz")
     const db = getDb()
@@ -40,7 +40,33 @@ describe("inbound-ledger", () => {
     expect(rows).toHaveLength(1)
     expect(rows[0].adapterId).toBe("adp_1")
     expect(rows[0].platformMessageId).toBe("msg_xyz")
+    expect(rows[0].namespace).toBe("inbound")
     expect(rows[0].receivedAt).toBeGreaterThanOrEqual(before)
+    // Primary key includes the namespace so callbacks with identical ids
+    // don't collide with messages.
+    expect(rows[0].id).toBe("adp_1:inbound:msg_xyz")
+  })
+
+  it("namespace=callback dedupes independently from inbound", async () => {
+    const firstInbound = await recordInbound("adp_1", "shared_id", "inbound")
+    const firstCallback = await recordInbound("adp_1", "shared_id", "callback")
+    const secondInbound = await recordInbound("adp_1", "shared_id", "inbound")
+    const secondCallback = await recordInbound("adp_1", "shared_id", "callback")
+    expect(firstInbound).toBe(true)
+    expect(firstCallback).toBe(true)
+    expect(secondInbound).toBe(false)
+    expect(secondCallback).toBe(false)
+    expect(await getDb().inboundLedger.count()).toBe(2)
+  })
+
+  it("callback rows are queryable via the compound namespace index", async () => {
+    await recordInbound("adp_1", "trigger_123", "callback")
+    const found = await getDb()
+      .inboundLedger.where("[adapterId+namespace+platformMessageId]")
+      .equals(["adp_1", "callback", "trigger_123"])
+      .first()
+    expect(found).toBeDefined()
+    expect(found?.namespace).toBe("callback")
   })
 
   it("pruneOldest is a no-op when count <= cap", async () => {

@@ -23,7 +23,7 @@ import type {
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
-import { ONEBOT_CAPS } from "./capability"
+import { ONEBOT_A2UI_CAPABILITY, ONEBOT_CAPS } from "./capability"
 import { parseOneBotEvent, clearVariantCache } from "./parse"
 import { parseV11Event, type OneBotV11Event } from "./v11"
 import {
@@ -323,6 +323,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     delete: deleteMessage,
     setTyping,
     refreshCredentials,
+    a2uiCapability: () => ONEBOT_A2UI_CAPABILITY,
     fetchHistory,
   }
 }

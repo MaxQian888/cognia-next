@@ -18,7 +18,7 @@ afterEach(() => {
 })
 
 describe("installOcrRuntime", () => {
-  it("registers all 17 OCR providers in the shared registry", async () => {
+  it("registers all 20 OCR providers in the shared registry", async () => {
     await installOcrRuntime()
     const registry = getSharedOcrRegistry()
     const ids = registry.list().map((p) => p.id)
@@ -41,15 +41,18 @@ describe("installOcrRuntime", () => {
         "windows-media-ocr",
         "apple-vision",
         "mlkit-android",
+        "ocrs",
+        "paddle-ocr",
+        "local-http",
       ])
     )
-    expect(registry.list()).toHaveLength(17)
+    expect(registry.list()).toHaveLength(20)
   })
 
   it("is idempotent — calling twice is a no-op", async () => {
     await installOcrRuntime()
     await installOcrRuntime()
-    expect(getSharedOcrRegistry().list()).toHaveLength(17)
+    expect(getSharedOcrRegistry().list()).toHaveLength(20)
   })
 
   it("accepts a caller-supplied native invoker (used for tests)", async () => {
@@ -95,5 +98,65 @@ describe("installOcrRuntime", () => {
       )
     ).rejects.toMatchObject({ code: "unsupported_shell" })
     expect(probe).toHaveBeenCalled()
+  })
+
+  it("routes the shared invoker to ocrs and paddle-ocr providers", async () => {
+    const invoker = jest.fn(async () => ({ text: "hello", blocks: [] }))
+    await installOcrRuntime({
+      nativeInvoker: invoker,
+      modelReadinessProbe: async () => true,
+    })
+    const ocrs = getSharedOcrRegistry().get("ocrs")!
+    const result = await ocrs.extract(
+      {
+        source: {
+          kind: "data-url",
+          dataUrl: "data:image/png;base64,YWJj",
+          mimeType: "image/png",
+        },
+      },
+      { credentials: { secrets: {} }, config: {}, platform: "tauri" }
+    )
+    expect(invoker).toHaveBeenCalledWith(expect.objectContaining({ backend: "ocrs" }))
+    expect(result.providerId).toBe("ocrs")
+  })
+
+  it("gates ocrs and paddle-ocr on the model-status probe", async () => {
+    const probe = jest.fn(async (_b: "ocrs" | "paddle-ocr") => false)
+    const invoker = jest.fn(async () => ({ text: "", blocks: [] }))
+    await installOcrRuntime({
+      nativeInvoker: invoker,
+      modelReadinessProbe: probe,
+    })
+    const ocrs = getSharedOcrRegistry().get("ocrs")!
+    await expect(
+      ocrs.extract(
+        {
+          source: {
+            kind: "data-url",
+            dataUrl: "data:image/png;base64,YWJj",
+            mimeType: "image/png",
+          },
+        },
+        { credentials: { secrets: {} }, config: {}, platform: "tauri" }
+      )
+    ).rejects.toMatchObject({ code: "unsupported_shell" })
+    expect(probe).toHaveBeenCalledWith("ocrs")
+    expect(invoker).not.toHaveBeenCalled()
+
+    const paddle = getSharedOcrRegistry().get("paddle-ocr")!
+    await expect(
+      paddle.extract(
+        {
+          source: {
+            kind: "data-url",
+            dataUrl: "data:image/png;base64,YWJj",
+            mimeType: "image/png",
+          },
+        },
+        { credentials: { secrets: {} }, config: {}, platform: "tauri" }
+      )
+    ).rejects.toMatchObject({ code: "unsupported_shell" })
+    expect(probe).toHaveBeenCalledWith("paddle-ocr")
   })
 })

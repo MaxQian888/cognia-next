@@ -73,6 +73,58 @@ function normalizeMessageSegments(message: OneBotSegment[] | string | undefined)
 }
 
 /**
+ * Build a synthetic system event for non-message OneBot v11 notices —
+ * member added/removed, friend add request, group join request,
+ * lifecycle, heartbeat. The bus consumes these only at the audit layer
+ * (no StoredMessage written), so the segments stay empty and the
+ * payload's full shape lives in `raw`.
+ */
+function v11SystemEvent(
+  adapterId: string,
+  event: OneBotV11Event,
+  systemKind: NonNullable<NormalizedInboundEvent["systemKind"]>
+): NormalizedInboundEvent {
+  const isGroup = event.group_id !== undefined && event.group_id !== 0
+  const userId = event.user_id ?? 0
+  const groupId = event.group_id ?? 0
+  const chatKey = isGroup ? `g:${groupId}` : `p:${userId}`
+  const conversationKey = buildConversationKey("onebot", adapterId, chatKey)
+  return {
+    platform: "onebot",
+    adapterId,
+    selfId: String(event.self_id),
+    messageId: `${event.post_type}:${event.notice_type ?? event.sub_type ?? "evt"}:${event.time}:${userId}`,
+    conversationRef: {
+      platform: "onebot",
+      adapterId,
+      chatKey,
+      messageType: isGroup ? "group" : "private",
+      groupId: isGroup ? groupId : undefined,
+      userId,
+    },
+    conversationKey,
+    sender: {
+      id: `onebot:${userId}`,
+      platform: "onebot",
+      adapterId,
+      remoteUserId: String(userId),
+    },
+    channel: {
+      id: conversationKey,
+      kind: isGroup ? "group" : "private",
+      platformChannelId: isGroup ? String(groupId) : String(userId),
+    },
+    segments: [],
+    plainText: "",
+    mentions: { selfMentioned: false, users: [] },
+    timestamp: event.time * 1000,
+    raw: event,
+    kind: "system",
+    systemKind,
+  }
+}
+
+/**
  * Build a synthetic delete event from a v11 `notice` recall payload.
  * `group_recall` carries `message_id` (and optionally `group_id`);
  * `friend_recall` carries `message_id` and `user_id`. We don't have full
@@ -148,6 +200,46 @@ export function parseV11Event(
     (event.notice_type === "group_recall" || event.notice_type === "friend_recall")
   ) {
     return v11RecallToEvent(adapterId, event)
+  }
+
+  // ── Notice (member changes, friend additions) → system event ─────────
+  if (event.post_type === "notice") {
+    switch (event.notice_type) {
+      case "group_increase":
+      case "friend_add":
+        return v11SystemEvent(adapterId, event, "member_added")
+      case "group_decrease":
+        return v11SystemEvent(adapterId, event, "member_removed")
+      case "group_msg_emoji_like":
+        // Custom OneBot v11 extension — emoji reaction on a message.
+        return v11SystemEvent(adapterId, event, "reaction_added")
+      default:
+        // Unknown notice types stay unhandled rather than producing
+        // misleading system events. The bus's `unknown.notice` audit
+        // covers them when the transport's audit hooks run.
+        return null
+    }
+  }
+
+  // ── Request (friend / group join request) → audit-only system event ──
+  if (event.post_type === "request") {
+    return v11SystemEvent(adapterId, event, "member_added")
+  }
+
+  // ── Meta event (lifecycle / heartbeat) ──────────────────────────────
+  // The OneBot adapter's reverse-WS transport already tracks heartbeats
+  // for connection health; we surface lifecycle "enable" / "disable"
+  // events as system events so the audit log records them.
+  if (event.post_type === "meta_event") {
+    if (
+      event.sub_type === "enable" ||
+      event.sub_type === "disable" ||
+      event.sub_type === "connect"
+    ) {
+      return v11SystemEvent(adapterId, event, "member_added")
+    }
+    // heartbeat / unknown meta_events are too noisy to log per-tick.
+    return null
   }
 
   if (event.post_type !== "message") return null

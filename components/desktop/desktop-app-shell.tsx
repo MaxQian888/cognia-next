@@ -28,6 +28,7 @@ import { TitleBar } from "@/components/desktop/title-bar"
 import { WindowFocusTracker } from "@/components/desktop/window-focus-tracker"
 import { WindowResizeEdges } from "@/components/desktop/window-resize-edges"
 import { ZoomShortcuts } from "@/components/desktop/zoom-shortcuts"
+import { VscodeExtensionHostBar } from "@/components/extensions/vscode-extension-host-bar"
 import { useMenuEventRouter } from "@/hooks/desktop/use-menu-event-router"
 import { usePlatform } from "@/hooks/use-platform"
 import { whenSeeded } from "@/lib/db/schema"
@@ -102,6 +103,13 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
           <GuildRail onCreateTeam={handleCreateTeam} onOpenSettings={() => handleOpenSettings()} />
         )}
         <div className="flex min-w-0 flex-1 overflow-hidden">{children}</div>
+        {/*
+         * VS Code extension host bar — hosts webviews + terminals from
+         * any activated extension. Returns `null` until an extension
+         * registers a surface, so the layout is unchanged in the
+         * default case. Phase A4 of the LSP reuse work.
+         */}
+        <VscodeExtensionHostBar className="hidden w-72 shrink-0 border-l lg:flex" />
       </div>
       {mounted && <CommandPalette onOpenSettings={handleOpenSettings} />}
       {!statusBarCollapsed && <StatusBar />}

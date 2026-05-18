@@ -1,4 +1,4 @@
-import { DISCORD_CAPS } from "./capability"
+import { DISCORD_A2UI_CAPABILITY, DISCORD_CAPS } from "./capability"
 
 describe("DISCORD_CAPS", () => {
   it("is sorted alphabetically (stable diff)", () => {
@@ -6,8 +6,9 @@ describe("DISCORD_CAPS", () => {
     expect([...DISCORD_CAPS]).toEqual(sorted)
   })
 
-  it("includes the Phase-1 ship-set", () => {
+  it("includes the G3.2 ship-set (with send.voice + send.video)", () => {
     const required = [
+      "send.a2ui",
       "send.text",
       "send.markdown",
       "send.image",
@@ -15,6 +16,8 @@ describe("DISCORD_CAPS", () => {
       "send.reply",
       "send.mention",
       "send.thread",
+      "send.voice",
+      "send.video",
       "edit",
       "delete",
       "typing",
@@ -24,11 +27,27 @@ describe("DISCORD_CAPS", () => {
     }
   })
 
-  it("does NOT include send.voice (Phase 2)", () => {
-    expect(DISCORD_CAPS).not.toContain("send.voice")
+  it("has exactly 13 entries (Phase-1 + send.a2ui + send.voice + send.video)", () => {
+    expect(DISCORD_CAPS).toHaveLength(13)
+  })
+})
+
+describe("DISCORD_A2UI_CAPABILITY", () => {
+  it("declares Button + Select + Card native", () => {
+    expect(DISCORD_A2UI_CAPABILITY.Button).toBe("native")
+    expect(DISCORD_A2UI_CAPABILITY.Select).toBe("native")
+    expect(DISCORD_A2UI_CAPABILITY.Card).toBe("native")
+    expect(DISCORD_A2UI_CAPABILITY.Image).toBe("native")
   })
 
-  it("has exactly 10 entries", () => {
-    expect(DISCORD_CAPS).toHaveLength(10)
+  it("declares Chart / Table as fallback (no native rendering)", () => {
+    expect(DISCORD_A2UI_CAPABILITY.Chart).toBe("fallback")
+    expect(DISCORD_A2UI_CAPABILITY.Table).toBe("fallback")
+  })
+
+  it("declares form controls as fallback (modals are interaction-launched)", () => {
+    expect(DISCORD_A2UI_CAPABILITY.TextField).toBe("fallback")
+    expect(DISCORD_A2UI_CAPABILITY.TextArea).toBe("fallback")
+    expect(DISCORD_A2UI_CAPABILITY.Checkbox).toBe("fallback")
   })
 })

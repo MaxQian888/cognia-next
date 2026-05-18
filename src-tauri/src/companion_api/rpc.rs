@@ -48,7 +48,6 @@ use serde_json::Value;
 
 use crate::{
     agents::commands as agent_commands,
-    anthropic_subscription::credential,
     api_key::ApiKeyState,
     claude::{
         commands as claude_commands,
@@ -57,7 +56,35 @@ use crate::{
     },
     mcp_server::McpServerState,
     skills::{install, native as skills_native, registry},
+    subscription::{
+        active::ActiveAccountState,
+        anthropic::AnthropicProvider,
+        codex::CodexProvider,
+        opencode::OpencodeProvider,
+        provider::{ProviderId, SubscriptionProvider},
+        vault::{self, Account, ProviderCredential},
+    },
 };
+
+/// Parse `provider` from RPC args. Mirrors `ProviderId::parse` and surfaces
+/// a 400 `malformed_request` envelope on a bad value.
+fn parse_provider(args: &Value) -> Result<ProviderId, (StatusCode, Json<RpcError>)> {
+    let value: String = required(args, "provider")?;
+    ProviderId::parse(&value).map_err(RpcError::malformed)
+}
+
+/// Dispatch validation through the per-provider `SubscriptionProvider` impl.
+fn validate_credential(
+    provider: ProviderId,
+    credential: &ProviderCredential,
+) -> Result<(), (StatusCode, Json<RpcError>)> {
+    let result = match provider {
+        ProviderId::Anthropic => AnthropicProvider.validate(credential),
+        ProviderId::Codex => CodexProvider.validate(credential),
+        ProviderId::Opencode => OpencodeProvider.validate(credential),
+    };
+    result.map_err(RpcError::malformed)
+}
 
 use super::{middleware::DeviceContext, SharedState};
 
@@ -490,25 +517,83 @@ pub(super) async fn dispatch(
                 })
         }
 
-        // ── Subscription / OAuth ─────────────────────────────────────────────
+        // ── Subscription / OAuth (ADR-0025) ──────────────────────────────────
+        // The legacy `claude_sub_*` / `codex_sub_*` RPC names are gone; mobile
+        // clients use the unified `subscription_*` surface below. The provider
+        // is selected by the `provider` arg ("anthropic" | "codex" | "opencode").
 
-        "claude_sub_save_token" => {
-            let payload: crate::anthropic_subscription::credential::SubscriptionCredential =
-                required(&args, "payload")?;
-            credential::save(&payload)
-                .map(|_| Value::Null)
-                .map_err(RpcError::internal)
+        "subscription_list_accounts" => {
+            let provider_id = parse_provider(&args)?;
+            let vault = vault::load(provider_id)
+                .map_err(RpcError::internal)?
+                .unwrap_or_else(vault::ProviderVault::empty);
+            let summaries = vault
+                .accounts
+                .iter()
+                .map(vault::AccountSummary::from_account)
+                .collect::<Vec<_>>();
+            serde_json::to_value(summaries).map_err(|e| RpcError::internal(e.to_string()))
         }
 
-        "claude_sub_load_token" => credential::load()
-            .map_err(RpcError::internal)
-            .and_then(|opt| {
-                serde_json::to_value(opt).map_err(|e| RpcError::internal(e.to_string()))
-            }),
+        "subscription_get_account" => {
+            let provider_id = parse_provider(&args)?;
+            let account_id: String = required(&args, "account_id")?;
+            let vault = vault::load(provider_id).map_err(RpcError::internal)?;
+            let account = vault.and_then(|v| v.find_account(&account_id).cloned());
+            serde_json::to_value(account).map_err(|e| RpcError::internal(e.to_string()))
+        }
 
-        "claude_sub_clear_token" => credential::clear()
-            .map(|_| Value::Null)
-            .map_err(RpcError::internal),
+        "subscription_save_account" => {
+            let provider_id = parse_provider(&args)?;
+            let account: Account = required(&args, "account")?;
+            if account.credential.provider() != provider_id {
+                return Err(RpcError::malformed(
+                    "credential provider mismatches the requested provider".into(),
+                ));
+            }
+            validate_credential(provider_id, &account.credential)?;
+            let mut vault_doc = vault::load(provider_id)
+                .map_err(RpcError::internal)?
+                .unwrap_or_else(vault::ProviderVault::empty);
+            vault_doc.upsert_account(account);
+            vault::save(provider_id, &vault_doc).map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
+
+        "subscription_delete_account" => {
+            let provider_id = parse_provider(&args)?;
+            let account_id: String = required(&args, "account_id")?;
+            let mut vault_doc = match vault::load(provider_id).map_err(RpcError::internal)? {
+                Some(v) => v,
+                None => return Ok(Value::Null),
+            };
+            vault_doc.remove_account(&account_id);
+            vault::save(provider_id, &vault_doc).map_err(RpcError::internal)?;
+            Ok(Value::Null)
+        }
+
+        "subscription_get_active" => {
+            let provider_id = parse_provider(&args)?;
+            let state: tauri::State<'_, ActiveAccountState> = app.state();
+            let snapshot = state.get(provider_id).await;
+            serde_json::to_value(snapshot).map_err(|e| RpcError::internal(e.to_string()))
+        }
+
+        "subscription_set_active" => {
+            let provider_id = parse_provider(&args)?;
+            let account_id: Option<String> = optional(&args, "account_id")?;
+            let mut vault_doc = vault::load(provider_id)
+                .map_err(RpcError::internal)?
+                .unwrap_or_else(vault::ProviderVault::empty);
+            vault_doc.active_account_id = account_id.clone();
+            vault::save(provider_id, &vault_doc).map_err(RpcError::internal)?;
+            // We don't replicate the full Tauri-side sidecar restart here —
+            // the mobile client is read-only against the active env. The
+            // local desktop will pick the change up the next time the
+            // renderer calls `subscription_set_active` (which DOES wire the
+            // sidecar restart).
+            Ok(Value::Null)
+        }
 
         "claude_set_oauth_bearer" => {
             let token: Option<String> = optional(&args, "token")?;

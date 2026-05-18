@@ -9,15 +9,19 @@ describe("lsp-binary-policy", () => {
   let audit: AutomationAuditLogRow[]
   let publishers: TrustedPublisherRow[]
 
+  let devModeFlag: boolean
+
   beforeEach(() => {
     __resetLspBinaryPolicyForTesting()
     audit = []
     publishers = []
+    devModeFlag = false
     configureLspBinaryPolicy({
       findTrustedPublisherByFingerprint: async (fp) => publishers.find((p) => p.fingerprint === fp),
       appendAudit: async (row) => {
         audit.push(row)
       },
+      isUnsignedLspAllowed: async () => devModeFlag,
       now: () => 1_700_000_000_000,
     })
   })
@@ -121,5 +125,80 @@ describe("lsp-binary-policy", () => {
       pluginPath: "/plugins/p",
     })
     expect(audit[0]!.processName).toBe("server.exe")
+  })
+
+  describe("dev-mode override (settings.developer.unsignedLspAllowed)", () => {
+    it("relaxes an unknown-publisher decision to allow + prompt when toggle is on", async () => {
+      devModeFlag = true
+      const result = await evaluateLspBinary({
+        pluginId: "p",
+        binaryPath: "/plugins/p/bin",
+        publisherFingerprint: "fp-unknown",
+        pluginPath: "/plugins/p",
+      })
+      expect(result.allowed).toBe(true)
+      expect(result.requiresPrompt).toBe(true)
+      expect(result.reason).toMatch(/dev-mode override/i)
+      // Audit row still captures the override + original reason.
+      expect(audit[0]!.reason).toMatch(/dev-mode override/i)
+      expect(audit[0]!.decision).toBe("allow")
+    })
+
+    it("relaxes a no-fingerprint decision when toggle is on", async () => {
+      devModeFlag = true
+      const result = await evaluateLspBinary({
+        pluginId: "p",
+        binaryPath: "/plugins/p/bin",
+        pluginPath: "/plugins/p",
+      })
+      expect(result.allowed).toBe(true)
+      expect(result.requiresPrompt).toBe(true)
+      expect(result.reason).toMatch(/dev-mode override.*no publisher fingerprint/i)
+    })
+
+    it("does NOT relax a trusted-publisher decision (already allowed, no prompt)", async () => {
+      devModeFlag = true
+      addTrustedPublisher("fp-abc")
+      const result = await evaluateLspBinary({
+        pluginId: "p",
+        binaryPath: "/plugins/p/server",
+        publisherFingerprint: "fp-abc",
+        pluginPath: "/plugins/p",
+      })
+      // Trusted-inside-dir is already allowed without prompt — the dev
+      // override must not introduce a needless prompt.
+      expect(result.allowed).toBe(true)
+      expect(result.requiresPrompt).toBe(false)
+      expect(result.reason).not.toMatch(/dev-mode override/i)
+    })
+
+    it("falls back to off (deny + prompt) when the toggle read throws", async () => {
+      configureLspBinaryPolicy({
+        isUnsignedLspAllowed: async () => {
+          throw new Error("settings db unavailable")
+        },
+      })
+      const result = await evaluateLspBinary({
+        pluginId: "p",
+        binaryPath: "/plugins/p/bin",
+        publisherFingerprint: "fp-unknown",
+        pluginPath: "/plugins/p",
+      })
+      expect(result.allowed).toBe(false)
+      expect(result.requiresPrompt).toBe(true)
+    })
+
+    it("ignores the toggle when it is off", async () => {
+      devModeFlag = false
+      const result = await evaluateLspBinary({
+        pluginId: "p",
+        binaryPath: "/plugins/p/bin",
+        publisherFingerprint: "fp-unknown",
+        pluginPath: "/plugins/p",
+      })
+      expect(result.allowed).toBe(false)
+      expect(result.requiresPrompt).toBe(true)
+      expect(result.reason).not.toMatch(/dev-mode override/i)
+    })
   })
 })

@@ -15,10 +15,14 @@
 //! - `ocr-windows`   — link `winocr` for Windows.Media.Ocr (Windows + MSIX).
 //! - `ocr-apple`     — call the Swift sidecar binary bundled at
 //!   `sidecars/apple-vision-ocr/` via `tauri-plugin-shell`.
+//! - `ocr-ocrs`      — pure-Rust ONNX-style pipeline via `ocrs` + RTen.
+//! - `ocr-paddle`    — PaddleOCR PP-OCRv5 via `oar-ocr` + `ort`.
 
 use crate::ocr::{NativeBackend, NativeOcrRegistry};
 
 pub mod placeholder;
+pub mod ocrs;
+pub mod paddle;
 
 #[cfg(all(feature = "ocr-tesseract"))]
 pub mod tesseract;
@@ -64,6 +68,51 @@ pub async fn install_platform_backends(registry: &NativeOcrRegistry) {
             .register(Box::new(placeholder::PlaceholderBackend::new("apple-vision")))
             .await;
     }
+
+    // ocrs — cross-platform pure-Rust pipeline. Falls back to the
+    // placeholder when the feature is off OR when the model directory
+    // can't be resolved (headless / no HOME). The latter is reported via
+    // `BackendFailure` from `extract` rather than crashing at boot.
+    #[cfg(feature = "ocr-ocrs")]
+    {
+        match ocrs::OcrsBackend::new() {
+            Ok(backend) => registry.register(Box::new(backend)).await,
+            Err(err) => {
+                log::warn!("ocrs backend disabled: {err}");
+                registry
+                    .register(Box::new(placeholder::PlaceholderBackend::new("ocrs")))
+                    .await;
+            }
+        }
+    }
+    #[cfg(not(feature = "ocr-ocrs"))]
+    {
+        registry
+            .register(Box::new(placeholder::PlaceholderBackend::new("ocrs")))
+            .await;
+    }
+
+    // paddle-ocr — PP-OCRv5 via oar-ocr + ort. Same lazy-init semantics.
+    #[cfg(feature = "ocr-paddle")]
+    {
+        match paddle::PaddleOcrBackend::new() {
+            Ok(backend) => registry.register(Box::new(backend)).await,
+            Err(err) => {
+                log::warn!("paddle-ocr backend disabled: {err}");
+                registry
+                    .register(Box::new(placeholder::PlaceholderBackend::new(
+                        "paddle-ocr",
+                    )))
+                    .await;
+            }
+        }
+    }
+    #[cfg(not(feature = "ocr-paddle"))]
+    {
+        registry
+            .register(Box::new(placeholder::PlaceholderBackend::new("paddle-ocr")))
+            .await;
+    }
 }
 
 /// Default placeholder so the dispatch table is dense even when no real
@@ -79,13 +128,16 @@ mod tests {
     use crate::ocr::{NativeOcrError, NativeOcrInvokePayload};
 
     #[tokio::test]
-    async fn install_default_backends_registers_three_ids() {
+    async fn install_default_backends_registers_all_known_ids() {
         let registry = NativeOcrRegistry::new();
         install_platform_backends(&registry).await;
         let ids = registry.list_ids().await;
         assert!(ids.contains(&"tesseract"));
         assert!(ids.contains(&"windows-media-ocr"));
         assert!(ids.contains(&"apple-vision"));
+        assert!(ids.contains(&"ocrs"));
+        assert!(ids.contains(&"paddle-ocr"));
+        assert_eq!(ids.len(), 5, "expected exactly five backend slots");
     }
 
     #[tokio::test]

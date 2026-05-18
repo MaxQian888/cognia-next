@@ -32,6 +32,21 @@ jest.mock("./chat-participant-registry", () => ({
   handleRegisterChatVariableResolver: jest.fn(),
 }))
 
+jest.mock("./languages-handler", () => ({
+  handleExtensionCleanup: jest.fn(),
+  handleLanguagesRegister: jest.fn(() => ({ token: "tk" })),
+  handleLanguagesRegisterDecorationType: jest.fn(() => ({ typeId: "td" })),
+  handleLanguagesSetDecorations: jest.fn(),
+  handleLanguagesSetDiagnostics: jest.fn(),
+  handleLanguagesUnregister: jest.fn(() => ({ removed: true })),
+  handleWindowActiveTextEditorGet: jest.fn(() => null),
+}))
+
+jest.mock("./lsp-workspace-manager", () => ({
+  listWorkspaceFolders: jest.fn(() => []),
+  resolveWorkspaceFolder: jest.fn(() => null),
+}))
+
 const EXPECTED_METHODS = [
   "lm:selectChatModels",
   "lm:sendChatRequest",
@@ -45,6 +60,16 @@ const EXPECTED_METHODS = [
   "chat:disposeParticipant",
   "chat:registerVariableResolver",
   "chat:respond",
+  "languages:register",
+  "languages:unregister",
+  "languages:setDiagnostics",
+  "languages:clearDiagnostics",
+  "languages:registerDecorationType",
+  "languages:setDecorations",
+  "extension:cleanup",
+  "window:activeTextEditor:get",
+  "workspace:listFolders",
+  "workspace:getWorkspaceFolder",
 ]
 
 interface IsolatedModules {
@@ -135,5 +160,116 @@ describe("installVscodeRpcHandlers", () => {
     } finally {
       reset()
     }
+  })
+
+  it("registers languages:* + extension:cleanup + window:activeTextEditor:get for the LSP path", () => {
+    const { install, listMethods, reset } = loadInIsolation()
+    try {
+      install()
+      const methods = listMethods()
+      expect(methods.filter((m) => m.startsWith("languages:")).length).toBe(6)
+      expect(methods).toContain("extension:cleanup")
+      expect(methods).toContain("window:activeTextEditor:get")
+    } finally {
+      reset()
+    }
+  })
+
+  it("languages:setDiagnostics converts VSCode-shape diagnostics through the adapter before forwarding to the bridge", async () => {
+    let handleInboundFrame!: (pluginId: string, raw: string) => Promise<void>
+    let setDiagnosticsSpy!: jest.Mock
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const setup = require("./setup-handlers") as {
+        installVscodeRpcHandlers: () => () => void
+      }
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const dispatcher = require("./rpc-dispatcher") as {
+        handleInboundFrame: (pluginId: string, raw: string) => Promise<void>
+      }
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const languagesHandler = require("./languages-handler") as {
+        handleLanguagesSetDiagnostics: jest.Mock
+      }
+      setup.installVscodeRpcHandlers()
+      handleInboundFrame = dispatcher.handleInboundFrame
+      setDiagnosticsSpy = languagesHandler.handleLanguagesSetDiagnostics
+      setDiagnosticsSpy.mockClear()
+    })
+
+    await handleInboundFrame(
+      "ext.eslint",
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "languages:setDiagnostics",
+        params: {
+          extensionId: "ext.eslint",
+          uri: "file:///x.ts",
+          diagnostics: [
+            {
+              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } },
+              severity: 0, // VSCode Error
+              message: "boom",
+              source: "eslint",
+            },
+            {
+              range: { start: { line: 2, character: 1 }, end: { line: 2, character: 8 } },
+              severity: 1, // VSCode Warning
+              message: "unused",
+            },
+          ],
+        },
+      })
+    )
+
+    expect(setDiagnosticsSpy).toHaveBeenCalledTimes(1)
+    const arg = setDiagnosticsSpy.mock.calls[0][0]
+    expect(arg.extensionId).toBe("ext.eslint")
+    expect(arg.uri).toBe("file:///x.ts")
+    expect(arg.markers).toHaveLength(2)
+    expect(arg.markers[0]).toMatchObject({
+      severity: "error",
+      message: "boom",
+      range: { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 6 },
+      source: "eslint",
+    })
+    expect(arg.markers[1]).toMatchObject({ severity: "warning", message: "unused" })
+  })
+
+  it("languages:clearDiagnostics forwards an empty marker list", async () => {
+    let handleInboundFrame!: (pluginId: string, raw: string) => Promise<void>
+    let setDiagnosticsSpy!: jest.Mock
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const setup = require("./setup-handlers") as {
+        installVscodeRpcHandlers: () => () => void
+      }
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const dispatcher = require("./rpc-dispatcher") as {
+        handleInboundFrame: (pluginId: string, raw: string) => Promise<void>
+      }
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const languagesHandler = require("./languages-handler") as {
+        handleLanguagesSetDiagnostics: jest.Mock
+      }
+      setup.installVscodeRpcHandlers()
+      handleInboundFrame = dispatcher.handleInboundFrame
+      setDiagnosticsSpy = languagesHandler.handleLanguagesSetDiagnostics
+      setDiagnosticsSpy.mockClear()
+    })
+
+    await handleInboundFrame(
+      "ext.eslint",
+      JSON.stringify({
+        jsonrpc: "2.0",
+        method: "languages:clearDiagnostics",
+        params: { extensionId: "ext.eslint", uri: "file:///x.ts" },
+      })
+    )
+    expect(setDiagnosticsSpy).toHaveBeenCalledWith({
+      extensionId: "ext.eslint",
+      uri: "file:///x.ts",
+      markers: [],
+    })
   })
 })

@@ -392,9 +392,13 @@ describe("monaco-bridge", () => {
   describe("provider registrations", () => {
     it("registers a completion provider and proxies invocations to the sidecar", async () => {
       const api = makeFakeApi()
-      const dispatch = jest.fn(async () => ({
-        suggestions: [{ label: "x", insertText: "x" }],
-      })) as unknown as jest.MockedFunction<DispatchRpc>
+      // Sidecar returns VS Code-shape items (flat array form). The bridge
+      // routes them through `vscodeCompletionResultToMonaco` before handing
+      // them to Monaco, so `kind` becomes the Monaco numeric enum (Text=18
+      // when omitted) and `insertText` falls back to `label`.
+      const dispatch = jest.fn(async () => [
+        { label: "x", insertText: "x" },
+      ]) as unknown as jest.MockedFunction<DispatchRpc>
       configureMonacoBridge({ monacoApi: api, dispatchRpc: dispatch })
       registerCompletionItemProvider({
         extensionId: "ext.a",
@@ -413,12 +417,24 @@ describe("monaco-bridge", () => {
         isDisposed: () => false,
       }
       const result = await api.triggerCompletion!(model, { lineNumber: 1, column: 1 })
+      // Position is dispatched in VSCode (0-based) shape.
       expect(dispatch).toHaveBeenCalledWith(
         "ext.a",
         "provideCompletionItems",
-        expect.objectContaining({ uri: "file:///x.ts" })
+        expect.objectContaining({
+          uri: "file:///x.ts",
+          position: { line: 0, character: 0 },
+        })
       )
-      expect(result).toEqual({ suggestions: [{ label: "x", insertText: "x" }] })
+      expect(result).toEqual({
+        suggestions: [
+          expect.objectContaining({
+            label: "x",
+            insertText: "x",
+            kind: 18, // Monaco Text fallback for missing VS Code kind.
+          }),
+        ],
+      })
     })
 
     it("hover/definition/formatting providers route through dispatchRpc", async () => {
@@ -645,17 +661,24 @@ describe("monaco-bridge", () => {
         triggerCharacters: ["."],
       })
       const result = await api.invocationTriggers.inlineCompletion!(model, pos)
+      // Position dispatches in VSCode (0-based) shape.
       expect(dispatch).toHaveBeenCalledWith(
         "ext.continue",
         "provideInlineCompletionItems",
-        expect.objectContaining({ uri: "file:///a.ts", position: pos })
+        expect.objectContaining({
+          uri: "file:///a.ts",
+          position: { line: pos.lineNumber - 1, character: pos.column - 1 },
+        })
       )
       expect(result).toEqual({ items: [{ insertText: "hi" }] })
     })
 
     it("registerSignatureHelpProvider routes provideSignatureHelp and passes trigger chars", async () => {
+      // Sidecar returns VS Code-shape SignatureHelp directly (no { value: } wrapper).
       const { api, dispatch, model, pos } = setup({
-        value: { signatures: [], activeSignature: 0, activeParameter: 0 },
+        signatures: [],
+        activeSignature: 0,
+        activeParameter: 0,
       })
       registerSignatureHelpProvider({
         extensionId: "ext.lsp",
@@ -669,6 +692,7 @@ describe("monaco-bridge", () => {
         "provideSignatureHelp",
         expect.objectContaining({ uri: "file:///a.ts" })
       )
+      // Bridge wraps in { value: } for Monaco's signature help provider shape.
       expect(result).toMatchObject({ value: { signatures: [] } })
     })
 
@@ -719,7 +743,9 @@ describe("monaco-bridge", () => {
     })
 
     it("registerFoldingRangeProvider proxies provideFoldingRanges", async () => {
-      const { api, dispatch, model } = setup([{ start: 1, end: 4 }])
+      // Sidecar returns VS Code/LSP `FoldingRange` shape (0-based `startLine`/`endLine`).
+      // Bridge converts to Monaco shape (1-based `start`/`end`).
+      const { api, dispatch, model } = setup([{ startLine: 0, endLine: 3 }])
       registerFoldingRangeProvider({ extensionId: "ext", selector: ["ts"] })
       const out = await api.invocationTriggers.foldingRange!(model)
       expect(dispatch).toHaveBeenCalledWith(
@@ -727,17 +753,20 @@ describe("monaco-bridge", () => {
         "provideFoldingRanges",
         expect.objectContaining({ uri: "file:///a.ts" })
       )
-      expect(out).toEqual([{ start: 1, end: 4 }])
+      expect(out).toEqual([{ start: 1, end: 4, kind: undefined }])
     })
 
     it("registerSelectionRangeProvider forwards positions", async () => {
       const { api, dispatch, model, pos } = setup([])
       registerSelectionRangeProvider({ extensionId: "ext", selector: ["ts"] })
       await api.invocationTriggers.selectionRange!(model, [pos])
+      // Positions dispatch in VSCode (0-based) shape.
       expect(dispatch).toHaveBeenCalledWith(
         "ext",
         "provideSelectionRanges",
-        expect.objectContaining({ positions: [pos] })
+        expect.objectContaining({
+          positions: [{ line: pos.lineNumber - 1, character: pos.column - 1 }],
+        })
       )
     })
 
@@ -761,10 +790,14 @@ describe("monaco-bridge", () => {
         moreTriggerCharacter: ["}", "\n"],
       })
       await api.invocationTriggers.onTypeFormat!(model, pos, ";")
+      // Position dispatches in VSCode (0-based) shape.
       expect(dispatch).toHaveBeenCalledWith(
         "ext",
         "provideOnTypeFormattingEdits",
-        expect.objectContaining({ ch: ";", position: pos })
+        expect.objectContaining({
+          ch: ";",
+          position: { line: pos.lineNumber - 1, character: pos.column - 1 },
+        })
       )
     })
 
@@ -793,10 +826,16 @@ describe("monaco-bridge", () => {
         legend: { tokenTypes: [], tokenModifiers: [] },
       })
       await api.invocationTriggers.rangeSemanticTokens!(model, range)
+      // Range dispatches in VSCode (0-based) shape.
       expect(dispatch).toHaveBeenCalledWith(
         "ext",
         "provideDocumentRangeSemanticTokens",
-        expect.objectContaining({ range })
+        expect.objectContaining({
+          range: {
+            start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
+            end: { line: range.endLineNumber - 1, character: range.endColumn - 1 },
+          },
+        })
       )
     })
 
@@ -804,10 +843,16 @@ describe("monaco-bridge", () => {
       const { api, dispatch, model, range } = setup({ hints: [] })
       registerInlayHintsProvider({ extensionId: "ext", selector: ["ts"] })
       await api.invocationTriggers.inlayHints!(model, range)
+      // Range dispatches in VSCode (0-based) shape.
       expect(dispatch).toHaveBeenCalledWith(
         "ext",
         "provideInlayHints",
-        expect.objectContaining({ range })
+        expect.objectContaining({
+          range: {
+            start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
+            end: { line: range.endLineNumber - 1, character: range.endColumn - 1 },
+          },
+        })
       )
     })
 
@@ -839,10 +884,13 @@ describe("monaco-bridge", () => {
       const { api, dispatch, model, pos } = setup({ ranges: [] })
       registerLinkedEditingRangeProvider({ extensionId: "ext", selector: ["html"] })
       await api.invocationTriggers.linkedEditingRange!(model, pos)
+      // Position dispatches in VSCode (0-based) shape.
       expect(dispatch).toHaveBeenCalledWith(
         "ext",
         "provideLinkedEditingRanges",
-        expect.objectContaining({ position: pos })
+        expect.objectContaining({
+          position: { line: pos.lineNumber - 1, character: pos.column - 1 },
+        })
       )
     })
 

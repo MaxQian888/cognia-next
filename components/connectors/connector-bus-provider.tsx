@@ -21,6 +21,7 @@ import { startOutboundRunner } from "@/lib/connectors/outbound-runner"
 import { listEnabledAdapterInstances } from "@/lib/db/adapter-instances"
 import { buildAdapterFromRow } from "@/lib/connectors/adapter-registry"
 import { runAndCaptureAssistantReply } from "@/lib/claude/run-and-capture"
+import { defaultConnectorCallbackHandler } from "@/lib/a2ui/connector-callback-handler"
 
 export function ConnectorBusProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
@@ -60,12 +61,32 @@ export function ConnectorBusProvider({ children }: { children: React.ReactNode }
       // unlistens before resolving / rejecting.
       installRuntime(bus, { runAndCapture: runAndCaptureAssistantReply })
 
+      // Wire the connector callback handler so inbound interactive events
+      // (Slack block_actions / Lark interactive card / Telegram callback_query
+      // / Discord component interactions) are projected onto the matching
+      // A2UI surface and drive a fresh AI-loop turn through the digest runner.
+      bus.callbackHandler = defaultConnectorCallbackHandler
+
       // Instantiate and register each enabled adapter.
+      const { getDb } = await import("@/lib/db/schema")
       for (const row of enabled) {
         const adapter = await buildAdapterFromRow(row)
         if (cancelled) return
         if (adapter) {
           bus.registerAdapter(adapter)
+          // G6 — refresh the per-row capability matrix from the live
+          // adapter so build-options' connector-capability prompt picks
+          // up post-deploy capability changes without requiring a
+          // settings-tab roundtrip.
+          try {
+            await getDb().adapterInstances.update(row.id, {
+              lastKnownCapabilities: adapter.a2uiCapability(),
+              updatedAt: Date.now(),
+            })
+          } catch {
+            // Best-effort — if the update fails the prompt section
+            // simply falls back to the stale matrix already on disk.
+          }
           // start() is deferred to Phase 1+; the outbound runner handles delivery.
         }
       }

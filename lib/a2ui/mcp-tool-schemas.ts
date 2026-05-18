@@ -117,6 +117,54 @@ export const A2UI_BRIDGE_TOOLS: readonly A2UIToolSchema[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "a2ui_handle_connector_action",
+    description:
+      "Inject a user action that arrived from an IM channel (Slack block_actions, Lark interactive card, Telegram callback_query, Discord component interaction) onto the matching A2UI surface. The agent receives this as a userAction event on the next turn — identical to in-renderer interactions — so the same flow handles both browser-side and IM-side users.",
+    inputSchema: {
+      type: "object",
+      required: ["surfaceId", "actionType"],
+      properties: {
+        surfaceId: { type: "string", description: "Target A2UI surface." },
+        componentId: {
+          type: "string",
+          description:
+            "Component id inside the surface that fired the action. Optional when the action is surface-level (dismiss).",
+        },
+        actionType: {
+          type: "string",
+          enum: ["button", "select", "checkbox", "input", "submit", "dismiss", "platform_specific"],
+        },
+        value: {
+          type: "string",
+          description:
+            "Primary scalar value: button action id, selected option key, checkbox boolean string, edited text.",
+        },
+        payload: {
+          type: "object",
+          additionalProperties: true,
+          description:
+            "Structured payload for multi-value actions (form submissions, platform_specific events).",
+        },
+        platform: {
+          type: "string",
+          enum: ["telegram", "discord", "slack", "lark", "onebot"],
+          description:
+            "Source IM platform — used for audit + per-platform UX touches in the renderer.",
+        },
+        triggerId: {
+          type: "string",
+          description:
+            "Adapter-supplied unique id for the callback. Used for ack/response routing.",
+        },
+        conversationKey: {
+          type: "string",
+          description: "Bus conversationKey the callback originated from.",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
 ] as const
 
 /**

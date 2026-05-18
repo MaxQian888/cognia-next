@@ -1913,6 +1913,34 @@ export class PluginManager {
         }
       }
     }
+    // Phase B of the LSP reuse work — `manifest.lspServers[]`. The
+    // registry awaits the binary-policy gate per entry and spawns each
+    // server through the injected client adapter. Failures don't abort
+    // plugin enable; they surface in Settings → Language Servers.
+    if (plugin.manifest.lspServers?.length) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { registerPluginLspServers } = require("@/lib/plugin/lsp/lsp-registry") as {
+          registerPluginLspServers: (input: {
+            pluginId: string
+            pluginPath: string
+            publisherFingerprint?: string
+            servers: NonNullable<typeof plugin.manifest.lspServers>
+          }) => Promise<unknown>
+        }
+        await registerPluginLspServers({
+          pluginId,
+          pluginPath: plugin.path ?? "",
+          publisherFingerprint: plugin.manifest.vscodeExtension?.publisherKeyFingerprint,
+          servers: plugin.manifest.lspServers,
+        })
+      } catch (err) {
+        loggers.manager.warn(
+          `[plugin:${pluginId}] failed to register LSP servers (registry not configured?):`,
+          err
+        )
+      }
+    }
     if (plugin.manifest.skills?.length) {
       for (const def of plugin.manifest.skills) {
         try {
@@ -2066,6 +2094,20 @@ export class PluginManager {
     // diagnostic surface could surface it.
     unregisterMcpServerPresetsByPlugin(pluginId)
     unregisterNativeAnthropicToolsByPlugin(pluginId)
+    // Tear down any LSP servers this plugin contributed. The registry's
+    // adapter handles the actual sidecar stop; failures are logged but
+    // never block the disable flow.
+    if (plugin.manifest.lspServers?.length) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { unregisterByOwner } = require("@/lib/plugin/lsp/lsp-registry") as {
+          unregisterByOwner: (ownerId: string) => Promise<number>
+        }
+        await unregisterByOwner(pluginId)
+      } catch (err) {
+        loggers.manager.warn(`[plugin:${pluginId}] LSP unregister failed:`, err)
+      }
+    }
     // Remove this plugin's skill ids from every character's
     // `pluginSkillIds` before the overlay is dropped so a re-enable
     // re-attaches cleanly.

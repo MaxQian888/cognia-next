@@ -8,6 +8,7 @@
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { escapeMdV2 } from "./markdown-v2"
+import { buildTelegramA2UICalls } from "./a2ui-mapper"
 
 export interface SerializedTelegramCall {
   /** Telegram Bot API method name. */
@@ -131,6 +132,17 @@ function serializeSegment(
         payload: { chat_id: chatId, text: seg.code, ...routing },
       }
 
+    case "a2ui":
+      // A2UI segments require async projection (binding-row persistence
+      // + SHA-1 hashing). The sync path falls back to `plainTextMirror`
+      // so test stubs without an adapterId/conversationKey context still
+      // get something legible. The adapter's send() method uses
+      // `serializeOutboundAsync` to invoke the full native projection.
+      return {
+        method: "sendMessage",
+        payload: { chat_id: chatId, text: seg.plainTextMirror, ...routing },
+      }
+
     default:
       // Unsupported segment types silently dropped in Phase 1
       return null
@@ -138,7 +150,11 @@ function serializeSegment(
 }
 
 /**
- * Project an `OutboundRequest` into an ordered list of Telegram Bot API calls.
+ * Project an `OutboundRequest` into an ordered list of Telegram Bot API
+ * calls (sync path). a2ui segments degrade to `plainTextMirror` because
+ * the full native projection (InlineKeyboard + callback bindings)
+ * requires Dexie writes — use `serializeOutboundAsync` from the adapter
+ * `send()` method to get the rich projection.
  */
 export function serializeOutbound(req: OutboundRequest): SerializedTelegramCall[] {
   const chatId = chatIdFromRef(req)
@@ -151,4 +167,61 @@ export function serializeOutbound(req: OutboundRequest): SerializedTelegramCall[
   }
 
   return calls
+}
+
+/**
+ * Async serializer used by the production adapter `send()`. a2ui segments
+ * route through `buildTelegramA2UICalls` (InlineKeyboardMarkup + photo
+ * uploads + binding-row persistence); other segments delegate to the
+ * sync `serializeOutbound`.
+ *
+ * Walk order matches `req.segments` so the assistant's intended layout
+ * is preserved (e.g., a2ui card followed by a markdown summary).
+ */
+export async function serializeOutboundAsync(
+  req: OutboundRequest,
+  adapterId: string
+): Promise<SerializedTelegramCall[]> {
+  const chatId = chatIdFromRef(req)
+  const routing = routingFields(req)
+  const calls: SerializedTelegramCall[] = []
+
+  for (const seg of req.segments) {
+    if (seg.type === "a2ui") {
+      const a2uiCalls = await buildTelegramA2UICalls({
+        adapterId,
+        chatId,
+        surfaceId: seg.surfaceId,
+        surface: seg.content,
+        conversationKey: extractConversationKey(req),
+        routing,
+      })
+      if (a2uiCalls.length === 0) {
+        // Mapper produced nothing native — fall back to the text mirror.
+        calls.push({
+          method: "sendMessage",
+          payload: { chat_id: chatId, text: seg.plainTextMirror, ...routing },
+        })
+      } else {
+        calls.push(...a2uiCalls)
+      }
+      continue
+    }
+    const call = serializeSegment(seg, chatId, routing)
+    if (call) calls.push(call)
+  }
+
+  return calls
+}
+
+function extractConversationKey(req: OutboundRequest): string | undefined {
+  const ref = req.conversationRef as Record<string, unknown>
+  const adapterId = typeof ref["adapterId"] === "string" ? ref["adapterId"] : ""
+  const chatId =
+    typeof ref["chatId"] === "string" || typeof ref["chatId"] === "number"
+      ? String(ref["chatId"])
+      : ""
+  if (!adapterId || !chatId) return undefined
+  const thread = req.threadId
+  return thread ? `telegram:${adapterId}:${chatId}:${thread}` : `telegram:${adapterId}:${chatId}`
 }

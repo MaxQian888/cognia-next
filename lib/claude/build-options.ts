@@ -537,11 +537,38 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // whitelist + tack the A2UI system-prompt extension onto appendSystemPrompt
   // so the model knows when to paint surfaces. Resolution order matches the
   // rest of build-options: session > character > appSettings default.
-  const a2uiEnabled =
+  //
+  // G6 — when the session is bound to an IM connector (platformBinding
+  // present) AND the adapter has cached a non-empty A2UI capability
+  // matrix, force a2uiEnabled regardless of the scope toggle. IM
+  // conversations need A2UI to deliver any interactive UX at all, so
+  // making it opt-in per IM session would silently degrade every reply
+  // to plain markdown.
+  const baseA2uiEnabled =
     (session as { a2uiEnabled?: boolean } | undefined)?.a2uiEnabled ??
     character?.a2uiEnabled ??
     appSettings?.a2uiDefaultEnabled ??
     false
+  let connectorCapabilityPrompt: string | null = null
+  if (session?.platformBinding?.adapterId) {
+    try {
+      const { getAdapterInstance } = await import("@/lib/db/adapter-instances")
+      const adapterRow = await getAdapterInstance(session.platformBinding.adapterId)
+      const matrix = adapterRow?.lastKnownCapabilities
+      if (matrix && Object.keys(matrix).length > 0) {
+        const { buildCapabilityPromptSection } =
+          await import("@/lib/connectors/a2ui-bridge/capability-evaluator")
+        connectorCapabilityPrompt = buildCapabilityPromptSection(
+          session.platformBinding.platform,
+          matrix
+        )
+      }
+    } catch {
+      // Best-effort — missing adapter row / capability matrix shouldn't
+      // crash the send; just skip the prompt injection.
+    }
+  }
+  const a2uiEnabled = baseA2uiEnabled || connectorCapabilityPrompt !== null
   if (a2uiEnabled) {
     for (const t of namespacedA2UIToolNames()) allowed.add(t)
   }
@@ -552,6 +579,15 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   if (a2uiEnabled) {
     const existing = opts.appendSystemPrompt?.trim() ?? ""
     opts.appendSystemPrompt = existing ? `${existing}\n\n${A2UI_SYSTEM_PROMPT}` : A2UI_SYSTEM_PROMPT
+  }
+  // G6 — append the connector-capability section after the A2UI prompt so
+  // the model knows which kinds will degrade on this channel and avoids
+  // the unsupported ones (Chart on OneBot, Slider on Slack, …).
+  if (connectorCapabilityPrompt) {
+    const existing = opts.appendSystemPrompt?.trim() ?? ""
+    opts.appendSystemPrompt = existing
+      ? `${existing}\n\n${connectorCapabilityPrompt}`
+      : connectorCapabilityPrompt
   }
 
   // --- MCP server subset ---------------------------------------------------
@@ -619,9 +655,31 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // registered native Anthropic tool (computer / bash / text_editor) plus
   // the matching `anthropic-beta` header to `appendHeaders`. The sidecar
   // forwards them to the Anthropic SDK verbatim. See ADR-0020.
+  //
+  // G6 — for IM-driven sessions (session bound to a connector platform
+  // binding), default to blacklisting Computer Use tools so an inbound
+  // Telegram / Slack / Discord / Lark message can't fire screenshot /
+  // mouse / keyboard actions. Per-conversation opt-in lives on
+  // `ConversationOverrideRow.allowComputerUse`.
   try {
     const { applyComputerUseTools } = await import("@/lib/claude/computer-use-tools")
-    const applied = applyComputerUseTools({ character, opts })
+    const imSession = Boolean(session?.platformBinding?.adapterId)
+    let allowImComputerUse = false
+    if (imSession && session?.platformBinding?.conversationKey) {
+      try {
+        const { readForResolution } = await import("@/lib/db/conversation-overrides")
+        const overrideRow = await readForResolution(session.platformBinding.conversationKey)
+        allowImComputerUse = overrideRow?.allowComputerUse === true
+      } catch {
+        // Override lookup is best-effort; fall back to the safe default.
+      }
+    }
+    const applied = applyComputerUseTools({
+      character,
+      opts,
+      imSession,
+      allowImComputerUse,
+    })
     Object.assign(opts, applied.opts)
   } catch {
     // Non-fatal — the registry import shouldn't ever fail in production,

@@ -16,6 +16,7 @@
  */
 
 import type {
+  ConnectorCallbackEvent,
   NormalizedInboundEvent,
   PlatformAdapter,
   OutboundRequest,
@@ -27,6 +28,7 @@ import { readForResolution } from "@/lib/db/conversation-overrides"
 import { getCharacter } from "@/lib/db/characters"
 import { getDb } from "@/lib/db/schema"
 import { recordAndCheckInbound } from "./dedup"
+import { resolveCallbackBinding } from "./adapters/_shared/a2ui-mapper"
 import { appendAudit } from "./audit"
 import { evaluatePolicy, type PolicyEvalState } from "./policy-eval"
 import { resolveBinding, type ResolvedBinding } from "./policy-resolve"
@@ -45,11 +47,38 @@ export type RouteHandler = (
   resolved: ResolvedBinding
 ) => void | Promise<void>
 
+/**
+ * Called when a connector-side inbound callback (Slack block_actions /
+ * Lark interactive card / Telegram callback_query / Discord component
+ * interaction) lands and has passed dedup + binding lookup. Wired by
+ * the connector runtime to the A2UI bridge MCP server's
+ * `a2ui_handle_connector_action` tool, which injects an A2UI ActionEvent
+ * onto the matching surface so the assistant's next turn sees the
+ * interaction as if it had fired inside the renderer.
+ *
+ * `boundConversationKey` is whatever the connectorCallbackBindings row
+ * resolved to — null when no binding exists (the callback's
+ * `conversationKey` is the only hint). Handler decides whether to drop
+ * orphan callbacks or treat them as raw action events.
+ */
+export type CallbackHandler = (
+  event: ConnectorCallbackEvent,
+  boundConversationKey: string | null
+) => void | Promise<void>
+
 class ConnectorBus {
   private adapters = new Map<string, PlatformAdapter>()
   private inboundHandler: BusInboundHandler | null = null
   /** Optional: set by Task 37 runtime. */
   routeHandler: RouteHandler | null = null
+  /**
+   * Optional connector-callback handler. Wired in production to
+   * `lib/a2ui/connector-callback-handler.ts`, which forwards the event
+   * to the `builtin:a2ui-bridge` MCP server's
+   * `a2ui_handle_connector_action` tool. Left null in tests until
+   * explicitly assigned.
+   */
+  callbackHandler: CallbackHandler | null = null
 
   /** In-memory policy state for rate-limit / cooldown bookkeeping. */
   private policyState: PolicyEvalState = {
@@ -400,6 +429,128 @@ class ConnectorBus {
       }
     }
     return a.send(req)
+  }
+
+  /**
+   * Dispatch a connector-side callback (interactive button / select /
+   * form submit / dismiss) into the A2UI Action channel.
+   *
+   * Pipeline:
+   *   1. Dedup against `inboundLedger` with namespace `"callback"` so a
+   *      redelivered event (Telegram retries, Slack rebroadcasts) is
+   *      not re-processed.
+   *   2. Recover the (surfaceId, componentId, conversationKey) binding
+   *      from `connectorCallbackBindings` — written at outbound time by
+   *      the per-platform A2UI mapper. The event's own `surfaceId` /
+   *      `componentId` fields take precedence when the binding is
+   *      absent (e.g., adapter computed them inline from the action_id).
+   *   3. Write an audit row (`callback.received` or
+   *      `callback.deduped` / `callback.unbound`).
+   *   4. Hand off to `callbackHandler` if set. The handler is
+   *      responsible for projecting the event into an A2UI ActionEvent
+   *      and forwarding it through the `builtin:a2ui-bridge` MCP server.
+   *
+   * Errors thrown by the handler are caught and audited as
+   * `callback.handler_failed` so a single bad callback doesn't kill the
+   * transport loop.
+   */
+  async dispatchConnectorCallback(event: ConnectorCallbackEvent): Promise<void> {
+    const now = Date.now()
+
+    // ── Step 1: Dedup ───────────────────────────────────────────────
+    const isNew = await recordAndCheckInbound(event.adapterId, event.triggerId, "callback")
+    if (!isNew) {
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "callback.deduped",
+        at: now,
+        conversationKey: event.conversationKey,
+        reason: "callback:duplicate",
+        message: `triggerId=${event.triggerId}`,
+        fields: { actionType: event.actionType },
+      })
+      return
+    }
+
+    // ── Step 2: Binding lookup (optional — event may already carry
+    //            inline-derived surfaceId / componentId) ─────────────
+    let resolvedSurfaceId = event.surfaceId
+    let resolvedComponentId = event.componentId
+    let resolvedConversationKey = event.conversationKey ?? null
+    let bindingFound = false
+    try {
+      // Pick the lookup key the adapter actually used at outbound time:
+      // most adapters bake the action_id into the platform-side button
+      // (`buildActionId(surfaceId, componentId, action)` formatted), so
+      // `triggerId` (when assignable) lives in the `actionId` column.
+      const binding = await resolveCallbackBinding(event.adapterId, event.triggerId)
+      if (binding) {
+        bindingFound = true
+        resolvedSurfaceId = binding.surfaceId
+        resolvedComponentId = binding.componentId ?? resolvedComponentId
+        resolvedConversationKey = binding.conversationKey ?? resolvedConversationKey
+      }
+    } catch {
+      // Binding lookup is best-effort — Dexie hiccups should not block
+      // the callback. We fall through to whatever the event self-reported.
+    }
+
+    if (!resolvedSurfaceId) {
+      // No anchoring surface at all — log and bail. We DON'T fire the
+      // handler because A2UI ActionEvents require a target surface.
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "callback.unbound",
+        at: now,
+        conversationKey: resolvedConversationKey ?? undefined,
+        reason: "no surfaceId binding",
+        message: `triggerId=${event.triggerId}`,
+        fields: {
+          actionType: event.actionType,
+          bindingFound,
+        },
+      })
+      return
+    }
+
+    // ── Step 3: Audit reception ─────────────────────────────────────
+    await appendAudit({
+      adapterId: event.adapterId,
+      kind: "callback.received",
+      at: now,
+      conversationKey: resolvedConversationKey ?? undefined,
+      idempotencyKey: event.triggerId,
+      message: `${event.actionType} on ${resolvedSurfaceId}${
+        resolvedComponentId ? `/${resolvedComponentId}` : ""
+      }`,
+      fields: {
+        actionType: event.actionType,
+        value: event.value,
+        bindingFound,
+      },
+    })
+
+    // ── Step 4: Hand off to the bridge ──────────────────────────────
+    if (!this.callbackHandler) return
+    const projected: ConnectorCallbackEvent = {
+      ...event,
+      surfaceId: resolvedSurfaceId,
+      componentId: resolvedComponentId,
+      conversationKey: resolvedConversationKey ?? undefined,
+    }
+    try {
+      await this.callbackHandler(projected, resolvedConversationKey)
+    } catch (err) {
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "callback.handler_failed",
+        at: Date.now(),
+        conversationKey: resolvedConversationKey ?? undefined,
+        reason: err instanceof Error ? err.name : "unknown",
+        message: err instanceof Error ? err.message : String(err),
+        fields: { triggerId: event.triggerId, surfaceId: resolvedSurfaceId },
+      })
+    }
   }
 
   listAdapters(): PlatformAdapter[] {

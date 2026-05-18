@@ -20,6 +20,7 @@ export type MessageSegment =
   | { type: "reply"; messageId: string; snippet: string }
   | { type: "location"; lat: number; lon: number; name?: string }
   | { type: "poll"; question: string; options: string[]; multi?: boolean }
+  | A2UIMessageSegment
 
 export type SegmentType = MessageSegment["type"]
 
@@ -27,6 +28,49 @@ export type SegmentType = MessageSegment["type"]
 export interface PlatformCard {
   kind: string
   payload: unknown
+}
+
+/**
+ * The unified A2UI segment carried across the bus.
+ *
+ * `surfaceId` is the A2UI surface this segment refers to — adapters use it
+ * when routing inbound platform callbacks back through
+ * `ConnectorBus.dispatchConnectorCallback`. `content` is the full A2UI
+ * Surface payload (components tree + dataModel + rootId); adapters either
+ * project it into native rich content (Slack Block Kit, Lark Interactive
+ * Card, Telegram InlineKeyboard, Discord Embed + Components) via the
+ * platform-specific A2UI mapper, or fall back to `plainTextMirror` when
+ * the platform cannot render the surface.
+ *
+ * `plainTextMirror` is generated alongside the surface by the assistant
+ * (or by `a2ui-bridge/a2ui-to-segments.ts` when extracting from an
+ * assistant response) so degradation is always available without
+ * re-rendering the surface.
+ */
+export interface A2UIMessageSegment {
+  type: "a2ui"
+  surfaceId: string
+  /** Opaque A2UISurface payload (`{components, dataModel, rootId, ...}`). */
+  content: A2UISegmentContent
+  /** Pre-baked plain-text projection for capability-fallback. */
+  plainTextMirror: string
+}
+
+/**
+ * The portion of A2UISurfaceRow that the bus carries between processes.
+ * Kept structurally compatible with `A2UISurfaceRow` so adapters can hand
+ * the segment straight into the A2UI renderer without re-shaping.
+ *
+ * Bus does not inspect; a2ui-bridge and platform mappers own.
+ */
+export interface A2UISegmentContent {
+  components: Record<string, unknown>
+  dataModel: Record<string, unknown>
+  rootId: string
+  surfaceType?: "inline" | "dialog" | "panel" | "fullscreen"
+  catalogId?: string
+  widget?: Record<string, unknown>
+  title?: string
 }
 
 export function isTextSegment(s: MessageSegment): s is Extract<MessageSegment, { type: "text" }> {
@@ -39,6 +83,9 @@ export function isMarkdownSegment(
   s: MessageSegment
 ): s is Extract<MessageSegment, { type: "markdown" }> {
   return s.type === "markdown"
+}
+export function isA2UISegment(s: MessageSegment): s is A2UIMessageSegment {
+  return s.type === "a2ui"
 }
 
 /**
@@ -87,6 +134,13 @@ export function segmentsToPlainText(segments: MessageSegment[]): string {
         break
       case "poll":
         out.push(` [poll:${s.question}] `)
+        break
+      case "a2ui":
+        // A2UI segments always carry a pre-baked text mirror so they remain
+        // matchable by trigger keywords/slash-commands even on platforms
+        // that cannot render the surface natively. Wrap with spaces for the
+        // same separator behaviour as other rich segments.
+        out.push(s.plainTextMirror ? ` ${s.plainTextMirror} ` : " [a2ui] ")
         break
     }
   }

@@ -107,6 +107,7 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   const monacoSetup = useCanvasMonacoSetup({
     documentId: activeId ?? undefined,
     language: activeDoc?.language,
+    initialContent: activeDoc?.content ?? "",
   })
 
   const actions = useCanvasActions()

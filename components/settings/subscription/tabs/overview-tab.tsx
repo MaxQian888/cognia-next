@@ -1,9 +1,10 @@
 "use client"
 
-// Subscription Overview tab — renders the live status badge, 5h/7d
-// utilization bars, and the reset countdown. When the user is signed out we
-// degrade to a CTA. When the user is in web mode we show a banner explaining
-// the keychain dependency.
+// Anthropic Overview pane. Renders the live status badge, 5h/7d utilization
+// bars, and the reset countdown for the ACTIVE Anthropic account. When the
+// user is signed out we degrade to a CTA that opens the parent's add-account
+// dialog. When the user is in web mode we show a banner explaining the
+// keychain dependency.
 
 import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -18,30 +19,34 @@ import {
   SettingsEmptyState,
 } from "@/components/settings/common/settings-section"
 
-import { useSubscriptionCredential, useSubscriptionUsage } from "@/lib/anthropic-subscription/hooks"
+import { useActiveAnthropicCredential, useAnthropicUsage } from "@/lib/subscription/anthropic/hooks"
 import { isTauri } from "@/lib/tauri"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import {
-  DEFAULT_SUBSCRIPTION_SETTINGS,
-  type SubscriptionSettings,
+  DEFAULT_ANTHROPIC_SUBSCRIPTION_SETTINGS,
+  type AnthropicSubscriptionSettings,
   type UsageWindow,
-} from "@/lib/anthropic-subscription/types"
-
-import { SubscriptionLoginDialog } from "../login-dialog"
+} from "@/lib/subscription/core/types"
 
 function getSubscriptionSettings(
-  appSettings: { subscriptionSettings?: SubscriptionSettings } | null | undefined
-): SubscriptionSettings {
-  return appSettings?.subscriptionSettings ?? DEFAULT_SUBSCRIPTION_SETTINGS
+  appSettings: { subscriptionSettings?: AnthropicSubscriptionSettings } | null | undefined
+): AnthropicSubscriptionSettings {
+  return appSettings?.subscriptionSettings ?? DEFAULT_ANTHROPIC_SUBSCRIPTION_SETTINGS
 }
 
-export function SubscriptionOverviewTab() {
+export interface SubscriptionOverviewTabProps {
+  /** Called when the empty-state CTA is clicked. */
+  onRequestAddAccount?: () => void
+}
+
+export function SubscriptionOverviewTab({
+  onRequestAddAccount,
+}: SubscriptionOverviewTabProps = {}) {
   const t = useTranslations("subscription")
   const tabReady = isTauri()
-  const { credential } = useSubscriptionCredential()
-  const { latest } = useSubscriptionUsage(20)
+  const { credential } = useActiveAnthropicCredential()
+  const { latest } = useAnthropicUsage(20)
   const settings = useSettingsStore((s) => getSubscriptionSettings(s.settings))
-  const [loginOpen, setLoginOpen] = useState(false)
 
   if (!tabReady) {
     return <SettingsAlert title={t("webModeBanner")}>{t("webModeBanner")}</SettingsAlert>
@@ -49,14 +54,15 @@ export function SubscriptionOverviewTab() {
 
   if (!credential) {
     return (
-      <>
-        <SettingsEmptyState
-          title={t("overview.signedOutTitle")}
-          description={t("overview.signedOutBody")}
-          action={<Button onClick={() => setLoginOpen(true)}>{t("overview.signInCta")}</Button>}
-        />
-        <SubscriptionLoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
-      </>
+      <SettingsEmptyState
+        title={t("overview.signedOutTitle")}
+        description={t("overview.signedOutBody")}
+        action={
+          onRequestAddAccount ? (
+            <Button onClick={onRequestAddAccount}>{t("overview.signInCta")}</Button>
+          ) : undefined
+        }
+      />
     )
   }
 
@@ -185,11 +191,6 @@ function UsageWindowCard({
   )
 }
 
-/**
- * Re-renders every 30s so reset countdowns stay roughly accurate without
- * pegging the CPU. Returns a relative-time string ("in 4 hours", "8 minutes
- * ago") or null when `target` is null.
- */
 function useRelativeTime(target: number | null): string | null {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {

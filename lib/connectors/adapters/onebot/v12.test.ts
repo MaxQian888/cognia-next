@@ -17,9 +17,15 @@ function makeBase(): OneBotV12Event {
 }
 
 describe("parseV12Event", () => {
-  it("returns null for non-message event types", () => {
+  it("notice with no detail_type → system event (G3.5 widened notice handling)", () => {
+    // G3.5 widened notice handling — a notice with no detail_type is
+    // surfaced as a system event tagged member_added by default. The
+    // pre-G3.5 behaviour returned null; that contract changed with the
+    // member-change projection.
     const event: OneBotV12Event = { ...makeBase(), type: "notice" }
-    expect(parseV12Event(ADAPTER_ID, event)).toBeNull()
+    const r = parseV12Event(ADAPTER_ID, event)
+    expect(r!.kind).toBe("system")
+    expect(r!.systemKind).toBe("member_added")
   })
 
   it("parses private text message", () => {
@@ -128,7 +134,7 @@ describe("parseV12Event", () => {
     expect(r!.channel.kind).toBe("private")
   })
 
-  it("returns null for notice variants we do not track", () => {
+  it("group_member_increase → system event (G3.5)", () => {
     const event: OneBotV12Event = {
       id: "evt-other",
       time: 1700000600,
@@ -136,6 +142,34 @@ describe("parseV12Event", () => {
       detail_type: "group_member_increase",
       group_id: "300001",
       user_id: "200002",
+      self: { platform: "qq", user_id: "100000" },
+    }
+    const r = parseV12Event(ADAPTER_ID, event)
+    expect(r!.kind).toBe("system")
+    expect(r!.systemKind).toBe("member_added")
+    expect(r!.channel.kind).toBe("group")
+  })
+
+  it("group_member_decrease → system event member_removed", () => {
+    const event: OneBotV12Event = {
+      id: "evt-leave",
+      time: 1700000700,
+      type: "notice",
+      detail_type: "group_member_decrease",
+      group_id: "300001",
+      user_id: "200003",
+      self: { platform: "qq", user_id: "100000" },
+    }
+    const r = parseV12Event(ADAPTER_ID, event)
+    expect(r!.systemKind).toBe("member_removed")
+  })
+
+  it("meta events still return null (heartbeat tick is too noisy)", () => {
+    const event: OneBotV12Event = {
+      id: "evt-meta",
+      time: 1700000800,
+      type: "meta",
+      detail_type: "heartbeat",
       self: { platform: "qq", user_id: "100000" },
     }
     expect(parseV12Event(ADAPTER_ID, event)).toBeNull()

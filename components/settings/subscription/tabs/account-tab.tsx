@@ -1,8 +1,8 @@
 "use client"
 
-// Account tab — surfaces the credential identity (email / plan / expiry),
-// lets the user run a manual refresh, and signs out cleanly. Web mode
-// degrades to a banner.
+// Account tab — surfaces the active Anthropic credential identity
+// (email / plan / expiry), lets the user run a manual refresh, and signs
+// out cleanly. Web mode degrades to a banner.
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
@@ -15,16 +15,18 @@ import {
   SettingsEmptyState,
 } from "@/components/settings/common/settings-section"
 
-import { useSubscriptionCredential } from "@/lib/anthropic-subscription/hooks"
+import { useActiveAnthropicCredential } from "@/lib/subscription/anthropic/hooks"
 import { isTauri } from "@/lib/tauri"
 
-import { SubscriptionLoginDialog } from "../login-dialog"
+export interface SubscriptionAccountTabProps {
+  /** Invoked when the empty-state CTA is clicked. */
+  onRequestAddAccount?: () => void
+}
 
-export function SubscriptionAccountTab() {
+export function SubscriptionAccountTab({ onRequestAddAccount }: SubscriptionAccountTabProps = {}) {
   const t = useTranslations("subscription")
   const tabReady = isTauri()
-  const { credential, refresh, signOut } = useSubscriptionCredential()
-  const [loginOpen, setLoginOpen] = useState(false)
+  const { credential, refresh, signOut } = useActiveAnthropicCredential()
   const [busy, setBusy] = useState<"refresh" | "signOut" | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -34,14 +36,15 @@ export function SubscriptionAccountTab() {
 
   if (!credential) {
     return (
-      <>
-        <SettingsEmptyState
-          title={t("account.signedOutTitle")}
-          description={t("account.signedOutBody")}
-          action={<Button onClick={() => setLoginOpen(true)}>{t("account.signInCta")}</Button>}
-        />
-        <SubscriptionLoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
-      </>
+      <SettingsEmptyState
+        title={t("account.signedOutTitle")}
+        description={t("account.signedOutBody")}
+        action={
+          onRequestAddAccount ? (
+            <Button onClick={onRequestAddAccount}>{t("account.signInCta")}</Button>
+          ) : undefined
+        }
+      />
     )
   }
 

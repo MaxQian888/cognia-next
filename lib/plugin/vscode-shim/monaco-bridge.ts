@@ -28,6 +28,39 @@
 
 import { nanoid } from "nanoid"
 
+import {
+  monacoPositionToVscode,
+  monacoRangeToVscode,
+  vscodeCodeLensToMonaco,
+  vscodeColorInformationToMonaco,
+  vscodeCompletionResultToMonaco,
+  vscodeDocumentLinkToMonaco,
+  vscodeDocumentSymbolToMonaco,
+  vscodeFoldingRangeToMonaco,
+  vscodeHoverToMonaco,
+  vscodeInlayHintToMonaco,
+  vscodeLocationsToMonaco,
+  vscodeSelectionRangeToMonaco,
+  vscodeSemanticTokensToMonaco,
+  vscodeSignatureHelpToMonaco,
+  vscodeTextEditsToMonaco,
+  type AdaptedMonacoCompletionItem,
+  type VscodeCodeLens,
+  type VscodeColorInformation,
+  type VscodeCompletionResult,
+  type VscodeDocumentLink,
+  type VscodeDocumentSymbol,
+  type VscodeFoldingRange,
+  type VscodeHover,
+  type VscodeInlayHint,
+  type VscodeLocation,
+  type VscodeRange as AdapterVscodeRange,
+  type VscodeSelectionRange,
+  type VscodeSemanticTokens,
+  type VscodeSignatureHelp,
+  type VscodeTextEdit,
+} from "./lsp-protocol-adapter"
+
 // ────────────────────────────────────────────────────────────────────────
 // Type aliases (Monaco-shaped, intentionally minimal)
 // ────────────────────────────────────────────────────────────────────────
@@ -88,10 +121,21 @@ export interface MonacoDecorationOptions {
 
 export interface MonacoCompletionItem {
   label: string
-  kind?: string
+  /**
+   * Monaco's numeric `CompletionItemKind` enum value (`Method = 0`,
+   * `Function = 1`, ...). The `lsp-protocol-adapter` translates VS Code's
+   * 1..25 enum into Monaco's enum before items reach this shape.
+   */
+  kind?: number
   detail?: string
   documentation?: string
   insertText: string
+  /**
+   * Monaco's `CompletionItemInsertTextRule` bitmask. `InsertAsSnippet = 4`
+   * is the only value cognia emits — see `lsp-protocol-adapter` for the
+   * VS Code `insertTextFormat` translation.
+   */
+  insertTextRules?: number
   range?: MonacoRange
   filterText?: string
   sortText?: string
@@ -608,12 +652,12 @@ export function registerCompletionItemProvider(req: CompletionProviderRequest): 
   const disposable = monacoApi!.languages.registerCompletionItemProvider(req.selector, {
     triggerCharacters: req.triggerCharacters,
     provideCompletionItems: async (model, position) => {
-      const result = await dispatchRpc!<{ suggestions: MonacoCompletionItem[] } | null>(
+      const result = await dispatchRpc!<VscodeCompletionResult | null>(
         req.extensionId,
         "provideCompletionItems",
-        { token, uri: model.uri, position }
+        { token, uri: model.uri, position: monacoPositionToVscode(position) }
       )
-      return result ?? null
+      return vscodeCompletionResultToMonaco(result)
     },
   })
   return registerToken(token, req.extensionId, disposable)
@@ -624,12 +668,12 @@ export function registerHoverProvider(req: HoverProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerHoverProvider(req.selector, {
     provideHover: async (model, position) => {
-      const result = await dispatchRpc!<MonacoHover | null>(req.extensionId, "provideHover", {
+      const result = await dispatchRpc!<VscodeHover | null>(req.extensionId, "provideHover", {
         token,
         uri: model.uri,
-        position,
+        position: monacoPositionToVscode(position),
       })
-      return result ?? null
+      return result ? vscodeHoverToMonaco(result) : null
     },
   })
   return registerToken(token, req.extensionId, disposable)
@@ -640,12 +684,14 @@ export function registerDefinitionProvider(req: DefinitionProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerDefinitionProvider(req.selector, {
     provideDefinition: async (model, position) => {
-      const result = await dispatchRpc!<MonacoLocation[] | null>(
+      const result = await dispatchRpc!<VscodeLocation[] | VscodeLocation | null>(
         req.extensionId,
         "provideDefinition",
-        { token, uri: model.uri, position }
+        { token, uri: model.uri, position: monacoPositionToVscode(position) }
       )
-      return result ?? null
+      if (result == null) return null
+      const locs = Array.isArray(result) ? result : [result]
+      return vscodeLocationsToMonaco(locs)
     },
   })
   return registerToken(token, req.extensionId, disposable)
@@ -656,12 +702,12 @@ export function registerReferenceProvider(req: ReferenceProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerReferenceProvider(req.selector, {
     provideReferences: async (model, position) => {
-      const result = await dispatchRpc!<MonacoLocation[] | null>(
+      const result = await dispatchRpc!<VscodeLocation[] | null>(
         req.extensionId,
         "provideReferences",
-        { token, uri: model.uri, position }
+        { token, uri: model.uri, position: monacoPositionToVscode(position) }
       )
-      return result ?? null
+      return result ? vscodeLocationsToMonaco(result) : null
     },
   })
   return registerToken(token, req.extensionId, disposable)
@@ -672,12 +718,12 @@ export function registerDocumentFormattingProvider(req: FormattingProviderReques
   const token = nanoid()
   const disposable = monacoApi!.languages.registerDocumentFormattingEditProvider(req.selector, {
     provideDocumentFormattingEdits: async (model) => {
-      const result = await dispatchRpc!<MonacoTextEdit[] | null>(
+      const result = await dispatchRpc!<VscodeTextEdit[] | null>(
         req.extensionId,
         "provideDocumentFormattingEdits",
         { token, uri: model.uri }
       )
-      return result ?? null
+      return result ? vscodeTextEditsToMonaco(result) : null
     },
   })
   return registerToken(token, req.extensionId, disposable)
@@ -690,12 +736,12 @@ export function registerDocumentRangeFormattingProvider(req: RangeFormattingProv
     req.selector,
     {
       provideDocumentRangeFormattingEdits: async (model, range) => {
-        const result = await dispatchRpc!<MonacoTextEdit[] | null>(
+        const result = await dispatchRpc!<VscodeTextEdit[] | null>(
           req.extensionId,
           "provideDocumentRangeFormattingEdits",
-          { token, uri: model.uri, range }
+          { token, uri: model.uri, range: monacoRangeToVscode(range) }
         )
-        return result ?? null
+        return result ? vscodeTextEditsToMonaco(result) : null
       },
     }
   )
@@ -707,12 +753,12 @@ export function registerCodeLensProvider(req: CodeLensProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerCodeLensProvider(req.selector, {
     provideCodeLenses: async (model) => {
-      const result = await dispatchRpc!<MonacoCodeLens[] | null>(
+      const result = await dispatchRpc!<VscodeCodeLens[] | null>(
         req.extensionId,
         "provideCodeLenses",
         { token, uri: model.uri }
       )
-      return result ?? null
+      return result ? result.map(vscodeCodeLensToMonaco) : null
     },
   })
   return registerToken(token, req.extensionId, disposable)
@@ -723,10 +769,13 @@ export function registerCodeActionsProvider(req: CodeActionsProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerCodeActionProvider(req.selector, {
     provideCodeActions: async (model, range) => {
+      // CodeActions ride through with their VS Code shape — Monaco accepts
+      // any object with `title`/`kind`/`command`/`edit`. We only convert
+      // ranges inside the action's edits if present; for now pass-through.
       const result = await dispatchRpc!<MonacoCodeLens[] | null>(
         req.extensionId,
         "provideCodeActions",
-        { token, uri: model.uri, range }
+        { token, uri: model.uri, range: monacoRangeToVscode(range) }
       )
       return result ?? null
     },
@@ -739,12 +788,17 @@ export function registerRenameProvider(req: RenameProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerRenameProvider(req.selector, {
     provideRenameEdits: async (model, position, newName) => {
-      const result = await dispatchRpc!<MonacoTextEdit[] | null>(
+      const result = await dispatchRpc!<VscodeTextEdit[] | null>(
         req.extensionId,
         "provideRenameEdits",
-        { token, uri: model.uri, position, newName }
+        {
+          token,
+          uri: model.uri,
+          position: monacoPositionToVscode(position),
+          newName,
+        }
       )
-      return result ?? null
+      return result ? vscodeTextEditsToMonaco(result) : null
     },
   })
   return registerToken(token, req.extensionId, disposable)
@@ -755,12 +809,12 @@ export function registerDocumentSymbolProvider(req: DocumentSymbolProviderReques
   const token = nanoid()
   const disposable = monacoApi!.languages.registerDocumentSymbolProvider(req.selector, {
     provideDocumentSymbols: async (model) => {
-      const result = await dispatchRpc!<unknown[] | null>(
+      const result = await dispatchRpc!<VscodeDocumentSymbol[] | null>(
         req.extensionId,
         "provideDocumentSymbols",
         { token, uri: model.uri }
       )
-      return result ?? null
+      return result ? result.map(vscodeDocumentSymbolToMonaco) : null
     },
   })
   return registerToken(token, req.extensionId, disposable)
@@ -781,7 +835,7 @@ export function registerInlineCompletionProvider(req: InlineCompletionProviderRe
       const result = await dispatchRpc!<{ items: MonacoUnknownArray } | null>(
         req.extensionId,
         "provideInlineCompletionItems",
-        { token, uri: model.uri, position }
+        { token, uri: model.uri, position: monacoPositionToVscode(position) }
       )
       return result ?? null
     },
@@ -799,12 +853,12 @@ export function registerSignatureHelpProvider(req: SignatureHelpProviderRequest)
     signatureHelpTriggerCharacters: req.triggerCharacters,
     signatureHelpRetriggerCharacters: req.retriggerCharacters,
     provideSignatureHelp: async (model, position) => {
-      const result = await dispatchRpc!<{ value: MonacoSignatureHelp } | null>(
+      const result = await dispatchRpc!<VscodeSignatureHelp | null>(
         req.extensionId,
         "provideSignatureHelp",
-        { token, uri: model.uri, position }
+        { token, uri: model.uri, position: monacoPositionToVscode(position) }
       )
-      return result ?? null
+      return result ? { value: vscodeSignatureHelpToMonaco(result) } : null
     },
   })
   return registerToken(token, req.extensionId, disposable)
@@ -856,18 +910,23 @@ export function registerColorProvider(req: ColorProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerColorProvider(req.selector, {
     provideDocumentColors: async (model) => {
-      const result = await dispatchRpc!<MonacoColorInformation[] | null>(
+      const result = await dispatchRpc!<VscodeColorInformation[] | null>(
         req.extensionId,
         "provideDocumentColors",
         { token, uri: model.uri }
       )
-      return result ?? null
+      return result ? result.map(vscodeColorInformationToMonaco) : null
     },
     provideColorPresentations: async (model, colorInfo) => {
+      // colorInfo flows back to the sidecar with its range in VSCode shape.
+      const vscodeColorInfo = {
+        range: monacoRangeToVscode(colorInfo.range),
+        color: colorInfo.color,
+      }
       const result = await dispatchRpc!<MonacoUnknownArray | null>(
         req.extensionId,
         "provideColorPresentations",
-        { token, uri: model.uri, colorInfo }
+        { token, uri: model.uri, colorInfo: vscodeColorInfo }
       )
       return result ?? null
     },
@@ -880,12 +939,12 @@ export function registerFoldingRangeProvider(req: FoldingRangeProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerFoldingRangeProvider(req.selector, {
     provideFoldingRanges: async (model) => {
-      const result = await dispatchRpc!<MonacoFoldingRange[] | null>(
+      const result = await dispatchRpc!<VscodeFoldingRange[] | null>(
         req.extensionId,
         "provideFoldingRanges",
         { token, uri: model.uri }
       )
-      return result ?? null
+      return result ? result.map(vscodeFoldingRangeToMonaco) : null
     },
   })
   return registerToken(token, req.extensionId, disposable)
@@ -896,12 +955,16 @@ export function registerSelectionRangeProvider(req: SelectionRangeProviderReques
   const token = nanoid()
   const disposable = monacoApi!.languages.registerSelectionRangeProvider(req.selector, {
     provideSelectionRanges: async (model, positions) => {
-      const result = await dispatchRpc!<MonacoSelectionRange[][] | null>(
+      const result = await dispatchRpc!<VscodeSelectionRange[][] | null>(
         req.extensionId,
         "provideSelectionRanges",
-        { token, uri: model.uri, positions }
+        {
+          token,
+          uri: model.uri,
+          positions: positions.map(monacoPositionToVscode),
+        }
       )
-      return result ?? null
+      return result ? result.map((perPos) => perPos.map(vscodeSelectionRangeToMonaco)) : null
     },
   })
   return registerToken(token, req.extensionId, disposable)
@@ -912,12 +975,12 @@ export function registerDocumentLinkProvider(req: DocumentLinkProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerLinkProvider(req.selector, {
     provideLinks: async (model) => {
-      const result = await dispatchRpc!<{ links: MonacoDocumentLink[] } | null>(
+      const result = await dispatchRpc!<{ links: VscodeDocumentLink[] } | null>(
         req.extensionId,
         "provideDocumentLinks",
         { token, uri: model.uri }
       )
-      return result ?? null
+      return result ? { links: result.links.map(vscodeDocumentLinkToMonaco) } : null
     },
   })
   return registerToken(token, req.extensionId, disposable)
@@ -929,12 +992,12 @@ export function registerOnTypeFormattingProvider(req: OnTypeFormattingProviderRe
   const disposable = monacoApi!.languages.registerOnTypeFormattingEditProvider(req.selector, {
     autoFormatTriggerCharacters: [req.firstTriggerCharacter, ...(req.moreTriggerCharacter ?? [])],
     provideOnTypeFormattingEdits: async (model, position, ch) => {
-      const result = await dispatchRpc!<MonacoTextEdit[] | null>(
+      const result = await dispatchRpc!<VscodeTextEdit[] | null>(
         req.extensionId,
         "provideOnTypeFormattingEdits",
-        { token, uri: model.uri, position, ch }
+        { token, uri: model.uri, position: monacoPositionToVscode(position), ch }
       )
-      return result ?? null
+      return result ? vscodeTextEditsToMonaco(result) : null
     },
   })
   return registerToken(token, req.extensionId, disposable)
@@ -946,12 +1009,12 @@ export function registerDocumentSemanticTokensProvider(req: SemanticTokensProvid
   const disposable = monacoApi!.languages.registerDocumentSemanticTokensProvider(req.selector, {
     getLegend: () => req.legend,
     provideDocumentSemanticTokens: async (model) => {
-      const result = await dispatchRpc!<MonacoSemanticTokens | null>(
+      const result = await dispatchRpc!<VscodeSemanticTokens | null>(
         req.extensionId,
         "provideDocumentSemanticTokens",
         { token, uri: model.uri }
       )
-      return result ?? null
+      return result ? vscodeSemanticTokensToMonaco(result) : null
     },
     releaseDocumentSemanticTokens: () => {
       // Sidecar manages its own cache keyed by resultId.
@@ -968,12 +1031,12 @@ export function registerDocumentRangeSemanticTokensProvider(req: SemanticTokensP
     {
       getLegend: () => req.legend,
       provideDocumentRangeSemanticTokens: async (model, range) => {
-        const result = await dispatchRpc!<MonacoSemanticTokens | null>(
+        const result = await dispatchRpc!<VscodeSemanticTokens | null>(
           req.extensionId,
           "provideDocumentRangeSemanticTokens",
-          { token, uri: model.uri, range }
+          { token, uri: model.uri, range: monacoRangeToVscode(range) }
         )
-        return result ?? null
+        return result ? vscodeSemanticTokensToMonaco(result) : null
       },
     }
   )
@@ -985,12 +1048,12 @@ export function registerInlayHintsProvider(req: InlayHintsProviderRequest) {
   const token = nanoid()
   const disposable = monacoApi!.languages.registerInlayHintsProvider(req.selector, {
     provideInlayHints: async (model, range) => {
-      const result = await dispatchRpc!<{ hints: MonacoInlayHint[] } | null>(
+      const result = await dispatchRpc!<{ hints: VscodeInlayHint[] } | null>(
         req.extensionId,
         "provideInlayHints",
-        { token, uri: model.uri, range }
+        { token, uri: model.uri, range: monacoRangeToVscode(range) }
       )
-      return result ?? null
+      return result ? { hints: result.hints.map(vscodeInlayHintToMonaco) } : null
     },
   })
   return registerToken(token, req.extensionId, disposable)
@@ -1004,7 +1067,7 @@ export function registerCallHierarchyProvider(req: CallHierarchyProviderRequest)
       const result = await dispatchRpc!<MonacoUnknownArray | null>(
         req.extensionId,
         "prepareCallHierarchy",
-        { token, uri: model.uri, position }
+        { token, uri: model.uri, position: monacoPositionToVscode(position) }
       )
       return result ?? null
     },
@@ -1036,7 +1099,7 @@ export function registerTypeHierarchyProvider(req: TypeHierarchyProviderRequest)
       const result = await dispatchRpc!<MonacoUnknownArray | null>(
         req.extensionId,
         "prepareTypeHierarchy",
-        { token, uri: model.uri, position }
+        { token, uri: model.uri, position: monacoPositionToVscode(position) }
       )
       return result ?? null
     },
@@ -1065,12 +1128,21 @@ export function registerLinkedEditingRangeProvider(req: LinkedEditingRangeProvid
   const token = nanoid()
   const disposable = monacoApi!.languages.registerLinkedEditingRangeProvider(req.selector, {
     provideLinkedEditingRanges: async (model, position) => {
-      const result = await dispatchRpc!<{ ranges: MonacoRange[] } | null>(
+      const result = await dispatchRpc!<{ ranges: AdapterVscodeRange[] } | null>(
         req.extensionId,
         "provideLinkedEditingRanges",
-        { token, uri: model.uri, position }
+        { token, uri: model.uri, position: monacoPositionToVscode(position) }
       )
-      return result ?? null
+      return result
+        ? {
+            ranges: result.ranges.map((r) => ({
+              startLineNumber: r.start.line + 1,
+              startColumn: r.start.character + 1,
+              endLineNumber: r.end.line + 1,
+              endColumn: r.end.character + 1,
+            })),
+          }
+        : null
     },
   })
   return registerToken(token, req.extensionId, disposable)

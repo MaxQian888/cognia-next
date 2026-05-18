@@ -12,7 +12,9 @@
  */
 
 import type { OutboundRequest } from "@/types/connectors/outbound"
+import type { MessageSegment } from "@/types/connectors/segment"
 import { toOneBotSegments } from "./segments"
+import { buildOneBotA2UISegments } from "./a2ui-mapper"
 
 export class OneBotUnsupportedError extends Error {
   constructor(action: string) {
@@ -75,7 +77,7 @@ export function serializeOutboundV11(
 ): SerializedOneBotCall[] {
   const { userId, groupId, messageType } = chatIdFromRef(req)
 
-  const segments = req.segments
+  const segments = expandA2UISegments(req.segments)
   // Prepend reply segment if replyTo is set
   const allSegments =
     req.replyTo !== undefined
@@ -119,7 +121,7 @@ export function serializeOutboundV12(
 ): SerializedOneBotCall[] {
   const { userId, groupId, messageType } = chatIdFromRef(req)
 
-  const segments = req.segments
+  const segments = expandA2UISegments(req.segments)
   const allSegments =
     req.replyTo !== undefined
       ? [{ type: "reply" as const, messageId: req.replyTo.messageId, snippet: "" }, ...segments]
@@ -238,4 +240,24 @@ export function serializeTypingV11(_conversationKey: string, _on: boolean): Seri
 
 export function serializeTypingV12(_conversationKey: string, _on: boolean): SerializedOneBotCall[] {
   return []
+}
+
+/**
+ * Walk a segment list and expand each `a2ui` segment into the OneBot
+ * native projection (text + image + plainTextMirror tail for any
+ * interactive components). Non-a2ui segments pass through unchanged.
+ *
+ * Synchronous because OneBot has no native interactive elements that
+ * need callback bindings — buttons / forms always fall back to text.
+ */
+function expandA2UISegments(segments: MessageSegment[]): MessageSegment[] {
+  const out: MessageSegment[] = []
+  for (const seg of segments) {
+    if (seg.type === "a2ui") {
+      out.push(...buildOneBotA2UISegments(seg.content, seg.plainTextMirror))
+    } else {
+      out.push(seg)
+    }
+  }
+  return out
 }

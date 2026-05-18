@@ -16,12 +16,15 @@ describe("OCR_PARAMETER_SCHEMAS", () => {
         "gemini-vision",
         "google-vision",
         "lark-basic",
+        "local-http",
         "mathpix",
         "mistral-ocr",
         "mlkit-android",
         "nanonets",
         "ocr-space",
+        "ocrs",
         "openai-vision",
+        "paddle-ocr",
         "tesseract-native",
         "tesseract-wasm",
         "windows-media-ocr",
@@ -54,6 +57,31 @@ describe("OCR_PARAMETER_SCHEMAS", () => {
       expect(keys).toContain("promptTemplate")
       expect(keys).toContain("model")
     }
+  })
+
+  it("ocrs ships only the common parameter block", () => {
+    const schema = OCR_PARAMETER_SCHEMAS["ocrs"]!
+    const keys = schema.parameters.map((p) => p.key).sort()
+    expect(keys).toEqual(["format", "languages", "maxImageDimension", "pageRange"])
+  })
+
+  it("paddle-ocr exposes a model variant selector", () => {
+    const schema = OCR_PARAMETER_SCHEMAS["paddle-ocr"]!
+    const keys = schema.parameters.map((p) => p.key)
+    expect(keys).toContain("model")
+  })
+
+  it("local-http requires endpoint + dialect and offers an optional apiKey + timeout", () => {
+    const schema = OCR_PARAMETER_SCHEMAS["local-http"]!
+    const params = Object.fromEntries(schema.parameters.map((p) => [p.key, p]))
+    expect(params["endpoint"]).toBeDefined()
+    expect(params["dialect"]).toBeDefined()
+    expect(params["apiKey"]).toBeDefined()
+    expect(params["timeoutMs"]).toBeDefined()
+    const dialect = params["dialect"]!
+    expect(dialect.type).toBe("select")
+    const optionValues = dialect.validation?.options?.map((o) => o.value).sort() ?? []
+    expect(optionValues).toEqual(["paddleocr-server", "umi-ocr"])
   })
 })
 

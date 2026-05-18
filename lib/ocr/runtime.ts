@@ -39,6 +39,13 @@ import {
 } from "./providers/windows-media-ocr"
 import { __setAppleVisionTauriInvoker, appleVisionProvider } from "./providers/apple-vision"
 import { mlkitAndroidProvider } from "./providers/mlkit-android"
+import { __setOcrsInvoker, __setOcrsReadiness, ocrsProvider } from "./providers/ocrs"
+import {
+  __setPaddleOcrInvoker,
+  __setPaddleOcrReadiness,
+  paddleOcrProvider,
+} from "./providers/paddle-ocr"
+import { localHttpProvider } from "./providers/local-http"
 
 const ALL_PROVIDERS = [
   mistralOcrProvider,
@@ -58,6 +65,9 @@ const ALL_PROVIDERS = [
   windowsMediaOcrProvider,
   appleVisionProvider,
   mlkitAndroidProvider,
+  ocrsProvider,
+  paddleOcrProvider,
+  localHttpProvider,
 ]
 
 let installed = false
@@ -67,6 +77,13 @@ export interface OcrRuntimeOptions {
   nativeInvoker?: NativeOcrInvoker
   /** Inject a custom MSIX-status probe. Defaults to the Tauri command. */
   windowsReadinessProbe?: () => Promise<boolean>
+  /**
+   * Inject a custom model-readiness probe — tests pass a deterministic
+   * function; production reads `ocr_model_status` from the Rust side. The
+   * probe accepts the backend id (`ocrs` / `paddle-ocr`) and returns true
+   * when the local model files are installed.
+   */
+  modelReadinessProbe?: (backend: "ocrs" | "paddle-ocr") => Promise<boolean>
 }
 
 /**
@@ -87,11 +104,19 @@ export async function installOcrRuntime(opts: OcrRuntimeOptions = {}): Promise<v
     __setNativeOcrInvoker(invoker)
     __setWindowsMediaOcrInvoker(invoker)
     __setAppleVisionTauriInvoker(invoker)
+    __setOcrsInvoker(invoker)
+    __setPaddleOcrInvoker(invoker)
   }
 
   const readinessProbe = opts.windowsReadinessProbe ?? (await tryBuildMsixProbe())
   if (readinessProbe) {
     __setWindowsMediaOcrReadiness(readinessProbe)
+  }
+
+  const modelProbe = opts.modelReadinessProbe ?? (await tryBuildModelStatusProbe())
+  if (modelProbe) {
+    __setOcrsReadiness(() => modelProbe("ocrs"))
+    __setPaddleOcrReadiness(() => modelProbe("paddle-ocr"))
   }
 }
 
@@ -102,6 +127,10 @@ export function __resetOcrRuntime(): void {
   __setWindowsMediaOcrInvoker(null)
   __setWindowsMediaOcrReadiness(null)
   __setAppleVisionTauriInvoker(null)
+  __setOcrsInvoker(null)
+  __setOcrsReadiness(null)
+  __setPaddleOcrInvoker(null)
+  __setPaddleOcrReadiness(null)
 }
 
 async function tryBuildTauriInvoker(): Promise<NativeOcrInvoker | null> {
@@ -138,6 +167,36 @@ async function tryBuildMsixProbe(): Promise<(() => Promise<boolean>) | null> {
       try {
         const status = await invoke<{ has_package_identity?: boolean }>("ocr_msix_status")
         return !!status?.has_package_identity
+      } catch {
+        return false
+      }
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Build a probe that asks the Rust side via `ocr_model_status` whether the
+ * given backend's models are installed. Returns `null` (no probe) when the
+ * runtime isn't Tauri — the providers will then either rely on the
+ * fallback default (`null` → treat as ready) or throw `unsupported_shell`
+ * when invoked without an installed model. Tests inject a stub via
+ * `OcrRuntimeOptions.modelReadinessProbe`.
+ */
+async function tryBuildModelStatusProbe(): Promise<
+  ((backend: "ocrs" | "paddle-ocr") => Promise<boolean>) | null
+> {
+  if (typeof window === "undefined") return null
+  if (!("__TAURI_INTERNALS__" in (window as unknown as Record<string, unknown>))) return null
+  try {
+    const { invoke } = (await import("@tauri-apps/api/core")) as {
+      invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>
+    }
+    return async (backend) => {
+      try {
+        const status = await invoke<{ installed?: boolean }>("ocr_model_status", { backend })
+        return !!status?.installed
       } catch {
         return false
       }

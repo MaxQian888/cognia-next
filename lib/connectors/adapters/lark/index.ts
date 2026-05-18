@@ -15,10 +15,17 @@ import type {
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
-import { LARK_CAPS } from "./capability"
-import { parseLarkEventEnvelope } from "./parse"
+import { LARK_A2UI_CAPABILITY, LARK_CAPS } from "./capability"
+import { parseLarkEventEnvelope, parseLarkInteractiveCallback } from "./parse"
+import { getBus } from "@/lib/connectors/bus"
 import type { LarkEventEnvelope } from "./parse"
-import { serializeOutbound, serializeEdit, serializeDelete, serializeReaction } from "./serialize"
+import {
+  serializeOutbound,
+  serializeOutboundAsync,
+  serializeEdit,
+  serializeDelete,
+  serializeReaction,
+} from "./serialize"
 import { getTenantAccessToken } from "./auth"
 import { resolveLarkMediaKeys } from "./upload"
 import { startLarkLongConn } from "./transport-long-conn"
@@ -118,6 +125,29 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
 
     healthState = "running"
 
+    /**
+     * Shared envelope dispatcher — handles both the long-connection and
+     * webhook paths. Interactive-card callbacks (G3.4) go through the
+     * ConnectorBus callback channel; everything else flows to
+     * `ctx.emit` as a normalised message event.
+     */
+    const dispatchEnvelope = async (envelope: LarkEventEnvelope): Promise<void> => {
+      // Interactive card callbacks — route to the callback channel.
+      if (envelope.header?.event_type === "im.interactive_message.action_triggered_v1") {
+        const callback = parseLarkInteractiveCallback(opts.id, opts.selfBotOpenId, envelope)
+        if (callback) {
+          lastActivityAt = Date.now()
+          await getBus().dispatchConnectorCallback(callback)
+        }
+        return
+      }
+      const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope)
+      if (event) {
+        lastActivityAt = Date.now()
+        await ctx.emit(event)
+      }
+    }
+
     if (opts.transport === "long-connection") {
       ;(async () => {
         try {
@@ -127,15 +157,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
           })
           for await (const envelope of generator) {
             if (signal.aborted) break
-            const event = parseLarkEventEnvelope(
-              opts.id,
-              opts.selfBotOpenId,
-              envelope as LarkEventEnvelope
-            )
-            if (event) {
-              lastActivityAt = Date.now()
-              await ctx.emit(event)
-            }
+            await dispatchEnvelope(envelope as LarkEventEnvelope)
           }
           if (!stopCalled) {
             healthState = "down"
@@ -156,15 +178,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
           })
           for await (const envelope of generator) {
             if (signal.aborted) break
-            const event = parseLarkEventEnvelope(
-              opts.id,
-              opts.selfBotOpenId,
-              envelope as LarkEventEnvelope
-            )
-            if (event) {
-              lastActivityAt = Date.now()
-              await ctx.emit(event)
-            }
+            await dispatchEnvelope(envelope as LarkEventEnvelope)
           }
           if (!stopCalled) {
             healthState = "down"
@@ -196,7 +210,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
         getAccessToken: getTat,
         uploadCache,
       })
-      const call = serializeOutbound({ ...req, segments: resolvedSegments })
+      const call = await serializeOutboundAsync({ ...req, segments: resolvedSegments }, opts.id)
       const urlPath = call.url.replace(LARK_API_BASE, "")
       await doRequest(call.method, urlPath, call.payload)
       return { ok: true }
@@ -348,6 +362,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     fetchHistory,
     setTyping,
     refreshCredentials,
+    a2uiCapability: () => LARK_A2UI_CAPABILITY,
     addReaction,
   }
 

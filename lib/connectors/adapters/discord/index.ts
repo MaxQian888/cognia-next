@@ -12,11 +12,13 @@ import type {
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
-import { DISCORD_CAPS } from "./capability"
-import { parseDiscordDispatch } from "./parse"
-import { serializeOutbound, serializeDelete, serializeEdit } from "./serialize"
+import { DISCORD_A2UI_CAPABILITY, DISCORD_CAPS } from "./capability"
+import { parseDiscordDispatch, parseDiscordInteraction } from "./parse"
+import { serializeOutboundAsync, serializeDelete, serializeEdit } from "./serialize"
+import { sendDiscordVoiceMessage } from "./voice-upload"
 import { startGatewayClient } from "./gateway-client"
 import type { GatewayClient } from "./gateway-client"
+import { getBus } from "@/lib/connectors/bus"
 
 export interface DiscordAdapterOptions {
   id: string
@@ -98,6 +100,19 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
             selfId = client.selfId
           }
 
+          // INTERACTION_CREATE (components / modal_submit) flows through
+          // the ConnectorBus callback channel — `dispatchConnectorCallback`
+          // dedups via namespace="callback", recovers the surface binding
+          // and forwards to the a2ui-bridge MCP server.
+          if (dispatch.t === "INTERACTION_CREATE") {
+            const callback = parseDiscordInteraction(opts.id, selfId, dispatch)
+            if (callback) {
+              lastActivityAt = Date.now()
+              await getBus().dispatchConnectorCallback(callback)
+            }
+            continue
+          }
+
           const event = parseDiscordDispatch(opts.id, selfId, dispatch)
           if (event) {
             lastActivityAt = Date.now()
@@ -128,10 +143,30 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
   }
 
   async function send(req: OutboundRequest): Promise<OutboundResult> {
-    const calls = serializeOutbound(req)
+    // Voice segments use a dedicated multipart-style upload helper
+    // because Discord's voice messages require the IS_VOICE_MESSAGE flag
+    // + duration_secs metadata on the attachment, which doesn't fit the
+    // generic POST /messages JSON body the rest of the segments use.
+    const channelId = String((req.conversationRef as Record<string, unknown>)["channelId"] ?? "")
+    const voiceSegments = req.segments.filter((s) => s.type === "voice")
+    const otherSegments = req.segments.filter((s) => s.type !== "voice")
+
     let platformMessageId: string | undefined
 
     try {
+      for (const seg of voiceSegments) {
+        if (seg.type !== "voice") continue
+        const result = await sendDiscordVoiceMessage({
+          botToken: opts.botToken,
+          channelId,
+          voiceUrl: seg.url,
+          durationSec: seg.durationSec,
+          replyToMessageId: req.replyTo?.messageId,
+        })
+        if (result.messageId) platformMessageId = result.messageId
+      }
+      const restReq: OutboundRequest = { ...req, segments: otherSegments }
+      const calls = await serializeOutboundAsync(restReq, opts.id)
       for (const call of calls) {
         const result = (await doRequest(
           call.method,
@@ -221,5 +256,6 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
     delete: deleteMessage,
     setTyping,
     refreshCredentials,
+    a2uiCapability: () => DISCORD_A2UI_CAPABILITY,
   }
 }

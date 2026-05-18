@@ -23,6 +23,17 @@ import {
   handleDisposeChatParticipant,
   handleRegisterChatVariableResolver,
 } from "./chat-participant-registry"
+import {
+  handleExtensionCleanup,
+  handleLanguagesRegister,
+  handleLanguagesRegisterDecorationType,
+  handleLanguagesSetDecorations,
+  handleLanguagesSetDiagnostics,
+  handleLanguagesUnregister,
+  handleWindowActiveTextEditorGet,
+} from "./languages-handler"
+import { vscodeDiagnosticToMonacoMarker, type VscodeDiagnostic } from "./lsp-protocol-adapter"
+import { listWorkspaceFolders, resolveWorkspaceFolder } from "./lsp-workspace-manager"
 
 let installed = false
 
@@ -80,6 +91,72 @@ export function installVscodeRpcHandlers(): () => void {
   disposers.push(
     registerMethod("chat:respond", (p) => {
       handleChatParticipantRespond(p as never)
+    })
+  )
+
+  // languages:* — provider registration + diagnostics + decorations.
+  disposers.push(registerMethod("languages:register", (p) => handleLanguagesRegister(p as never)))
+  disposers.push(
+    registerMethod("languages:unregister", (p) => handleLanguagesUnregister(p as never))
+  )
+  disposers.push(
+    registerMethod("languages:setDiagnostics", (p) => {
+      // Sidecar speaks VS Code shapes; convert each Diagnostic into a
+      // Monaco marker (string severity, 1-based ranges) before forwarding
+      // to the bridge. Either `diagnostics` (sidecar's collection.set
+      // notification) or pre-converted `markers` (renderer-side callers)
+      // is accepted.
+      const payload = p as {
+        extensionId: string
+        uri: string
+        diagnostics?: VscodeDiagnostic[]
+        markers?: unknown[]
+      }
+      const markers = payload.diagnostics
+        ? payload.diagnostics.map(vscodeDiagnosticToMonacoMarker)
+        : (payload.markers ?? [])
+      handleLanguagesSetDiagnostics({
+        extensionId: payload.extensionId,
+        uri: payload.uri,
+        markers,
+      })
+    })
+  )
+  disposers.push(
+    registerMethod("languages:clearDiagnostics", (p) => {
+      // Sidecar emits this when an extension calls
+      // `DiagnosticCollection.set(uri, undefined)` or `.delete(uri)`.
+      // Treat as setting the marker list to empty.
+      const payload = p as { extensionId: string; uri: string }
+      handleLanguagesSetDiagnostics({
+        extensionId: payload.extensionId,
+        uri: payload.uri,
+        markers: [],
+      })
+    })
+  )
+  disposers.push(
+    registerMethod("languages:registerDecorationType", (p) =>
+      handleLanguagesRegisterDecorationType(p as never)
+    )
+  )
+  disposers.push(
+    registerMethod("languages:setDecorations", (p) => handleLanguagesSetDecorations(p as never))
+  )
+  disposers.push(registerMethod("extension:cleanup", (p) => handleExtensionCleanup(p as never)))
+  disposers.push(
+    registerMethod("window:activeTextEditor:get", () => handleWindowActiveTextEditorGet())
+  )
+
+  // workspace:* — workspace folder lookups for the sidecar's
+  // `vscode.workspace.workspaceFolders` / `getWorkspaceFolder(uri)` APIs.
+  // Answered by `lsp-workspace-manager` from the renderer side, which
+  // tracks materialised per-surface workspaces.
+  disposers.push(registerMethod("workspace:listFolders", () => listWorkspaceFolders()))
+  disposers.push(
+    registerMethod("workspace:getWorkspaceFolder", (p) => {
+      const { uri } = p as { uri: string }
+      return resolveWorkspaceFolder(uri)
     })
   )
 

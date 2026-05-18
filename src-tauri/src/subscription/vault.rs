@@ -1,0 +1,610 @@
+// Provider-vault storage layer.
+//
+// One keyring entry per provider:
+//   service = "com.cognia.subscription/v2"
+//   account = "anthropic" | "codex" | "opencode"
+//   payload = JSON blob shaped as `ProviderVault`
+//
+// `ProviderVault` holds N `Account`s, an optional `activeAccountId` pointer,
+// and an optional `ProviderPreset`. The vault layer is responsible for keyring
+// I/O and structural validation; provider-specific credential validation is
+// delegated to `SubscriptionProvider::validate`.
+
+use keyring::Entry;
+use serde::{Deserialize, Serialize};
+
+use crate::subscription::preset::ProviderPreset;
+use crate::subscription::provider::ProviderId;
+
+pub const SERVICE: &str = "com.cognia.subscription/v2";
+pub const SCHEMA_VERSION: u32 = 2;
+
+// ---------------------------------------------------------------------------
+// Credential variants — provider-specific shapes. Fields mirror today's v1
+// schemas verbatim so the migration is a straight wrap.
+// ---------------------------------------------------------------------------
+
+/// Anthropic credential (PKCE flow). Mirrors the v1 `SubscriptionCredential`
+/// from `anthropic_subscription/credential.rs` field-for-field.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AnthropicCredentialData {
+    /// OAuth bearer. Sent as `Authorization: Bearer <token>`. Treat as secret.
+    #[serde(rename = "accessToken")]
+    pub access_token: String,
+    /// Long-lived refresh token. May rotate on every refresh — callers must
+    /// always persist the latest value returned by the token endpoint.
+    #[serde(rename = "refreshToken")]
+    pub refresh_token: String,
+    /// Absolute expiry in ms epoch. `Date.now() + expires_in*1000` at exchange.
+    #[serde(rename = "expiresAtMs")]
+    pub expires_at_ms: i64,
+    /// `"subscription"` (Pro/Max) or `"console"` (API billing).
+    pub mode: String,
+    /// OAuth scope string echoed from the server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    /// Account email (optional — server may not return one).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    /// Plan label ("pro", "max", "team", "console").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+    /// When this record was last written (ms epoch).
+    #[serde(rename = "storedAtMs", default)]
+    pub stored_at_ms: i64,
+}
+
+/// Codex credential (device-code flow). Mirrors the v1 `CodexCredential` from
+/// `codex_subscription/credential.rs` field-for-field.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodexCredentialData {
+    /// Either the ChatGPT bearer JWT or — for api_key mode — the raw key.
+    #[serde(rename = "accessToken", default, skip_serializing_if = "String::is_empty")]
+    pub access_token: String,
+    /// Long-lived refresh token (chatgpt mode only). May rotate.
+    #[serde(rename = "refreshToken", default, skip_serializing_if = "String::is_empty")]
+    pub refresh_token: String,
+    /// Raw id_token JWT verbatim (chatgpt mode only).
+    #[serde(rename = "idTokenRaw", default, skip_serializing_if = "String::is_empty")]
+    pub id_token_raw: String,
+    /// Absolute expiry in ms epoch. 0 = doesn't apply (api_key mode).
+    #[serde(rename = "expiresAtMs", default)]
+    pub expires_at_ms: i64,
+    /// `"chatgpt"` or `"api_key"`.
+    #[serde(rename = "authMode")]
+    pub auth_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(rename = "chatgptPlanType", default, skip_serializing_if = "Option::is_none")]
+    pub chatgpt_plan_type: Option<String>,
+    #[serde(rename = "chatgptUserId", default, skip_serializing_if = "Option::is_none")]
+    pub chatgpt_user_id: Option<String>,
+    #[serde(rename = "accountId", default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    /// `"file"` | `"keyring"` | `"oauth"` — where the credential was first adopted.
+    #[serde(rename = "originalSource", default, skip_serializing_if = "Option::is_none")]
+    pub original_source: Option<String>,
+    #[serde(rename = "storedAtMs", default)]
+    pub stored_at_ms: i64,
+}
+
+/// Pointer-style record for an OpenCode-discovered credential. We capture
+/// where it came from + the original JSON payload (for forensics / future
+/// adoption) without copying the full secret payload into our own keyring —
+/// the user can always re-adopt by clicking "Use" in the UI, which then
+/// flows through `OpencodeZenData` for `opencode-zen` or `opencode_save_zen_key`.
+///
+/// Note: discovery results are surfaced separately via `opencode_oauth_discover`
+/// and are NOT routinely persisted into the vault. This variant exists so a
+/// future "snapshot adopt" flow can record a discovery decision without
+/// re-reading auth.json. It is currently only used in tests.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OpencodeDiscoveredData {
+    /// `"anthropic"` | `"openai"` | `"opencode-zen"` — whitelisted sub-providers.
+    #[serde(rename = "subProvider")]
+    pub sub_provider: String,
+    /// Resolved path to the source `auth.json`.
+    #[serde(rename = "authJsonPath")]
+    pub auth_json_path: String,
+    /// The original JSON payload for the sub-provider entry, verbatim. Kept
+    /// as a string (not a typed value) because OpenCode's schema is open-ended
+    /// — keeping the original bytes is the safest way to round-trip future
+    /// fields we don't yet know about.
+    #[serde(rename = "originalPayloadJson")]
+    pub original_payload_json: String,
+    #[serde(rename = "lastSeenAtMs", default)]
+    pub last_seen_at_ms: i64,
+}
+
+/// OpenCode-Zen API key (paste-key flow). Plan ships this as Phase 1 — full
+/// OAuth into opencode.ai is deferred until the endpoints are documented.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OpencodeZenData {
+    #[serde(rename = "accessToken")]
+    pub access_token: String,
+    /// Optional regional override. Free-text URL today; future versions may
+    /// swap to a dropdown when opencode.ai publishes the region list.
+    #[serde(rename = "baseUrl", default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(rename = "storedAtMs", default)]
+    pub stored_at_ms: i64,
+}
+
+/// Discriminated union of every provider-specific credential shape. Tag is
+/// `"provider"` for ergonomic JSON: `{"provider":"anthropic","accessToken":...}`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "provider", rename_all = "kebab-case")]
+pub enum ProviderCredential {
+    Anthropic(AnthropicCredentialData),
+    Codex(CodexCredentialData),
+    OpencodeDiscovered(OpencodeDiscoveredData),
+    OpencodeZen(OpencodeZenData),
+}
+
+impl ProviderCredential {
+    /// Which `ProviderId` does this credential belong under in the vault?
+    pub fn provider(&self) -> ProviderId {
+        match self {
+            ProviderCredential::Anthropic(_) => ProviderId::Anthropic,
+            ProviderCredential::Codex(_) => ProviderId::Codex,
+            ProviderCredential::OpencodeDiscovered(_) | ProviderCredential::OpencodeZen(_) => {
+                ProviderId::Opencode
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Account + Vault + AccountSummary
+// ---------------------------------------------------------------------------
+
+/// One credential entry in a provider's vault.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Account {
+    /// UUIDv7. Stable across renames; UI sorts by `created_at_ms`.
+    pub id: String,
+    /// Optional user label ("公司 Pro", "Personal Max"). When `None`, the UI
+    /// falls back to provider-derived defaults (email / plan / etc.).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// The actual credential payload.
+    pub credential: ProviderCredential,
+    #[serde(rename = "createdAtMs")]
+    pub created_at_ms: i64,
+    #[serde(rename = "lastUsedAtMs", default)]
+    pub last_used_at_ms: i64,
+}
+
+/// Renderer-safe projection of `Account` — strips the secret bearer. Used by
+/// `subscription_list_accounts` so the renderer's account picker doesn't see
+/// any token bytes unless it explicitly fetches the full `Account` for an
+/// edit dialog.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AccountSummary {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Provider id (string form so the renderer can switch on it directly).
+    pub provider: String,
+    /// One-letter variant tag for inspection: `"anthropic"`, `"codex"`,
+    /// `"opencode-discovered"`, `"opencode-zen"`. Useful when the UI wants
+    /// to render an icon distinguishing Zen vs discovered.
+    pub variant: String,
+    /// User-facing extra context derived from claims (email, plan, etc.).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+    /// 0 = doesn't apply (api_key / opencode-zen).
+    #[serde(rename = "expiresAtMs", default)]
+    pub expires_at_ms: i64,
+    #[serde(rename = "createdAtMs")]
+    pub created_at_ms: i64,
+    #[serde(rename = "lastUsedAtMs", default)]
+    pub last_used_at_ms: i64,
+}
+
+impl AccountSummary {
+    pub fn from_account(account: &Account) -> Self {
+        let (email, plan, expires_at_ms, variant) = match &account.credential {
+            ProviderCredential::Anthropic(c) => (
+                c.email.clone(),
+                c.plan.clone(),
+                c.expires_at_ms,
+                "anthropic",
+            ),
+            ProviderCredential::Codex(c) => (
+                c.email.clone(),
+                c.chatgpt_plan_type.clone(),
+                c.expires_at_ms,
+                "codex",
+            ),
+            ProviderCredential::OpencodeDiscovered(_) => (None, None, 0, "opencode-discovered"),
+            ProviderCredential::OpencodeZen(_) => (None, None, 0, "opencode-zen"),
+        };
+        Self {
+            id: account.id.clone(),
+            label: account.label.clone(),
+            provider: account.credential.provider().as_str().to_string(),
+            variant: variant.to_string(),
+            email,
+            plan,
+            expires_at_ms,
+            created_at_ms: account.created_at_ms,
+            last_used_at_ms: account.last_used_at_ms,
+        }
+    }
+}
+
+/// The full vault as stored in the keyring entry for one provider.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderVault {
+    #[serde(rename = "schemaVersion")]
+    pub schema_version: u32,
+    #[serde(default)]
+    pub accounts: Vec<Account>,
+    #[serde(rename = "activeAccountId", default, skip_serializing_if = "Option::is_none")]
+    pub active_account_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<ProviderPreset>,
+}
+
+impl ProviderVault {
+    pub fn empty() -> Self {
+        Self {
+            schema_version: SCHEMA_VERSION,
+            accounts: Vec::new(),
+            active_account_id: None,
+            preset: None,
+        }
+    }
+
+    /// Upsert an account by id (replace existing, append if new). Returns the
+    /// id that was written.
+    pub fn upsert_account(&mut self, account: Account) -> String {
+        let id = account.id.clone();
+        if let Some(existing) = self.accounts.iter_mut().find(|a| a.id == account.id) {
+            *existing = account;
+        } else {
+            self.accounts.push(account);
+        }
+        id
+    }
+
+    /// Remove an account by id. Returns `true` if anything was removed. If the
+    /// removed account was the active pointer, clears it.
+    pub fn remove_account(&mut self, account_id: &str) -> bool {
+        let before = self.accounts.len();
+        self.accounts.retain(|a| a.id != account_id);
+        let removed = self.accounts.len() != before;
+        if removed && self.active_account_id.as_deref() == Some(account_id) {
+            self.active_account_id = None;
+        }
+        removed
+    }
+
+    /// Find an account by id.
+    pub fn find_account(&self, account_id: &str) -> Option<&Account> {
+        self.accounts.iter().find(|a| a.id == account_id)
+    }
+
+    /// Returns `true` if `active_account_id` is `Some` but no account in
+    /// `accounts` matches. Used by `subscription_set_active` to detect orphan
+    /// pointers.
+    pub fn has_orphan_active(&self) -> bool {
+        match &self.active_account_id {
+            Some(id) => !self.accounts.iter().any(|a| &a.id == id),
+            None => false,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Keyring I/O
+// ---------------------------------------------------------------------------
+
+fn entry_for(provider: ProviderId) -> Result<Entry, String> {
+    Entry::new(SERVICE, provider.as_str()).map_err(|e| format!("keyring init failed: {e}"))
+}
+
+/// Persist a vault for the given provider. Overwrites the existing keyring
+/// entry. Validates structural invariants (schema version, orphan active
+/// pointer); provider-specific credential validation is the caller's job
+/// (typically through `SubscriptionProvider::validate` before upsert).
+pub fn save(provider: ProviderId, vault: &ProviderVault) -> Result<(), String> {
+    if vault.schema_version != SCHEMA_VERSION {
+        return Err(format!(
+            "vault schemaVersion must be {SCHEMA_VERSION}, got {}",
+            vault.schema_version
+        ));
+    }
+    if vault.has_orphan_active() {
+        return Err("vault.activeAccountId does not match any account in vault.accounts".into());
+    }
+    let blob = serde_json::to_string(vault)
+        .map_err(|e| format!("vault serialize failed: {e}"))?;
+    entry_for(provider)?
+        .set_password(&blob)
+        .map_err(|e| format!("keyring write failed: {e}"))
+}
+
+/// Read the vault. Returns `Ok(None)` when no entry exists, surfaces parse
+/// errors as `Err` so the UI can show "credential corrupted" rather than
+/// silently dropping the user back to "logged out".
+pub fn load(provider: ProviderId) -> Result<Option<ProviderVault>, String> {
+    match entry_for(provider)?.get_password() {
+        Ok(blob) => {
+            let parsed: ProviderVault = serde_json::from_str(&blob)
+                .map_err(|e| format!("vault parse failed: {e}"))?;
+            Ok(Some(parsed))
+        }
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("keyring read failed: {e}")),
+    }
+}
+
+/// Remove the vault entry. Idempotent. Exposed on the public surface for
+/// the future "sign out all" admin flow + every test in the migration suite
+/// that needs to reset between runs.
+#[allow(dead_code)]
+pub fn clear(provider: ProviderId) -> Result<(), String> {
+    match entry_for(provider)?.delete_credential() {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("keyring delete failed: {e}")),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn keyring_available() -> bool {
+        std::env::var("COGNIA_TEST_KEYRING").ok().as_deref() == Some("1")
+    }
+
+    fn anthropic_account() -> Account {
+        Account {
+            id: "0193c2b0-0000-7000-8000-000000000001".into(),
+            label: Some("Default".into()),
+            credential: ProviderCredential::Anthropic(AnthropicCredentialData {
+                access_token: "oat01-vault-test".into(),
+                refresh_token: "rt-vault-test".into(),
+                expires_at_ms: 1_800_000_000_000,
+                mode: "subscription".into(),
+                scope: Some("user:profile".into()),
+                email: Some("user@example.com".into()),
+                plan: Some("pro".into()),
+                stored_at_ms: 1_700_000_000_000,
+            }),
+            created_at_ms: 1_700_000_000_000,
+            last_used_at_ms: 1_700_000_000_000,
+        }
+    }
+
+    fn codex_account() -> Account {
+        Account {
+            id: "0193c2b0-0000-7000-8000-000000000002".into(),
+            label: None,
+            credential: ProviderCredential::Codex(CodexCredentialData {
+                access_token: "oat-codex-vault".into(),
+                refresh_token: "rt-codex-vault".into(),
+                id_token_raw: "eyJ.fake.jwt".into(),
+                expires_at_ms: 1_800_000_000_000,
+                auth_mode: "chatgpt".into(),
+                email: Some("user@example.com".into()),
+                chatgpt_plan_type: Some("plus".into()),
+                chatgpt_user_id: Some("user_abc".into()),
+                account_id: Some("acct_def".into()),
+                original_source: Some("oauth".into()),
+                stored_at_ms: 1_700_000_000_000,
+            }),
+            created_at_ms: 1_700_000_000_000,
+            last_used_at_ms: 1_700_000_000_000,
+        }
+    }
+
+    #[test]
+    fn provider_id_round_trip() {
+        for s in ["anthropic", "codex", "opencode"] {
+            let p = ProviderId::parse(s).unwrap();
+            assert_eq!(p.as_str(), s);
+        }
+        assert!(ProviderId::parse("unknown").is_err());
+    }
+
+    #[test]
+    fn provider_credential_provider_dispatch() {
+        let a = ProviderCredential::Anthropic(AnthropicCredentialData::default());
+        assert_eq!(a.provider(), ProviderId::Anthropic);
+        let c = ProviderCredential::Codex(CodexCredentialData::default());
+        assert_eq!(c.provider(), ProviderId::Codex);
+        let d = ProviderCredential::OpencodeDiscovered(OpencodeDiscoveredData::default());
+        assert_eq!(d.provider(), ProviderId::Opencode);
+        let z = ProviderCredential::OpencodeZen(OpencodeZenData::default());
+        assert_eq!(z.provider(), ProviderId::Opencode);
+    }
+
+    #[test]
+    fn anthropic_credential_round_trip() {
+        let original = anthropic_account();
+        let blob = serde_json::to_string(&original).unwrap();
+        let parsed: Account = serde_json::from_str(&blob).unwrap();
+        assert_eq!(parsed, original);
+        // camelCase fields survive
+        assert!(blob.contains("\"accessToken\""));
+        assert!(blob.contains("\"refreshToken\""));
+        assert!(blob.contains("\"createdAtMs\""));
+    }
+
+    #[test]
+    fn codex_credential_round_trip() {
+        let original = codex_account();
+        let blob = serde_json::to_string(&original).unwrap();
+        let parsed: Account = serde_json::from_str(&blob).unwrap();
+        assert_eq!(parsed, original);
+        assert!(blob.contains("\"authMode\""));
+        assert!(blob.contains("\"idTokenRaw\""));
+    }
+
+    #[test]
+    fn opencode_zen_round_trip() {
+        let zen = Account {
+            id: "0193c2b0-0000-7000-8000-000000000003".into(),
+            label: Some("Zen Default".into()),
+            credential: ProviderCredential::OpencodeZen(OpencodeZenData {
+                access_token: "ozk-1".into(),
+                base_url: Some("https://zen.opencode.ai".into()),
+                stored_at_ms: 1_700_000_000_000,
+            }),
+            created_at_ms: 1_700_000_000_000,
+            last_used_at_ms: 1_700_000_000_000,
+        };
+        let blob = serde_json::to_string(&zen).unwrap();
+        let parsed: Account = serde_json::from_str(&blob).unwrap();
+        assert_eq!(parsed, zen);
+    }
+
+    #[test]
+    fn provider_credential_serializes_as_tagged_union() {
+        let c = ProviderCredential::Anthropic(AnthropicCredentialData::default());
+        let blob = serde_json::to_string(&c).unwrap();
+        assert!(blob.contains("\"provider\":\"anthropic\""));
+        let c2 = ProviderCredential::OpencodeZen(OpencodeZenData::default());
+        let blob2 = serde_json::to_string(&c2).unwrap();
+        assert!(blob2.contains("\"provider\":\"opencode-zen\""));
+    }
+
+    #[test]
+    fn upsert_account_inserts_new() {
+        let mut vault = ProviderVault::empty();
+        let id = vault.upsert_account(anthropic_account());
+        assert_eq!(vault.accounts.len(), 1);
+        assert_eq!(id, "0193c2b0-0000-7000-8000-000000000001");
+    }
+
+    #[test]
+    fn upsert_account_replaces_existing_by_id() {
+        let mut vault = ProviderVault::empty();
+        let mut a = anthropic_account();
+        vault.upsert_account(a.clone());
+        a.label = Some("Renamed".into());
+        vault.upsert_account(a);
+        assert_eq!(vault.accounts.len(), 1);
+        assert_eq!(vault.accounts[0].label.as_deref(), Some("Renamed"));
+    }
+
+    #[test]
+    fn remove_account_clears_active_when_matching() {
+        let mut vault = ProviderVault::empty();
+        let a = anthropic_account();
+        let id = a.id.clone();
+        vault.upsert_account(a);
+        vault.active_account_id = Some(id.clone());
+        assert!(vault.remove_account(&id));
+        assert!(vault.active_account_id.is_none());
+    }
+
+    #[test]
+    fn remove_account_preserves_active_when_different() {
+        let mut vault = ProviderVault::empty();
+        vault.upsert_account(anthropic_account());
+        vault.upsert_account(codex_account()); // wrong provider per real schema, but vault doesn't enforce that
+        vault.active_account_id = Some("0193c2b0-0000-7000-8000-000000000002".into());
+        assert!(vault.remove_account("0193c2b0-0000-7000-8000-000000000001"));
+        assert_eq!(
+            vault.active_account_id.as_deref(),
+            Some("0193c2b0-0000-7000-8000-000000000002")
+        );
+    }
+
+    #[test]
+    fn has_orphan_active_detects_dangling_pointer() {
+        let mut vault = ProviderVault::empty();
+        vault.upsert_account(anthropic_account());
+        vault.active_account_id = Some("nonexistent".into());
+        assert!(vault.has_orphan_active());
+        vault.active_account_id = Some("0193c2b0-0000-7000-8000-000000000001".into());
+        assert!(!vault.has_orphan_active());
+    }
+
+    #[test]
+    fn save_rejects_wrong_schema_version() {
+        let mut vault = ProviderVault::empty();
+        vault.schema_version = 99;
+        let err = save(ProviderId::Anthropic, &vault).expect_err("should reject");
+        assert!(err.contains("schemaVersion"));
+    }
+
+    #[test]
+    fn save_rejects_orphan_active() {
+        let mut vault = ProviderVault::empty();
+        vault.active_account_id = Some("nonexistent".into());
+        let err = save(ProviderId::Anthropic, &vault).expect_err("should reject");
+        assert!(err.contains("activeAccountId"));
+    }
+
+    #[test]
+    fn vault_round_trips_through_keyring() {
+        if !keyring_available() {
+            return;
+        }
+        let _ = clear(ProviderId::Anthropic);
+        let mut vault = ProviderVault::empty();
+        vault.upsert_account(anthropic_account());
+        vault.active_account_id = Some("0193c2b0-0000-7000-8000-000000000001".into());
+        save(ProviderId::Anthropic, &vault).unwrap();
+        let got = load(ProviderId::Anthropic).unwrap().unwrap();
+        assert_eq!(got, vault);
+        clear(ProviderId::Anthropic).unwrap();
+        assert!(load(ProviderId::Anthropic).unwrap().is_none());
+    }
+
+    #[test]
+    fn clear_when_missing_is_ok() {
+        if !keyring_available() {
+            return;
+        }
+        let _ = clear(ProviderId::Anthropic);
+        assert!(clear(ProviderId::Anthropic).is_ok());
+    }
+
+    #[test]
+    fn account_summary_strips_secrets() {
+        let s = AccountSummary::from_account(&anthropic_account());
+        let blob = serde_json::to_string(&s).unwrap();
+        assert!(!blob.contains("oat01-vault-test"));
+        assert!(!blob.contains("rt-vault-test"));
+        assert_eq!(s.provider, "anthropic");
+        assert_eq!(s.variant, "anthropic");
+        assert_eq!(s.email.as_deref(), Some("user@example.com"));
+        assert_eq!(s.plan.as_deref(), Some("pro"));
+    }
+
+    #[test]
+    fn account_summary_distinguishes_opencode_variants() {
+        let discovered = Account {
+            id: "x".into(),
+            label: None,
+            credential: ProviderCredential::OpencodeDiscovered(OpencodeDiscoveredData::default()),
+            created_at_ms: 0,
+            last_used_at_ms: 0,
+        };
+        let zen = Account {
+            id: "y".into(),
+            label: None,
+            credential: ProviderCredential::OpencodeZen(OpencodeZenData::default()),
+            created_at_ms: 0,
+            last_used_at_ms: 0,
+        };
+        assert_eq!(
+            AccountSummary::from_account(&discovered).variant,
+            "opencode-discovered"
+        );
+        assert_eq!(AccountSummary::from_account(&zen).variant, "opencode-zen");
+    }
+}

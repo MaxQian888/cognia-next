@@ -1,4 +1,4 @@
-import { parseTelegramUpdate } from "./parse"
+import { parseTelegramUpdate, parseTelegramCallbackQuery } from "./parse"
 import type { TelegramUpdate } from "./parse"
 
 import privateMsgFixture from "./fixtures/private-message.json"
@@ -178,54 +178,27 @@ describe("parseTelegramUpdate", () => {
     })
   })
 
-  describe("callback_query produces a synthetic create event", () => {
+  describe("callback_query is routed through the callback channel (G4)", () => {
     const update = callbackQueryFixture as TelegramUpdate
-    const result = parseTelegramUpdate(ADAPTER_ID, SELF_ID, update)
 
-    it("returns a non-null event", () => {
-      expect(result).not.toBeNull()
-    })
-
-    it("kind is create (treated as a fresh user turn)", () => {
-      expect(result!.kind).toBe("create")
-    })
-
-    it("messageId is prefixed with tgcq: + the callback_query.id for dedup", () => {
-      expect(result!.messageId).toBe("tgcq:4382bfdwdsb323b2d9")
-    })
-
-    it("segments carry the callback data as a text payload", () => {
-      expect(result!.segments).toEqual([{ type: "text", text: "option_a" }])
-      expect(result!.plainText).toBe("option_a")
-    })
-
-    it("sender is the user who pressed the button (not the bot)", () => {
-      expect(result!.sender.remoteUserId).toBe("777777777")
-      expect(result!.sender.displayName).toBe("Grace")
-    })
-
-    it("conversationKey anchors to the chat where the button lives", () => {
-      expect(result!.conversationKey).toBe(`telegram:${ADAPTER_ID}:777777777`)
-    })
-
-    it("conversationRef carries the callback_query.id for the responder to ack", () => {
-      expect((result!.conversationRef as { callbackQueryId?: string }).callbackQueryId).toBe(
-        "4382bfdwdsb323b2d9"
-      )
+    it("parseTelegramUpdate returns null — callbacks go through dispatchConnectorCallback", () => {
+      // G3.1 moved callback_query off the inbound message path so the
+      // adapter can ack the press and dedup via namespace="callback".
+      expect(parseTelegramUpdate(ADAPTER_ID, SELF_ID, update)).toBeNull()
     })
   })
 
-  describe("inline-message-only callback_query (no chat) returns null", () => {
-    it("returns null when callback_query has no message", () => {
-      const update: TelegramUpdate = {
-        update_id: 1,
-        callback_query: {
-          id: "abc",
-          from: { id: 1, first_name: "X" },
-          inline_message_id: "inline-1",
-          data: "x",
-        },
-      }
+  describe("inline-message-only callback_query returns null from both parsers", () => {
+    const update: TelegramUpdate = {
+      update_id: 1,
+      callback_query: {
+        id: "abc",
+        from: { id: 1, first_name: "X" },
+        inline_message_id: "inline-1",
+        data: "x",
+      },
+    }
+    it("parseTelegramUpdate returns null", () => {
       expect(parseTelegramUpdate(ADAPTER_ID, SELF_ID, update)).toBeNull()
     })
   })
@@ -248,5 +221,278 @@ describe("parseTelegramUpdate", () => {
       expect(r!.replacesMessageId).toBe("555")
       expect(r!.channel.kind).toBe("channel")
     })
+  })
+
+  describe("native media types (G3.1)", () => {
+    const baseChat = { id: 1, type: "private" as const, first_name: "Q" }
+    const baseFrom = { id: 1, first_name: "Q" }
+
+    it("voice → voice segment with durationSec", () => {
+      const u: TelegramUpdate = {
+        update_id: 1,
+        message: {
+          message_id: 10,
+          chat: baseChat,
+          from: baseFrom,
+          date: 1,
+          voice: { file_id: "vid_abc", duration: 12 },
+        },
+      }
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, u)
+      expect(r!.segments).toEqual([{ type: "voice", url: "tg://file/vid_abc", durationSec: 12 }])
+    })
+
+    it("audio → file segment with friendly name", () => {
+      const u: TelegramUpdate = {
+        update_id: 1,
+        message: {
+          message_id: 10,
+          chat: baseChat,
+          from: baseFrom,
+          date: 1,
+          audio: { file_id: "aud_1", duration: 100, title: "Song" },
+        },
+      }
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, u)
+      expect(r!.segments[0]).toMatchObject({
+        type: "file",
+        url: "tg://file/aud_1",
+        name: "Song",
+      })
+    })
+
+    it("video → video segment with thumbnailUrl when thumb present", () => {
+      const u: TelegramUpdate = {
+        update_id: 1,
+        message: {
+          message_id: 10,
+          chat: baseChat,
+          from: baseFrom,
+          date: 1,
+          video: {
+            file_id: "vid_x",
+            width: 1280,
+            height: 720,
+            duration: 30,
+            thumb: { file_id: "thumb_x", file_unique_id: "u", width: 320, height: 180 },
+          },
+        },
+      }
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, u)
+      expect(r!.segments[0]).toMatchObject({
+        type: "video",
+        url: "tg://file/vid_x",
+        thumbnailUrl: "tg://file/thumb_x",
+        durationSec: 30,
+      })
+    })
+
+    it("video_note → video segment (round avatar recording)", () => {
+      const u: TelegramUpdate = {
+        update_id: 1,
+        message: {
+          message_id: 10,
+          chat: baseChat,
+          from: baseFrom,
+          date: 1,
+          video_note: { file_id: "vn_1", length: 360, duration: 5 },
+        },
+      }
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, u)
+      expect(r!.segments[0].type).toBe("video")
+    })
+
+    it("animation → video segment (GIF / animated WebP)", () => {
+      const u: TelegramUpdate = {
+        update_id: 1,
+        message: {
+          message_id: 10,
+          chat: baseChat,
+          from: baseFrom,
+          date: 1,
+          animation: { file_id: "anim_1", width: 200, height: 200, duration: 2 },
+        },
+      }
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, u)
+      expect(r!.segments[0].type).toBe("video")
+    })
+
+    it("document → file segment with the original file_name", () => {
+      const u: TelegramUpdate = {
+        update_id: 1,
+        message: {
+          message_id: 10,
+          chat: baseChat,
+          from: baseFrom,
+          date: 1,
+          document: {
+            file_id: "doc_1",
+            file_name: "report.pdf",
+            mime_type: "application/pdf",
+            file_size: 1024,
+          },
+        },
+      }
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, u)
+      expect(r!.segments[0]).toMatchObject({
+        type: "file",
+        name: "report.pdf",
+        mimeType: "application/pdf",
+      })
+    })
+
+    it("sticker → emoji segment carrying the sticker emoji", () => {
+      const u: TelegramUpdate = {
+        update_id: 1,
+        message: {
+          message_id: 10,
+          chat: baseChat,
+          from: baseFrom,
+          date: 1,
+          sticker: { file_id: "stk_1", emoji: "🐱", width: 512, height: 512 },
+        },
+      }
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, u)
+      expect(r!.segments).toEqual([{ type: "emoji", code: "🐱" }])
+    })
+
+    it("location → location segment with lat/lon", () => {
+      const u: TelegramUpdate = {
+        update_id: 1,
+        message: {
+          message_id: 10,
+          chat: baseChat,
+          from: baseFrom,
+          date: 1,
+          location: { latitude: 1.2, longitude: 3.4 },
+        },
+      }
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, u)
+      expect(r!.segments).toEqual([{ type: "location", lat: 1.2, lon: 3.4 }])
+    })
+
+    it("contact → text segment with name + phone", () => {
+      const u: TelegramUpdate = {
+        update_id: 1,
+        message: {
+          message_id: 10,
+          chat: baseChat,
+          from: baseFrom,
+          date: 1,
+          contact: { phone_number: "+1234567890", first_name: "Alice", last_name: "B" },
+        },
+      }
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, u)
+      expect((r!.segments[0] as { text: string }).text).toContain("Alice B")
+      expect((r!.segments[0] as { text: string }).text).toContain("+1234567890")
+    })
+
+    it("dice → text segment with emoji and value", () => {
+      const u: TelegramUpdate = {
+        update_id: 1,
+        message: {
+          message_id: 10,
+          chat: baseChat,
+          from: baseFrom,
+          date: 1,
+          dice: { emoji: "🎲", value: 4 },
+        },
+      }
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, u)
+      expect((r!.segments[0] as { text: string }).text).toBe("🎲 (4)")
+    })
+  })
+
+  describe("message_reaction → system event", () => {
+    it("reports reaction_added as systemKind", () => {
+      const u: TelegramUpdate = {
+        update_id: 1,
+        message_reaction: {
+          chat: { id: -100, type: "supergroup", title: "Team" },
+          message_id: 42,
+          user: { id: 7, first_name: "Bob" },
+          date: 1700000000,
+          old_reaction: [],
+          new_reaction: [{ type: "emoji", emoji: "👍" }],
+        },
+      }
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, u)
+      expect(r!.kind).toBe("system")
+      expect(r!.systemKind).toBe("reaction_added")
+      expect(r!.segments).toEqual([{ type: "emoji", code: "👍" }])
+      expect(r!.replacesMessageId).toBe("42")
+    })
+
+    it("reports reaction_removed when new_reaction is empty", () => {
+      const u: TelegramUpdate = {
+        update_id: 1,
+        message_reaction: {
+          chat: { id: -100, type: "supergroup", title: "Team" },
+          message_id: 42,
+          user: { id: 7, first_name: "Bob" },
+          date: 1700000000,
+          old_reaction: [{ type: "emoji", emoji: "👍" }],
+          new_reaction: [],
+        },
+      }
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, u)
+      expect(r!.systemKind).toBe("reaction_removed")
+    })
+
+    it("returns null when neither old nor new reaction changed", () => {
+      const u: TelegramUpdate = {
+        update_id: 1,
+        message_reaction: {
+          chat: { id: -100, type: "supergroup", title: "Team" },
+          message_id: 42,
+          user: { id: 7, first_name: "Bob" },
+          date: 1700000000,
+          old_reaction: [{ type: "emoji", emoji: "👍" }],
+          new_reaction: [{ type: "emoji", emoji: "👍" }],
+        },
+      }
+      expect(parseTelegramUpdate(ADAPTER_ID, SELF_ID, u)).toBeNull()
+    })
+  })
+})
+
+describe("parseTelegramCallbackQuery", () => {
+  it("projects the press into a ConnectorCallbackEvent for the callback channel", () => {
+    const update = callbackQueryFixture as TelegramUpdate
+    const cb = parseTelegramCallbackQuery(ADAPTER_ID, SELF_ID, update)
+    expect(cb).not.toBeNull()
+    expect(cb!.platform).toBe("telegram")
+    expect(cb!.adapterId).toBe(ADAPTER_ID)
+    expect(cb!.actionType).toBe("button")
+    // triggerId prefers the wire data field; falls back to the cq id.
+    expect(cb!.triggerId).toBe("option_a")
+    expect(cb!.user.remoteUserId).toBe("777777777")
+    expect(cb!.originatingMessageId).toBeDefined()
+  })
+
+  it("uses tgcq:<callbackId> as triggerId when data is empty", () => {
+    const update: TelegramUpdate = {
+      update_id: 1,
+      callback_query: {
+        id: "press-1",
+        from: { id: 1, first_name: "X" },
+        message: {
+          message_id: 9,
+          chat: { id: 7, type: "private", first_name: "X" },
+          date: 1,
+        },
+        data: "",
+      },
+    }
+    const cb = parseTelegramCallbackQuery(ADAPTER_ID, SELF_ID, update)
+    expect(cb!.triggerId).toBe("tgcq:press-1")
+  })
+
+  it("returns null when no message is attached", () => {
+    const update: TelegramUpdate = {
+      update_id: 1,
+      callback_query: { id: "p", from: { id: 1, first_name: "X" }, data: "a" },
+    }
+    expect(parseTelegramCallbackQuery(ADAPTER_ID, SELF_ID, update)).toBeNull()
   })
 })
