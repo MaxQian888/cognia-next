@@ -94,7 +94,7 @@ rusqlite = { version = "0.39", features = ["bundled"] }
 # (the `bundled` feature does).
 sqlite-vec = "0.1"
 
-gray_matter = { version = "0.2", default-features = false, features = ["yaml"] }
+gray_matter = { version = "0.3", default-features = false, features = ["yaml"] }
 wait-timeout = "0.2"
 regex = "1"
 toml_edit = { version = "0.22", features = ["serde"] }
