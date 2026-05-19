@@ -1,6 +1,12 @@
-import manifest from "./manifest"
+import manifest, { dynamic } from "./manifest"
 
 describe("manifest()", () => {
+  it('opts into force-static so output: "export" can pre-render it', () => {
+    // Next.js 16 fails the build under `output: "export"` if a metadata
+    // route doesn't declare a static rendering mode.
+    expect(dynamic).toBe("force-static")
+  })
+
   it("returns a complete MetadataRoute.Manifest with PWA-installable shape", () => {
     const m = manifest()
 

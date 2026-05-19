@@ -210,9 +210,11 @@ describe("PluginsSection (governance panel)", () => {
   it("policy tab signature-required toggle persists", () => {
     renderWithTab("policy")
     const switches = screen.getAllByRole("switch")
+    // ADR 0016 P0-3: signatureRequired defaults to true, so the first toggle
+    // is the user disabling the signature requirement.
     fireEvent.click(switches[1])
     const stored = window.localStorage.getItem("cognia.plugins.policy")
-    expect(JSON.parse(stored as string).signatureRequired).toBe(true)
+    expect(JSON.parse(stored as string).signatureRequired).toBe(false)
   })
 
   it("policy tab auto-update toggle persists", () => {
@@ -242,9 +244,11 @@ describe("PluginsSection (governance panel)", () => {
     const switches = screen.getAllByRole("switch")
     fireEvent.click(switches[0])
     expect(applyPolicy).toHaveBeenCalledWith(expect.objectContaining({ governance: "block" }))
+    // signatureRequired defaults to true post ADR 0016 P0-3; toggling flips
+    // it to false.
     fireEvent.click(switches[1])
     expect(applyPolicy).toHaveBeenLastCalledWith(
-      expect.objectContaining({ signatureRequired: true })
+      expect.objectContaining({ signatureRequired: false })
     )
     fireEvent.click(switches[2])
     expect(applyPolicy).toHaveBeenLastCalledWith(expect.objectContaining({ autoUpdate: true }))

@@ -41,6 +41,10 @@ export async function persistMessages(sessionId: string, messages: UIMessage[]):
   const db = getDb()
   const now = Date.now()
 
+  // Captured outside the transaction so we can fan-out trigger.chat.message
+  // events for newly-arrived user messages once the rows are persisted.
+  const newUserMessageIds: string[] = []
+
   await db.transaction("rw", db.messages, async () => {
     // Existing ids for this session — used to compute deletions.
     const existingIds = new Set(
@@ -100,6 +104,11 @@ export async function persistMessages(sessionId: string, messages: UIMessage[]):
         metadata: strippedMeta,
         createdAt: prior?.createdAt ?? now + i,
       })
+      // Track new user-role messages so we can fan out the chat-message
+      // trigger after the write commits.
+      if (!existingIds.has(id) && m.role === "user") {
+        newUserMessageIds.push(id)
+      }
     }
 
     const toDelete: string[] = []
@@ -112,6 +121,64 @@ export async function persistMessages(sessionId: string, messages: UIMessage[]):
     }
     await db.messages.bulkPut(rows)
   })
+
+  if (newUserMessageIds.length > 0) {
+    // Fire-and-forget so persistence is never blocked by the workflow
+    // subsystem. Each user-message arrival is its own trigger event so a
+    // workflow scoped to the session/character fans out once per message.
+    void dispatchChatMessageTriggers(sessionId, newUserMessageIds).catch(() => {
+      // Swallow — the trigger fan-out is best-effort and must not surface
+      // to the chat send pipeline.
+    })
+  }
+}
+
+/**
+ * Look up workflows subscribed to `trigger.chat.message` for the session's
+ * character + session scope and invoke the orchestrator for each match.
+ *
+ * Kept here (rather than in the chat-send path) so every code path that
+ * lands a user message in Dexie — direct chat, IM bridge inbound,
+ * scheduled replay — fans out triggers consistently.
+ */
+async function dispatchChatMessageTriggers(
+  sessionId: string,
+  newUserMessageIds: string[]
+): Promise<void> {
+  // Lazy-load the workflow runtime so messages.ts stays cheap to import
+  // from db-only callers. Eager static imports here pull the orchestrator,
+  // hooks system and trigger registries into every test that touches the
+  // Dexie schema and previously caused 1+ GB worker memory spikes.
+  const [{ dispatchTrigger }, { findMatchingWorkflows }] = await Promise.all([
+    import("@/lib/workflow/runtime/trigger-bridge"),
+    import("@/lib/workflow/runtime/trigger-subscriptions"),
+  ])
+
+  const session = await getDb().sessions.get(sessionId)
+  const characterId = session?.characterId
+  const matches = findMatchingWorkflows("trigger.chat.message", {
+    characterId,
+    sessionId,
+  })
+  if (matches.length === 0) return
+
+  const originAt = Date.now()
+  await Promise.all(
+    newUserMessageIds.flatMap((messageId) =>
+      matches.map((match) =>
+        dispatchTrigger({
+          workflowId: match.workflowId,
+          kind: "trigger.chat.message",
+          payload: { messageId, sessionId, characterId },
+          originAt,
+          binding: { sessionId, characterId },
+        }).catch(() => {
+          // Per-match failures are isolated so one bad workflow can't
+          // block other subscribers from running.
+        })
+      )
+    )
+  )
 }
 
 export async function clearMessages(sessionId: string): Promise<void> {

@@ -15,11 +15,27 @@ export type PluginPointStability = "stable" | "experimental" | "deprecated"
 export type PluginPointStatus = "implemented" | "virtual" | "deprecated"
 export type PluginPointGovernanceMode = "warn" | "block"
 
+export type PluginPointHostKind = "jsx-mount" | "registration"
+
 export interface PluginPointContract {
   id: string
   kind: PluginPointKind
   stability: PluginPointStability
   status: PluginPointStatus
+  /**
+   * For ui-slot points only: how the host surfaces the slot.
+   *
+   * - `jsx-mount` (default): the host renders `<PluginExtensionSlot point="…" />`
+   *   somewhere; the static slot audit requires ≥1 such JSX mount when
+   *   status is `implemented`.
+   * - `registration`: the host is a non-JSX surface (e.g. an iframe wrapper
+   *   that registers panels via a bridge function such as `attachHostFrame`).
+   *   The audit verifies the `binding` file exists on disk rather than
+   *   counting JSX mounts.
+   *
+   * Hook / runtime / activation contracts leave this undefined.
+   */
+  hostKind?: PluginPointHostKind
   owner: string
   binding: string
   docs: string
@@ -170,13 +186,27 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
 // VS Code extension slots are wired through `components/extensions/
 // vscode-extension-panel.tsx` and `components/extensions/vscode-terminal-panel.tsx`
 // — a direct webview-registration host pattern rather than a
-// `<PluginExtensionSlot>` JSX mount. The audit's JSX-mount scanner can't
-// see them, but they are fully functional at runtime, so the contract
-// reports `status: "implemented"` with their explicit binding files in
-// `IMPLEMENTED_EXTENSION_POINT_BINDINGS` below. The Set is kept empty
-// (rather than removed) so future "register without JSX mount" slots can
-// be added by id without touching the status logic.
+// `<PluginExtensionSlot>` JSX mount. They are fully functional at runtime,
+// so the contract reports `status: "implemented"` with their explicit
+// binding files in `IMPLEMENTED_EXTENSION_POINT_BINDINGS` below, and the
+// `REGISTRATION_HOST_EXTENSION_POINTS` set below tells the slot audit to
+// verify the binding file exists instead of counting JSX mounts.
+// The Set is kept empty (rather than removed) so future "register without
+// JSX mount" slots can be added by id without touching the status logic.
 const VIRTUAL_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>()
+
+/**
+ * UI-slot points whose host registers panels through a bridge function
+ * rather than mounting `<PluginExtensionSlot point="…" />`. The static
+ * slot audit branches on this set: instead of expecting ≥1 JSX mount, it
+ * checks that the `binding` file exists on disk.
+ */
+const REGISTRATION_HOST_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
+  "vscode.sidebar.view",
+  "vscode.webview.panel",
+  "vscode.activity-bar",
+  "vscode.terminal.output",
+])
 
 const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoint, string>> = {
   "sidebar.left.top": "components/shell/guild-rail.tsx",
@@ -564,6 +594,9 @@ const extensionPointContracts: Record<CanonicalExtensionPoint, PluginPointContra
           ? "implemented"
           : "deprecated"
       const implementedBinding = IMPLEMENTED_EXTENSION_POINT_BINDINGS[id]
+      const hostKind: PluginPointHostKind = REGISTRATION_HOST_EXTENSION_POINTS.has(id)
+        ? "registration"
+        : "jsx-mount"
       return [
         id,
         {
@@ -576,6 +609,7 @@ const extensionPointContracts: Record<CanonicalExtensionPoint, PluginPointContra
                 ? "experimental"
                 : "deprecated",
           status,
+          hostKind,
           owner: "plugin-platform",
           binding:
             status === "deprecated"

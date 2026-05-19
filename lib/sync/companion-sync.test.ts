@@ -162,8 +162,13 @@ describe("installForegroundSync", () => {
     })
     document.dispatchEvent(new Event("visibilitychange"))
 
-    // Drain microtasks so runSyncDown's body executes.
-    await new Promise((r) => setTimeout(r, 0))
+    // Drain microtasks so runSyncDown's body executes. `runSyncDown`
+    // chains `ensureHydrated → loadCursors → await getDb().toArray()`
+    // before invoking handlers, which spans several Promise hops — one
+    // macrotask is not always enough, especially on slower runners.
+    for (let i = 0; i < 5; i++) {
+      await new Promise((r) => setTimeout(r, 0))
+    }
     expect(handler).toHaveBeenCalledTimes(1)
     teardown()
   })
@@ -279,7 +284,12 @@ describe("installResumeSync", () => {
 
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" })
     document.dispatchEvent(new Event("visibilitychange"))
-    await new Promise((r) => setTimeout(r, 10))
+    // Drain multiple macrotasks: runSyncDown chains ensureHydrated +
+    // loadCursors + handler invocations, more than a single 10ms wait
+    // covers reliably on slower CI runners.
+    for (let i = 0; i < 5; i++) {
+      await new Promise((r) => setTimeout(r, 10))
+    }
 
     expect(handler).toHaveBeenCalled()
     teardown()

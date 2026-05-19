@@ -16,6 +16,7 @@ jest.mock("@/lib/automation/client", () => {
     type: jest.fn(),
     keys: jest.fn(),
     invokePattern: jest.fn(),
+    windowOp: jest.fn(),
     auditSnapshot: jest.fn(),
     settingsGet: jest.fn(),
     settingsSet: jest.fn(),
@@ -218,23 +219,18 @@ describe("action.desktop.invokePattern", () => {
 })
 
 describe("action.desktop.windowFocus / windowClose / windowResize", () => {
-  it("focus dispatches via the window pattern", async () => {
-    mocks.invokePattern.mockResolvedValueOnce({})
+  it("focus dispatches via desktop.windowOp", async () => {
+    mocks.windowOp.mockResolvedValueOnce(undefined)
     const exec = getExecutor("action.desktop.windowFocus", 1)!
     await exec.execute(makeCtx({ target: "abc" }))
-    expect(mocks.invokePattern).toHaveBeenCalledWith(
-      ["abc"],
-      "window",
-      { op: "focus" },
-      expect.any(Object)
-    )
+    expect(mocks.windowOp).toHaveBeenCalledWith(["abc"], { kind: "focus" }, expect.any(Object))
   })
 
-  it("close dispatches via the window pattern", async () => {
-    mocks.invokePattern.mockResolvedValueOnce({})
+  it("close dispatches via desktop.windowOp", async () => {
+    mocks.windowOp.mockResolvedValueOnce(undefined)
     const exec = getExecutor("action.desktop.windowClose", 1)!
     await exec.execute(makeCtx({ target: "abc" }))
-    expect(mocks.invokePattern.mock.calls[0][2]).toEqual({ op: "close" })
+    expect(mocks.windowOp).toHaveBeenCalledWith(["abc"], { kind: "close" }, expect.any(Object))
   })
 
   it("resize requires a rect", async () => {
@@ -242,12 +238,15 @@ describe("action.desktop.windowFocus / windowClose / windowResize", () => {
     await expect(exec.execute(makeCtx({ target: "abc" }))).rejects.toThrow(/rect/)
   })
 
-  it("resize dispatches transform-pattern with the rect", async () => {
-    mocks.invokePattern.mockResolvedValueOnce({})
+  it("resize dispatches windowOp with the rect", async () => {
+    mocks.windowOp.mockResolvedValueOnce(undefined)
     const exec = getExecutor("action.desktop.windowResize", 1)!
     await exec.execute(makeCtx({ target: "abc", rect: { x: 0, y: 0, width: 800, height: 600 } }))
-    expect(mocks.invokePattern.mock.calls[0][1]).toBe("transform")
-    expect(mocks.invokePattern.mock.calls[0][2]).toMatchObject({ op: "resize" })
+    expect(mocks.windowOp).toHaveBeenCalledWith(
+      ["abc"],
+      { kind: "resize", rect: { x: 0, y: 0, width: 800, height: 600 } },
+      expect.any(Object)
+    )
   })
 })
 

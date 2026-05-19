@@ -52,9 +52,10 @@ describe("usePluginStore", () => {
 
     await usePluginStore.getState().initialize("/tmp/plugins")
 
+    // ADR 0016 P0-3: signatureRequired is default-on; autoUpdate stays off.
     expect(applyPolicyMock).toHaveBeenCalledWith({
       governance: "warn",
-      signatureRequired: false,
+      signatureRequired: true,
       autoUpdate: false,
     })
   })

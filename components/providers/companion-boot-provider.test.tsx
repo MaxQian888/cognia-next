@@ -24,10 +24,14 @@ jest.mock("@/lib/tauri/transport-companion", () => ({
 const runSyncDownMock = jest.fn()
 const installForegroundSyncMock = jest.fn()
 const installEventDrivenSyncMock = jest.fn()
+const installNetworkSyncMock = jest.fn(async () => () => {})
+const installResumeSyncMock = jest.fn(async () => () => {})
 jest.mock("@/lib/sync/companion-sync", () => ({
   runSyncDown: () => runSyncDownMock(),
   installForegroundSync: () => installForegroundSyncMock(),
   installEventDrivenSync: () => installEventDrivenSyncMock(),
+  installNetworkSync: () => installNetworkSyncMock(),
+  installResumeSync: () => installResumeSyncMock(),
 }))
 
 const registerPushMock = jest.fn()
@@ -72,6 +76,9 @@ jest.mock("@/lib/capacitor/splash-screen", () => ({
   hide: jest.fn(async () => ({ kind: "ok" })),
 }))
 jest.mock("@/lib/capacitor/status-bar", () => ({
+  syncWithTheme: jest.fn(async () => ({ kind: "ok" })),
+}))
+jest.mock("@/lib/capacitor/navigation-bar", () => ({
   syncWithTheme: jest.fn(async () => ({ kind: "ok" })),
 }))
 jest.mock("@/lib/capacitor/local-notifications", () => ({

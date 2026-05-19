@@ -178,7 +178,7 @@ describe("Composer — mobile mention popover", () => {
     expect(screen.queryByTestId("mobile-mention-popover")).toBeNull()
   })
 
-  it("dismisses on backdrop click", async () => {
+  it("dismisses on Escape (replaces the legacy hand-rolled backdrop click)", async () => {
     const Wrapper = withAdapter(makeAdapter())
     render(
       <Wrapper>
@@ -195,7 +195,12 @@ describe("Composer — mobile mention popover", () => {
     const ta = document.querySelector("textarea")! as HTMLTextAreaElement
     fireEvent.change(ta, { target: { value: "@" } })
     expect(screen.getByTestId("mobile-mention-popover")).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId("mobile-mention-popover-backdrop"))
+    // The popover was migrated from a hand-rolled overlay+backdrop button
+    // to shadcn Sheet, which dismisses via Escape / outside-click via the
+    // Radix overlay. Asserting Escape covers the same UX contract without
+    // depending on Radix's internal overlay markup.
+    fireEvent.keyDown(document.body, { key: "Escape", code: "Escape" })
+    await Promise.resolve()
     expect(screen.queryByTestId("mobile-mention-popover")).toBeNull()
   })
 })

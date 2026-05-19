@@ -183,8 +183,12 @@ const config: Config = {
   // A set of global variables that need to be available in all test environments
   // globals: {},
 
-  // The maximum amount of workers used to run your tests. Can be specified as % or a number. E.g. maxWorkers: 10% will use 10% of your CPU amount + 1 as the maximum worker number. maxWorkers: 2 will use a maximum of 2 workers.
-  // maxWorkers: "50%",
+  // Cap workers at 50% so the deep-import suites (twin / plugin / agent
+  // graphs) don't gang up on a single Node process and OOM with
+  // `ENOMEM: not enough memory, open '…semver/sort.js'` mid-run. Jest's
+  // default uses every core, which on a 16-core box pulls the same
+  // 2 GB-class module graph into RAM 15+ times concurrently.
+  maxWorkers: "50%",
 
   // An array of directory names to be searched recursively up from the requiring module's location
   // moduleDirectories: [
@@ -226,6 +230,12 @@ const config: Config = {
     // is short enough to leave it untransformed. Tests don't render real
     // syntax highlighting, so a thin mock is sufficient.
     "^shiki$": "<rootDir>/__mocks__/shiki.js",
+
+    // motion/react (formerly framer-motion) doesn't synchronously project
+    // its `animate` target into inline style under jsdom — there's no
+    // animation loop. Tests that assert on the post-animation style need
+    // a mock that merges `animate` into `style` at render time.
+    "^motion/react$": "<rootDir>/__mocks__/motion-react.js",
 
     // react-markdown and its remark/rehype plugin ecosystem are ESM-only.
     // Instead of fighting pnpm's two-layer path layout with transformIgnorePatterns,
@@ -336,6 +346,11 @@ const config: Config = {
     "/src-tauri/",
     "/sidecar/",
     "/tests/e2e/", // Playwright E2E tests — run via `pnpx playwright test`, not Jest
+    // scripts/*.test.mjs use Node's built-in `node --test` runner (ESM with
+    // `import.meta.url` / `__dirname = dirname(fileURLToPath(...))`) which
+    // collides with Jest's Babel/CJS transform. They are exercised by
+    // `pnpm sidecar:test` and dedicated `node --test` invocations.
+    "/scripts/.*\\.test\\.mjs$",
     // Worktree-local override: the parent `jest.config.ts` adds
     // `/\\.claude/worktrees/` here so the root suite doesn't pick up worktree
     // copies of test files; this worktree's local config drops those entries

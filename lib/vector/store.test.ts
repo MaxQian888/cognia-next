@@ -769,48 +769,104 @@ describe("NativeVectorStore", () => {
     })
   })
 
-  describe("stub methods throw not-yet-supported", () => {
-    it("scrollDocuments throws", async () => {
-      await expect(store.scrollDocuments!("col")).rejects.toThrow(
-        "scrollDocuments is not yet supported on the native backend"
+  describe("native-backed operations route through the Tauri command surface", () => {
+    // Earlier revisions of the native backend stubbed these methods to throw
+    // "not yet supported". They were since implemented (see store.ts:
+    // scrollDocuments→vector_scroll_points, renameCollection→
+    // vector_rename_collection, exportCollection/importCollection→
+    // vector_export_collection/vector_import_collection, getStats→
+    // vector_list_collections + vector_get_stats + vector_get_store_size,
+    // countDocuments→vector_count_points). These assertions lock the
+    // observable Tauri-command surface for each method so future refactors
+    // keep the contract intact.
+    it("scrollDocuments invokes vector_scroll_points + vector_count_points", async () => {
+      mockInvoke.mockResolvedValueOnce({ points: [], next_cursor: undefined, has_more: false })
+      mockInvoke.mockResolvedValueOnce(0)
+      const result = await store.scrollDocuments!("col")
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "vector_scroll_points",
+        expect.objectContaining({ collection: "col", limit: 100 })
       )
-      expect(mockInvoke).not.toHaveBeenCalled()
+      expect(mockInvoke).toHaveBeenCalledWith("vector_count_points", { collection: "col" })
+      expect(result).toEqual({
+        documents: [],
+        total: 0,
+        offset: 0,
+        limit: 100,
+        hasMore: false,
+      })
     })
 
-    it("renameCollection throws", async () => {
-      await expect(store.renameCollection!("a", "b")).rejects.toThrow(
-        "renameCollection is not yet supported on the native backend"
-      )
-      expect(mockInvoke).not.toHaveBeenCalled()
+    it("scrollDocuments rejects non-zero offsets so callers go through cursor paging", async () => {
+      await expect(store.scrollDocuments!("col", { offset: 50 })).rejects.toThrow(/offset=0/)
     })
 
-    it("exportCollection throws", async () => {
-      await expect(store.exportCollection!("col")).rejects.toThrow(
-        "exportCollection is not yet supported on the native backend"
-      )
-      expect(mockInvoke).not.toHaveBeenCalled()
+    it("renameCollection invokes vector_rename_collection with from/to", async () => {
+      mockInvoke.mockResolvedValueOnce(undefined)
+      await store.renameCollection!("a", "b")
+      expect(mockInvoke).toHaveBeenCalledWith("vector_rename_collection", { from: "a", to: "b" })
     })
 
-    it("importCollection throws", async () => {
-      const data: CollectionImport = { meta: { name: "x", documentCount: 0 }, points: [] }
-      await expect(store.importCollection!(data)).rejects.toThrow(
-        "importCollection is not yet supported on the native backend"
-      )
-      expect(mockInvoke).not.toHaveBeenCalled()
+    it("exportCollection parses the JSONL header + points payload", async () => {
+      const jsonl = [
+        JSON.stringify({
+          kind: "collection",
+          name: "col",
+          dim: 3,
+          point_count: 1,
+        }),
+        JSON.stringify({ kind: "point", id: "p1", vector: [0.1, 0.2, 0.3], payload: { x: 1 } }),
+      ].join("\n")
+      mockInvoke.mockResolvedValueOnce(jsonl)
+      const result = await store.exportCollection!("col")
+      expect(mockInvoke).toHaveBeenCalledWith("vector_export_collection", { collection: "col" })
+      expect(result.meta.name).toBe("col")
+      expect(result.points).toHaveLength(1)
+      expect(result.points[0]?.id).toBe("p1")
     })
 
-    it("getStats throws", async () => {
-      await expect(store.getStats!()).rejects.toThrow(
-        "getStats is not yet supported on the native backend"
+    it("importCollection re-packs the structured payload into JSONL", async () => {
+      mockInvoke.mockResolvedValueOnce(undefined)
+      const data: CollectionImport = {
+        meta: { name: "x", documentCount: 1, dimension: 3 },
+        points: [{ id: "p1", vector: [0.1, 0.2, 0.3], payload: { content: "hi" } }],
+      }
+      await store.importCollection!(data, true)
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "vector_import_collection",
+        expect.objectContaining({ collection: "x", overwrite: true })
       )
-      expect(mockInvoke).not.toHaveBeenCalled()
+      const callArgs = mockInvoke.mock.calls.at(-1)?.[1] as { jsonl: string } | undefined
+      expect(callArgs?.jsonl.split("\n")).toHaveLength(2)
     })
 
-    it("countDocuments throws", async () => {
-      await expect(store.countDocuments!("col")).rejects.toThrow(
-        "countDocuments is not yet supported on the native backend"
+    it("getStats aggregates listCollections + per-collection counts + store size", async () => {
+      mockInvoke.mockResolvedValueOnce([{ name: "a", dimension: 3 }])
+      mockInvoke.mockResolvedValueOnce({ count: 7 })
+      mockInvoke.mockResolvedValueOnce(1024)
+      const stats = await store.getStats!()
+      expect(stats.collectionCount).toBe(1)
+      expect(stats.totalPoints).toBe(7)
+      expect(stats.storageSizeBytes).toBe(1024)
+    })
+
+    it("countDocuments invokes vector_count_points when no filters are supplied", async () => {
+      mockInvoke.mockResolvedValueOnce(42)
+      const count = await store.countDocuments!("col")
+      expect(mockInvoke).toHaveBeenCalledWith("vector_count_points", { collection: "col" })
+      expect(count).toBe(42)
+    })
+
+    it("countDocuments routes through vector_search_points when payload filters are supplied", async () => {
+      mockInvoke.mockResolvedValueOnce({ total: 5 })
+      const count = await store.countDocuments!("col", {
+        filters: [{ key: "category", value: "x", operation: "equals" }],
+      })
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "vector_search_points",
+        expect.objectContaining({ collection: "col", top_k: 1 })
       )
-      expect(mockInvoke).not.toHaveBeenCalled()
+      expect(count).toBe(5)
     })
   })
 })

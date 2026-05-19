@@ -10,7 +10,11 @@
  * and replay vectors without re-embedding.
  */
 
-import { bulkCreateTwinChunks } from "@/lib/db/twin-chunks"
+import {
+  bulkCreateTwinChunks,
+  deleteTwinChunksBySource,
+  listTwinChunksBySource,
+} from "@/lib/db/twin-chunks"
 import { updateTwinSource } from "@/lib/db/twin-sources"
 import type { IVectorStore } from "@/lib/vector/store"
 import type { ChunkingStrategyId, TwinChunk, TwinChunkMetadata, VectorBackend } from "@/types/twin"
@@ -70,17 +74,38 @@ export async function persistChunks(input: PersistInput): Promise<PersistResult>
   const collection = input.vectorCollection ?? vectorCollectionName(input.twinId)
   const now = Date.now()
 
-  // 0. Ensure the collection exists. Most vector backends raise on
-  //    addDocuments-before-create; calling this once per persist call is
-  //    cheap (clients short-circuit when the collection is already there).
-  //    Failures here are non-fatal — if the upsert below works anyway, the
-  //    backend already had the collection or auto-created it.
+  // 0a. Ensure the collection exists. Most vector backends raise on
+  //     addDocuments-before-create; calling this once per persist call is
+  //     cheap (clients short-circuit when the collection is already there).
+  //     Failures here are non-fatal — if the upsert below works anyway, the
+  //     backend already had the collection or auto-created it.
   try {
     await input.store.createCollection(collection, {
       dimension: input.embeddings[0]?.length,
     })
   } catch {
     // ignore — most clients throw "already exists" which we treat as success
+  }
+
+  // 0b. Idempotent replace. If this sourceId already has chunks (re-parse
+  //     case) drop the old vectors from the remote store + the Dexie rows
+  //     before inserting fresh ones; otherwise re-parses leave stale
+  //     content in both stores.
+  const existing = await listTwinChunksBySource(input.sourceId)
+  if (existing.length > 0) {
+    const oldVectorIds = existing
+      .map((row) => row.vectorDocId)
+      .filter((id): id is string => typeof id === "string" && id.length > 0)
+    if (oldVectorIds.length > 0 && typeof input.store.deleteDocuments === "function") {
+      try {
+        await input.store.deleteDocuments(collection, oldVectorIds)
+      } catch {
+        // Tolerate remote-store delete failures so a one-off remote outage
+        // can't strand the local re-parse. The Dexie cleanup below still
+        // removes the stale rows from the canonical local store.
+      }
+    }
+    await deleteTwinChunksBySource(input.sourceId)
   }
 
   // 1. Build rows + ids in memory.

@@ -195,7 +195,11 @@ describe("LocalProviderSetupWizard", () => {
     it("should show documentation link", async () => {
       await navigateToConfigure()
 
-      const docsLink = screen.getByRole("link", { name: /viewDocumentation/i })
+      // The link's accessible name comes from the resolved translation
+      // (`providers.viewDocumentation` → "View documentation" in en.json).
+      // Earlier the test mock echoed keys verbatim; now it resolves real
+      // bundle entries via `jest.setup.ts`.
+      const docsLink = screen.getByRole("link", { name: /View documentation/i })
       expect(docsLink).toHaveAttribute("href", "https://ollama.ai/docs")
     })
 

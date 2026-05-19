@@ -136,15 +136,30 @@ describe("WorkflowBottomToolbar", () => {
     expect(screen.getByTestId("workflow-quick-action-explain")).not.toBeDisabled()
   })
 
-  it("dispatches the correct kind through ctx.onQuickAction on click", () => {
-    const onQuickAction = jest.fn()
-    renderWithCtx({ selectedIds: ["n_a"], onQuickAction })
-    fireEvent.click(screen.getByTestId("workflow-quick-action-validate"))
-    fireEvent.click(screen.getByTestId("workflow-quick-action-explain"))
-    fireEvent.click(screen.getByTestId("workflow-quick-action-suggest"))
-    expect(onQuickAction).toHaveBeenNthCalledWith(1, "validate")
-    expect(onQuickAction).toHaveBeenNthCalledWith(2, "explain")
-    expect(onQuickAction).toHaveBeenNthCalledWith(3, "suggest")
+  it("dispatches the correct kind through the workflow CustomEvent on click", () => {
+    // The toolbar funnels clicks through `dispatchWorkflowSlashAction` first
+    // (the same path `/validate`, `/explain`, `/suggest` slash commands take)
+    // and only falls back to `ctx.onQuickAction` when there is no DOM. In
+    // jsdom the dispatch path wins, so we assert on the CustomEvent.
+    const events: Array<{ kind: string }> = []
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent<{ action: { kind: string } }>).detail
+      events.push({ kind: detail.action.kind })
+    }
+    window.addEventListener("workflow-copilot:dispatch-action", listener)
+    try {
+      const onQuickAction = jest.fn()
+      renderWithCtx({ selectedIds: ["n_a"], onQuickAction })
+      fireEvent.click(screen.getByTestId("workflow-quick-action-validate"))
+      fireEvent.click(screen.getByTestId("workflow-quick-action-explain"))
+      fireEvent.click(screen.getByTestId("workflow-quick-action-suggest"))
+      expect(events.map((e) => e.kind)).toEqual(["validate", "explain", "suggest"])
+      // The fallback `ctx.onQuickAction` must NOT fire when the DOM dispatch
+      // succeeded, otherwise the toolbar would double-dispatch slash actions.
+      expect(onQuickAction).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener("workflow-copilot:dispatch-action", listener)
+    }
   })
 
   it("disables all quick actions while streaming", () => {

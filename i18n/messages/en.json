@@ -427,7 +427,7 @@
       "foldLevel1": "Fold level 1",
       "foldLevel2": "Fold level 2"
     },
-    "deleteAria": "Delete {name}",
+    "deleteAria": "Delete document {name}",
     "renameDocument": "Rename document",
     "save": "Save",
     "versionHistory": "Version history",
@@ -883,6 +883,49 @@
         "titleFallback": "Render Error",
         "titleNamed": "{name} Render Error",
         "retry": "Retry"
+      }
+    },
+    "welcomeDemo": {
+      "openDemo": "Try Interactive Demo",
+      "dialogTitle": "Interactive A2UI Demo",
+      "dialogDescription": "A live A2UI surface — pick suggestions, tweak settings, and see the schema render in place.",
+      "refresh": "Refresh demo",
+      "quickActions": "Quick actions",
+      "summarize": "Summarize",
+      "translate": "Translate",
+      "analyze": "Analyze",
+      "codeReview": "Code review",
+      "generateIdeas": "Generate ideas",
+      "explainConcept": "Explain a concept",
+      "responseSettings": "Response settings",
+      "tone": "Tone",
+      "selectTonePlaceholder": "Pick a tone",
+      "length": "Length",
+      "selectLengthPlaceholder": "Pick a length"
+    },
+    "artifactPart": {
+      "cleared": "(cleared)",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyAria": "Copy artifact content",
+      "download": "Download",
+      "downloadAria": "Download artifact",
+      "openInCanvas": "Open in canvas",
+      "openInCanvasAria": "Open artifact in canvas",
+      "collapse": "Collapse preview",
+      "expand": "Expand preview"
+    },
+    "canvasInline": {
+      "openInCanvas": "Open in canvas",
+      "collapsePreview": "Collapse preview",
+      "expandPreview": "Expand preview"
+    },
+    "sourcesPart": {
+      "usedSources": "{count, plural, =0 {No sources} =1 {Used 1 source} other {Used # sources}}"
+    },
+    "mcp": {
+      "wikiSearch": {
+        "noResults": "No results"
       }
     }
   },
@@ -5597,7 +5640,11 @@
       "transportRetries": "Retries",
       "transportDropped": "Dropped",
       "transportLastFailure": "Last Failure",
+      "transportLastSuccess": "Last Success",
+      "transportQueueDepth": "Queue Depth",
+      "transportQueueHistory": "Queue depth history",
       "transportHealthOverflow": "Show more transports",
+      "transportFilterPrefix": "Transport: {value}",
       "viewDiagnostics": "View Diagnostics",
       "logRatePulse": "Live log stream activity",
       "nativeLoggingDetails": "Native Logging Details",
@@ -5605,9 +5652,17 @@
       "nativeLoggingMode": "Startup Mode",
       "nativeLoggingBridge": "Bridge",
       "nativeLoggingTargets": "Targets",
+      "nativeLoggingNoTargets": "none",
       "nativeLoggingFallbackReason": "Fallback Reason",
       "nativeLoggingLastBridgeError": "Last Bridge Error",
       "viewNativeDiagnostics": "View Native Diagnostics",
+      "recentSearches": {
+        "removeAria": "Remove recent search {query}",
+        "empty": "No recent searches",
+        "clear": "Clear"
+      },
+      "unsavedChanges": "Unsaved changes",
+      "filterIn": "in:",
       "focusSession": "Focus this session",
       "showingRange": "Showing {start}-{end} of {total}",
       "pageSize": "Page Size",
@@ -5624,13 +5679,17 @@
       "clearSearchHistory": "Clear history",
       "emptyStateTitle": "No logs collected yet",
       "emptyStateDescription": "Logs appear here automatically as you use the app. Press ? for keyboard shortcuts.",
+      "emptyStateFilterPrefix": "No logs match the active filters:",
+      "emptyStateClearFilters": "Clear filters",
+      "emptyStateOpenPresets": "Open presets",
       "errorAndFatal": "Error",
       "copyLogEntry": "Copy log entry",
       "focusTraceMenu": "Focus on this trace",
       "focusSessionMenu": "Focus on this session",
       "viewDetailsMenu": "View details",
       "moreFilters": {
-        "show": "Show more filters"
+        "show": "More filters",
+        "hide": "Hide more filters"
       },
       "shortcutsHint": "Keyboard shortcuts",
       "shiftClickPrefix": "Shift-click to",
@@ -5638,14 +5697,28 @@
       "scrollMenuLabel": "Scroll",
       "allLevelsTab": "All",
       "shortcuts": {
-        "refresh": "Refresh logs",
-        "dashboardView": "Toggle dashboard view",
+        "refresh": "Refresh",
+        "dashboardView": "Dashboard view",
         "nextEntry": "Next entry",
         "previousEntry": "Previous entry",
         "expandEntry": "Expand entry",
-        "openDetails": "Open details panel",
-        "closeOrClear": "Close dialog or clear focus",
-        "showShortcuts": "Show this shortcut list"
+        "openDetails": "Open details",
+        "closeOrClear": "Close / clear",
+        "showShortcuts": "Show shortcuts"
+      },
+      "filterChip": {
+        "sourceLabel": "Source:",
+        "clearSource": "Clear source filter {value}",
+        "sessionLabel": "Session:",
+        "clearSession": "Clear session filter",
+        "moduleLabel": "Module:",
+        "clearModule": "Clear module filter",
+        "clearTimeRange": "Clear time range filter",
+        "traceLabel": "Trace:",
+        "clearTrace": "Clear trace filter",
+        "transportLabel": "Transport:",
+        "clearTransport": "Clear transport filter",
+        "transportPrefix": "Transport: {name}"
       }
     },
     "dashboard": {
@@ -5672,6 +5745,8 @@
       "trendStable": "Stable",
       "currentPeriod": "Current Period",
       "previousPeriod": "Previous Period",
+      "otherSeries": "Other",
+      "logsSeries": "Logs",
       "platformLogging": "Platform Logging",
       "platformBackend": "Platform Backend",
       "platformHealth": "Platform Health",
@@ -5682,7 +5757,8 @@
       "title": "Timeline",
       "total": "Total",
       "errors": "Errors",
-      "warnings": "Warnings"
+      "warnings": "Warnings",
+      "clear": "Clear"
     },
     "detail": {
       "title": "Log Detail",
@@ -5785,6 +5861,13 @@
       "saved": "Saved!",
       "reset": "Reset",
       "saveError": "Failed to save settings",
+      "unsavedChanges": "Unsaved changes",
+      "tabs": {
+        "levels": "Levels",
+        "transports": "Transports",
+        "advanced": "Advanced",
+        "retention": "Retention"
+      },
       "native": {
         "title": "Native logging readiness",
         "status": "Status",
@@ -5908,6 +5991,8 @@
       "completionTokens": "Completion",
       "totalTokens": "Total",
       "costEstimate": "Cost",
+      "costInputPrefix": "in:",
+      "costOutputPrefix": "out:",
       "duration": "Duration",
       "success": "Success",
       "failed": "Failed",
@@ -6005,7 +6090,58 @@
       "addAgentFailed": "Failed to add external agent.",
       "unsupportedProtocol": "Only ACP is currently supported for executable agents.",
       "removeAgentConfirm": "Remove this external agent? You can re-add it later.",
-      "removeAgentFailed": "Failed to remove external agent."
+      "removeAgentFailed": "Failed to remove external agent.",
+      "diagnostics": {
+        "noBlockingReason": "No blocking reason recorded.",
+        "notExecutable": "Agent is not executable.",
+        "connectAgentToList": "Connect an agent to list sessions.",
+        "sessionListingUnsupported": "Session listing is unsupported on this agent.",
+        "resumeUnsupported": "Resume unsupported: {reason}",
+        "resumeUnsupportedDefault": "Reason not provided.",
+        "forkUnsupported": "Fork unsupported: {reason}",
+        "forkUnsupportedDefault": "Reason not provided.",
+        "runtimeDiagnostics": "Runtime diagnostics",
+        "protocolTransport": "Protocol/Transport: {protocol} via {transport}",
+        "executableWithCode": "Executable: {value} ({code})",
+        "executable": "Executable: {value}",
+        "yes": "yes",
+        "no": "no",
+        "health": "Health: {value}",
+        "unknown": "unknown",
+        "authRequired": "Auth required: {value}",
+        "authMethods": "Auth methods: {value}",
+        "none": "none",
+        "sessionSupport": "Session support — list {list}, fork {fork}, resume {resume}",
+        "adapter": "Adapter: {value}",
+        "surface": "Surface: {value}",
+        "supportTier": "Support tier: {value}",
+        "prerequisiteStatus": "Prerequisite status: {value}",
+        "contractVersion": "Contract version: {value}",
+        "lifecycleStage": "Lifecycle stage: {value}",
+        "blockedStage": "Blocked stage: {value}",
+        "branchOutcome": "Branch outcome: {value}",
+        "canonicalReasonWithText": "Canonical reason: {code} — {text}",
+        "canonicalReason": "Canonical reason: {code}",
+        "correlation": "Correlation",
+        "naLabel": "n/a",
+        "latestRun": "Latest run: {outcome}",
+        "trace": "Trace: {trace}",
+        "session": "Session: {session}",
+        "blockingReason": "Blocking reason: {reason}",
+        "recoveryHints": "Recovery hints",
+        "recommendedActions": "Recommended actions",
+        "benchmarkAdaptation": "Benchmark adaptation",
+        "noBenchmarkAdaptation": "No benchmark adaptations recorded.",
+        "gap": "Gap: {gap}",
+        "target": "Target: {target}",
+        "evidence": "Evidence: {evidence}",
+        "evidenceMissing": "missing",
+        "rationale": "{rationale}",
+        "tradeOff": "Trade-off: {tradeOff}",
+        "userImpact": "User impact: {impact}",
+        "reviewWithLink": "Review: {reviewedBy} ({link})",
+        "review": "Review: {reviewedBy}"
+      }
     },
     "settings": {
       "title": "External Agents",
@@ -9424,7 +9560,24 @@
       "perFileSrcSingular": "1 src",
       "perFileSrcPlural": "{count} srcs",
       "repoImportedSingular": "Imported 1 commit from",
-      "repoImportedPlural": "Imported {count} commits from"
+      "repoImportedPlural": "Imported {count} commits from",
+      "errors": {
+        "unknownFileType": "Unknown file type",
+        "noTextExtracted": "No text could be extracted",
+        "parseFailed": "Failed to parse file",
+        "parseFailedFallback": "Failed to parse file (fallback parser also rejected it)",
+        "formatUnsupported": "Unsupported file format",
+        "fileEmpty": "File is empty",
+        "shapeNoMessages": "Export contains no messages",
+        "importParseFailed": "Failed to parse export",
+        "importParseFailedFallback": "Failed to parse export (fallback parser also rejected it)",
+        "dingTalkNoMessages": "DingTalk export contains no messages",
+        "dingTalkParseFailed": "Failed to parse DingTalk export",
+        "dingTalkParseFailedFallback": "Failed to parse DingTalk export (fallback parser also rejected it)",
+        "noMessagesParsed": "No messages parsed",
+        "noCommitsFound": "No commits found in the selected repository",
+        "pasteContentRequired": "Paste some content before saving"
+      }
     },
     "selector": {
       "activeTwinAria": "Active twin: {name}",
@@ -12129,6 +12282,55 @@
       "debug": "Diagnose a failing run via the workflow-debugger subagent",
       "refactor": "Restructure a subgraph via the workflow-refactorer subagent",
       "delegate": "Hand off explicitly to one of the four workflow specialists"
+    }
+  },
+  "automation": {
+    "consent": {
+      "ariaLabel": "Automation consent prompt",
+      "title": "Automation requests your consent",
+      "actions": {
+        "close": "Close",
+        "allowOnce": "Allow once",
+        "allowSession": "Always allow this session",
+        "reject": "Reject"
+      },
+      "fields": {
+        "action": "Action:",
+        "surface": "Surface:",
+        "plugin": "Plugin:",
+        "window": "Window:",
+        "process": "Process:",
+        "autoReject": "Auto-rejecting in {seconds}s",
+        "morePending": "(+{count} more pending)"
+      },
+      "commands": {
+        "click": "Click on screen",
+        "type": "Type text",
+        "keys": "Send keys",
+        "screenshot": "Take screenshot",
+        "find": "Find element",
+        "getFocus": "Read focused element",
+        "readTree": "Read accessibility tree",
+        "mouseMove": "Move mouse",
+        "drag": "Drag",
+        "scroll": "Scroll",
+        "holdKey": "Hold key",
+        "windowOp": "Window operation",
+        "cursorPosition": "Read cursor position",
+        "pickAtPoint": "Pick element at point",
+        "invokePattern": "Invoke automation pattern",
+        "auditSnapshot": "Read audit snapshot",
+        "settingsGet": "Read automation settings",
+        "settingsSet": "Write automation settings",
+        "killSwitch": "Trigger kill switch",
+        "capabilities": "Read capabilities"
+      },
+      "surfaces": {
+        "workflow": "Workflow",
+        "computerUse": "Computer Use",
+        "mcp": "MCP",
+        "plugin": "Plugin"
+      }
     }
   }
 }

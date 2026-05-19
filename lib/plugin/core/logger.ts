@@ -22,7 +22,25 @@ type PluginLoggerExtended = PluginLogger & {
   withContext: (context: Record<string, unknown>) => PluginLoggerExtended
 }
 
-const pluginBaseLogger = createLogger("plugin")
+// Lazy base logger.
+//
+// `@/lib/plugin/core/logger` is pulled in early by the plugin manager,
+// validators, and a few stores. Several import chains in those packages
+// (notably `stores/agent/agent-team-store/slices/actions.slice` →
+// `agent-team-compat` → orchestrator → hooks-system → plugin store →
+// plugin index → validation → THIS file) re-enter the module graph
+// while `@/lib/logger` is still being evaluated under Jest's CJS loader.
+// Calling `createLogger("plugin")` at module-init time during that
+// window resolves to an empty namespace and throws
+// `createLogger is not a function`. Resolving lazily on first use keeps
+// the runtime fully implemented while breaking the init-order cycle.
+let pluginBaseLoggerInstance: Logger | undefined
+function getPluginBaseLogger(): Logger {
+  if (!pluginBaseLoggerInstance) {
+    pluginBaseLoggerInstance = createLogger("plugin")
+  }
+  return pluginBaseLoggerInstance
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(
@@ -106,34 +124,93 @@ export function createPluginSystemLogger(
   module: string,
   _options?: LoggerOptions
 ): PluginLoggerExtended {
-  const childLogger = pluginBaseLogger.child(module)
+  const childLogger = getPluginBaseLogger().child(module)
   return createLoggerWrapper(childLogger)
 }
 
-export const pluginLogger = createPluginSystemLogger("system")
-
-export const loggers = {
-  manager: createPluginSystemLogger("manager"),
-  loader: createPluginSystemLogger("loader"),
-  registry: createPluginSystemLogger("registry"),
-  sandbox: createPluginSystemLogger("sandbox"),
-  hooks: createPluginSystemLogger("hooks"),
-  marketplace: createPluginSystemLogger("marketplace"),
-  hotReload: createPluginSystemLogger("hotReload"),
-  devServer: createPluginSystemLogger("devServer"),
-  ipc: createPluginSystemLogger("ipc"),
-  backup: createPluginSystemLogger("backup"),
-  updater: createPluginSystemLogger("updater"),
-  validation: createPluginSystemLogger("validation"),
-  a2ui: createPluginSystemLogger("a2ui"),
-  debugger: createPluginSystemLogger("debugger"),
-  messageBus: createPluginSystemLogger("messageBus"),
-  agent: createPluginSystemLogger("agent"),
-  i18n: createPluginSystemLogger("i18n"),
-  rollback: createPluginSystemLogger("rollback"),
-  signature: createPluginSystemLogger("signature"),
-  workflow: createPluginSystemLogger("workflow"),
-  devTools: createPluginSystemLogger("devTools"),
+/**
+ * Build a logger map whose entries materialise on first access via
+ * `Object.defineProperty` getters. Each entry is then a stable plain object
+ * (so `jest.spyOn(loggers.manager, "info")` works as expected) while
+ * module-init importers don't trigger `createLogger("plugin")` against the
+ * still-evaluating `@/lib/logger` barrel.
+ */
+function makeLazyLoggers<K extends string>(...modules: K[]): Record<K, PluginLoggerExtended> {
+  const cache: Partial<Record<K, PluginLoggerExtended>> = {}
+  const out = {} as Record<K, PluginLoggerExtended>
+  for (const mod of modules) {
+    Object.defineProperty(out, mod, {
+      enumerable: true,
+      configurable: true,
+      get(): PluginLoggerExtended {
+        if (!cache[mod]) {
+          cache[mod] = createPluginSystemLogger(mod)
+        }
+        return cache[mod] as PluginLoggerExtended
+      },
+    })
+  }
+  return out
 }
+
+// `pluginLogger` retains the historical default-export shape but defers the
+// underlying `createLogger("plugin")` invocation until the consumer touches
+// a property. We attach a getter for each level so spy / mock tooling can
+// rebind methods on the resolved instance directly.
+let _pluginLoggerSingleton: PluginLoggerExtended | undefined
+const PLUGIN_LOGGER_METHODS = [
+  "trace",
+  "debug",
+  "info",
+  "warn",
+  "error",
+  "fatal",
+  "child",
+  "withContext",
+] as const
+
+function getPluginLoggerSingleton(): PluginLoggerExtended {
+  if (!_pluginLoggerSingleton) {
+    _pluginLoggerSingleton = createPluginSystemLogger("system")
+  }
+  return _pluginLoggerSingleton
+}
+
+export const pluginLogger = {} as PluginLoggerExtended
+for (const method of PLUGIN_LOGGER_METHODS) {
+  Object.defineProperty(pluginLogger, method, {
+    enumerable: true,
+    configurable: true,
+    get() {
+      const target = getPluginLoggerSingleton() as unknown as Record<string, unknown>
+      const fn = target[method]
+      return typeof fn === "function" ? (fn as (...args: unknown[]) => unknown).bind(target) : fn
+    },
+  })
+}
+
+export const loggers = makeLazyLoggers(
+  "manager",
+  "loader",
+  "registry",
+  "sandbox",
+  "hooks",
+  "marketplace",
+  "hotReload",
+  "devServer",
+  "ipc",
+  "backup",
+  "updater",
+  "validation",
+  "a2ui",
+  "debugger",
+  "messageBus",
+  "agent",
+  "i18n",
+  "rollback",
+  "signature",
+  "workflow",
+  "devTools"
+)
 
 export type PluginSystemLogger = ReturnType<typeof createPluginSystemLogger>

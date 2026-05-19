@@ -253,12 +253,45 @@ jest.mock("next-intl", () => {
 
   const interpolate = (template: string, values?: Record<string, unknown>) => {
     if (!values) return template
-    // Strip ICU plural / select syntax to its `other` branch and interpolate
-    // simple `{name}` placeholders. Good enough for visible-text assertions.
-    let out = template.replace(
-      /\{(\w+),\s*(?:plural|select|selectordinal),\s*([^{}]*\{[^{}]*\}[^{}]*)*\s*other\s*\{([^}]*)\}\s*\}/g,
-      (_match, _name, _branches, otherBody) => otherBody
-    )
+    // Resolve ICU plural / select syntax. ICU templates have nested braces
+    // so a regex with lazy `[\s\S]*?` truncates at the first `}`; we walk
+    // the string and track brace depth instead. For each `{name, plural,
+    // …}` block we try to match the active branch by value before falling
+    // back to `other`, and `#` inside the chosen branch is replaced by
+    // the controlling variable's value (per ICU spec).
+    let out = ""
+    let i = 0
+    const headerRe = /\{(\w+),\s*(?:plural|select|selectordinal),\s*/y
+    while (i < template.length) {
+      headerRe.lastIndex = i
+      const header = headerRe.exec(template)
+      if (!header) {
+        out += template[i]
+        i += 1
+        continue
+      }
+      const name = header[1]!
+      let j = headerRe.lastIndex
+      let depth = 1
+      while (j < template.length && depth > 0) {
+        const ch = template[j]
+        if (ch === "{") depth += 1
+        else if (ch === "}") depth -= 1
+        if (depth > 0) j += 1
+      }
+      // template[headerRe.lastIndex..j) is the branches body.
+      const body = template.slice(headerRe.lastIndex, j)
+      const branches = new Map<string, string>()
+      const branchRe = /(=\d+|zero|one|two|few|many|other)\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g
+      let m: RegExpExecArray | null
+      while ((m = branchRe.exec(body)) !== null) {
+        branches.set(m[1]!, m[2]!)
+      }
+      const controlling = values[name]
+      const chosen = branches.get(`=${controlling}`) ?? branches.get("other") ?? ""
+      out += chosen.replace(/#/g, String(controlling))
+      i = j + 1
+    }
     out = Object.entries(values).reduce(
       (acc, [k, v]) => acc.replace(new RegExp(`\\{\\s*${k}\\s*\\}`, "g"), String(v)),
       out

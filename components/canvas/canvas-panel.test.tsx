@@ -167,7 +167,7 @@ describe("CanvasPanel", () => {
       ).ResizeObserver = originalResizeObserver
     })
 
-    function seedDocAndRender() {
+    async function seedDocAndRender() {
       act(() => {
         const id = useArtifactStore.getState().createCanvasDocument({
           title: "Resize",
@@ -178,20 +178,22 @@ describe("CanvasPanel", () => {
         useArtifactStore.getState().setActiveCanvas(id)
       })
       const utils = renderWithProviders(<CanvasPanel />)
-      // Drain the microtask the Monaco mock uses to attach editorStub via onMount.
-      act(() => {
-        jest.advanceTimersByTime(0)
+      // Drain the Promise-microtask the Monaco mock uses to attach
+      // editorStub via onMount. Fake timers don't flush microtasks via
+      // advanceTimersByTime(0); we need an actual async-act tick.
+      await act(async () => {
+        await Promise.resolve()
       })
       return utils
     }
 
-    it("registers exactly one ResizeObserver for the editor container", () => {
-      seedDocAndRender()
+    it("registers exactly one ResizeObserver for the editor container", async () => {
+      await seedDocAndRender()
       expect(ControllableResizeObserver.instances.length).toBe(1)
     })
 
-    it("coalesces 5 rapid ticks into a single layout() call after the 60ms window", () => {
-      seedDocAndRender()
+    it("coalesces 5 rapid ticks into a single layout() call after the 60ms window", async () => {
+      await seedDocAndRender()
       const observer = ControllableResizeObserver.instances[0]!
 
       act(() => {
@@ -214,8 +216,8 @@ describe("CanvasPanel", () => {
       expect(mockEditorLayout).toHaveBeenCalledTimes(1)
     })
 
-    it("cancels the pending layout call when unmounted before the timer fires", () => {
-      const { unmount } = seedDocAndRender()
+    it("cancels the pending layout call when unmounted before the timer fires", async () => {
+      const { unmount } = await seedDocAndRender()
       const observer = ControllableResizeObserver.instances[0]!
 
       act(() => {

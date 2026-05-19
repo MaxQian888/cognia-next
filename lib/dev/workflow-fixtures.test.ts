@@ -50,10 +50,16 @@ describe("workflow-fixtures", () => {
       }
     }
     // Every advertised kind in the visual taxonomy should appear in at least
-    // one fixture. (Exception: `trigger.desktop.event` is registered for the
+    // one fixture. (Exceptions: `trigger.desktop.event` is registered for the
     // sidebar but has no first-class seed yet — it's covered by the desktop
-    // family specs through editor-level interaction only.)
-    const skip = new Set<string>(["trigger.desktop.event"])
+    // family specs through editor-level interaction only. The two `*.team.*`
+    // kinds were added with the agent-teams workflow integration; they are
+    // exercised through the agent-team-runtime tests rather than fixtures.)
+    const skip = new Set<string>([
+      "trigger.desktop.event",
+      "trigger.team",
+      "action.team.task.dispatch",
+    ])
     const missing = WORKFLOW_NODE_KINDS.filter((k) => !seen.has(k) && !skip.has(k))
     expect(missing).toEqual([])
   })

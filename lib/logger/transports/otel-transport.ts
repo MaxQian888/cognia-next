@@ -3,10 +3,60 @@
  *
  * Transport that integrates logs with OpenTelemetry spans for distributed tracing.
  * Automatically attaches trace and span IDs to log entries when available.
+ *
+ * `@opentelemetry/api` is treated as an optional dependency: this module
+ * lazy-loads it via `require` and silently degrades to a no-op surface when
+ * the package fails to load (for example in environments where the OTel
+ * runtime hasn't been installed, or under unit-test mocks that simulate the
+ * "api unavailable" path).
  */
 
 import type { Transport, StructuredLogEntry } from "../types"
-import * as otelApi from "@opentelemetry/api"
+
+interface OtelApiSurface {
+  trace: {
+    getActiveSpan: () => {
+      addEvent: (name: string, attrs?: Record<string, string | number | boolean>) => void
+      setStatus: (status: { code: number; message?: string }) => void
+      recordException: (err: unknown) => void
+      spanContext: () => { traceId: string; spanId: string }
+    } | null
+    getTracer: (name: string) => {
+      startActiveSpan: <T>(
+        name: string,
+        fn: (span: {
+          addEvent: (name: string, attrs?: Record<string, string | number | boolean>) => void
+          setAttributes: (attrs: Record<string, string | number | boolean>) => void
+          setStatus: (status: { code: number; message?: string }) => void
+          recordException: (err: unknown) => void
+          end: () => void
+        }) => T | Promise<T>
+      ) => T | Promise<T>
+    }
+  }
+  SpanStatusCode: { OK: number; ERROR: number }
+}
+
+let cachedOtelApi: OtelApiSurface | null | undefined
+let inFlight: Promise<OtelApiSurface | null> | undefined
+
+async function loadOtelApi(): Promise<OtelApiSurface | null> {
+  if (cachedOtelApi !== undefined) return cachedOtelApi
+  if (!inFlight) {
+    inFlight = (async () => {
+      try {
+        const mod = await import("@opentelemetry/api")
+        cachedOtelApi =
+          (mod as unknown as { default?: OtelApiSurface }).default ??
+          (mod as unknown as OtelApiSurface)
+      } catch {
+        cachedOtelApi = null
+      }
+      return cachedOtelApi
+    })()
+  }
+  return inFlight
+}
 
 export interface OtelTransportOptions {
   /** OTLP endpoint associated with this transport */
@@ -31,13 +81,16 @@ const LEVEL_PRIORITY: Record<string, number> = {
 }
 
 /**
- * Get current OpenTelemetry trace context
+ * Get current OpenTelemetry trace context. Returns `null` when no active
+ * span exists or `@opentelemetry/api` is unavailable in this runtime.
  */
-export function getOtelContext(): {
+export async function getOtelContext(): Promise<{
   traceId?: string
   spanId?: string
-} | null {
-  const span = otelApi.trace.getActiveSpan()
+} | null> {
+  const api = await loadOtelApi()
+  if (!api) return null
+  const span = api.trace.getActiveSpan()
   if (!span) return null
 
   const context = span.spanContext()
@@ -70,14 +123,20 @@ export class OtelTransport implements Transport {
   }
 
   log(entry: StructuredLogEntry): void {
-    // Synchronous log — errors are silently ignored
-    this.logAsync(entry)
+    // Fire-and-forget. The async path may need to lazy-load
+    // `@opentelemetry/api`; we deliberately swallow the resulting Promise so
+    // the synchronous log surface keeps its non-blocking contract.
+    void this.logAsync(entry).catch(() => {
+      // Errors emitting span events must never bubble up to the caller.
+    })
   }
 
-  private logAsync(entry: StructuredLogEntry): void {
+  private async logAsync(entry: StructuredLogEntry): Promise<void> {
     this.ensureInitialized()
 
-    const span = otelApi.trace.getActiveSpan()
+    const api = await loadOtelApi()
+    if (!api) return
+    const span = api.trace.getActiveSpan()
     if (!span) return
 
     // Check if we should add this log level as a span event
@@ -124,7 +183,7 @@ export class OtelTransport implements Transport {
 
         // Set span status to error
         span.setStatus({
-          code: otelApi.SpanStatusCode.ERROR,
+          code: api.SpanStatusCode.ERROR,
           message: entry.message,
         })
       }
@@ -148,26 +207,31 @@ export function createOtelTransport(options?: OtelTransportOptions): OtelTranspo
 }
 
 /**
- * Helper to wrap a function with OpenTelemetry span and logging
+ * Helper to wrap a function with OpenTelemetry span and logging. If
+ * `@opentelemetry/api` isn't available in this runtime the wrapper simply
+ * delegates to `fn()` so callers can use `withOtelSpan` unconditionally
+ * without forking the call sites.
  */
 export async function withOtelSpan<T>(
   name: string,
   fn: () => Promise<T>,
   attributes?: Record<string, string | number | boolean>
 ): Promise<T> {
-  const tracer = otelApi.trace.getTracer("cognia-logger")
+  const api = await loadOtelApi()
+  if (!api) return fn()
 
+  const tracer = api.trace.getTracer("cognia-logger")
   return tracer.startActiveSpan(name, async (span) => {
     try {
       if (attributes) {
         span.setAttributes(attributes)
       }
       const result = await fn()
-      span.setStatus({ code: otelApi.SpanStatusCode.OK })
+      span.setStatus({ code: api.SpanStatusCode.OK })
       return result
     } catch (error) {
       span.setStatus({
-        code: otelApi.SpanStatusCode.ERROR,
+        code: api.SpanStatusCode.ERROR,
         message: error instanceof Error ? error.message : String(error),
       })
       if (error instanceof Error) {

@@ -25,7 +25,22 @@
 
 import { liveQuery, type Subscription } from "dexie"
 
-import { isTauri, transport } from "@/lib/tauri"
+// Import `transport` from the leaf module directly so we don't pull
+// `@/lib/tauri` (the barrel) into our import graph. The barrel re-exports
+// `transport` via `export { transport }`, which Jest's CJS compilation
+// turns into a live getter. When `jest.mock("@/lib/tauri", () => ({
+// ...jest.requireActual("@/lib/tauri") }))` is used in a sibling test
+// the spread invokes that getter while the cycle
+//   lib/tauri.ts → transport-instance → transport-companion → transport-rtc
+//     → lib/signaling/index.ts → lib/signaling/desktop-controller.ts
+// is still mid-evaluation, tripping a TDZ on the underlying
+// `_transportinstance` binding. Importing the leaf bypasses the barrel
+// getter entirely.
+import { transport } from "@/lib/tauri/transport-instance"
+
+function isTauriRenderer(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+}
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { getSettings } from "@/lib/db/settings"
 import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials"
@@ -72,8 +87,8 @@ export interface DesktopSignalingControllerOptions {
 export function installDesktopSignalingController(
   options: DesktopSignalingControllerOptions = {}
 ): () => void {
-  const tauri = options.isTauriOverride ?? isTauri()
-  if (!tauri) {
+  const isDesktopTauri = options.isTauriOverride ?? isTauriRenderer()
+  if (!isDesktopTauri) {
     return () => {
       // No-op on web / Capacitor.
     }

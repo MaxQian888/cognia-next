@@ -13,6 +13,10 @@ import type { MetadataRoute } from "next"
  * since Chrome 93 + Safari 16.4. Production PNG variants (192/512/512-
  * maskable/180-apple) are a follow-up.
  */
+// Required by Next.js 16 when `output: "export"` is set in next.config.ts —
+// the manifest returns a fully static object so we opt in explicitly.
+export const dynamic = "force-static"
+
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "cognia",

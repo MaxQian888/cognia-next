@@ -47,20 +47,26 @@ describe("SubscriptionSection", () => {
     expect(screen.getByTestId("overview-tab")).toBeInTheDocument()
   })
 
-  it("respects the ?subTab= query param", () => {
-    useSearchParamsMock.mockReturnValue(new URLSearchParams("subTab=usage"))
+  it("respects the ?innerTab= query param", () => {
+    // `?subTab=` selects the provider (anthropic / codex / opencode);
+    // the inner overview/account/usage/settings tab is driven by
+    // `?innerTab=` for Anthropic provider.
+    useSearchParamsMock.mockReturnValue(new URLSearchParams("innerTab=usage"))
     render(<SubscriptionSection />)
     expect(screen.getByTestId("usage-tab")).toBeInTheDocument()
   })
 
-  it("falls back to overview for an unknown ?subTab=", () => {
-    useSearchParamsMock.mockReturnValue(new URLSearchParams("subTab=ALIEN"))
+  it("falls back to overview for an unknown ?innerTab=", () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams("innerTab=ALIEN"))
     render(<SubscriptionSection />)
     expect(screen.getByTestId("overview-tab")).toBeInTheDocument()
   })
 
   it("clicking a tab updates the URL", () => {
     render(<SubscriptionSection />)
+    // This file overrides next-intl with a key-echo mock at the top, so
+    // `t("tabs.account")` renders as `tabs.account` and the tab's
+    // accessible name is the raw key.
     const trigger = screen.getByRole("tab", { name: "tabs.account" })
     // Radix Tabs needs the full pointer-down → click sequence to fire
     // `onValueChange`; a bare click event in jsdom gets swallowed.
@@ -69,7 +75,7 @@ describe("SubscriptionSection", () => {
     fireEvent.click(trigger)
     expect(replace).toHaveBeenCalled()
     const url = replace.mock.calls.at(-1)![0] as string
-    expect(url).toContain("subTab=account")
+    expect(url).toContain("innerTab=account")
   })
 
   it("renders all four tab triggers", () => {

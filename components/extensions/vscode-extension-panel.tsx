@@ -23,6 +23,7 @@ import {
   disposeWebviewPanel,
   listPanels,
   notifyViewStateChange,
+  setState as setWebviewPanelState,
   type HostFrame,
   type WebviewMessage,
   type WebviewRecord,
@@ -117,10 +118,7 @@ function VscodeWebviewIframe({ panel }: { panel: WebviewRecord }) {
         stateFromWebview = payload.state
         // Mirror into the bridge so the next mount (after detach/reattach)
         // can rehydrate.
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const bridge =
-          require("@/lib/plugin/vscode-shim/webview-bridge") as typeof import("@/lib/plugin/vscode-shim/webview-bridge")
-        bridge.setState(panel.panelId, stateFromWebview)
+        setWebviewPanelState(panel.panelId, stateFromWebview)
       }
     }
 

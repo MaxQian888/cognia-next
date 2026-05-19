@@ -137,6 +137,77 @@ describe("audit-plugin-slots: evaluateAuditFromSources", () => {
     expect(report.errors[0]).toContain("components/host/wrong.tsx")
   })
 
+  it("registration host with existing binding file = no error", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "audit-reg-ok-"))
+    try {
+      const bindingRel = "components/host/registration.tsx"
+      const absBinding = path.join(tmp, bindingRel)
+      fs.mkdirSync(path.dirname(absBinding), { recursive: true })
+      fs.writeFileSync(absBinding, "export {}\n")
+
+      const contract: PluginPointContract = {
+        ...mockContract("R", "implemented", "stable", bindingRel),
+        hostKind: "registration",
+      }
+      const report = evaluateAuditFromSources([], [], {
+        repoRoot: tmp,
+        canonicalPoints: ["R"],
+        getContract: () => contract,
+      })
+      expect(report.ok).toBe(true)
+      expect(report.errors).toEqual([])
+      expect(report.entries[0].hostKind).toBe("registration")
+      expect(report.entries[0].registrationBindingMissing).toBe(false)
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it("registration host with missing binding file = error", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "audit-reg-miss-"))
+    try {
+      const contract: PluginPointContract = {
+        ...mockContract("R", "implemented", "stable", "components/host/does-not-exist.tsx"),
+        hostKind: "registration",
+      }
+      const report = evaluateAuditFromSources([], [], {
+        repoRoot: tmp,
+        canonicalPoints: ["R"],
+        getContract: () => contract,
+      })
+      expect(report.ok).toBe(false)
+      expect(report.errors).toEqual([expect.stringContaining("[registration-host-missing]")])
+      expect(report.entries[0].registrationBindingMissing).toBe(true)
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it("registration host does not require any JSX mount (and ignores unrelated drift)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "audit-reg-nojsx-"))
+    try {
+      const bindingRel = "components/host/registration.tsx"
+      fs.mkdirSync(path.join(tmp, "components/host"), { recursive: true })
+      fs.writeFileSync(path.join(tmp, bindingRel), "export {}\n")
+
+      const contract: PluginPointContract = {
+        ...mockContract("R", "implemented", "stable", bindingRel),
+        hostKind: "registration",
+      }
+      const report = evaluateAuditFromSources([], [], {
+        repoRoot: tmp,
+        canonicalPoints: ["R"],
+        getContract: () => contract,
+      })
+      // Neither "[implemented-unmounted]" nor "[binding-drift]" should fire
+      // for a registration host even though zero JSX mounts were found.
+      expect(report.ok).toBe(true)
+      expect(report.errors).toEqual([])
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
   it("unknown point in mounts = error", () => {
     const contract = mockContract("X", "implemented")
     const mounts = [

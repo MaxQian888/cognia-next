@@ -22,15 +22,21 @@
  * additional JWT is replayed on the data channel itself.
  */
 
+// Import from the leaf modules directly. The signaling barrel
+// (`@/lib/signaling`) re-exports `desktop-controller`, which itself imports
+// from `lib/tauri/*` — pulling the barrel back here would close the
+// `lib/tauri.ts → transport-instance → transport-companion → transport-rtc
+// → @/lib/signaling → desktop-controller → @/lib/tauri/transport-*` cycle
+// and trip TDZ on the `transport` binding.
+import { SignalingClient } from "@/lib/signaling/client"
 import {
   DATACHANNEL_LABEL,
-  SignalingClient,
   type Envelope,
   type PeerRole,
   type RtcAnswerBody,
   type RtcIceBody,
   type RtcOfferBody,
-} from "@/lib/signaling"
+} from "@/lib/signaling/types"
 
 // ---------------------------------------------------------------------------
 // Public types

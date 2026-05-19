@@ -228,6 +228,22 @@ describe("plugin point contracts", () => {
         expect(contract.binding).toMatch(/components\/extensions\/vscode-/)
       }
     })
+
+    it("marks every VS Code UI slot as a registration host (non-JSX mount)", () => {
+      const contracts = PLUGIN_POINT_CONTRACTS.filter((c) => c.id.startsWith("vscode."))
+      expect(contracts).toHaveLength(4)
+      for (const contract of contracts) {
+        expect({ id: contract.id, hostKind: contract.hostKind }).toEqual({
+          id: contract.id,
+          hostKind: "registration",
+        })
+      }
+    })
+
+    it("leaves non-vscode UI slots on the default jsx-mount host kind", () => {
+      const sample = PLUGIN_POINT_CONTRACTS.find((c) => c.id === "chat.header")
+      expect(sample?.hostKind).toBe("jsx-mount")
+    })
   })
 
   describe("VS Code extension reuse — activation patterns", () => {

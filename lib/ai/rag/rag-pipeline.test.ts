@@ -133,6 +133,11 @@ describe("rag-pipeline", () => {
       dimensions: 1536,
     },
     embeddingApiKey: "test-api-key",
+    // Native (sqlite-vec) backend doesn't require a credential configId
+    // and is the only provider that can be exercised under jsdom without
+    // a live cloud endpoint. Cloud providers (Chroma/Pinecone/Qdrant/...)
+    // now require config.configId per the credential-form refactor.
+    vectorStoreConfig: { provider: "native" },
   }
 
   beforeEach(() => {

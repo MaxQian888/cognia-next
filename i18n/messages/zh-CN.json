@@ -427,7 +427,7 @@
       "foldLevel1": "折叠至 1 级",
       "foldLevel2": "折叠至 2 级"
     },
-    "deleteAria": "删除 {name}",
+    "deleteAria": "删除文档 {name}",
     "renameDocument": "重命名文档",
     "save": "保存",
     "versionHistory": "版本历史",
@@ -883,6 +883,49 @@
         "titleFallback": "渲染错误",
         "titleNamed": "{name} 渲染错误",
         "retry": "重试"
+      }
+    },
+    "welcomeDemo": {
+      "openDemo": "试用交互式演示",
+      "dialogTitle": "A2UI 交互式演示",
+      "dialogDescription": "实时 A2UI 演示 —— 选择建议、调整设置并就地渲染。",
+      "refresh": "刷新演示",
+      "quickActions": "快捷操作",
+      "summarize": "总结",
+      "translate": "翻译",
+      "analyze": "分析",
+      "codeReview": "代码评审",
+      "generateIdeas": "生成想法",
+      "explainConcept": "解释概念",
+      "responseSettings": "响应设置",
+      "tone": "语气",
+      "selectTonePlaceholder": "选择语气",
+      "length": "长度",
+      "selectLengthPlaceholder": "选择长度"
+    },
+    "artifactPart": {
+      "cleared": "（已清空）",
+      "copy": "复制",
+      "copied": "已复制",
+      "copyAria": "复制 artifact 内容",
+      "download": "下载",
+      "downloadAria": "下载 artifact",
+      "openInCanvas": "在画布中打开",
+      "openInCanvasAria": "在画布中打开 artifact",
+      "collapse": "折叠预览",
+      "expand": "展开预览"
+    },
+    "canvasInline": {
+      "openInCanvas": "在画布中打开",
+      "collapsePreview": "折叠预览",
+      "expandPreview": "展开预览"
+    },
+    "sourcesPart": {
+      "usedSources": "{count, plural, =0 {未引用来源} =1 {引用 1 项来源} other {引用 # 项来源}}"
+    },
+    "mcp": {
+      "wikiSearch": {
+        "noResults": "无结果"
       }
     }
   },
@@ -5597,7 +5640,11 @@
       "transportRetries": "重试次数",
       "transportDropped": "丢弃数",
       "transportLastFailure": "上次失败",
+      "transportLastSuccess": "上次成功",
+      "transportQueueDepth": "队列深度",
+      "transportQueueHistory": "队列深度历史",
       "transportHealthOverflow": "显示更多传输",
+      "transportFilterPrefix": "传输：{value}",
       "viewDiagnostics": "查看诊断",
       "logRatePulse": "实时日志流活动",
       "nativeLoggingDetails": "原生日志详情",
@@ -5605,9 +5652,17 @@
       "nativeLoggingMode": "启动模式",
       "nativeLoggingBridge": "桥接",
       "nativeLoggingTargets": "目标",
+      "nativeLoggingNoTargets": "无",
       "nativeLoggingFallbackReason": "回退原因",
       "nativeLoggingLastBridgeError": "上次桥接错误",
       "viewNativeDiagnostics": "查看原生诊断",
+      "recentSearches": {
+        "removeAria": "移除最近搜索 {query}",
+        "empty": "暂无最近搜索",
+        "clear": "清除"
+      },
+      "unsavedChanges": "有未保存的修改",
+      "filterIn": "范围：",
       "focusSession": "聚焦此会话",
       "showingRange": "显示 {start}-{end} / 共 {total} 项",
       "pageSize": "每页数量",
@@ -5624,13 +5679,17 @@
       "clearSearchHistory": "清除历史",
       "emptyStateTitle": "暂无日志",
       "emptyStateDescription": "使用应用时日志将自动出现。按 ? 查看键盘快捷键。",
+      "emptyStateFilterPrefix": "没有匹配当前筛选的日志：",
+      "emptyStateClearFilters": "清除筛选",
+      "emptyStateOpenPresets": "打开预设",
       "errorAndFatal": "错误",
       "copyLogEntry": "复制日志条目",
       "focusTraceMenu": "聚焦此追踪",
       "focusSessionMenu": "聚焦此会话",
       "viewDetailsMenu": "查看详情",
       "moreFilters": {
-        "show": "显示更多筛选"
+        "show": "更多筛选",
+        "hide": "隐藏更多筛选"
       },
       "shortcutsHint": "键盘快捷键",
       "shiftClickPrefix": "按住 Shift 单击以",
@@ -5638,14 +5697,28 @@
       "scrollMenuLabel": "滚动",
       "allLevelsTab": "全部",
       "shortcuts": {
-        "refresh": "刷新日志",
-        "dashboardView": "切换仪表盘视图",
+        "refresh": "刷新",
+        "dashboardView": "仪表盘视图",
         "nextEntry": "下一条",
         "previousEntry": "上一条",
         "expandEntry": "展开条目",
-        "openDetails": "打开详情面板",
-        "closeOrClear": "关闭对话框或清除聚焦",
-        "showShortcuts": "显示快捷键列表"
+        "openDetails": "打开详情",
+        "closeOrClear": "关闭 / 清除",
+        "showShortcuts": "显示快捷键"
+      },
+      "filterChip": {
+        "sourceLabel": "来源：",
+        "clearSource": "清除来源筛选 {value}",
+        "sessionLabel": "会话：",
+        "clearSession": "清除会话筛选",
+        "moduleLabel": "模块：",
+        "clearModule": "清除模块筛选",
+        "clearTimeRange": "清除时间范围筛选",
+        "traceLabel": "追踪：",
+        "clearTrace": "清除追踪筛选",
+        "transportLabel": "传输：",
+        "clearTransport": "清除传输筛选",
+        "transportPrefix": "传输：{name}"
       }
     },
     "dashboard": {
@@ -5672,6 +5745,8 @@
       "trendStable": "稳定",
       "currentPeriod": "当前周期",
       "previousPeriod": "上一周期",
+      "otherSeries": "其他",
+      "logsSeries": "日志",
       "platformLogging": "平台日志",
       "platformBackend": "平台后端",
       "platformHealth": "平台健康度",
@@ -5682,7 +5757,8 @@
       "title": "时间线",
       "total": "总计",
       "errors": "错误",
-      "warnings": "警告"
+      "warnings": "警告",
+      "clear": "清除"
     },
     "detail": {
       "title": "日志详情",
@@ -5785,6 +5861,13 @@
       "saved": "已保存！",
       "reset": "重置",
       "saveError": "保存设置失败",
+      "unsavedChanges": "有未保存的修改",
+      "tabs": {
+        "levels": "级别",
+        "transports": "传输",
+        "advanced": "高级",
+        "retention": "保留"
+      },
       "native": {
         "title": "原生日志就绪状态",
         "status": "状态",
@@ -5908,6 +5991,8 @@
       "completionTokens": "输出",
       "totalTokens": "总计",
       "costEstimate": "费用",
+      "costInputPrefix": "输入：",
+      "costOutputPrefix": "输出：",
       "duration": "耗时",
       "success": "成功",
       "failed": "失败",
@@ -6005,7 +6090,58 @@
       "addAgentFailed": "添加外部代理失败。",
       "unsupportedProtocol": "目前可执行代理仅支持 ACP。",
       "removeAgentConfirm": "确定移除该外部代理？之后可以重新添加。",
-      "removeAgentFailed": "移除外部代理失败。"
+      "removeAgentFailed": "移除外部代理失败。",
+      "diagnostics": {
+        "noBlockingReason": "未记录阻塞原因。",
+        "notExecutable": "代理不可执行。",
+        "connectAgentToList": "请先连接代理以列出会话。",
+        "sessionListingUnsupported": "该代理不支持列出会话。",
+        "resumeUnsupported": "无法恢复：{reason}",
+        "resumeUnsupportedDefault": "未提供原因。",
+        "forkUnsupported": "无法 fork：{reason}",
+        "forkUnsupportedDefault": "未提供原因。",
+        "runtimeDiagnostics": "运行时诊断",
+        "protocolTransport": "协议/传输：{protocol}（{transport}）",
+        "executableWithCode": "可执行：{value}（{code}）",
+        "executable": "可执行：{value}",
+        "yes": "是",
+        "no": "否",
+        "health": "健康度：{value}",
+        "unknown": "未知",
+        "authRequired": "需要认证：{value}",
+        "authMethods": "认证方式：{value}",
+        "none": "无",
+        "sessionSupport": "会话支持 — 列表 {list}，fork {fork}，resume {resume}",
+        "adapter": "适配器：{value}",
+        "surface": "界面：{value}",
+        "supportTier": "支持等级：{value}",
+        "prerequisiteStatus": "前置条件状态：{value}",
+        "contractVersion": "契约版本：{value}",
+        "lifecycleStage": "生命周期阶段：{value}",
+        "blockedStage": "阻塞阶段：{value}",
+        "branchOutcome": "分支结果：{value}",
+        "canonicalReasonWithText": "规范原因：{code} — {text}",
+        "canonicalReason": "规范原因：{code}",
+        "correlation": "关联",
+        "naLabel": "暂无",
+        "latestRun": "最近运行：{outcome}",
+        "trace": "追踪：{trace}",
+        "session": "会话：{session}",
+        "blockingReason": "阻塞原因：{reason}",
+        "recoveryHints": "恢复提示",
+        "recommendedActions": "建议操作",
+        "benchmarkAdaptation": "基准适配",
+        "noBenchmarkAdaptation": "未记录基准适配。",
+        "gap": "差距：{gap}",
+        "target": "目标：{target}",
+        "evidence": "证据：{evidence}",
+        "evidenceMissing": "缺失",
+        "rationale": "{rationale}",
+        "tradeOff": "权衡：{tradeOff}",
+        "userImpact": "用户影响：{impact}",
+        "reviewWithLink": "审查：{reviewedBy}（{link}）",
+        "review": "审查：{reviewedBy}"
+      }
     },
     "settings": {
       "title": "外部代理",
@@ -9424,7 +9560,24 @@
       "perFileSrcSingular": "1 条",
       "perFileSrcPlural": "{count} 条",
       "repoImportedSingular": "已从下列仓库导入 1 条提交：",
-      "repoImportedPlural": "已从下列仓库导入 {count} 条提交："
+      "repoImportedPlural": "已从下列仓库导入 {count} 条提交：",
+      "errors": {
+        "unknownFileType": "未知文件类型",
+        "noTextExtracted": "未能从文件中提取文本",
+        "parseFailed": "文件解析失败",
+        "parseFailedFallback": "文件解析失败（备用解析器也拒绝处理）",
+        "formatUnsupported": "不支持的文件格式",
+        "fileEmpty": "文件内容为空",
+        "shapeNoMessages": "导出文件中没有任何消息",
+        "importParseFailed": "导出文件解析失败",
+        "importParseFailedFallback": "导出文件解析失败（备用解析器也拒绝处理）",
+        "dingTalkNoMessages": "钉钉导出文件中没有任何消息",
+        "dingTalkParseFailed": "钉钉导出文件解析失败",
+        "dingTalkParseFailedFallback": "钉钉导出文件解析失败（备用解析器也拒绝处理）",
+        "noMessagesParsed": "未解析到任何消息",
+        "noCommitsFound": "所选仓库未发现提交",
+        "pasteContentRequired": "保存前请先粘贴内容"
+      }
     },
     "selector": {
       "activeTwinAria": "当前孪生：{name}",
@@ -12129,6 +12282,55 @@
       "debug": "通过 workflow-debugger 子代理诊断失败的运行",
       "refactor": "通过 workflow-refactorer 子代理重构子图",
       "delegate": "显式移交给四位工作流专家之一"
+    }
+  },
+  "automation": {
+    "consent": {
+      "ariaLabel": "自动化操作确认",
+      "title": "自动化操作请求授权",
+      "actions": {
+        "close": "关闭",
+        "allowOnce": "本次允许",
+        "allowSession": "本会话总是允许",
+        "reject": "拒绝"
+      },
+      "fields": {
+        "action": "操作：",
+        "surface": "界面：",
+        "plugin": "插件：",
+        "window": "窗口：",
+        "process": "进程：",
+        "autoReject": "{seconds} 秒后自动拒绝",
+        "morePending": "（还有 {count} 个待处理）"
+      },
+      "commands": {
+        "click": "点击屏幕",
+        "type": "输入文本",
+        "keys": "发送按键",
+        "screenshot": "截屏",
+        "find": "查找元素",
+        "getFocus": "读取焦点元素",
+        "readTree": "读取无障碍树",
+        "mouseMove": "移动鼠标",
+        "drag": "拖拽",
+        "scroll": "滚动",
+        "holdKey": "长按按键",
+        "windowOp": "窗口操作",
+        "cursorPosition": "读取光标位置",
+        "pickAtPoint": "拾取指定坐标元素",
+        "invokePattern": "调用自动化模式",
+        "auditSnapshot": "读取审计快照",
+        "settingsGet": "读取自动化设置",
+        "settingsSet": "写入自动化设置",
+        "killSwitch": "触发紧急停止",
+        "capabilities": "读取能力清单"
+      },
+      "surfaces": {
+        "workflow": "工作流",
+        "computerUse": "桌面自动化",
+        "mcp": "MCP",
+        "plugin": "插件"
+      }
     }
   }
 }

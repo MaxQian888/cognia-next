@@ -62,10 +62,20 @@ interface AuditEntry {
   point: CanonicalExtensionPoint
   status: "implemented" | "deprecated" | "virtual"
   stability: "stable" | "experimental" | "deprecated"
+  /**
+   * How the host surfaces the slot. `jsx-mount` (the default) means the
+   * audit must find at least one `<PluginExtensionSlot point="…" />` JSX
+   * mount when `status === "implemented"`. `registration` means the host
+   * registers contributions through a bridge function rather than a JSX
+   * mount — the audit verifies the binding file exists on disk instead.
+   */
+  hostKind: "jsx-mount" | "registration"
   binding: string
   mounts: DiscoveredMount[]
   /** Drift errors: contract.binding doesn't match any discovered mount file. */
   drift: string | null
+  /** Set when a registration-host's binding file is missing on disk. */
+  registrationBindingMissing: boolean
 }
 
 interface AuditReport {
@@ -235,15 +245,19 @@ export function evaluateAuditFromSources(
         point: point as CanonicalExtensionPoint,
         status: "deprecated" as const,
         stability: "deprecated" as const,
+        hostKind: "jsx-mount" as const,
         binding: "(no contract)",
         mounts: mountsByPoint.get(point) ?? [],
         drift: null,
+        registrationBindingMissing: false,
       }
     }
     const pointMounts = mountsByPoint.get(point) ?? []
+    const hostKind: "jsx-mount" | "registration" = contract.hostKind ?? "jsx-mount"
     let drift: string | null = null
+    let registrationBindingMissing = false
 
-    if (contract.status === "implemented" && pointMounts.length > 0) {
+    if (contract.status === "implemented" && hostKind === "jsx-mount" && pointMounts.length > 0) {
       const bindingPath = path.normalize(contract.binding).replace(/\\/g, "/")
       const matched = pointMounts.some((m) => {
         const rel = path.relative(repoRoot, m.filePath).replace(/\\/g, "/")
@@ -257,13 +271,20 @@ export function evaluateAuditFromSources(
       }
     }
 
+    if (contract.status === "implemented" && hostKind === "registration") {
+      const absBinding = path.join(repoRoot, contract.binding)
+      registrationBindingMissing = !fs.existsSync(absBinding)
+    }
+
     return {
       point: point as CanonicalExtensionPoint,
       status: contract.status as "implemented" | "deprecated" | "virtual",
       stability: contract.stability,
+      hostKind,
       binding: contract.binding,
       mounts: pointMounts,
       drift,
+      registrationBindingMissing,
     }
   })
 
@@ -272,7 +293,13 @@ export function evaluateAuditFromSources(
 
   for (const entry of entries) {
     if (entry.status === "implemented") {
-      if (entry.mounts.length === 0) {
+      if (entry.hostKind === "registration") {
+        if (entry.registrationBindingMissing) {
+          errors.push(
+            `[registration-host-missing] "${entry.point}" is a registration-host slot but its binding file "${entry.binding}" was not found on disk.`
+          )
+        }
+      } else if (entry.mounts.length === 0) {
         errors.push(
           `[implemented-unmounted] "${entry.point}" is implemented but no <PluginExtensionSlot point="${entry.point}" /> mount was found in the codebase.`
         )
@@ -361,8 +388,12 @@ function renderMarkdown(report: AuditReport, repoRoot: string): string {
     lines.push("|---|---|---|")
     for (const e of list) {
       const mountCount = e.mounts.length
-      const mark =
-        status === "implemented"
+      const isRegistration = status === "implemented" && e.hostKind === "registration"
+      const mark = isRegistration
+        ? e.registrationBindingMissing
+          ? "✗"
+          : "R"
+        : status === "implemented"
           ? mountCount > 0
             ? "✓"
             : "✗"
@@ -373,8 +404,11 @@ function renderMarkdown(report: AuditReport, repoRoot: string): string {
             : mountCount > 0
               ? "✓"
               : "⚠"
-      const mountList =
-        e.mounts.length === 0
+      const mountList = isRegistration
+        ? e.registrationBindingMissing
+          ? `registration: binding missing (${e.binding})`
+          : `registration: ${e.binding}`
+        : e.mounts.length === 0
           ? "—"
           : e.mounts
               .map((m) => `${path.relative(repoRoot, m.filePath).replace(/\\/g, "/")}:${m.line}`)

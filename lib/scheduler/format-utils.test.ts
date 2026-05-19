@@ -54,12 +54,16 @@ describe("formatRelativeTime", () => {
   })
 
   it("should return minutes", () => {
-    const inMinutes = new Date(Date.now() + 5 * 60000)
+    // Pad above the unit boundary so micro-second elapse between Date.now()
+    // and formatRelativeTime()'s internal new Date() can't pull the diff
+    // back below 5 * 60000 ms and trip Math.floor() down to 4.
+    const inMinutes = new Date(Date.now() + 5 * 60000 + 1000)
     expect(formatRelativeTime(inMinutes)).toBe("5m")
   })
 
   it("should return hours", () => {
-    const inHours = new Date(Date.now() + 3 * 3600000)
+    // Same boundary-padding rationale as the "should return minutes" case.
+    const inHours = new Date(Date.now() + 3 * 3600000 + 1000)
     expect(formatRelativeTime(inHours)).toBe("3h")
   })
 
