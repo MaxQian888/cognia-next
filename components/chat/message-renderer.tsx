@@ -288,6 +288,17 @@ function MessageRendererInner({
 
       <PluginExtensionSlot point="chat.message.after" className="mt-1 empty:hidden" />
 
+      {/* ADR-0026 §5 §A — revived hover-action slot. Distinct from the */}
+      {/* footer below: this slot is visible above the message body on hover, */}
+      {/* the footer holds host copy/regenerate controls. */}
+      <PluginExtensionSlot
+        point="chat.message.actions"
+        className={cn(
+          "mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 empty:hidden",
+          message.role === "user" ? "ml-auto" : ""
+        )}
+      />
+
       {!editing && (
         <MessageActions
           className={cn(

@@ -28,6 +28,7 @@ import { A2UIDispatchProvider } from "@/components/providers/a2ui-dispatch-provi
 import { ConnectorBusProvider } from "@/components/connectors/connector-bus-provider"
 import { ConnectorDeepLinkRouter } from "@/components/connectors/connector-deep-link-router"
 import { ConsentOverlay } from "@/components/automation/consent-overlay"
+import { PluginModalRoot } from "@/components/plugins/plugin-modal-root"
 import { SubscriptionUsageProvider } from "@/components/providers/subscription-usage-provider"
 import { BackgroundApplier } from "@/lib/appearance"
 import { CustomThemeApplier } from "@/lib/appearance/custom-theme-applier"
@@ -120,6 +121,9 @@ export default async function RootLayout({
                       </CompanionEventBridgeProvider>
                     </BackupSchedulerProvider>
                     <ConsentOverlay />
+                    {/* Renders any modal a plugin opens via ctx.modal.openModal(). */}
+                    {/* See ADR-0026 §3 §A. */}
+                    <PluginModalRoot />
                     <ExposeTestGlobals />
                     <Toaster />
                   </LoggerProvider>

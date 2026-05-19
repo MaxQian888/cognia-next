@@ -169,6 +169,15 @@ function GenericBottomToolbar({ session }: BottomToolbarProps) {
             className="flex items-center gap-1 empty:hidden"
             overflowLabel={t("pluginExtensionOverflow")}
           />
+          {/* ADR-0026 §3 §C — composer dropdown groups. Distinct from */}
+          {/* chat.input.actions (flat buttons) so plugins can ship grouped */}
+          {/* quick actions under a single trigger. */}
+          <PluginExtensionSlotWithOverflow
+            point="chat.input.menu"
+            limit={3}
+            className="flex items-center gap-1 empty:hidden"
+            overflowLabel={t("pluginExtensionOverflow")}
+          />
         </div>
       </div>
 

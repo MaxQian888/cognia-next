@@ -12,6 +12,7 @@ import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import { createLogger } from "@/lib/logger"
 import { isTauri } from "@/lib/tauri"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 
 const log = createLogger("settings.apiKey")
 
@@ -75,6 +76,10 @@ export function ApiKeySection() {
 
   return (
     <div className="space-y-4">
+      {/* ADR-0026 §5 §B — revived `settings.ai` slot. Plugins that ship */}
+      {/* unified AI settings (provider comparison, multi-key managers, */}
+      {/* etc.) contribute here. */}
+      <PluginExtensionSlot point="settings.ai" className="empty:hidden" />
       <div className="space-y-1">
         <Label htmlFor="api-key" className="flex items-center gap-2">
           <KeyRoundIcon className="size-4" />
