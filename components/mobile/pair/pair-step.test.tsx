@@ -10,10 +10,15 @@ import { PairStep } from "./pair-step"
 const VALID_JWT = "aaa.bbb.ccc"
 
 jest.mock("@/lib/capacitor/barcode", () => ({ scan: jest.fn() }))
+const openSettingsMock = jest.fn(async () => ({ kind: "ok" as const }))
+jest.mock("@/lib/capacitor/app-settings", () => ({
+  openAppSettings: () => openSettingsMock(),
+}))
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     const map: Record<string, string> = {
       scanCta: "Scan QR",
+      scanning: "Scanning…",
       manualDivider: "or paste manually",
       baseUrlLabel: "Server URL",
       tokenLabel: "Pair token",
@@ -26,6 +31,7 @@ jest.mock("next-intl", () => ({
       errorTitle: "Pairing failed",
       "scanError.notPairCode": "QR code scanned but its payload is not a cognia pairing code.",
       "scanError.permissionDenied": "Camera permission denied.",
+      "scanError.openSettings": "Open Settings",
       "scanError.unsupported": "QR scan only available on mobile app.",
       "scanError.failed": `QR scan failed: ${(vars?.message as string) ?? ""}`,
       "discover.baseUrlLocked": "Server is locked",
@@ -162,6 +168,18 @@ describe("<PairStep />", () => {
     render(<PairStep onPaired={() => {}} />)
     await user.click(screen.getByTestId("pair-scan-qr"))
     expect(await screen.findByTestId("pair-error")).toHaveTextContent(/Camera permission denied/i)
+  })
+
+  it("Wave 4 — permission_denied surfaces an Open Settings CTA that deep-links to iOS Settings", async () => {
+    mockedScanQr.mockResolvedValueOnce({ kind: "permission_denied" })
+    openSettingsMock.mockClear()
+    const user = userEvent.setup()
+    render(<PairStep onPaired={() => {}} />)
+    await user.click(screen.getByTestId("pair-scan-qr"))
+    const cta = await screen.findByTestId("pair-error-action")
+    expect(cta).toHaveTextContent("Open Settings")
+    await user.click(cta)
+    expect(openSettingsMock).toHaveBeenCalledTimes(1)
   })
 
   it("Scan QR cancellation leaves the form untouched and shows no error", async () => {

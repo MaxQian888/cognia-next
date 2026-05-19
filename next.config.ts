@@ -1,9 +1,31 @@
 import createNextIntlPlugin from "next-intl/plugin"
+import withSerwistInit from "@serwist/next"
 import type { NextConfig } from "next"
 
 const withNextIntl = createNextIntlPlugin("./i18n/request.ts")
 
 const isProd = process.env.NODE_ENV === "production"
+
+// Wave 4 / ADR-0026 — Serwist PWA.
+//
+// Enabled on web + Tauri builds; disabled on Capacitor mobile because the
+// iOS WKWebView serves content from the `capacitor://localhost` custom
+// scheme, which standard ServiceWorker registration rejects. The mobile
+// shell relies on the Dexie-first SyncOrchestrator (lib/sync/companion-sync.ts)
+// for offline tolerance instead — no SW required.
+//
+// Also disabled in development so HMR works without precache stale-while-revalidate
+// interference.
+const disableSerwist =
+  process.env.NEXT_PUBLIC_PLATFORM === "mobile" || process.env.NODE_ENV !== "production"
+
+const withSerwist = withSerwistInit({
+  swSrc: "app/sw.ts",
+  swDest: "public/sw.js",
+  cacheOnNavigation: true,
+  reloadOnOnline: true,
+  disable: disableSerwist,
+})
 
 const internalHost = process.env.TAURI_DEV_HOST || "localhost"
 
@@ -83,4 +105,4 @@ const nextConfig: NextConfig = {
   },
 }
 
-export default withNextIntl(nextConfig)
+export default withNextIntl(withSerwist(nextConfig))

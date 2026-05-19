@@ -6,10 +6,14 @@ import "fake-indexeddb/auto"
 
 import type { Transport } from "@/lib/tauri/transport-types"
 
+import { getDb, whenSeeded } from "@/lib/db/schema"
+
 import {
   __resetSyncStateForTests,
   installEventDrivenSync,
   installForegroundSync,
+  installNetworkSync,
+  installResumeSync,
   runSyncDown,
   snapshotSyncStates,
 } from "./companion-sync"
@@ -119,6 +123,11 @@ describe("runSyncDown", () => {
     const p2 = runSyncDown({ transport, handlers })
     expect(p1).toBe(p2)
 
+    // Wave 4 / ADR-0026 — `ensureHydrated()` awaits a Dexie open. Drain
+    // enough macrotasks for the IDB transaction to settle so the for loop
+    // actually invokes the handler (which captures the real `resolveHandler`).
+    await new Promise((r) => setTimeout(r, 50))
+
     resolveHandler(makeOkOutcome("characters", 1, 1))
     await p1
 
@@ -178,6 +187,105 @@ describe("installForegroundSync", () => {
   })
 })
 
+describe("cursor persistence (Wave 4 / ADR-0026)", () => {
+  it("hydrates `since` from the Dexie syncCursors table on first runSyncDown", async () => {
+    await whenSeeded()
+    await getDb().syncCursors.put({
+      table: "characters",
+      since: 777,
+      lastSyncAt: 1_700_000_000_000,
+      lastError: null,
+    })
+
+    const handler = jest.fn().mockResolvedValue(makeOkOutcome("characters", 1, 999))
+    const handlers = [{ table: "characters" as const, run: handler }]
+
+    await runSyncDown({ transport: makeTransport(), handlers })
+
+    expect(handler.mock.calls[0][1]).toEqual({ since: 777 })
+    expect(snapshotSyncStates().characters.since).toBe(999)
+  })
+
+  it("persists the advanced cursor back into Dexie after a successful run", async () => {
+    await whenSeeded()
+    const handler = jest.fn().mockResolvedValue(makeOkOutcome("characters", 1, 555))
+    const handlers = [{ table: "characters" as const, run: handler }]
+
+    await runSyncDown({ transport: makeTransport(), handlers })
+    // Fire-and-forget writes settle on the next microtask.
+    await new Promise((r) => setTimeout(r, 5))
+
+    const persisted = await getDb().syncCursors.get("characters")
+    expect(persisted?.since).toBe(555)
+    expect(persisted?.lastError).toBeNull()
+  })
+
+  it("persists lastError to Dexie on a failing handler", async () => {
+    await whenSeeded()
+    const handler = jest.fn().mockResolvedValue(makeFailOutcome("characters", "transport"))
+    const handlers = [{ table: "characters" as const, run: handler }]
+
+    await runSyncDown({ transport: makeTransport(), handlers })
+    await new Promise((r) => setTimeout(r, 5))
+
+    const persisted = await getDb().syncCursors.get("characters")
+    expect(persisted?.lastError).toContain("mock-transport")
+    expect(persisted?.since).toBe(0)
+  })
+})
+
+describe("installNetworkSync", () => {
+  it("triggers runSyncDown on network connected=true", async () => {
+    const handler = jest.fn().mockResolvedValue(makeOkOutcome("characters"))
+    const handlers = [{ table: "characters" as const, run: handler }]
+
+    // Set up navigator.onLine + fire the `online` event so the web fallback
+    // path inside `lib/capacitor/network.subscribe` triggers connected=true.
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true })
+
+    const teardown = await installNetworkSync({ transport: makeTransport(), handlers })
+
+    window.dispatchEvent(new Event("online"))
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(handler).toHaveBeenCalled()
+    teardown()
+  })
+
+  it("does not trigger when network reports disconnected", async () => {
+    const handler = jest.fn().mockResolvedValue(makeOkOutcome("characters"))
+    const handlers = [{ table: "characters" as const, run: handler }]
+
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false })
+
+    const teardown = await installNetworkSync({ transport: makeTransport(), handlers })
+
+    window.dispatchEvent(new Event("offline"))
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(handler).not.toHaveBeenCalled()
+    teardown()
+
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true })
+  })
+})
+
+describe("installResumeSync", () => {
+  it("triggers runSyncDown on visibilitychange to visible (fallback path)", async () => {
+    const handler = jest.fn().mockResolvedValue(makeOkOutcome("characters"))
+    const handlers = [{ table: "characters" as const, run: handler }]
+
+    const teardown = await installResumeSync({ transport: makeTransport(), handlers })
+
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" })
+    document.dispatchEvent(new Event("visibilitychange"))
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(handler).toHaveBeenCalled()
+    teardown()
+  })
+})
+
 describe("installEventDrivenSync", () => {
   it("subscribes once and triggers a sync per inbound event", async () => {
     const handlers = [
@@ -201,7 +309,8 @@ describe("installEventDrivenSync", () => {
     expect(transport.subscribe).toHaveBeenCalledWith("sync://invalidate", expect.any(Function))
 
     subscribers[0]?.({})
-    await new Promise((r) => setTimeout(r, 0))
+    // Wave 4 — ensureHydrated awaits Dexie; give the IDB open a moment.
+    await new Promise((r) => setTimeout(r, 50))
 
     expect(handlers[0].run).toHaveBeenCalled()
 

@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
+import { openAppSettings } from "@/lib/capacitor/app-settings"
 import { scan as scanBarcode } from "@/lib/capacitor/barcode"
 import { decodePairPayload } from "@/lib/qr/pair-payload"
 import { parsePairQrPayload } from "@/lib/qr/pair-qr"
@@ -60,7 +61,12 @@ export interface PairStepProps {
   onBack?: () => void
 }
 
-type Phase = { kind: "idle" } | { kind: "pairing" } | { kind: "error"; message: string }
+type ErrorAction = { label: string; onAction: () => void | Promise<void> }
+type Phase =
+  | { kind: "idle" }
+  | { kind: "scanning" }
+  | { kind: "pairing" }
+  | { kind: "error"; message: string; action?: ErrorAction }
 
 export function PairStep({
   prefilledBaseUrl = "",
@@ -82,7 +88,11 @@ export function PairStep({
   const [phase, setPhase] = useState<Phase>({ kind: "idle" })
 
   const onScanQr = useCallback(async () => {
-    setPhase({ kind: "idle" })
+    // Wave 4 / ADR-0026 — flip to `scanning` so the UI can render an
+    // indeterminate overlay while the mlkit native modal launches. (On
+    // some Android emulators there's a ~500 ms lag between the button tap
+    // and the camera view appearing — without the overlay it looks frozen.)
+    setPhase({ kind: "scanning" })
     const result = await scanBarcode()
     if (result.kind === "scanned") {
       const decoded = decodePairPayload(result.raw)
@@ -105,14 +115,27 @@ export function PairStep({
       return
     }
     if (result.kind === "permission_denied") {
-      setPhase({ kind: "error", message: t("scanError.permissionDenied") })
+      // Wave 4 — Apple does not expose a programmatic re-prompt once the
+      // user has denied camera access. Surface a CTA that deep-links to
+      // Settings → cognia → Camera so the user can flip the toggle.
+      setPhase({
+        kind: "error",
+        message: t("scanError.permissionDenied"),
+        action: {
+          label: t("scanError.openSettings"),
+          onAction: () => void openAppSettings(),
+        },
+      })
       return
     }
     if (result.kind === "unsupported") {
       setPhase({ kind: "error", message: t("scanError.unsupported") })
       return
     }
-    if (result.kind === "cancelled") return
+    if (result.kind === "cancelled") {
+      setPhase({ kind: "idle" })
+      return
+    }
     setPhase({ kind: "error", message: t("scanError.failed", { message: result.message }) })
   }, [t])
 
@@ -244,11 +267,20 @@ export function PairStep({
               size="lg"
               className="touch-target w-full"
               onClick={() => void onScanQr()}
-              disabled={isPairing}
+              disabled={isPairing || phase.kind === "scanning"}
               data-testid="pair-scan-qr"
             >
-              <ScanLineIcon className="size-5" aria-hidden="true" />
-              {t("scanCta")}
+              {phase.kind === "scanning" ? (
+                <>
+                  <Loader2Icon className="size-5 animate-spin" aria-hidden="true" />
+                  {t("scanning")}
+                </>
+              ) : (
+                <>
+                  <ScanLineIcon className="size-5" aria-hidden="true" />
+                  {t("scanCta")}
+                </>
+              )}
             </Button>
 
             <div className="flex items-center gap-3">
@@ -327,7 +359,20 @@ export function PairStep({
               <Alert variant="destructive" data-testid="pair-error">
                 <AlertCircleIcon />
                 <AlertTitle>{t("errorTitle")}</AlertTitle>
-                <AlertDescription>{phase.message}</AlertDescription>
+                <AlertDescription className="flex flex-col gap-2">
+                  <span>{phase.message}</span>
+                  {phase.action ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void phase.action?.onAction()}
+                      data-testid="pair-error-action"
+                    >
+                      {phase.action.label}
+                    </Button>
+                  ) : null}
+                </AlertDescription>
               </Alert>
             ) : null}
 

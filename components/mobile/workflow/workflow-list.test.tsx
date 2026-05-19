@@ -24,6 +24,19 @@ jest.mock("dexie-react-hooks", () => ({
   },
 }))
 
+// Wave 4 / ADR-0026 — synchronous shortcut for the Dexie-first hook. The
+// workflows list now reads through it (`table: "workflows"` triggers the
+// sync orchestrator on mount), but unit tests want a deterministic
+// shortcut that does not invoke the real orchestrator or Dexie.
+jest.mock("@/hooks/data", () => ({
+  useDexieFirstQuery: <T,>(opts: { initial: T }) => ({
+    data: liveQueries.shift() ?? opts.initial,
+    isSyncing: false,
+    lastSyncedAt: null,
+    error: null,
+  }),
+}))
+
 jest.mock("@/lib/db/workflows", () => ({
   listWorkflows: () => Promise.resolve([]),
 }))
@@ -161,21 +174,18 @@ describe("<WorkflowList />", () => {
     expect(screen.queryByTestId("pinned-section-stub")).not.toBeInTheDocument()
   })
 
-  it("toggles pin on long-press (add when missing)", async () => {
+  it("Wave 4 / ADR-0026 — long-press now opens the action sheet (pin moved inside)", async () => {
     liveQueries.push([wf("a", "Alpha")], [])
     settingsRef.value = { pinnedWorkflowIds: [] }
     render(<WorkflowList />)
     fireEvent.contextMenu(screen.getAllByTestId("long-press-stub")[0])
+    await waitFor(() =>
+      expect(screen.getByTestId("workflow-row-actions-sheet")).toBeInTheDocument()
+    )
+    // The action sheet exposes a Pin button that delegates to the same
+    // save flow that the old long-press used to call directly.
+    fireEvent.click(screen.getByTestId("workflow-action-pin"))
     await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
     expect(saveMock.mock.calls[0][0]).toEqual({ pinnedWorkflowIds: ["a"] })
-  })
-
-  it("toggles pin on long-press (remove when already pinned)", async () => {
-    liveQueries.push([wf("a", "Alpha"), wf("b", "Beta")], [])
-    settingsRef.value = { pinnedWorkflowIds: ["a", "b"] }
-    render(<WorkflowList />)
-    fireEvent.contextMenu(screen.getAllByTestId("long-press-stub")[0])
-    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
-    expect(saveMock.mock.calls[0][0]).toEqual({ pinnedWorkflowIds: ["b"] })
   })
 })

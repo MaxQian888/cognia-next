@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="cognia">
+  <rect width="512" height="512" rx="96" fill="#0a0a0a"/>
+  <path d="M256 128c-70.7 0-128 57.3-128 128s57.3 128 128 128c45.6 0 85.6-23.9 108.4-59.9l-37.6-23.8C311.3 324.7 285.6 340 256 340c-46.4 0-84-37.6-84-84s37.6-84 84-84c29.6 0 55.3 15.3 70.8 39.7l37.6-23.8C341.6 151.9 301.6 128 256 128z" fill="#ffffff"/>
+  <circle cx="256" cy="256" r="32" fill="#ffffff"/>
+</svg>

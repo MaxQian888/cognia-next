@@ -17,6 +17,11 @@ export { useBackupReminder } from "./use-backup-reminder"
 export { useBatchExport, type BatchProgress, type BatchExportResult } from "./use-batch-export"
 export { useChatImport, type ChatImportFlowState } from "./use-chat-import"
 export { useClientLiveQuery } from "./use-client-live-query"
+export {
+  useDexieFirstQuery,
+  type DexieFirstQueryResult,
+  type UseDexieFirstQueryOptions,
+} from "./use-dexie-first-query"
 export { useFullBackup, type RunBackupArgs, type RunBackupResult } from "./use-full-backup"
 export { useImportFlow, type ImportFlowState } from "./use-import-flow"
 export { useSingleExport, type SingleExportResult } from "./use-single-export"

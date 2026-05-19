@@ -8,7 +8,7 @@ import { motion, useReducedMotion } from "motion/react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { useClientLiveQuery } from "@/hooks/data"
+import { useClientLiveQuery, useDexieFirstQuery } from "@/hooks/data"
 import { listCharacters } from "@/lib/db/characters"
 import { listSessionStates } from "@/lib/db/session-state"
 import { updateSession } from "@/lib/db/sessions"
@@ -54,7 +54,15 @@ export function MobileChannelList({
   const tShell = useTranslations("mobile.shell")
   const [query, setQuery] = useState("")
 
-  const characters = useClientLiveQuery<Character[]>(() => listCharacters(), [], [])
+  // Wave 4 / ADR-0026 — Dexie-first read so the chip list survives a
+  // server drop; `table: "characters"` kicks the sync orchestrator on
+  // mount so an offline-then-online transition refreshes the chips.
+  const { data: characters } = useDexieFirstQuery<Character[]>({
+    query: () => listCharacters(),
+    deps: [],
+    initial: [],
+    table: "characters",
+  })
   const characterById = useMemo(() => {
     const map = new Map<string, Character>()
     for (const c of characters ?? []) map.set(c.id, c)

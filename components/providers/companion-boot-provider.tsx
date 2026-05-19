@@ -21,6 +21,8 @@ import {
 import {
   installEventDrivenSync,
   installForegroundSync,
+  installNetworkSync,
+  installResumeSync,
   runSyncDown,
 } from "@/lib/sync/companion-sync"
 import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
@@ -119,6 +121,13 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       }
       cleanup.push(installForegroundSync())
       cleanup.push(installEventDrivenSync())
+      // Wave 4 / ADR-0026 — also kick a sync on network up and app resume.
+      // `installNetworkSync` and `installResumeSync` both return promises
+      // that resolve to the teardown function; await before pushing so the
+      // cleanup array has a real `() => void`, matching the existing
+      // `installForegroundSync` / `installEventDrivenSync` shape.
+      cleanup.push(await installNetworkSync())
+      cleanup.push(await installResumeSync())
 
       // ── Push notifications ────────────────────────────────────────────
       const push = await registerPushNotifications()

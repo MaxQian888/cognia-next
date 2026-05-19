@@ -31,6 +31,14 @@ jest.mock("@/hooks/data", () => ({
   // Synchronous wrapper: just invoke the query and return its value as-is
   // (the lib mocks above return values directly, not promises).
   useClientLiveQuery: <T,>(query: () => T) => query(),
+  // Wave 4 / ADR-0026 — same synchronous shortcut for the Dexie-first hook.
+  // We deliberately skip kicking the orchestrator in unit tests.
+  useDexieFirstQuery: <T,>(opts: { query: () => T }) => ({
+    data: opts.query(),
+    isSyncing: false,
+    lastSyncedAt: null,
+    error: null,
+  }),
 }))
 
 jest.mock("next-intl", () => ({

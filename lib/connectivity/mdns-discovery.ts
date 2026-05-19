@@ -37,11 +37,76 @@ interface MdnsScannerShape {
 
 export type MdnsLoader = () => Promise<MdnsScannerShape>
 
-const defaultMobileLoader: MdnsLoader = async () => {
-  throw new Error("mDNS plugin not configured")
+const SERVICE_TYPE = "_cognia._tcp"
+
+/**
+ * Shape of the upstream `capacitor-zeroconf` plugin we care about. Kept
+ * minimal so the dynamic-import never pulls in extra surface, and so this
+ * module remains testable without the native side present.
+ */
+interface ZeroconfPluginShape {
+  watch(opts: { type: string; domain: string }): Promise<void>
+  unwatch(opts?: { type: string; domain: string }): Promise<void>
+  addListener(
+    event: "discovered",
+    handler: (svc: {
+      name?: string
+      hostname?: string
+      ipv4Addresses?: string[]
+      ipv6Addresses?: string[]
+      port?: number
+      txtRecord?: Record<string, string>
+    }) => void
+  ): Promise<{ remove(): Promise<void> | void }>
+  requestPermissions?(): Promise<{ localNetwork: "granted" | "denied" | "prompt" }>
 }
 
-const SERVICE_TYPE = "_cognia._tcp"
+/**
+ * Default mobile loader — dynamic-imports `capacitor-zeroconf` and adapts
+ * its `watch`/`addListener("discovered")` surface to our internal
+ * `MdnsScannerShape`. Falls back to a throw on web / Tauri so `subscribe()`
+ * returns a no-op for those platforms.
+ *
+ * The plugin's `txtRecord.fp` carries the desktop's SHA-256 SPKI fingerprint
+ * we use for TLS pinning before the first request.
+ */
+const defaultMobileLoader: MdnsLoader = async () => {
+  if (typeof window === "undefined") throw new Error("mDNS not available on server")
+  const cap = (window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
+  if (typeof cap?.isNativePlatform !== "function" || cap.isNativePlatform() !== true) {
+    throw new Error("mDNS only available on Capacitor mobile")
+  }
+  const moduleId = "capacitor-zeroconf"
+  const mod = (await import(/* webpackIgnore: true */ moduleId)) as {
+    Zeroconf?: ZeroconfPluginShape
+  }
+  const plugin = mod.Zeroconf
+  if (!plugin) throw new Error("capacitor-zeroconf did not export Zeroconf")
+
+  // Split `_cognia._tcp` into `type` + assume `.local.` domain so the
+  // plugin's IDL matches.
+  return {
+    async startScan({ serviceType }) {
+      await plugin.watch({ type: serviceType, domain: "local." })
+    },
+    async stopScan() {
+      await plugin.unwatch({ type: SERVICE_TYPE, domain: "local." })
+    },
+    async addListener(_event, handler) {
+      const sub = await plugin.addListener("discovered", (svc) => {
+        const ip = svc.ipv4Addresses?.[0] ?? svc.ipv6Addresses?.[0] ?? ""
+        handler({
+          name: svc.name ?? "cognia",
+          hostname: svc.hostname ?? svc.name ?? ip,
+          ip,
+          port: svc.port ?? 0,
+          txt: svc.txtRecord ?? {},
+        })
+      })
+      return sub
+    },
+  }
+}
 
 export type Unsubscribe = () => void
 

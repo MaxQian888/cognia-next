@@ -58,3 +58,21 @@ export interface SyncFailure {
 }
 
 export type SyncOutcome = { ok: true; result: SyncResult } | { ok: false; failure: SyncFailure }
+
+/**
+ * Persisted sync state per table (Dexie `syncCursors`, v44 / Wave 4).
+ *
+ * Pre-v44 installs ran with cursors only in memory; this table makes a
+ * cold-started phone resume from the last successful `since` instead of
+ * re-pulling the whole snapshot.
+ */
+export interface SyncCursorRow {
+  /** Primary key — the SyncableTable name. */
+  table: SyncableTable
+  /** Last successful `next_since` cursor returned by the server. */
+  since: number
+  /** Epoch ms of the last successful pull. `null` until the first success. */
+  lastSyncAt: number | null
+  /** Last failure message, retained until the next success. */
+  lastError: string | null
+}
