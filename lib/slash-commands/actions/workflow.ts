@@ -32,6 +32,15 @@ import type { SlashCommand, SlashContext } from "../builtin"
 
 export const WORKFLOW_COPILOT_DISPATCH_EVENT = "workflow-copilot:dispatch-action"
 
+export type WorkflowSubagentAlias = "designer" | "debugger" | "refactorer" | "doc-writer"
+
+export const WORKFLOW_SUBAGENT_ALIAS_TO_NAME: Record<WorkflowSubagentAlias, string> = {
+  designer: "workflow-designer",
+  debugger: "workflow-debugger",
+  refactorer: "workflow-refactorer",
+  "doc-writer": "workflow-doc-writer",
+}
+
 export type WorkflowSlashAction =
   | { kind: "validate" }
   | { kind: "explain"; args: string }
@@ -39,6 +48,7 @@ export type WorkflowSlashAction =
   | { kind: "run"; stepId?: string }
   | { kind: "debug" }
   | { kind: "refactor"; description: string }
+  | { kind: "delegate"; alias: WorkflowSubagentAlias; task: string }
 
 export interface WorkflowDispatchEventDetail {
   action: WorkflowSlashAction
@@ -144,7 +154,63 @@ export const WORKFLOW_SLASH_COMMANDS: SlashCommand[] = [
       dispatchWorkflowSlashAction({ kind: "refactor", description })
     },
   },
+  {
+    name: "delegate",
+    description:
+      "Explicit handoff to one of the four workflow specialists (designer / debugger / refactorer / doc-writer).",
+    scope: "builtin",
+    category: "workflow",
+    argumentHint: "<designer|debugger|refactorer|doc-writer> <task...>",
+    handler: (ctx) => {
+      if (!inWorkflowEditorSession(ctx)) return refuseOutsideEditor(ctx, "delegate")
+      const parsed = parseDelegateArgs(ctx.args)
+      if (!parsed.ok) {
+        ctx.pushSystemMessage(parsed.message)
+        return
+      }
+      dispatchWorkflowSlashAction({
+        kind: "delegate",
+        alias: parsed.alias,
+        task: parsed.task,
+      })
+    },
+  },
 ]
+
+/**
+ * Parse `/delegate <alias> <task...>`. Returns a typed payload or an
+ * error message ready for `pushSystemMessage`. Exported for unit tests.
+ */
+export function parseDelegateArgs(
+  raw: string
+): { ok: true; alias: WorkflowSubagentAlias; task: string } | { ok: false; message: string } {
+  const trimmed = (raw ?? "").trim()
+  if (trimmed.length === 0) {
+    return {
+      ok: false,
+      message:
+        "Usage: `/delegate <designer|debugger|refactorer|doc-writer> <task>` — e.g. `/delegate debugger why is the cron node not firing?`.",
+    }
+  }
+  const [aliasRaw, ...rest] = trimmed.split(/\s+/)
+  const alias = aliasRaw.toLowerCase() as WorkflowSubagentAlias
+  if (!(alias in WORKFLOW_SUBAGENT_ALIAS_TO_NAME)) {
+    return {
+      ok: false,
+      message: `Unknown subagent alias \`${aliasRaw}\`. Pick one of: ${Object.keys(
+        WORKFLOW_SUBAGENT_ALIAS_TO_NAME
+      ).join(", ")}.`,
+    }
+  }
+  const task = rest.join(" ").trim()
+  if (task.length === 0) {
+    return {
+      ok: false,
+      message: `Provide a task description after \`/delegate ${alias}\`.`,
+    }
+  }
+  return { ok: true, alias, task }
+}
 
 /**
  * Build the user-prompt the chat-tab listener dispatches to the agent
@@ -183,6 +249,18 @@ export function buildWorkflowSlashPrompt(action: WorkflowSlashAction): string | 
         "",
         "The refactor MUST preserve observable behavior. Use `wf_propose_batch` for any multi-op change so the user can review the diff before commit.",
       ].join("\n")
+    case "delegate": {
+      const subagentName = WORKFLOW_SUBAGENT_ALIAS_TO_NAME[action.alias]
+      return [
+        `/delegate ${action.alias} ${action.task}`,
+        "",
+        `Please delegate to the \`${subagentName}\` subagent via the \`Task\` tool. The user's task is:`,
+        "",
+        action.task,
+        "",
+        "Summarize the subagent's reply in your own voice once it completes. Don't repeat the specialist's tool output verbatim.",
+      ].join("\n")
+    }
     default:
       return null
   }

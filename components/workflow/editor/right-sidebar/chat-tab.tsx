@@ -23,27 +23,14 @@
  * back through the same `claude.send` path.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { ChatPane } from "@/components/chat/chat-view"
 import { useClaudeChat } from "@/hooks/chat/use-claude-chat"
 import { useWorkflowEditorSession } from "@/hooks/chat/use-workflow-editor-session"
-import { Loader2Icon, MessageSquareIcon, Trash2Icon } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import { clearMessages } from "@/lib/db/messages"
-import { clearSessionSdkLink } from "@/lib/db/sessions"
-import { useChatStore } from "@/stores/chat"
+import { Loader2Icon, MessageSquareIcon } from "lucide-react"
+import { WorkflowSessionBar } from "@/components/workflow/editor/chat/session-bar"
 import type { SendContent } from "@/lib/claude/types"
 import type { EditorStore } from "@/lib/workflow/editor/store"
 import {
@@ -109,24 +96,6 @@ export function WorkflowEditorChatTab({
     },
     [claude]
   )
-
-  const [clearOpen, setClearOpen] = useState(false)
-  const handleClearConversation = useCallback(async () => {
-    if (!session) return
-    try {
-      // 1. Delete every Dexie message row keyed to this workflow session.
-      await clearMessages(session.id)
-      // 2. Drop sdkSessionId so the next send opens a fresh SDK query —
-      //    the agent loses all in-context memory of the prior turns.
-      await clearSessionSdkLink(session.id)
-      // 3. Drop the in-memory mirror so the UI doesn't render stale history.
-      useChatStore.getState().setMessages([])
-      toast.success(t("clear"))
-      setClearOpen(false)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
-    }
-  }, [session, t])
 
   // Build the workflow quick-action prompts from the *current* editor
   // state at click time — we read directly via `getState()` so the prompt
@@ -195,39 +164,11 @@ export function WorkflowEditorChatTab({
         aria-label={t("ariaLabel", { name: workflowName ?? workflowId })}
         data-testid="workflow-chat-tab"
       >
-        <div className="flex items-center justify-end gap-1 border-b px-2 py-1">
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground"
-            onClick={() => setClearOpen(true)}
-            data-testid="workflow-chat-clear"
-            aria-label={t("clear")}
-          >
-            <Trash2Icon className="size-3.5" aria-hidden="true" />
-            <span>{t("clear")}</span>
-          </Button>
-        </div>
-        <AlertDialog open={clearOpen} onOpenChange={setClearOpen}>
-          <AlertDialogContent data-testid="workflow-chat-clear-dialog">
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t("clearConfirmTitle")}</AlertDialogTitle>
-              <AlertDialogDescription>{t("clearConfirmDescription")}</AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel data-testid="workflow-chat-clear-cancel">
-                {t("clearCancel")}
-              </AlertDialogCancel>
-              <AlertDialogAction
-                onClick={() => void handleClearConversation()}
-                data-testid="workflow-chat-clear-confirm"
-              >
-                {t("clearConfirm")}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <WorkflowSessionBar
+          workflowId={workflowId}
+          workflowName={workflowName}
+          activeSessionId={session.id}
+        />
         <ChatPane
           activeSession={session}
           onSend={handleSend}
@@ -306,7 +247,8 @@ async function dispatchWorkflowAction(
     }
     case "run":
     case "debug":
-    case "refactor": {
+    case "refactor":
+    case "delegate": {
       const prompt = buildWorkflowSlashPrompt(action)
       if (prompt) await send(prompt)
       return

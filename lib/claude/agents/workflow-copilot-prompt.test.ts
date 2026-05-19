@@ -20,33 +20,60 @@ import {
   workflowCopilotAgent,
 } from "./workflow-copilot-prompt"
 
+const DIRECT_MUTATION_TOOLS = [
+  "wf_add_node",
+  "wf_remove_node",
+  "wf_connect_edge",
+  "wf_disconnect_edge",
+  "wf_configure_node",
+]
+
 describe("WORKFLOW_COPILOT_ALLOWED_TOOLS", () => {
-  it("contains every wf_* tool family the plugin currently ships", () => {
+  it("contains every wf_* tool the Copilot needs (read + propose + run)", () => {
     const expected = [
+      // read
       "wf_read_graph",
       "wf_read_selection",
       "wf_read_node",
       "wf_get_validation_errors",
       "wf_get_last_run",
-      "wf_add_node",
-      "wf_remove_node",
-      "wf_connect_edge",
-      "wf_disconnect_edge",
-      "wf_configure_node",
+      // resource awareness
+      "wf_list_characters",
+      "wf_list_twins",
+      "wf_list_skills",
+      "wf_list_connectors",
+      "wf_list_mcp_servers",
+      "wf_list_plugins",
+      // node-kind catalog
+      "wf_list_node_kinds",
+      "wf_describe_node_kind",
+      // diagnostics
+      "wf_explain_validation",
+      "wf_explain_last_run",
+      // batch mutation (proposal flow)
       "wf_propose_batch",
       "wf_batch_apply",
+      // templates
       "wf_list_templates",
       "wf_apply_template",
+      // layout + viewport
       "wf_auto_layout",
       "wf_group_nodes",
       "wf_select_nodes",
       "wf_focus_viewport",
+      // run control
       "wf_run_workflow",
       "wf_run_from_step",
       "wf_cancel_run",
     ]
     for (const name of expected) {
       expect(WORKFLOW_COPILOT_ALLOWED_TOOLS).toContain(`mcp__cognia-plugin-tools__${name}`)
+    }
+  })
+
+  it("does NOT include direct-mutation tools (proposal-only contract)", () => {
+    for (const name of DIRECT_MUTATION_TOOLS) {
+      expect(WORKFLOW_COPILOT_ALLOWED_TOOLS).not.toContain(`mcp__cognia-plugin-tools__${name}`)
     }
   })
 
@@ -73,6 +100,12 @@ describe("WORKFLOW_COPILOT_DISALLOWED_TOOLS", () => {
       expect(WORKFLOW_COPILOT_DISALLOWED_TOOLS).toContain(banned)
     }
   })
+
+  it("pins direct-mutation tools so a future regression fails closed", () => {
+    for (const name of DIRECT_MUTATION_TOOLS) {
+      expect(WORKFLOW_COPILOT_DISALLOWED_TOOLS).toContain(`mcp__cognia-plugin-tools__${name}`)
+    }
+  })
 })
 
 describe("buildWorkflowCopilotPrompt", () => {
@@ -84,9 +117,33 @@ describe("buildWorkflowCopilotPrompt", () => {
 
   it("includes every slash command name", () => {
     const prompt = buildWorkflowCopilotPrompt(null)
-    for (const slash of ["/validate", "/explain", "/suggest", "/run", "/debug", "/refactor"]) {
+    for (const slash of [
+      "/validate",
+      "/explain",
+      "/suggest",
+      "/run",
+      "/debug",
+      "/refactor",
+      "/delegate",
+    ]) {
       expect(prompt).toContain(slash)
     }
+  })
+
+  it("includes an EXAMPLES section grounding the propose-only contract", () => {
+    const prompt = buildWorkflowCopilotPrompt(null)
+    expect(prompt).toContain("Examples")
+    // The examples should walk through wf_propose_batch, never a direct
+    // mutation tool — guards against a future drift where someone copies
+    // a `wf_add_node(...)` example back in.
+    expect(prompt).toContain("wf_propose_batch")
+    expect(prompt).not.toMatch(/^[^#]*wf_add_node\b/m)
+  })
+
+  it("nudges resource look-up before referencing ids", () => {
+    const prompt = buildWorkflowCopilotPrompt(null)
+    expect(prompt).toContain("wf_list_connectors")
+    expect(prompt).toContain("wf_describe_node_kind")
   })
 
   it("documents the @-mention syntax for nodes and edges", () => {

@@ -6,6 +6,7 @@ import {
   WORKFLOW_SLASH_COMMANDS,
   buildWorkflowSlashPrompt,
   dispatchWorkflowSlashAction,
+  parseDelegateArgs,
 } from "./workflow"
 import type { SlashContext } from "../builtin"
 
@@ -46,9 +47,10 @@ describe("WORKFLOW_SLASH_COMMANDS — gating", () => {
     WORKFLOW_SLASH_COMMANDS.map((c) => [c.name, c])
   )
 
-  it("ships exactly the six core commands", () => {
+  it("ships exactly seven core commands (six core + /delegate)", () => {
     expect(WORKFLOW_SLASH_COMMANDS.map((c) => c.name).sort()).toEqual([
       "debug",
+      "delegate",
       "explain",
       "refactor",
       "run",
@@ -218,5 +220,113 @@ describe("buildWorkflowSlashPrompt", () => {
     expect(prompt).toMatch(/workflow-refactorer/)
     expect(prompt).toMatch(/wrap in retry \+ fallback/)
     expect(prompt).toMatch(/wf_propose_batch/)
+  })
+
+  it("/delegate emits a Task-tool-driven handoff prompt with the resolved subagent name", () => {
+    const prompt = buildWorkflowSlashPrompt({
+      kind: "delegate",
+      alias: "debugger",
+      task: "why is the cron node not firing",
+    })!
+    expect(prompt).toMatch(/workflow-debugger/)
+    expect(prompt).toMatch(/Task/)
+    expect(prompt).toMatch(/why is the cron node not firing/)
+  })
+})
+
+describe("parseDelegateArgs", () => {
+  it("accepts a valid alias + task", () => {
+    expect(parseDelegateArgs("debugger explain the failing http call")).toEqual({
+      ok: true,
+      alias: "debugger",
+      task: "explain the failing http call",
+    })
+  })
+
+  it("normalises the alias case", () => {
+    expect(parseDelegateArgs("DESIGNER add a Telegram trigger")).toEqual({
+      ok: true,
+      alias: "designer",
+      task: "add a Telegram trigger",
+    })
+  })
+
+  it("rejects an unknown alias", () => {
+    const out = parseDelegateArgs("auditor look at the cron")
+    expect(out.ok).toBe(false)
+    if (!out.ok) expect(out.message).toMatch(/Unknown subagent alias/)
+  })
+
+  it("rejects an empty input", () => {
+    const out = parseDelegateArgs("")
+    expect(out.ok).toBe(false)
+    if (!out.ok) expect(out.message).toMatch(/Usage/)
+  })
+
+  it("rejects an alias without a task", () => {
+    const out = parseDelegateArgs("doc-writer")
+    expect(out.ok).toBe(false)
+    if (!out.ok) expect(out.message).toMatch(/task description/i)
+  })
+})
+
+describe("/delegate slash command handler", () => {
+  const delegate = WORKFLOW_SLASH_COMMANDS.find((c) => c.name === "delegate")!
+
+  it("emits a delegate action when the args parse cleanly", async () => {
+    const events: CustomEvent[] = []
+    const listener = (e: Event): void => {
+      events.push(e as CustomEvent)
+    }
+    window.addEventListener(WORKFLOW_COPILOT_DISPATCH_EVENT, listener)
+    try {
+      const ctx = {
+        args: "refactorer parallelize the two analyses",
+        activeSessionId: "workflow:wf_42",
+        chatStatus: "ready",
+        currentPermissionMode: null,
+        startNewSession: () => undefined,
+        openSettings: () => undefined,
+        setPermissionMode: () => undefined,
+        pushSystemMessage: () => undefined,
+      } as unknown as SlashContext
+      await delegate.handler!(ctx)
+      expect(events).toHaveLength(1)
+      expect(events[0].detail).toEqual({
+        action: {
+          kind: "delegate",
+          alias: "refactorer",
+          task: "parallelize the two analyses",
+        },
+      })
+    } finally {
+      window.removeEventListener(WORKFLOW_COPILOT_DISPATCH_EVENT, listener)
+    }
+  })
+
+  it("reports usage on an unknown alias without dispatching", async () => {
+    const events: CustomEvent[] = []
+    const pushes: string[] = []
+    const listener = (e: Event): void => {
+      events.push(e as CustomEvent)
+    }
+    window.addEventListener(WORKFLOW_COPILOT_DISPATCH_EVENT, listener)
+    try {
+      const ctx = {
+        args: "intruder do bad things",
+        activeSessionId: "workflow:wf_42",
+        chatStatus: "ready",
+        currentPermissionMode: null,
+        startNewSession: () => undefined,
+        openSettings: () => undefined,
+        setPermissionMode: () => undefined,
+        pushSystemMessage: (m: string) => pushes.push(m),
+      } as unknown as SlashContext
+      await delegate.handler!(ctx)
+      expect(events).toHaveLength(0)
+      expect(pushes.join("\n")).toMatch(/Unknown subagent alias/)
+    } finally {
+      window.removeEventListener(WORKFLOW_COPILOT_DISPATCH_EVENT, listener)
+    }
   })
 })

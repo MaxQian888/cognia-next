@@ -43,7 +43,11 @@ const TemplatesTab = lazy(() =>
   import("./templates-tab").then((m) => ({ default: m.TemplatesTab }))
 )
 
-type RightSidebarTab = "chat" | "inspector" | "templates"
+const ChangelogTab = lazy(() =>
+  import("./changelog-tab").then((m) => ({ default: m.ChangelogTab }))
+)
+
+type RightSidebarTab = "chat" | "inspector" | "templates" | "changelog"
 
 export function RightSidebar({
   useStore,
@@ -81,7 +85,13 @@ export function RightSidebar({
 
   const handleTabChange = (next: string) => {
     const v: RightSidebarTab =
-      next === "chat" ? "chat" : next === "templates" ? "templates" : "inspector"
+      next === "chat"
+        ? "chat"
+        : next === "templates"
+          ? "templates"
+          : next === "changelog"
+            ? "changelog"
+            : "inspector"
     userPinnedTab.current = v
     setTab(v)
   }
@@ -93,7 +103,7 @@ export function RightSidebar({
       className={cn("flex h-full w-full flex-col border-l bg-card/40", className)}
       data-testid="workflow-right-sidebar"
     >
-      <TabsList className="m-2 grid w-auto grid-cols-3">
+      <TabsList className="m-2 grid w-auto grid-cols-4">
         <TabsTrigger value="chat" data-testid="workflow-right-sidebar-tab-chat">
           {t("tabs.chat")}
         </TabsTrigger>
@@ -105,6 +115,9 @@ export function RightSidebar({
         </TabsTrigger>
         <TabsTrigger value="templates" data-testid="workflow-right-sidebar-tab-templates">
           {t("tabs.templates")}
+        </TabsTrigger>
+        <TabsTrigger value="changelog" data-testid="workflow-right-sidebar-tab-changelog">
+          {t("tabs.changelog")}
         </TabsTrigger>
       </TabsList>
       <TabsContent value="chat" className="flex-1 m-0 overflow-hidden">
@@ -143,6 +156,21 @@ export function RightSidebar({
           }
         >
           <TemplatesTab useStore={useStore} workflowId={workflowId} />
+        </Suspense>
+      </TabsContent>
+      <TabsContent value="changelog" className="flex-1 m-0 overflow-hidden">
+        <Suspense
+          fallback={
+            <div
+              className="flex h-full w-full items-center justify-center gap-2 p-6 text-sm text-muted-foreground"
+              data-testid="workflow-changelog-tab-suspense"
+            >
+              <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+              {t("chatLoading")}
+            </div>
+          }
+        >
+          <ChangelogTab useStore={useStore} workflowId={workflowId} />
         </Suspense>
       </TabsContent>
     </Tabs>

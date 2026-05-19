@@ -31,6 +31,41 @@
 import { create } from "zustand"
 import type { ProposalOp, ProposalOpCount } from "./proposal-types"
 import { summarizeOps } from "./proposal-types"
+import { appendProposalHistory } from "./proposal-history"
+
+function affectedNodeIdsFromOps(ops: ReadonlyArray<ProposalOp>): string[] {
+  const ids = new Set<string>()
+  for (const op of ops) {
+    switch (op.type) {
+      case "add_node":
+      case "remove_node":
+      case "configure_node":
+        ids.add(op.nodeId)
+        break
+      case "connect_edge":
+        ids.add(op.source)
+        ids.add(op.target)
+        break
+    }
+  }
+  return [...ids]
+}
+
+function persistHistory(payload: ProposalPayload, status: "applied" | "discarded"): void {
+  // Fire-and-forget — never block an Apply / Discard transition on a
+  // Dexie hiccup. The Changelog tab tolerates missing rows gracefully.
+  void appendProposalHistory({
+    workflowId: payload.workflowId,
+    proposalId: payload.proposalId,
+    status,
+    summary: payload.summary,
+    opsCount: payload.ops.length,
+    affectedNodeIds: affectedNodeIdsFromOps(payload.ops),
+    createdAt: Date.now(),
+  }).catch((err) => {
+    console.warn("proposal-store: failed to persist history", err)
+  })
+}
 
 export interface ProposalPayload {
   proposalId: string
@@ -100,6 +135,7 @@ export const useProposalStore = create<ProposalStoreState>((set, get) => ({
       opCount,
       createdAt,
     }
+    let replacedOpen: ProposalPayload | undefined
     set((s) => {
       const prior = s.entries[workflowId]
       // Replacing the open proposal: the prior open becomes a discarded record.
@@ -109,13 +145,18 @@ export const useProposalStore = create<ProposalStoreState>((set, get) => ({
       }
       if (prior?.open) {
         next.lastDiscarded = prior.open
+        replacedOpen = prior.open
       }
       return { entries: { ...s.entries, [workflowId]: next } }
     })
+    // Persist the implicit discard so the changelog reflects every
+    // terminal state, including silent replacements.
+    if (replacedOpen) persistHistory(replacedOpen, "discarded")
     return full
   },
 
   markApplied: (workflowId) => {
+    let applied: ProposalPayload | undefined
     set((s) => {
       const prior = s.entries[workflowId]
       if (!prior?.open) return s
@@ -124,11 +165,14 @@ export const useProposalStore = create<ProposalStoreState>((set, get) => ({
         open: undefined,
         lastApplied: prior.open,
       }
+      applied = prior.open
       return { entries: { ...s.entries, [workflowId]: next } }
     })
+    if (applied) persistHistory(applied, "applied")
   },
 
   discardProposal: (workflowId) => {
+    let discarded: ProposalPayload | undefined
     set((s) => {
       const prior = s.entries[workflowId]
       if (!prior?.open) return s
@@ -137,8 +181,10 @@ export const useProposalStore = create<ProposalStoreState>((set, get) => ({
         open: undefined,
         lastDiscarded: prior.open,
       }
+      discarded = prior.open
       return { entries: { ...s.entries, [workflowId]: next } }
     })
+    if (discarded) persistHistory(discarded, "discarded")
   },
 
   clearProposalsFor: (workflowId) => {
