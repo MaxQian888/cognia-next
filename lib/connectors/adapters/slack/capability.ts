@@ -82,4 +82,11 @@ export const SLACK_A2UI_CAPABILITY: A2UICapabilityMatrix = buildA2UICapabilityMa
   Slider: "simulated",
   Tabs: "simulated",
   Accordion: "simulated",
+  // ADR-0026 Track B — overlays via `views.open` Modal two-hop.
+  // The mapper emits a Block Kit Button whose `action_id` triggers a
+  // `connectorCallbackBindings` entry with `kind: "modal_open"`; on
+  // click, the adapter calls `views.open` with the surface's Input
+  // blocks. Modal submissions round-trip as `actionType: "submit"`.
+  Dialog: "simulated",
+  Drawer: "simulated",
 })

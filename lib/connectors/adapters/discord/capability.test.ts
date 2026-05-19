@@ -55,9 +55,13 @@ describe("DISCORD_A2UI_CAPABILITY", () => {
     expect(DISCORD_A2UI_CAPABILITY.Table).toBe("fallback")
   })
 
-  it("declares form controls as fallback (modals are interaction-launched)", () => {
-    expect(DISCORD_A2UI_CAPABILITY.TextField).toBe("fallback")
-    expect(DISCORD_A2UI_CAPABILITY.TextArea).toBe("fallback")
+  it("declares TextField/TextArea/Dialog as simulated via showModal two-hop (ADR-0026 Track B)", () => {
+    expect(DISCORD_A2UI_CAPABILITY.TextField).toBe("simulated")
+    expect(DISCORD_A2UI_CAPABILITY.TextArea).toBe("simulated")
+    expect(DISCORD_A2UI_CAPABILITY.Dialog).toBe("simulated")
+  })
+
+  it("Checkbox remains fallback — Discord modals can't host single-check toggles", () => {
     expect(DISCORD_A2UI_CAPABILITY.Checkbox).toBe("fallback")
   })
 })

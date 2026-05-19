@@ -18,6 +18,7 @@ import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { TriggerPolicy, ConnectorMode } from "@/types/connectors/policy"
 import type { TransportMode } from "@/types/connectors/adapter"
 import type { A2UICapabilityMatrix } from "@/types/connectors/capability"
+import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
 import type { ConversationReference, PlatformIdentity } from "@/types/connectors/event"
 import type { AuditEntry } from "@/types/connectors/audit"
 import type { MessageSegment } from "@/types/connectors/segment"
@@ -85,6 +86,19 @@ export interface AdapterInstanceRow {
    * the cache the next time the adapter starts.
    */
   lastKnownCapabilities?: A2UICapabilityMatrix
+  /**
+   * Cache of `PlatformAdapter.platformSkillCapabilities()` written at
+   * adapter start. Added at v43 (ADR-0026) so the build-options resolver
+   * can render the "Built-in skills available on this channel: …" prompt
+   * section without an async fan-out across the skill registry at every
+   * send. Rows that pre-date v43 will have `undefined` here; the
+   * resolver treats that as "no built-in skills available" and the
+   * runtime refreshes the cache the next time the adapter starts.
+   *
+   * Adapters that don't expose any built-in skill families (Telegram,
+   * Discord, OneBot in v1) write `[]` so the cache hit is unambiguous.
+   */
+  lastKnownSkillCapabilities?: readonly PlatformSkillCapability[]
   /**
    * Optional upstream-implementation probe result. Added at v41 in support
    * of OneBot NapCat / Lagrange / LLOneBot feature detection. Other
@@ -241,6 +255,30 @@ export interface ConversationOverrideRow {
    * which Codex account is currently active") without changing provider.
    */
   modelOverride?: string
+  /**
+   * Per-conversation allowlist for built-in skills (ADR-0026 / schema v43).
+   *
+   *   - `undefined` / `"all"` — fall back to per-skill `imAccess` defaults
+   *     (read skills are always available, write skills go through HITL,
+   *     destructive skills are blocked).
+   *   - `[]` — block every built-in skill on this channel.
+   *   - `string[]` — only these skill IDs may be invoked. Matches against
+   *     `BuiltInSkill.id` (e.g. `"lark.calendar.list_events"`) — wildcard
+   *     entries like `"lark.calendar.*"` match every skill in that family.
+   *
+   * Independent of `requireHitlForWrites`: a skill must clear BOTH gates
+   * (be in this allowlist AND pass the HITL routing) before
+   * `runBuiltInSkill` executes it.
+   */
+  allowedBuiltInSkillIds?: string[] | "all"
+  /**
+   * Whether write-tier skills go through A2UI confirm-card HITL on this
+   * channel (ADR-0026 / schema v43). Defaults to `true`. Operators MAY
+   * set `false` for trusted internal channels to skip the confirm card
+   * on `mutation === "write"` skills. Destructive skills always HITL
+   * regardless of this flag.
+   */
+  requireHitlForWrites?: boolean
   createdAt: number
   updatedAt: number
 }

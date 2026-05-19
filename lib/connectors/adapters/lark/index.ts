@@ -363,6 +363,18 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     setTyping,
     refreshCredentials,
     a2uiCapability: () => LARK_A2UI_CAPABILITY,
+    platformSkillCapabilities: () => {
+      // Lazy ESM import via the synchronous bundler entry. The barrel
+      // self-registers every Lark skill family; `summariseSkillCapabilities`
+      // just walks the registry — zero I/O, safe in adapter start.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require("@/lib/skills/built-in")
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { summariseSkillCapabilities } = require("@/lib/skills/built-in/manifest") as {
+        summariseSkillCapabilities: typeof import("@/lib/skills/built-in/manifest").summariseSkillCapabilities
+      }
+      return summariseSkillCapabilities("lark")
+    },
     addReaction,
   }
 

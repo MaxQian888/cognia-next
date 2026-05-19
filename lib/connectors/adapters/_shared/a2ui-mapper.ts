@@ -164,9 +164,18 @@ export async function recordCallbackBinding(input: {
   surfaceId: string
   componentId?: string
   conversationKey?: string
+  /** Optional override for the createdAt stamp — defaults to `Date.now()`. */
+  createdAt?: number
   expiresAt?: number
   /** Defaults to `"callback_query"` — see `ConnectorCallbackBindingKind`. */
   kind?: ConnectorCallbackBindingRow["kind"]
+  /**
+   * Free-form structured payload the bus passes to the kind-specific
+   * dispatcher (schema v43). The `"skill_invoke"` kind carries
+   * `{skillId, args}` here so the callback can re-fire the skill with
+   * HITL bypass; `"modal_open"` may carry the platform view payload.
+   */
+  payload?: Record<string, unknown>
 }): Promise<void> {
   const row: ConnectorCallbackBindingRow = {
     id: `${input.adapterId}:${input.actionId}`,
@@ -176,8 +185,9 @@ export async function recordCallbackBinding(input: {
     surfaceId: input.surfaceId,
     componentId: input.componentId,
     conversationKey: input.conversationKey,
-    createdAt: Date.now(),
+    createdAt: input.createdAt ?? Date.now(),
     expiresAt: input.expiresAt,
+    payload: input.payload,
   }
   await getDb().connectorCallbackBindings.put(row)
 }

@@ -478,17 +478,18 @@ class ConnectorBus {
     let resolvedComponentId = event.componentId
     let resolvedConversationKey = event.conversationKey ?? null
     let bindingFound = false
+    let resolvedBinding: Awaited<ReturnType<typeof resolveCallbackBinding>> = undefined
     try {
       // Pick the lookup key the adapter actually used at outbound time:
       // most adapters bake the action_id into the platform-side button
       // (`buildActionId(surfaceId, componentId, action)` formatted), so
       // `triggerId` (when assignable) lives in the `actionId` column.
-      const binding = await resolveCallbackBinding(event.adapterId, event.triggerId)
-      if (binding) {
+      resolvedBinding = await resolveCallbackBinding(event.adapterId, event.triggerId)
+      if (resolvedBinding) {
         bindingFound = true
-        resolvedSurfaceId = binding.surfaceId
-        resolvedComponentId = binding.componentId ?? resolvedComponentId
-        resolvedConversationKey = binding.conversationKey ?? resolvedConversationKey
+        resolvedSurfaceId = resolvedBinding.surfaceId
+        resolvedComponentId = resolvedBinding.componentId ?? resolvedComponentId
+        resolvedConversationKey = resolvedBinding.conversationKey ?? resolvedConversationKey
       }
     } catch {
       // Binding lookup is best-effort — Dexie hiccups should not block
@@ -530,7 +531,59 @@ class ConnectorBus {
       },
     })
 
-    // ── Step 4: Hand off to the bridge ──────────────────────────────
+    // ── Step 4a: skill_invoke short-circuit (ADR-0026) ───────────────
+    //
+    // When the binding is a deferred built-in-skill invocation, route
+    // straight to the dispatcher with `hitlBypass: true` (user confirmed)
+    // or audit a rejection (user cancelled). Bypasses the standard digest
+    // turn so the assistant doesn't see a synthetic "user clicked button"
+    // turn — the dispatcher will surface the skill result through the
+    // normal chat-loop on its own.
+    if (resolvedBinding?.kind === "skill_invoke") {
+      const skillId = String(resolvedBinding.payload?.["skillId"] ?? "")
+      const skillArgs = resolvedBinding.payload?.["args"]
+      const value = (event.value ?? "").toLowerCase()
+      const cancelled = value === "cancel" || event.actionType === "dismiss"
+      if (cancelled || !skillId) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "builtin_skill_hitl_rejected",
+          at: Date.now(),
+          conversationKey: resolvedConversationKey ?? undefined,
+          reason: cancelled ? "user_cancelled" : "binding_missing_skill_id",
+          message: `Skill HITL rejected for binding ${event.triggerId}`,
+          fields: { triggerId: event.triggerId, skillId },
+        })
+        return
+      }
+      try {
+        // Lazy import to avoid pulling the skill registry into adapter
+        // bundles that don't need it (mobile lite shells, for instance).
+        const { runBuiltInSkill } = await import("@/lib/skills/built-in/dispatcher")
+        await runBuiltInSkill(skillId, skillArgs, {
+          sessionId: resolvedConversationKey ?? "",
+          imBinding: {
+            adapterId: event.adapterId,
+            platform: event.platform,
+            conversationKey: resolvedConversationKey ?? event.adapterId,
+          },
+          hitlBypass: true,
+        })
+      } catch (err) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "builtin_skill_failed",
+          at: Date.now(),
+          conversationKey: resolvedConversationKey ?? undefined,
+          reason: err instanceof Error ? err.name : "unknown",
+          message: err instanceof Error ? err.message : String(err),
+          fields: { triggerId: event.triggerId, skillId },
+        })
+      }
+      return
+    }
+
+    // ── Step 4b: Hand off to the bridge ──────────────────────────────
     if (!this.callbackHandler) return
     const projected: ConnectorCallbackEvent = {
       ...event,

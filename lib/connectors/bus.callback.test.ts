@@ -147,3 +147,122 @@ describe("ConnectorBus.dispatchConnectorCallback", () => {
     expect(audit.some((r) => r.kind === "callback.received")).toBe(true)
   })
 })
+
+// ── ADR-0026 — skill_invoke binding kind ─────────────────────────────
+describe("ConnectorBus.dispatchConnectorCallback — skill_invoke kind", () => {
+  it("routes Confirm click to the built-in skill dispatcher with hitlBypass=true", async () => {
+    // Register a trivial test skill that records its invocation.
+    const { registerBuiltInSkill, __resetSharedBuiltInSkillRegistry } =
+      await import("@/lib/skills/built-in/registry")
+    __resetSharedBuiltInSkillRegistry()
+    let executed = false
+    const { z } = await import("zod")
+    registerBuiltInSkill({
+      id: "test.skill",
+      family: "test",
+      label: { en: "test", "zh-CN": "测试" },
+      description: { en: "test", "zh-CN": "测试" },
+      platforms: "any",
+      mutation: "write",
+      imAccess: "always",
+      mcpToolName: "test_skill",
+      inputSchema: z.object({ x: z.string() }),
+      execute: async () => {
+        executed = true
+        return { ok: true }
+      },
+      hitlSurface: () => ({
+        components: {},
+        dataModel: {},
+        rootId: "sfc_t",
+      }),
+    })
+
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId: "trig_skill_confirm",
+      kind: "skill_invoke",
+      surfaceId: "sfc_t",
+      conversationKey: "telegram:adp_tg:c1",
+      payload: { skillId: "test.skill", args: { x: "hi" } },
+    })
+
+    const bus = getBus()
+    const handler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    bus.callbackHandler = handler
+
+    await bus.dispatchConnectorCallback(
+      makeEvent({ triggerId: "trig_skill_confirm", value: "confirm" })
+    )
+
+    expect(executed).toBe(true)
+    // Standard digest handler is bypassed.
+    expect(handler).not.toHaveBeenCalled()
+
+    __resetSharedBuiltInSkillRegistry()
+  })
+
+  it("audits builtin_skill_hitl_rejected on Cancel click", async () => {
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId: "trig_skill_cancel",
+      kind: "skill_invoke",
+      surfaceId: "sfc_t",
+      payload: { skillId: "anything", args: {} },
+    })
+    const bus = getBus()
+    const handler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    bus.callbackHandler = handler
+    await bus.dispatchConnectorCallback(
+      makeEvent({ triggerId: "trig_skill_cancel", value: "cancel" })
+    )
+    expect(handler).not.toHaveBeenCalled()
+    const audit = await getDb().connectorAudit.toArray()
+    expect(audit.some((r) => r.kind === "builtin_skill_hitl_rejected")).toBe(true)
+  })
+
+  it("audits builtin_skill_failed when the dispatcher throws", async () => {
+    const { registerBuiltInSkill, __resetSharedBuiltInSkillRegistry } =
+      await import("@/lib/skills/built-in/registry")
+    __resetSharedBuiltInSkillRegistry()
+    const { z } = await import("zod")
+    registerBuiltInSkill({
+      id: "test.boom",
+      family: "test",
+      label: { en: "t", "zh-CN": "t" },
+      description: { en: "t", "zh-CN": "t" },
+      platforms: "any",
+      mutation: "write",
+      imAccess: "always",
+      mcpToolName: "test_boom",
+      inputSchema: z.object({}).strict(),
+      execute: async () => {
+        throw new Error("upstream 500")
+      },
+      hitlSurface: () => ({
+        components: {},
+        dataModel: {},
+        rootId: "sfc_t",
+      }),
+    })
+
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId: "trig_skill_boom",
+      kind: "skill_invoke",
+      surfaceId: "sfc_t",
+      payload: { skillId: "test.boom", args: {} },
+    })
+
+    const bus = getBus()
+    await bus.dispatchConnectorCallback(
+      makeEvent({ triggerId: "trig_skill_boom", value: "confirm" })
+    )
+    const audit = await getDb().connectorAudit.toArray()
+    // The dispatcher itself wrote builtin_skill_failed; the bus
+    // doesn't re-audit because the dispatcher already did.
+    expect(audit.some((r) => r.kind === "builtin_skill_failed")).toBe(true)
+
+    __resetSharedBuiltInSkillRegistry()
+  })
+})

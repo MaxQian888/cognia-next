@@ -22,6 +22,7 @@ import type {
 } from "@/types/connectors/capability"
 import { A2UI_COMPONENT_KINDS, componentKindsByLevel } from "@/types/connectors/capability"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
+import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
 import { walkA2UISurface } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 
 export interface CapabilityEvaluation {
@@ -94,10 +95,18 @@ export function evaluateSurfaceAgainstCapability(
  * Build the capability summary the build-options resolver appends to the
  * system prompt. Concise (single paragraph, three bullets) so it fits
  * into the existing prompt budget without dominating.
+ *
+ * `skillCapabilities` (added at ADR-0026) appends an extra bullet
+ * declaring the built-in skill families this channel can serve, e.g.
+ *   `- Built-in skills available on this channel: lark.calendar
+ *     (read+write), lark.doc (read+write), …`
+ * so the assistant knows which lark-cli-backed tools it can invoke
+ * without paying the cost of probing each tool at decision time.
  */
 export function buildCapabilityPromptSection(
   platform: string,
-  matrix: A2UICapabilityMatrix
+  matrix: A2UICapabilityMatrix,
+  skillCapabilities?: readonly PlatformSkillCapability[]
 ): string {
   const native = componentKindsByLevel(matrix, "native")
   const simulated = componentKindsByLevel(matrix, "simulated")
@@ -122,6 +131,15 @@ export function buildCapabilityPromptSection(
   }
   if (unsupported.length > 0) {
     lines.push(`- NOT supported — do not emit: ${unsupported.join(", ")}.`)
+  }
+  if (skillCapabilities && skillCapabilities.length > 0) {
+    const summary = skillCapabilities
+      .map((c) => `${c.family} (${c.mutations.join("+")})`)
+      .join(", ")
+    lines.push(
+      `- Built-in skills available on this channel: ${summary}. ` +
+        `Write/destructive operations route through an A2UI confirm card by default.`
+    )
   }
   return lines.join("\n")
 }

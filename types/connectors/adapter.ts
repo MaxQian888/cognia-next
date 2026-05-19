@@ -136,4 +136,17 @@ export interface PlatformAdapter {
    * adapter used in tests.
    */
   a2uiCapability(): A2UICapabilityMatrix
+  /**
+   * Declare which built-in skill families this adapter can serve in v1
+   * (ADR-0026). Read at adapter start and cached on
+   * `AdapterInstanceRow.lastKnownSkillCapabilities` so the hot send
+   * path (build-options) doesn't pay for a registry walk per turn.
+   *
+   * Adapters that don't expose any built-in skill family return `[]`.
+   * The return shape lives in `types/connectors/skill-capability.ts`.
+   *
+   * Optional for backward compat — adapters that haven't been updated
+   * are treated as "no built-in skill capabilities" by the resolver.
+   */
+  platformSkillCapabilities?(): readonly import("./skill-capability").PlatformSkillCapability[]
 }

@@ -41,7 +41,8 @@ export const LARK_CAPS: readonly Capability[] = [
 
 /**
  * A2UI capability matrix for the Lark adapter (G3.4, extended at ADR-0009
- * v41 / B4 for Checkbox simulated tier).
+ * v41 / B4 for Checkbox simulated tier, extended again at ADR-0026 for
+ * `form_dialog` Modal projection).
  *
  * Native rendering (via `buildLarkA2UICard`):
  *   - Text / Link / Divider / Card (header) / Alert → div+lark_md / hr.
@@ -63,10 +64,17 @@ export const LARK_CAPS: readonly Capability[] = [
  *     platforms with native checkbox support. The user-visible UX is
  *     "tap the dropdown, pick ✓ or ✗" — single round-trip but two
  *     visible steps, hence simulated.
+ *   - Dialog / Drawer / Sheet → Lark Interactive Card v2 `form_dialog`
+ *     element (ADR-0026 Track B). The mapper emits a Button that, when
+ *     clicked, opens a Lark `form_dialog` carrying the surface's
+ *     TextField / Select / DatePicker children. Callback round-trips
+ *     through the `connectorCallbackBindings` table with
+ *     `kind: "modal_open"` so the bus knows to project the submit
+ *     payload back as `actionType: "submit"`.
  *
  * Fallback (renders via plain text mirror):
  *   - Slider / Table / Chart / DataExplorer / Pagination.
- *   - Tabs / Accordion / Dialog / Drawer / Sheet / Sidebar / Collapsible.
+ *   - Tabs / Accordion / Sidebar / Collapsible.
  */
 export const LARK_A2UI_CAPABILITY: A2UICapabilityMatrix = buildA2UICapabilityMatrix({
   Text: "native",
@@ -86,4 +94,8 @@ export const LARK_A2UI_CAPABILITY: A2UICapabilityMatrix = buildA2UICapabilityMat
   Column: "native",
   List: "native",
   Checkbox: "simulated",
+  // ADR-0026 Track B — overlays projected as Lark form_dialog two-hop.
+  Dialog: "simulated",
+  Drawer: "simulated",
+  Sheet: "simulated",
 })

@@ -142,12 +142,18 @@ export interface ConnectorCallbackEvent {
  *   - `"block_action"`   — generic platform interaction that's neither a
  *                          callback_query nor a form (e.g., Slack
  *                          `external_select` dynamic option requests).
+ *   - `"skill_invoke"`   — A2UI confirm-card → built-in skill invocation
+ *                          (ADR-0026). The binding row carries the
+ *                          deferred `{skillId, args}` in `payload`; on
+ *                          inbound callback the bus reads the payload and
+ *                          re-fires the skill with HITL bypass.
  */
 export type ConnectorCallbackBindingKind =
   | "callback_query"
   | "force_reply"
   | "modal_open"
   | "block_action"
+  | "skill_invoke"
 
 /**
  * Persisted association between an outbound A2UI surface and the
@@ -189,4 +195,13 @@ export interface ConnectorCallbackBindingRow {
   createdAt: number
   /** Optional explicit TTL ms-since-epoch. */
   expiresAt?: number
+  /**
+   * Free-form structured payload the bus passes to the kind-specific
+   * dispatcher. Added at v43 to support `kind: "skill_invoke"` — stores
+   * the deferred built-in skill `{skillId, args}` so the inbound callback
+   * can re-fire the skill with HITL bypass. Other kinds may use it for
+   * platform-specific carryover (e.g., Slack `viewPayload` for the
+   * `modal_open` two-hop).
+   */
+  payload?: Record<string, unknown>
 }

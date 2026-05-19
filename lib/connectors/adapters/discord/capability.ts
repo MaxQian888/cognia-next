@@ -70,4 +70,14 @@ export const DISCORD_A2UI_CAPABILITY: A2UICapabilityMatrix = buildA2UICapability
   Row: "native",
   Column: "native",
   List: "native",
+  // ADR-0026 Track B — TextField / TextArea / Dialog round-trip via
+  // `interaction.showModal` two-hop. The mapper emits a Button whose
+  // `custom_id` is bound (`kind: "modal_open"`) to the surface's input
+  // children; on click, the adapter responds with InteractionResponse
+  // type 9 (MODAL) carrying TextInput components. Modal submissions
+  // arrive as `MESSAGE_COMPONENT` with `actionType: "submit"` and are
+  // routed through the standard binding lookup.
+  TextField: "simulated",
+  TextArea: "simulated",
+  Dialog: "simulated",
 })

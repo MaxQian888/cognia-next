@@ -30,6 +30,18 @@ export type AuditKind =
   | "callback.deduped"
   | "callback.unbound"
   | "callback.handler_failed"
+  // ── Built-in skills tier (ADR-0026 / schema v43) ─────────────────────
+  // The dispatcher emits one of these on every `runBuiltInSkill` call.
+  // `reason` carries the gate that fired (`pii_blocked`,
+  // `mutation_blocked`, `not_allowed_for_channel`, etc.) and `fields`
+  // carries `{skillId, mutation, hitl}`. PII redaction runs against
+  // `fields.args` before the row is written.
+  | "builtin_skill_invoked"
+  | "builtin_skill_denied"
+  | "builtin_skill_hitl_pending"
+  | "builtin_skill_hitl_approved"
+  | "builtin_skill_hitl_rejected"
+  | "builtin_skill_failed"
 
 export interface AuditEntry {
   id: string
