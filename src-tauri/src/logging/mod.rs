@@ -31,13 +31,17 @@ use tauri_plugin_log::Builder as LogBuilder;
 pub fn bootstrap(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let plan = native_bootstrap::plan_native_logging_bootstrap(true);
 
-    let mut builder = LogBuilder::default().level(log::LevelFilter::Info);
-    for target in plan.targets() {
-        builder = builder.target(target);
-    }
-    // Mirror records into the platform logger (EventLog / OSLog / journald)
-    // when its config + min-level allow.
-    builder = builder.target(platform::dispatch_target());
+    // `LogBuilder::default()` already seeds `[Stdout, LogDir(None)]`. Using
+    // `.target(...)` would append, producing duplicate stdout/file writes —
+    // call `.targets(...)` (plural) so the planned set, plus the platform
+    // dispatch target, fully replaces the defaults.
+    let targets = plan
+        .targets()
+        .into_iter()
+        .chain(std::iter::once(platform::dispatch_target()));
+    let builder = LogBuilder::default()
+        .level(log::LevelFilter::Info)
+        .targets(targets);
 
     if let Err(error) = app.handle().plugin(builder.build()) {
         log::warn!("native_logging: failed to install tauri-plugin-log: {error}");

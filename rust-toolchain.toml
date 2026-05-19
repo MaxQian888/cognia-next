@@ -1,0 +1,13 @@
+# Workspace toolchain pin. `1.89.0` is the floor required by transitive deps
+# in the committed Cargo.lock — the highest is `metrique 0.1.25` (Rust 1.89),
+# with `image 0.25.10`, `plist 1.9.0`, `serde_with 3.20.0`, and `time 0.3.47`
+# all needing 1.88. Earlier deps like `oar-ocr` only needed 1.84.1 and
+# `clap_lex 1.1.0`'s edition2024 needed 1.85, but the lockfile has moved
+# past those. All workspace members + CI compile against this channel.
+#
+# Bumping: if cargo check fails on "requires rustc X.Y.Z", check the
+# Cargo.lock for the demanding crate and either downgrade it
+# (`cargo update -p <crate>@<ver> --precise <older>`) or bump this pin.
+[toolchain]
+channel = "1.93.0"
+components = ["rustfmt", "clippy"]

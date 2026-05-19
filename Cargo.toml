@@ -1,0 +1,43 @@
+# Cargo workspace root for cognia-next.
+#
+# Members share one Cargo.lock + one target/ directory at the repo root:
+#   - src-tauri/           — main Tauri app (`cognia-next`) + headless
+#                            server binary (`cognia-server`).
+#   - crates/cognia-cli/   — plugin-author CLI (`cognia`).
+#
+# Intentionally excluded:
+#   - signaling-server/             standalone deploy artifact built via
+#                                   Dockerfile/Fly.io. Keeping its own
+#                                   Cargo.lock isolates the deploy image.
+#   - crates/cognia-plugin-template, plugins/wasm-example-formatter
+#                                   wasm32-wasip2 components built with
+#                                   `cargo component`; their tighter
+#                                   release profile (opt-level = "s")
+#                                   and different target conflict with
+#                                   a desktop workspace.
+#   - crates/cognia-plugin-template-ts
+#                                   pure TypeScript template, no Rust.
+
+[workspace]
+resolver = "2"
+members = [
+  "src-tauri",
+  "crates/cognia-cli",
+]
+exclude = [
+  "signaling-server",
+  "crates/cognia-plugin-template",
+  "crates/cognia-plugin-template-ts",
+  "plugins/wasm-example-formatter",
+]
+
+# `rten` and `rten-imageproc` are pulled in transitively when the optional
+# `ocr-ocrs` feature is enabled on the `cognia-next` member. Upstream README
+# requires opt-level = 3 even in dev profile — without it, smoke tests crawl.
+# Profile overrides live at the workspace root per Cargo's rules; package-
+# level `[profile.*]` blocks in workspace members are ignored.
+[profile.dev.package.rten]
+opt-level = 3
+
+[profile.dev.package.rten-imageproc]
+opt-level = 3

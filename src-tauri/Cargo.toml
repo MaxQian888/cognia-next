@@ -6,10 +6,15 @@ authors = ["AstroAir <astro_air@126.com>"]
 license = "MIT"
 repository = "https://github.com/AstroAir/cognia-next"
 edition = "2021"
-# Bumped from 1.82 → 1.84.1 because `oar-ocr` (gated behind the optional
-# `ocr-paddle` feature) uses edition 2024 and pins MSRV at 1.84.1. The default
-# build doesn't compile the dep, but the workspace MSRV must accommodate it.
-rust-version = "1.84.1"
+# 1.89.0 floor — driven by transitive deps in the workspace Cargo.lock
+# (`metrique 0.1.25` is the highest). `clap_lex 1.1.0` needs 1.85
+# (edition2024) and `oar-ocr` (gated by `ocr-paddle`) needs 1.84.1; the
+# workspace toolchain pin in `rust-toolchain.toml` reflects the floor.
+rust-version = "1.89.0"
+# NOTE: the workspace toolchain pin (`rust-toolchain.toml`) lives at 1.93.0
+# to match the lockfile resolver context. `rust-version` here documents the
+# minimum any consumer needs to build this crate — 1.89.0 is the floor from
+# transitive deps; bumping the pin doesn't change this MSRV claim.
 default-run = "cognia-next"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -321,9 +326,5 @@ ocr-ocrs = ["dep:ocrs", "dep:rten", "dep:rten-imageproc", "dep:image"]
 ocr-paddle = ["dep:oar-ocr", "dep:ort", "dep:image"]
 
 # RTen is mandatory `--release` per upstream README — without opt-level=3
-# even smoke tests crawl. The override keeps dev iteration usable when the
-# `ocr-ocrs` feature is on.
-[profile.dev.package.rten]
-opt-level = 3
-[profile.dev.package.rten-imageproc]
-opt-level = 3
+# even smoke tests crawl. The override now lives in the workspace root
+# Cargo.toml (cargo ignores `[profile.*]` blocks in workspace members).
