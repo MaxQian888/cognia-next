@@ -3,9 +3,9 @@
  * the registry + adapter + settings sync without touching Tauri.
  */
 
-const syncMock = jest.fn(async () => ({ added: 0, removed: 0, skipped: 0 }))
+const syncMock = jest.fn(async (_entries: unknown) => ({ added: 0, removed: 0, skipped: 0 }))
 const registryDisposeMock = jest.fn()
-const configureLspRegistryMock = jest.fn(() => registryDisposeMock)
+const configureLspRegistryMock = jest.fn((_input: unknown) => registryDisposeMock)
 
 jest.mock("./lsp-user-servers", () => ({
   syncUserLspServers: (entries: unknown) => syncMock(entries),
@@ -46,6 +46,7 @@ jest.mock("@/stores/settings/settings-store", () => ({
 }))
 
 import { __resetLspBootstrapForTesting, bootstrapLspRegistry } from "./lsp-bootstrap"
+import type { UserLspServerEntry } from "@/lib/claude/types"
 
 beforeEach(() => {
   __resetLspBootstrapForTesting()
@@ -92,7 +93,7 @@ describe("bootstrapLspRegistry", () => {
   })
 
   it("re-syncs whenever the subscription fires", () => {
-    let listener: ((entries: unknown[] | undefined) => void) | null = null
+    let listener: ((entries: UserLspServerEntry[] | undefined) => void) | null = null
     const dispose = jest.fn()
     bootstrapLspRegistry({
       subscribeUserLspServers: (cb) => {

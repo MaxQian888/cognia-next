@@ -4,7 +4,7 @@
 
 import { fireEvent, render, screen } from "@testing-library/react"
 
-const saveMock = jest.fn(async () => {})
+const saveMock = jest.fn(async (_patch: unknown) => {})
 const settingsRef: {
   settings: { developer?: { userLspServers?: unknown[] } } | null
 } = { settings: { developer: {} } }

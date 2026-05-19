@@ -16,7 +16,7 @@
  *     `tests/e2e/lsp/vscode-eslint.spec.ts`).
  */
 
-const evaluateLspBinaryMock = jest.fn(async () => ({
+const evaluateLspBinaryMock = jest.fn(async (_input: unknown) => ({
   allowed: true,
   requiresPrompt: false,
   reason: "test-policy-allow",

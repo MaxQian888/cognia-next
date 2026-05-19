@@ -68,16 +68,16 @@ describe("VscodeExtensionHostBar", () => {
 
   it("respects the webviewSlot filter", () => {
     listPanelsMock.mockReturnValue([
-      { panelId: "p1", hostSlot: "sidebar" },
-      { panelId: "p2", hostSlot: "panel" },
+      { panelId: "p1", hostSlot: "sidebar.left" },
+      { panelId: "p2", hostSlot: "panel.bottom" },
     ])
-    render(<VscodeExtensionHostBar webviewSlot="panel" />)
+    render(<VscodeExtensionHostBar webviewSlot="panel.bottom" />)
     expect(screen.getByTestId("vscode-extension-host-bar")).toBeInTheDocument()
   })
 
   it("returns null when webviewSlot filter rules every panel out", () => {
-    listPanelsMock.mockReturnValue([{ panelId: "p1", hostSlot: "sidebar" }])
-    const { container } = render(<VscodeExtensionHostBar webviewSlot="activityBar" />)
+    listPanelsMock.mockReturnValue([{ panelId: "p1", hostSlot: "sidebar.left" }])
+    const { container } = render(<VscodeExtensionHostBar webviewSlot="panel.bottom" />)
     expect(container).toBeEmptyDOMElement()
   })
 

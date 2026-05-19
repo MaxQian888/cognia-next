@@ -262,7 +262,10 @@ describe("vscode-loader — Tauri mode", () => {
   })
 
   it("bootstraps configureMonacoBridge with monaco-editor + dispatchRpc on first load", async () => {
-    const invoke = jest.fn(async (cmd: string) => {
+    // `Promise<unknown>` widens the return so `mockResolvedValueOnce` can
+    // surface the JSON string the rpc dispatch path returns later in the
+    // test without re-inferring the activate-response shape.
+    const invoke = jest.fn(async (cmd: string): Promise<unknown> => {
       if (cmd === "plugin_load_vscode") return undefined
       if (cmd === "plugin_activate_vscode")
         return {

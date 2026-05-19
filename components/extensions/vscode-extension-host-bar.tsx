@@ -75,12 +75,20 @@ function useActiveExtensionSurfaces(slot?: WebviewRecord["hostSlot"]): {
   return { webviews, terminals }
 }
 
-function sameIds<T extends { panelId?: string; terminalId?: string }>(a: T[], b: T[]): boolean {
+function sameIds<T extends { panelId?: string; terminalId?: string; id?: string }>(
+  a: T[],
+  b: T[]
+): boolean {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i += 1) {
     const ai = a[i]
     const bi = b[i]
-    if ((ai?.panelId ?? ai?.terminalId) !== (bi?.panelId ?? bi?.terminalId)) return false
+    // `TerminalRecord` uses `.id`; `WebviewRecord` uses `.panelId`; the
+    // legacy mock shape exposes `.terminalId`. Cover all three so the
+    // helper works for whichever shape the bridges hand us today.
+    if ((ai?.panelId ?? ai?.terminalId ?? ai?.id) !== (bi?.panelId ?? bi?.terminalId ?? bi?.id)) {
+      return false
+    }
   }
   return true
 }

@@ -3,8 +3,8 @@
  * only verify the diff logic (add / remove / skip).
  */
 
-const registerMock = jest.fn(async () => ({ state: "running" }))
-const unregisterMock = jest.fn(async () => undefined)
+const registerMock = jest.fn(async (_input: unknown) => ({ state: "running" }))
+const unregisterMock = jest.fn(async (_owner: string, _id: string) => undefined)
 let listResult: Array<{ ownerId: string; serverId: string }> = []
 
 jest.mock("./lsp-registry", () => ({
