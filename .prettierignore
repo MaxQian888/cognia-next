@@ -4,7 +4,7 @@ out
 build
 coverage
 dist
-src-tauri/target
+target
 src-tauri/gen
 pnpm-lock.yaml
 *.min.js

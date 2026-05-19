@@ -70,9 +70,31 @@ coverage_output.txt
 .playwright-mcp
 .VSCodeCounter
 
-# Rust build artifacts (src-tauri/target is ignored by src-tauri/.gitignore)
+# Rust build artifacts. The workspace target/ lives at repo root (members:
+# src-tauri, crates/cognia-cli). signaling-server stays standalone with its
+# own target/, and each WASM plugin under crates/* or plugins/* builds via
+# `cargo component` into its own target/ as well.
+/target/
 /signaling-server/target/
 /crates/*/target/
+/plugins/*/target/
+
+# Cargo / rustc transient state. `Cargo.lock` at the workspace root IS
+# committed (binary crates need reproducible builds); per-member lockfiles
+# under members/ are not — cargo uses the workspace root one. The leftover
+# `/src-tauri/Cargo.lock` and `/crates/cognia-cli/Cargo.lock` paths exist
+# only so a stray file there is caught instead of accidentally committed.
+/src-tauri/Cargo.lock
+/crates/*/Cargo.lock
+
+# rustfmt backup files (created by `rustfmt --backup`) and rustc ICE dumps.
+*.rs.bk
+rustc-ice-*.txt
+
+# Windows debug-info sidecars from `cargo build` on MSVC — these end up in
+# target/ already (covered above), but if a build script copies one out
+# to the repo it stays out of git.
+*.pdb
 
 # local lint / verification dumps
 .lint-output.*
