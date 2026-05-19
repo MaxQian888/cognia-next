@@ -324,7 +324,7 @@ jobs:
           CI: "true"
           NEXT_PUBLIC_E2E: "1"
           PLAYWRIGHT_TAURI_DRIVER: "1"
-          PLAYWRIGHT_TAURI_BIN: ${{ github.workspace }}\src-tauri\target\debug\cognia-next.exe
+          PLAYWRIGHT_TAURI_BIN: ${{ github.workspace }}\target\debug\cognia-next.exe
       - name: Upload Playwright HTML report
         uses: actions/upload-artifact@v7
         if: always()

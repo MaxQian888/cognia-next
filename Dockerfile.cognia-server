@@ -11,10 +11,17 @@
 ## The container expects `/data` to be a writable volume so the SQLite store
 ## and the self-signed TLS cert persist across restarts.
 
-FROM rust:1.83-bookworm AS builder
+FROM rust:1.84-bookworm AS builder
 WORKDIR /work
-COPY src-tauri /work/src-tauri
-WORKDIR /work/src-tauri
+# Workspace root files first — Cargo.toml declares members, rust-toolchain.toml
+# pins the MSRV (rustup auto-installs the pinned channel), and .cargo/config.toml
+# carries `--cfg tokio_unstable` (required by dial9-tokio-telemetry).
+COPY Cargo.toml rust-toolchain.toml ./
+COPY .cargo ./.cargo
+# Workspace members. crates/cognia-cli is included so the workspace resolves;
+# we still build only the cognia-server binary.
+COPY src-tauri ./src-tauri
+COPY crates ./crates
 RUN cargo build --release --bin cognia-server
 
 FROM debian:bookworm-slim AS runtime
@@ -30,7 +37,7 @@ RUN apt-get update \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /work/src-tauri/target/release/cognia-server /usr/local/bin/cognia-server
+COPY --from=builder /work/target/release/cognia-server /usr/local/bin/cognia-server
 
 ENV COGNIA_DATA_DIR=/data
 VOLUME /data

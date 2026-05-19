@@ -16,8 +16,10 @@
  *                                        # a legacy alias for one release cycle.
  *   PLAYWRIGHT_TAURI_BIN=<absolute path> # Path to the built Tauri exe (debug build).
  *                                        # If unset, defaults to
- *                                        # `src-tauri/target/debug/cognia(.exe)`
- *                                        # under the current working directory.
+ *                                        # `target/debug/cognia(.exe)` under the
+ *                                        # current working directory (workspace
+ *                                        # root, since the Rust workspace lives
+ *                                        # at the repo root).
  *   WEBVIEW2_REMOTE_DEBUGGING_PORT=9222  # CDP port for WebView2; defaults to 9222.
  *
  * The CDP env (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`) is injected into the
@@ -41,7 +43,7 @@ const DEFAULT_CDP_PORT = 9222
 
 function defaultBinaryPath(): string {
   const exe = process.platform === "win32" ? "cognia.exe" : "cognia"
-  return path.resolve(process.cwd(), "src-tauri", "target", "debug", exe)
+  return path.resolve(process.cwd(), "target", "debug", exe)
 }
 
 async function fetchJson(url: string, timeoutMs: number): Promise<unknown | null> {
