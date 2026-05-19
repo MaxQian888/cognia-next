@@ -57,6 +57,8 @@ import type { ChatDraftRow } from "./chat-drafts"
 import type { Goal, GoalEvent } from "@/types/goal"
 import type { OcrResultRow } from "./ocr-results"
 import type { PluginSkillUsageRow } from "./plugin-skill-usage"
+import type { WorkflowProposalHistoryRow } from "@/lib/workflow/editor/proposal-history"
+import type { SyncCursorRow } from "@/lib/sync/types"
 
 export class CogniaDB extends Dexie {
   sessions!: Table<ChatSession, string>
@@ -191,6 +193,14 @@ export class CogniaDB extends Dexie {
    * telemetry surfaces. Pure additive; no upgrade hook needed.
    */
   pluginSkillUsage!: Table<PluginSkillUsageRow, string>
+  /**
+   * v42 — Workflow proposal history. One row per terminal (applied /
+   * discarded) proposal so the Changelog tab can render a timeline.
+   * Capped at 50 rows per workflow by `pruneOldProposalHistory()` in
+   * `lib/workflow/editor/proposal-history.ts`. Pure additive table; no
+   * upgrade hook needed.
+   */
+  workflowProposalHistory!: Table<WorkflowProposalHistoryRow, string>
 
   constructor() {
     super("cognia-claude")
@@ -1213,12 +1223,61 @@ export class CogniaDB extends Dexie {
             }
           })
       })
+
+    // v42 — Workflow proposal history (Changelog tab). One row per
+    //   terminal applied / discarded proposal. `id` is `${proposalId}:
+    //   ${status}`; per-workflow listing keys on `[workflowId+createdAt]`
+    //   for newest-first reads. Capped at 50 per workflow by
+    //   `lib/workflow/editor/proposal-history.ts`.
+    this.version(42).stores({
+      workflowProposalHistory: "&id, workflowId, createdAt, [workflowId+createdAt]",
+    })
+
+    // v43 — Built-in skills tier + lark-cli bridge (ADR-0026).
+    //
+    //   All changes are additive optional columns; no index is added,
+    //   no table is created, no row is rewritten:
+    //
+    //   • `connectorCallbackBindings.payload?: Record<string, unknown>` —
+    //     free-form structured payload the bus passes to kind-specific
+    //     dispatchers. Used by the new `kind: "skill_invoke"` to carry
+    //     `{skillId, args}` from confirm-card outbound to inbound
+    //     callback so the skill re-fires with HITL bypass.
+    //   • `connectorCallbackBindings.kind` enum widened to include
+    //     `"skill_invoke"` (no schema declaration needed — `kind` is
+    //     already an index column at v41 and Dexie filter-only at that
+    //     level; the wider union is purely a type-level change).
+    //   • `conversationOverrides.allowedBuiltInSkillIds?:
+    //     string[] | "all"` and `requireHitlForWrites?: boolean` — per-
+    //     channel gating for the built-in skill tier. Filter-only
+    //     columns; no index.
+    //   • `adapterInstances.lastKnownSkillCapabilities?:
+    //     readonly PlatformSkillCapability[]` — sibling of the existing
+    //     `lastKnownCapabilities` A2UI matrix cache. Written at adapter
+    //     start by adapters that expose built-in skill families
+    //     (Lark in v1). Filter-only; no index.
+    //
+    //   Pre-v43 rows that lack these fields are interpreted by the
+    //   resolver as "fall back to per-skill defaults" / "no skill
+    //   capabilities cached" — no backfill needed.
+    this.version(43).stores({})
+
+    // v44 (Wave 4 / ADR-0026) — persistent cursors for the companion sync
+    // orchestrator. Previously `stateMap` lived only in memory, so a cold
+    // start re-pulled every table from `since: 0`. With this table the
+    // mobile shell resumes from the last successful cursor across app
+    // restarts. Primary key `&table` enforces one row per syncable table.
+    // Pure additive — no upgrade hook needed; pre-v44 installs start with
+    // an empty cursor table and the orchestrator falls back to `since: 0`.
+    this.version(44).stores({ syncCursors: "&table, lastSyncAt, since" })
   }
 
   sessionState!: Table<SessionStateRow, string>
   tts_provider_keys!: Table<TtsProviderKeyRow, string>
   openVsxCache!: Table<OpenVsxCacheRow, string>
   vscodeExtensionRuntime!: Table<VscodeExtensionRuntimeRow, string>
+  // v44 — companion sync cursors (Wave 4 / ADR-0026). See `lib/sync/types.ts`.
+  syncCursors!: Table<SyncCursorRow, string>
 }
 
 /** Web-mode fallback row for TTS provider API keys. */

@@ -102,4 +102,62 @@ describe("conversation-overrides", () => {
     expect(row.characterId).toBe("char_1")
     expect(row.lastReadAt).toBe(12345)
   })
+
+  // ── v43 / ADR-0026 — built-in skill gating fields ─────────────────
+  it("allowedBuiltInSkillIds: string[] round-trips", async () => {
+    const row = await upsertByConversationKey({
+      ...baseInput(),
+      allowedBuiltInSkillIds: ["lark.calendar.list_events", "lark.doc.search"],
+    })
+    expect(row.allowedBuiltInSkillIds).toEqual(["lark.calendar.list_events", "lark.doc.search"])
+  })
+
+  it("allowedBuiltInSkillIds: 'all' sentinel round-trips", async () => {
+    const row = await upsertByConversationKey({
+      ...baseInput(),
+      allowedBuiltInSkillIds: "all",
+    })
+    expect(row.allowedBuiltInSkillIds).toBe("all")
+  })
+
+  it("allowedBuiltInSkillIds: [] (block-all) round-trips", async () => {
+    const row = await upsertByConversationKey({
+      ...baseInput(),
+      allowedBuiltInSkillIds: [],
+    })
+    expect(row.allowedBuiltInSkillIds).toEqual([])
+  })
+
+  it("requireHitlForWrites: false round-trips (default-allow channel)", async () => {
+    const row = await upsertByConversationKey({
+      ...baseInput(),
+      requireHitlForWrites: false,
+    })
+    expect(row.requireHitlForWrites).toBe(false)
+  })
+
+  it("requireHitlForWrites: true round-trips", async () => {
+    const row = await upsertByConversationKey({
+      ...baseInput(),
+      requireHitlForWrites: true,
+    })
+    expect(row.requireHitlForWrites).toBe(true)
+  })
+
+  it("v43 gate fields preserved across upsert that touches unrelated fields", async () => {
+    const first = await upsertByConversationKey({
+      ...baseInput(),
+      allowedBuiltInSkillIds: ["lark.task.list"],
+      requireHitlForWrites: false,
+    })
+    const second = await upsertByConversationKey({
+      ...baseInput(),
+      mode: "manual",
+      allowedBuiltInSkillIds: first.allowedBuiltInSkillIds,
+      requireHitlForWrites: first.requireHitlForWrites,
+    })
+    expect(second.id).toBe(first.id)
+    expect(second.allowedBuiltInSkillIds).toEqual(["lark.task.list"])
+    expect(second.requireHitlForWrites).toBe(false)
+  })
 })

@@ -63,6 +63,96 @@ describe("getDb", () => {
     expect(db.verno).toBeGreaterThanOrEqual(41)
   })
 
+  // v43 — Built-in skills tier + lark-cli bridge (ADR-0026). All changes
+  // are additive optional columns; verify they round-trip through the
+  // declared row types and that the `kind` widening accepts the new
+  // `"skill_invoke"` discriminator.
+  it("v43 built-in-skill fields round-trip on the affected tables", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(43)
+    const now = Date.now()
+
+    // connectorCallbackBindings: new `"skill_invoke"` kind + payload.
+    await db.connectorCallbackBindings.put({
+      id: "lark-1:skinv-42",
+      adapterId: "lark-1",
+      actionId: "skinv-42",
+      kind: "skill_invoke",
+      surfaceId: "sfc_confirm",
+      componentId: "btn_yes",
+      conversationKey: "lark:lark-1:oc_x",
+      createdAt: now,
+      expiresAt: now + 7 * 24 * 3600 * 1000,
+      payload: {
+        skillId: "lark.calendar.create_event",
+        args: { title: "Q4 review", start: "2026-06-01T15:00:00", end: "2026-06-01T16:00:00" },
+      },
+    })
+    const bindings = await db.connectorCallbackBindings
+      .where("kind")
+      .equals("skill_invoke")
+      .toArray()
+    expect(bindings).toHaveLength(1)
+    expect(bindings[0].payload?.skillId).toBe("lark.calendar.create_event")
+
+    // conversationOverrides: per-channel built-in skill gating.
+    await db.conversationOverrides.put({
+      id: "co-v43-1",
+      conversationKey: "lark:lark-1:oc_y",
+      sessionId: "s_v43_1",
+      allowedBuiltInSkillIds: ["lark.calendar.list_events", "lark.doc.search"],
+      requireHitlForWrites: false,
+      createdAt: now,
+      updatedAt: now,
+    })
+    const co = await db.conversationOverrides.get("co-v43-1")
+    expect(co?.allowedBuiltInSkillIds).toEqual(["lark.calendar.list_events", "lark.doc.search"])
+    expect(co?.requireHitlForWrites).toBe(false)
+
+    // conversationOverrides: "all" sentinel survives the put/get round-trip.
+    await db.conversationOverrides.put({
+      id: "co-v43-2",
+      conversationKey: "lark:lark-1:oc_z",
+      sessionId: "s_v43_2",
+      allowedBuiltInSkillIds: "all",
+      createdAt: now,
+      updatedAt: now,
+    })
+    expect((await db.conversationOverrides.get("co-v43-2"))?.allowedBuiltInSkillIds).toBe("all")
+
+    // adapterInstances: lastKnownSkillCapabilities cache column.
+    await db.adapterInstances.put({
+      id: "lark-1",
+      type: "lark",
+      displayName: "Lark Workspace",
+      enabled: true,
+      transportMode: "webhook",
+      settings: {},
+      credentialsRef: {
+        keyringService: "com.cognia.platforms",
+        accounts: ["lark-1:appSecret"],
+      },
+      trigger: {
+        rules: [{ kind: "private-default" }],
+        blockers: [],
+        storeUnmatchedInDraftMode: false,
+      },
+      defaultMode: "auto",
+      lastKnownSkillCapabilities: [
+        { family: "lark.calendar", mutations: ["read", "write"] },
+        { family: "lark.doc", mutations: ["read", "write", "destructive"] },
+        { family: "lark.task", mutations: ["read", "write"] },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    })
+    const adapter = await db.adapterInstances.get("lark-1")
+    expect(adapter?.lastKnownSkillCapabilities).toHaveLength(3)
+    expect(adapter?.lastKnownSkillCapabilities?.[0].family).toBe("lark.calendar")
+    expect(adapter?.lastKnownSkillCapabilities?.[1].mutations).toContain("destructive")
+  })
+
   // v41 — IM connector complete gap closure (ADR-0009 v41,
   // im-a2ui-warm-eclipse plan). Round-trip the five additive fields so a
   // future contributor can't accidentally trim them in a downstream type

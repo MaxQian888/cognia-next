@@ -47,14 +47,48 @@ export interface E2BBackend {
   remove(handle: WorkspaceHandle): Promise<boolean>
 }
 
-let _e2bBackend: E2BBackend | null = null
+// Legacy singleton state is kept as a thin shim over the new
+// `workspace-backend-registry`. The registry is the source of truth;
+// `setE2BBackend` / `getE2BBackend` exist for backwards compatibility
+// with `plugins/e2b-sandbox/src/index.ts:21-22` and will be removed
+// after that plugin migrates to `ctx.workspace.registerBackend(...)`.
+// See ADR-0026 §2 §D.
+import {
+  registerWorkspaceBackend,
+  unregisterWorkspaceBackend,
+  getWorkspaceBackend,
+} from "./workspace-backend-registry"
 
+const LEGACY_E2B_BACKEND_ID = "e2b"
+
+/**
+ * @deprecated Use `ctx.workspace.registerBackend()` from a plugin context
+ * or `registerWorkspaceBackend()` directly. This shim writes into the
+ * shared `workspace-backend-registry` under the id `"e2b"` so the legacy
+ * `getE2BBackend()` accessor (and the `cloneToWorkspace({ backend: "e2b" })`
+ * dispatch below) keep working. ADR-0026 §2 §D migration path.
+ */
 export function setE2BBackend(b: E2BBackend | null): void {
-  _e2bBackend = b
+  // Reset first so set(null) reliably clears and set(impl) is idempotent.
+  unregisterWorkspaceBackend(LEGACY_E2B_BACKEND_ID)
+  if (b === null) return
+  registerWorkspaceBackend({
+    backendId: LEGACY_E2B_BACKEND_ID,
+    pluginId: "host", // legacy callers don't carry plugin identity
+    label: "e2b Firecracker",
+    description: "Legacy setE2BBackend shim — migrate to ctx.workspace.registerBackend",
+    backend: b,
+  })
 }
 
+/**
+ * @deprecated Read directly from the registry via
+ * `getWorkspaceBackend(id)` if you need to dispatch by id. This wrapper
+ * is kept for `cloneToWorkspace({ backend: "e2b" })` which still uses
+ * the string-union backend selector.
+ */
 export function getE2BBackend(): E2BBackend | null {
-  return _e2bBackend
+  return getWorkspaceBackend(LEGACY_E2B_BACKEND_ID) ?? null
 }
 
 export interface CloneOptions {
@@ -78,12 +112,13 @@ export interface CloneOptions {
  */
 export async function cloneToWorkspace(opts: CloneOptions): Promise<WorkspaceHandle> {
   if (opts.backend === "e2b") {
-    if (!_e2bBackend) {
+    const backend = getWorkspaceBackend(LEGACY_E2B_BACKEND_ID)
+    if (!backend) {
       throw new Error(
         "e2b workspace backend not registered. Install the e2b-sandbox plugin and enable it."
       )
     }
-    return _e2bBackend.clone({
+    return backend.clone({
       repoFullName: opts.repoFullName,
       branch: opts.branch,
       token: opts.token,
@@ -121,12 +156,13 @@ export interface CommitAndPushOptions {
  */
 export async function commitAndPush(opts: CommitAndPushOptions): Promise<string> {
   if (opts.workspace.backend === "e2b") {
-    if (!_e2bBackend) {
+    const backend = getWorkspaceBackend(LEGACY_E2B_BACKEND_ID)
+    if (!backend) {
       throw new Error(
         "e2b workspace backend not registered. Install the e2b-sandbox plugin and enable it."
       )
     }
-    return _e2bBackend.commitAndPush({
+    return backend.commitAndPush({
       workspace: opts.workspace,
       message: opts.message,
       remoteBranch: opts.remoteBranch,
@@ -151,9 +187,10 @@ export async function commitAndPush(opts: CommitAndPushOptions): Promise<string>
  */
 export async function removeWorkspace(handle: WorkspaceHandle): Promise<boolean> {
   if (handle.backend === "e2b") {
-    if (!_e2bBackend) return false
+    const backend = getWorkspaceBackend(LEGACY_E2B_BACKEND_ID)
+    if (!backend) return false
     try {
-      return await _e2bBackend.remove(handle)
+      return await backend.remove(handle)
     } catch (err) {
       console.error(`e2b removeWorkspace failed for ${handle.path}`, err)
       return false
