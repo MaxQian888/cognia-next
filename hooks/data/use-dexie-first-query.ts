@@ -74,6 +74,9 @@ export function useDexieFirstQuery<T>(
 
   useEffect(() => {
     if (!opts.table) return
+    // Capture into a local so the async closure sees the narrowed type
+    // — TS doesn't carry `if (!opts.table)` narrowing into the IIFE.
+    const table = opts.table
     let cancelled = false
 
     void (async () => {
@@ -87,7 +90,7 @@ export function useDexieFirstQuery<T>(
         // them on the per-table state; nothing more to do here.
       }
       if (cancelled) return
-      const updated = getSyncStateFor(opts.table)
+      const updated = getSyncStateFor(table)
       setStatus({
         lastSyncedAt: updated?.lastSyncAt ?? null,
         error: updated?.lastError ?? null,
