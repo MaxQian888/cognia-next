@@ -131,7 +131,7 @@ cron = "0.12"
 axum = { version = "0.8", features = ["macros", "ws"] }
 # axum-server (M2.9) — TLS termination for the companion API. `tls-rustls`
 # pulls in rustls + ring; matches the project's existing tokio-rustls path.
-axum-server = { version = "0.7", features = ["tls-rustls"] }
+axum-server = { version = "0.8", features = ["tls-rustls"] }
 subtle = "2"
 tower = { version = "0.5", features = ["util", "limit", "timeout"] }
 tower-http = { version = "0.6", features = ["limit", "trace", "cors"] }
