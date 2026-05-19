@@ -1058,6 +1058,15 @@ describe("resolveSendOptions — workflow-editor (Workflow Copilot mode)", () =>
     expect(opts.mcpServers).toBeUndefined()
   })
 
+  it("scopes Read to lib/workflow/copilot-templates via additionalDirectories", async () => {
+    const ch = makeChar({ id: "c1" })
+    const opts = await resolveSendOptions({
+      character: ch,
+      session: makeSession({ id: "workflow:wf_42", kind: "workflow-editor" }),
+    })
+    expect(opts.additionalDirectories).toEqual(["lib/workflow/copilot-templates"])
+  })
+
   it("clears appendSystemPrompt — A2UI / skill / goal sections do not leak into this session", async () => {
     const ch = makeChar({
       id: "c1",

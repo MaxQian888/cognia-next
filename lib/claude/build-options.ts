@@ -636,9 +636,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       if (matrix && Object.keys(matrix).length > 0) {
         const { buildCapabilityPromptSection } =
           await import("@/lib/connectors/a2ui-bridge/capability-evaluator")
+        // ADR-0026 — also pass the cached built-in skill capabilities so
+        // the prompt declares which lark.* (and future) skill families
+        // this channel can serve. Intersected against the per-channel
+        // allowlist below.
         connectorCapabilityPrompt = buildCapabilityPromptSection(
           session.platformBinding.platform,
-          matrix
+          matrix,
+          adapterRow?.lastKnownSkillCapabilities
         )
       }
     } catch {
@@ -649,6 +654,48 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const a2uiEnabled = baseA2uiEnabled || connectorCapabilityPrompt !== null
   if (a2uiEnabled) {
     for (const t of namespacedA2UIToolNames()) allowed.add(t)
+  }
+
+  // ── ADR-0026 — Built-in skills manifest ──────────────────────────────
+  // The built-in skill tier produces MCP tool defs that surface to the
+  // sidecar through the same plugin-tools manifest path. The dispatcher
+  // owns HITL routing; here we only flow the manifest entries into the
+  // allowed tools whitelist and append a skill-manifest entry the
+  // sidecar bridge picks up.
+  //
+  // Gating: surface skills ONLY when the session is IM-bound (the
+  // assistant needs `lark.calendar.*` to answer the Lark user) OR the
+  // character has explicitly opted in via `enableBuiltInSkills`. Desktop
+  // sessions without an explicit opt-in see an empty manifest — keeps
+  // the chat-history token budget tight and avoids exposing skills the
+  // user hasn't enabled.
+  const builtInSkillsRequested =
+    Boolean(session?.platformBinding?.adapterId) || character?.enableBuiltInSkills === true
+  let builtInSkillsManifest: Awaited<
+    ReturnType<typeof import("@/lib/skills/built-in/manifest").buildBuiltInSkillManifest>
+  > = []
+  if (builtInSkillsRequested) {
+    try {
+      // Side-effect import so every family's registerBuiltInSkill() runs
+      // before the manifest builder walks the registry.
+      await import("@/lib/skills/built-in")
+      const { buildBuiltInSkillManifest } = await import("@/lib/skills/built-in/manifest")
+      builtInSkillsManifest = buildBuiltInSkillManifest({
+        imBinding: session?.platformBinding?.adapterId
+          ? {
+              adapterId: session.platformBinding.adapterId,
+              platform: session.platformBinding.platform,
+              conversationKey: session.platformBinding.conversationKey ?? "",
+            }
+          : undefined,
+        imOverrideRow: imOverrideRow ?? undefined,
+      })
+      for (const entry of builtInSkillsManifest) {
+        allowed.add(entry.name)
+      }
+    } catch {
+      // Best-effort — registry import failure shouldn't break sends.
+    }
   }
 
   if (allowed.size > 0) opts.allowedTools = [...allowed]
@@ -750,7 +797,21 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       if (!computerUseAllowedForChat) {
         manifest = manifest.filter((entry) => entry.pluginId !== "cognia-computer-use")
       }
-      if (manifest.length > 0) opts.pluginTools = manifest
+      // ADR-0026 — fold built-in skill manifest entries into the same
+      // pluginTools stream the sidecar consumes. The two streams share
+      // a shape; the sidecar's `plugin_tool_exec` IPC routes by tool
+      // name so the synthetic `cognia-builtin-skills` namespace can
+      // co-exist with real plugin tools without collision.
+      const combined = [
+        ...manifest,
+        ...builtInSkillsManifest.map((e) => ({
+          name: e.name,
+          description: e.description,
+          jsonSchema: e.jsonSchema,
+          pluginId: e.pluginId,
+        })),
+      ]
+      if (combined.length > 0) opts.pluginTools = combined
     } catch {
       // Non-fatal — skip plugin tools for this turn if the bridge isn't
       // ready (e.g. the plugin store hasn't been hydrated yet on cold boot).
@@ -933,6 +994,16 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       opts.appendSystemPrompt = snapshot ?? undefined
       opts.allowedTools = [...WORKFLOW_COPILOT_ALLOWED_TOOLS]
       opts.disallowedTools = [...WORKFLOW_COPILOT_DISALLOWED_TOOLS]
+      // Scope the built-in Read tool to the copilot-templates directory
+      // only. The IDENTITY section of the prompt promises Read access is
+      // limited; without this clamp the SDK would otherwise inherit the
+      // additive stack's referencedPaths (which can include any user-
+      // @-referenced folder). Overwriting `additionalDirectories` is the
+      // single source of truth: anything under `lib/workflow/copilot-
+      // templates/` (relative to the sidecar's cwd) is readable, nothing
+      // else is. In dev / packaged Tauri the sidecar cwd is the repo root,
+      // so the relative path resolves consistently across platforms.
+      opts.additionalDirectories = ["lib/workflow/copilot-templates"]
       // External MCP servers are character-scope; the Copilot operates
       // purely through the workflow-ai plugin tools (already populated on
       // `opts.pluginTools` above by `buildPluginToolsManifest()`).

@@ -134,3 +134,54 @@ describe("handlePluginToolExec", () => {
     )
   })
 })
+
+// ── ADR-0026 — built-in skill fallback ────────────────────────────────
+describe("handlePluginToolExec — built-in skill fallback", () => {
+  afterEach(async () => {
+    __setPluginToolResolverForTesting(null)
+    const { __resetSharedBuiltInSkillRegistry } = await import("@/lib/skills/built-in/registry")
+    __resetSharedBuiltInSkillRegistry()
+  })
+
+  it("routes an mcpToolName to the built-in skill dispatcher when plugin registry has no match", async () => {
+    // Plugin resolver always misses — so the fallback path must fire.
+    __setPluginToolResolverForTesting({ getTool: () => undefined })
+
+    const { registerBuiltInSkill } = await import("@/lib/skills/built-in/registry")
+    const { z } = await import("zod")
+    const execute = jest.fn().mockResolvedValue({ events: [] })
+    registerBuiltInSkill({
+      id: "fallback.test",
+      family: "fallback",
+      label: { en: "x", "zh-CN": "x" },
+      description: { en: "x", "zh-CN": "x" },
+      platforms: "any",
+      mutation: "read",
+      imAccess: "always",
+      mcpToolName: "fallback_test",
+      inputSchema: z.object({ x: z.string() }),
+      execute,
+    })
+
+    const response = await handlePluginToolExec(
+      makeRequest({ name: "fallback_test", args: { x: "y" } })
+    )
+
+    expect(execute).toHaveBeenCalledWith({ x: "y" }, expect.anything())
+    expect(response).toEqual(
+      expect.objectContaining({
+        type: "plugin_tool_response",
+        sessionId: "session-1",
+        toolUseId: "use-1",
+        result: { status: "ok", data: { events: [] } },
+      })
+    )
+  })
+
+  it("returns plugin tool not found when neither registry matches", async () => {
+    __setPluginToolResolverForTesting({ getTool: () => undefined })
+
+    const response = await handlePluginToolExec(makeRequest({ name: "no_such_tool" }))
+    expect(response.error).toBe("plugin tool not found: no_such_tool")
+  })
+})

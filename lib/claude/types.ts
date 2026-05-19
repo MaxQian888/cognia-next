@@ -1365,6 +1365,21 @@ export interface Character {
    */
   enableComputerUse?: boolean
   /**
+   * Opt-in flag for the built-in skill tier in desktop sessions
+   * (ADR-0026). When true, `build-options.ts:resolveSendOptions`
+   * surfaces every registered built-in skill that targets the
+   * desktop runtime via `opts.pluginTools` so the assistant can call
+   * `lark.calendar.*` etc. from in-app chat.
+   *
+   * IM-bound sessions ignore this flag — built-in skills always
+   * surface there, filtered by the per-conversation
+   * `allowedBuiltInSkillIds` allowlist and the per-skill `imAccess`
+   * tier. The flag is desktop-only because IM messaging is the
+   * primary use case for the skill tier; desktop is opt-in to keep
+   * the chat-history token budget tight.
+   */
+  enableBuiltInSkills?: boolean
+  /**
    * Fine-grained per-character configuration that only applies when
    * `enableComputerUse === true`.
    */

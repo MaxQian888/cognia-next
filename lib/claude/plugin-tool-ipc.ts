@@ -129,19 +129,53 @@ export async function handlePluginToolExec(
   try {
     const resolver = resolverOverride ?? (await defaultResolver())
     const tool = resolver.getTool(request.name)
-    if (!tool) {
-      return { ...baseResponse, error: `plugin tool not found: ${request.name}` }
+    if (tool) {
+      const context: PluginToolContext = {
+        sessionId: request.sessionId,
+        config: resolver.getPluginConfig?.(tool.pluginId) ?? {},
+      }
+      const result = await tool.execute(request.args, context)
+      return { ...baseResponse, result }
     }
-    const context: PluginToolContext = {
-      sessionId: request.sessionId,
-      config: resolver.getPluginConfig?.(tool.pluginId) ?? {},
+    // ── ADR-0026 — built-in skill fallback ────────────────────────────
+    // Tool not in the plugin registry — try the built-in skill registry.
+    // The sidecar surfaces built-in skill MCP tool names verbatim from
+    // `BuiltInSkill.mcpToolName`; we resolve by that field.
+    const builtIn = await resolveBuiltInSkillByMcpName(request.name)
+    if (builtIn) {
+      const { runBuiltInSkill } = await import("@/lib/skills/built-in/dispatcher")
+      const result = await runBuiltInSkill(builtIn.id, request.args, {
+        sessionId: request.sessionId,
+      })
+      // The dispatcher returns a discriminated union; on `denied` /
+      // `pending_hitl` / `error` we surface the structured payload so the
+      // model can see the reason. The SDK turns this into a tool result
+      // string verbatim — opaque to the model is fine.
+      return { ...baseResponse, result }
     }
-    const result = await tool.execute(request.args, context)
-    return { ...baseResponse, result }
+    return { ...baseResponse, error: `plugin tool not found: ${request.name}` }
   } catch (err) {
     return {
       ...baseResponse,
       error: err instanceof Error ? err.message : String(err),
     }
+  }
+}
+
+async function resolveBuiltInSkillByMcpName(
+  mcpToolName: string
+): Promise<{ id: string } | undefined> {
+  try {
+    await import("@/lib/skills/built-in")
+    const { getSharedBuiltInSkillRegistry } = await import("@/lib/skills/built-in/registry")
+    const reg = getSharedBuiltInSkillRegistry()
+    for (const skill of reg.list()) {
+      if (skill.mcpToolName === mcpToolName) {
+        return { id: skill.id }
+      }
+    }
+    return undefined
+  } catch {
+    return undefined
   }
 }
