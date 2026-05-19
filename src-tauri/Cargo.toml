@@ -124,7 +124,7 @@ base64 = "0.22"
 # firing via a small tokio loop in `src-tauri/src/workflow/triggers/cron_daemon.rs`
 # rather than pull in `tokio-cron-scheduler` (which is heavier and has its
 # own runtime semantics that conflict with our existing scheduler module).
-cron = "0.12"
+cron = "0.16"
 
 # MCP HTTP server — axum for the inbound listener, subtle for constant-time
 # bearer-token comparison, tower-http for body-size limits.
