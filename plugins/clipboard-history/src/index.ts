@@ -14,6 +14,9 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
+// `isTauri` retained as a fallback for hosts that don't expose
+// `ctx.capabilities` (older bootstrap, sidecar harnesses). Prefer
+// `ctx.capabilities.tauri` per ADR-0026 §5 §C.
 import { isTauri } from "@/lib/tauri"
 import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
 
@@ -30,8 +33,12 @@ interface PluginConfig {
   pollIntervalMs?: number
 }
 
-async function readClipboardText(): Promise<string | null> {
-  if (isTauri()) {
+async function readClipboardText(ctx?: PluginContext): Promise<string | null> {
+  // Prefer ADR-0026 §5 §C `ctx.capabilities.tauri` when the host wired
+  // it; fall back to the direct `isTauri()` import when running under an
+  // older bootstrap (the import keeps working as a `@deprecated` path).
+  const tauriHost = ctx?.capabilities?.tauri ?? isTauri()
+  if (tauriHost) {
     try {
       const mod = await import("@tauri-apps/plugin-clipboard-manager")
       return await mod.readText()
@@ -96,7 +103,7 @@ const definition: PluginDefinition = {
       if (pollHandle) clearInterval(pollHandle)
       if (cfg.privacyMode || interval <= 0) return
       pollHandle = setInterval(async () => {
-        const text = await readClipboardText()
+        const text = await readClipboardText(ctx)
         if (text) await pushIfNew(ctx, text)
       }, interval)
     }

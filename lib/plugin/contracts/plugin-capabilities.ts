@@ -466,7 +466,12 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     // Diagnostics + provider responses route through the existing
     // `monaco-bridge` + `lsp-protocol-adapter` pipeline.
     id: "lsp-server",
-    support: "supported",
+    // Host runtime is fully wired (lsp-registry + monaco bridge + sidecar
+    // client are all live), but the SDK packages don't yet ship a
+    // `defineLspServer()` helper — plugin authors declare LSP servers
+    // through `manifest.lspServers[]` only. Downgrade to `experimental`
+    // until the SDK gains a typed helper; the host contract is unaffected.
+    support: "experimental",
     manifestFields: ["lspServers"],
     runtimeBinding: "lib/plugin/lsp/lsp-registry registerPluginLspServers / unregisterByOwner",
     hostBindings: [

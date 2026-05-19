@@ -13,6 +13,8 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
+// `isTauri` retained as fallback when host doesn't expose
+// `ctx.capabilities` (ADR-0026 §5 §C migration path).
 import { isTauri } from "@/lib/tauri"
 
 interface ListFilesArgs {
@@ -36,8 +38,22 @@ const DESKTOP_ONLY = {
   error: "Workspace Tools require the desktop app for filesystem access.",
 }
 
+/**
+ * Cached `tauri` flag — set by `activate()` from `ctx.capabilities.tauri`
+ * when the host exposes ADR-0026 §5 §C, otherwise falls back to the
+ * direct `isTauri()` import. Module-scoped so the tool executors (which
+ * don't receive the plugin context as an argument) can read it without
+ * threading `ctx` through every call site.
+ */
+let tauriHostFlag: boolean | undefined
+
+function resolveTauriHost(): boolean {
+  if (tauriHostFlag !== undefined) return tauriHostFlag
+  return isTauri()
+}
+
 async function listFiles(args: ListFilesArgs): Promise<unknown> {
-  if (!isTauri()) return DESKTOP_ONLY
+  if (!resolveTauriHost()) return DESKTOP_ONLY
   const fs = await import("@tauri-apps/plugin-fs")
   const path = args.path && args.path.length > 0 ? args.path : "."
   const entries = await fs.readDir(path)
@@ -53,7 +69,7 @@ async function listFiles(args: ListFilesArgs): Promise<unknown> {
 }
 
 async function readFile(args: ReadFileArgs): Promise<unknown> {
-  if (!isTauri()) return DESKTOP_ONLY
+  if (!resolveTauriHost()) return DESKTOP_ONLY
   if (!args.path) {
     return { ok: false as const, error: "path is required" }
   }
@@ -69,7 +85,7 @@ async function readFile(args: ReadFileArgs): Promise<unknown> {
 }
 
 async function search(args: SearchArgs): Promise<unknown> {
-  if (!isTauri()) return DESKTOP_ONLY
+  if (!resolveTauriHost()) return DESKTOP_ONLY
   if (!args.pattern) {
     return { ok: false as const, error: "pattern is required" }
   }
@@ -116,7 +132,12 @@ const definition: PluginDefinition = {
     main: "src/index.ts",
   } as never,
   activate: async (ctx: PluginContext) => {
-    ctx.logger?.info(`workspace-tools activated (${isTauri() ? "desktop" : "browser fallback"})`)
+    // Resolve the platform once at activate time and cache for the
+    // executors below. Prefer ADR-0026 §5 §C `ctx.capabilities.tauri`.
+    tauriHostFlag = ctx.capabilities?.tauri ?? isTauri()
+    ctx.logger?.info(
+      `workspace-tools activated (${tauriHostFlag ? "desktop" : "browser fallback"})`
+    )
 
     const tools: Array<{
       name: string
@@ -158,8 +179,10 @@ const definition: PluginDefinition = {
     }
   },
   deactivate: async () => {
-    // Tools are unregistered by the runtime when deactivate runs; no
-    // side state to clean up here.
+    // Tools are unregistered by the runtime when deactivate runs.
+    // Reset the cached host flag so a subsequent reactivation re-resolves
+    // it from `ctx.capabilities` cleanly.
+    tauriHostFlag = undefined
   },
 }
 

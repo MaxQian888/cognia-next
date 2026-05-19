@@ -89,6 +89,164 @@ const WASM_PREOPEN_PATH_PATTERN = /^[^\0]+$/
 const ID_PATTERN = /^[a-z0-9]([a-z0-9-_.]*[a-z0-9])?$/
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(-[a-z0-9]+)?$/i
 
+// Shared validators for the ADR-0026 lazy-factory manifest fields.
+//
+// Every new declarative provider/renderer/middleware entry uses the same
+// `{ id, label, entry, export }` shape. The validators below enforce:
+//   - id matches the standard ID_PATTERN (lowercase alphanumeric + sep)
+//   - entry is a relative path, no traversal (`..`), no NUL bytes, no
+//     absolute / drive-letter prefixes
+//   - export is a non-empty JS identifier
+//   - duplicate ids inside the same field reject
+//
+// Mirrors the path-traversal guard `lib/plugin/bridge/themes-bridge.ts`
+// applies to `vscodeJsonPath`, keeping security policy consistent across
+// every manifest plugin-supplied path.
+
+const LAZY_FACTORY_ENTRY_TRAVERSAL = /(^|[\\/])\.\.([\\/]|$)/
+const LAZY_FACTORY_ENTRY_NUL = /\0/
+const LAZY_FACTORY_ENTRY_ABS = /^(\/|[a-zA-Z]:[\\/])/
+const JS_IDENT_PATTERN = /^[$_a-zA-Z][$_a-zA-Z0-9]*$/
+
+interface LazyFactoryEntry {
+  id?: unknown
+  label?: unknown
+  entry?: unknown
+  export?: unknown
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+interface LazyFactoryFieldOptions {
+  /** Manifest field name (e.g. "ocrProviders"). Drives error codes. */
+  field: string
+  /** Whether each entry requires a `label` field. Default true. */
+  requireLabel?: boolean
+  /**
+   * Optional per-entry extra validation. Return diagnostics for the entry;
+   * the runner attaches them to the right field path. The callback receives
+   * the entry object already verified as plain object.
+   */
+  extra?: (
+    entry: Record<string, unknown>,
+    index: number,
+    push: (severity: "error" | "warning", code: string, message: string) => void
+  ) => void
+}
+
+function validateLazyFactoryArray(
+  raw: unknown,
+  options: LazyFactoryFieldOptions,
+  pushError: (field: string, code: string, message: string, hint?: string) => void,
+  pushWarning: (field: string, code: string, message: string, hint?: string) => void
+): void {
+  const { field, requireLabel = true, extra } = options
+  if (raw === undefined) return
+
+  if (!Array.isArray(raw)) {
+    pushError(field, `manifest.${field}.invalid_type`, `"${field}" must be an array if provided`)
+    return
+  }
+
+  const seenIds = new Set<string>()
+  for (let i = 0; i < raw.length; i++) {
+    const entry = raw[i] as LazyFactoryEntry
+    const path = `${field}[${i}]`
+
+    if (!isPlainObject(entry)) {
+      pushError(path, `manifest.${field}.invalid_item`, `Entry at index ${i} must be an object`)
+      continue
+    }
+
+    if (typeof entry.id !== "string" || entry.id.length === 0) {
+      pushError(
+        `${path}.id`,
+        `manifest.${field}.id.missing`,
+        `Entry at index ${i} requires a non-empty string "id"`
+      )
+    } else if (!ID_PATTERN.test(entry.id)) {
+      pushError(
+        `${path}.id`,
+        `manifest.${field}.id.invalid`,
+        `Entry id "${entry.id}" must be lowercase alphanumeric with hyphens/underscores/dots`
+      )
+    } else if (seenIds.has(entry.id)) {
+      pushError(
+        `${path}.id`,
+        `manifest.${field}.id.duplicate`,
+        `Duplicate id "${entry.id}" in "${field}"`
+      )
+    } else {
+      seenIds.add(entry.id)
+    }
+
+    if (requireLabel && (typeof entry.label !== "string" || entry.label.length === 0)) {
+      pushError(
+        `${path}.label`,
+        `manifest.${field}.label.missing`,
+        `Entry at index ${i} requires a non-empty string "label"`
+      )
+    }
+
+    if (typeof entry.entry !== "string" || entry.entry.length === 0) {
+      pushError(
+        `${path}.entry`,
+        `manifest.${field}.entry.missing`,
+        `Entry at index ${i} requires a non-empty string "entry" (relative path)`
+      )
+    } else {
+      if (LAZY_FACTORY_ENTRY_NUL.test(entry.entry)) {
+        pushError(
+          `${path}.entry`,
+          `manifest.${field}.entry.invalid_chars`,
+          `"entry" must not contain NUL bytes`
+        )
+      }
+      if (LAZY_FACTORY_ENTRY_ABS.test(entry.entry)) {
+        pushError(
+          `${path}.entry`,
+          `manifest.${field}.entry.absolute`,
+          `"entry" must be a relative path (no leading "/" or drive letter)`
+        )
+      }
+      if (LAZY_FACTORY_ENTRY_TRAVERSAL.test(entry.entry)) {
+        pushError(
+          `${path}.entry`,
+          `manifest.${field}.entry.traversal`,
+          `"entry" must not contain ".." path segments`
+        )
+      }
+    }
+
+    if (typeof entry.export !== "string" || entry.export.length === 0) {
+      pushError(
+        `${path}.export`,
+        `manifest.${field}.export.missing`,
+        `Entry at index ${i} requires a non-empty string "export" (named JS export)`
+      )
+    } else if (!JS_IDENT_PATTERN.test(entry.export)) {
+      pushError(
+        `${path}.export`,
+        `manifest.${field}.export.invalid`,
+        `"export" must be a valid JS identifier (got "${entry.export}")`
+      )
+    }
+
+    if (extra) {
+      extra(entry as Record<string, unknown>, i, (severity, code, message) => {
+        const fullCode = `manifest.${field}.${code}`
+        if (severity === "error") {
+          pushError(path, fullCode, message)
+        } else {
+          pushWarning(path, fullCode, message)
+        }
+      })
+    }
+  }
+}
+
 // =============================================================================
 // Manifest Validation
 // =============================================================================
@@ -627,6 +785,94 @@ export function validatePluginManifest(
       }
     }
   }
+
+  // ── ADR-0026 lazy-factory fields ────────────────────────────────────────────
+  // Each of the six new manifest blocks shares the `{ id, label, entry,
+  // export }` shape. `validateLazyFactoryArray` enforces the shared rules;
+  // the `extra` callback runs field-specific checks (e.g. `kind` for
+  // aiProviders, `partType` for messageRenderers).
+
+  validateLazyFactoryArray(m.ocrProviders, { field: "ocrProviders" }, pushError, pushWarning)
+  validateLazyFactoryArray(
+    m.workspaceBackends,
+    { field: "workspaceBackends" },
+    pushError,
+    pushWarning
+  )
+  validateLazyFactoryArray(
+    m.messageRenderers,
+    {
+      field: "messageRenderers",
+      requireLabel: false,
+      extra: (entry, _i, push) => {
+        if (typeof entry.partType !== "string" || entry.partType.length === 0) {
+          push("error", "partType.missing", `messageRenderers entry requires a "partType" string`)
+        }
+      },
+    },
+    pushError,
+    pushWarning
+  )
+  validateLazyFactoryArray(
+    m.aiProviders,
+    {
+      field: "aiProviders",
+      extra: (entry, _i, push) => {
+        if (entry.kind !== "llm" && entry.kind !== "embedding") {
+          push("error", "kind.invalid", `aiProviders entry "kind" must be "llm" or "embedding"`)
+          return
+        }
+        if (entry.kind === "embedding") {
+          if (
+            typeof entry.dimensions !== "number" ||
+            !Number.isInteger(entry.dimensions) ||
+            entry.dimensions <= 0
+          ) {
+            push(
+              "error",
+              "dimensions.invalid",
+              `aiProviders embedding entry requires positive integer "dimensions"`
+            )
+          }
+        }
+        if (entry.kind === "llm" && entry.models !== undefined) {
+          if (
+            !Array.isArray(entry.models) ||
+            !(entry.models as unknown[]).every((s) => typeof s === "string")
+          ) {
+            push("error", "models.invalid", `aiProviders llm entry "models" must be string[]`)
+          }
+        }
+      },
+    },
+    pushError,
+    pushWarning
+  )
+  validateLazyFactoryArray(m.modalMounts, { field: "modalMounts" }, pushError, pushWarning)
+  validateLazyFactoryArray(
+    m.chatMiddlewares,
+    {
+      field: "chatMiddlewares",
+      extra: (entry, _i, push) => {
+        if (entry.priority !== undefined) {
+          if (typeof entry.priority !== "number" || entry.priority < -100 || entry.priority > 100) {
+            push("error", "priority.range", `chatMiddlewares "priority" must be in [-100, 100]`)
+          }
+        }
+        if (entry.timeoutMs !== undefined) {
+          if (
+            typeof entry.timeoutMs !== "number" ||
+            entry.timeoutMs <= 0 ||
+            entry.timeoutMs > 60_000
+          ) {
+            push("error", "timeoutMs.range", `chatMiddlewares "timeoutMs" must be in (0, 60000]`)
+          }
+        }
+      },
+    },
+    pushError,
+    pushWarning
+  )
 
   // ── i18n block ──────────────────────────────────────────────────────────────
   // Plugin-supplied localized strings. Validated as a flat per-locale string

@@ -1,0 +1,213 @@
+---
+title: 扩展点 v2
+description: ADR-0026 新增的 6 个 manifest 根字段、8 个 runtime 点位、onBuildOptions hook、围绕式聊天中间件，以及 ctx.* 命名空间（ocr / workspace / modal / chat / capabilities）的实战参考。
+---
+
+# 扩展点 v2
+
+ADR-0026（2026-05）补齐了 cognia-next 插件平台的 17 个真实缺口。本页是实战参考——新增的 manifest 字段、runtime 点位、`ctx.*` 命名空间的最小可用形状。
+
+背景和动机参见 [ADR-0026 — 插件扩展点扩充](/docs/zh/adr/0026-plugin-extension-point-expansion)。
+
+## Manifest 字段
+
+每个新贡献统一使用懒加载工厂形状：
+
+```jsonc
+// plugin.json 根级，与 themes / connectors / mcpServerPresets 并列
+{
+  "ocrProviders": [
+    {
+      "id": "baidu",
+      "label": "百度 OCR",
+      "entry": "providers/baidu.js",
+      "export": "createBaiduProvider"
+    }
+  ]
+}
+```
+
+`entry` 是相对于插件安装根的路径（禁止 `..`、绝对路径、NUL 字节）。`export` 是 host 首次需要时 dynamic-import 出来的具名函数。
+
+六个新 manifest 块：
+
+| 字段 | 作用 | 权限 |
+|------|------|------|
+| `ocrProviders` | OCR registry 贡献 | `network:fetch` |
+| `workspaceBackends` | Issue-loop / sandbox runner | `process:spawn` |
+| `messageRenderers` | 自定义 `part.type` React 组件 | `extension:ui` |
+| `aiProviders` | 插件内部 LLM / embedding | `network:fetch` |
+| `modalMounts` | 声明式 modal 预注册 | `extension:ui` |
+| `chatMiddlewares` | 围绕式 chat 管道 | `agent:control` |
+
+另加 `configComponent?: { entry, export }`，提供每个插件的自定义设置 UI。
+
+## ctx.ocr — 注册 OCR provider
+
+```ts
+export async function activate(ctx: PluginContext) {
+  const handle = ctx.ocr.registerProvider({
+    id: "my-engine", // 自动前缀为 `<pluginId>:my-engine`
+    label: "我的 OCR 引擎",
+    category: "specialist",
+    shells: { browser: true, tauri: true, capacitor: false },
+    credentialKeys: ["myocr-key"],
+    extract: async (input, providerCtx) => { /* 返回 OcrResult */ },
+  })
+
+  // 可选——host 在 disable 时也会自动清。
+  ctx.onDeactivate?.(() => handle.unregister())
+}
+```
+
+## ctx.workspace — 注册 issue-loop 后端
+
+后端形状沿用 `E2BBackend`（`clone / commitAndPush / remove`），替换旧的 `setE2BBackend()` singleton：
+
+```ts
+ctx.workspace.registerBackend({
+  id: "my-sandbox",
+  label: "我的沙箱",
+  backend: {
+    async clone({ repoFullName, branch, token }) { /* ... */ },
+    async commitAndPush({ workspace, message, remoteBranch }) { /* ... */ },
+    async remove(handle) { /* ... */ },
+  },
+})
+```
+
+## ctx.renderer — 自定义 message-part renderer
+
+按 `part.type` 注册 React 组件。保留类型（`tool-*` / `text` / `reasoning` / `file` / `a2ui` / `subagent` / `agent-team-dispatch` / `artifact` / `sources` / `canvas`）会被拒绝，使用插件前缀的 type：
+
+```ts
+ctx.messagePart.registerPartRenderer("x-my-custom-block", MyBlockRenderer)
+```
+
+或者通过 `manifest.messageRenderers[]` 声明：
+
+```jsonc
+{ "partType": "x-my-block", "entry": "renderer.js", "export": "MyBlockRenderer" }
+```
+
+## ctx.ai — 插件内部 LLM / embedding
+
+**重要：** 主聊天链路永远不会解析到插件 AI provider。这些调用仅供插件自己的后台任务（总结、分类、向量化）使用。想影响主聊天请用 `ctx.chat.use()`。
+
+```ts
+const { text } = await ctx.ai.chat([
+  { role: "user", content: "总结一下这段" }
+])
+
+const vectors = await ctx.ai.embed(["hello", "world"])
+```
+
+## ctx.modal — 在任何地方打开 modal
+
+```ts
+const handle = ctx.modal.openModal(MyModalComponent, { initialTab: "general" })
+// 关闭：
+handle.close()
+```
+
+插件组件收到 `{ onClose, modalId, args }`。调用 `onClose()` 把条目从栈里 pop 出去。
+
+## ctx.chat — 围绕式中间件
+
+中间件包裹整个 build-options + send 调用。安全网：每个中间件 5s 超时（最大 60s）、错误隔离（抛错跳过该中间件、不影响主链路）、3 次连续失败熔断。
+
+```ts
+const dispose = ctx.chat.use(async (req, next) => {
+  const before = Date.now()
+  const res = await next()
+  ctx.logger.info(`turn 用时 ${Date.now() - before}ms`)
+  return res
+}, { id: "telemetry", priority: 10, timeoutMs: 3000 })
+```
+
+只想改字段、不想短路的，用更轻量的 `onBuildOptions` hook：
+
+```ts
+export const hooks: PluginHooks = {
+  async onBuildOptions(options) {
+    if (options.systemPrompt) {
+      return {
+        ...options,
+        systemPrompt: options.systemPrompt + "\n\n请简洁回答。"
+      }
+    }
+  },
+}
+```
+
+## ctx.capabilities — 平台探测
+
+替代直接 `isTauri()` / `isMobile()` import：
+
+```ts
+if (ctx.capabilities.tauri) {
+  // Tauri 路径
+} else if (ctx.capabilities.mobile) {
+  // Capacitor 移动端路径
+} else {
+  // 浏览器路径
+}
+```
+
+## 每个插件的自定义设置 UI
+
+在 manifest 加 `configComponent`。host 会在插件设置 tab 里渲染你的组件，**替代**由 `configSchema` 自动生成的表单：
+
+```jsonc
+{
+  "configComponent": { "entry": "settings.js", "export": "MySettings" }
+}
+```
+
+```tsx
+export const MySettings: ConfigComponent = ({ config, onSave }) => {
+  return <button onClick={() => onSave({ ...config, enabled: true })}>
+    启用
+  </button>
+}
+```
+
+## 主题 CSS 变量
+
+插件主题现在可以在运行时覆盖 CSS 自定义属性（变量名匹配 `^--[a-z][a-z0-9-]*$`，值 ≤200 字符，`</style>` 会被拒绝）：
+
+```jsonc
+{
+  "themes": [
+    {
+      "id": "midnight",
+      "name": "Midnight",
+      "isDark": true,
+      "cssVariables": {
+        "--background": "#0a0a0a",
+        "--foreground": "#fafafa",
+        "--accent-1": "oklch(0.7 0.15 220)"
+      }
+    }
+  ]
+}
+```
+
+## 复活的槽位
+
+v2 复活两个之前 deprecated 的槽位：
+
+- **`chat.message.actions`** — 每条消息上方的 hover action bar，与 `chat.message.footer`（host copy/regenerate）区分。
+- **`settings.ai`** — `api-key-section` 顶部，统一 AI 设置卡片的标准 host。
+
+## 迁移速查表
+
+旧路径仍能跑（`@deprecated` shim 兜底）。建议在后续 PR 中迁移：
+
+| 旧 | 新 |
+|----|----|
+| 全局 `installOcrRuntime()` | `ctx.ocr.registerProvider(...)` |
+| `setE2BBackend(impl)` | `ctx.workspace.registerBackend({ id: "e2b", ... })` |
+| `registerNodeExecutor` side-effect import | `ctx.workflow.registerNode(...)` 或 `manifest.workflows.nodes[]` |
+| `registerPluginI18n({ ... })` | `manifest.i18n`（已自动 wire） |
+| 直接 `isTauri()` import | `ctx.capabilities.tauri` |

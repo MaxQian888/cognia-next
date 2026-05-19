@@ -13,13 +13,18 @@
  */
 
 import type { PluginContext, PluginDefinition, PluginTool } from "@/types/plugin"
-import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
+// ADR-0026 §5 §D — i18n is declared in `manifest.i18n` below and auto-
+// wired by the plugin manager on enable. The old imperative
+// `registerPluginI18n` / `unregisterPluginI18n` calls are gone.
 import { buildReadTools } from "./tools/read-tools"
 import { buildMutateTools } from "./tools/mutate-tools"
 import { buildLayoutTools } from "./tools/layout-tools"
 import { buildRunTools } from "./tools/run-tools"
 import { buildProposeTools } from "./tools/propose-tools"
 import { buildTemplateTools } from "./tools/template-tools"
+import { buildResourceTools } from "./tools/resource-tools"
+import { buildNodeKindTools } from "./tools/node-kind-tools"
+import { buildDiagnosticTools } from "./tools/diagnostic-tools"
 
 const PLUGIN_ID = "cognia-workflow-ai"
 
@@ -31,6 +36,9 @@ export function buildWorkflowAiTools(): PluginTool[] {
     ...buildTemplateTools(),
     ...buildLayoutTools(),
     ...buildRunTools(),
+    ...buildResourceTools(),
+    ...buildNodeKindTools(),
+    ...buildDiagnosticTools(),
   ]
 }
 
@@ -54,10 +62,11 @@ const definition: PluginDefinition = {
     capabilities: ["tools", "commands"],
     main: "src/index.ts",
     permissions: [],
+    // ADR-0026 §5 §D — declarative i18n. Auto-wired on enable / disable.
+    i18n: { locales: I18N_MESSAGES },
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("workflow-ai plugin activated")
-    registerPluginI18n({ pluginId: PLUGIN_ID, messages: I18N_MESSAGES })
     if (ctx.agent?.registerTool) {
       for (const tool of buildWorkflowAiTools()) {
         ctx.agent.registerTool(tool)
@@ -70,7 +79,7 @@ const definition: PluginDefinition = {
   },
   deactivate: async (ctx?: PluginContext) => {
     if (ctx?.pluginId) {
-      unregisterPluginI18n(ctx.pluginId)
+      // i18n teardown handled by the manager (manifest.i18n path).
       if (ctx.agent?.unregisterTool) {
         for (const tool of buildWorkflowAiTools()) {
           ctx.agent.unregisterTool(tool.name)

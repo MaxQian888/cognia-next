@@ -1,0 +1,242 @@
+---
+title: Extension Points v2
+description: Reference for the six new flat manifest fields, the eight new runtime points, the onBuildOptions hook, around-style chat middleware, and the ctx.* namespaces added in ADR-0026 (ocr, workspace, modal, chat, capabilities).
+---
+
+# Extension Points v2
+
+ADR-0026 (2026-05) closed 17 gaps in the cognia-next plugin platform. This
+page is the practical reference: every new manifest field, runtime point,
+and `ctx.*` namespace introduced, with the minimum viable shape a plugin
+author needs.
+
+For background and rationale, see
+[ADR-0026 — Plugin Extension-Point Expansion](/docs/en/adr/0026-plugin-extension-point-expansion).
+
+## Manifest fields
+
+Every new contribution uses the same lazy-factory shape:
+
+```jsonc
+// plugin.json — root level, parallel with themes / connectors / mcpServerPresets
+{
+  "ocrProviders": [
+    {
+      "id": "baidu",
+      "label": "Baidu OCR",
+      "entry": "providers/baidu.js",
+      "export": "createBaiduProvider"
+    }
+  ]
+}
+```
+
+`entry` is a relative path inside the plugin install root (no `..`, no
+absolute paths, no NUL bytes). `export` is the named function the host
+dynamic-imports on first use.
+
+The six new manifest blocks:
+
+| Field | Drives | Permission |
+|-------|--------|------------|
+| `ocrProviders` | OCR registry contributions | `network:fetch` |
+| `workspaceBackends` | Issue-loop / sandbox runners | `process:spawn` |
+| `messageRenderers` | Custom `part.type` React components | `extension:ui` |
+| `aiProviders` | Plugin-internal LLM / embedding | `network:fetch` |
+| `modalMounts` | Declarative modal pre-registration | `extension:ui` |
+| `chatMiddlewares` | Around-style chat pipeline | `agent:control` |
+
+Plus `configComponent?: { entry, export }` for a per-plugin custom
+settings UI panel.
+
+## ctx.ocr — register an OCR provider
+
+```ts
+export async function activate(ctx: PluginContext) {
+  const handle = ctx.ocr.registerProvider({
+    id: "my-engine", // prefixed automatically as `<pluginId>:my-engine`
+    label: "My OCR Engine",
+    category: "specialist",
+    shells: { browser: true, tauri: true, capacitor: false },
+    credentialKeys: ["myocr-key"],
+    extract: async (input, providerCtx) => {
+      // ... call your backend and return OcrResult
+    },
+  })
+
+  // Optional — the host calls this automatically on plugin disable.
+  ctx.onDeactivate?.(() => handle.unregister())
+}
+```
+
+## ctx.workspace — register an issue-loop backend
+
+`E2BBackend`-shaped runtime (the same `clone / commitAndPush / remove`
+contract `lib/github/workspace.ts` has always required). Replaces the
+legacy `setE2BBackend()` singleton:
+
+```ts
+ctx.workspace.registerBackend({
+  id: "my-sandbox",
+  label: "My Sandbox",
+  backend: {
+    async clone({ repoFullName, branch, token }) { /* ... */ },
+    async commitAndPush({ workspace, message, remoteBranch }) { /* ... */ },
+    async remove(handle) { /* ... */ },
+  },
+})
+```
+
+## ctx.renderer — custom message-part renderer
+
+Plugins ship a React component keyed on `part.type`. Reserved types
+(`tool-*`, `text`, `reasoning`, `file`, `a2ui`, `subagent`,
+`agent-team-dispatch`, `artifact`, `sources`, `canvas`) are rejected — use a
+plugin-prefixed type:
+
+```ts
+ctx.messagePart.registerPartRenderer("x-my-custom-block", MyBlockRenderer)
+```
+
+Or declaratively via `manifest.messageRenderers[]`:
+
+```jsonc
+{ "partType": "x-my-block", "entry": "renderer.js", "export": "MyBlockRenderer" }
+```
+
+## ctx.ai — plugin-internal LLM / embedding
+
+**Important:** the main chat pipeline never resolves a plugin AI
+provider. Use these calls for plugin-internal background tasks
+(summarization, classification, embedding for plugin-owned vector
+stores). Influence the main chat via `ctx.chat.use()` instead.
+
+```ts
+const { text } = await ctx.ai.chat([
+  { role: "user", content: "Summarize this." }
+])
+
+const vectors = await ctx.ai.embed(["hello", "world"])
+```
+
+## ctx.modal — open a modal from anywhere
+
+```ts
+const handle = ctx.modal.openModal(MyModalComponent, { initialTab: "general" })
+// Later:
+handle.close()
+```
+
+The plugin component receives `{ onClose, modalId, args }`. Calling
+`onClose()` pops the entry from the stack.
+
+## ctx.chat — around-style middleware
+
+A middleware wraps the entire build-options + send call. Safety net:
+per-middleware timeout (5s default, 60s max), error isolation (one throw
+skips that middleware), 3-strike circuit breaker disables on repeated
+failure.
+
+```ts
+const dispose = ctx.chat.use(async (req, next) => {
+  const before = Date.now()
+  const res = await next()
+  ctx.logger.info(`turn took ${Date.now() - before}ms`)
+  return res
+}, { id: "telemetry", priority: 10, timeoutMs: 3000 })
+```
+
+For a *transform-only* hook (no short-circuit, no async wrapping), use
+the lighter `onBuildOptions` hook instead:
+
+```ts
+export const hooks: PluginHooks = {
+  async onBuildOptions(options) {
+    if (options.systemPrompt) {
+      return {
+        ...options,
+        systemPrompt: options.systemPrompt + "\n\nBe concise."
+      }
+    }
+  },
+}
+```
+
+## ctx.capabilities — platform detection
+
+Replaces direct `isTauri()` / `isMobile()` imports:
+
+```ts
+if (ctx.capabilities.tauri) {
+  // Tauri-only path
+} else if (ctx.capabilities.mobile) {
+  // Capacitor mobile path
+} else {
+  // Browser path
+}
+```
+
+## Per-plugin custom settings UI
+
+Add `configComponent` to your manifest. The host renders your component
+in the plugin's settings tab *instead of* the auto-generated form derived
+from `configSchema`:
+
+```jsonc
+{
+  "configComponent": { "entry": "settings.js", "export": "MySettings" }
+}
+```
+
+```tsx
+export const MySettings: ConfigComponent = ({ config, onSave }) => {
+  return <button onClick={() => onSave({ ...config, enabled: true })}>
+    Enable
+  </button>
+}
+```
+
+## Theme CSS variables
+
+Plugins can now contribute themes that override CSS custom properties at
+runtime (variable names are constrained to `^--[a-z][a-z0-9-]*$`, values
+≤200 chars, `</style>` rejected):
+
+```jsonc
+{
+  "themes": [
+    {
+      "id": "midnight",
+      "name": "Midnight",
+      "isDark": true,
+      "cssVariables": {
+        "--background": "#0a0a0a",
+        "--foreground": "#fafafa",
+        "--accent-1": "oklch(0.7 0.15 220)"
+      }
+    }
+  ]
+}
+```
+
+## Slot revivals
+
+Two previously deprecated slots are revived in v2:
+
+- **`chat.message.actions`** — hover-action bar above each message,
+  separate from the `chat.message.footer` host actions row.
+- **`settings.ai`** — top of `api-key-section`, the canonical home for
+  unified AI-settings plugin cards.
+
+## Migration cheat-sheet
+
+If your plugin still uses the old paths, the host accepts them under
+`@deprecated` shims. Migrate when convenient:
+
+| Old | New |
+|-----|-----|
+| `installOcrRuntime()` global | `ctx.ocr.registerProvider(...)` |
+| `setE2BBackend(impl)` | `ctx.workspace.registerBackend({ id: "e2b", ... })` |
+| `registerNodeExecutor` side-effect import | `ctx.workflow.registerNode(...)` or `manifest.workflows.nodes[]` |
+| `registerPluginI18n({ ... })` | `manifest.i18n` (auto-wired) |
+| Direct `isTauri()` import | `ctx.capabilities.tauri` |

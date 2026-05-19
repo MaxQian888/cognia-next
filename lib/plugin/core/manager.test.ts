@@ -35,6 +35,11 @@ jest.mock("@/lib/plugin/security/permission-guard", () => ({
 
 jest.mock("@/lib/native/utils", () => ({
   canUseTauriInvoke: jest.fn(() => true),
+  // ADR-0026 §5 §C — `createCapabilitiesAPI()` (mounted on every full
+  // plugin context) reads `isTauri()` from this module. Mock it here so
+  // the plugin lifecycle tests don't crash with "isTauri is not a
+  // function" when instantiating the context.
+  isTauri: jest.fn(() => false),
 }))
 
 jest.mock("@/lib/chat/slash-command-registry", () => ({

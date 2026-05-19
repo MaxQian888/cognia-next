@@ -1,0 +1,121 @@
+import { registerAiProvidersForPlugin, unregisterAiProvidersForPlugin } from "./ai-providers-bridge"
+import { clearCustomAIProviders, getCustomAIProviders } from "@/lib/plugin/api/ai-provider-api"
+import type { PluginManifest } from "@/types/plugin/plugin"
+
+const manifest = (overrides: Partial<PluginManifest>): PluginManifest =>
+  ({
+    id: "p",
+    name: "P",
+    version: "1.0.0",
+    description: "",
+    type: "frontend",
+    capabilities: ["tools"],
+    main: "index.js",
+    ...overrides,
+  }) as PluginManifest
+
+describe("ai-providers-bridge", () => {
+  beforeEach(() => {
+    clearCustomAIProviders()
+  })
+
+  it("registers an LLM provider via the existing host API", async () => {
+    const m = manifest({
+      aiProviders: [
+        {
+          id: "myllm",
+          label: "My LLM",
+          entry: "llm.js",
+          export: "createLlm",
+          kind: "llm",
+          models: ["small", "large"],
+        },
+      ],
+    })
+    const importer = jest.fn(async () => ({
+      createLlm: () => ({
+        id: "myllm",
+        complete: async () => ({ text: "hello world" }),
+      }),
+    }))
+    const result = await registerAiProvidersForPlugin(m, "/plugins/p", { importer })
+    expect(result).toEqual({ registered: 1, errors: [] })
+    const all = getCustomAIProviders()
+    expect(all.some((p) => p.id === "p:myllm")).toBe(true)
+  })
+
+  it("adapts complete() into the AsyncIterable chat shape", async () => {
+    const m = manifest({
+      aiProviders: [
+        { id: "x", label: "X", entry: "x.js", export: "create", kind: "llm", models: ["one"] },
+      ],
+    })
+    const importer = jest.fn(async () => ({
+      create: () => ({ id: "x", complete: async () => ({ text: "buffered output" }) }),
+    }))
+    await registerAiProvidersForPlugin(m, "/plugins/p", { importer })
+    const provider = getCustomAIProviders().find((p) => p.id === "p:x")!
+    const chunks: string[] = []
+    for await (const chunk of provider.chat([{ role: "user", content: "hi" }])) {
+      chunks.push(chunk.content)
+    }
+    expect(chunks).toEqual(["buffered output"])
+  })
+
+  it("registers an embedding provider", async () => {
+    const m = manifest({
+      aiProviders: [
+        {
+          id: "emb",
+          label: "Emb",
+          entry: "e.js",
+          export: "createEmb",
+          kind: "embedding",
+          dimensions: 4,
+        },
+      ],
+    })
+    const importer = jest.fn(async () => ({
+      createEmb: () => ({
+        id: "emb",
+        dimensions: 4,
+        embed: async (req: { texts: string[] }) => ({
+          vectors: req.texts.map(() => [0.1, 0.2, 0.3, 0.4]),
+          dimensions: 4,
+        }),
+      }),
+    }))
+    const result = await registerAiProvidersForPlugin(m, "/plugins/p", { importer })
+    expect(result.registered).toBe(1)
+    const provider = getCustomAIProviders().find((p) => p.id === "p:emb")!
+    expect(provider.embed).toBeDefined()
+    const vectors = await provider.embed!(["a", "b"])
+    expect(vectors).toEqual([
+      [0.1, 0.2, 0.3, 0.4],
+      [0.1, 0.2, 0.3, 0.4],
+    ])
+  })
+
+  it("collects errors per failing entry", async () => {
+    const m = manifest({
+      aiProviders: [{ id: "bad", label: "Bad", entry: "b.js", export: "missing", kind: "llm" }],
+    })
+    const importer = jest.fn(async () => ({ other: () => ({}) }))
+    const result = await registerAiProvidersForPlugin(m, "/plugins/p", { importer })
+    expect(result.registered).toBe(0)
+    expect(result.errors).toHaveLength(1)
+  })
+
+  it("unregister tears down every provider", async () => {
+    const m = manifest({
+      aiProviders: [{ id: "z", label: "Z", entry: "z.js", export: "create", kind: "llm" }],
+    })
+    const importer = jest.fn(async () => ({
+      create: () => ({ id: "z", complete: async () => ({ text: "" }) }),
+    }))
+    await registerAiProvidersForPlugin(m, "/plugins/p", { importer })
+    expect(getCustomAIProviders().some((p) => p.id === "p:z")).toBe(true)
+    unregisterAiProvidersForPlugin("p")
+    expect(getCustomAIProviders().some((p) => p.id === "p:z")).toBe(false)
+  })
+})

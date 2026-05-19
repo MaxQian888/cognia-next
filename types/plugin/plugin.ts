@@ -20,6 +20,12 @@ import type { PluginNativeAnthropicToolDef } from "./plugin-native-tool"
 import type { PluginSchedulerAPI } from "./plugin-scheduler"
 import type { PluginSkillDef } from "./plugin-skill"
 import type { PluginVerificationSnapshot } from "./plugin-verification"
+import type { PluginOcrProviderDef } from "./plugin-ocr"
+import type { PluginWorkspaceBackendDef } from "./plugin-workspace-backend"
+import type { PluginMessageRendererDef } from "./plugin-message-renderer"
+import type { PluginAiProviderDef } from "./plugin-ai-provider"
+import type { PluginModalMountDef } from "./plugin-modal"
+import type { PluginChatMiddlewareDef } from "./plugin-chat-middleware"
 // `ActivationEventDeclaration` lives in `lib/plugin/contracts/plugin-points`,
 // added by Task #10. Importing the real type keeps the manifest schema and
 // the runtime parser in lockstep — historically a local alias was used to
@@ -532,6 +538,81 @@ export interface PluginManifest {
   i18n?: {
     locales: Partial<Record<string, Record<string, string>>>
   }
+
+  // ---------------------------------------------------------------------------
+  // Extension-point v2 (ADR-0026) — declarative provider / renderer / mount /
+  // middleware contributions. Each entry follows the lazy-factory pattern
+  // (`entry` = relative path to the plugin's module, `export` = named factory
+  // function). The host dynamic-imports on first use; plugins should keep
+  // module-level work in the entry file minimal.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * OCR providers contributed by this plugin. Registered with
+   * `lib/ocr/registry.ts` via `lib/plugin/bridge/ocr-providers-bridge.ts` on
+   * plugin enable; auto-unregistered on disable. Permission gate:
+   * `network:fetch` (+ optional `media:image:read`).
+   */
+  ocrProviders?: PluginOcrProviderDef[]
+
+  /**
+   * Workspace execution backends contributed by this plugin (issue-loop /
+   * sandbox runners). Registered with the workspace-backend-registry; the
+   * legacy `setE2BBackend` singleton becomes a `@deprecated` shim that
+   * delegates to the same registry. Permission gate: `process:spawn` +
+   * `filesystem:write`.
+   */
+  workspaceBackends?: PluginWorkspaceBackendDef[]
+
+  /**
+   * Per-part message renderers contributed by this plugin. The host owns
+   * message chrome (select / copy / regenerate) — plugins only contribute
+   * the inner React node for unknown `part.type` values. Registered with
+   * `lib/plugin/api/message-part-renderers.ts`. Permission gate:
+   * `extension:ui`.
+   */
+  messageRenderers?: PluginMessageRendererDef[]
+
+  /**
+   * Plugin-internal AI providers (LLM completion + embedding). Strictly NOT
+   * a replacement for the main chat backend — the chat pipeline always
+   * resolves through Claude Code SDK. Plugins call `ctx.ai.complete()` /
+   * `ctx.ai.embed()` for their own background tasks. Permission gate:
+   * `network:fetch` + `secrets:read`.
+   */
+  aiProviders?: PluginAiProviderDef[]
+
+  /**
+   * Modal mounts that the host can open by id (declarative + deep-linkable).
+   * Imperative `ctx.modal.openModal()` works for ad-hoc modals without a
+   * manifest entry. Permission gate: `extension:ui`.
+   */
+  modalMounts?: PluginModalMountDef[]
+
+  /**
+   * Around-style chat middleware. Each middleware wraps the build-options +
+   * send pipeline; the runner enforces per-middleware timeout, error
+   * isolation, and a 3-strike circuit breaker that disables the plugin on
+   * repeated failure. Permission gate: closest existing `chat:hooks`-style
+   * key (see ADR-0026 §4).
+   */
+  chatMiddlewares?: PluginChatMiddlewareDef[]
+
+  /**
+   * Optional custom settings UI component. When present, the host renders
+   * `<component {...}/>` in the per-plugin settings panel *instead of* the
+   * generic JSON-schema-driven form (which is still derived from
+   * `configSchema`). Useful for plugins whose configuration is too rich for
+   * a flat form (file pickers, OAuth flows, live previews).
+   *
+   * `entry` is a relative path under the plugin install root and `export`
+   * is the named React export — same lazy-factory shape used by every
+   * other v2 contribution. ADR-0026 §3 §B.
+   */
+  configComponent?: {
+    entry: string
+    export: string
+  }
 }
 
 /**
@@ -557,6 +638,19 @@ export type PluginThemeContribution =
       id: string
       name: string
       vscodeJsonPath: string
+    }
+  /**
+   * ADR-0026 §3 §D — CSS custom-property overrides applied as a scoped
+   * `<style data-plugin-theme="<pluginId>">` block when the theme is
+   * activated. Values are constrained to CSS custom properties (variable
+   * names matching `^--[a-z][a-z0-9-]*$` and bounded length) — no full
+   * CSS string injection is allowed, to keep the surface auditable.
+   */
+  | {
+      id: string
+      name: string
+      isDark?: boolean
+      cssVariables: Record<string, string>
     }
 
 /**
@@ -1181,6 +1275,28 @@ export interface PluginContext {
    * the namespace prefix is applied automatically.
    */
   dexie?: PluginDexieAPI
+
+  // ---------------------------------------------------------------------------
+  // ADR-0026 v2 namespaces. Optional on the base context — the host's
+  // `createFullPluginContext` always wires them up, but `createPluginContext`
+  // (the bare-bones variant used in some test paths) may omit them. Plugin
+  // authors should null-check or rely on TypeScript's narrowing.
+  // ---------------------------------------------------------------------------
+
+  /** OCR provider registration (ADR-0026 §2 §A). */
+  ocr?: import("@/lib/plugin/api/ocr-api").PluginOcrAPI
+
+  /** Workspace backend registration (ADR-0026 §2 §D). */
+  workspace?: import("@/lib/plugin/api/workspace-api").PluginWorkspaceAPI
+
+  /** Modal stack push/close (ADR-0026 §3 §A). */
+  modal?: import("@/lib/plugin/api/modal-api").PluginModalAPI
+
+  /** Chat-middleware registration (ADR-0026 §4 §A). */
+  chat?: import("@/lib/plugin/api/chat-api").PluginChatAPI
+
+  /** Platform-capability flags (ADR-0026 §5 §C). */
+  capabilities?: import("@/lib/plugin/api/capabilities-api").PluginCapabilitiesAPI
 }
 
 /**

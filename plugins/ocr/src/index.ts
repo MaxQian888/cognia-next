@@ -5,10 +5,15 @@
  *   * an agent tool `ocr.extract` so the model can call OCR mid-conversation
  *   * a slash command `/ocr` that drives the same extraction from chat
  *
- * Both paths share the same handler. The plugin doesn't own the registry —
- * it expects `installOcrRuntime()` (from `lib/ocr/runtime.ts`) to have run
- * during the app's client-side bootstrap. The plugin's job is the schema
- * surface for the agent and slash dispatcher.
+ * Both paths share the same handler.
+ *
+ * The plugin is a **consumer** of the shared OCR registry — it does not
+ * register providers itself. The host's `installOcrRuntime()`
+ * (`lib/ocr/runtime.ts`) registers the 17 built-in providers during
+ * client-side bootstrap; *additional* provider plugins use ADR-0026
+ * §2 §A's `ctx.ocr.registerProvider(...)` or `manifest.ocrProviders[]`
+ * to contribute their own. Both paths funnel through the same
+ * `getSharedOcrRegistry()` this dispatcher reads from.
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"

@@ -21,10 +21,6 @@
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
-    },
-    "mobile": {
-      "availability": "supported",
-      "entrypoint": "src/index.ts"
     }
   }
 }

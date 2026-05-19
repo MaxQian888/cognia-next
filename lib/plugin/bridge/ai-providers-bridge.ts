@@ -1,0 +1,218 @@
+/**
+ * AI Providers Bridge.
+ *
+ * Resolves `manifest.aiProviders` contributions on plugin enable. Each
+ * entry is a lazy factory: `{ kind, id, label, entry, export, ... }`.
+ *
+ * The bridge dynamic-imports the entry, calls the named factory to produce
+ * a `PluginLlmProvider` or `PluginEmbeddingProvider`, then adapts it to
+ * the existing host `AIProviderDefinition` shape and registers via
+ * `createAIProviderAPI(pluginId).registerProvider(...)`.
+ *
+ * The host `AIProviderDefinition` expects:
+ *   - `chat`: AsyncIterable<AIChatChunk> generator.
+ *   - `embed`: (texts) => Promise<number[][]>.
+ *
+ * Plugin authors using the new API can supply the simpler buffered
+ * `complete(req)` / `embed(req)` shapes — this bridge wraps them.
+ *
+ * See ADR-0026 §2 §F.
+ */
+
+import type { PluginManifest } from "@/types/plugin/plugin"
+import type {
+  PluginAiProviderDef,
+  PluginAiProviderFactory,
+  PluginLlmProvider,
+  PluginEmbeddingProvider,
+  AiMessage,
+} from "@/types/plugin/plugin-ai-provider"
+import type {
+  AIProviderDefinition,
+  AIChatMessage,
+  AIChatChunk,
+  AIChatOptions,
+} from "@/types/plugin/plugin-extended"
+import { loggers } from "@/lib/plugin/core/logger"
+import { createAIProviderAPI } from "@/lib/plugin/api/ai-provider-api"
+
+const unregistrarsByPlugin = new Map<string, Array<() => void>>()
+
+export interface AiProvidersBridgeError {
+  pluginId: string
+  providerId: string
+  message: string
+}
+
+export interface AiProvidersBridgeResult {
+  registered: number
+  errors: AiProvidersBridgeError[]
+}
+
+export interface AiProvidersBridgeOptions {
+  importer?: (entry: string) => Promise<Record<string, unknown>>
+  getConfig?: (pluginId: string, key: string) => unknown
+  getSecret?: (pluginId: string, key: string) => Promise<string | undefined>
+}
+
+const DEFAULT_IMPORTER: NonNullable<AiProvidersBridgeOptions["importer"]> = (entry) =>
+  import(/* @vite-ignore */ /* webpackIgnore: true */ entry)
+
+export async function registerAiProvidersForPlugin(
+  manifest: PluginManifest,
+  installRoot: string,
+  options: AiProvidersBridgeOptions = {}
+): Promise<AiProvidersBridgeResult> {
+  const pluginId = manifest.id
+  const defs = manifest.aiProviders ?? []
+  if (defs.length === 0) {
+    return { registered: 0, errors: [] }
+  }
+
+  // Clear prior on re-enable.
+  unregisterAiProvidersForPlugin(pluginId)
+
+  const importer = options.importer ?? DEFAULT_IMPORTER
+  const api = createAIProviderAPI(pluginId)
+  const errors: AiProvidersBridgeError[] = []
+  const unregistrars: Array<() => void> = []
+  let registered = 0
+
+  for (const def of defs) {
+    try {
+      const adapted = await adaptProvider(def, pluginId, installRoot, importer, options)
+      const unregister = api.registerProvider(adapted)
+      unregistrars.push(unregister)
+      registered++
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      errors.push({ pluginId, providerId: def.id, message })
+      loggers.manager.error(`[ai-providers-bridge] failed to register ${pluginId}:${def.id}`, err)
+    }
+  }
+
+  if (unregistrars.length > 0) {
+    unregistrarsByPlugin.set(pluginId, unregistrars)
+  }
+  return { registered, errors }
+}
+
+async function adaptProvider(
+  def: PluginAiProviderDef,
+  pluginId: string,
+  installRoot: string,
+  importer: NonNullable<AiProvidersBridgeOptions["importer"]>,
+  options: AiProvidersBridgeOptions
+): Promise<AIProviderDefinition> {
+  const resolved = `${installRoot.replace(/[\\/]+$/, "")}/${def.entry.replace(/^[\\/]+/, "")}`
+  const mod = await importer(resolved)
+  const exported = mod[def.export]
+  if (typeof exported !== "function") {
+    throw new Error(`entry "${def.entry}" does not export a factory named "${def.export}"`)
+  }
+  const factory = exported as PluginAiProviderFactory
+  const ctx = {
+    providerId: `${pluginId}:${def.id}`,
+    pluginId,
+    kind: def.kind,
+    getConfig: <T = unknown>(key: string) => options.getConfig?.(pluginId, key) as T | undefined,
+    getSecret: (key: string) => Promise.resolve(options.getSecret?.(pluginId, key) ?? undefined),
+  }
+  const provider = await factory(ctx)
+
+  if (def.kind === "llm") {
+    const llm = provider as PluginLlmProvider
+    if (typeof llm.complete !== "function") {
+      throw new Error(`factory "${def.export}" did not return a PluginLlmProvider`)
+    }
+    return adaptLlmToHost(def, llm)
+  }
+
+  const embed = provider as PluginEmbeddingProvider
+  if (typeof embed.embed !== "function") {
+    throw new Error(`factory "${def.export}" did not return a PluginEmbeddingProvider`)
+  }
+  return adaptEmbeddingToHost(def, embed)
+}
+
+function adaptLlmToHost(def: PluginAiProviderDef, llm: PluginLlmProvider): AIProviderDefinition {
+  if (def.kind !== "llm") throw new Error("adaptLlmToHost requires kind=llm def")
+  return {
+    id: def.id,
+    name: def.label,
+    description: def.description ?? "",
+    models: (def.models ?? []).map((modelId) => ({
+      id: modelId,
+      name: modelId,
+      provider: def.id,
+      contextLength: 0,
+      capabilities: ["chat"],
+    })),
+    // The host's AIProviderDefinition.chat returns an AsyncIterable. We
+    // adapt the simpler buffered `complete()` shape into a single-chunk
+    // async generator — plugins that want true streaming can supply a
+    // richer host implementation in a follow-up (ADR-0026 §F keeps the
+    // minimal surface unambiguous).
+    chat: (messages: AIChatMessage[], options?: AIChatOptions): AsyncIterable<AIChatChunk> => {
+      const ai: AiMessage[] = messages.map((m) => ({
+        role: m.role === "system" ? "system" : m.role === "user" ? "user" : "assistant",
+        content: m.content,
+      }))
+      async function* gen(): AsyncIterable<AIChatChunk> {
+        const res = await llm.complete({
+          messages: ai,
+          model: options?.model,
+          maxTokens: options?.maxTokens,
+          temperature: options?.temperature,
+        })
+        yield { content: res.text }
+      }
+      return gen()
+    },
+    embed: undefined,
+  }
+}
+
+function adaptEmbeddingToHost(
+  def: PluginAiProviderDef,
+  embed: PluginEmbeddingProvider
+): AIProviderDefinition {
+  if (def.kind !== "embedding") throw new Error("adaptEmbeddingToHost requires kind=embedding def")
+  return {
+    id: def.id,
+    name: def.label,
+    description: def.description ?? "",
+    models: [
+      {
+        id: def.id,
+        name: def.label,
+        provider: def.id,
+        contextLength: 0,
+        capabilities: ["embedding"],
+      },
+    ],
+    chat: (_messages: AIChatMessage[], _options?: AIChatOptions): AsyncIterable<AIChatChunk> => {
+      async function* gen(): AsyncIterable<AIChatChunk> {
+        throw new Error(`provider ${def.id} is embedding-only and cannot serve chat`)
+      }
+      return gen()
+    },
+    embed: async (texts: string[]) => {
+      const res = await embed.embed({ texts })
+      return res.vectors
+    },
+  }
+}
+
+export function unregisterAiProvidersForPlugin(pluginId: string): void {
+  const unregs = unregistrarsByPlugin.get(pluginId)
+  if (!unregs) return
+  for (const fn of unregs) {
+    try {
+      fn()
+    } catch (err) {
+      loggers.manager.warn(`[ai-providers-bridge] unregister threw for ${pluginId}`, err)
+    }
+  }
+  unregistrarsByPlugin.delete(pluginId)
+}

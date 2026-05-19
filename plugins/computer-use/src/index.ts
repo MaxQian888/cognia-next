@@ -20,7 +20,11 @@
 import type { PluginContext, PluginDefinition, PluginTool } from "@/types/plugin"
 import { defineNativeAnthropicTool } from "@/lib/plugin/sdk"
 import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
-import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
+// ADR-0026 §5 §D — i18n strings are now declared in `manifest.i18n` below
+// and auto-wired by the plugin manager on enable. The old imperative
+// `registerPluginI18n` / `unregisterPluginI18n` calls are removed; the
+// strings still ship in this file under SLASH_MESSAGES because slash
+// handlers run outside React and pick the locale at call time.
 import {
   dispatchAnthropicAction,
   type BashAction,
@@ -277,6 +281,21 @@ const definition: PluginDefinition = {
     main: "src/index.ts",
     nativeAnthropicTools: [COMPUTER_TOOL, BASH_TOOL, TEXT_EDITOR_TOOL],
     permissions: ["native:input", "native:screen"],
+    // ADR-0026 §5 §D — declarative i18n. The plugin manager merges these
+    // into the host next-intl bundle under `plugin.cognia-computer-use.*`
+    // on enable and removes them on disable.
+    i18n: {
+      locales: {
+        en: {
+          "slash.cu.description": SLASH_MESSAGES.en.description,
+          "slash.cu.body": SLASH_MESSAGES.en.body,
+        },
+        "zh-CN": {
+          "slash.cu.description": SLASH_MESSAGES["zh-CN"].description,
+          "slash.cu.body": SLASH_MESSAGES["zh-CN"].body,
+        },
+      },
+    },
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("computer-use plugin activated")
@@ -287,20 +306,9 @@ const definition: PluginDefinition = {
     // `lib/plugin/core/manager.ts` + `lib/plugin/registries/native-anthropic-tool-registry.ts`.
     // Re-registering here would create harmless duplicate diagnostics; the
     // registry is idempotent by tuple but the duplicate obscures intent.
-
-    registerPluginI18n({
-      pluginId: PLUGIN_ID,
-      messages: {
-        en: {
-          "slash.cu.description": SLASH_MESSAGES.en.description,
-          "slash.cu.body": SLASH_MESSAGES.en.body,
-        },
-        "zh-CN": {
-          "slash.cu.description": SLASH_MESSAGES["zh-CN"].description,
-          "slash.cu.body": SLASH_MESSAGES["zh-CN"].body,
-        },
-      },
-    })
+    //
+    // Likewise, i18n is now wired via `manifest.i18n` above; no imperative
+    // `registerPluginI18n(...)` call here. See ADR-0026 §5 §D.
 
     const locale = pluginLocale()
     const copy = SLASH_MESSAGES[locale] ?? SLASH_MESSAGES.en
@@ -332,7 +340,8 @@ const definition: PluginDefinition = {
   deactivate: async (ctx?: PluginContext) => {
     if (ctx?.pluginId) {
       unregisterCommandsByPlugin(ctx.pluginId)
-      unregisterPluginI18n(ctx.pluginId)
+      // i18n teardown handled by the manager when manifest.i18n is in use
+      // (ADR-0026 §5 §D). No imperative unregisterPluginI18n call needed.
       if (ctx.agent?.unregisterTool) {
         for (const name of PLUGIN_TOOL_NAMES) {
           ctx.agent.unregisterTool(name)

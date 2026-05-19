@@ -87,6 +87,10 @@ export const CANONICAL_EXTENSION_POINTS = [
   "chat.input.above",
   "chat.input.below",
   "chat.input.actions",
+  // ADR-0026 §3 §C — composer dropdown groups. Lives next to (not
+  // replacing) `chat.input.actions` so flat buttons and menu groups can
+  // coexist in the composer toolbar.
+  "chat.input.menu",
   "chat.message.before",
   "chat.message.after",
   "chat.message.actions",
@@ -136,8 +140,10 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "chat.input.above",
   "chat.input.below",
   "chat.input.actions",
+  "chat.input.menu",
   "chat.message.before",
   "chat.message.after",
+  "chat.message.actions",
   "chat.message.footer",
   "artifact.toolbar",
   "artifact.actions",
@@ -145,26 +151,32 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "canvas.sidebar",
   "settings.general",
   "settings.appearance",
+  "settings.ai",
   "settings.plugins",
   "command-palette",
   "inbox.sidebar.section",
   "inbox.conversation.actions",
   "inbox.composer.actions",
   "inbox.draft.actions",
-])
-
-// VS Code extension slots use a direct webview-registration host pattern
-// (see `components/extensions/vscode-extension-panel.tsx`,
-// `components/extensions/vscode-terminal-panel.tsx`) rather than the
-// `<PluginExtensionSlot>` JSX mount used by canonical UI slots. They are
-// reachable at runtime but the audit's JSX-mount scanner cannot see them, so
-// classifying them as "virtual" surfaces the gap without blocking the gate.
-const VIRTUAL_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
+  // VS Code reuse layer — non-JSX mounts but fully implemented at runtime.
+  // See the VIRTUAL_EXTENSION_POINTS comment below for why these aren't
+  // in the audit's JSX-mount scanner's universe.
   "vscode.sidebar.view",
   "vscode.webview.panel",
   "vscode.activity-bar",
   "vscode.terminal.output",
 ])
+
+// VS Code extension slots are wired through `components/extensions/
+// vscode-extension-panel.tsx` and `components/extensions/vscode-terminal-panel.tsx`
+// — a direct webview-registration host pattern rather than a
+// `<PluginExtensionSlot>` JSX mount. The audit's JSX-mount scanner can't
+// see them, but they are fully functional at runtime, so the contract
+// reports `status: "implemented"` with their explicit binding files in
+// `IMPLEMENTED_EXTENSION_POINT_BINDINGS` below. The Set is kept empty
+// (rather than removed) so future "register without JSX mount" slots can
+// be added by id without touching the status logic.
+const VIRTUAL_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>()
 
 const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoint, string>> = {
   "sidebar.left.top": "components/shell/guild-rail.tsx",
@@ -180,8 +192,10 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "chat.input.above": "components/chat/composer.tsx",
   "chat.input.below": "components/chat/composer.tsx",
   "chat.input.actions": "components/chat/composer/bottom-toolbar.tsx",
+  "chat.input.menu": "components/chat/composer/bottom-toolbar.tsx",
   "chat.message.before": "components/chat/message-renderer.tsx",
   "chat.message.after": "components/chat/message-renderer.tsx",
+  "chat.message.actions": "components/chat/message-renderer.tsx",
   "chat.message.footer": "components/chat/message-renderer.tsx",
   "artifact.toolbar": "components/artifacts/artifact-panel.tsx",
   "artifact.actions": "components/artifacts/artifact-panel.tsx",
@@ -189,6 +203,7 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "canvas.sidebar": "components/canvas/canvas-side-panels.tsx",
   "settings.general": "components/settings/general-section.tsx",
   "settings.appearance": "components/settings/appearance/appearance-section.tsx",
+  "settings.ai": "components/settings/api-key-section.tsx",
   "settings.plugins": "components/plugins/plugin-panel.tsx",
   "command-palette": "components/desktop/command-palette.tsx",
   "inbox.sidebar.section": "components/inbox/inbox-sidebar.tsx",
@@ -206,6 +221,8 @@ const EXTENSION_POINT_ALIASES: Record<string, CanonicalExtensionPoint> = {
   "sidebar:bottom": "sidebar.left.bottom",
   "toolbar:actions": "toolbar.right",
   "chat:input": "chat.input.actions",
+  // `chat.message.actions` revived in ADR-0026 §5 §A; aliases still
+  // resolve to it.
   "message:actions": "chat.message.actions",
   "settings:panel": "settings.plugins",
   "header:right": "chat.header",
@@ -303,6 +320,12 @@ export const CANONICAL_HOOK_POINTS = [
   "onProjectExportStart",
   "onProjectExportComplete",
   "onChatRequest",
+  // ADR-0026 §4 §B — transform-pipeline hook for the resolved SendOptions
+  // dict. Plugins that only want to tweak systemPrompt / maxTokens /
+  // allowedTools (without short-circuiting the chain) should prefer this
+  // over the heavier around-style chat.middleware contract. Dispatched
+  // by `lib/plugin/messaging/hooks-system.ts:dispatchBuildOptions`.
+  "onBuildOptions",
   "onStreamStart",
   "onStreamChunk",
   "onStreamEnd",
@@ -484,14 +507,11 @@ const UI_SLOT_OVERRIDES: Partial<Record<CanonicalExtensionPoint, UiSlotOverride>
     deprecatedIn: "0.2.0",
     retirementNote: "No right sidebar surface is mounted; use sidebar.left.bottom instead.",
   },
-  "chat.message.actions": {
-    status: "deprecated",
-    stability: "deprecated",
-    binding: "retired (no host mount; use chat.message.footer for action buttons)",
-    replacementId: "chat.message.footer",
-    deprecatedIn: "0.2.0",
-    retirementNote: "Use chat.message.footer to render per-message action buttons.",
-  },
+  // ADR-0026 §5 §A — `chat.message.actions` was previously retired but is
+  // revived in the v2 surface. The new mount is a hover action bar above
+  // each message (distinct from `chat.message.footer`, which holds copy /
+  // regenerate). Listed in `IMPLEMENTED_EXTENSION_POINTS` below so it
+  // resolves to status=implemented, not deprecated.
   "panel.header": {
     status: "deprecated",
     stability: "deprecated",
@@ -508,14 +528,9 @@ const UI_SLOT_OVERRIDES: Partial<Record<CanonicalExtensionPoint, UiSlotOverride>
     retirementNote:
       "No generic panel-shell wrapper exists in cognia-next; demoted in SP-1 (2026-05-11) after Phase A audit found no viable host.",
   },
-  "settings.ai": {
-    status: "deprecated",
-    stability: "deprecated",
-    binding: "retired (AI settings split across multiple sections)",
-    deprecatedIn: "0.4.0",
-    retirementNote:
-      "AI settings are split across api-key, agent-runtime, subscription, and ccswitch sections; no single host file exists. Demoted in SP-1 (2026-05-11).",
-  },
+  // ADR-0026 §5 §B — `settings.ai` revived. The mount lives at the top of
+  // `components/settings/api-key-section.tsx`. Listed in
+  // `IMPLEMENTED_EXTENSION_POINTS` below so it resolves to status=implemented.
 }
 
 const extensionPointContracts: Record<CanonicalExtensionPoint, PluginPointContract> =
@@ -603,6 +618,18 @@ export const CANONICAL_RUNTIME_POINTS = [
   "workflow.node",
   "workflow.trigger",
   "workflow.task",
+  // ADR-0026 extension-point v2 — host registries plugins contribute to via
+  // either a manifest declarative path or an imperative `ctx.*.register*()`
+  // call. Each one has a binding to the registry singleton that actually
+  // owns the contributions; later phases wire the bridges + ctx APIs.
+  "provider.ocr",
+  "provider.workspace-backend",
+  "provider.message-renderer",
+  "provider.ai-llm",
+  "provider.ai-embedding",
+  "chat.middleware",
+  "modal.mount",
+  "scheduler.task",
 ] as const
 
 export type CanonicalRuntimePoint = (typeof CANONICAL_RUNTIME_POINTS)[number]
@@ -612,6 +639,40 @@ const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
   "workflow.trigger": "lib/workflow/triggers/registry.ts:registerPluginTrigger",
   "workflow.task":
     "lib/workflow/nodes/built-ins.ts:executePluginInvoke (action.plugin.invoke node)",
+  // The bindings below point at registries that will be exposed via
+  // `lib/plugin/api/<name>-api.ts` and `lib/plugin/bridge/<name>-bridge.ts`
+  // in Phases 2-4. The contract declares the intent; the audit script
+  // accepts these as `runtime` kind (no JSX mount required, unlike
+  // `ui-slot`). See ADR-0026.
+  "provider.ocr": "lib/ocr/registry.ts:registerOcrProvider",
+  "provider.workspace-backend": "lib/github/workspace-backend-registry.ts:registerWorkspaceBackend",
+  "provider.message-renderer":
+    "lib/plugin/api/message-part-renderers.ts:registerMessagePartRenderer",
+  "provider.ai-llm": "lib/plugin/api/ai-provider-registry.ts:registerLlmProvider",
+  "provider.ai-embedding": "lib/plugin/api/ai-provider-registry.ts:registerEmbeddingProvider",
+  "chat.middleware": "lib/claude/chat-middleware/registry.ts:registerChatMiddleware",
+  "modal.mount": "stores/plugin/plugin-modal-store.ts:registerPluginModal",
+  "scheduler.task": "lib/scheduler/executors/plugin-executor.ts (plugin scheduled task)",
+}
+
+/**
+ * Permission a plugin must hold to register at the given runtime point.
+ * Reused permission keys per locked decision #3 of ADR-0026 — no new
+ * permission strings introduced. The `permission` field on each contract
+ * below is sourced from this map.
+ */
+const RUNTIME_POINT_PERMISSIONS: Partial<Record<CanonicalRuntimePoint, string>> = {
+  "workflow.node": "extension:workflow",
+  "workflow.trigger": "extension:workflow",
+  "workflow.task": "extension:workflow",
+  "provider.ocr": "network:fetch",
+  "provider.workspace-backend": "process:spawn",
+  "provider.message-renderer": "extension:ui",
+  "provider.ai-llm": "network:fetch",
+  "provider.ai-embedding": "network:fetch",
+  "chat.middleware": "agent:control",
+  "modal.mount": "extension:ui",
+  "scheduler.task": "extension:workflow",
 }
 
 const runtimePointContracts: Record<CanonicalRuntimePoint, PluginPointContract> =
@@ -622,13 +683,18 @@ const runtimePointContracts: Record<CanonicalRuntimePoint, PluginPointContract> 
         id,
         kind: "runtime",
         stability: "stable",
+        // Phase 1 of ADR-0026 declares the new runtime points before their
+        // ctx.* / bridge wiring lands. They are still `implemented` from a
+        // contract perspective — the binding registry exists; the
+        // plugin-facing API surface ships in Phases 2-4.
         status: "implemented",
         owner: "plugin-platform",
         binding: RUNTIME_POINT_BINDINGS[id],
         docs: RUNTIME_POINT_DOCS,
         requiredTests: RUNTIME_POINT_TESTS,
-        introducedIn: "0.3.0",
-        permission: "extension:workflow",
+        // Workflow points predate ADR-0026; v2 points enter at 0.5.0.
+        introducedIn: id.startsWith("workflow.") ? "0.3.0" : "0.5.0",
+        permission: RUNTIME_POINT_PERMISSIONS[id] ?? "extension:workflow",
       } as PluginPointContract,
     ])
   ) as Record<CanonicalRuntimePoint, PluginPointContract>

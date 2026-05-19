@@ -18,6 +18,12 @@
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import { defineMcpServerPreset } from "@/lib/plugin/sdk"
 import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+// `setE2BBackend` kept as a fallback for hosts that don't expose
+// `ctx.workspace` yet (older bootstrap paths / unit-test contexts). When
+// the new API is present, we register through it for ADR-0026 §2 §D
+// lifecycle + multi-backend semantics; otherwise we fall back to the
+// legacy singleton path. The legacy path is now itself a shim over the
+// same registry (see `lib/github/workspace.ts`).
 import { setE2BBackend } from "@/lib/github/workspace"
 import { E2BWorkspaceBackend } from "./workspace-backend"
 
@@ -47,6 +53,12 @@ const E2B_PRESET = defineMcpServerPreset({
   tags: ["sandbox", "code", "execution"],
 })
 
+// Disposer returned by `ctx.workspace.registerBackend(...)`, stashed
+// across activate/deactivate so the v2 registration is torn down
+// explicitly rather than relying on the legacy `setE2BBackend(null)`
+// shim. Module-scoped because there's only ever one e2b plugin instance.
+let workspaceRegistrationDispose: (() => void) | undefined
+
 const definition: PluginDefinition = {
   manifest: {
     id: "cognia-e2b-sandbox",
@@ -67,7 +79,28 @@ const definition: PluginDefinition = {
     // lazy-loads `@e2b/sdk`; if the SDK isn't installed it surfaces a
     // helpful install hint at the first clone attempt instead of failing
     // here at activation time.
-    setE2BBackend(new E2BWorkspaceBackend())
+    //
+    // Prefer ADR-0026 §2 §D `ctx.workspace.registerBackend(...)` when
+    // available so the registration carries the plugin id + auto-cleanup
+    // on disable. Fall back to the legacy `setE2BBackend(...)` shim when
+    // running under an older host that doesn't expose `ctx.workspace`
+    // (e.g. a sidecar harness or pre-v0.5 host). Both paths end up in the
+    // same `workspace-backend-registry` either way — see
+    // `lib/github/workspace.ts:setE2BBackend`.
+    const backend = new E2BWorkspaceBackend()
+    if (ctx.workspace) {
+      const handle = ctx.workspace.registerBackend({
+        id: "e2b",
+        label: "E2B Firecracker",
+        description:
+          "Runs each turn inside an ephemeral Firecracker microVM sandbox. Untrusted-code safe.",
+        backend,
+      })
+      workspaceRegistrationDispose = handle.unregister
+    } else {
+      setE2BBackend(backend)
+      workspaceRegistrationDispose = () => setE2BBackend(null)
+    }
 
     registerSlashCommand({
       id: "e2b.attach",
@@ -82,7 +115,10 @@ const definition: PluginDefinition = {
     })
   },
   deactivate: async (ctx?: PluginContext) => {
-    setE2BBackend(null)
+    if (workspaceRegistrationDispose) {
+      workspaceRegistrationDispose()
+      workspaceRegistrationDispose = undefined
+    }
     if (ctx?.pluginId) {
       unregisterCommandsByPlugin(ctx.pluginId)
     }

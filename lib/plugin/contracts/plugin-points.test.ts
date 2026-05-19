@@ -290,4 +290,86 @@ describe("plugin point contracts", () => {
       }
     })
   })
+
+  // ---------------------------------------------------------------------------
+  // ADR-0026 — Phase 1 extension-point v2 contracts.
+  //
+  // Phase 1 only adds the runtime points + the onBuildOptions hook; the
+  // ctx.* / bridge wiring lands in Phases 2-4. The tests below verify:
+  //   - all 8 new runtime points are present in the canonical registry,
+  //   - each has a binding pointing at the host registry that owns it,
+  //   - each has a `permission` field reusing an existing PluginPermission
+  //     value (locked decision #3 of ADR-0026),
+  //   - `onBuildOptions` is registered and dispatched-by `hooks-system`.
+  // ---------------------------------------------------------------------------
+  describe("ADR-0026 extension-point v2 contracts (Phase 1)", () => {
+    const newRuntimePoints = [
+      "provider.ocr",
+      "provider.workspace-backend",
+      "provider.message-renderer",
+      "provider.ai-llm",
+      "provider.ai-embedding",
+      "chat.middleware",
+      "modal.mount",
+      "scheduler.task",
+    ] as const
+
+    it("registers every new runtime point in PLUGIN_POINT_CONTRACTS", () => {
+      const runtimeIds = new Set(
+        PLUGIN_POINT_CONTRACTS.filter((c) => c.kind === "runtime").map((c) => c.id)
+      )
+      for (const id of newRuntimePoints) {
+        expect(runtimeIds.has(id)).toBe(true)
+      }
+    })
+
+    it("provides a non-empty binding for every new runtime point", () => {
+      for (const id of newRuntimePoints) {
+        const contract = PLUGIN_POINT_CONTRACTS.find((c) => c.id === id)
+        expect(contract).toBeDefined()
+        expect(contract!.binding).not.toBe("")
+        // Bindings target the registry singleton the point fan-outs to.
+        // The exact file is verified per-point; here we just smoke-check
+        // none of the new bindings fell through to the deprecated fallback.
+        expect(contract!.binding).not.toMatch(/retired/i)
+      }
+    })
+
+    it("assigns a permission to every new runtime point (no new perm keys)", () => {
+      const existingPermissions = new Set([
+        "extension:ui",
+        "extension:workflow",
+        "network:fetch",
+        "process:spawn",
+        "filesystem:read",
+        "filesystem:write",
+        "agent:control",
+        "secrets:read",
+        "secrets:write",
+      ])
+      for (const id of newRuntimePoints) {
+        const contract = PLUGIN_POINT_CONTRACTS.find((c) => c.id === id)
+        expect(contract).toBeDefined()
+        expect(contract!.permission).toBeDefined()
+        expect(existingPermissions.has(contract!.permission!)).toBe(true)
+      }
+    })
+
+    it("introduces the new runtime points in 0.5.0 (workflow.* stays at 0.3.0)", () => {
+      for (const id of newRuntimePoints) {
+        const contract = PLUGIN_POINT_CONTRACTS.find((c) => c.id === id)!
+        expect(contract.introducedIn).toBe("0.5.0")
+      }
+      const workflowNode = PLUGIN_POINT_CONTRACTS.find((c) => c.id === "workflow.node")!
+      expect(workflowNode.introducedIn).toBe("0.3.0")
+    })
+
+    it("adds onBuildOptions to the canonical hook registry", () => {
+      expect(CANONICAL_HOOK_POINTS).toContain("onBuildOptions")
+      const result = validateHookPoint("onBuildOptions")
+      expect(result.allowed).toBe(true)
+      expect(result.contract?.status).toBe("implemented")
+      expect(result.contract?.binding).toBe("lib/plugin/messaging/hooks-system.ts")
+    })
+  })
 })

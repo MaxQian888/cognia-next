@@ -785,5 +785,230 @@ describe("Plugin Validation", () => {
         expect(result.diagnostics!.some((d) => d.code === "manifest.i18n.too_many_keys")).toBe(true)
       })
     })
+
+    // -----------------------------------------------------------------------
+    // ADR-0026 — lazy-factory manifest fields.
+    //
+    // The six new fields (ocrProviders / workspaceBackends / messageRenderers
+    // / aiProviders / modalMounts / chatMiddlewares) all share the
+    // `{ id, label, entry, export }` shape; the tests below exercise the
+    // shared `validateLazyFactoryArray` rules plus the field-specific
+    // extras (kind discriminant, dimensions, partType, priority, timeoutMs).
+    // -----------------------------------------------------------------------
+    describe("ADR-0026 lazy-factory manifest fields", () => {
+      const withLazy = (extra: Record<string, unknown>): PluginManifest =>
+        ({
+          ...createValidManifest(),
+          ...extra,
+        }) as PluginManifest
+
+      it("accepts a valid ocrProviders entry", () => {
+        const manifest = withLazy({
+          ocrProviders: [
+            {
+              id: "baidu",
+              label: "Baidu OCR",
+              entry: "providers/baidu.js",
+              export: "createBaiduProvider",
+            },
+          ],
+        })
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(true)
+      })
+
+      it("rejects ocrProviders with non-array shape", () => {
+        const manifest = withLazy({ ocrProviders: "nope" })
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.ocrProviders.invalid_type")
+        ).toBe(true)
+      })
+
+      it("rejects ocrProviders entry missing required id", () => {
+        const manifest = withLazy({
+          ocrProviders: [{ label: "x", entry: "a.js", export: "f" }],
+        })
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(result.diagnostics!.some((d) => d.code === "manifest.ocrProviders.id.missing")).toBe(
+          true
+        )
+      })
+
+      it("rejects ocrProviders with an absolute entry path", () => {
+        const manifest = withLazy({
+          ocrProviders: [
+            { id: "x", label: "X", entry: "/abs/path.js", export: "f" },
+            { id: "y", label: "Y", entry: "C:\\drv\\path.js", export: "f" },
+          ],
+        })
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        const codes = result.diagnostics!.map((d) => d.code)
+        expect(codes.filter((c) => c === "manifest.ocrProviders.entry.absolute").length).toBe(2)
+      })
+
+      it("rejects ocrProviders with traversal in entry", () => {
+        const manifest = withLazy({
+          ocrProviders: [{ id: "x", label: "X", entry: "../escape.js", export: "f" }],
+        })
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.ocrProviders.entry.traversal")
+        ).toBe(true)
+      })
+
+      it("rejects ocrProviders with NUL byte in entry", () => {
+        const manifest = withLazy({
+          ocrProviders: [{ id: "x", label: "X", entry: "a\0b.js", export: "f" }],
+        })
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.ocrProviders.entry.invalid_chars")
+        ).toBe(true)
+      })
+
+      it("rejects duplicate ids within the same field", () => {
+        const manifest = withLazy({
+          ocrProviders: [
+            { id: "dup", label: "X", entry: "a.js", export: "f" },
+            { id: "dup", label: "Y", entry: "b.js", export: "g" },
+          ],
+        })
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.ocrProviders.id.duplicate")
+        ).toBe(true)
+      })
+
+      it("rejects export that is not a valid JS identifier", () => {
+        const manifest = withLazy({
+          ocrProviders: [{ id: "x", label: "X", entry: "a.js", export: "1bad-name" }],
+        })
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.ocrProviders.export.invalid")
+        ).toBe(true)
+      })
+
+      it("messageRenderers requires partType but not label", () => {
+        const missingPartType = withLazy({
+          messageRenderers: [{ id: "r", entry: "a.js", export: "Renderer" }],
+        })
+        let result = validatePluginManifest(missingPartType)
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.messageRenderers.partType.missing")
+        ).toBe(true)
+
+        const ok = withLazy({
+          messageRenderers: [
+            { id: "r", entry: "a.js", export: "Renderer", partType: "x-custom-block" },
+          ],
+        })
+        result = validatePluginManifest(ok)
+        expect(result.valid).toBe(true)
+      })
+
+      it("aiProviders rejects unknown kind", () => {
+        const manifest = withLazy({
+          aiProviders: [
+            { id: "x", label: "X", entry: "a.js", export: "f", kind: "neither-llm-nor-embed" },
+          ],
+        })
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.aiProviders.kind.invalid")
+        ).toBe(true)
+      })
+
+      it("aiProviders embedding kind requires positive integer dimensions", () => {
+        const missing = withLazy({
+          aiProviders: [{ id: "e", label: "E", entry: "a.js", export: "f", kind: "embedding" }],
+        })
+        let result = validatePluginManifest(missing)
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.aiProviders.dimensions.invalid")
+        ).toBe(true)
+
+        const ok = withLazy({
+          aiProviders: [
+            {
+              id: "e",
+              label: "E",
+              entry: "a.js",
+              export: "f",
+              kind: "embedding",
+              dimensions: 1536,
+            },
+          ],
+        })
+        result = validatePluginManifest(ok)
+        expect(result.valid).toBe(true)
+      })
+
+      it("aiProviders llm rejects non-string-array models", () => {
+        const manifest = withLazy({
+          aiProviders: [
+            {
+              id: "l",
+              label: "L",
+              entry: "a.js",
+              export: "f",
+              kind: "llm",
+              models: [123, "claude-opus-4-7"],
+            },
+          ],
+        })
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.aiProviders.models.invalid")
+        ).toBe(true)
+      })
+
+      it("chatMiddlewares rejects out-of-range priority and timeout", () => {
+        const manifest = withLazy({
+          chatMiddlewares: [
+            { id: "m", label: "M", entry: "a.js", export: "f", priority: 999 },
+            { id: "n", label: "N", entry: "a.js", export: "g", timeoutMs: 999_999 },
+            { id: "o", label: "O", entry: "a.js", export: "h", timeoutMs: 0 },
+          ],
+        })
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(false)
+        const codes = new Set(result.diagnostics!.map((d) => d.code))
+        expect(codes.has("manifest.chatMiddlewares.priority.range")).toBe(true)
+        expect(codes.has("manifest.chatMiddlewares.timeoutMs.range")).toBe(true)
+      })
+
+      it("modalMounts validates the shared shape and accepts a minimal entry", () => {
+        const manifest = withLazy({
+          modalMounts: [
+            { id: "settings", label: "Open Settings", entry: "modal.js", export: "Modal" },
+          ],
+        })
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(true)
+      })
+
+      it("workspaceBackends validates the shared shape", () => {
+        const manifest = withLazy({
+          workspaceBackends: [
+            { id: "e2b", label: "e2b Sandbox", entry: "backend.js", export: "createBackend" },
+          ],
+        })
+        const result = validatePluginManifest(manifest)
+        expect(result.valid).toBe(true)
+      })
+    })
   })
 })

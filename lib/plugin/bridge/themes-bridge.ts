@@ -94,14 +94,88 @@ function isVscodePathContribution(
   return typeof (c as { vscodeJsonPath?: unknown }).vscodeJsonPath === "string"
 }
 
+/** Discriminator for ADR-0026 §3 §D CSS-vars variant. */
+function isCssVariablesContribution(
+  c: PluginThemeContribution
+): c is { id: string; name: string; isDark?: boolean; cssVariables: Record<string, string> } {
+  return (
+    !isVscodePathContribution(c) &&
+    typeof (c as { cssVariables?: unknown }).cssVariables === "object" &&
+    (c as { cssVariables?: unknown }).cssVariables !== null
+  )
+}
+
+const CSS_VAR_NAME_PATTERN = /^--[a-z][a-z0-9-]*$/
+const CSS_VAR_VALUE_MAX_LEN = 200
+
+/**
+ * Sanitize a plugin-supplied CSS variable map. Variable names must match
+ * `^--[a-z][a-z0-9-]*$`; values must be strings under the length cap and
+ * must not contain `</style>` (defense against injection). Invalid entries
+ * are dropped silently with a warning — the bridge never throws on a
+ * single bad pair.
+ */
+function sanitizeCssVariables(
+  vars: Record<string, string>,
+  pluginId: string
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [rawName, rawValue] of Object.entries(vars)) {
+    if (!CSS_VAR_NAME_PATTERN.test(rawName)) {
+      loggers.manager.warn(
+        `[themes-bridge] plugin ${pluginId}: dropping CSS variable with invalid name "${rawName}"`
+      )
+      continue
+    }
+    if (typeof rawValue !== "string" || rawValue.length === 0) {
+      loggers.manager.warn(
+        `[themes-bridge] plugin ${pluginId}: dropping non-string value for "${rawName}"`
+      )
+      continue
+    }
+    if (rawValue.length > CSS_VAR_VALUE_MAX_LEN) {
+      loggers.manager.warn(
+        `[themes-bridge] plugin ${pluginId}: dropping value for "${rawName}" exceeding ${CSS_VAR_VALUE_MAX_LEN} chars`
+      )
+      continue
+    }
+    if (rawValue.includes("</style>")) {
+      loggers.manager.warn(
+        `[themes-bridge] plugin ${pluginId}: dropping value for "${rawName}" containing </style>`
+      )
+      continue
+    }
+    out[rawName] = rawValue
+  }
+  return out
+}
+
+export { sanitizeCssVariables as __sanitizeCssVariablesForTesting }
+
 /**
  * Resolve a single contribution to a structured `ThemeColors` + `isDark` pair.
  * Throws on hard errors so the caller can collect them per-contribution.
  */
 async function resolveContribution(
   contribution: PluginThemeContribution,
-  baseDir: string
-): Promise<{ colors: ThemeColors; isDark: boolean }> {
+  baseDir: string,
+  pluginId?: string
+): Promise<{ colors: ThemeColors; isDark: boolean; cssVariables?: Record<string, string> }> {
+  if (isCssVariablesContribution(contribution)) {
+    // CSS-vars-only contributions don't carry a structured ThemeColors
+    // payload — supply the minimum the appearance pipeline needs (so the
+    // legacy fallback path stays well-defined) and pass the sanitized
+    // variable map through for the runtime injection layer.
+    const sanitized = sanitizeCssVariables(contribution.cssVariables, pluginId ?? "<unknown>")
+    return {
+      colors: {
+        background: sanitized["--background"] ?? "#000",
+        foreground: sanitized["--foreground"] ?? "#fff",
+      } as unknown as ThemeColors,
+      isDark: contribution.isDark === true,
+      cssVariables: sanitized,
+    }
+  }
   if (isVscodePathContribution(contribution)) {
     if (isUnsafeRelativePath(contribution.vscodeJsonPath)) {
       throw new Error(
@@ -165,11 +239,18 @@ export class PluginThemesBridge {
     for (const contribution of contributions) {
       const contributionId = (contribution as { id?: string }).id ?? "<unknown>"
       try {
-        const { colors, isDark } = await resolveContribution(contribution, baseDir)
+        const { colors, isDark, cssVariables } = await resolveContribution(
+          contribution,
+          baseDir,
+          pluginId
+        )
+        // CSS-vars contributions override the auto-derived variable map;
+        // structured-color contributions keep deriving from `colors`.
+        const variables = cssVariables ?? colorsToVariables(colors)
         const theme: PluginTheme = {
           id: `${pluginId}.${contributionId}`,
           name: contribution.name,
-          variables: colorsToVariables(colors),
+          variables,
           variant: isDark ? "dark" : "light",
           source: "plugin",
           pluginId,

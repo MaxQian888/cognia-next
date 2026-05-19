@@ -241,6 +241,38 @@ export interface PostChatReceiveResult {
 }
 
 /**
+ * Structural subset of `SendOptions` (lib/claude/types) plugins are allowed
+ * to inspect/transform via `onBuildOptions`. Keeping the type structural —
+ * not an import of the full host type — keeps plugin authors decoupled from
+ * host-internal fields they shouldn't touch (provider keys, runtime
+ * snapshots, the workflow editor block, etc.).
+ */
+export interface BuildOptionsHookInput {
+  /** Resolved session id this turn belongs to. */
+  sessionId: string
+  /** Model identifier (e.g. `claude-opus-4-7`). */
+  model: string
+  /** Base system prompt (character + brief mode + skills already merged). */
+  systemPrompt?: string
+  /** Snippet appended to the system prompt this turn (`appendSystemPrompt`). */
+  appendSystemPrompt?: string
+  /** Max output tokens for this turn. */
+  maxTokens?: number
+  /** Temperature. */
+  temperature?: number
+  /** Allow-list of tool names the agent may call. */
+  allowedTools?: string[]
+}
+
+/**
+ * Plugins return the same shape (with any subset of fields replaced). The
+ * dispatcher applies a shallow merge per field; returning `undefined` for a
+ * field leaves the prior value untouched. Returning `undefined` (no return)
+ * is also OK and means "no change."
+ */
+export type BuildOptionsHookOutput = Partial<BuildOptionsHookInput> | undefined | void
+
+/**
  * AI and chat-related hook events
  */
 export interface AIHookEvents {
@@ -279,6 +311,21 @@ export interface AIHookEvents {
   onPostChatReceive?: (
     response: ChatResponseData
   ) => PostChatReceiveResult | Promise<PostChatReceiveResult>
+
+  /**
+   * Called after the host has resolved the per-turn `SendOptions` block
+   * (system prompt, allowed tools, max tokens, etc.) and before the agent
+   * SDK is invoked. The plugin can return a transformed options dict; the
+   * host applies the result via `dispatchBuildOptions` (transform pipeline,
+   * mirrors `dispatchExportTransform`). Plugins that need to short-circuit
+   * the entire turn should register a `chat.middleware` instead.
+   *
+   * The structural shape below carries only the fields plugins are allowed
+   * to influence; the full host `SendOptions` is kept private.
+   */
+  onBuildOptions?: (
+    options: BuildOptionsHookInput
+  ) => BuildOptionsHookOutput | Promise<BuildOptionsHookOutput>
 
   /** Called when streaming response starts */
   onStreamStart?: (sessionId: string) => void
@@ -428,6 +475,7 @@ export interface PluginHooksAll extends PluginHooks {
   onPostToolUse?: AIHookEvents["onPostToolUse"]
   onPreCompact?: AIHookEvents["onPreCompact"]
   onPostChatReceive?: AIHookEvents["onPostChatReceive"]
+  onBuildOptions?: AIHookEvents["onBuildOptions"]
 
   // Vector/RAG hooks
   onDocumentsIndexed?: VectorHookEvents["onDocumentsIndexed"]

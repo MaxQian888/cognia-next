@@ -1345,6 +1345,49 @@ export class PluginEventHooks {
     return messages
   }
 
+  /**
+   * ADR-0026 §4 §B — transform-pipeline dispatch for `onBuildOptions`.
+   *
+   * Plugins return a (partial) replacement of the structural
+   * `BuildOptionsHookInput`. The dispatcher applies a shallow per-field
+   * merge in plugin priority order. Returning `undefined` (no return) is
+   * treated as "no change."
+   *
+   * Errors / timeouts in any single plugin are swallowed (`executeHook`
+   * already isolates failures); the chain proceeds with the previous
+   * value. This sits below the around-style `chat.middleware` runner —
+   * use `onBuildOptions` for option tweaks, the runner for control flow.
+   */
+  async dispatchBuildOptions(
+    options: import("@/types/plugin/plugin-hooks").BuildOptionsHookInput
+  ): Promise<import("@/types/plugin/plugin-hooks").BuildOptionsHookInput> {
+    const results = await this.executeHook("onBuildOptions", async (hooks) => {
+      if ((hooks as import("@/types/plugin/plugin-hooks").PluginHooksAll).onBuildOptions) {
+        return (hooks as import("@/types/plugin/plugin-hooks").PluginHooksAll).onBuildOptions!(
+          options
+        )
+      }
+      return undefined
+    })
+
+    let merged = options
+    for (const result of results) {
+      if (!result.success || !result.result) continue
+      // Shallow merge per-field. Plugins can omit fields to leave them
+      // untouched; explicit `undefined` returns are filtered out so a
+      // forgotten field can't accidentally null-out a host-set value.
+      const patch = result.result as Partial<typeof options>
+      const next: typeof merged = { ...merged }
+      for (const [key, value] of Object.entries(patch)) {
+        if (value !== undefined) {
+          ;(next as unknown as Record<string, unknown>)[key] = value
+        }
+      }
+      merged = next
+    }
+    return merged
+  }
+
   dispatchStreamStart(sessionId: string) {
     this.executeHook("onStreamStart", (hooks) => hooks.onStreamStart?.(sessionId))
   }

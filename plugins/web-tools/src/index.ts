@@ -14,6 +14,8 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
+// `isTauri` retained as fallback when host doesn't expose
+// `ctx.capabilities` (ADR-0026 §5 §C migration path).
 import { isTauri } from "@/lib/tauri"
 
 interface FetchArgs {
@@ -91,7 +93,10 @@ async function webDownload(args: DownloadArgs, ctx: PluginContext): Promise<unkn
     }
     const buffer = new Uint8Array(await res.arrayBuffer())
 
-    if (isTauri()) {
+    // Prefer ADR-0026 §5 §C `ctx.capabilities.tauri`; fall back to the
+    // direct `isTauri()` call when the host doesn't expose it.
+    const tauriHost = ctx.capabilities?.tauri ?? isTauri()
+    if (tauriHost) {
       const directory = args.directory ?? pickConfig(ctx, "downloadDirectory", "")
       if (!directory) {
         return {

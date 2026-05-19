@@ -102,6 +102,11 @@ import {
 } from "../api"
 import { createMessagePartAPI } from "../api/message-part-api"
 import { createDexieAPI } from "../api/dexie-api"
+import { createOcrAPI, type PluginOcrAPI } from "../api/ocr-api"
+import { createWorkspaceAPI, type PluginWorkspaceAPI } from "../api/workspace-api"
+import { createModalAPI, type PluginModalAPI } from "../api/modal-api"
+import { createChatAPI, type PluginChatAPI } from "../api/chat-api"
+import { createCapabilitiesAPI, type PluginCapabilitiesAPI } from "../api/capabilities-api"
 import { getDb } from "@/lib/db/schema"
 import { createIPCAPI } from "../messaging/ipc"
 import { createEventAPI } from "../messaging/message-bus"
@@ -115,10 +120,26 @@ import { createTrayAPI } from "@/lib/plugin/api/tray-api"
 /**
  * Full plugin context combining base and extended APIs.
  * The extended storage API intentionally replaces the legacy async storage shape.
+ *
+ * ADR-0026 v2 namespaces (`ocr`, `workspace`) are intersected at the end so
+ * the existing `PluginContextAPI` interface stays untouched — plugins gain
+ * the new namespaces without breaking any structural-type consumers in the
+ * SDK or sidecar that already type the existing keys.
  */
 export type FullPluginContext = Omit<PluginContext, "storage"> &
   Omit<PluginContextAPI, "storage"> & {
     storage: PluginContextAPI["storage"]
+  } & {
+    /** OCR provider registration (ADR-0026 §2 §A). */
+    ocr: PluginOcrAPI
+    /** Workspace backend registration (ADR-0026 §2 §D). */
+    workspace: PluginWorkspaceAPI
+    /** Modal stack push/close (ADR-0026 §3 §A). */
+    modal: PluginModalAPI
+    /** Chat-middleware registration (ADR-0026 §4 §A). */
+    chat: PluginChatAPI
+    /** Read-only platform-capability flags (ADR-0026 §5 §C). */
+    capabilities: PluginCapabilitiesAPI
   }
 
 // =============================================================================
@@ -237,12 +258,20 @@ export function createFullPluginContext(
       ),
   }
 
-  // Combine base and feature API contexts with enhanced APIs
+  // Combine base and feature API contexts with enhanced APIs + ADR-0026
+  // v2 namespaces (`ocr`, `workspace`). Both are stateless wrappers; the
+  // underlying registries already auto-clean on disable through the
+  // bridge layer's `clear*ForPlugin(pluginId)` hooks.
   return {
     ...baseContext,
     ...contextAPI,
     events: enhancedEvents,
     i18n: enhancedI18n,
+    ocr: createOcrAPI(pluginId),
+    workspace: createWorkspaceAPI(pluginId),
+    modal: createModalAPI(pluginId),
+    chat: createChatAPI(pluginId),
+    capabilities: createCapabilitiesAPI(),
   }
 }
 

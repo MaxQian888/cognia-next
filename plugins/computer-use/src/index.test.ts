@@ -33,12 +33,13 @@ import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/sla
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 import { dispatchAnthropicAction } from "@/lib/automation/anthropic-action-mapper"
 import { pluginComputerUseBash, pluginComputerUseTextEditor } from "@/lib/automation/plugin-tauri"
+import type { PluginTool } from "@/types/plugin/plugin"
 
 const mockedDispatchAction = dispatchAnthropicAction as jest.Mock
 const mockedBash = pluginComputerUseBash as jest.Mock
 const mockedTextEditor = pluginComputerUseTextEditor as jest.Mock
 
-type ToolArg = Parameters<NonNullable<MockAgentCtx["agent"]>["registerTool"]>[0]
+type ToolArg = PluginTool
 
 interface MockAgentCtx {
   pluginId: string
@@ -68,16 +69,30 @@ afterEach(() => {
 })
 
 describe("computer-use plugin activate()", () => {
-  it("registers the slash command and i18n bundle", async () => {
+  it("registers the slash command (i18n is now declarative via manifest.i18n)", async () => {
     const ctx = buildCtx()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await definition.activate(ctx as any)
-    expect(registerPluginI18n).toHaveBeenCalledWith(
-      expect.objectContaining({ pluginId: "cognia-computer-use" })
-    )
+    // ADR-0026 §5 §D — i18n migration: the plugin no longer calls
+    // `registerPluginI18n` directly. The strings ship in
+    // `manifest.i18n.locales` and `lib/plugin/core/manager.ts` auto-wires
+    // them on enable. So this test verifies the slash command is still
+    // registered AND the imperative i18n registry is no longer touched.
+    expect(registerPluginI18n).not.toHaveBeenCalled()
     expect(registerSlashCommand).toHaveBeenCalledWith(
       expect.objectContaining({ name: "/cu", source: "plugin" })
     )
+  })
+
+  it("declares the i18n bundle on the manifest", () => {
+    // The host's auto-wire (lib/plugin/core/manager.ts:1057-1071) reads
+    // this block during enablePlugin(); verifying the shape here so a
+    // future refactor that drops the field gets caught.
+    const manifest = definition.manifest as {
+      i18n?: { locales?: Record<string, Record<string, string>> }
+    }
+    expect(manifest.i18n?.locales?.en?.["slash.cu.description"]).toBeDefined()
+    expect(manifest.i18n?.locales?.["zh-CN"]?.["slash.cu.body"]).toBeDefined()
   })
 
   it("registers computer_use, bash, and text_editor plugin tools", async () => {
@@ -117,13 +132,7 @@ describe("computer-use plugin activate()", () => {
     it("computer_use → dispatchAnthropicAction with computerUse surface", async () => {
       const tool = await getTool("computer_use")
       mockedDispatchAction.mockResolvedValueOnce({ ok: true })
-      await tool!.execute(
-        { action: "screenshot" },
-        {
-          config: {},
-          pluginId: "cognia-computer-use",
-        }
-      )
+      await tool!.execute({ action: "screenshot" }, { config: {} })
       expect(mockedDispatchAction).toHaveBeenCalledWith(
         { action: "screenshot" },
         { surface: "computerUse", pluginId: "cognia-computer-use" }
@@ -138,13 +147,7 @@ describe("computer-use plugin activate()", () => {
         exit_code: 0,
         duration_ms: 0,
       })
-      await tool!.execute(
-        { command: "ls" },
-        {
-          config: {},
-          pluginId: "cognia-computer-use",
-        }
-      )
+      await tool!.execute({ command: "ls" }, { config: {} })
       expect(mockedBash).toHaveBeenCalledWith(
         { command: "ls" },
         { surface: "computerUse", pluginId: "cognia-computer-use" }
@@ -154,13 +157,7 @@ describe("computer-use plugin activate()", () => {
     it("text_editor → pluginComputerUseTextEditor with computerUse surface", async () => {
       const tool = await getTool("text_editor")
       mockedTextEditor.mockResolvedValueOnce({ ok: true })
-      await tool!.execute(
-        { action: "view", path: "/tmp/x" },
-        {
-          config: {},
-          pluginId: "cognia-computer-use",
-        }
-      )
+      await tool!.execute({ action: "view", path: "/tmp/x" }, { config: {} })
       expect(mockedTextEditor).toHaveBeenCalledWith(
         { action: "view", path: "/tmp/x" },
         { surface: "computerUse", pluginId: "cognia-computer-use" }
@@ -170,12 +167,15 @@ describe("computer-use plugin activate()", () => {
 })
 
 describe("computer-use plugin deactivate()", () => {
-  it("unregisters commands, i18n, and plugin tools", async () => {
+  it("unregisters commands and plugin tools (i18n teardown handled by manager)", async () => {
     const ctx = buildCtx()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await definition.deactivate!(ctx as any)
     expect(unregisterCommandsByPlugin).toHaveBeenCalledWith("cognia-computer-use")
-    expect(unregisterPluginI18n).toHaveBeenCalledWith("cognia-computer-use")
+    // ADR-0026 §5 §D — the plugin no longer calls `unregisterPluginI18n`
+    // directly. The manager tears down the manifest.i18n bundle when the
+    // plugin disables.
+    expect(unregisterPluginI18n).not.toHaveBeenCalled()
     const unregistered = ctx.agent!.unregisterTool.mock.calls.map((c) => c[0])
     expect(unregistered.sort()).toEqual(["bash", "computer_use", "text_editor"])
   })
