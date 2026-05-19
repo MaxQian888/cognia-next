@@ -402,10 +402,10 @@ pnpm build
 
 ```bash
 pnpm tauri build
-# 产物：
-# - Windows: src-tauri/target/release/bundle/msi/  (及 nsis/)
-# - macOS:   src-tauri/target/release/bundle/dmg/  (及 app/)
-# - Linux:   src-tauri/target/release/bundle/{appimage,deb,rpm}/
+# 产物（workspace 根目录 target/）：
+# - Windows: target/release/bundle/msi/  (及 nsis/)
+# - macOS:   target/release/bundle/dmg/  (及 app/)
+# - Linux:   target/release/bundle/{appimage,deb,rpm}/
 ```
 
 可选 OCR 特性通过 Cargo feature 标志控制 —— 见 `src-tauri/Cargo.toml` 中的 `ocr-tesseract`、`ocr-windows`、`ocr-apple`、`ocr-ocrs`、`ocr-paddle`。默认构建提供占位后端，保证派发表在任何平台都能编译。
@@ -427,7 +427,7 @@ pnpm docs:build
 
 ## 部署
 
-- **桌面** —— 分发 `src-tauri/target/release/bundle/` 下的 `.msi` / `.dmg` / `.AppImage`。代码签名按项目约定处理。
+- **桌面** —— 分发 `target/release/bundle/`（workspace 根目录）下的 `.msi` / `.dmg` / `.AppImage`。代码签名按项目约定处理。
 - **移动** —— 在 `pnpm mobile:sync` 之后通过 App Store Connect / Google Play 提交。
 - **文档** —— `docs/` 是完整的 Next.js 服务端应用（**不是** 静态导出）；可部署到 Vercel / Railway / Fly.io / 自托管 Node。
 - **信令服务器** —— 把 `signaling-server/` 部署到任何支持 WebSocket 的 Node 主机。TURN 凭据放进桌面端 OS keyring，绝不内嵌代码。

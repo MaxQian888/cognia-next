@@ -102,7 +102,7 @@ This:
 <Tabs groupId="os" persist items={["Windows", "macOS", "Linux"]}>
   <Tab value="Windows">
     ```
-    src-tauri/target/release/bundle/
+    target/release/bundle/
       msi/Cognia_<version>_x64_en-US.msi
       nsis/Cognia_<version>_x64-setup.exe   # if configured
     ```
@@ -113,7 +113,7 @@ This:
   </Tab>
   <Tab value="macOS">
     ```
-    src-tauri/target/release/bundle/
+    target/release/bundle/
       dmg/Cognia_<version>_<arch>.dmg
       macos/Cognia.app
     ```
@@ -125,7 +125,7 @@ This:
   </Tab>
   <Tab value="Linux">
     ```
-    src-tauri/target/release/bundle/
+    target/release/bundle/
       appimage/cognia_<version>_amd64.AppImage
       deb/cognia_<version>_amd64.deb        # if configured
       rpm/cognia-<version>.x86_64.rpm        # if configured

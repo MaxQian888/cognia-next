@@ -110,7 +110,7 @@ pnpm tauri build
 <Tabs groupId="os" persist items={["Windows", "macOS", "Linux"]}>
   <Tab value="Windows">
     ```text
-    src-tauri/target/release/bundle/
+    target/release/bundle/
       msi/Cognia_<version>_x64_en-US.msi
       nsis/Cognia_<version>_x64-setup.exe   # 如配置
     ```
@@ -120,7 +120,7 @@ pnpm tauri build
   </Tab>
   <Tab value="macOS">
     ```text
-    src-tauri/target/release/bundle/
+    target/release/bundle/
       dmg/Cognia_<version>_<arch>.dmg
       macos/Cognia.app
     ```
@@ -131,7 +131,7 @@ pnpm tauri build
   </Tab>
   <Tab value="Linux">
     ```text
-    src-tauri/target/release/bundle/
+    target/release/bundle/
       appimage/cognia_<version>_amd64.AppImage
       deb/cognia_<version>_amd64.deb        # 如配置
       rpm/cognia-<version>.x86_64.rpm        # 如配置

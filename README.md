@@ -400,10 +400,10 @@ pnpm build
 
 ```bash
 pnpm tauri build
-# Outputs:
-# - Windows: src-tauri/target/release/bundle/msi/  (and nsis/)
-# - macOS:   src-tauri/target/release/bundle/dmg/  (and app/)
-# - Linux:   src-tauri/target/release/bundle/{appimage,deb,rpm}/
+# Outputs (workspace root target/):
+# - Windows: target/release/bundle/msi/  (and nsis/)
+# - macOS:   target/release/bundle/dmg/  (and app/)
+# - Linux:   target/release/bundle/{appimage,deb,rpm}/
 ```
 
 Optional OCR features are gated by Cargo feature flags — see `src-tauri/Cargo.toml` for `ocr-tesseract`, `ocr-windows`, `ocr-apple`, `ocr-ocrs`, `ocr-paddle`. Default build ships placeholder backends so the dispatch table compiles everywhere.
@@ -425,7 +425,7 @@ pnpm docs:build
 
 ## Deployment
 
-- **Desktop** — distribute the `.msi` / `.dmg` / `.AppImage` from `src-tauri/target/release/bundle/`. Code-signing is project-specific.
+- **Desktop** — distribute the `.msi` / `.dmg` / `.AppImage` from `target/release/bundle/` (workspace root). Code-signing is project-specific.
 - **Mobile** — submit via App Store Connect / Google Play after `pnpm mobile:sync`.
 - **Docs** — `docs/` is a full Next.js server app (NOT static export); deploy to Vercel / Railway / Fly.io / self-hosted Node.
 - **Signaling server** — deploy `signaling-server/` to any Node host that supports WebSockets. Set TURN credentials via the OS keyring on the desktop client; never ship them in code.

@@ -3863,6 +3863,32 @@
         "submit": "添加",
         "cancel": "取消"
       }
+    },
+    "builtInSkills": {
+      "title": "内置技能",
+      "description": "经过代码审查的第一方 MCP 工具，助手可在桌面对话或 IM 渠道中调用。",
+      "tabs": {
+        "lark": "飞书"
+      },
+      "lark": {
+        "emptyHint": "尚未注册飞书技能。",
+        "intro": {
+          "title": "飞书生产力技能 (lark-cli)",
+          "body": "这些技能将 lark-cli 子命令包装为强类型 MCP 工具，助手直接调用，执行运行在桌面 sidecar 中。",
+          "gates": "只读技能无需确认。在 IM 渠道中，写操作默认弹出 A2UI 确认卡。删除类操作需在会话设置中显式开启。"
+        }
+      },
+      "mutation": {
+        "read": "只读",
+        "write": "写入",
+        "destructive": "删除"
+      },
+      "conversation": {
+        "title": "内置技能",
+        "description": "按会话设置经过代码审查的 lark-cli 技能。",
+        "allowedListLabel": "允许的技能 ID",
+        "requireHitlForWritesLabel": "写操作需要确认卡"
+      }
     }
   },
   "presets": {
@@ -9643,9 +9669,11 @@
         "pair": "配对",
         "paired": "已连接"
       },
+      "scanning": "扫描中…",
       "scanError": {
         "notPairCode": "这个二维码不是 Cognia 配对码。",
         "permissionDenied": "未授予相机权限。请在系统设置里开启后再扫码。",
+        "openSettings": "前往设置",
         "unsupported": "本设备不支持扫码，请在下方手动粘贴配对令牌。",
         "failed": "扫码失败：{message}"
       }
@@ -9850,6 +9878,35 @@
       "pinned_removed": "已取消置顶。",
       "graphViewerEmpty": "工作流中没有节点。"
     },
+    "workflowList": {
+      "swipe": {
+        "run": "运行",
+        "runQueued": "已触发 {name} — 已加入桌面端队列。",
+        "favorite": "★",
+        "unfavorite": "取消置顶"
+      },
+      "actions": {
+        "title": "工作流操作",
+        "run": "立即运行",
+        "runQueued": "已触发 {name} — 已加入桌面端队列。",
+        "pause": "暂停计划",
+        "pauseDeferred": "请暂时从桌面端暂停 / 恢复 —— 服务端镜像将在 Wave 5 上线。",
+        "resume": "恢复计划",
+        "favorite": "置顶",
+        "pinned": "已置顶。",
+        "unpin": "取消置顶",
+        "unpinned": "已取消置顶。",
+        "graph": "查看图",
+        "delete": "删除"
+      },
+      "deleteConfirm": {
+        "title": "删除 {name}？",
+        "body": "将从本设备移除该工作流。如果上游桌面端还存在，下次同步会再拉回。",
+        "cancel": "取消",
+        "confirm": "删除",
+        "toast": "已删除 {name}。"
+      }
+    },
     "twinSources": {
       "title": "孪生数据源",
       "empty": "暂无孪生数据源。点击 + 添加。",
@@ -9989,7 +10046,55 @@
       "reconnecting": "正在重连",
       "offline": "离线",
       "repairNeeded": "需重新配对",
-      "aria": "连接：{label}"
+      "aria": {
+        "menu": "连接：{label} — 打开菜单"
+      },
+      "menu": {
+        "title": "连接"
+      },
+      "actions": {
+        "reconnect": "立即重连",
+        "scanLan": "扫描局域网",
+        "switchServer": "切换已配对服务器",
+        "goToPair": "配对新设备"
+      },
+      "toasts": {
+        "reconnectStarted": "重新握手中…",
+        "reconnectThrottled": "请稍等几秒再点重连。",
+        "syncKicked": "已同步。",
+        "syncFailed": "同步失败（{message}）。"
+      },
+      "sync": {
+        "heading": "上次同步",
+        "never": "从未",
+        "justNow": "刚刚",
+        "minutesAgo": "{n} 分钟前",
+        "hoursAgo": "{n} 小时前",
+        "daysAgo": "{n} 天前"
+      },
+      "scan": {
+        "title": "在此网络中查找桌面端",
+        "scanning": "扫描中…",
+        "empty": "暂无发现。请确认桌面端已在同一 Wi-Fi 上运行。",
+        "mdnsDenied": "本地网络权限被拒绝",
+        "openSettings": "前往设置",
+        "source": {
+          "mdns": "mDNS",
+          "probe": "探测",
+          "history": "历史"
+        }
+      },
+      "switch": {
+        "title": "已配对的桌面端",
+        "empty": "尚无历史配对。",
+        "switchingTo": "正在切换到 {name}…",
+        "lastSeen": "最近一次",
+        "never": "从未",
+        "justNow": "刚刚",
+        "minutesAgo": "{n} 分钟",
+        "hoursAgo": "{n} 小时",
+        "daysAgo": "{n} 天"
+      }
     },
     "security": {
       "title": "生物识别保护",
@@ -11923,7 +12028,8 @@
       "tabs": {
         "chat": "对话",
         "inspector": "检查器",
-        "templates": "模板"
+        "templates": "模板",
+        "changelog": "变更"
       },
       "chatLoading": "正在加载对话…"
     },
@@ -11937,6 +12043,30 @@
       "clearConfirmDescription": "这个工作流的副驾驶会话中的所有消息都将被删除。下一次发送时会开启一个新的 agent 会话。",
       "clearConfirm": "清空",
       "clearCancel": "取消",
+      "session": {
+        "switchLabel": "切换会话",
+        "placeholder": "选择一个会话",
+        "new": "新建会话",
+        "newDefault": "工作流对话",
+        "newSuffixed": "{name} — 额外",
+        "rename": "重命名会话",
+        "delete": "删除会话",
+        "defaultTag": "默认",
+        "created": "已创建新会话",
+        "deleted": "会话已删除",
+        "deleteDefaultBlocked": "默认工作流会话不能删除——请改用清空。",
+        "cleared": "对话已清空",
+        "handlerDefault": "Copilot"
+      },
+      "rename": {
+        "title": "重命名会话",
+        "description": "起一个方便日后定位这条线索的名字。",
+        "placeholder": "会话名称",
+        "cancel": "取消",
+        "save": "保存",
+        "empty": "名称不能为空",
+        "success": "会话已重命名"
+      },
       "proposal": {
         "apply": "应用",
         "discard": "丢弃",
@@ -11946,6 +12076,29 @@
         "errorEditorNotOpen": "对应的工作流编辑器未打开。",
         "status": {
           "open": "待确认",
+          "applied": "已应用",
+          "discarded": "已丢弃"
+        },
+        "banner": {
+          "applyAll": "应用",
+          "discard": "丢弃",
+          "revealInChat": "定位",
+          "ops": "{count} 项"
+        },
+        "toast": {
+          "proposed": "新提案：{summary}",
+          "applied": "已应用：{summary}",
+          "discarded": "已丢弃：{summary}"
+        }
+      },
+      "changelog": {
+        "noWorkflow": "打开一个工作流以查看变更历史。",
+        "loading": "正在加载变更历史…",
+        "empty": "尚未有任何应用或丢弃的提案。",
+        "reveal": "在对话中定位",
+        "openSnapshot": "聚焦相关节点",
+        "opsCount": "{count} 项",
+        "status": {
           "applied": "已应用",
           "discarded": "已丢弃"
         }
@@ -11974,7 +12127,8 @@
       "suggest": "提议下一个节点（不会自动添加）",
       "run": "运行工作流（或从指定步骤运行）。需要批准。",
       "debug": "通过 workflow-debugger 子代理诊断失败的运行",
-      "refactor": "通过 workflow-refactorer 子代理重构子图"
+      "refactor": "通过 workflow-refactorer 子代理重构子图",
+      "delegate": "显式移交给四位工作流专家之一"
     }
   }
 }

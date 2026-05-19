@@ -3863,6 +3863,32 @@
         "submit": "Add",
         "cancel": "Cancel"
       }
+    },
+    "builtInSkills": {
+      "title": "Built-in Skills",
+      "description": "Code-reviewed first-party MCP tools the assistant can call from desktop chat or IM channels.",
+      "tabs": {
+        "lark": "Lark"
+      },
+      "lark": {
+        "emptyHint": "No Lark skills are registered.",
+        "intro": {
+          "title": "Lark productivity skills (lark-cli)",
+          "body": "These skills wrap lark-cli subcommands behind typed MCP tools. The assistant calls them directly; execution runs in the desktop sidecar.",
+          "gates": "Read skills run without confirmation. Write skills surface an A2UI confirm card by default in IM channels. Destructive skills require explicit opt-in via the conversation settings panel."
+        }
+      },
+      "mutation": {
+        "read": "read",
+        "write": "write",
+        "destructive": "destructive"
+      },
+      "conversation": {
+        "title": "Built-in skills",
+        "description": "Per-conversation gating for code-reviewed lark-cli skills.",
+        "allowedListLabel": "Allowed skill IDs",
+        "requireHitlForWritesLabel": "Require confirm card for write actions"
+      }
     }
   },
   "presets": {
@@ -9643,9 +9669,11 @@
         "pair": "Pair",
         "paired": "Connected"
       },
+      "scanning": "Scanning…",
       "scanError": {
         "notPairCode": "That QR code isn't a Cognia pair code.",
         "permissionDenied": "Camera permission denied. Enable it in system settings to scan QR codes.",
+        "openSettings": "Open Settings",
         "unsupported": "This device can't scan QR codes. Paste the pair token manually below.",
         "failed": "Scan failed: {message}"
       }
@@ -9850,6 +9878,35 @@
       "pinned_removed": "Unpinned.",
       "graphViewerEmpty": "No nodes in this workflow."
     },
+    "workflowList": {
+      "swipe": {
+        "run": "Run",
+        "runQueued": "Triggered {name} — queued for desktop.",
+        "favorite": "★",
+        "unfavorite": "Unpin"
+      },
+      "actions": {
+        "title": "Workflow actions",
+        "run": "Run now",
+        "runQueued": "Triggered {name} — queued for desktop.",
+        "pause": "Pause schedule",
+        "pauseDeferred": "Pause/resume from the desktop for now — server-side mirror lands in Wave 5.",
+        "resume": "Resume schedule",
+        "favorite": "Pin",
+        "pinned": "Pinned.",
+        "unpin": "Unpin",
+        "unpinned": "Unpinned.",
+        "graph": "View graph",
+        "delete": "Delete"
+      },
+      "deleteConfirm": {
+        "title": "Delete {name}?",
+        "body": "Removes the workflow from this device. Re-syncs from the desktop if the upstream copy is still present.",
+        "cancel": "Cancel",
+        "confirm": "Delete",
+        "toast": "Deleted {name}."
+      }
+    },
     "twinSources": {
       "title": "Twin sources",
       "empty": "No twin sources yet. Tap + to add one.",
@@ -9989,7 +10046,55 @@
       "reconnecting": "Reconnecting",
       "offline": "Offline",
       "repairNeeded": "Re-pair needed",
-      "aria": "Connection: {label}"
+      "aria": {
+        "menu": "Connection: {label} — open menu"
+      },
+      "menu": {
+        "title": "Connection"
+      },
+      "actions": {
+        "reconnect": "Reconnect now",
+        "scanLan": "Scan local network",
+        "switchServer": "Switch paired server",
+        "goToPair": "Pair new device"
+      },
+      "toasts": {
+        "reconnectStarted": "Re-handshaking…",
+        "reconnectThrottled": "Slow down — wait a few seconds between reconnects.",
+        "syncKicked": "Synced.",
+        "syncFailed": "Sync failed ({message})."
+      },
+      "sync": {
+        "heading": "Last sync",
+        "never": "never",
+        "justNow": "just now",
+        "minutesAgo": "{n}m ago",
+        "hoursAgo": "{n}h ago",
+        "daysAgo": "{n}d ago"
+      },
+      "scan": {
+        "title": "Find a desktop on this network",
+        "scanning": "Scanning…",
+        "empty": "No desktops found yet. Make sure one is running on the same Wi-Fi.",
+        "mdnsDenied": "Local network permission denied",
+        "openSettings": "Open Settings",
+        "source": {
+          "mdns": "mDNS",
+          "probe": "probe",
+          "history": "history"
+        }
+      },
+      "switch": {
+        "title": "Paired desktops",
+        "empty": "No previously paired desktops yet.",
+        "switchingTo": "Switching to {name}…",
+        "lastSeen": "last seen",
+        "never": "never",
+        "justNow": "just now",
+        "minutesAgo": "{n}m",
+        "hoursAgo": "{n}h",
+        "daysAgo": "{n}d"
+      }
     },
     "security": {
       "title": "Biometric protection",
@@ -11923,7 +12028,8 @@
       "tabs": {
         "chat": "Chat",
         "inspector": "Inspector",
-        "templates": "Templates"
+        "templates": "Templates",
+        "changelog": "Changes"
       },
       "chatLoading": "Loading chat…"
     },
@@ -11937,6 +12043,30 @@
       "clearConfirmDescription": "Every message in this workflow's co-pilot session will be deleted. The next message you send starts a fresh agent session.",
       "clearConfirm": "Clear",
       "clearCancel": "Cancel",
+      "session": {
+        "switchLabel": "Switch session",
+        "placeholder": "Pick a session",
+        "new": "New session",
+        "newDefault": "Workflow chat",
+        "newSuffixed": "{name} — extra",
+        "rename": "Rename session",
+        "delete": "Delete session",
+        "defaultTag": "Default",
+        "created": "New session created",
+        "deleted": "Session deleted",
+        "deleteDefaultBlocked": "The default workflow session can't be deleted — clear it instead.",
+        "cleared": "Conversation cleared",
+        "handlerDefault": "Copilot"
+      },
+      "rename": {
+        "title": "Rename session",
+        "description": "Pick a name that helps you find this thread later.",
+        "placeholder": "Session name",
+        "cancel": "Cancel",
+        "save": "Save",
+        "empty": "Name cannot be empty",
+        "success": "Session renamed"
+      },
       "proposal": {
         "apply": "Apply",
         "discard": "Discard",
@@ -11946,6 +12076,29 @@
         "errorEditorNotOpen": "The editor for this workflow is not open.",
         "status": {
           "open": "Pending",
+          "applied": "Applied",
+          "discarded": "Discarded"
+        },
+        "banner": {
+          "applyAll": "Apply",
+          "discard": "Discard",
+          "revealInChat": "Reveal",
+          "ops": "{count} ops"
+        },
+        "toast": {
+          "proposed": "Proposed: {summary}",
+          "applied": "Applied: {summary}",
+          "discarded": "Discarded: {summary}"
+        }
+      },
+      "changelog": {
+        "noWorkflow": "Open a workflow to see its change history.",
+        "loading": "Loading change history…",
+        "empty": "No proposals applied or discarded yet.",
+        "reveal": "Reveal in chat",
+        "openSnapshot": "Focus affected nodes",
+        "opsCount": "{count} ops",
+        "status": {
           "applied": "Applied",
           "discarded": "Discarded"
         }
@@ -11974,7 +12127,8 @@
       "suggest": "Propose one next node to add (no auto-apply)",
       "run": "Run the workflow (or from a specific step). Requires approval.",
       "debug": "Diagnose a failing run via the workflow-debugger subagent",
-      "refactor": "Restructure a subgraph via the workflow-refactorer subagent"
+      "refactor": "Restructure a subgraph via the workflow-refactorer subagent",
+      "delegate": "Hand off explicitly to one of the four workflow specialists"
     }
   }
 }
