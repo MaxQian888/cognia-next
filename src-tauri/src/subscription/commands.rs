@@ -6,11 +6,11 @@
 // submodules (`anthropic::commands::*`, `codex::commands::*`,
 // `opencode::commands::*`).
 
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 use crate::api_key::ApiKeyState;
 use crate::claude::sidecar::{kill_sidecar, SidecarState};
-use crate::subscription::active::{ActiveAccountState, ActiveSnapshot};
+use crate::subscription::active::{self, ActiveAccountState, ActiveSnapshot};
 use crate::subscription::anthropic::AnthropicProvider;
 use crate::subscription::codex::CodexProvider;
 use crate::subscription::migration::{self, MigrationOutcome};
@@ -248,6 +248,40 @@ pub async fn subscription_set_preset(
     let mut vault = vault::load(id)?.unwrap_or_else(ProviderVault::empty);
     vault.preset = preset;
     vault::save(id, &vault)
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0028 — per-`query()` env injection. `claude_env_for_account` returns the
+// env tuple for an arbitrary accountId WITHOUT touching `ActiveAccountState`,
+// so the renderer can mix accounts per ChatSession without flipping the global
+// active pointer. `claude_proxy_env_for_session` returns the current process
+// proxy env tuple; the `session_id` parameter is forward-compat for per-session
+// proxy overrides (deferred V2).
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn claude_env_for_account(
+    app: AppHandle,
+    provider: String,
+    account_id: String,
+) -> Result<Option<Vec<(String, String)>>, String> {
+    let id = ProviderId::parse(&provider)?;
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("no app_data_dir: {e}"))?;
+    active::env_for_account(&app_data_dir, id, &account_id)
+}
+
+#[tauri::command]
+pub async fn claude_proxy_env_for_session(
+    _session_id: String,
+) -> Result<Vec<(String, String)>, String> {
+    // _session_id is forward-compat for per-session proxy overrides (ADR-0028
+    // open follow-up). V1 returns the process-level proxy as-is, identical to
+    // what `src-tauri/src/claude/sidecar.rs:163` already injects at sidecar
+    // spawn — but now also reachable per-`query()` from the renderer.
+    Ok(crate::proxy_config::current().env_vars())
 }
 
 #[cfg(test)]
