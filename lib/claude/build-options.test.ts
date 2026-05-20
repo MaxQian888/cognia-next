@@ -41,7 +41,17 @@ jest.mock("@/lib/db/conversation-overrides", () => ({
   readForResolution: jest.fn(),
 }))
 
+// ADR-0028 — env-resolver bridges the renderer to the Rust per-account env
+// builder. Mock both helpers so resolveSendOptions exercises the integration
+// path without a real Tauri transport.
+jest.mock("@/lib/claude/env-resolver", () => ({
+  resolveAccountId: jest.fn(),
+  resolveAccountEnv: jest.fn(),
+  resolveProxyEnv: jest.fn(),
+}))
+
 import { buildAgentModeSessionUpdate } from "@/lib/agent"
+import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import { getCharacter, listCharactersByIds } from "@/lib/db/characters"
 import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import { listEnabledSkillsByIds, recordSkillUsage, renderSkillsSection } from "@/lib/db/skills"
@@ -64,6 +74,9 @@ const mGetTeam = getTeam as jest.Mock
 const mRuntimeGet = (useAgentRuntimeStore as unknown as { getState: jest.Mock }).getState
 const mCustomGet = (useCustomModeStore as unknown as { getState: jest.Mock }).getState
 const mBuildModeUpdate = buildAgentModeSessionUpdate as jest.Mock
+const mResolveAccountId = resolveAccountId as jest.Mock
+const mResolveAccountEnv = resolveAccountEnv as jest.Mock
+const mResolveProxyEnv = resolveProxyEnv as jest.Mock
 
 function makeChar(p: Partial<Character> = {}): Character {
   return {
@@ -101,6 +114,11 @@ beforeEach(() => {
   mRuntimeGet.mockReturnValue({ modeId: undefined })
   mCustomGet.mockReturnValue({ customModes: {} })
   mBuildModeUpdate.mockReturnValue(undefined)
+  // ADR-0028 — default to the "no account override" path so existing tests
+  // see today's behaviour. Per-test overrides activate the new flow.
+  mResolveAccountId.mockReturnValue(null)
+  mResolveAccountEnv.mockResolvedValue({})
+  mResolveProxyEnv.mockResolvedValue({})
 })
 
 describe("resolveMemberConfig", () => {
@@ -1129,5 +1147,91 @@ describe("resolveSendOptions — workflow-editor (Workflow Copilot mode)", () =>
     expect(opts.systemPrompt).not.toContain("Workflow Copilot")
     // Character's allowedTools survives.
     expect(opts.allowedTools).toContain("Bash")
+  })
+})
+
+describe("resolveSendOptions — ADR-0028 per-`query()` env injection", () => {
+  it("merges account env + proxy env into opts.env when accountId resolves", async () => {
+    mGetCharacter.mockResolvedValue(makeChar({ id: "c1", providerId: "anthropic" }))
+    mResolveAccountId.mockReturnValue("acct-A")
+    mResolveAccountEnv.mockResolvedValue({
+      CLAUDE_CODE_OAUTH_TOKEN: "oat-A",
+      CLAUDE_CONFIG_DIR: "/tmp/configs/acct-A",
+      ANTHROPIC_BASE_URL: "https://example.com",
+    })
+    mResolveProxyEnv.mockResolvedValue({
+      HTTPS_PROXY: "http://proxy:8080",
+    })
+
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1", accountId: "acct-A" }),
+    })
+
+    expect(mResolveAccountId).toHaveBeenCalled()
+    expect(mResolveAccountEnv).toHaveBeenCalledWith("anthropic", "acct-A")
+    expect(mResolveProxyEnv).toHaveBeenCalledWith("s1")
+    expect(opts.env).toMatchObject({
+      CLAUDE_CODE_OAUTH_TOKEN: "oat-A",
+      CLAUDE_CONFIG_DIR: "/tmp/configs/acct-A",
+      ANTHROPIC_BASE_URL: "https://example.com",
+      HTTPS_PROXY: "http://proxy:8080",
+    })
+  })
+
+  it("leaves opts.env unset when no accountId resolves and proxy is inactive", async () => {
+    mGetCharacter.mockResolvedValue(makeChar({ id: "c1" }))
+    mResolveAccountId.mockReturnValue(null)
+    mResolveAccountEnv.mockResolvedValue({})
+    mResolveProxyEnv.mockResolvedValue({})
+
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+    })
+
+    // Either undefined or — if some other layer set DEBUG/CLAUDE_CODE_DEBUG —
+    // the account/proxy keys at least must not appear.
+    expect(opts.env?.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+    expect(opts.env?.CLAUDE_CONFIG_DIR).toBeUndefined()
+    expect(opts.env?.HTTPS_PROXY).toBeUndefined()
+  })
+
+  it("debugMode flags layer on top of account env without colliding", async () => {
+    mGetCharacter.mockResolvedValue(makeChar({ id: "c1", providerId: "anthropic" }))
+    mResolveAccountId.mockReturnValue("acct-A")
+    mResolveAccountEnv.mockResolvedValue({
+      CLAUDE_CODE_OAUTH_TOKEN: "oat-A",
+    })
+    mResolveProxyEnv.mockResolvedValue({})
+
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1", debugMode: true, accountId: "acct-A" }),
+    })
+
+    // Account-env keys survive; debugMode keys layer in on top.
+    expect(opts.env).toMatchObject({
+      CLAUDE_CODE_OAUTH_TOKEN: "oat-A",
+      DEBUG: "*",
+      CLAUDE_CODE_DEBUG: "1",
+    })
+  })
+
+  it("proxy fields apply even when no account override is set", async () => {
+    mGetCharacter.mockResolvedValue(makeChar({ id: "c1" }))
+    mResolveAccountId.mockReturnValue(null)
+    mResolveAccountEnv.mockResolvedValue({}) // no accountId resolved
+    mResolveProxyEnv.mockResolvedValue({
+      HTTPS_PROXY: "http://proxy:8080",
+      HTTP_PROXY: "http://proxy:8080",
+    })
+
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+    })
+
+    expect(opts.env).toMatchObject({
+      HTTPS_PROXY: "http://proxy:8080",
+      HTTP_PROXY: "http://proxy:8080",
+    })
+    expect(opts.env?.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
   })
 })

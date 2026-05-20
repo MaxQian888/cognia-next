@@ -114,6 +114,16 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // `ANTHROPIC_DEFAULT_HEADERS` (comma-separated list of `key=value` pairs)
   // when present. We only set it when the renderer actually attached
   // container skills so non-skills sends stay on stable behaviour.
+  //
+  // ADR-0028 — per-`query()` env is the per-session account/proxy isolation
+  // mechanism. `sendOptions.env` (built by `lib/claude/build-options.ts`)
+  // carries the resolved account env (`CLAUDE_CODE_OAUTH_TOKEN`,
+  // `CLAUDE_CONFIG_DIR`, `ANTHROPIC_BASE_URL`, …) plus proxy env. The
+  // claude-agent-sdk v0.2.111+ overlays this onto the spawned CLI
+  // subprocess's environment; an earlier v0.2.113 brief replace-not-overlay
+  // regime is also handled correctly by our explicit `process.env` spread
+  // below — DO NOT collapse this to `sendOptions.env` alone or essential
+  // host vars like PATH will be lost on Windows.
   const baseEnv = { ...process.env, ...(sendOptions.env ?? {}) }
   if (Array.isArray(sendOptions.containerSkillIds) && sendOptions.containerSkillIds.length > 0) {
     const existingHeaders = baseEnv.ANTHROPIC_DEFAULT_HEADERS

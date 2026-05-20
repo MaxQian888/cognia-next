@@ -7,6 +7,7 @@
 // Lives in its own module so it can be imported from both the direct-chat
 // hook and the team-chat hook, and unit-tested in Phase 6 without React.
 
+import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
 import { getCharacter, listCharactersByIds } from "@/lib/db/characters"
 import { listEnabledSkillsByIds, recordSkillUsage, renderSkillsSection } from "@/lib/db/skills"
 import { recordPluginSkillUsage } from "@/lib/db/plugin-skill-usage"
@@ -864,6 +865,26 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // Non-fatal — the registry import shouldn't ever fail in production,
     // but a hot-reload during dev can briefly leave it unresolved. Better
     // to skip computer-use than to break the send.
+  }
+
+  // --- Per-session account / proxy env (ADR-0028) --------------------------
+  // Resolve the accountId via the chain (session → character → settings →
+  // global active pointer), then ask the Rust side for the env tuple to
+  // forward to this `query()` call. The sidecar's dispatch path spreads
+  // `{ ...process.env, ...opts.env }` so per-call env wins over process env
+  // — exactly what we want for multi-account isolation. Per-account
+  // `CLAUDE_CONFIG_DIR` is also the OAuth refresh race mitigation (each
+  // account gets its own .credentials.json).
+  //
+  // Runs BEFORE the convenience-modes block below so `debugMode` can layer
+  // `DEBUG=*` / `CLAUDE_CODE_DEBUG=1` on top.
+  const accountId = resolveAccountId(session ?? null, character ?? null, appSettings ?? null)
+  const [accountEnv, proxyEnv] = await Promise.all([
+    resolveAccountEnv(providerId, accountId),
+    resolveProxyEnv(session?.id ?? null),
+  ])
+  if (Object.keys(accountEnv).length > 0 || Object.keys(proxyEnv).length > 0) {
+    opts.env = { ...(opts.env ?? {}), ...accountEnv, ...proxyEnv }
   }
 
   // --- Convenience modes (bare / debug / brief) ----------------------------
