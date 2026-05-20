@@ -1,6 +1,9 @@
-// ADR-0028 — `UninstalledSandboxBackend`. The default `current_backend()`
-// for any platform whose real backend hasn't shipped yet (Phase 4.2 / 4.3 /
-// 4.4 land per-platform after this Phase 4.1 commit).
+// ADR-0028 — `UninstalledSandboxBackend`. Originally the default
+// `current_backend()` for every platform until Phase 4.2 / 4.3 / 4.4 ship.
+//
+// After 4.3 (macOS) and 4.4 (Linux) land, this is the fallback only for
+// non-tier-1 OSes (BSD, etc.). Kept for that long-tail coverage.
+#![allow(dead_code)]
 //
 // Honest about its state: every `run()` returns `SandboxError::Unavailable`,
 // `is_available()` returns false, `first_time_setup()` returns

@@ -14,38 +14,43 @@
 // the Settings → Sandbox tab can render a meaningful status badge from
 // `lib/claude/env-resolver.ts`-style helpers when those land in Phase 7.
 
+#[cfg(target_os = "linux")]
+pub mod linux;
+#[cfg(target_os = "macos")]
+pub mod macos;
 pub mod mock;
 pub mod policy;
 pub mod traits;
 pub mod types;
 pub mod uninstalled;
+#[cfg(target_os = "windows")]
+pub mod windows;
 
 use std::sync::Arc;
 
 use crate::sandbox::traits::SandboxedExec;
 use crate::sandbox::types::SandboxHealth;
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
 use crate::sandbox::uninstalled::UninstalledSandboxBackend;
 
 /// Backend selection. Single source of truth for the per-platform routing
-/// table. Today every arm yields `UninstalledSandboxBackend`; Phase 4.2
-/// (Windows) / 4.3 (macOS) / 4.4 (Linux) replace one arm each.
-///
-/// Returns `Arc<dyn SandboxedExec>` so callers can clone the handle into
-/// async tasks without paying the trait-object setup cost per call.
+/// table. Phase 4.3 + 4.4 land the real macOS + Linux backends; Windows is
+/// a tracked follow-up that surfaces SetupRequired honestly until the
+/// `codex-windows-sandbox` vendoring lands.
 pub fn current_backend() -> Arc<dyn SandboxedExec> {
-    // Per-OS cfg arms are pre-wired here so the per-platform Phase 4.x
-    // commits land as one-line swaps.
     #[cfg(target_os = "windows")]
     {
-        Arc::new(UninstalledSandboxBackend::new())
+        Arc::new(windows::WindowsSandboxBackend::new())
     }
     #[cfg(target_os = "macos")]
     {
-        Arc::new(UninstalledSandboxBackend::new())
+        Arc::new(macos::MacOsSandboxBackend::new())
     }
     #[cfg(target_os = "linux")]
     {
-        Arc::new(UninstalledSandboxBackend::new())
+        // No bundled bwrap yet — the resolver falls back to system PATH.
+        // Phase 8 (verification) wires the resource_dir lookup.
+        Arc::new(linux::LinuxSandboxBackend::new(None))
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
@@ -68,17 +73,37 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn current_backend_returns_uninstalled_until_phase_4_2() {
+    async fn current_backend_uses_per_platform_dispatch() {
         let backend = current_backend();
-        // is_available is false because no real per-platform backend has
-        // shipped yet. The renderer's strict-mode policy refuses calls.
-        assert!(!backend.is_available());
+        let health = backend.health();
+        #[cfg(target_os = "windows")]
+        {
+            // Vendor still pending — Phase 4.2 follow-up.
+            assert_eq!(health.backend, "windows-codex-vendor-pending");
+            assert!(!backend.is_available());
+        }
+        #[cfg(target_os = "macos")]
+        {
+            assert_eq!(health.backend, "macos-sandbox-exec");
+        }
+        #[cfg(target_os = "linux")]
+        {
+            assert_eq!(health.backend, "linux-bwrap");
+        }
+        // Silence on unsupported OS.
+        let _ = health;
     }
 
     #[tokio::test]
-    async fn sandbox_health_probe_reports_uninstalled() {
+    async fn sandbox_health_probe_reports_a_known_backend_id() {
         let health = sandbox_health_probe().await.unwrap();
-        assert!(!health.available);
-        assert!(health.backend.starts_with("uninstalled-"));
+        let ok = matches!(
+            health.backend.as_str(),
+            "windows-codex-vendor-pending"
+                | "macos-sandbox-exec"
+                | "linux-bwrap"
+                | "mock"
+        ) || health.backend.starts_with("uninstalled-");
+        assert!(ok, "unexpected backend id: {}", health.backend);
     }
 }
