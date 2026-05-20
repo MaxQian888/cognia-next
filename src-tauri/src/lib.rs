@@ -304,12 +304,11 @@ pub fn run() {
             // ADR-0028 — per-`query()` env injection (per-session multi-account).
             subscription::commands::claude_env_for_account,
             subscription::commands::claude_proxy_env_for_session,
-            // ADR-0028 — sandbox health probe (read-only diagnostic).
-            // sandbox_exec is intentionally NOT registered until a real
-            // backend ships in Phase 4.2 (Windows) / 4.3 (macOS) / 4.4 (Linux);
-            // until then the health probe surfaces "uninstalled" honestly to
-            // the Settings → Sandbox tab.
+            // ADR-0028 — sandbox dispatch + health probe. Phase 4.5
+            // plugin consumes sandbox_exec via plugin_tool_exec → renderer
+            // → Tauri.
             sandbox::sandbox_health_probe,
+            sandbox::sandbox_exec,
             subscription::anthropic::commands::anthropic_oauth_save_pkce_result,
             subscription::codex::commands::codex_oauth_discover,
             subscription::codex::commands::codex_oauth_request_device_code,

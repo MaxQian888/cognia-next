@@ -68,6 +68,31 @@ pub async fn sandbox_health_probe() -> Result<SandboxHealth, String> {
     Ok(current_backend().health())
 }
 
+/// Tauri-exposed execution dispatcher consumed by the
+/// `cognia-sandboxed-tools` plugin (Phase 4.5). The renderer-side plugin
+/// tool's `execute()` forwards every call here.
+///
+/// Flow: derive a `SandboxPolicy` from `(tool, request)` via
+/// `policy::policy_for`, then dispatch to `current_backend().run(...)`.
+/// Errors come back as `String` (Tauri can't serialize the rich
+/// `SandboxError` enum directly without a custom impl); the plugin uses
+/// `error.message` verbatim as the ToolResult error so the model sees the
+/// same stderr-style failure a native shell command would emit.
+#[tauri::command]
+pub async fn sandbox_exec(
+    tool: String,
+    command: crate::sandbox::types::SandboxCommand,
+    request: crate::sandbox::policy::PolicyRequest,
+) -> Result<crate::sandbox::types::SandboxResult, String> {
+    let stripped = tool.strip_prefix("sandbox_").unwrap_or(&tool).to_string();
+    let policy = crate::sandbox::policy::policy_for(&stripped, request)
+        .map_err(|e| e.to_string())?;
+    current_backend()
+        .run(command, policy)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

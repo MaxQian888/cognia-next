@@ -867,6 +867,43 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     // to skip computer-use than to break the send.
   }
 
+  // --- Sandbox replacement of SDK builtin Bash / Edit / Write (ADR-0028 4.5)
+  // When sandbox is enabled for this session, disallow the SDK's builtin
+  // Bash / Edit / Write so the model can't bypass the sandbox. The
+  // `cognia-sandboxed-tools` plugin contributes 4 replacements via
+  // `opts.pluginTools` (built above by `buildPluginToolsManifest()` — that
+  // helper collects every enabled plugin's tools, including ours when the
+  // plugin is enabled in the store). Native `text_editor` is filtered out
+  // of `opts.anthropicTools` so the model gets a single, sandboxed path.
+  //
+  // A short system-prompt note steers the model to `sandbox_*` tool names —
+  // anthropic models do follow disallowedTools strictly, but the prompt
+  // hint reduces "I notice Bash is disabled, can you tell me why?"
+  // back-and-forth.
+  const sandboxEnabled =
+    session?.sandboxEnabled ??
+    character?.sandboxEnabled ??
+    appSettings?.sandboxDefaultEnabled ??
+    false
+  if (sandboxEnabled) {
+    const disallowed = new Set(opts.disallowedTools ?? [])
+    for (const t of ["Bash", "Edit", "Write"]) disallowed.add(t)
+    opts.disallowedTools = [...disallowed]
+    if (Array.isArray(opts.anthropicTools)) {
+      opts.anthropicTools = opts.anthropicTools.filter(
+        (t) => t.name !== "text_editor" && t.name !== "str_replace_based_edit_tool"
+      )
+    }
+    const sandboxHint =
+      "Filesystem-mutating and shell tools are sandboxed in this session. Use " +
+      "`sandbox_bash` / `sandbox_edit` / `sandbox_write` / `sandbox_text_editor` " +
+      "(from cognia-sandboxed-tools) instead of the SDK builtins; they accept the " +
+      "same shape plus an explicit writable/readable scope. The unsandboxed Bash / " +
+      "Edit / Write are not available in this session."
+    const existing = opts.appendSystemPrompt?.trim() ?? ""
+    opts.appendSystemPrompt = existing ? `${existing}\n\n${sandboxHint}` : sandboxHint
+  }
+
   // --- Per-session account / proxy env (ADR-0028) --------------------------
   // Resolve the accountId via the chain (session → character → settings →
   // global active pointer), then ask the Rust side for the env tuple to

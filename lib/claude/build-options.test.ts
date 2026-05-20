@@ -1150,6 +1150,71 @@ describe("resolveSendOptions — workflow-editor (Workflow Copilot mode)", () =>
   })
 })
 
+describe("resolveSendOptions — ADR-0028 sandbox builtin replacement", () => {
+  it("disallows SDK Bash/Edit/Write + filters text_editor when session sandbox is enabled", async () => {
+    mGetCharacter.mockResolvedValue(
+      makeChar({
+        id: "c1",
+        enableComputerUse: true,
+      })
+    )
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        characterId: "c1",
+        sandboxEnabled: true,
+      }),
+    })
+    const disallowed = opts.disallowedTools ?? []
+    expect(disallowed).toContain("Bash")
+    expect(disallowed).toContain("Edit")
+    expect(disallowed).toContain("Write")
+    // text_editor must NOT survive on anthropicTools when sandbox is on.
+    if (Array.isArray(opts.anthropicTools)) {
+      expect(opts.anthropicTools.map((t) => t.name)).not.toContain("text_editor")
+      expect(opts.anthropicTools.map((t) => t.name)).not.toContain("str_replace_based_edit_tool")
+    }
+    // System prompt hint mentions sandbox_bash / sandbox_edit.
+    expect(opts.appendSystemPrompt ?? "").toContain("sandbox_bash")
+  })
+
+  it("character.sandboxEnabled wins when session-level is unset", async () => {
+    mGetCharacter.mockResolvedValue(makeChar({ id: "c1", sandboxEnabled: true }))
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+    })
+    expect(opts.disallowedTools ?? []).toContain("Bash")
+  })
+
+  it("session.sandboxEnabled = false overrides character + app default", async () => {
+    mGetCharacter.mockResolvedValue(makeChar({ id: "c1", sandboxEnabled: true }))
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1", sandboxEnabled: false }),
+      appSettings: {
+        id: "singleton",
+        alwaysAllowTools: [],
+        builtinTools: {
+          fileExtras: true,
+          git: true,
+          process: false,
+          environment: true,
+          shellAdvanced: false,
+        },
+        sandboxDefaultEnabled: true,
+      } as AppSettings,
+    })
+    expect(opts.disallowedTools ?? []).not.toContain("Bash")
+  })
+
+  it("leaves disallowedTools alone when sandbox is unset on every layer", async () => {
+    mGetCharacter.mockResolvedValue(makeChar({ id: "c1" }))
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+    })
+    expect(opts.disallowedTools ?? []).not.toContain("Bash")
+  })
+})
+
 describe("resolveSendOptions — ADR-0028 per-`query()` env injection", () => {
   it("merges account env + proxy env into opts.env when accountId resolves", async () => {
     mGetCharacter.mockResolvedValue(makeChar({ id: "c1", providerId: "anthropic" }))
