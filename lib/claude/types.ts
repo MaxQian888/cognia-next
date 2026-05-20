@@ -534,6 +534,16 @@ export interface ChatSession {
    * without touching settings.
    */
   providerOverride?: string
+  /**
+   * Per-session account override (ADR-0028). Picks which `ProviderVault::accounts[]`
+   * entry supplies the OAuth / API key, `CLAUDE_CONFIG_DIR`, base URL, and proxy
+   * for this conversation. Precedence chain: `session.accountId →
+   * character.accountIdOverride → settings.defaultAccountId →
+   * ActiveAccountState.get(provider).active_account_id` (today's single-active
+   * pointer is the final fallback). Undefined here = inherit from character or
+   * the global active pointer, preserving today's behaviour for legacy rows.
+   */
+  accountId?: string
   systemPrompt?: string
   workingDir?: string
   /**
@@ -921,6 +931,14 @@ export interface AppSettings {
   /** Active default AI provider id (e.g. "openai", "anthropic", "google"). */
   defaultProvider?: string
   /**
+   * Default account override (ADR-0028) for sessions / characters that do not
+   * set their own `accountId` / `accountIdOverride`. Refers to a UUIDv7 in
+   * `ProviderVault::accounts[]` for the provider matched by `defaultProvider`.
+   * Undefined keeps today's behaviour exactly — the single global active pointer
+   * (`ActiveAccountState`) remains the source of truth.
+   */
+  defaultAccountId?: string
+  /**
    * Per-provider configuration. Stores the full `UserProviderSettings`
    * shape (api key, base URL, model list, key rotation, OAuth state,
    * health metrics) used by the providers settings UI. The lean
@@ -1052,6 +1070,16 @@ export interface AppSettings {
   biometricRequiredFor?: BiometricGuardPolicy
 
   /**
+   * Master switch for mobile-initiated Computer Use sessions (ADR-0020
+   * follow-up). When `false`, the mobile `/me/computer-use` quick toggle
+   * is off and the runtime refuses to enter a computer-use turn from a
+   * mobile-driven conversation regardless of per-character `enableComputerUse`.
+   * `undefined` falls back to the per-character flag, preserving today's
+   * behaviour for existing installs.
+   */
+  mobileComputerUseEnabled?: boolean
+
+  /**
    * Developer-only knobs. Surfaced under Settings → Developer in dev
    * builds; hidden in production builds (gate via `NODE_ENV`). Each
    * toggle relaxes a safety check that exists for a reason — never
@@ -1122,12 +1150,20 @@ export interface BiometricGuardPolicy {
   exportBackup: boolean
   /** Revealing secrets (API keys, OAuth tokens) in the UI. */
   revealSecrets: boolean
+  /**
+   * The "退出登录" button on mobile `/me`. When true (default), we re-prompt
+   * the user's biometric before clearing the pairing JWT + Anthropic
+   * credential. Off lets the action run unconditionally on devices the
+   * user trusts.
+   */
+  signOut: boolean
 }
 
 export const DEFAULT_BIOMETRIC_GUARD: BiometricGuardPolicy = {
   deletePairing: true,
   exportBackup: false,
   revealSecrets: false,
+  signOut: true,
 }
 
 export interface BackupAutoSchedule {
@@ -1311,6 +1347,14 @@ export interface Character {
    * port (P3).
    */
   providerId?: string
+  /**
+   * Per-character account override (ADR-0028). Picks which `ProviderVault::accounts[]`
+   * entry supplies credentials for every session bound to this character — unless
+   * the session itself sets `ChatSession.accountId`, which wins. Undefined here
+   * falls through to `AppSettings.defaultAccountId` and then to the global
+   * `ActiveAccountState` pointer (today's behaviour).
+   */
+  accountIdOverride?: string
   /**
    * Provider id used for embedding this character's twin sources.
    * Independent of chat provider — a character can chat through OpenAI but
