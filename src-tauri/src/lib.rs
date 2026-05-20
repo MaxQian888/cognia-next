@@ -22,7 +22,7 @@ mod plugin_api;
 mod plugins;
 mod proxy_config;
 mod remote_control;
-mod sandbox;
+pub mod sandbox;
 mod scheduler;
 mod settings;
 mod shell;

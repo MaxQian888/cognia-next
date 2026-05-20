@@ -1487,6 +1487,21 @@
     "buttonLabel": "Call Rust greet()"
   },
   "settings": {
+    "sandbox": {
+      "title": "Sandbox",
+      "description": "Per-platform OS sandbox for high-risk tools (Bash / Edit / Write / text_editor). When unavailable, strict mode refuses these tool calls instead of bypassing isolation.",
+      "retryButton": "Run health probe",
+      "strictModeNote": "Strict mode: when unavailable, sandboxed tool calls are refused — no bypass option.",
+      "backend": { "label": "Backend" },
+      "version": { "label": "Version" },
+      "lastError": { "label": "Last error" },
+      "ipcError": { "label": "IPC error" },
+      "status": {
+        "ok": "Active",
+        "setup": "Setup required",
+        "down": "Unavailable"
+      }
+    },
     "title": "Settings",
     "description": "Configure defaults, your API key, prompt presets, MCP servers and more.",
     "close": "Close",
@@ -3820,7 +3835,40 @@
         "inbox": "Inbox",
         "outbound": "Outbound",
         "audit": "Audit",
+        "tunnel": "Tunnel",
         "capability": "Capabilities"
+      },
+      "tunnel": {
+        "title": "Cloudflared tunnel",
+        "description": "Expose this desktop's adapter webhook receiver to the public internet so Slack / Lark / Discord interactions can reach it. Uses the cloudflared `--url` quick-tunnel.",
+        "status": {
+          "running": "Running",
+          "off": "Off"
+        },
+        "start": "Start tunnel",
+        "stop": "Stop tunnel",
+        "started": "Tunnel started",
+        "stopped": "Tunnel stopped",
+        "notInstalled": "cloudflared isn't installed on this machine",
+        "desktopOnly": "Tunnel control requires the desktop app",
+        "desktopOnlyHint": "The tunnel runs from the desktop app. Open cognia-next on your desktop to launch it.",
+        "copy": "Copy",
+        "copied": "Copied",
+        "copyFailed": "Couldn't copy",
+        "copiedCommand": "Command copied",
+        "install": {
+          "title": "Install cloudflared",
+          "description": "Run one of the following on your {platform} host, then start the tunnel.",
+          "copyAria": "Copy {label} command"
+        },
+        "webhookUrls": {
+          "title": "Adapter webhook URLs",
+          "description": "Copy these into each platform's admin console once the tunnel is up.",
+          "noAdapters": "No adapters configured yet. Add one in the Adapters tab.",
+          "tunnelOff": "Start the tunnel above to surface a public URL.",
+          "notApplicable": "Reverse-WebSocket transport — no public URL needed.",
+          "copy": "Copy {name} webhook URL"
+        }
       },
       "capabilityMatrix": {
         "intro": "Each cell shows how the adapter projects an A2UI component on its platform. Capabilities are refreshed each time the adapter starts.",
@@ -3926,7 +3974,12 @@
         "computerUseBadge": "CU",
         "computerUseTooltip": "Computer-use tools are allowed on this conversation (ADR-0025 per-channel opt-in). Disable by editing the override.",
         "searchPlaceholder": "Search by conversation key or character id",
-        "searchNoResults": "No overrides match \"{query}\"."
+        "searchNoResults": "No overrides match \"{query}\".",
+        "summary": {
+          "computerUse": "Computer Use on: {count}",
+          "hitlOff": "HITL disabled: {count}",
+          "customSkillAllowlist": "Custom skill allowlist: {count}"
+        }
       },
       "inbox": {
         "summary": "Per-adapter conversation summary. Use the Inbox for the full view.",
@@ -3957,6 +4010,12 @@
         "bulkRetryConfirmDescription": "{count} job(s) will be moved back to pending and the runner will retry them on its next poll. Persistent failures will re-deadletter after the same 5-attempt cap.",
         "bulkRetryCancel": "Cancel",
         "bulkRetryConfirm": "Retry all",
+        "exportCsv": "Export CSV",
+        "exportJson": "Export JSON",
+        "clearAll": "Clear ({count})",
+        "clearAllConfirmTitle": "Delete every dead-lettered job in this view?",
+        "clearAllConfirmDescription": "{count} job(s) will be permanently removed from the outbound queue. This cannot be undone. The platform-side message is unaffected.",
+        "clearAllConfirm": "Delete all",
         "expandDetailsAria": "Expand details for job {id}",
         "collapseDetailsAria": "Collapse details for job {id}",
         "detailIdempotencyKey": "Idempotency key",
@@ -4760,6 +4819,16 @@
       "configureSkillsmp": "Configure the SkillsMP base URL in Settings → API to enable this source."
     },
     "analytics": {
+      "loading": "Loading analytics…",
+      "totalSkills": "Total skills",
+      "totalEnabled": "Enabled",
+      "totalUsage": "Total uses",
+      "tokensEstimated": "Estimated tokens",
+      "categoryUsageTitle": "Usage by category",
+      "mostUsedTitle": "Most used",
+      "recentUsageTitle": "Recently used",
+      "neverUsedTitle": "Never used",
+      "neverUsedEmpty": "No data yet — usage will appear here once skills are invoked.",
       "trend": {
         "title": "Usage trend",
         "window7": "7d",
@@ -5051,6 +5120,7 @@
       "tabLifecycle": "Lifecycle",
       "tabOperations": "Operations",
       "tabAnalytics": "Analytics",
+      "tabTriggers": "Triggers",
       "metaId": "ID",
       "metaVersion": "Version",
       "metaSource": "Source",
@@ -5099,6 +5169,7 @@
       "colDeclared": "Manifest",
       "colOptional": "Optional",
       "colGranted": "Granted",
+      "colTier": "Tier",
       "colActions": "",
       "empty": "This plugin doesn't declare or hold any permissions.",
       "auditLogTitle": "Recent audit events",
@@ -5106,7 +5177,56 @@
       "revokeAll": "Revoke all",
       "close": "Close",
       "grant": "Grant",
-      "revoke": "Revoke"
+      "revoke": "Revoke",
+      "tierLabel": {
+        "silent": "Silent",
+        "confirm": "Confirm each call",
+        "forbid": "Forbid"
+      },
+      "tierHint": {
+        "silent": "Allow the granted permission to run without prompting.",
+        "confirm": "Show an overlay each time and wait for the user to allow or reject.",
+        "forbid": "Always deny — even if the manifest declares it."
+      }
+    },
+    "triggers": {
+      "badge": {
+        "label": "{count, plural, one {# workflow trigger} other {# workflow triggers}}",
+        "ariaLabel": "Workflow triggers fired by this message",
+        "popoverTitle": "Workflow triggers",
+        "empty": "No triggers fired.",
+        "workflowPrefix": "workflow:",
+        "pluginPrefix": "plugin:"
+      },
+      "status": {
+        "dispatched": "Dispatched",
+        "rejected": "Rejected",
+        "error": "Error"
+      },
+      "devtools": {
+        "title": "Triggers",
+        "empty": "No trigger events recorded yet.",
+        "filterPlugin": "Filter by plugin",
+        "filterPluginAll": "All plugins",
+        "filterPluginBuiltin": "— built-in —",
+        "filterKind": "Filter by kind",
+        "filterKindAll": "All kinds",
+        "clear": "Clear all",
+        "colTime": "Time",
+        "colPlugin": "Plugin",
+        "colKind": "Kind",
+        "colWorkflow": "Workflow",
+        "colStatus": "Status",
+        "colError": "Error"
+      },
+      "detailSubscriptions": {
+        "title": "Subscribed workflows",
+        "empty": "No workflows subscribe to this plugin's triggers yet.",
+        "muteToggle": "Mute",
+        "muteHint": "Muting stops the trigger from dispatching while keeping the subscription.",
+        "colKind": "Trigger kind",
+        "colWorkflow": "Workflow"
+      }
     },
     "configForm": {
       "description": "Settings declared in the plugin's manifest.configSchema. Save to apply the new values on next activation.",
@@ -5115,7 +5235,13 @@
       "save": "Save",
       "saving": "Saving…",
       "cancel": "Cancel",
-      "close": "Close"
+      "close": "Close",
+      "arrayPlaceholder": "One value per line",
+      "arrayAdd": "Add item",
+      "arrayRemove": "Remove",
+      "emptyArray": "No items yet — use \"Add item\" to start.",
+      "oneOfVariant": "Variant",
+      "unsupportedField": "Unsupported field shape — fall back to raw JSON."
     },
     "panel": {
       "totalBadge": "{count} total",
@@ -5192,7 +5318,29 @@
       "install": "Install",
       "installing": "Installing…",
       "uninstall": "Uninstall",
-      "uninstalling": "Uninstalling…"
+      "uninstalling": "Uninstalling…",
+      "versionLabel": "Version"
+    },
+    "modalRoot": {
+      "errorFallback": "Plugin modal failed to render. Check the console for details."
+    },
+    "consent": {
+      "title": "Plugin requesting permission",
+      "ariaLabel": "Plugin consent dialog",
+      "fields": {
+        "plugin": "Plugin:",
+        "permission": "Permission:",
+        "reason": "Reason:",
+        "autoReject": "Auto-reject in {seconds}s",
+        "morePending": "{count} more pending",
+        "defaultReason": "No reason supplied."
+      },
+      "actions": {
+        "allowOnce": "Allow once",
+        "allowSession": "Always allow this session",
+        "reject": "Reject",
+        "close": "Close"
+      }
     },
     "marketplace": {
       "loading": "Loading marketplace…",
@@ -5200,6 +5348,7 @@
       "retry": "Retry",
       "searchPlaceholder": "Search the marketplace…",
       "emptySection": "Nothing in this section yet.",
+      "loadMore": "Load more ({shown}/{total})",
       "sections": {
         "all": "All",
         "featured": "Featured",
@@ -5354,14 +5503,18 @@
         "hooks": "Hook history",
         "profiler": "Profiler",
         "hotReload": "Hot reload",
-        "inspect": "Inspect"
+        "inspect": "Inspect",
+        "triggers": "Triggers"
       },
       "logs": {
         "empty": "No logs captured."
       },
       "bus": {
         "empty": "No bus events.",
-        "desktopOnly": "The dev-server message bus is only available in the desktop build."
+        "desktopOnly": "The dev-server message bus is only available in the desktop build.",
+        "consoleTapHint": "You can still capture browser console output into the Logs tab below.",
+        "consoleTapOn": "Enable console capture",
+        "consoleTapOff": "Disable console capture"
       },
       "hooks": {
         "empty": "No hook activity."
@@ -7444,6 +7597,22 @@
     "noUpcomingTasks": "No upcoming tasks",
     "recentExecutions": "Recent Executions",
     "noRecentExecutions": "No recent executions",
+    "upcomingRail": {
+      "title": "Upcoming",
+      "recentTitle": "Recent",
+      "empty": "Nothing scheduled",
+      "ariaLabel": "Upcoming and recent runs"
+    },
+    "mobile": {
+      "fabCreateAria": "Create scheduled task",
+      "statStripLabels": {
+        "active": "Active",
+        "paused": "Paused",
+        "executions": "Executions",
+        "successRate": "Success"
+      }
+    },
+    "emptyFiltered": "No matching tasks",
     "cronMatchingNow": "Cron matches current time",
     "upcomingRuns": "Upcoming Runs",
     "activePlugins": "{count} plugin(s)",
@@ -7834,7 +8003,19 @@
       "newChat": "New chat",
       "emptyTeam": "No conversations yet. Start one above.",
       "emptyDm": "No chats yet. Pick a character to begin.",
-      "groupOther": "Other"
+      "groupOther": "Other",
+      "bulk": {
+        "selectedCount": "{count, plural, one {# selected} other {# selected}}",
+        "delete": "Delete",
+        "pin": "Pin",
+        "unpin": "Unpin",
+        "cancel": "Cancel",
+        "deleteConfirmTitle": "{count, plural, one {Delete # conversation?} other {Delete # conversations?}}",
+        "deleteConfirmBody": "This permanently removes the conversations and all their messages. This cannot be undone.",
+        "deleteSuccess": "{count, plural, one {Deleted # conversation} other {Deleted # conversations}}",
+        "pinSuccess": "{count, plural, one {Pinned # conversation} other {Pinned # conversations}}",
+        "unpinSuccess": "{count, plural, one {Unpinned # conversation} other {Unpinned # conversations}}"
+      }
     },
     "commandPalette": {
       "title": "Command palette",
@@ -7990,7 +8171,10 @@
       "untitled": "(untitled)",
       "actionsMenu": "Session actions",
       "rename": "Rename",
-      "delete": "Delete"
+      "delete": "Delete",
+      "pin": "Pin",
+      "unpin": "Unpin",
+      "pinned": "Pinned"
     },
     "shell": {
       "desktopOnlyTitle": "Run inside Tauri",
@@ -10476,9 +10660,12 @@
       "pairingUnpaired": "Not paired with desktop yet",
       "actionPair": "Pair now",
       "sectionAccount": "Account",
-      "sectionData": "Data & backup",
-      "sectionAppearance": "Appearance & language",
+      "sectionData": "Data",
+      "sectionAppearance": "Appearance",
       "sectionAdvanced": "Advanced",
+      "sectionConnection": "Connection & extensions",
+      "sectionAutomation": "Automation",
+      "sectionAbout": "About",
       "settingsLink": "App settings",
       "backupLink": "Backup & sync",
       "dexieMaintenance": "Dexie maintenance",
@@ -10486,6 +10673,21 @@
       "biometricToggle": "Require biometric to unlock",
       "biometricUnavailable": "This device has no biometric enrolled.",
       "versionLabel": "Version",
+      "subscriptionRow": "Subscription & account",
+      "syncRow": "Sync status",
+      "devicesRow": "Paired devices",
+      "notificationsRow": "Notifications",
+      "preferencesRow": "Font size & default model",
+      "connectorsRow": "Platform connectors",
+      "ocrRow": "OCR providers",
+      "computerUseRow": "Computer Use",
+      "backupRow": "Backup & restore",
+      "schedulerRow": "Scheduled tasks",
+      "storageRow": "Storage usage",
+      "aboutRow": "About",
+      "helpRow": "Help & docs",
+      "feedbackRow": "Feedback & diagnostics",
+      "deviceInfoRow": "Device info",
       "profile": {
         "fallbackName": "Signed-out",
         "fallbackPlan": "Local account",
@@ -10498,6 +10700,14 @@
         "themeDark": "Dark",
         "themeAuto": "Auto"
       },
+      "quickActions": {
+        "computerUseLabel": "Computer Use",
+        "computerUseAria": "Toggle mobile Computer Use",
+        "on": "On",
+        "off": "Off",
+        "scanLabel": "Scan / re-pair",
+        "scanAria": "Open server scan sheet"
+      },
       "todayStats": {
         "sessions": "Sessions",
         "drafts": "Drafts",
@@ -10505,7 +10715,98 @@
         "backupNever": "Never"
       },
       "appearanceLink": "Theme & wallpaper",
-      "appearanceBackAria": "Back to Me"
+      "appearanceBackAria": "Back to Me",
+      "account": {
+        "notSignedIn": "No Anthropic account active. Tap to sign in.",
+        "fiveHourLabel": "5-hour quota",
+        "sevenDayLabel": "7-day quota",
+        "resetIn": "resets in {remaining}"
+      },
+      "signOut": {
+        "cta": "Sign out",
+        "confirmTitle": "Sign out of cognia?",
+        "confirmDescription": "This clears the Anthropic credential and the desktop pairing JWT on this device. You can pair again at any time.",
+        "confirmAction": "Sign out",
+        "cancel": "Cancel",
+        "pending": "Signing out…",
+        "biometricReason": "Confirm to sign out of cognia",
+        "biometricTitle": "Sign out",
+        "biometricDescription": "Re-prompts before clearing the pairing JWT.",
+        "biometricLabel": "Confirm before sign-out",
+        "biometricHelp": "Require Face ID / fingerprint before clearing pairing.",
+        "successToast": "Signed out — pairing cleared.",
+        "lockoutToast": "Too many attempts. Try again later.",
+        "errorToast": "Sign-out failed: {reason}"
+      },
+      "computerUse": {
+        "masterToggleTitle": "Mobile Computer Use",
+        "masterToggleDescription": "When off, mobile-initiated conversations refuse to enter a Computer Use loop regardless of per-character settings.",
+        "masterToggleAria": "Toggle mobile Computer Use",
+        "masterStateOn": "Mobile Computer Use is enabled.",
+        "masterStateOff": "Mobile Computer Use is disabled."
+      },
+      "sync": {
+        "title": "Companion sync",
+        "description": "Per-table snapshot from the desktop. Each row pulls deltas on the next foreground or after a manual retry.",
+        "syncAll": "Sync all",
+        "syncRowAria": "Retry sync for {table}",
+        "lastSynced": "Last synced {time}",
+        "neverSynced": "Never synced yet",
+        "toastTableSynced": "Synced {table}.",
+        "toastAllSynced": "Sync requested.",
+        "toastError": "Sync failed: {reason}"
+      },
+      "storage": {
+        "totalTitle": "Browser storage",
+        "totalDescription": "{used} of {quota} used",
+        "totalUnsupported": "This shell does not expose storage estimates.",
+        "backupsTitle": "Encrypted backups",
+        "backupsDescription": "{count} files · {total}",
+        "backupsEmpty": "No successful backups yet.",
+        "unnamedFile": "(no filename)",
+        "refresh": "Refresh"
+      },
+      "device": {
+        "hardwareTitle": "App & device",
+        "permissionsTitle": "Permissions",
+        "aboutTitle": "About this readout",
+        "aboutBody": "Cognia reads only what your shell exposes — no telemetry leaves the device.",
+        "appVersion": "App version",
+        "userAgent": "User agent",
+        "uaUnknown": "(unknown)",
+        "biometricLabel": "Biometric (Face ID / fingerprint)",
+        "localLabel": "Local notifications",
+        "status": {
+          "granted": "Granted",
+          "denied": "Denied",
+          "prompt": "Ask each time",
+          "unsupported": "Unsupported",
+          "unknown": "Unknown"
+        }
+      },
+      "help": {
+        "resourcesTitle": "Resources",
+        "docsLabel": "Documentation",
+        "docsDescription": "Open the cognia docs site in the system browser.",
+        "githubLabel": "Source on GitHub",
+        "githubDescription": "Browse the repository and release notes.",
+        "legalTitle": "Legal",
+        "licenseLabel": "License",
+        "licenseDescription": "Source under MIT. Third-party notices listed in the desktop About panel."
+      },
+      "feedback": {
+        "reportTitle": "Report a problem",
+        "openIssueLabel": "Open a GitHub issue",
+        "openIssueDescription": "Includes templates for bug reports and feature requests.",
+        "copyLabel": "Copy diagnostics",
+        "copyLabelDone": "Diagnostics copied",
+        "copyDescription": "App version, user agent, and current sync snapshot.",
+        "copyToast": "Diagnostics copied to clipboard.",
+        "copyError": "Clipboard unavailable in this shell.",
+        "diagnosticsTitle": "More diagnostics",
+        "deviceInfoLabel": "Device info",
+        "deviceInfoDescription": "Permissions, app build, and platform details."
+      }
     },
     "companion": {
       "tunnel": {
@@ -12845,7 +13146,21 @@
       "lastInboundMinutes": "Last message {minutes}min ago",
       "lastInboundHours": "Last message {hours}h ago",
       "lastInboundDays": "Last message {days}d ago",
-      "lastInboundTooltip": "Newest inbound message at {time}"
+      "lastInboundTooltip": "Newest inbound message at {time}",
+      "computerUse": {
+        "on": "Computer Use",
+        "off": "Computer Use",
+        "aria": "Computer Use is {state}",
+        "tooltipOn": "Computer Use is on for this conversation. Replies may drive screenshot / mouse / keyboard actions on the host.",
+        "tooltipOff": "Computer Use is off. Replies cannot drive host automation. Click to enable (confirmation required).",
+        "confirmTitle": "Enable Computer Use for this conversation?",
+        "confirmMessage": "When enabled, AI replies in this conversation may fire screenshot, mouse, and keyboard actions on the host. Continue only if you trust the channel.",
+        "confirmEnable": "Enable",
+        "confirmCancel": "Cancel",
+        "enabled": "Computer Use enabled",
+        "disabled": "Computer Use disabled",
+        "cancelled": "No change — Computer Use stays off"
+      }
     },
     "conversationOverride": {
       "dialogTitle": "Conversation settings",
@@ -12882,7 +13197,28 @@
         "cooldownMs": "Cooldown after bot reply (ms)",
         "suppressGroups": "Suppress in group chats",
         "advancedJson": "Advanced (quiet hours + cooldown + muted)",
-        "advancedJsonHelp": "These fields populate the per-conversation `trigger` partial that overrides the adapter trigger policy."
+        "advancedJsonHelp": "These fields populate the per-conversation `trigger` partial that overrides the adapter trigger policy.",
+        "quietHours": {
+          "enabled": "Per-conversation quiet hours",
+          "from": "From",
+          "to": "To",
+          "tz": "Time zone",
+          "help": "When enabled, outbound traffic on this conversation defers during this window. Overrides the adapter-level quiet hours."
+        },
+        "allowedSkills": {
+          "label": "Built-in skill allowlist",
+          "inherit": "Inherit",
+          "all": "Allow all",
+          "whitelist": "Whitelist",
+          "placeholder": "skill.id or family.* (Enter to add)",
+          "add": "Add",
+          "remove": "Remove {id}",
+          "help": "Whitelist accepts exact ids (lark.calendar.list_events) or wildcards (lark.calendar.*). Empty whitelist blocks every built-in skill on this conversation."
+        },
+        "requireHitlForWrites": {
+          "label": "Require HITL for write skills",
+          "help": "When off, write-tier skills run without the A2UI confirm card. Destructive skills always require HITL regardless. Defaults on."
+        }
       }
     },
     "draftBanner": {
@@ -12896,6 +13232,36 @@
         "sidebarHandle": "Resize sidebar",
         "detailHandle": "Resize conversation list"
       }
+    },
+    "connectionLoss": {
+      "headline": "{count, plural, =1 {1 adapter is offline} other {# adapters are offline}}",
+      "state": {
+        "degraded": "degraded",
+        "down": "down"
+      },
+      "reconnect": "Reconnect",
+      "reconnectAll": "Reconnect all",
+      "reconnectQueued": "Reconnect queued",
+      "reconnectUnavailable": "Reconnect unavailable",
+      "reconnectDesktopOnly": "Reconnect is only available in the desktop app",
+      "dismiss": "Dismiss"
+    },
+    "inboundA2UI": {
+      "rawPayload": "Raw payload"
+    },
+    "bindingsInspector": {
+      "title": "Callback bindings",
+      "subtitle": "{count} recent binding(s) for this conversation",
+      "empty": "No bindings yet — bindings appear here when the assistant emits an A2UI surface with interactive components.",
+      "failures": "{count} callback failure(s) in the last 24h",
+      "copied": "Copied actionId",
+      "copyFailed": "Couldn't copy to clipboard",
+      "testQueued": "Synthetic callback dispatched",
+      "deleted": "Binding deleted",
+      "copyAria": "Copy {id}",
+      "testAria": "Test {id}",
+      "deleteAria": "Delete {id}",
+      "openInspector": "Open bindings inspector"
     },
     "sidebar": {
       "title": "Inbox",

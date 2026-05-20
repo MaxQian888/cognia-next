@@ -1487,6 +1487,21 @@
     "buttonLabel": "调用 Rust greet()"
   },
   "settings": {
+    "sandbox": {
+      "title": "沙盒",
+      "description": "为高风险工具 (Bash / Edit / Write / text_editor) 提供按平台的 OS 沙盒。沙盒不可用时严格模式拒绝这些工具调用,不会绕过隔离。",
+      "retryButton": "运行健康探测",
+      "strictModeNote": "严格模式: 沙盒不可用时,沙盒化工具调用一律被拒 —— 没有 bypass 选项。",
+      "backend": { "label": "后端" },
+      "version": { "label": "版本" },
+      "lastError": { "label": "最近错误" },
+      "ipcError": { "label": "IPC 错误" },
+      "status": {
+        "ok": "已激活",
+        "setup": "需要配置",
+        "down": "不可用"
+      }
+    },
     "title": "设置",
     "description": "配置默认值、API 密钥、提示词预设、MCP 服务器等。",
     "close": "关闭",
@@ -3820,7 +3835,40 @@
         "inbox": "收件箱",
         "outbound": "出站",
         "audit": "审计",
+        "tunnel": "隧道",
         "capability": "能力矩阵"
+      },
+      "tunnel": {
+        "title": "Cloudflared 隧道",
+        "description": "把本机的适配器 webhook 接收端口暴露到公网，让 Slack / Lark / Discord 交互能够回到这里。使用 cloudflared 的 `--url` 临时隧道。",
+        "status": {
+          "running": "运行中",
+          "off": "未运行"
+        },
+        "start": "启动隧道",
+        "stop": "停止隧道",
+        "started": "隧道已启动",
+        "stopped": "隧道已停止",
+        "notInstalled": "本机尚未安装 cloudflared",
+        "desktopOnly": "隧道控制需要桌面端",
+        "desktopOnlyHint": "隧道由桌面端运行。请在桌面打开 cognia-next 后启动。",
+        "copy": "复制",
+        "copied": "已复制",
+        "copyFailed": "复制失败",
+        "copiedCommand": "命令已复制",
+        "install": {
+          "title": "安装 cloudflared",
+          "description": "在 {platform} 上执行以下任一命令，然后回来启动隧道。",
+          "copyAria": "复制 {label} 命令"
+        },
+        "webhookUrls": {
+          "title": "各适配器的 webhook 地址",
+          "description": "隧道启动后，把对应地址粘贴到每个平台的管理后台。",
+          "noAdapters": "尚未配置任何适配器。在「适配器」标签页中添加一个。",
+          "tunnelOff": "请先启动隧道以生成公网地址。",
+          "notApplicable": "反向 WebSocket 通道，无需公网地址。",
+          "copy": "复制 {name} 的 webhook 地址"
+        }
       },
       "capabilityMatrix": {
         "intro": "每个单元格展示了适配器在其平台上如何投射 A2UI 组件。能力在适配器每次启动时刷新。",
@@ -3926,7 +3974,12 @@
         "computerUseBadge": "CU",
         "computerUseTooltip": "已为该会话开启 Computer Use 工具（ADR-0025 的按通道显式授权）。如需关闭，请编辑覆盖。",
         "searchPlaceholder": "按 conversationKey 或角色 id 搜索",
-        "searchNoResults": "没有匹配 \"{query}\" 的覆盖。"
+        "searchNoResults": "没有匹配 \"{query}\" 的覆盖。",
+        "summary": {
+          "computerUse": "已开启 Computer Use：{count}",
+          "hitlOff": "已关闭 HITL：{count}",
+          "customSkillAllowlist": "自定义 skill 白名单：{count}"
+        }
       },
       "inbox": {
         "summary": "按适配器分组的会话汇总。完整视图请到收件箱。",
@@ -3957,6 +4010,12 @@
         "bulkRetryConfirmDescription": "{count} 个任务将被改回 pending 状态，下次轮询时由运行器重试。如果失败仍然持续，会在相同的 5 次尝试上限后重新进入死信。",
         "bulkRetryCancel": "取消",
         "bulkRetryConfirm": "全部重试",
+        "exportCsv": "导出 CSV",
+        "exportJson": "导出 JSON",
+        "clearAll": "清空（{count}）",
+        "clearAllConfirmTitle": "删除本视图中所有死信任务？",
+        "clearAllConfirmDescription": "{count} 个任务将从出站队列中永久移除，不可撤销。平台端的原始消息不受影响。",
+        "clearAllConfirm": "全部删除",
         "expandDetailsAria": "展开任务 {id} 的详情",
         "collapseDetailsAria": "收起任务 {id} 的详情",
         "detailIdempotencyKey": "幂等键",
@@ -4760,6 +4819,16 @@
       "configureSkillsmp": "在 设置 → API 配置 SkillsMP 基础地址以启用此来源。"
     },
     "analytics": {
+      "loading": "正在加载统计…",
+      "totalSkills": "技能总数",
+      "totalEnabled": "已启用",
+      "totalUsage": "总使用次数",
+      "tokensEstimated": "预估 Token",
+      "categoryUsageTitle": "按分类使用次数",
+      "mostUsedTitle": "最常使用",
+      "recentUsageTitle": "最近使用",
+      "neverUsedTitle": "从未使用",
+      "neverUsedEmpty": "暂无数据 — 技能被调用后将显示在此。",
       "trend": {
         "title": "使用趋势",
         "window7": "7天",
@@ -5051,6 +5120,7 @@
       "tabLifecycle": "生命周期",
       "tabOperations": "运维",
       "tabAnalytics": "使用统计",
+      "tabTriggers": "触发",
       "metaId": "ID",
       "metaVersion": "版本",
       "metaSource": "来源",
@@ -5099,6 +5169,7 @@
       "colDeclared": "声明",
       "colOptional": "可选",
       "colGranted": "已授予",
+      "colTier": "等级",
       "colActions": "",
       "empty": "此插件未声明或持有任何权限。",
       "auditLogTitle": "最近审计事件",
@@ -5106,7 +5177,56 @@
       "revokeAll": "全部撤销",
       "close": "关闭",
       "grant": "授予",
-      "revoke": "撤销"
+      "revoke": "撤销",
+      "tierLabel": {
+        "silent": "静默",
+        "confirm": "每次确认",
+        "forbid": "禁止"
+      },
+      "tierHint": {
+        "silent": "允许已授权的调用静默执行。",
+        "confirm": "每次调用都弹出授权确认。",
+        "forbid": "始终拒绝 — 即使 manifest 声明了。"
+      }
+    },
+    "triggers": {
+      "badge": {
+        "label": "{count, plural, one {# 个工作流触发} other {# 个工作流触发}}",
+        "ariaLabel": "本消息触发的工作流",
+        "popoverTitle": "工作流触发",
+        "empty": "没有触发。",
+        "workflowPrefix": "工作流：",
+        "pluginPrefix": "插件："
+      },
+      "status": {
+        "dispatched": "已派发",
+        "rejected": "已拒绝",
+        "error": "错误"
+      },
+      "devtools": {
+        "title": "触发记录",
+        "empty": "暂无触发事件。",
+        "filterPlugin": "按插件筛选",
+        "filterPluginAll": "全部插件",
+        "filterPluginBuiltin": "— 内置 —",
+        "filterKind": "按类型筛选",
+        "filterKindAll": "全部类型",
+        "clear": "全部清空",
+        "colTime": "时间",
+        "colPlugin": "插件",
+        "colKind": "类型",
+        "colWorkflow": "工作流",
+        "colStatus": "状态",
+        "colError": "错误"
+      },
+      "detailSubscriptions": {
+        "title": "订阅的工作流",
+        "empty": "尚无工作流订阅该插件的触发。",
+        "muteToggle": "静音",
+        "muteHint": "静音会停止派发，但保留订阅。",
+        "colKind": "触发类型",
+        "colWorkflow": "工作流"
+      }
     },
     "configForm": {
       "description": "插件 manifest.configSchema 中声明的设置。保存后将在下一次激活时生效。",
@@ -5115,7 +5235,13 @@
       "save": "保存",
       "saving": "保存中…",
       "cancel": "取消",
-      "close": "关闭"
+      "close": "关闭",
+      "arrayPlaceholder": "每行一个值",
+      "arrayAdd": "添加条目",
+      "arrayRemove": "删除",
+      "emptyArray": "暂无条目 — 点击\"添加条目\"开始。",
+      "oneOfVariant": "变体",
+      "unsupportedField": "不支持的字段结构 — 已回退为原始 JSON。"
     },
     "panel": {
       "totalBadge": "共 {count}",
@@ -5192,7 +5318,29 @@
       "install": "安装",
       "installing": "安装中…",
       "uninstall": "卸载",
-      "uninstalling": "卸载中…"
+      "uninstalling": "卸载中…",
+      "versionLabel": "版本"
+    },
+    "modalRoot": {
+      "errorFallback": "插件弹窗渲染失败，详细信息请查看控制台。"
+    },
+    "consent": {
+      "title": "插件请求权限",
+      "ariaLabel": "插件授权对话框",
+      "fields": {
+        "plugin": "插件：",
+        "permission": "权限：",
+        "reason": "理由：",
+        "autoReject": "{seconds} 秒后自动拒绝",
+        "morePending": "还有 {count} 个待处理",
+        "defaultReason": "未提供理由。"
+      },
+      "actions": {
+        "allowOnce": "仅本次允许",
+        "allowSession": "本次会话始终允许",
+        "reject": "拒绝",
+        "close": "关闭"
+      }
     },
     "marketplace": {
       "loading": "加载市场中…",
@@ -5200,6 +5348,7 @@
       "retry": "重试",
       "searchPlaceholder": "在市场中搜索…",
       "emptySection": "此分区暂无内容。",
+      "loadMore": "加载更多 ({shown}/{total})",
       "sections": {
         "all": "全部",
         "featured": "精选",
@@ -5354,14 +5503,18 @@
         "hooks": "Hook 历史",
         "profiler": "性能分析",
         "hotReload": "热重载",
-        "inspect": "运行时检查"
+        "inspect": "运行时检查",
+        "triggers": "触发记录"
       },
       "logs": {
         "empty": "未捕获到日志。"
       },
       "bus": {
         "empty": "无总线事件。",
-        "desktopOnly": "开发服务器消息总线仅在桌面端可用。"
+        "desktopOnly": "开发服务器消息总线仅在桌面端可用。",
+        "consoleTapHint": "可在浏览器端将 console 输出捕获到 Logs 选项卡。",
+        "consoleTapOn": "启用 console 捕获",
+        "consoleTapOff": "停用 console 捕获"
       },
       "hooks": {
         "empty": "无 Hook 活动。"
@@ -7444,6 +7597,22 @@
     "noUpcomingTasks": "暂无即将执行的任务",
     "recentExecutions": "最近执行记录",
     "noRecentExecutions": "暂无执行记录",
+    "upcomingRail": {
+      "title": "即将执行",
+      "recentTitle": "最近运行",
+      "empty": "暂无计划",
+      "ariaLabel": "即将执行与最近运行"
+    },
+    "mobile": {
+      "fabCreateAria": "新建计划任务",
+      "statStripLabels": {
+        "active": "运行中",
+        "paused": "已暂停",
+        "executions": "执行次数",
+        "successRate": "成功率"
+      }
+    },
+    "emptyFiltered": "没有匹配的任务",
     "cronMatchingNow": "Cron 匹配当前时间",
     "upcomingRuns": "即将执行",
     "activePlugins": "{count} 个插件",
@@ -7834,7 +8003,19 @@
       "newChat": "新建聊天",
       "emptyTeam": "还没有会话，从上方开启一个吧。",
       "emptyDm": "还没有聊天，挑选一个角色开始。",
-      "groupOther": "其它"
+      "groupOther": "其它",
+      "bulk": {
+        "selectedCount": "已选 {count} 项",
+        "delete": "删除",
+        "pin": "置顶",
+        "unpin": "取消置顶",
+        "cancel": "取消",
+        "deleteConfirmTitle": "删除 {count} 个会话？",
+        "deleteConfirmBody": "将永久删除这些会话及其所有消息，不可撤销。",
+        "deleteSuccess": "已删除 {count} 个会话",
+        "pinSuccess": "已置顶 {count} 个会话",
+        "unpinSuccess": "已取消置顶 {count} 个会话"
+      }
     },
     "commandPalette": {
       "title": "命令面板",
@@ -7990,7 +8171,10 @@
       "untitled": "（无标题）",
       "actionsMenu": "会话操作",
       "rename": "重命名",
-      "delete": "删除"
+      "delete": "删除",
+      "pin": "置顶",
+      "unpin": "取消置顶",
+      "pinned": "已置顶"
     },
     "shell": {
       "desktopOnlyTitle": "请在 Tauri 中运行",
@@ -10476,9 +10660,12 @@
       "pairingUnpaired": "尚未与桌面配对",
       "actionPair": "去配对",
       "sectionAccount": "账户",
-      "sectionData": "数据与备份",
-      "sectionAppearance": "外观与语言",
+      "sectionData": "数据",
+      "sectionAppearance": "外观",
       "sectionAdvanced": "高级",
+      "sectionConnection": "连接与扩展",
+      "sectionAutomation": "自动化",
+      "sectionAbout": "关于",
       "settingsLink": "应用设置",
       "backupLink": "备份与同步",
       "dexieMaintenance": "Dexie 维护",
@@ -10486,6 +10673,21 @@
       "biometricToggle": "启用生物识别解锁",
       "biometricUnavailable": "本设备未注册生物识别。",
       "versionLabel": "版本",
+      "subscriptionRow": "订阅与账号",
+      "syncRow": "同步状态",
+      "devicesRow": "已配对设备",
+      "notificationsRow": "通知",
+      "preferencesRow": "字号与默认模型",
+      "connectorsRow": "平台连接器",
+      "ocrRow": "OCR 提供方",
+      "computerUseRow": "Computer Use",
+      "backupRow": "备份与恢复",
+      "schedulerRow": "计划任务",
+      "storageRow": "存储用量",
+      "aboutRow": "关于",
+      "helpRow": "帮助与文档",
+      "feedbackRow": "反馈与诊断",
+      "deviceInfoRow": "设备信息",
       "profile": {
         "fallbackName": "未登录",
         "fallbackPlan": "本机账号",
@@ -10498,6 +10700,14 @@
         "themeDark": "深色",
         "themeAuto": "自动"
       },
+      "quickActions": {
+        "computerUseLabel": "Computer Use",
+        "computerUseAria": "切换移动端 Computer Use",
+        "on": "开",
+        "off": "关",
+        "scanLabel": "扫码 / 重新配对",
+        "scanAria": "打开服务器扫描面板"
+      },
       "todayStats": {
         "sessions": "会话",
         "drafts": "草稿",
@@ -10505,7 +10715,98 @@
         "backupNever": "从未"
       },
       "appearanceLink": "主题与壁纸",
-      "appearanceBackAria": "返回个人"
+      "appearanceBackAria": "返回个人",
+      "account": {
+        "notSignedIn": "未登录 Anthropic 账户。点击此处登录。",
+        "fiveHourLabel": "5 小时额度",
+        "sevenDayLabel": "7 日额度",
+        "resetIn": "{remaining} 后重置"
+      },
+      "signOut": {
+        "cta": "退出登录",
+        "confirmTitle": "确认退出 cognia？",
+        "confirmDescription": "将清除本设备上的 Anthropic 凭据和与桌面的配对 JWT。可随时重新配对。",
+        "confirmAction": "退出",
+        "cancel": "取消",
+        "pending": "正在退出…",
+        "biometricReason": "请验证以退出 cognia",
+        "biometricTitle": "退出登录",
+        "biometricDescription": "清除配对前重新验证身份。",
+        "biometricLabel": "退出前要求生物识别",
+        "biometricHelp": "清除配对前要求 Face ID / 指纹。",
+        "successToast": "已退出，配对已清除。",
+        "lockoutToast": "尝试次数过多，请稍后再试。",
+        "errorToast": "退出失败：{reason}"
+      },
+      "computerUse": {
+        "masterToggleTitle": "移动端 Computer Use",
+        "masterToggleDescription": "关闭后，移动端发起的对话将拒绝进入 Computer Use 循环，与角色级开关无关。",
+        "masterToggleAria": "切换移动端 Computer Use 总开关",
+        "masterStateOn": "移动端 Computer Use 已启用。",
+        "masterStateOff": "移动端 Computer Use 已停用。"
+      },
+      "sync": {
+        "title": "同步状态",
+        "description": "桌面与本机的逐表同步快照。每行在前台恢复或手动重试时拉取增量。",
+        "syncAll": "全部同步",
+        "syncRowAria": "重新同步 {table}",
+        "lastSynced": "上次同步：{time}",
+        "neverSynced": "从未同步",
+        "toastTableSynced": "已同步 {table}",
+        "toastAllSynced": "已发起同步。",
+        "toastError": "同步失败：{reason}"
+      },
+      "storage": {
+        "totalTitle": "浏览器存储",
+        "totalDescription": "已用 {used} / {quota}",
+        "totalUnsupported": "当前壳层未暴露存储用量。",
+        "backupsTitle": "加密备份",
+        "backupsDescription": "{count} 个文件 · {total}",
+        "backupsEmpty": "尚无成功的备份。",
+        "unnamedFile": "（无文件名）",
+        "refresh": "刷新"
+      },
+      "device": {
+        "hardwareTitle": "应用与设备",
+        "permissionsTitle": "权限",
+        "aboutTitle": "关于此页面",
+        "aboutBody": "Cognia 仅读取壳层暴露的信息——不会有任何遥测离开本机。",
+        "appVersion": "应用版本",
+        "userAgent": "User Agent",
+        "uaUnknown": "（未知）",
+        "biometricLabel": "生物识别（Face ID / 指纹）",
+        "localLabel": "本机通知",
+        "status": {
+          "granted": "已授权",
+          "denied": "已拒绝",
+          "prompt": "每次询问",
+          "unsupported": "不支持",
+          "unknown": "未知"
+        }
+      },
+      "help": {
+        "resourcesTitle": "资源",
+        "docsLabel": "文档站",
+        "docsDescription": "在系统浏览器中打开 cognia 文档。",
+        "githubLabel": "GitHub 源码",
+        "githubDescription": "查看仓库与发布说明。",
+        "legalTitle": "法律",
+        "licenseLabel": "许可证",
+        "licenseDescription": "源代码遵循 MIT 协议。第三方声明详见桌面端「关于」面板。"
+      },
+      "feedback": {
+        "reportTitle": "反馈问题",
+        "openIssueLabel": "在 GitHub 提交 Issue",
+        "openIssueDescription": "包含 Bug 报告与功能请求模板。",
+        "copyLabel": "复制诊断信息",
+        "copyLabelDone": "已复制诊断信息",
+        "copyDescription": "应用版本、User Agent 和当前同步快照。",
+        "copyToast": "已复制诊断信息到剪贴板。",
+        "copyError": "当前壳层无法访问剪贴板。",
+        "diagnosticsTitle": "更多诊断",
+        "deviceInfoLabel": "设备信息",
+        "deviceInfoDescription": "权限、构建号、平台细节。"
+      }
     },
     "companion": {
       "tunnel": {
@@ -12845,7 +13146,21 @@
       "lastInboundMinutes": "{minutes} 分钟前收到消息",
       "lastInboundHours": "{hours} 小时前收到消息",
       "lastInboundDays": "{days} 天前收到消息",
-      "lastInboundTooltip": "最近一条入站消息：{time}"
+      "lastInboundTooltip": "最近一条入站消息：{time}",
+      "computerUse": {
+        "on": "Computer Use",
+        "off": "Computer Use",
+        "aria": "Computer Use 当前 {state}",
+        "tooltipOn": "本会话已启用 Computer Use，AI 回复可能在主机执行截图/鼠标/键盘操作。",
+        "tooltipOff": "本会话已禁用 Computer Use，回复不会驱动主机自动化。点击启用（需确认）。",
+        "confirmTitle": "为本会话启用 Computer Use？",
+        "confirmMessage": "启用后，本会话内的 AI 回复可能在主机上触发截图、鼠标、键盘动作。仅在信任此频道时继续。",
+        "confirmEnable": "启用",
+        "confirmCancel": "取消",
+        "enabled": "Computer Use 已启用",
+        "disabled": "Computer Use 已禁用",
+        "cancelled": "未改动 — Computer Use 保持禁用"
+      }
     },
     "conversationOverride": {
       "dialogTitle": "会话覆盖设置",
@@ -12882,7 +13197,28 @@
         "cooldownMs": "机器人回复后冷却时间 (ms)",
         "suppressGroups": "在群聊中抑制",
         "advancedJson": "高级 (勿扰时段 + 冷却 + 静音)",
-        "advancedJsonHelp": "这些字段会写入该会话的 `trigger` 部分覆盖，覆盖适配器级触发策略。"
+        "advancedJsonHelp": "这些字段会写入该会话的 `trigger` 部分覆盖，覆盖适配器级触发策略。",
+        "quietHours": {
+          "enabled": "本会话静默时段",
+          "from": "起始",
+          "to": "结束",
+          "tz": "时区",
+          "help": "启用后，该会话的外发消息会在此时段内延迟。覆盖适配器级静默时段。"
+        },
+        "allowedSkills": {
+          "label": "内置 Skill 白名单",
+          "inherit": "沿用默认",
+          "all": "全部允许",
+          "whitelist": "白名单",
+          "placeholder": "skill.id 或 family.*（回车添加）",
+          "add": "添加",
+          "remove": "移除 {id}",
+          "help": "白名单接受精确 id（lark.calendar.list_events）或通配符（lark.calendar.*）。空白名单会屏蔽所有内置 skill。"
+        },
+        "requireHitlForWrites": {
+          "label": "写入类 Skill 需要二次确认",
+          "help": "关闭后写入类 skill 无需 A2UI 确认卡片即可执行。破坏性 skill 始终需要 HITL。默认开启。"
+        }
       }
     },
     "draftBanner": {
@@ -12896,6 +13232,36 @@
         "sidebarHandle": "调整侧栏宽度",
         "detailHandle": "调整会话列表宽度"
       }
+    },
+    "connectionLoss": {
+      "headline": "{count, plural, =1 {1 个适配器已离线} other {# 个适配器已离线}}",
+      "state": {
+        "degraded": "已降级",
+        "down": "已掉线"
+      },
+      "reconnect": "重连",
+      "reconnectAll": "全部重连",
+      "reconnectQueued": "已排队重连",
+      "reconnectUnavailable": "无法重连",
+      "reconnectDesktopOnly": "仅桌面端支持重连",
+      "dismiss": "关闭"
+    },
+    "inboundA2UI": {
+      "rawPayload": "原始负载"
+    },
+    "bindingsInspector": {
+      "title": "回调绑定",
+      "subtitle": "本会话最近 {count} 条绑定",
+      "empty": "暂无绑定 —— 助手发送带交互组件的 A2UI 卡片时会在此显示。",
+      "failures": "近 24 小时有 {count} 条回调失败",
+      "copied": "已复制 actionId",
+      "copyFailed": "复制到剪贴板失败",
+      "testQueued": "已派发合成回调",
+      "deleted": "已删除绑定",
+      "copyAria": "复制 {id}",
+      "testAria": "测试 {id}",
+      "deleteAria": "删除 {id}",
+      "openInspector": "打开回调绑定检查器"
     },
     "sidebar": {
       "title": "收件箱",
