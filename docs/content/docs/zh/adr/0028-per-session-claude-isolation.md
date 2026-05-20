@@ -1,6 +1,6 @@
 ---
 title: ADR-0028 — 按会话隔离 Claude Code
-description: 通过 per-`query()` env 实现 `ChatSession` 维度的 OAuth / `CLAUDE_CONFIG_DIR` / base-URL / 代理隔离；按配置元组取多例的 WarmQuery 池；五层混合执行沙盒（vendor Codex Windows 沙盒 + sandbox-exec + bwrap，加 Node 24 `--permission`、Wasmtime、e2b microVM 与 `computer_use` 的 per-action 策略闸门）。
+description: 通过 per-`query()` env 实现 `ChatSession` 维度的 OAuth / `CLAUDE_CONFIG_DIR` / base-URL / 代理隔离(不做 WarmQuery 池 —— spike 显示 `startup()` 烤死所有 options,命中率接近零;作为单会话预热的 follow-up 推迟);五层混合执行沙盒(vendor Codex Windows 沙盒 + sandbox-exec + bwrap,加 Node 24 `--permission`、Wasmtime、e2b microVM 与 `computer_use` 的 per-action 策略闸门)。
 ---
 
 # ADR-0028 — 按会话隔离 Claude Code
@@ -41,13 +41,13 @@ ADR-0025 已经发布多账号 vault（`src-tauri/src/subscription/vault.rs` 的
 
 sub-sidecar 池被考虑后**否决**：SDK 层 subprocess-per-`query()` 已经给每个会话独立的 CLI 进程，我们再叠一层 Node sub-sidecar 是冗余的，per-session 内存成本会翻三倍。
 
-### 按配置元组取多例的 WarmQuery 池
+### 冷启动代价 —— 接受，不做池
 
-SDK 文档中的 `startup()` API 返回一个预热好的 `WarmQuery`，避免后续每次 `.query()` 调用的约 12 秒冷启动。我们在 host sidecar `sidecar/warm-pool.mjs` 中按 `sha1(${accountId}|${configDir}|${baseURL}|${proxyURL}).slice(0,16)` 池化。
+SDK 自 v0.2.111 起暴露 `startup()` API,返回一个 `WarmQuery` 用于摊销 CLI 子进程约 12 秒的冷启动。Plan 中作为 contingency 标注的这个问题,由 context7 spike 对着 v0.2.111+ 的版本确认了结论:**`Options` 的每一个字段 —— 包括 `cwd`、`model`、`mcpServers`、`agents`、`allowedTools`、`additionalDirectories`、`permissionMode`、`canUseTool`、`resume`、`forkSession` —— 都在 `startup()` 时被烤死**,且一个 `WarmQuery` 实例只能服务恰好一次 `.query()` 调用就废了。在 cognia 里,`additionalDirectories`(由 `@`-引用驱动)、`appendSystemPrompt`(由 goal 注入 / 工作流 snapshot 驱动)、以及其他若干字段在每条消息间都会变,按 tuple-key 池化的命中率接近零。复杂度配不上收益。
 
-池的形状：`Map<tupleKey, { free: WarmQuery[], inUse: Set<WarmQuery>, total: number, lastUsedAt: number }>`，per-tuple 上限 4、全局上限 16、idle TTL 5 分钟、sweeper 间隔 60 秒、startup 超时 30 秒。会话在生命周期内持有一个 WarmQuery；`session_ended` 时归还到对应 tuple 的 `free` 列表。池耗尽 / startup 超时 / 崩溃 → fallback 到非池化 `query()`（12 秒冷启路径），**永远不阻断用户**。
+**决策**: 删掉池。每次 `query()` 付约 12 秒冷启;sidecar 的 streaming-input 机制会让用户在一个 _send_ 内只看到一次 spinner,而不是会话内每一轮都看到。`sidecar/dispatch/anthropic.mjs` 的 streaming 流程不变。一个未来的优化是:在 `session_ended` 后立即按会话当前 options 起一个 `startup()`,下条消息如果 options 没变就用它 —— 作为 follow-up 跟踪,V1 不做。
 
-`startup()` 实际把哪些 options 烤死、哪些 per-`.query()` 可变 —— 在 Phase 4 实施前用 context7 验证。如果 `startup()` 烤死的不止 `env`，则降级为方案 A（无池），其余设计照常落地。
+`env` 语义: 自 v0.2.111 起,`options.env` 对子进程**覆盖**(overlay)`process.env`(此前研究读到 v0.2.113 一度改为 replace-not-overlay;当前公开文档记录的是 overlay)。无论哪种,`sidecar/dispatch/anthropic.mjs:117` 显式的 `baseEnv = { ...process.env, ...(sendOptions.env ?? {}) }` 在两种语义下都正确,保留。
 
 ### 五层混合执行沙盒
 
@@ -95,13 +95,13 @@ SDK `--resume` 忽略 `CLAUDE_CONFIG_DIR`，只在默认 `~/.claude/projects/` �
 
 ### 审计与可观测
 
-`automation/audit.rs` 新增 `Surface::Sandbox` variant。每次沙盒调用（Allow / Deny / Error）写一条；WarmQuery 池事件（`warm_died` / `pool_exhausted` / `startup_timeout`）与 `resume_replayed` 也写一条。现有 5000 上限的 VecDeque + Dexie `automationAuditLog` 镜像照常承载。现有 Diagnostics tab（`components/settings/sections/diagnostics-section.tsx`，observability 分组）扩展三张 collapsible 卡片：WarmQuery 池统计、沙盒事件流、sidecar 重启计数 —— 不新建 tab。
+`automation/audit.rs` 新增 `Surface::Sandbox` variant。每次沙盒调用（Allow / Deny / Error）写一条;`resume_replayed` 也写一条。现有 5000 上限的 VecDeque + Dexie `automationAuditLog` 镜像照常承载。现有 Diagnostics tab（`components/settings/sections/diagnostics-section.tsx`,observability 分组）扩展两张 collapsible 卡片:沙盒事件流、sidecar 重启计数 —— 不新建 tab。
 
 ### UI 界面
 
 - **Settings → Sandbox**（新 tab）：健康卡片显示后端 + 版本 + 合成用户名（Windows），"Retry setup" / "Run health probe" 按钮，默认 tier 单选（OS / microVM —— 严格模式下没有 "Off"），per-tool 网络策略编辑器，T5 per-app 策略编辑器。
 - **Settings → Subscription**（扩展）：每个账号显示 "在 X 角色 / Y 会话使用中" chips、"设为默认" 操作、删除前列出引用方确认。
-- **Settings → Diagnostics**（扩展）：WarmQuery / 沙盒 / sidecar 三张 collapsible。
+- **Settings → Diagnostics**(扩展):沙盒事件流 + sidecar 重启计数两张 collapsible。
 - **Character 编辑器**（扩展）：账号选择器 + `sandboxTier` override。
 - **Chat session header**：账号 badge（单账号用户隐藏）+ 切换器 → toast "下一条消息将使用账号 X"。
 - **Composer**：盾牌指示器（filled / dashed / crossed 对应 绿 / 黄 / 红）—— 颜色配合形状以保证色盲友好。
@@ -112,7 +112,7 @@ SDK `--resume` 忽略 `CLAUDE_CONFIG_DIR`，只在默认 `~/.claude/projects/` �
 ## 非目标
 
 - **sub-sidecar 池 / per-tuple OS 进程**。已确认与 SDK 层 subprocess-per-`query()` 重复。
-- **per-tool-call 沙盒启动**。一会话一个常驻沙盒（借用 WarmQuery 生命周期），类似 Vercel Managed Agents 模式。
+- **per-tool-call 沙盒启动**。会话内的多次工具调用复用 per-call CLI 子进程;一个会话对应一个沙盒身份,每次工具调用按 per-tool 策略评估。
 - **macOS App Sandbox + XPC 迁移**。等 Apple 给 `sandbox-exec` 设定移除时间表后启动；现在推迟。
 - **移动端 / Capacitor 覆盖**。Claude Code 不在移动端跑；瘦客户端（ADR-0014 / ADR-0015）超出范围。多租户 per-session 隔离的天然归宿是 V2 headless 服务器。
 - **Vercel Sandbox**。仅云上可用，桌面应用默认不可行。
@@ -124,7 +124,7 @@ SDK `--resume` 忽略 `CLAUDE_CONFIG_DIR`，只在默认 `~/.claude/projects/` �
 - **多账号聊天**变成会话级决策，不再是全局开关。
 - **OAuth refresh 竞态**对装有 ≥2 账号的安装彻底消失（各自一份 `.credentials.json`）。
 - **per-`query()` env** 让每轮多付一次 Tauri IPC（env 解析约 1 ms）。
-- **WarmQuery 池**对热 tuple 消除 SDK 约 12 秒冷启；冷 tuple 第一次发送仍要付。
+- **冷启动代价**每次 `query()` 约 12 秒在 V1 是被接受的(见上文"冷启动代价 —— 接受,不做池")。预热作为文档化的后续跟进。
 - **Windows 安装**首次开沙盒会话时多一次 UAC 弹窗。本地用户列表出现两个合成账号（`CogniaSandboxOffline` / `CogniaSandboxOnline`）；Firewall 规则按 SID 绑定出网。卸载会清掉。
 - **包体积**：Linux 因 bundle `bwrap` 多约 1.5 MB；macOS 用 OS 自带 `sandbox-exec` 不增；Windows 多两个约 500 KB exe。
 - **严格模式**意味着 Windows 用户首次拒 UAC 后无法发 Bash / Edit / Write 工具调用，直到重做 setup。这是刻意的。
@@ -146,13 +146,13 @@ SDK `--resume` 忽略 `CLAUDE_CONFIG_DIR`，只在默认 `~/.claude/projects/` �
 
 覆盖率门槛 ≥90%（CLAUDE.md 要求），由现有 Jest config + 新 Rust 模块的 `cargo-tarpaulin` 强制。
 
-手工验收（每个 release 跑一次）：完整 Windows 安装 / UAC 拒绝 / 多账号 `mitmproxy` / WarmQuery 命中率 / OAuth 竞态 / resume 重放清单见实施计划 `~/.claude/plans/plan-distributed-wren.md`。
+手工验收(每个 release 跑一次):完整 Windows 安装 / UAC 拒绝 / 多账号 `mitmproxy` / OAuth 竞态 / resume 重放清单见实施计划 `~/.claude/plans/plan-distributed-wren.md`。
 
 ## 后续跟进
 
 1. macOS `sandbox-exec` 弃用时间表 —— Apple 真给日期后，启动 App Sandbox + XPC 迁移（当前 SBPL profile 与 App Sandbox temporary-exception entitlements 一一对应）。
 2. 季度复审上游 `codex-rs/codex-windows-sandbox` 是否有值得 backport 的安全修复。
-3. `startup()` API 表面验证（Phase 4 实施前）：若 `startup()` 烤死的字段不止 `env`，砍掉 WarmQuery 池（方案 A）—— 其余设计不变。
+3. 单会话 WarmQuery 预热优化 —— 在 `session_ended` 后立即按会话当前 options 起 `startup()`,下条消息若 options 未变就直接用它。V1 推迟;spike 证明跨会话池化不可行,但 stable-options 会话内的单实例预热仍是干净的胜利。
 4. Anthropic `--resume` 忽略 `CLAUDE_CONFIG_DIR`（#16103）—— 跟踪上游修复；landed 后 per-account 会话的 Dexie 重放路径可以退役。
 5. V2 headless 服务器的多租户 per-session 隔离（ADR-0014 后续）—— headless API 稳定后把 trait / env 注入层端口过去。
 6. T2 / T3 / T4 / T5 的遥测 —— 五层都上线后，看 Diagnostics 审计日志里各 tier 的使用比例，判断 T4（e2b）的 opt-in 比例是否值得它的 bundle 成本。

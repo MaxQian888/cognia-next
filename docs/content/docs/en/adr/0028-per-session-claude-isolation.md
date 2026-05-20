@@ -1,6 +1,6 @@
 ---
 title: ADR-0028 — Per-session Claude Code isolation
-description: Per-`ChatSession` OAuth / `CLAUDE_CONFIG_DIR` / base-URL / proxy isolation via per-`query()` env, WarmQuery pool keyed by config tuple, and a five-tier hybrid execution sandbox (vendored Codex Windows sandbox + sandbox-exec + bwrap, plus Node 24 `--permission`, Wasmtime, e2b microVM, and a per-action policy gate for `computer_use`).
+description: Per-`ChatSession` OAuth / `CLAUDE_CONFIG_DIR` / base-URL / proxy isolation via per-`query()` env (no WarmQuery pool — spike showed all options are baked at `startup()`, near-zero hit rate; deferred as a single-session pre-warm follow-up), and a five-tier hybrid execution sandbox (vendored Codex Windows sandbox + sandbox-exec + bwrap, plus Node 24 `--permission`, Wasmtime, e2b microVM, and a per-action policy gate for `computer_use`).
 ---
 
 # ADR-0028 — Per-session Claude Code isolation
@@ -41,13 +41,13 @@ A research pass also confirmed two SDK-level facts that reshape the architecture
 
 Sub-sidecar pools were considered and rejected: SDK-level subprocess-per-`query()` already gives every session an isolated CLI process. Running our own Node sub-sidecars on top is redundant and triples per-session memory cost.
 
-### WarmQuery pool keyed by config tuple
+### Cold-start cost — accepted, no pool
 
-The SDK's documented `startup()` API returns a `WarmQuery` that pre-warms a CLI subprocess and avoids the ~12 s cold start on each subsequent `.query()` call. We pool these in the host sidecar at `sidecar/warm-pool.mjs` keyed by `sha1(${accountId}|${configDir}|${baseURL}|${proxyURL}).slice(0,16)`.
+The SDK exposes a `startup()` API (since v0.2.111) that returns a `WarmQuery` to amortize the ~12 s cold start of the CLI subprocess. A context7 spike against v0.2.111+ resolved the question that the plan flagged as a contingency: **every field of `Options` — including `cwd`, `model`, `mcpServers`, `agents`, `allowedTools`, `additionalDirectories`, `permissionMode`, `canUseTool`, `resume`, `forkSession` — is baked at `startup()` time**, and a `WarmQuery` instance can serve exactly one `.query()` call before being discarded. In cognia, `additionalDirectories` (driven by `@`-references), `appendSystemPrompt` (driven by goal injection / workflow snapshot), and a few other fields change per message, so a tuple-keyed warm pool would have a near-zero hit rate. The complexity does not earn its keep.
 
-Pool shape: `Map<tupleKey, { free: WarmQuery[], inUse: Set<WarmQuery>, total: number, lastUsedAt: number }>` with per-tuple cap 4, global cap 16, idle TTL 5 min, sweeper interval 60 s, startup timeout 30 s. Sessions hold one WarmQuery for their lifetime; on `session_ended` the instance returns to the tuple's `free` list. Pool exhaustion / startup timeout / crash falls back to non-pooled `query()` (12 s cold-start path) — never blocks the user.
+**Decision**: the pool is dropped. Each `query()` pays the ~12 s cold start; the sidecar handles streaming-input across the cost so the user sees the spinner once per _send_, not per turn within a session. The streaming-input flow in `sidecar/dispatch/anthropic.mjs` is unchanged. A future optimization could pre-warm a `WarmQuery` per session right after `session_ended` and trade it on the next message _if_ options haven't changed — tracked as a follow-up rather than V1 scope.
 
-The exact shape of `startup()`'s baked-vs-per-call options is verified via context7 before Phase 4 implementation. If `startup()` bakes options beyond `env`, the pool is dropped (Approach A) and the rest of the design ships unchanged.
+The `env` semantics are: since v0.2.111 `options.env` **overlays** `process.env` for the subprocess (it was briefly replace-not-overlay during v0.2.113 in the previous research pass; the current public docs document overlay). Either way, `sidecar/dispatch/anthropic.mjs:117`'s explicit `baseEnv = { ...process.env, ...(sendOptions.env ?? {}) }` is correct under both regimes and stays.
 
 ### Five-tier hybrid execution sandbox
 
@@ -95,13 +95,13 @@ Per-account `CLAUDE_CONFIG_DIR` directories eliminate the cross-process race on 
 
 ### Audit + observability
 
-`automation/audit.rs` gains a `Surface::Sandbox` variant. Every sandbox call (Allow / Deny / Error) is recorded; WarmQuery pool events (`warm_died`, `pool_exhausted`, `startup_timeout`) and `resume_replayed` events are recorded too. The existing 5000-cap VecDeque + Dexie `automationAuditLog` mirror carry them. The existing Diagnostics tab (`components/settings/sections/diagnostics-section.tsx`, observability group) is extended with collapsible cards for WarmQuery pool stats, sandbox event log, and sidecar restart counter — no new tab.
+`automation/audit.rs` gains a `Surface::Sandbox` variant. Every sandbox call (Allow / Deny / Error) is recorded; `resume_replayed` events are recorded too. The existing 5000-cap VecDeque + Dexie `automationAuditLog` mirror carry them. The existing Diagnostics tab (`components/settings/sections/diagnostics-section.tsx`, observability group) is extended with collapsible cards for the sandbox event log and a sidecar restart counter — no new tab.
 
 ### UI surfaces
 
 - **Settings → Sandbox** (new tab): health card with backend + version + synthetic user name (Windows), "Retry setup" / "Run health probe" buttons, default tier picker (OS / microVM — no "Off" per strict mode), per-tool network policy editor, T5 per-app policy editor.
 - **Settings → Subscription** (extension): per-account "in use by X character / Y session" chips, "Set as default" action, delete confirmation listing references.
-- **Settings → Diagnostics** (extension): WarmQuery / sandbox / sidecar collapsibles.
+- **Settings → Diagnostics** (extension): sandbox event log + sidecar restart counter collapsibles.
 - **Character editor** (extension): account picker + `sandboxTier` override.
 - **Chat session header**: account badge (hidden when user has one account) + switcher → toast "下一条消息将使用账号 X".
 - **Composer**: shield indicator (filled / dashed / crossed for green / yellow / red) — colour paired with shape for colour-blind safety.
@@ -112,7 +112,7 @@ All new strings land in both `i18n/messages/en.json` and `i18n/messages/zh-CN.js
 ## Non-goals
 
 - **Sub-sidecar pool / OS-process-per-tuple.** Validated as redundant given SDK subprocess-per-`query()`.
-- **Per-tool-call sandbox boot.** One persistent sandbox per session via WarmQuery, mirroring the Vercel Managed Agents lifecycle.
+- **Per-tool-call sandbox boot.** Tool calls within a session reuse the per-call CLI subprocess; one logical sandbox identity per session, evaluated per tool call against the per-tool policy.
 - **macOS App Sandbox + XPC migration.** Plan B for when Apple sets a `sandbox-exec` removal date; deferred.
 - **Mobile / Capacitor coverage.** Claude Code does not run on mobile; the thin client (ADR-0014, ADR-0015) is out of scope. The V2 headless server is the natural home for multi-tenant per-session isolation at the server layer.
 - **Vercel Sandbox.** Cloud-only; not viable as a desktop-app default.
@@ -124,7 +124,7 @@ All new strings land in both `i18n/messages/en.json` and `i18n/messages/zh-CN.js
 - **Multi-account chat** becomes a per-session decision rather than a global mode switch.
 - **OAuth refresh races** disappear for installs with ≥2 accounts (each gets its own `.credentials.json`).
 - **Per-`query()` env** plumbing means each turn pays one Tauri IPC round-trip for env resolution (~1 ms).
-- **WarmQuery pool** removes the ~12 s SDK cold start for warm tuples; cold tuples still pay it on first send.
+- **Cold-start cost** of ~12 s per `query()` call is accepted in V1 (see "Cold-start cost — accepted, no pool" above). Pre-warming is a documented follow-up.
 - **Windows install** adds a one-time UAC prompt the first time the user opens a sandbox-using session. Two synthetic OS users (`CogniaSandboxOffline` / `CogniaSandboxOnline`) appear in Local Users; Firewall rules tie outbound network to a specific SID. Uninstall removes both.
 - **Bundle size**: bundled `bwrap` adds ~1.5 MB to the Linux build; macOS uses the OS-provided `sandbox-exec`; Windows ships two ~500 KB exes.
 - **Strict mode** means a Windows user who denies UAC on first sandbox use cannot send Bash / Edit / Write tool calls until they re-run setup. This is by design.
@@ -146,13 +146,13 @@ All new strings land in both `i18n/messages/en.json` and `i18n/messages/zh-CN.js
 
 Coverage threshold ≥ 90 % per CLAUDE.md, enforced by existing Jest config + `cargo-tarpaulin` for new Rust modules.
 
-Manual acceptance (per-release): see implementation plan at `~/.claude/plans/plan-distributed-wren.md` — full Windows install / UAC-deny / multi-account `mitmproxy` / WarmQuery hit-rate / OAuth race / resume-replay checklist.
+Manual acceptance (per-release): see implementation plan at `~/.claude/plans/plan-distributed-wren.md` — full Windows install / UAC-deny / multi-account `mitmproxy` / OAuth race / resume-replay checklist.
 
 ## Open follow-ups
 
 1. macOS `sandbox-exec` deprecation timeline — when Apple sets a date, schedule App Sandbox + XPC migration (current SBPL profiles port one-to-one to App Sandbox temporary-exception entitlements).
 2. Quarterly review of upstream `codex-rs/codex-windows-sandbox` for security fixes worth backporting.
-3. `startup()` API surface verification (Phase 4 implementation): if `startup()` bakes options beyond `env`, drop the WarmQuery pool (Approach A) — same plan minus pool.
+3. Per-session WarmQuery pre-warming optimization — kick off `startup({sessionOptions})` immediately after `session_ended` and trade it on the next message when options haven't changed. Deferred from V1; the spike showed pool-style sharing across sessions is not viable, but single-session pre-warming on stable-options sessions remains a clean win.
 4. Anthropic `--resume` ignoring `CLAUDE_CONFIG_DIR` (#16103) — track upstream fix; once landed, the Dexie replay path can be retired for per-account sessions.
 5. V2 headless server multi-tenant per-session isolation (ADR-0014 follow-up) — port the trait / env-injection layer once the headless API is stable.
 6. T2 / T3 / T4 / T5 telemetry — once the five tiers ship, measure tier-mix in the Diagnostics audit log to see whether T4 (e2b) opt-in rate justifies its bundle cost.
