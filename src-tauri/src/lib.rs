@@ -22,6 +22,7 @@ mod plugin_api;
 mod plugins;
 mod proxy_config;
 mod remote_control;
+mod sandbox;
 mod scheduler;
 mod settings;
 mod shell;
@@ -303,6 +304,12 @@ pub fn run() {
             // ADR-0028 — per-`query()` env injection (per-session multi-account).
             subscription::commands::claude_env_for_account,
             subscription::commands::claude_proxy_env_for_session,
+            // ADR-0028 — sandbox health probe (read-only diagnostic).
+            // sandbox_exec is intentionally NOT registered until a real
+            // backend ships in Phase 4.2 (Windows) / 4.3 (macOS) / 4.4 (Linux);
+            // until then the health probe surfaces "uninstalled" honestly to
+            // the Settings → Sandbox tab.
+            sandbox::sandbox_health_probe,
             subscription::anthropic::commands::anthropic_oauth_save_pkce_result,
             subscription::codex::commands::codex_oauth_discover,
             subscription::codex::commands::codex_oauth_request_device_code,
