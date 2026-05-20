@@ -82,7 +82,7 @@ beforeEach(async () => {
 describe("executeBackupTask", () => {
   it("writes an encrypted backup, records success in history, and returns the path", async () => {
     const task = makeTask({ backupType: "full", destination: "local" })
-    const result = await executeBackupTask(task, makeExecution())
+    const result = await executeBackupTask(task, makeExecution(), new AbortController().signal)
     expect(result.success).toBe(true)
     expect(writeTextFileMock).toHaveBeenCalledTimes(1)
     expect((result.output as { sizeBytes: number }).sizeBytes).toBeGreaterThan(0)
@@ -97,7 +97,7 @@ describe("executeBackupTask", () => {
 
   it("rejects non-local destinations with a clear error", async () => {
     const task = makeTask({ destination: "convex" })
-    const result = await executeBackupTask(task, makeExecution())
+    const result = await executeBackupTask(task, makeExecution(), new AbortController().signal)
     expect(result.success).toBe(false)
     expect(result.error).toMatch(/local/i)
     expect(writeTextFileMock).not.toHaveBeenCalled()
@@ -108,7 +108,7 @@ describe("executeBackupTask", () => {
   it("returns an actionable error when not running under Tauri", async () => {
     isTauriValue = false
     const task = makeTask({ destination: "local" })
-    const result = await executeBackupTask(task, makeExecution())
+    const result = await executeBackupTask(task, makeExecution(), new AbortController().signal)
     expect(result.success).toBe(false)
     expect(result.error).toMatch(/Tauri/i)
     const history = await listBackupHistory()
@@ -118,7 +118,7 @@ describe("executeBackupTask", () => {
   it("records a failure row when writeTextFile throws", async () => {
     writeTextFileMock.mockRejectedValueOnce(new Error("disk full"))
     const task = makeTask({ destination: "local" })
-    const result = await executeBackupTask(task, makeExecution())
+    const result = await executeBackupTask(task, makeExecution(), new AbortController().signal)
     expect(result.success).toBe(false)
     expect(result.error).toBe("disk full")
     const history = await listBackupHistory()
@@ -131,7 +131,7 @@ describe("executeBackupTask", () => {
 
   it("creates the backups directory once before writing", async () => {
     const task = makeTask({ destination: "local" })
-    await executeBackupTask(task, makeExecution())
+    await executeBackupTask(task, makeExecution(), new AbortController().signal)
     expect(mkdirMock).toHaveBeenCalledTimes(1)
   })
 })

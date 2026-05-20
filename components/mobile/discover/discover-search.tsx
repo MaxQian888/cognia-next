@@ -14,7 +14,7 @@ export interface DiscoverSearchProps {
 }
 
 export function DiscoverSearch({ value, onChange, className }: DiscoverSearchProps) {
-  const t = useTranslations("mobile.discover")
+  const t = useTranslations("discover")
   const tShell = useTranslations("mobile.shell")
   return (
     <div className={cn("relative", className)} data-testid="discover-search">

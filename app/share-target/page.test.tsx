@@ -27,8 +27,21 @@ jest.mock("dexie-react-hooks", () => ({
 }))
 
 const listSessionsMock = jest.fn(async () => mockSessions)
+const createSessionMock = jest.fn(async (partial?: { title?: string }) => ({
+  id: "new-session-id",
+  title: partial?.title ?? "New chat",
+  createdAt: 0,
+  updatedAt: 0,
+  kind: "direct" as const,
+}))
 jest.mock("@/lib/db/sessions", () => ({
   listSessions: () => listSessionsMock(),
+  createSession: (partial?: unknown) => createSessionMock(partial as never),
+}))
+
+const setDraftMock: jest.Mock = jest.fn(async () => undefined)
+jest.mock("@/lib/db/chat-drafts", () => ({
+  setDraft: (sessionId: string, text: string) => setDraftMock(sessionId, text),
 }))
 
 const enqueueMock: jest.Mock = jest.fn(async () => undefined)
@@ -37,8 +50,12 @@ jest.mock("@/lib/db/mobile-outbound-queue", () => ({
 }))
 
 const toastSuccessMock: jest.Mock = jest.fn()
+const toastErrorMock: jest.Mock = jest.fn()
 jest.mock("sonner", () => ({
-  toast: { success: (arg: unknown) => toastSuccessMock(arg) },
+  toast: {
+    success: (arg: unknown) => toastSuccessMock(arg),
+    error: (arg: unknown) => toastErrorMock(arg),
+  },
 }))
 
 let mockKeyboard: { keyboardHeight: number; isVisible: boolean } = {
@@ -55,6 +72,8 @@ beforeEach(() => {
   routerBackMock.mockClear()
   routerReplaceMock.mockClear()
   enqueueMock.mockClear()
+  createSessionMock.mockClear()
+  setDraftMock.mockClear()
   toastSuccessMock.mockClear()
   mockSessions = []
   mockParams = new URLSearchParams("")
@@ -255,5 +274,88 @@ describe("ShareTargetPage", () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+
+  // ── New session / Inbox draft ──────────────────────────────────────────
+
+  it("renders the new-session and inbox-draft target buttons", () => {
+    setParams("text=hello")
+    mockSessions = [{ id: "s1", title: "Alpha" }]
+    render(<ShareTargetPage />)
+    expect(screen.getByTestId("share-target-new-session")).toBeInTheDocument()
+    expect(screen.getByTestId("share-target-inbox-draft")).toBeInTheDocument()
+  })
+
+  it("disables both quick-action buttons when there is no body", () => {
+    setParams("")
+    mockSessions = [{ id: "s1", title: "Alpha" }]
+    render(<ShareTargetPage />)
+    const newBtn = screen.getByTestId("share-target-new-session") as HTMLButtonElement
+    const draftBtn = screen.getByTestId("share-target-inbox-draft") as HTMLButtonElement
+    expect(newBtn.disabled).toBe(true)
+    expect(draftBtn.disabled).toBe(true)
+  })
+
+  it("creates a new session and enqueues a send when 'New session' is picked", async () => {
+    setParams("text=hello%20there&url=https%3A%2F%2Fa.example")
+    mockSessions = [{ id: "s1", title: "Alpha" }]
+    render(<ShareTargetPage />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("share-target-new-session"))
+    })
+    expect(createSessionMock).toHaveBeenCalledTimes(1)
+    expect(enqueueMock).toHaveBeenCalledTimes(1)
+    const arg = (enqueueMock.mock.calls[0] as unknown[])[0] as {
+      payload: { sessionId: string; segments: Array<{ text: string }> }
+    }
+    expect(arg.payload.sessionId).toBe("new-session-id")
+    expect(arg.payload.segments[0]!.text).toBe("hello there\nhttps://a.example")
+    expect(routerReplaceMock).toHaveBeenCalledWith("/?session=new-session-id")
+  })
+
+  it("derives a title from the first line of text", async () => {
+    setParams("text=" + encodeURIComponent("First line\nSecond line continues here"))
+    mockSessions = []
+    render(<ShareTargetPage />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("share-target-new-session"))
+    })
+    const arg = createSessionMock.mock.calls[0]?.[0] as { title: string }
+    expect(arg.title).toBe("First line")
+  })
+
+  it("falls back to hostname-based title when only url is shared", async () => {
+    setParams("url=https%3A%2F%2Fexample.com%2Fdocs")
+    mockSessions = []
+    render(<ShareTargetPage />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("share-target-new-session"))
+    })
+    const arg = createSessionMock.mock.calls[0]?.[0] as { title: string }
+    expect(arg.title).toBe("Share from example.com")
+  })
+
+  it("saves a chat draft and skips enqueue for 'Inbox draft'", async () => {
+    setParams("text=hello%20world")
+    mockSessions = []
+    render(<ShareTargetPage />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("share-target-inbox-draft"))
+    })
+    expect(createSessionMock).toHaveBeenCalledTimes(1)
+    expect(setDraftMock).toHaveBeenCalledWith("new-session-id", "hello world")
+    expect(enqueueMock).not.toHaveBeenCalled()
+    expect(toastSuccessMock).toHaveBeenCalledWith("draftSavedToast")
+  })
+
+  it("surfaces createSession failure as a toast.error", async () => {
+    setParams("text=hello")
+    mockSessions = []
+    createSessionMock.mockRejectedValueOnce(new Error("dexie locked"))
+    render(<ShareTargetPage />)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("share-target-new-session"))
+    })
+    expect(toastErrorMock).toHaveBeenCalledWith("createSessionFailed")
   })
 })

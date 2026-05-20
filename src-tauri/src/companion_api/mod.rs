@@ -35,11 +35,13 @@ pub mod desktop_messages_bridge;
 pub mod desktop_writes_bridge;
 pub mod dispatchers;
 pub mod event_bus;
+pub mod healthz;
 pub mod push_creds;
 pub mod store;
 pub mod idempotency;
 pub mod jwt;
 pub mod middleware;
+pub mod pair_code_lru;
 pub mod push;
 pub mod rate_limit;
 pub mod redemption_lru;
@@ -70,6 +72,7 @@ use std::sync::Arc;
 use deny_list::DenyList;
 use event_bus::EventBus;
 use idempotency::IdempotencyCache;
+use pair_code_lru::PairCodeLru;
 use redemption_lru::RedemptionLru;
 
 // ---------------------------------------------------------------------------
@@ -88,6 +91,10 @@ pub struct CompanionState {
     pub secret: RwLock<Vec<u8>>,
     /// Single-use redemption tracker for pair JWTs.
     pub redemption_lru: RedemptionLru,
+    /// 6-digit numeric code → pair JWT map (emulator-friendly path that
+    /// avoids QR camera scanning). Single-use; entries TTL-pruned in lock
+    /// step with the underlying pair JWT's `exp` claim.
+    pub pair_code_lru: Arc<PairCodeLru>,
     /// In-memory set of revoked device IDs.  Shared with [`CompanionServerState`]
     /// via `Arc` so Tauri commands (`companion_revoke_device`, etc.) can mutate
     /// it even when the axum server holds a clone of the same `SharedState`.
@@ -156,6 +163,47 @@ pub fn tls_fingerprint() -> String {
     TLS_FINGERPRINT.read().clone()
 }
 
+/// Port the companion API server is currently bound to. Process-global
+/// for the same reason as [`TLS_FINGERPRINT`] — the many CompanionState
+/// constructors (production + tests + bin entry points) don't need to
+/// thread the port through. Set by [`CompanionServerState::start`] after
+/// the listener has actually bound; read by [`healthz::healthz_handler`]
+/// to surface to mobile clients in `/api/v1/healthz`.
+static ADVERTISED_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
+
+pub fn set_advertised_port(port: u16) {
+    ADVERTISED_PORT.store(port, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn advertised_port() -> u16 {
+    ADVERTISED_PORT.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Per-source-IP rate limiter for the pre-auth (`public_routes`) surface —
+/// the only endpoints reachable without a verified device JWT. Lives as a
+/// process-wide singleton (like [`TLS_FINGERPRINT`] / [`ADVERTISED_PORT`])
+/// so the many test constructors of `CompanionState` aren't forced to
+/// thread a value.
+///
+/// Bucket: 5 burst, refill 20 req/min (≈ 1 every 3 s). The numeric
+/// `/auth/pair/redeem-code` endpoint accepts only `100_000..=999_999` (a
+/// ~900 000-code keyspace), and the pair-code LRU caps at 64 live entries
+/// — without this gate, an unauthenticated LAN peer could redeem the
+/// keyspace in O(minutes). With the gate the same brute force takes
+/// roughly 31 hours per source IP, well beyond the ~5-minute pair-code
+/// TTL.
+static PRE_AUTH_RATE_LIMITER: once_cell::sync::Lazy<Arc<rate_limit::RateLimiter>> =
+    once_cell::sync::Lazy::new(|| {
+        rate_limit::RateLimiter::new(rate_limit::RateLimitConfig {
+            capacity: 5.0,
+            refill_per_sec: 20.0 / 60.0,
+        })
+    });
+
+pub fn pre_auth_rate_limiter() -> Arc<rate_limit::RateLimiter> {
+    Arc::clone(&PRE_AUTH_RATE_LIMITER)
+}
+
 // ---------------------------------------------------------------------------
 // Orchestrator state (Tauri-managed)
 // ---------------------------------------------------------------------------
@@ -203,6 +251,9 @@ pub struct CompanionServerState {
     /// re-paired phone keeps its existing FCM/APNs token until the
     /// phone itself re-registers.
     pub push_tokens: Arc<push::PushTokenRegistry>,
+    /// 6-digit pair-code map — survives restarts so codes generated just
+    /// before a server bounce still resolve. Capped at 64 entries.
+    pub pair_code_lru: Arc<PairCodeLru>,
     /// mDNS broadcaster (Wave 1.5) — exposes the running server on the LAN
     /// so paired phones can discover the desktop without manual baseUrl
     /// entry. Optional — broadcast must be opted into via Settings.
@@ -263,6 +314,7 @@ impl CompanionServerState {
             sync_registry: sync_registry::SyncTableRegistry::with_defaults(),
             rate_limiter: rate_limit::RateLimiter::with_defaults(),
             push_tokens,
+            pair_code_lru: Arc::new(PairCodeLru::new()),
             mdns: mdns::BroadcasterState::new(),
             tunnel: tunnel::TunnelState::new(),
         }
@@ -308,6 +360,10 @@ impl CompanionServerState {
             inner.bound_port = Some(bound_port);
             inner.bind_mode = Some(mode);
         }
+        // Publish the live bind port so `/api/v1/healthz` can advertise it
+        // to mobile clients — the same process-global pattern used by the
+        // TLS fingerprint, set here so test + production paths both hit it.
+        set_advertised_port(bound_port);
         Ok(bound_port)
     }
 
@@ -319,6 +375,9 @@ impl CompanionServerState {
         }
         inner.bound_port = None;
         inner.bind_mode = None;
+        // Mirror the bind state in the process-global so /healthz responses
+        // reflect "server stopped" rather than a stale port.
+        set_advertised_port(0);
     }
 
     /// Whether the most recent `start` was loopback-only.  `None` if the
@@ -364,6 +423,7 @@ mod tests {
         Arc::new(CompanionState {
             secret: RwLock::new(vec![0u8; 32]),
             redemption_lru: RedemptionLru::new(),
+            pair_code_lru: Arc::new(PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),

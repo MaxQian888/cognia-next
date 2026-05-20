@@ -34,7 +34,8 @@ const log = loggers.scheduler
 // Task executor registry
 type TaskExecutor = (
   task: ScheduledTask,
-  execution: TaskExecution
+  execution: TaskExecution,
+  signal: AbortSignal
 ) => Promise<{ success: boolean; output?: Record<string, unknown>; error?: string }>
 
 const executors: Map<string, TaskExecutor> = new Map()
@@ -802,7 +803,7 @@ class TaskSchedulerImpl {
 
       // Execute with timeout
       const result = await this.executeWithTimeout(
-        () => executor(task, execution),
+        (signal) => executor(task, execution, signal),
         task.config.timeout
       )
 
@@ -931,7 +932,8 @@ class TaskSchedulerImpl {
       }
 
       // Handle retry with exponential backoff + jitter
-      if (retryAttempt < task.config.maxRetries) {
+      const isTimeout = error instanceof SchedulerError && error.code === "EXECUTION_TIMEOUT"
+      if (!isTimeout && retryAttempt < task.config.maxRetries) {
         const delay = this.calculateRetryDelay(task.config, retryAttempt)
         shouldRetry = true
         nextRetryAt = new Date(Date.now() + delay)
@@ -980,13 +982,16 @@ class TaskSchedulerImpl {
   /**
    * Execute a function with timeout using AbortController
    */
-  private async executeWithTimeout<T>(fn: () => Promise<T>, timeoutMs: number): Promise<T> {
+  private async executeWithTimeout<T>(
+    fn: (signal: AbortSignal) => Promise<T>,
+    timeoutMs: number
+  ): Promise<T> {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
 
     try {
       const result = await Promise.race([
-        fn(),
+        fn(controller.signal),
         new Promise<never>((_resolve, reject) => {
           controller.signal.addEventListener("abort", () => {
             reject(SchedulerError.executionTimeout("task", timeoutMs))

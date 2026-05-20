@@ -97,7 +97,7 @@ describe("ExternalBridgeSection", () => {
     expect(screen.getByText(/4ms/)).toBeInTheDocument()
   })
 
-  it("HTTP / stdio toggle changes the snippet content", async () => {
+  it("the snippet client picker switches between Claude Desktop stdio/HTTP variants", async () => {
     const user = userEvent.setup()
     // Pre-set a token so the HTTP snippet shows it instead of the placeholder.
     await saveSettings({
@@ -109,13 +109,53 @@ describe("ExternalBridgeSection", () => {
     })
     render(<ExternalBridgeSection />)
     await waitFor(() => screen.getByText(/Setup snippet/i))
-    // Default is stdio.
+    // Default is "Claude Desktop (stdio)".
     expect(screen.getByText(/cognia-mcp\.js/)).toBeInTheDocument()
-    // Switch to HTTP.
-    const httpButton = screen.getByRole("button", { name: /^HTTP$/ })
-    await user.click(httpButton)
+    // Switch to "Claude Desktop (HTTP)" via the client picker.
+    const picker = screen.getByRole("combobox", { name: /Client/i })
+    await user.click(picker)
+    const httpOption = await screen.findByRole("option", { name: /Claude Desktop \(HTTP\)/i })
+    await user.click(httpOption)
     await waitFor(() => {
       expect(screen.getByText(/Bearer test-token-abc/)).toBeInTheDocument()
+    })
+  })
+
+  it("offers Cursor and Goose snippets in addition to Claude Desktop", async () => {
+    const user = userEvent.setup()
+    await saveSettings({
+      externalBridge: {
+        enabled: true,
+        enabledScopes: ["wiki:cognia", "rag:cognia"],
+        bearerToken: "test-token-abc",
+      },
+    })
+    render(<ExternalBridgeSection />)
+    await waitFor(() => screen.getByText(/Setup snippet/i))
+    const picker = screen.getByRole("combobox", { name: /Client/i })
+    await user.click(picker)
+    expect(await screen.findByRole("option", { name: /Cursor/i })).toBeInTheDocument()
+    expect(await screen.findByRole("option", { name: /Goose/i })).toBeInTheDocument()
+  })
+
+  it("clearing the audit log requires confirmation and wires to clearMcpAuditLog", async () => {
+    const user = userEvent.setup()
+    await appendMcpAuditLog({
+      ts: Date.now(),
+      tool: "wiki_search",
+      scope: "wiki:cognia",
+      allowed: true,
+      latencyMs: 4,
+    })
+    render(<ExternalBridgeSection />)
+    const clearButton = await screen.findByRole("button", { name: /Clear audit log/i })
+    await user.click(clearButton)
+    // Confirmation dialog renders.
+    expect(await screen.findByText(/Clear MCP audit log/i)).toBeInTheDocument()
+    const confirm = screen.getByRole("button", { name: /^Clear log$/i })
+    await user.click(confirm)
+    await waitFor(() => {
+      expect(screen.getByText(/No calls yet/i)).toBeInTheDocument()
     })
   })
 })

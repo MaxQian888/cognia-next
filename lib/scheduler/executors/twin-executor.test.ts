@@ -33,13 +33,17 @@ const execution = { id: "exec_1" } as unknown as TaskExecution
 
 describe("executeTwinTask", () => {
   it("rejects payloads missing twinId", async () => {
-    const result = await executeTwinTask(makeTask({}), execution)
+    const result = await executeTwinTask(makeTask({}), execution, new AbortController().signal)
     expect(result.success).toBe(false)
     expect(result.error).toMatch(/twinId/)
   })
 
   it("enqueues a distill job when kind is omitted (defaults to distill)", async () => {
-    const result = await executeTwinTask(makeTask({ twinId: "twin_alice" }), execution)
+    const result = await executeTwinTask(
+      makeTask({ twinId: "twin_alice" }),
+      execution,
+      new AbortController().signal
+    )
     expect(result.success).toBe(true)
     expect(result.output).toMatchObject({ kind: "distill" })
     const jobs = await listJobsByTwinAndKind("twin_alice", "distill")
@@ -49,7 +53,8 @@ describe("executeTwinTask", () => {
   it("supports re-distill kind", async () => {
     const result = await executeTwinTask(
       makeTask({ twinId: "twin_alice", kind: "re-distill" }),
-      execution
+      execution,
+      new AbortController().signal
     )
     expect(result.success).toBe(true)
     const jobs = await listJobsByTwinAndKind("twin_alice", "re-distill")
@@ -59,7 +64,8 @@ describe("executeTwinTask", () => {
   it("ingest kind skips when nothing is pending", async () => {
     const result = await executeTwinTask(
       makeTask({ twinId: "twin_alice", kind: "ingest" }),
-      execution
+      execution,
+      new AbortController().signal
     )
     expect(result.success).toBe(true)
     expect(result.output?.skipped).toBeDefined()
@@ -90,7 +96,8 @@ describe("executeTwinTask", () => {
     })
     const result = await executeTwinTask(
       makeTask({ twinId: "twin_alice", kind: "ingest" }),
-      execution
+      execution,
+      new AbortController().signal
     )
     expect(result.success).toBe(true)
     expect(result.output?.sourceCount).toBe(2)
@@ -122,7 +129,8 @@ describe("executeTwinTask", () => {
     })
     const result = await executeTwinTask(
       makeTask({ twinId: "twin_alice", kind: "ingest", sourceIds: [a.id] }),
-      execution
+      execution,
+      new AbortController().signal
     )
     expect(result.success).toBe(true)
     expect(result.output?.sourceCount).toBe(1)

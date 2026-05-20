@@ -23,7 +23,7 @@ export interface FeaturedCarouselProps {
  * than 3 characters are eligible, since one tile doesn't read as a row.
  */
 export function FeaturedCarousel({ characters, onSelect, className }: FeaturedCarouselProps) {
-  const t = useTranslations("mobile.discover")
+  const t = useTranslations("discover")
   const reduce = useReducedMotion()
   if (characters.length < 3) return null
   return (

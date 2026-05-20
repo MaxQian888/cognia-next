@@ -63,6 +63,111 @@ describe("getDb", () => {
     expect(db.verno).toBeGreaterThanOrEqual(41)
   })
 
+  // v45 — IM connector Lark-first completeness pass. All changes are
+  // additive optional columns on `adapterInstances`; verify they
+  // round-trip through the declared row type and that pre-v45 rows
+  // (without the fields) still read fine.
+  it("v45 Lark guardrail fields round-trip on adapterInstances", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(45)
+    const now = Date.now()
+
+    // A Lark adapter row carrying every v45 field.
+    await db.adapterInstances.put({
+      id: "lark-v45",
+      type: "lark",
+      displayName: "Lark Workspace",
+      enabled: true,
+      transportMode: "webhook",
+      settings: {},
+      credentialsRef: {
+        keyringService: "com.cognia.platforms",
+        accounts: ["lark-v45:appSecret", "lark-v45:verificationToken"],
+      },
+      trigger: {
+        rules: [{ kind: "private-default" }],
+        blockers: [],
+        storeUnmatchedInDraftMode: false,
+      },
+      defaultMode: "auto",
+      atResponseStrategy: "mention_only",
+      chatAllowlist: ["oc_team_eng", "oc_team_pm"],
+      chatBlocklist: ["oc_spam_chat"],
+      lastWhoamiAt: now,
+      lastWhoamiResult: {
+        botName: "Cognia Bot",
+        botAvatar: "https://avatars.feishu.cn/abc.png",
+        appId: "cli_v45",
+        openId: "ou_bot_open_id",
+        tenantKey: "tnt_v45",
+        scopes: ["im:message", "bot:info", "im:resource"],
+        activateStatus: 2,
+      },
+      userTokenStoredAt: now - 60_000,
+      createdAt: now,
+      updatedAt: now,
+    })
+    const row = await db.adapterInstances.get("lark-v45")
+    expect(row?.atResponseStrategy).toBe("mention_only")
+    expect(row?.chatAllowlist).toEqual(["oc_team_eng", "oc_team_pm"])
+    expect(row?.chatBlocklist).toEqual(["oc_spam_chat"])
+    expect(row?.lastWhoamiAt).toBe(now)
+    expect(row?.lastWhoamiResult?.botName).toBe("Cognia Bot")
+    expect(row?.lastWhoamiResult?.tenantKey).toBe("tnt_v45")
+    expect(row?.lastWhoamiResult?.scopes).toContain("bot:info")
+    expect(row?.userTokenStoredAt).toBe(now - 60_000)
+
+    // Pre-v45 row (no new fields) still reads back fine — every new
+    // column is optional, so absence is the same as "not configured".
+    await db.adapterInstances.put({
+      id: "lark-pre-v45",
+      type: "lark",
+      displayName: "Pre-v45 row",
+      enabled: false,
+      transportMode: "webhook",
+      settings: {},
+      credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
+      trigger: {
+        rules: [{ kind: "private-default" }],
+        blockers: [],
+        storeUnmatchedInDraftMode: false,
+      },
+      defaultMode: "manual",
+      createdAt: now,
+      updatedAt: now,
+    })
+    const legacy = await db.adapterInstances.get("lark-pre-v45")
+    expect(legacy?.atResponseStrategy).toBeUndefined()
+    expect(legacy?.chatAllowlist).toBeUndefined()
+    expect(legacy?.chatBlocklist).toBeUndefined()
+    expect(legacy?.lastWhoamiAt).toBeUndefined()
+    expect(legacy?.lastWhoamiResult).toBeUndefined()
+    expect(legacy?.userTokenStoredAt).toBeUndefined()
+  })
+
+  // v45 — `adapter.heartbeat` AuditKind is accepted by the
+  // `connectorAudit` table writer and the index can filter it out.
+  it("v45 adapter.heartbeat audit rows round-trip and are filterable by kind", async () => {
+    const db = getDb()
+    await db.open()
+    const now = Date.now()
+
+    await db.connectorAudit.bulkPut([
+      { id: "h-1", adapterId: "lark-v45", kind: "adapter.heartbeat", at: now - 60_000 },
+      { id: "h-2", adapterId: "lark-v45", kind: "adapter.heartbeat", at: now - 30_000 },
+      { id: "h-3", adapterId: "lark-v45", kind: "adapter.started", at: now - 90_000 },
+    ])
+
+    const heartbeats = await db.connectorAudit.where("kind").equals("adapter.heartbeat").toArray()
+    expect(heartbeats).toHaveLength(2)
+    expect(heartbeats.every((r) => r.adapterId === "lark-v45")).toBe(true)
+
+    const nonHeartbeat = await db.connectorAudit.where("kind").equals("adapter.started").toArray()
+    expect(nonHeartbeat).toHaveLength(1)
+    expect(nonHeartbeat[0].kind).toBe("adapter.started")
+  })
+
   // v43 — Built-in skills tier + lark-cli bridge (ADR-0026). All changes
   // are additive optional columns; verify they round-trip through the
   // declared row types and that the `kind` widening accepts the new

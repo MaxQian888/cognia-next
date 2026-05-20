@@ -2,6 +2,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // rustls 0.23.x requires an explicit crypto provider; multiple crates pull
+    // in both `aws-lc-rs` and `ring`, so auto-detection fails. Pick `ring` to
+    // match axum-server's `tls-rustls` feature.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     // Dial9 tokio telemetry — production flight recorder for async performance
     // analysis. Requires `tokio_unstable` flag in `.cargo/config.toml`.
     let trace_dir = dirs::data_dir()

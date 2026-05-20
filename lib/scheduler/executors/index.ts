@@ -35,8 +35,9 @@ import { registerTaskExecutor } from "../task-scheduler"
 import { executePluginTask } from "./plugin-executor"
 import { executeBackupTask } from "./backup-executor"
 import { executeTwinTask } from "./twin-executor"
+import { executeWikiRebuildTask } from "./wiki-rebuild-executor"
 import { executeScript } from "../script-executor"
-import { sendPrompt, onClaudeMessage } from "@/lib/claude/ipc"
+import { sendPrompt, onClaudeMessage, interruptSession } from "@/lib/claude/ipc"
 import type {
   AppSettings,
   BuiltinToolsConfig,
@@ -331,6 +332,7 @@ async function applyAdHocSkill(
 interface RunChatPromptOptions {
   characterId?: string
   skillId?: string
+  signal?: AbortSignal
 }
 
 async function runChatPrompt(
@@ -431,16 +433,39 @@ async function runChatPrompt(
     }
   })
 
-  const timeoutMs = task.config.timeout || 300_000
-  const timer = new Promise<ChatExecutionResult>((resolve) => {
-    setTimeout(() => {
-      resolve({
-        success: false,
-        error: `Chat task exceeded timeout (${timeoutMs}ms)`,
-        output: { sessionId, events: collected.length },
-      })
-    }, timeoutMs)
-  })
+  const { signal } = options
+
+  const abortHandler = () => {
+    void interruptSession(sessionId).catch(() => undefined)
+    resolveOnce({
+      success: false,
+      error: `Chat task aborted (timeout or cancellation)`,
+      output: { sessionId, events: collected.length },
+    })
+  }
+
+  if (signal?.aborted) {
+    abortHandler()
+    try {
+      unlisten()
+    } catch {
+      /* */
+    }
+    return await finished
+  }
+
+  signal?.addEventListener("abort", abortHandler, { once: true })
+
+  if (signal?.aborted) {
+    abortHandler()
+    try {
+      unlisten()
+    } catch {
+      /* */
+    }
+    signal?.removeEventListener("abort", abortHandler)
+    return await finished
+  }
 
   try {
     log.info("Scheduler chat task → sendPrompt", {
@@ -453,10 +478,11 @@ async function runChatPrompt(
       agentModeId: payload.agentModeId,
     })
     await sendPrompt(sessionId, payload.prompt, finalOptions)
-    return await Promise.race([finished, timer])
+    return await finished
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : String(err) }
   } finally {
+    signal?.removeEventListener("abort", abortHandler)
     try {
       unlisten()
     } catch {
@@ -471,17 +497,19 @@ async function runChatPrompt(
 
 async function executeChatTask(
   task: ScheduledTask,
-  execution: TaskExecution
+  execution: TaskExecution,
+  signal: AbortSignal
 ): Promise<ChatExecutionResult> {
   const raw = (task.payload ?? {}) as Record<string, unknown>
   const payload = reconcileLegacyPromptFields(task.id, raw) as Partial<ChatLikeTaskPayload>
   if (!payload.prompt) return { success: false, error: "chat task requires `prompt` in payload" }
-  return runChatPrompt(task, execution, payload as ChatLikeTaskPayload)
+  return runChatPrompt(task, execution, payload as ChatLikeTaskPayload, { signal })
 }
 
 async function executeAgentTask(
   task: ScheduledTask,
-  execution: TaskExecution
+  execution: TaskExecution,
+  signal: AbortSignal
 ): Promise<ChatExecutionResult> {
   const raw = (task.payload ?? {}) as Record<string, unknown>
   const payload = reconcileLegacyPromptFields(task.id, raw) as Partial<AgentTaskPayload>
@@ -490,12 +518,14 @@ async function executeAgentTask(
     return { success: false, error: "agent task requires `characterId` in payload" }
   return runChatPrompt(task, execution, payload as AgentTaskPayload, {
     characterId: payload.characterId,
+    signal,
   })
 }
 
 async function executeSkillTask(
   task: ScheduledTask,
-  execution: TaskExecution
+  execution: TaskExecution,
+  signal: AbortSignal
 ): Promise<ChatExecutionResult> {
   const raw = (task.payload ?? {}) as Record<string, unknown>
   const payload = reconcileLegacyPromptFields(task.id, raw) as Partial<SkillTaskPayload>
@@ -503,12 +533,14 @@ async function executeSkillTask(
   if (!payload.skillId) return { success: false, error: "skill task requires `skillId` in payload" }
   return runChatPrompt(task, execution, payload as SkillTaskPayload, {
     skillId: payload.skillId,
+    signal,
   })
 }
 
 async function executeScriptTask(
   task: ScheduledTask,
-  execution: TaskExecution
+  execution: TaskExecution,
+  signal: AbortSignal
 ): Promise<ChatExecutionResult> {
   const payload = task.payload as
     | {
@@ -527,6 +559,10 @@ async function executeScriptTask(
     return { success: false, error: "script task requires `language` and `code` in payload" }
   }
 
+  if (signal?.aborted) {
+    return { success: false, error: "Script execution aborted before start" }
+  }
+
   const result = await executeScript({
     type: "execute_script",
     language: payload.language,
@@ -538,6 +574,10 @@ async function executeScriptTask(
     memory_mb: payload.memory_mb,
     use_sandbox: payload.use_sandbox,
   })
+
+  if (signal?.aborted) {
+    return { success: false, error: "Script execution was cancelled" }
+  }
 
   log.info("Scheduler script task complete", {
     taskId: task.id,
@@ -559,7 +599,8 @@ async function executeScriptTask(
 
 async function executeExternalAgentTask(
   task: ScheduledTask,
-  execution: TaskExecution
+  execution: TaskExecution,
+  signal: AbortSignal
 ): Promise<ChatExecutionResult> {
   const payload = (task.payload ?? {}) as Partial<ExternalAgentTaskPayload>
   if (!payload.prompt || !payload.prompt.trim()) {
@@ -567,6 +608,10 @@ async function executeExternalAgentTask(
   }
   if (!payload.agentId || !payload.agentId.trim()) {
     return { success: false, error: "external-agent task requires `agentId` in payload" }
+  }
+
+  if (signal?.aborted) {
+    return { success: false, error: "External agent task aborted" }
   }
 
   const timeout = payload.timeoutMs ?? task.config.timeout ?? 300_000
@@ -608,7 +653,11 @@ async function executeExternalAgentTask(
   }
 }
 
-async function executeCustomTask(task: ScheduledTask): Promise<ChatExecutionResult> {
+async function executeCustomTask(
+  task: ScheduledTask,
+  _execution: TaskExecution,
+  _signal: AbortSignal
+): Promise<ChatExecutionResult> {
   // The "custom" type lets users write their own executor and register it via
   // `registerTaskExecutor("custom-<name>", fn)`. The default fall-through is
   // a friendly no-op so the scheduler doesn't blow up if a stale custom task
@@ -640,9 +689,10 @@ export function registerBuiltInExecutors(): void {
   registerTaskExecutor("custom", executeCustomTask)
   registerTaskExecutor("external-agent", executeExternalAgentTask)
   registerTaskExecutor("twin", executeTwinTask)
+  registerTaskExecutor("wiki-rebuild", executeWikiRebuildTask)
 
   log.info(
-    "Built-in scheduler executors registered: chat, agent, skill, script, plugin, backup, custom, external-agent, twin"
+    "Built-in scheduler executors registered: chat, agent, skill, script, plugin, backup, custom, external-agent, twin, wiki-rebuild"
   )
 }
 
@@ -654,6 +704,7 @@ export {
   executeExternalAgentTask,
   executePluginTask,
   executeBackupTask,
+  executeWikiRebuildTask,
   executeCustomTask,
   // Internal helpers exposed for unit testing.
   reconcileLegacyPromptFields,

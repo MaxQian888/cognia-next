@@ -23,13 +23,17 @@ const registeredExecutors = new Map<
   string,
   (
     task: unknown,
-    execution: unknown
+    execution: unknown,
+    signal?: AbortSignal
   ) => Promise<{ success: boolean; output?: Record<string, unknown>; error?: string }>
 >()
 
 jest.mock("@/lib/scheduler/task-scheduler", () => ({
   registerTaskExecutor: jest.fn(
-    (type: string, fn: (task: unknown, execution: unknown) => Promise<{ success: boolean }>) => {
+    (
+      type: string,
+      fn: (task: unknown, execution: unknown, signal?: AbortSignal) => Promise<{ success: boolean }>
+    ) => {
       registeredExecutors.set(type, fn)
     }
   ),
@@ -104,7 +108,7 @@ function makeExecution(input?: Record<string, unknown>) {
 async function callExecutor(type: string, task: unknown, execution: unknown) {
   const fn = registeredExecutors.get(type)
   if (!fn) throw new Error(`Executor not registered: ${type}`)
-  return fn(task, execution)
+  return fn(task, execution, new AbortController().signal)
 }
 
 // ── lifecycle ────────────────────────────────────────────────────────────────

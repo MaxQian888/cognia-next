@@ -104,6 +104,37 @@ describe("resolveSendOptions twin injection", () => {
     expect(opts.systemPrompt).toContain("BASE_SYSTEM_PROMPT")
   })
 
+  it("does not set opts.twinContext when retrieval returns nothing and runtime did not degrade", async () => {
+    const opts = await resolveSendOptions({
+      character: baseCharacter,
+      twinDeps: fakeDeps,
+      twinUserMessage: "hi",
+    })
+    // Empty retrieval + no degradation → no twinContext metadata to surface.
+    expect(opts.twinContext).toBeUndefined()
+  })
+
+  it("stamps opts.twinContext with degraded=true when the vector store throws", async () => {
+    const explodingDeps: TwinRuntimeDepsForBuild = {
+      ...fakeDeps,
+      store: {
+        searchByEmbedding: async () => {
+          throw new Error("boom")
+        },
+      },
+    }
+    const opts = await resolveSendOptions({
+      character: baseCharacter,
+      twinDeps: explodingDeps,
+      twinUserMessage: "hi",
+    })
+    // Vector retrieval failure degrades the runtime; chat hook surfaces this
+    // to the user via the SourcesPart "degraded" indicator.
+    expect(opts.twinContext?.degraded).toBe(true)
+    expect(opts.twinContext?.twinId).toBe("twin_alice")
+    expect(opts.twinContext?.retrievedChunks).toEqual([])
+  })
+
   it("forwards precomputedQueryEmbedding to applyTwinContext", async () => {
     // Mock the applyTwinContext function to capture the arguments it receives
     jest.mock("@/lib/twin/runtime", () => ({

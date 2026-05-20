@@ -27,6 +27,7 @@ import { sendDiscordVoiceMessage } from "./voice-upload"
 import { startGatewayClient } from "./gateway-client"
 import type { GatewayClient } from "./gateway-client"
 import { getBus } from "@/lib/connectors/bus"
+import { gateInboundEvent } from "@/lib/connectors/at-gate"
 
 export interface DiscordAdapterOptions {
   id: string
@@ -123,6 +124,8 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
 
           const event = parseDiscordDispatch(opts.id, selfId, dispatch)
           if (event) {
+            // im-refactored-crayon — at-strategy + chat allow/blocklist gate.
+            if (!(await gateInboundEvent(opts.id, event))) continue
             lastActivityAt = Date.now()
             await ctx.emit(event)
           }

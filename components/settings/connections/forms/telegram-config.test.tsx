@@ -142,6 +142,26 @@ describe("TelegramConfigDialog — create new", () => {
     })
   })
 
+  it("declares both botToken and webhookSecret in credentialsRef.accounts on create", async () => {
+    render(<TelegramConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+
+    fireEvent.change(screen.getByLabelText(/bot token/i), {
+      target: { value: "123:VALIDTOKEN" },
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() => {
+      expect(mockCreateAdapterInstance).toHaveBeenCalledWith(
+        expect.objectContaining({
+          credentialsRef: expect.objectContaining({
+            accounts: expect.arrayContaining(["botToken", "webhookSecret"]),
+          }),
+        })
+      )
+    })
+  })
+
   it("shows error toast when token is empty on Save", async () => {
     render(<TelegramConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
     fireEvent.click(screen.getByRole("button", { name: /create/i }))
@@ -193,6 +213,47 @@ describe("TelegramConfigDialog — edit existing", () => {
       )
       expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
     })
+  })
+
+  it("migrates credentialsRef.accounts to include webhookSecret when missing", async () => {
+    // Existing row has only ["botToken"] — should be upgraded to ["botToken", "webhookSecret"].
+    render(<TelegramConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
+    fireEvent.change(screen.getByDisplayValue("Prod Bot"), {
+      target: { value: "Migrated Bot" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+
+    await waitFor(() => {
+      expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
+        "cai_existing",
+        expect.objectContaining({
+          credentialsRef: expect.objectContaining({
+            accounts: expect.arrayContaining(["botToken", "webhookSecret"]),
+          }),
+        })
+      )
+    })
+  })
+
+  it("skips credentialsRef migration when accounts already include webhookSecret", async () => {
+    const migratedRow: AdapterInstanceRow = {
+      ...existingRow,
+      credentialsRef: {
+        keyringService: "com.cognia.platforms",
+        accounts: ["botToken", "webhookSecret"],
+      },
+    }
+    render(<TelegramConfigDialog open={true} onOpenChange={jest.fn()} row={migratedRow} />)
+    fireEvent.change(screen.getByDisplayValue("Prod Bot"), {
+      target: { value: "Already-Migrated" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+
+    await waitFor(() => {
+      expect(mockUpdateAdapterInstance).toHaveBeenCalled()
+    })
+    const patchArg = mockUpdateAdapterInstance.mock.calls[0][1]
+    expect(patchArg).not.toHaveProperty("credentialsRef")
   })
 })
 

@@ -86,7 +86,8 @@ async function resolveBackupPath(filename: string): Promise<string> {
 
 export async function executeBackupTask(
   task: ScheduledTask,
-  execution: TaskExecution
+  execution: TaskExecution,
+  _signal: AbortSignal
 ): Promise<ExecutorResult> {
   const payload = (task.payload ?? {}) as Partial<BackupTaskPayload>
   const destination = payload.destination

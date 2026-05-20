@@ -23,6 +23,10 @@ import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   CircleIcon,
+  CopyIcon,
+  CheckIcon,
+  PauseIcon,
+  PlayIcon,
   QrCodeIcon,
   RefreshCwIcon,
   ShieldAlertIcon,
@@ -47,12 +51,19 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { isTauri, transport } from "@/lib/tauri"
-import { listPairedDevices, revokePairedDevice } from "@/lib/db/paired-devices"
+import {
+  listPairedDevices,
+  pausePairedDevice,
+  resumePairedDevice,
+  revokePairedDevice,
+} from "@/lib/db/paired-devices"
 import { encodePairPayload } from "@/lib/qr/pair-payload"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { formatRelative } from "@/lib/time/relative"
 import { cn } from "@/lib/utils"
+import { APP_VERSION } from "@/lib/app-version"
 import { WebRtcCard } from "./webrtc-card"
+import { SyncStatusCard } from "./sync-status-card"
 
 // ---------------------------------------------------------------------------
 // Tauri command shapes — mirror src-tauri/src/companion_api/commands.rs
@@ -76,6 +87,11 @@ interface PairJwtIssue {
   fingerprint?: string
   /** Server app version (Wave 1.7 v2 payload). */
   appVersion?: string
+  /** 6-digit emulator-friendly pair code (Wave 4.x). Same TTL as the JWT.
+   *  Optional so older Rust desktops returning the legacy shape still
+   *  decode — the UI renders only when present. */
+  pairCode?: string
+  pairCodeExpiresAtMs?: number
 }
 
 interface TunnelInfo {
@@ -153,6 +169,7 @@ export function CompanionSection() {
       <WebRtcCard />
       <PairDeviceCard />
       <PairedDevicesCard />
+      <SyncStatusCard />
       <ReachabilityDiagnosticsCard />
       <PushCredentialsCard />
     </div>
@@ -275,7 +292,7 @@ function MdnsCard() {
             .catch(() => "")
           await startMdnsBroadcast({
             port: DEFAULT_PORT,
-            appVersion: SERVER_VERSION,
+            appVersion: APP_VERSION,
             tlsFingerprint: fingerprint,
           })
           setRunning(true)
@@ -317,6 +334,7 @@ function MdnsCard() {
 // ---------------------------------------------------------------------------
 
 function ServerStatusCard() {
+  const t = useTranslations("mobile.companion.server")
   const desktop = isTauri()
   const [status, setStatus] = useState<CompanionServerStatus>({
     running: false,
@@ -359,7 +377,7 @@ function ServerStatusCard() {
   const onToggleEnabled = useCallback(
     async (enabled: boolean) => {
       if (!desktop) {
-        toast.error("Companion server is desktop-only.")
+        toast.error(t("desktopOnlyError"))
         return
       }
       setBusy(true)
@@ -371,11 +389,11 @@ function ServerStatusCard() {
             bindMode: desiredBind,
             boundPort: port,
           })
-          toast.success(`Companion server listening on port ${port}.`)
+          toast.success(t("started", { port }))
         } else {
           await stopServer()
           setStatus({ running: false, bindMode: "none", boundPort: null })
-          toast.success("Companion server stopped.")
+          toast.success(t("stopped"))
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : String(err))
@@ -383,7 +401,7 @@ function ServerStatusCard() {
         setBusy(false)
       }
     },
-    [desktop, desiredBind]
+    [desktop, desiredBind, t]
   )
 
   // Switching the radio while the server is running rebinds — stop + start.
@@ -414,53 +432,51 @@ function ServerStatusCard() {
         <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium">
           <span className="flex items-center gap-2">
             <SmartphoneIcon className="h-4 w-4" />
-            Mobile companion server
-            <StatusBadge status={status} desktop={desktop} />
+            {t("title")}
+            <StatusBadge status={status} desktop={desktop} t={t} />
           </span>
           <Switch
             checked={status.running}
             onCheckedChange={onToggleEnabled}
             disabled={!desktop || busy}
-            aria-label="Enable companion server"
+            aria-label={t("enableLabel")}
           />
         </CardTitle>
         <CardDescription className="text-xs">
           {status.running && status.boundPort !== null
-            ? `Listening on http://${status.bindMode === "lan" ? "<your-LAN-IP>" : "127.0.0.1"}:${status.boundPort}`
-            : "Server is off. Phones cannot reach this device."}
+            ? t("listeningOn", {
+                url: `http://${
+                  status.bindMode === "lan" ? t("bindModePlaceholderLan") : "127.0.0.1"
+                }:${status.boundPort}`,
+              })
+            : t("serverOff")}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <div>
-          <Label className="mb-2 block text-xs text-muted-foreground">Bind mode</Label>
+          <Label className="mb-2 block text-xs text-muted-foreground">{t("bindMode")}</Label>
           <RadioGroup
             value={desiredBind}
             onValueChange={onBindModeChange}
             className="space-y-2"
-            aria-label="Bind mode"
+            aria-label={t("bindMode")}
           >
             <div className="flex items-start gap-3 rounded border bg-card px-3 py-2">
               <RadioGroupItem value="loopback" id="bind-loopback" disabled={!desktop || busy} />
               <div className="space-y-0.5">
                 <Label htmlFor="bind-loopback" className="text-sm font-medium">
-                  Loopback (this device only)
+                  {t("loopbackLabel")}
                 </Label>
-                <p className="text-xs text-muted-foreground">
-                  Safest. The companion API is only reachable from the desktop itself — useful for
-                  testing the QR flow.
-                </p>
+                <p className="text-xs text-muted-foreground">{t("loopbackDesc")}</p>
               </div>
             </div>
             <div className="flex items-start gap-3 rounded border bg-card px-3 py-2">
               <RadioGroupItem value="lan" id="bind-lan" disabled={!desktop || busy} />
               <div className="space-y-0.5">
                 <Label htmlFor="bind-lan" className="text-sm font-medium">
-                  LAN (phones on the same Wi-Fi)
+                  {t("lanLabel")}
                 </Label>
-                <p className="text-xs text-muted-foreground">
-                  Required to actually pair a phone. Reachable on every interface on the local
-                  network.
-                </p>
+                <p className="text-xs text-muted-foreground">{t("lanDesc")}</p>
               </div>
             </div>
           </RadioGroup>
@@ -471,39 +487,40 @@ function ServerStatusCard() {
             className="flex items-start gap-2 rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300"
           >
             <ShieldAlertIcon className="h-3.5 w-3.5 shrink-0" />
-            <span>
-              Self-signed HTTPS is active. The mobile client pins the cert fingerprint encoded in
-              the QR; a server cert rotation requires re-pairing.
-            </span>
+            <span>{t("httpsWarning")}</span>
           </div>
         )}
-        {!desktop && (
-          <p className="text-xs text-muted-foreground">
-            Companion server runs in the desktop process — switch to the Tauri build to manage it.
-          </p>
-        )}
+        {!desktop && <p className="text-xs text-muted-foreground">{t("desktopOnly")}</p>}
       </CardContent>
     </Card>
   )
 }
 
-function StatusBadge({ status, desktop }: { status: CompanionServerStatus; desktop: boolean }) {
+function StatusBadge({
+  status,
+  desktop,
+  t,
+}: {
+  status: CompanionServerStatus
+  desktop: boolean
+  t: (key: string) => string
+}) {
   if (!desktop) {
     return (
       <span className="text-[10px] uppercase text-muted-foreground" title="Desktop-only">
-        web
+        {t("statusWeb")}
       </span>
     )
   }
   return status.running ? (
     <span className="flex items-center gap-1 text-[10px] uppercase text-emerald-500">
       <CircleIcon className="h-2 w-2 fill-current" />
-      live
+      {t("statusLive")}
     </span>
   ) : (
     <span className="flex items-center gap-1 text-[10px] uppercase text-muted-foreground">
       <CircleIcon className="h-2 w-2 fill-current" />
-      idle
+      {t("statusIdle")}
     </span>
   )
 }
@@ -512,9 +529,8 @@ function StatusBadge({ status, desktop }: { status: CompanionServerStatus; deskt
 // Card 2 — Pair a new device (QR + countdown)
 // ---------------------------------------------------------------------------
 
-const SERVER_VERSION = "0.1.0"
-
 function PairDeviceCard() {
+  const t = useTranslations("mobile.companion.pair")
   const desktop = isTauri()
   const [issue, setIssue] = useState<PairJwtIssue | null>(null)
   const [busy, setBusy] = useState(false)
@@ -530,7 +546,7 @@ function PairDeviceCard() {
 
   const onGenerate = useCallback(async () => {
     if (!desktop) {
-      toast.error("Companion pairing is desktop-only.")
+      toast.error(t("desktopOnlyError"))
       return
     }
     setBusy(true)
@@ -543,7 +559,7 @@ function PairDeviceCard() {
     } finally {
       setBusy(false)
     }
-  }, [desktop])
+  }, [desktop, t])
 
   const expired = issue ? now >= issue.expiresAtMs : false
   const remainingSecs = issue ? Math.max(0, Math.floor((issue.expiresAtMs - now) / 1000)) : 0
@@ -557,7 +573,7 @@ function PairDeviceCard() {
     return encodePairPayload({
       baseUrl: issue.baseUrl,
       pairJwt: issue.pairJwt,
-      version: issue.appVersion ?? SERVER_VERSION,
+      version: issue.appVersion ?? APP_VERSION,
       fingerprint: issue.fingerprint ?? "",
     })
   }, [issue])
@@ -567,12 +583,9 @@ function PairDeviceCard() {
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-sm font-medium">
           <QrCodeIcon className="h-4 w-4" />
-          Pair a new device
+          {t("title")}
         </CardTitle>
-        <CardDescription className="text-xs">
-          Generate a QR code, scan it with the cognia mobile app, and the phone exchanges the
-          one-shot token for a long-lived device JWT.
-        </CardDescription>
+        <CardDescription className="text-xs">{t("description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -580,35 +593,108 @@ function PairDeviceCard() {
             size="sm"
             onClick={onGenerate}
             disabled={!desktop || busy}
-            aria-label="Generate QR"
+            aria-label={t("generateAria")}
           >
             <QrCodeIcon className="mr-1 h-3.5 w-3.5" />
-            {issue ? "Refresh QR" : "Generate QR"}
+            {issue ? t("refreshQr") : t("generateQr")}
           </Button>
           {issue && (
             <span
               className={cn("text-xs", expired ? "text-destructive" : "text-muted-foreground")}
               aria-live="polite"
             >
-              {expired
-                ? "Token expired — refresh to issue a new one."
-                : `Expires in ${formatRemaining(remainingSecs)}`}
+              {expired ? t("expired") : t("expiresIn", { time: formatRemaining(remainingSecs) })}
             </span>
           )}
         </div>
         {issue && qrPayload && !expired && (
           <div
-            className="flex w-full justify-center rounded border bg-white p-4"
+            className="flex w-full justify-center rounded border bg-card p-4"
             data-testid="pair-qr-canvas"
           >
-            <QRCodeSVG value={qrPayload} size={224} level="M" aria-label="Pairing QR code" />
+            <QRCodeSVG value={qrPayload} size={224} level="M" aria-label={t("qrAria")} />
           </div>
+        )}
+        {issue?.pairCode && (
+          <PairCodeBlock
+            code={issue.pairCode}
+            expired={expired}
+            label={t("codeLabel")}
+            copyLabel={t("codeCopy")}
+            copiedLabel={t("codeCopied")}
+            hint={t("codeHint")}
+          />
         )}
         {issue && (
           <p className="break-all text-[10px] font-mono text-muted-foreground">{issue.baseUrl}</p>
         )}
       </CardContent>
     </Card>
+  )
+}
+
+interface PairCodeBlockProps {
+  code: string
+  expired: boolean
+  label: string
+  copyLabel: string
+  copiedLabel: string
+  hint: string
+}
+
+function PairCodeBlock({ code, expired, label, copyLabel, copiedLabel, hint }: PairCodeBlockProps) {
+  const [copied, setCopied] = useState(false)
+
+  const onCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Clipboard API unavailable (older WebView / locked-down env).
+      // The user can still read the digits off the screen.
+    }
+  }, [code])
+
+  return (
+    <div
+      className={cn("flex flex-col gap-2 rounded border bg-card p-3", expired && "opacity-50")}
+      data-testid="pair-code-block"
+      data-expired={expired ? "true" : "false"}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</span>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 gap-1 px-2"
+          onClick={() => void onCopy()}
+          disabled={expired}
+          aria-label={copyLabel}
+          data-testid="pair-code-copy"
+        >
+          {copied ? (
+            <>
+              <CheckIcon className="size-3.5" aria-hidden="true" />
+              {copiedLabel}
+            </>
+          ) : (
+            <>
+              <CopyIcon className="size-3.5" aria-hidden="true" />
+              {copyLabel}
+            </>
+          )}
+        </Button>
+      </div>
+      <p
+        className="select-all text-center font-mono text-2xl tracking-[0.3em]"
+        aria-label={label}
+        data-testid="pair-code-digits"
+      >
+        {code}
+      </p>
+      <p className="text-[11px] text-muted-foreground">{hint}</p>
+    </div>
   )
 }
 
@@ -624,11 +710,18 @@ function formatRemaining(secs: number): string {
 // Card 3 — paired devices table
 // ---------------------------------------------------------------------------
 
+async function unrevokeDeviceRustSide(deviceId: string): Promise<void> {
+  if (!isTauri()) return
+  await transport.call<void>("companion_unrevoke_device", { deviceId })
+}
+
 function PairedDevicesCard() {
   const rows = useLiveQuery(() => listPairedDevices(), [], [])
   const guard = useBiometricGuard()
-
+  const t = useTranslations("mobile.companion.paired")
   const tRev = useTranslations("mobile.companion.revoke")
+  const tPause = useTranslations("mobile.companion.pause")
+  const tResume = useTranslations("mobile.companion.resume")
   const onRevoke = useCallback(
     async (deviceId: string, label: string) => {
       const result = await guard(
@@ -655,30 +748,79 @@ function PairedDevicesCard() {
     [guard, tRev]
   )
 
+  const onPause = useCallback(
+    async (deviceId: string, label: string) => {
+      // Same biometric gate as revoke: Rust treats pause as a deny-list
+      // entry (companion_revoke_device) — without the gate an attacker at
+      // a momentarily-unlocked desktop could silently disable every
+      // paired phone.
+      const result = await guard(
+        {
+          reason: tPause("reason", { label }),
+          title: tPause("title"),
+          description: tPause("description"),
+        },
+        async () => {
+          await pausePairedDevice(deviceId)
+          await revokeDeviceRustSide(deviceId)
+        }
+      )
+      if (result.kind === "blocked") {
+        if (result.reason === "cancelled") return
+        toast.error(tPause("blocked", { reason: result.reason }))
+        return
+      }
+      toast.success(t("toastPaused", { label }))
+    },
+    [guard, t, tPause]
+  )
+
+  const onResume = useCallback(
+    async (deviceId: string, label: string) => {
+      // Resume undoes the deny-list entry pause put in place — gate it on
+      // the same biometric so a paused row can only be revived by the
+      // person physically holding the desktop.
+      const result = await guard(
+        {
+          reason: tResume("reason", { label }),
+          title: tResume("title"),
+          description: tResume("description"),
+        },
+        async () => {
+          await resumePairedDevice(deviceId)
+          await unrevokeDeviceRustSide(deviceId)
+        }
+      )
+      if (result.kind === "blocked") {
+        if (result.reason === "cancelled") return
+        toast.error(tResume("blocked", { reason: result.reason }))
+        return
+      }
+      toast.success(t("toastResumed", { label }))
+    },
+    [guard, t, tResume]
+  )
+
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium">Paired devices</CardTitle>
-        <CardDescription className="text-xs">
-          Revoking deny-lists the device JWT immediately. The row stays for audit.
-        </CardDescription>
+        <CardTitle className="text-sm font-medium">{t("title")}</CardTitle>
+        <CardDescription className="text-xs">{t("description")}</CardDescription>
       </CardHeader>
       <CardContent>
         {!rows || rows.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
-            No devices paired yet — generate a QR to add one.
-          </p>
+          <p className="text-xs text-muted-foreground">{t("empty")}</p>
         ) : (
           <div className="max-h-[360px] overflow-y-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Label</TableHead>
-                  <TableHead>Platform</TableHead>
-                  <TableHead>Fingerprint</TableHead>
-                  <TableHead>Paired</TableHead>
-                  <TableHead>Last seen</TableHead>
-                  <TableHead className="w-[80px] text-right">Actions</TableHead>
+                  <TableHead>{t("colLabel")}</TableHead>
+                  <TableHead>{t("colPlatform")}</TableHead>
+                  <TableHead>{t("colFingerprint")}</TableHead>
+                  <TableHead>{t("colPaired")}</TableHead>
+                  <TableHead>{t("colLastSeen")}</TableHead>
+                  <TableHead className="w-[80px] text-right">{t("colActions")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -689,7 +831,12 @@ function PairedDevicesCard() {
                         <span>{row.label}</span>
                         {row.revokedAt !== undefined && (
                           <Badge variant="outline" className="text-[10px]">
-                            revoked
+                            {t("revoked")}
+                          </Badge>
+                        )}
+                        {row.revokedAt === undefined && row.pausedAt !== undefined && (
+                          <Badge variant="outline" className="text-[10px]">
+                            {t("paused")}
                           </Badge>
                         )}
                       </div>
@@ -703,12 +850,14 @@ function PairedDevicesCard() {
                         <span
                           title={row.serverFingerprint}
                           className="cursor-help"
-                          aria-label={`Pinned cert ${row.serverFingerprint}`}
+                          aria-label={t("fingerprintAria", {
+                            fingerprint: row.serverFingerprint,
+                          })}
                         >
                           {row.serverFingerprint.slice(0, 12)}…
                         </span>
                       ) : (
-                        <span className="italic text-muted-foreground/60">unpinned</span>
+                        <span className="italic text-muted-foreground/60">{t("unpinned")}</span>
                       )}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
@@ -718,19 +867,44 @@ function PairedDevicesCard() {
                       {formatRelative(row.lastSeenAt)}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => onRevoke(row.deviceId, row.label)}
-                        disabled={row.revokedAt !== undefined}
-                        aria-label={`Revoke ${row.label}`}
-                      >
-                        {row.revokedAt !== undefined ? (
-                          <RefreshCwIcon className="h-3.5 w-3.5" />
-                        ) : (
-                          <TrashIcon className="h-3.5 w-3.5" />
-                        )}
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        {row.revokedAt === undefined &&
+                          (row.pausedAt !== undefined ? (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => onResume(row.deviceId, row.label)}
+                              aria-label={t("resumeAria", { label: row.label })}
+                              data-testid={`paired-device-resume-${row.deviceId}`}
+                            >
+                              <PlayIcon className="h-3.5 w-3.5" />
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => onPause(row.deviceId, row.label)}
+                              aria-label={t("pauseAria", { label: row.label })}
+                              data-testid={`paired-device-pause-${row.deviceId}`}
+                            >
+                              <PauseIcon className="h-3.5 w-3.5" />
+                            </Button>
+                          ))}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => onRevoke(row.deviceId, row.label)}
+                          disabled={row.revokedAt !== undefined}
+                          aria-label={t("revokeAria", { label: row.label })}
+                          data-testid={`paired-device-revoke-${row.deviceId}`}
+                        >
+                          {row.revokedAt !== undefined ? (
+                            <RefreshCwIcon className="h-3.5 w-3.5" />
+                          ) : (
+                            <TrashIcon className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -763,6 +937,7 @@ function ReachabilityDiagnosticsCard() {
   const [rows, setRows] = useState<ReachabilityRow[] | null>(null)
   const [busy, setBusy] = useState(false)
   const desktop = isTauri()
+  const t = useTranslations("mobile.companion.diagnostics")
 
   const onTest = useCallback(async () => {
     setBusy(true)
@@ -770,30 +945,23 @@ function ReachabilityDiagnosticsCard() {
       const out = await probeLocalReachability()
       setRows(out)
     } catch (err) {
-      toast.error(`Probe failed: ${err instanceof Error ? err.message : String(err)}`)
+      toast.error(t("probeFailed", { message: err instanceof Error ? err.message : String(err) }))
     } finally {
       setBusy(false)
     }
-  }, [])
+  }, [t])
 
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium">Connection diagnostics</CardTitle>
-        <CardDescription className="text-xs">
-          Test which local URLs the desktop server is reachable on. Useful when a phone reports a
-          connection error and you want to confirm the LAN / tunnel paths are healthy.
-        </CardDescription>
+        <CardTitle className="text-sm font-medium">{t("title")}</CardTitle>
+        <CardDescription className="text-xs">{t("description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <Button size="sm" variant="outline" onClick={onTest} disabled={!desktop || busy}>
-          {busy ? "Probing…" : "Test reachability"}
+          {busy ? t("probing") : t("testButton")}
         </Button>
-        {!desktop && (
-          <p className="text-xs text-muted-foreground">
-            Only available in the Tauri desktop build.
-          </p>
-        )}
+        {!desktop && <p className="text-xs text-muted-foreground">{t("desktopOnly")}</p>}
         {rows && rows.length > 0 && (
           <div className="space-y-1.5">
             {rows.map((row) => (
@@ -813,19 +981,15 @@ function ReachabilityDiagnosticsCard() {
                   <div className="font-mono">{row.url}</div>
                   <div className="text-[10px] text-muted-foreground">
                     {row.reachable
-                      ? `OK · ${row.latencyMs ?? "—"} ms`
-                      : `Failed${row.error ? ` · ${row.error}` : ""}`}
+                      ? `${t("ok")} · ${row.latencyMs ?? "—"} ${t("ms")}`
+                      : `${t("failed")}${row.error ? ` · ${row.error}` : ""}`}
                   </div>
                 </div>
               </div>
             ))}
           </div>
         )}
-        {rows && rows.length === 0 && (
-          <p className="text-xs text-muted-foreground">
-            No candidates to probe — start the companion server first.
-          </p>
-        )}
+        {rows && rows.length === 0 && <p className="text-xs text-muted-foreground">{t("empty")}</p>}
       </CardContent>
     </Card>
   )
@@ -868,6 +1032,7 @@ async function clearApns(): Promise<void> {
 }
 
 function PushCredentialsCard() {
+  const t = useTranslations("mobile.companion.push")
   const desktop = isTauri()
   const [status, setStatus] = useState<PushConfigStatus | null>(null)
   const [busy, setBusy] = useState(false)
@@ -886,9 +1051,9 @@ function PushCredentialsCard() {
       const s = await fetchPushStatus()
       setStatus(s)
     } catch (err) {
-      toast.error(`Push status failed: ${err instanceof Error ? err.message : String(err)}`)
+      toast.error(t("statusFailed", { message: err instanceof Error ? err.message : String(err) }))
     }
-  }, [desktop])
+  }, [desktop, t])
 
   useEffect(() => {
     let cancelled = false
@@ -909,111 +1074,111 @@ function PushCredentialsCard() {
 
   const onSubmitFcm = useCallback(async () => {
     if (!fcmJson.trim()) {
-      toast.error("Paste the FCM service-account JSON first.")
+      toast.error(t("fcmRequired"))
       return
     }
     setBusy(true)
     try {
       await configureFcm(fcmJson.trim())
       setFcmJson("")
-      toast.success("FCM configured.")
+      toast.success(t("fcmConfigured"))
       await refresh()
     } catch (err) {
-      toast.error(`FCM configure: ${err instanceof Error ? err.message : String(err)}`)
+      toast.error(
+        t("fcmConfigureFailed", { message: err instanceof Error ? err.message : String(err) })
+      )
     } finally {
       setBusy(false)
     }
-  }, [fcmJson, refresh])
+  }, [fcmJson, refresh, t])
 
   const onClearFcm = useCallback(async () => {
     setBusy(true)
     try {
       await clearFcm()
-      toast.success("FCM cleared.")
+      toast.success(t("fcmCleared"))
       await refresh()
     } catch (err) {
-      toast.error(`FCM clear: ${err instanceof Error ? err.message : String(err)}`)
+      toast.error(
+        t("fcmClearFailed", { message: err instanceof Error ? err.message : String(err) })
+      )
     } finally {
       setBusy(false)
     }
-  }, [refresh])
+  }, [refresh, t])
 
   const onSubmitApns = useCallback(async () => {
     const required = ["keyId", "teamId", "bundleId", "privateKeyPem"] as const
     for (const field of required) {
       if (!apns[field].trim()) {
-        toast.error(`APNs: ${field} is required.`)
+        toast.error(t("apnsFieldRequired", { field }))
         return
       }
     }
     setBusy(true)
     try {
       await configureApns(apns)
-      toast.success("APNs configured.")
+      toast.success(t("apnsConfigured"))
       setApns((prev) => ({ ...prev, privateKeyPem: "" }))
       await refresh()
     } catch (err) {
-      toast.error(`APNs configure: ${err instanceof Error ? err.message : String(err)}`)
+      toast.error(
+        t("apnsConfigureFailed", { message: err instanceof Error ? err.message : String(err) })
+      )
     } finally {
       setBusy(false)
     }
-  }, [apns, refresh])
+  }, [apns, refresh, t])
 
   const onClearApns = useCallback(async () => {
     setBusy(true)
     try {
       await clearApns()
-      toast.success("APNs cleared.")
+      toast.success(t("apnsCleared"))
       await refresh()
     } catch (err) {
-      toast.error(`APNs clear: ${err instanceof Error ? err.message : String(err)}`)
+      toast.error(
+        t("apnsClearFailed", { message: err instanceof Error ? err.message : String(err) })
+      )
     } finally {
       setBusy(false)
     }
-  }, [refresh])
+  }, [refresh, t])
 
   return (
     <Card data-testid="push-credentials-card">
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium">Push notifications</CardTitle>
-        <CardDescription className="text-xs">
-          Paste FCM (Android) and APNs (iOS) credentials to enable push delivery for paired phones
-          while their WebSocket is disconnected. Secrets are stored in the OS keyring on desktop;
-          headless deployments use a JSON file under the data directory.
-        </CardDescription>
+        <CardTitle className="text-sm font-medium">{t("title")}</CardTitle>
+        <CardDescription className="text-xs">{t("description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
-        {!desktop && (
-          <p className="text-xs text-muted-foreground">
-            Only available in the Tauri desktop build.
-          </p>
-        )}
+        {!desktop && <p className="text-xs text-muted-foreground">{t("desktopOnly")}</p>}
 
         {/* FCM */}
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <Label className="text-xs font-medium">FCM (Android)</Label>
+            <Label className="text-xs font-medium">{t("fcmLabel")}</Label>
             {status?.fcmConfigured ? (
               <Badge variant="outline" className="text-[10px] uppercase">
-                configured
+                {t("configured")}
               </Badge>
             ) : null}
           </div>
           <textarea
             className="h-32 w-full resize-y rounded border bg-background px-2 py-1.5 font-mono text-[10px]"
-            placeholder='Paste the {"type":"service_account",...} JSON downloaded from Google Cloud Console.'
+            placeholder={t("fcmPlaceholder")}
             value={fcmJson}
             onChange={(e) => setFcmJson(e.target.value)}
             disabled={!desktop || busy}
-            aria-label="FCM service-account JSON"
+            aria-label={t("fcmAria")}
           />
           <div className="flex gap-2">
             <Button size="sm" onClick={onSubmitFcm} disabled={!desktop || busy}>
-              Save FCM
+              {t("saveFcm")}
             </Button>
             {status?.fcmConfigured && (
               <Button size="sm" variant="ghost" onClick={onClearFcm} disabled={!desktop || busy}>
-                Clear FCM
+                {t("clearFcm")}
               </Button>
             )}
           </div>
@@ -1022,16 +1187,16 @@ function PushCredentialsCard() {
         {/* APNs */}
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <Label className="text-xs font-medium">APNs (iOS)</Label>
+            <Label className="text-xs font-medium">{t("apnsLabel")}</Label>
             {status?.apnsConfigured ? (
               <Badge variant="outline" className="text-[10px] uppercase">
-                configured
+                {t("configured")}
               </Badge>
             ) : null}
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
-              <Label className="text-[10px] text-muted-foreground">Key ID</Label>
+              <Label className="text-[10px] text-muted-foreground">{t("keyId")}</Label>
               <Input
                 value={apns.keyId}
                 onChange={(e) => setApns({ ...apns, keyId: e.target.value })}
@@ -1041,7 +1206,7 @@ function PushCredentialsCard() {
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-[10px] text-muted-foreground">Team ID</Label>
+              <Label className="text-[10px] text-muted-foreground">{t("teamId")}</Label>
               <Input
                 value={apns.teamId}
                 onChange={(e) => setApns({ ...apns, teamId: e.target.value })}
@@ -1051,7 +1216,7 @@ function PushCredentialsCard() {
               />
             </div>
             <div className="col-span-2 space-y-1">
-              <Label className="text-[10px] text-muted-foreground">Bundle ID</Label>
+              <Label className="text-[10px] text-muted-foreground">{t("bundleId")}</Label>
               <Input
                 value={apns.bundleId}
                 onChange={(e) => setApns({ ...apns, bundleId: e.target.value })}
@@ -1063,11 +1228,11 @@ function PushCredentialsCard() {
           </div>
           <textarea
             className="h-32 w-full resize-y rounded border bg-background px-2 py-1.5 font-mono text-[10px]"
-            placeholder={`-----BEGIN PRIVATE KEY-----\n...contents of the .p8 file...\n-----END PRIVATE KEY-----`}
+            placeholder={t("apnsKeyPlaceholder")}
             value={apns.privateKeyPem}
             onChange={(e) => setApns({ ...apns, privateKeyPem: e.target.value })}
             disabled={!desktop || busy}
-            aria-label="APNs .p8 private key"
+            aria-label={t("apnsKeyAria")}
           />
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-1.5 text-xs">
@@ -1076,16 +1241,16 @@ function PushCredentialsCard() {
                 checked={apns.production}
                 onChange={(e) => setApns({ ...apns, production: e.target.checked })}
                 disabled={!desktop || busy}
-                aria-label="APNs production environment"
+                aria-label={t("productionAria")}
               />
-              Production environment
+              {t("productionEnv")}
             </label>
             <Button size="sm" onClick={onSubmitApns} disabled={!desktop || busy}>
-              Save APNs
+              {t("saveApns")}
             </Button>
             {status?.apnsConfigured && (
               <Button size="sm" variant="ghost" onClick={onClearApns} disabled={!desktop || busy}>
-                Clear APNs
+                {t("clearApns")}
               </Button>
             )}
           </div>

@@ -69,6 +69,13 @@ export async function updateAdapterInstance(
       | "muted"
       | "lastKnownCapabilities"
       | "implMetadata"
+      // v45 (im-refactored-crayon) — Lark guardrails + whoami cache.
+      | "atResponseStrategy"
+      | "chatAllowlist"
+      | "chatBlocklist"
+      | "lastWhoamiAt"
+      | "lastWhoamiResult"
+      | "userTokenStoredAt"
     >
   >
 ): Promise<void> {

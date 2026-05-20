@@ -41,6 +41,15 @@ export interface PairedDeviceRow {
   revokedAt?: number
 
   /**
+   * Epoch ms when the owner *paused* (i.e. temporarily blocked) the device.
+   * Unlike `revokedAt`, pause is reversible: the row stays unrevoked, but
+   * the device is added to the Rust deny-list so its JWT is rejected.
+   * Calling `resumePairedDevice` clears this field and removes the device
+   * from the deny-list. Schema v46.
+   */
+  pausedAt?: number
+
+  /**
    * APNs (iOS) or FCM (Android) push registration token. Populated lazily
    * by M4.6 (push notifications); undefined until the phone registers.
    */

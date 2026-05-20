@@ -31,6 +31,7 @@ import { startSlackWebhookTransport } from "./transport-webhook"
 import { parseConversationKey } from "@/types/connectors/event"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import { getBus } from "@/lib/connectors/bus"
+import { gateInboundEvent } from "@/lib/connectors/at-gate"
 
 export interface SlackAdapterOptions {
   id: string
@@ -139,6 +140,8 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
               envelope as SlackEventEnvelope
             )
             if (event) {
+              // im-refactored-crayon — at-strategy + chat allow/blocklist gate.
+              if (!(await gateInboundEvent(opts.id, event))) continue
               lastActivityAt = Date.now()
               await ctx.emit(event)
             }
@@ -164,6 +167,8 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
             if (signal.aborted) break
             const event = parseSlackEventCallback(opts.id, opts.selfId, envelope)
             if (event) {
+              // im-refactored-crayon — at-strategy + chat allow/blocklist gate.
+              if (!(await gateInboundEvent(opts.id, event))) continue
               lastActivityAt = Date.now()
               await ctx.emit(event)
             }

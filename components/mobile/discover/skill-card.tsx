@@ -31,7 +31,7 @@ export interface SkillCardProps {
 }
 
 export function SkillCard({ skill, onToggle, className }: SkillCardProps) {
-  const t = useTranslations("mobile.discover")
+  const t = useTranslations("discover")
   const tSkills = useTranslations("mobile.skills")
   const [open, setOpen] = useState(false)
   const enabled = skill.status !== "disabled"

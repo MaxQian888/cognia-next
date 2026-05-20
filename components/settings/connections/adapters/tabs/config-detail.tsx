@@ -1,0 +1,149 @@
+"use client"
+
+/**
+ * Per-adapter Config detail tab (im-refactored-crayon).
+ *
+ * Mounted inside `AdapterDetailPanel`. The body is per-platform:
+ *
+ *   - Lark: composes whoami panel + at-strategy radio + chat whitelist
+ *     editor + an Edit button that opens the existing LarkConfigDialog
+ *     so credentials (App ID / Secret / Verification / Encrypt key) can
+ *     still be rotated.
+ *   - Other platforms: a single "Edit credentials" button that opens the
+ *     platform's existing config dialog. Lit up when those dialogs are
+ *     wired into the Adapters tab.
+ */
+
+import { useState } from "react"
+import { useTranslations } from "next-intl"
+import { Settings2Icon } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { LarkConfigDialog } from "../../forms/lark-config"
+import { TelegramConfigDialog } from "../../forms/telegram-config"
+import { DiscordConfigDialog } from "../../forms/discord-config"
+import { SlackConfigDialog } from "../../forms/slack-config"
+import { OneBotConfigDialog } from "../../forms/onebot-config"
+import { LarkWhoamiPanel } from "../../forms/lark/lark-whoami-panel"
+import { AdapterWhoamiPanel } from "../../forms/shared/adapter-whoami-panel"
+import { SendTestMessageSection } from "../../forms/shared/send-test-message-section"
+// LarkAtStrategy + LarkWhitelistEditor are platform-neutral in behaviour
+// (they read/write `atResponseStrategy` + `chatAllowlist` / `chatBlocklist`
+// on the adapter row, which are bus-level concepts, not Lark-specific).
+// Re-used for every platform in the detail panel; the "Lark" prefix is a
+// historical naming artefact left in place to avoid file churn.
+import { LarkAtStrategy } from "../../forms/lark/lark-at-strategy"
+import { LarkWhitelistEditor } from "../../forms/lark/lark-whitelist-editor"
+import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+
+export interface ConfigDetailProps {
+  row: AdapterInstanceRow
+}
+
+export function ConfigDetail({ row }: ConfigDetailProps) {
+  const t = useTranslations("settings.connections.adapters.detail")
+  const [editing, setEditing] = useState(false)
+
+  return (
+    <div className="space-y-4" data-testid="config-detail">
+      <Card>
+        <CardHeader className="pb-2 pt-3">
+          <CardTitle className="flex items-center justify-between text-sm font-medium">
+            <span>{row.displayName}</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setEditing(true)}
+              data-testid="config-detail-edit"
+            >
+              <Settings2Icon className="mr-1.5 h-3.5 w-3.5" />
+              {t("editCredentials")}
+            </Button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-1 text-xs text-muted-foreground">
+          <div>
+            <span>type: </span>
+            <span className="font-mono">{row.type}</span>
+          </div>
+          <div>
+            <span>transport: </span>
+            <span className="font-mono">{row.transportMode}</span>
+          </div>
+          <div>
+            <span>mode: </span>
+            <span className="font-mono">{row.defaultMode}</span>
+          </div>
+          {row.publicUrl && (
+            <div>
+              <span>publicUrl: </span>
+              <span className="font-mono break-all">{row.publicUrl}</span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Bot identity panel — Lark gets its richer panel that surfaces
+       * tenant + scopes; every other platform gets the generic panel
+       * that branches on `row.type` to call the right probe. */}
+      {row.type === "lark" ? (
+        <LarkWhoamiPanel adapterId={row.id} />
+      ) : (
+        <AdapterWhoamiPanel adapterId={row.id} platform={row.type} />
+      )}
+
+      {/* Mention strategy + chat allow/blocklist — applies to every
+       * platform that distinguishes private / group / channel contexts.
+       * The components were originally written for Lark but the body is
+       * platform-neutral. */}
+      <LarkAtStrategy adapterId={row.id} />
+      <LarkWhitelistEditor adapterId={row.id} />
+
+      {/* End-to-end verify: send a synthetic message through the same
+       * bus path the runner uses. Lives here (not in the create dialog)
+       * because the adapter must be registered with the running bus —
+       * which only happens after the row is enabled. Reuses
+       * `getBus().sendOutbound` for full-pipeline coverage. */}
+      <SendTestMessageSection adapterId={row.id} platform={row.type} />
+
+      {/* Edit-credentials dialogs — only the dialog matching the row's
+       * platform mounts open at any time. */}
+      <LarkConfigDialog
+        open={editing && row.type === "lark"}
+        onOpenChange={(open) => {
+          if (!open) setEditing(false)
+        }}
+        row={row.type === "lark" ? row : null}
+      />
+      <TelegramConfigDialog
+        open={editing && row.type === "telegram"}
+        onOpenChange={(open) => {
+          if (!open) setEditing(false)
+        }}
+        row={row.type === "telegram" ? row : null}
+      />
+      <DiscordConfigDialog
+        open={editing && row.type === "discord"}
+        onOpenChange={(open) => {
+          if (!open) setEditing(false)
+        }}
+        row={row.type === "discord" ? row : null}
+      />
+      <SlackConfigDialog
+        open={editing && row.type === "slack"}
+        onOpenChange={(open) => {
+          if (!open) setEditing(false)
+        }}
+        row={row.type === "slack" ? row : null}
+      />
+      <OneBotConfigDialog
+        open={editing && row.type === "onebot"}
+        onOpenChange={(open) => {
+          if (!open) setEditing(false)
+        }}
+        row={row.type === "onebot" ? row : null}
+      />
+    </div>
+  )
+}

@@ -91,6 +91,17 @@ export function makeDefaultLoader<P>(moduleId: string, exportName: string): () =
     if (detectNativePlatform() === "web") {
       throw new Error(`${moduleId} not available on web`)
     }
+    // Capacitor injects every plugin onto window.Capacitor.Plugins at boot.
+    // In a production static-export the webpackIgnore import below usually
+    // fails because the npm module is not in the bundle and there is no
+    // node_modules inside the WebView. Falling back to the global keeps
+    // splash-screen hide, haptics, status-bar, etc. working on device.
+    const capPlugins = (globalThis as unknown as { Capacitor?: { Plugins?: Record<string, P> } })
+      .Capacitor?.Plugins
+    const fromGlobal = capPlugins?.[exportName]
+    if (fromGlobal) {
+      return fromGlobal
+    }
     const mod = (await import(/* webpackIgnore: true */ moduleId)) as Record<string, unknown>
     const exported = mod[exportName]
     if (!exported) {

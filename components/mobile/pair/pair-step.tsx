@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl"
 import {
   AlertCircleIcon,
   ArrowLeftIcon,
+  KeyIcon,
   Loader2Icon,
   LockIcon,
   ScanLineIcon,
@@ -17,6 +18,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { openAppSettings } from "@/lib/capacitor/app-settings"
@@ -26,25 +28,8 @@ import { parsePairQrPayload } from "@/lib/qr/pair-qr"
 import { pinnedFetch } from "@/lib/tauri/pinned-fetch"
 import { saveCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
 
-import {
-  describeHttpError,
-  describeNetworkError,
-  getDeviceLabel,
-  getDevicePlatform,
-  safeText,
-  validateBaseUrl,
-  validatePairJwt,
-} from "./pair-helpers"
-
-interface PairResponseBody {
-  device_id: string
-  device_jwt: string
-  server_version: string
-  /** ADR-0021 — optional for legacy desktops without WebRTC support. */
-  rendezvous_id?: string
-  /** ADR-0021 — 32-byte HMAC secret, URL-safe base64 (unpadded). */
-  rendezvous_secret?: string
-}
+import { describeNetworkError, validateBaseUrl, validatePairJwt } from "./pair-helpers"
+import { redeemPairCode, redeemPairJwt, type RedeemResult } from "./pair-api"
 
 export interface PairStepProps {
   /** Pre-fill the URL field, e.g. after the user picked a discovered server. */
@@ -68,6 +53,8 @@ type Phase =
   | { kind: "pairing" }
   | { kind: "error"; message: string; action?: ErrorAction }
 
+type PairMode = "jwt" | "code"
+
 export function PairStep({
   prefilledBaseUrl = "",
   prefilledPairJwt = "",
@@ -84,8 +71,10 @@ export function PairStep({
   // which gives us a fresh seed without a tedious useEffect-sync dance.
   const [baseUrl, setBaseUrl] = useState(prefilledBaseUrl)
   const [pairJwt, setPairJwt] = useState(prefilledPairJwt)
+  const [pairCode, setPairCode] = useState("")
   const [serverFingerprint, setServerFingerprint] = useState(prefilledFingerprint)
   const [phase, setPhase] = useState<Phase>({ kind: "idle" })
+  const [mode, setMode] = useState<PairMode>(prefilledPairJwt ? "jwt" : "code")
 
   const onScanQr = useCallback(async () => {
     // Wave 4 / ADR-0026 — flip to `scanning` so the UI can render an
@@ -100,6 +89,7 @@ export function PairStep({
         setBaseUrl(decoded.payload.baseUrl)
         setPairJwt(decoded.payload.pairJwt)
         setServerFingerprint(decoded.payload.fingerprint || "")
+        setMode("jwt")
         setPhase({ kind: "idle" })
         return
       }
@@ -108,6 +98,7 @@ export function PairStep({
         setBaseUrl(legacy.baseUrl)
         setPairJwt(legacy.pairJwt)
         setServerFingerprint("")
+        setMode("jwt")
         setPhase({ kind: "idle" })
         return
       }
@@ -141,48 +132,53 @@ export function PairStep({
 
   const onPair = useCallback(async () => {
     const trimmedUrl = baseUrl.trim().replace(/\/+$/, "")
-    const trimmedJwt = pairJwt.trim()
 
     const urlError = validateBaseUrl(trimmedUrl)
     if (urlError) {
       setPhase({ kind: "error", message: urlError })
       return
     }
-    const jwtError = validatePairJwt(trimmedJwt)
-    if (jwtError) {
-      setPhase({ kind: "error", message: jwtError })
-      return
-    }
 
-    setPhase({ kind: "pairing" })
-    try {
-      // Use `pinnedFetch` so Capacitor routes through the native HTTP stack
-      // with `serverTrustMode: "self-signed"` — the desktop's TLS cert is
-      // self-signed (M2.9) and browser fetch can't reach it.
-      const response = await pinnedFetch(`${trimmedUrl}/api/v1/auth/pair`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pair_jwt: trimmedJwt,
-          device_label: getDeviceLabel(),
-          device_platform: getDevicePlatform(),
-          device_pubkey: "",
-          app_version: "0.1.0",
-        }),
-        serverFingerprint: serverFingerprint || undefined,
-      })
-
-      if (!response.ok) {
-        setPhase({
-          kind: "error",
-          message: describeHttpError(response.status, await safeText(response)),
-        })
+    let result: RedeemResult
+    if (mode === "jwt") {
+      const trimmedJwt = pairJwt.trim()
+      const jwtError = validatePairJwt(trimmedJwt)
+      if (jwtError) {
+        setPhase({ kind: "error", message: jwtError })
         return
       }
+      setPhase({ kind: "pairing" })
+      try {
+        result = await redeemPairJwt({
+          baseUrl: trimmedUrl,
+          pairJwt: trimmedJwt,
+          serverFingerprint: serverFingerprint || undefined,
+        })
+      } catch (err) {
+        setPhase({ kind: "error", message: describeNetworkError(err) })
+        return
+      }
+    } else {
+      const trimmedCode = pairCode.trim()
+      if (!/^\d{6}$/.test(trimmedCode)) {
+        setPhase({ kind: "error", message: t("codeError.malformed") })
+        return
+      }
+      setPhase({ kind: "pairing" })
+      try {
+        result = await redeemPairCode({
+          baseUrl: trimmedUrl,
+          code: trimmedCode,
+          serverFingerprint: serverFingerprint || undefined,
+        })
+      } catch (err) {
+        setPhase({ kind: "error", message: describeNetworkError(err) })
+        return
+      }
+    }
 
-      const body = (await response.json()) as PairResponseBody
-
-      // P0.3 — app-layer fingerprint attestation. After pair redeem, call
+    if (result.kind === "ok") {
+      // P0.3 — app-layer fingerprint attestation. After redeem, call
       // /api/v1/whoami and confirm the server reports the same TLS
       // fingerprint the QR encoded. Catches "connected to the wrong cognia"
       // and most cert-rotation cases. Not strict TLS pinning — see
@@ -191,7 +187,7 @@ export function PairStep({
         try {
           const whoami = await pinnedFetch(`${trimmedUrl}/api/v1/whoami`, {
             method: "GET",
-            headers: { Authorization: `Bearer ${body.device_jwt}` },
+            headers: { Authorization: `Bearer ${result.body.device_jwt}` },
             serverFingerprint,
           })
           if (whoami.ok) {
@@ -215,28 +211,26 @@ export function PairStep({
         }
       }
 
-      const config: CompanionConfig = {
-        baseUrl: trimmedUrl,
-        deviceJwt: body.device_jwt,
-        deviceId: body.device_id,
-        serverVersion: body.server_version,
-      }
-      if (serverFingerprint) {
-        config.serverFingerprint = serverFingerprint
-      }
-      // ADR-0021 — opt the device into the WebRTC tier when the desktop
-      // returns a rendezvous tuple. Legacy desktops omit both fields, in
-      // which case the transport stays on HTTPS+WS only.
-      if (body.rendezvous_id && body.rendezvous_secret) {
-        config.rendezvousId = body.rendezvous_id
-        config.rendezvousSecret = body.rendezvous_secret
-      }
-      await saveCompanionConfig(config)
-      onPaired(config)
-    } catch (err) {
-      setPhase({ kind: "error", message: describeNetworkError(err) })
+      await saveCompanionConfig(result.config)
+      onPaired(result.config)
+      return
     }
-  }, [baseUrl, pairJwt, serverFingerprint, onPaired, t])
+
+    // Error branch — surface a useful message for the user.
+    if (result.kind === "network_error") {
+      setPhase({ kind: "error", message: describeNetworkError(result.message) })
+      return
+    }
+    if (result.kind === "code_error") {
+      setPhase({ kind: "error", message: t(`codeError.${result.code}`) })
+      return
+    }
+    // http_error
+    setPhase({
+      kind: "error",
+      message: describeHttpStatus(result.status, t),
+    })
+  }, [baseUrl, mode, pairCode, pairJwt, serverFingerprint, onPaired, t])
 
   const isPairing = phase.kind === "pairing"
 
@@ -319,23 +313,56 @@ export function PairStep({
               />
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="pair-jwt" className="text-sm font-medium">
-                {t("tokenLabel")}
-              </Label>
-              <Textarea
-                id="pair-jwt"
-                placeholder="eyJ..."
-                value={pairJwt}
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-                onChange={(e) => setPairJwt(e.target.value)}
-                className="min-h-24 font-mono text-xs"
-                disabled={isPairing}
-                data-testid="pair-jwt"
-              />
-            </div>
+            <Tabs value={mode} onValueChange={(v) => setMode(v as PairMode)}>
+              <TabsList className="w-full">
+                <TabsTrigger value="jwt" data-testid="pair-tab-jwt">
+                  {t("tabs.jwt")}
+                </TabsTrigger>
+                <TabsTrigger value="code" data-testid="pair-tab-code">
+                  <KeyIcon className="size-3.5" aria-hidden="true" />
+                  {t("tabs.code")}
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="jwt" className="flex flex-col gap-1.5 pt-3">
+                <Label htmlFor="pair-jwt" className="text-sm font-medium">
+                  {t("tokenLabel")}
+                </Label>
+                <Textarea
+                  id="pair-jwt"
+                  placeholder="eyJ..."
+                  value={pairJwt}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  onChange={(e) => setPairJwt(e.target.value)}
+                  className="min-h-24 font-mono text-xs"
+                  disabled={isPairing}
+                  data-testid="pair-jwt"
+                />
+              </TabsContent>
+              <TabsContent value="code" className="flex flex-col gap-1.5 pt-3">
+                <Label htmlFor="pair-code" className="text-sm font-medium">
+                  {t("codeLabel")}
+                </Label>
+                <Input
+                  id="pair-code"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="\d{6}"
+                  maxLength={6}
+                  placeholder="123456"
+                  value={pairCode}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  onChange={(e) => setPairCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  className="touch-target text-center font-mono tracking-[0.4em] text-lg"
+                  disabled={isPairing}
+                  data-testid="pair-code-input"
+                />
+                <p className="text-xs text-muted-foreground">{t("codeHint")}</p>
+              </TabsContent>
+            </Tabs>
 
             {serverFingerprint ? (
               <Alert
@@ -413,4 +440,12 @@ export function PairStep({
       ) : null}
     </section>
   )
+}
+
+function describeHttpStatus(status: number, t: ReturnType<typeof useTranslations>): string {
+  if (status === 401) return t("httpError.401")
+  if (status === 403) return t("httpError.403")
+  if (status === 404) return t("httpError.404")
+  if (status >= 500) return t("httpError.5xx", { status })
+  return t("httpError.generic", { status })
 }

@@ -104,6 +104,24 @@ export interface ExternalBridgeSettings {
   httpPort?: number
   /** ISO timestamp of the most recent token rotation, for audit. */
   tokenRotatedAt?: number
+  /**
+   * Optional automatic wiki-rebuild schedule. When `mode === "off"` the
+   * scheduler row is deleted; otherwise the bridge maintains a single
+   * `wiki-rebuild` scheduled task. Custom mode takes a raw cron expression.
+   */
+  wikiSchedule?: WikiScheduleSettings
+}
+
+export type WikiScheduleMode = "off" | "daily" | "weekly" | "custom"
+
+export interface WikiScheduleSettings {
+  mode: WikiScheduleMode
+  /** Required when `mode === "custom"`. Standard 5-field cron expression. */
+  customCron?: string
+  /** When true, the scheduled rebuild ignores cached hashes (full rebuild). */
+  force?: boolean
+  /** Optional IANA timezone for the cron (defaults to local). */
+  timezone?: string
 }
 
 export const DEFAULT_EXTERNAL_BRIDGE_SETTINGS: ExternalBridgeSettings = {

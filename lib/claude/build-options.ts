@@ -513,6 +513,27 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       if (result.applied) {
         baseSystem = result.applied.systemPrompt
       }
+      // Stash the retrieved context for the chat hook so it can render a
+      // Twin SourcesPart on the assistant message. Always attached when the
+      // runtime ran (even if degraded) so the UI can show a "no context"
+      // indicator instead of staying silent.
+      if (
+        result.retrievedChunks.length > 0 ||
+        result.selectedStyleSamples.length > 0 ||
+        result.degraded
+      ) {
+        opts.twinContext = {
+          twinId: character.twinId,
+          retrievedChunks: result.retrievedChunks,
+          selectedStyleSamples: result.selectedStyleSamples.map((s) => ({
+            id: s.id,
+            contextLabel: s.contextLabel,
+            summary: s.summary,
+            tone: s.tone,
+          })),
+          degraded: result.degraded,
+        }
+      }
     } catch {
       // Twin runtime failure is non-fatal — keep the original baseSystem.
     }

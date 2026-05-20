@@ -1,16 +1,18 @@
 "use client"
 
-// Telegram-specific adapter configuration dialog.
-// Wraps AdapterForm with:
-//   - Bot token field (secret, tested via getMe)
-//   - Transport mode switcher (longpoll | webhook)
-//   - Optional webhook secret token field
-// On save: creates or updates the AdapterInstanceRow and writes the bot token
-// to the keyring via connectorsKeyringSet.
+/**
+ * Telegram adapter configuration dialog.
+ *
+ * Migrated to the shared `AdapterFormSections` shell — Identity holds the
+ * bot token + Test connection; Delivery holds the transport (longpoll vs
+ * webhook), the dynamic webhook URL (auto-resolved from the Cloudflared
+ * tunnel) and the webhook secret token; Advanced holds the cross-cutting
+ * Quiet-Hours + Mute controls.
+ */
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckCircle2Icon, LoaderIcon, XCircleIcon } from "lucide-react"
+import { CheckCircle2Icon, ExternalLinkIcon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -23,17 +25,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { connectorsHttpRequest, connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { TransportMode } from "@/types/connectors/adapter"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
-
-// ----------------------------------------------------------------------------
-// Types
-// ----------------------------------------------------------------------------
+import { useTunnelStatus } from "@/hooks/use-tunnel-status"
+import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
+import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 
 interface GetMeResult {
   ok: boolean
@@ -41,10 +41,6 @@ interface GetMeResult {
   id?: number
   error?: string
 }
-
-// ----------------------------------------------------------------------------
-// Test Connection
-// ----------------------------------------------------------------------------
 
 async function testTelegramToken(token: string): Promise<GetMeResult> {
   try {
@@ -67,10 +63,6 @@ async function testTelegramToken(token: string): Promise<GetMeResult> {
   }
 }
 
-// ----------------------------------------------------------------------------
-// Dialog
-// ----------------------------------------------------------------------------
-
 interface TelegramConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -88,13 +80,23 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
     (row?.transportMode as TransportMode) ?? "longpoll"
   )
   const [webhookSecret, setWebhookSecret] = useState("")
-
+  const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
+  const [quietHours, setQuietHours] = useState<QuietHoursValue | null>(row?.quietHours ?? null)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<GetMeResult | null>(null)
-
   const [saving, setSaving] = useState(false)
 
   const desktop = isTauri()
+  const tunnel = useTunnelStatus()
+
+  const dirty =
+    isNew ||
+    displayName.trim() !== row?.displayName ||
+    botToken.length > 0 ||
+    webhookSecret.length > 0 ||
+    transport !== ((row?.transportMode as TransportMode) ?? "longpoll") ||
+    muted !== (row?.muted ?? false) ||
+    quietHours !== (row?.quietHours ?? null)
 
   const handleTest = async () => {
     if (!botToken.trim()) {
@@ -113,6 +115,15 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
     }
   }
 
+  const handleCopyWebhookUrl = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url)
+      toast.success(t("webhookUrlCopied"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   const handleSave = async () => {
     if (!displayName.trim()) {
       toast.error(t("displayNameRequired"))
@@ -120,6 +131,10 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
     }
     if (isNew && !botToken.trim()) {
       toast.error(t("botTokenRequired"))
+      return
+    }
+    if (quietHours && (!quietHours.from || !quietHours.to || !quietHours.tz)) {
+      toast.error(t("quietHoursIncomplete"))
       return
     }
 
@@ -136,21 +151,32 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
           settings: {},
           credentialsRef: {
             keyringService: "com.cognia.platforms",
-            accounts: ["botToken"],
+            accounts: ["botToken", "webhookSecret"],
           },
           trigger: defaultPrivateChatPolicy(),
           defaultMode: "auto",
+          quietHours: quietHours ?? undefined,
+          muted,
         })
         adapterId = newRow.id
       } else {
         adapterId = row.id
+        const existingAccounts = row.credentialsRef?.accounts ?? []
+        const needsMigration = !existingAccounts.includes("webhookSecret")
         await updateAdapterInstance(adapterId, {
           displayName: displayName.trim(),
           transportMode: transport,
+          muted,
+          quietHours: quietHours ?? undefined,
+          ...(needsMigration && {
+            credentialsRef: {
+              keyringService: row.credentialsRef?.keyringService ?? "com.cognia.platforms",
+              accounts: ["botToken", "webhookSecret"],
+            },
+          }),
         })
       }
 
-      // Write secrets to keyring (Tauri only)
       if (botToken.trim()) {
         await connectorsKeyringSet(adapterId, "botToken", botToken.trim())
       }
@@ -167,119 +193,120 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
     }
   }
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>{isNew ? t("titleNew") : t("titleEdit")}</DialogTitle>
-        </DialogHeader>
+  const webhookPath = isNew ? null : `/webhook/telegram/${row?.id ?? ""}`
+  const webhookUrl =
+    tunnel.url && webhookPath ? `${tunnel.url.replace(/\/$/, "")}${webhookPath}` : null
 
-        <div className="space-y-4">
-          {/* Display name */}
-          <div className="space-y-1.5">
-            <Label htmlFor="tg-display-name">{t("displayNameLabel")}</Label>
+  const identitySection: FormSection = {
+    id: "identity",
+    label: t("sectionIdentity"),
+    description: t("sectionIdentityDesc"),
+    defaultOpen: true,
+    children: (
+      <div className="space-y-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="tg-display-name">{t("displayNameLabel")}</Label>
+          <Input
+            id="tg-display-name"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder={t("displayNamePlaceholder")}
+            disabled={saving}
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="tg-bot-token">
+            {t("botTokenLabel")}
+            <span className="ml-1 text-destructive">*</span>
+          </Label>
+          <p className="text-xs text-muted-foreground">{t("botTokenHelp")}</p>
+          <div className="flex gap-2">
             <Input
-              id="tg-display-name"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder={t("displayNamePlaceholder")}
+              id="tg-bot-token"
+              type="password"
+              autoComplete="new-password"
+              value={botToken}
+              onChange={(e) => setBotToken(e.target.value)}
+              placeholder={t("botTokenPlaceholder")}
               disabled={saving}
+              className="flex-1"
             />
-          </div>
-
-          {/* Bot token + test */}
-          <div className="space-y-1.5">
-            <Label htmlFor="tg-bot-token">
-              {t("botTokenLabel")}
-              <span className="ml-1 text-destructive">*</span>
-            </Label>
-            <p className="text-xs text-muted-foreground">{t("botTokenHelp")}</p>
-            <div className="flex gap-2">
-              <Input
-                id="tg-bot-token"
-                type="password"
-                autoComplete="new-password"
-                value={botToken}
-                onChange={(e) => setBotToken(e.target.value)}
-                placeholder={t("botTokenPlaceholder")}
-                disabled={saving}
-                className="flex-1"
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={handleTest}
-                disabled={testing || saving || !desktop}
-                aria-label={t("testConnectionAria")}
-              >
-                {testing ? (
-                  <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  t("testButtonLabel")
-                )}
-              </Button>
-            </div>
-
-            {/* Test result display */}
-            {testResult !== null && (
-              <div
-                className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs ${
-                  testResult.ok
-                    ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
-                    : "bg-destructive/10 text-destructive"
-                }`}
-                role="status"
-                aria-label={
-                  testResult.ok ? t("connectionSucceededLabel") : t("connectionFailedLabel")
-                }
-              >
-                {testResult.ok ? (
-                  <CheckCircle2Icon className="h-3.5 w-3.5 shrink-0" />
-                ) : (
-                  <XCircleIcon className="h-3.5 w-3.5 shrink-0" />
-                )}
-                {testResult.ok
-                  ? t("connectedAs", {
-                      username: testResult.username ?? t("unknownUsername"),
-                      id: testResult.id ?? t("unknownId"),
-                    })
-                  : testResult.error}
-              </div>
-            )}
-
-            {!desktop && (
-              <p className="text-xs text-amber-600 dark:text-amber-400">
-                {t("testRequiresDesktop")}
-              </p>
-            )}
-          </div>
-
-          <Separator />
-
-          {/* Transport mode */}
-          <div className="space-y-1.5">
-            <Label htmlFor="tg-transport">{t("transportLabel")}</Label>
-            <Select
-              value={transport}
-              onValueChange={(v) => setTransport(v as TransportMode)}
-              disabled={saving}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={handleTest}
+              disabled={testing || saving || !desktop}
+              aria-label={t("testConnectionAria")}
             >
-              <SelectTrigger id="tg-transport">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="longpoll">{t("transportLongpoll")}</SelectItem>
-                <SelectItem value="webhook">{t("transportWebhook")}</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              {transport === "longpoll" ? t("transportLongpollHelp") : t("transportWebhookHelp")}
-            </p>
+              {testing ? <LoaderIcon className="h-3.5 w-3.5 animate-spin" /> : t("testButtonLabel")}
+            </Button>
           </div>
 
-          {/* Webhook secret (only when webhook selected) */}
-          {transport === "webhook" && (
+          {testResult !== null && (
+            <div
+              className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs ${
+                testResult.ok
+                  ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
+                  : "bg-destructive/10 text-destructive"
+              }`}
+              role="status"
+              aria-label={
+                testResult.ok ? t("connectionSucceededLabel") : t("connectionFailedLabel")
+              }
+            >
+              {testResult.ok ? (
+                <CheckCircle2Icon className="h-3.5 w-3.5 shrink-0" />
+              ) : (
+                <XCircleIcon className="h-3.5 w-3.5 shrink-0" />
+              )}
+              {testResult.ok
+                ? t("connectedAs", {
+                    username: testResult.username ?? t("unknownUsername"),
+                    id: testResult.id ?? t("unknownId"),
+                  })
+                : testResult.error}
+            </div>
+          )}
+
+          {!desktop && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">{t("testRequiresDesktop")}</p>
+          )}
+        </div>
+      </div>
+    ),
+  }
+
+  const deliverySection: FormSection = {
+    id: "delivery",
+    label: t("sectionDelivery"),
+    description: t("sectionDeliveryDesc"),
+    defaultOpen: true,
+    children: (
+      <div className="space-y-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="tg-transport">{t("transportLabel")}</Label>
+          <Select
+            value={transport}
+            onValueChange={(v) => setTransport(v as TransportMode)}
+            disabled={saving}
+          >
+            <SelectTrigger id="tg-transport">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="longpoll">{t("transportLongpoll")}</SelectItem>
+              <SelectItem value="webhook">{t("transportWebhook")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {transport === "longpoll" ? t("transportLongpollHelp") : t("transportWebhookHelp")}
+          </p>
+        </div>
+
+        {transport === "webhook" && (
+          <>
             <div className="space-y-1.5">
               <Label htmlFor="tg-webhook-secret">{t("webhookSecretLabel")}</Label>
               <p className="text-xs text-muted-foreground">
@@ -297,25 +324,110 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
                 disabled={saving}
               />
             </div>
-          )}
 
-          <Separator />
+            <div className="space-y-2 rounded border bg-card px-3 py-3">
+              <Label className="text-xs font-medium">{t("webhookUrlLabel")}</Label>
+              {webhookPath === null ? (
+                <p className="text-xs text-muted-foreground">{t("webhookUrlNewAdapterHint")}</p>
+              ) : tunnel.loading ? (
+                <p className="text-xs text-muted-foreground">{t("webhookUrlTunnelLoading")}</p>
+              ) : tunnel.running && webhookUrl ? (
+                <div className="space-y-2">
+                  <Input
+                    readOnly
+                    value={webhookUrl}
+                    className="font-mono text-[11px]"
+                    aria-label={t("webhookUrlLabel")}
+                    data-testid="telegram-webhook-url-input"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleCopyWebhookUrl(webhookUrl)}
+                      aria-label={t("webhookUrlCopyAria")}
+                    >
+                      {t("webhookUrlCopy")}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() =>
+                        typeof window !== "undefined" &&
+                        window.open(
+                          "https://core.telegram.org/bots/api#setwebhook",
+                          "_blank",
+                          "noopener,noreferrer"
+                        )
+                      }
+                    >
+                      <ExternalLinkIcon className="mr-1 h-3.5 w-3.5" />
+                      {t("openDocs")}
+                    </Button>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">{t("webhookUrlHelp")}</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p
+                    className="text-xs text-amber-700 dark:text-amber-400"
+                    data-testid="telegram-webhook-url-tunnel-off"
+                  >
+                    {t("webhookUrlTunnelOffHelp")}
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      if (typeof window !== "undefined") {
+                        window.location.assign("/settings/companion#tunnel")
+                      }
+                    }}
+                  >
+                    {t("openCompanion")}
+                  </Button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    ),
+  }
 
-          {/* Actions */}
-          <div className="flex items-center justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={saving}
-            >
-              {t("cancel")}
-            </Button>
-            <Button type="button" onClick={handleSave} disabled={saving}>
-              {saving ? t("saving") : isNew ? t("create") : t("save")}
-            </Button>
-          </div>
-        </div>
+  const advancedSection: FormSection = {
+    id: "advanced",
+    label: t("sectionAdvanced"),
+    description: t("sectionAdvancedDesc"),
+    children: (
+      <QuietHoursAndMute
+        muted={muted}
+        onMutedChange={setMuted}
+        quietHours={quietHours}
+        onQuietHoursChange={setQuietHours}
+        disabled={saving}
+      />
+    ),
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{isNew ? t("titleNew") : t("titleEdit")}</DialogTitle>
+        </DialogHeader>
+
+        <AdapterFormSections
+          sections={[identitySection, deliverySection, advancedSection]}
+          onSubmit={handleSave}
+          onCancel={() => onOpenChange(false)}
+          submitting={saving}
+          dirty={dirty}
+          submitLabel={isNew ? t("create") : t("save")}
+        />
       </DialogContent>
     </Dialog>
   )

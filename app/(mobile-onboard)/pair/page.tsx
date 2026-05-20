@@ -1,13 +1,13 @@
 /**
- * /pair — Capacitor mobile onboarding (M3.4 stub).
+ * /pair — Capacitor mobile onboarding.
  *
- * The real QR-scan UX ships in M4.5 (issue #49). This stub exists to
- * exercise the full pair-flow end-to-end: HTTP POST to
- * /api/v1/auth/pair → device JWT in SecureStorage → smoke RPC + WS event.
+ * Drives the full pair flow: LAN scan / QR / 6-digit numeric code →
+ * `POST /api/v1/auth/pair` (or `/redeem-code`) → device JWT in
+ * SecureStorage → smoke RPC + WS event. The actual stepper UX +
+ * client-side state machine lives in `PairOnboardingClient`.
  *
  * Server component entry — keeps page.tsx free of `"use client"` so the
- * static export build (`output: "export"`) can render a shell. Actual
- * pair logic lives in the client component.
+ * static export build (`output: "export"`) can render a shell.
  */
 
 import { PairOnboardingClient } from "@/components/mobile/pair-onboarding-client"

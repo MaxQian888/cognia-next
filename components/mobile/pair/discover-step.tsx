@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
-import { scanLan, type DiscoveredServer } from "@/lib/connectivity/lan-scanner"
+import { rankSource, scanLan, type DiscoveredServer } from "@/lib/connectivity/lan-scanner"
 
 import { ScanRadar } from "./scan-radar"
 import { ServerCard } from "./server-card"
@@ -60,7 +60,7 @@ export function DiscoverStep({ history, onSelect, onSkip, scan = scanLan }: Disc
           const idx = prev.findIndex((s) => s.id === svc.id)
           if (idx < 0) return [...prev, svc]
           const existing = prev[idx]
-          if (rank(existing.source) >= rank(svc.source)) return prev
+          if (rankSource(existing.source) >= rankSource(svc.source)) return prev
           const next = [...prev]
           next[idx] = svc
           return next
@@ -193,19 +193,15 @@ export function DiscoverStep({ history, onSelect, onSkip, scan = scanLan }: Disc
   )
 }
 
-function rank(source: DiscoveredServer["source"]): number {
-  if (source === "mdns") return 3
-  if (source === "probe") return 2
-  return 1
-}
-
 /**
- * Sort by source priority (mDNS first, probe second, history last) then
- * by latency ascending so the closest server lands at the top.
+ * Sort by source priority (paired first, then mDNS, probe, history) then
+ * by latency ascending so the closest server lands at the top. Uses the
+ * canonical [`rankSource`] from `lan-scanner` so a new source tier
+ * (e.g. "paired") never silently drops to rank 1 here.
  */
 function sortServers(items: DiscoveredServer[]): DiscoveredServer[] {
   return [...items].sort((a, b) => {
-    const r = rank(b.source) - rank(a.source)
+    const r = rankSource(b.source) - rankSource(a.source)
     if (r !== 0) return r
     const al = a.latencyMs ?? Number.POSITIVE_INFINITY
     const bl = b.latencyMs ?? Number.POSITIVE_INFINITY

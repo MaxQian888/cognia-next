@@ -199,6 +199,100 @@ assistantReplyToSegments → enqueueOutbound` pipeline. PII gating runs before
 - Computer Use is blacklisted for IM sessions by default; opt-in lives on
   `ConversationOverrideRow.allowComputerUse`.
 
+### v39 (2026-05-20) — `im-gleaming-quail` completeness pass
+
+End-to-end audit of the IM connector surface produced fifteen concrete
+improvements. All shipped behind the same plan file under
+`~/.claude/plans/im-gleaming-quail.md`.
+
+**Bug fixes (link-chain):**
+
+- **Telegram `webhookSecret` persistence** — `credentialsRef.accounts` now
+  declares both `botToken` and `webhookSecret`; existing rows auto-migrate
+  on edit so the secret survives restart and reaches the Tauri verifier.
+  (`components/settings/connections/forms/telegram-config.tsx`)
+- **Lark TAT 401 auto-refresh** — new `lib/connectors/adapters/lark/auth-retry.ts`
+  exports `LarkApiError`, `isLarkTatInvalidation`, and `withTatRefresh`.
+  Wrapping `doRequest`, `send`, and `edit` (for the upload pre-pass) means
+  the adapter recovers from server-side TAT revocation in one retry
+  instead of waiting up to two hours for the natural TTL.
+- **Callback bindings TTL** — `recordCallbackBinding` now defaults
+  `expiresAt = createdAt + 30 d`. New `lib/connectors/callback-binding-cleanup.ts`
+  runs daily on `ConnectorBusProvider` start; it reaps explicit expiries
+  - pre-default-TTL rows past a 60-day grace window. No schema bump
+    required — the `expiresAt` column already existed.
+
+**Diagnostic / observability:**
+
+- **Heartbeat carries runtime snapshot** — `CircuitBreaker.snapshot()` and
+  `TokenBucket.snapshot()` are new pure-read accessors;
+  `outbound-runner.ts` publishes its per-adapter state map through a new
+  module-level `getAdapterRuntimeStateSnapshot(adapterId)`. The heartbeat
+  audit row's `fields` block now carries `breakerState`, `breakerOpenedAt`,
+  `breakerFailureRate`, `breakerEventCount`, `rateAvailable`,
+  `rateCapacity`, `rateRefillPerSec`, `rateNextRefillAt`.
+- **Outbound row badges** — new `lib/connectors/derive-job-badge.ts` pure
+  helper. `outbound-tab.tsx` live-queries `outboundQueue` +
+  `adapterInstances` + the latest heartbeats so each pending row carries a
+  derived overlay: `paused-muted`, `paused-quiet-hours` (with ETA),
+  `circuit-blocked`. Uses the same `isInQuietHours` / `msUntilQuietEnd`
+  helpers the runner uses, so the UI and runtime always agree.
+- **Audit conversation-key filter + export** — `audit-tab.tsx` gains a
+  substring filter on `conversationKey` and an Export menu (CSV / JSON)
+  backed by the new pure `lib/connectors/audit-export.ts`. Files are
+  named `cognia-audit-<scope>-<YYYYMMDDHHmm>.{csv,json}` and stream via
+  the standard `URL.createObjectURL` + anchor pattern.
+- **Health detail panel runtime card** — surfaces the breaker pill (closed /
+  half-open / open with opened-at timestamp) and a rate-bucket gauge with
+  next-refill ETA. The `useAdapterHealth` hook now exposes `breaker` and
+  `rateBucket` typed snapshots derived from the latest heartbeat row.
+- **Inbox header adapter-degradation badge + Reconnect** — amber/red
+  badge when the adapter state is `degraded` / `down` / `unknown`. Click
+  opens a popover with a Reconnect button that drives the existing
+  `requeueAdapter` lifecycle hook. Reuses `useAdapterHealth`, so no new
+  live-query plumbing.
+
+**Verify + UX completion:**
+
+- **Send test message** — new `SendTestMessageSection` mounted in the
+  Adapters → Config detail tab, driving a real `getBus().sendOutbound`
+  through the bus's full pipeline (any platform). Pairs with the existing
+  `AdapterWhoamiPanel` (probe leg) so each platform has both
+  "credentials valid?" and "end-to-end works?" affordances.
+- **Quiet hours custom timezone + responsive grid** — the 12-zone
+  dropdown now offers a `Custom…` option that switches to a freeform
+  IANA input with `Intl.DateTimeFormat` validation. Grid layout drops to
+  one column on narrow screens (`grid-cols-1 sm:grid-cols-3`).
+- **ConversationsTab CU badge** — surfaces
+  `ConversationOverrideRow.allowComputerUse === true` as a small badge so
+  operators can spot computer-use-enabled channels at a glance.
+- **Discord `publicKey` Phase-2 cleanup** — field is now labelled
+  `[Phase 2]` with an inline advisory; Phase 1 no longer writes the
+  value to keyring (avoiding the ghost-credential foot-gun) since Gateway
+  transport doesn't consume it.
+
+**Advanced:**
+
+- **Outbound deadlettered bulk-retry** — when the filter is set to
+  `deadlettered` with one or more rows visible, a "Retry all" button
+  appears in the chip strip. Reuses the existing single-job retry
+  semantics inside a Dexie `bulkPut`.
+- **Inbound at-gate stats** — new pure summariser
+  `lib/connectors/at-gate-stats.ts:summariseAtGateBlocks` rolls up the
+  existing `inbound.policy_blocked` audit rows (no new instrumentation
+  required). Health detail surfaces "Inbound filter (24h): N dropped,
+  reasons: …". Folds long tails into an `other` bucket via the `topN`
+  option.
+
+**Follow-ups not in this branch:**
+
+- The OneBot reverse-WS probe today fires through the existing
+  `handleVerify` flow in `onebot-config.tsx`, which listens for
+  `connectors://onebot/<adapterId>/open` Tauri events with a 10 s
+  timeout. A dedicated `connectors_onebot_probe` Tauri command that
+  surfaces the live `ws_server.connected_clients()` table is a clear
+  next step — listed in the plan as Task 3.2's Rust leg.
+
 ---
 
 ## References

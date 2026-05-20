@@ -66,4 +66,31 @@ export function assertDraftBodyClean(payload: TwinDraftPayload): void {
   }
 }
 
+/**
+ * Generic variant for non-draft payloads (Persona browser edits, manual
+ * entity / playbook / style sample additions). Scans every string field
+ * supplied; throws `DraftPiiError` whose `violations[].field` reuses the
+ * caller-supplied keys so the UI surface can localize them.
+ *
+ * Re-uses the same `hasNoLeakingPii` gate as `assertDraftBodyClean` so
+ * the persona-edit red-line behaves identically to the draft-edit one
+ * (single source of truth for what counts as PII).
+ */
+export function assertFieldsClean(fields: Record<string, string | undefined | null>): void {
+  const violations: DraftPiiViolation[] = []
+  for (const [key, value] of Object.entries(fields)) {
+    if (typeof value !== "string" || value.length === 0) continue
+    if (hasNoLeakingPii(value)) continue
+    violations.push({
+      // `field` is typed as the draft SCANNED_FIELDS tuple for back-compat;
+      // the assertion is safe at runtime — UIs read .field as a free string.
+      field: key as DraftPiiViolation["field"],
+      message: `${key} appears to contain unredacted personal information.`,
+    })
+  }
+  if (violations.length > 0) {
+    throw new DraftPiiError(violations)
+  }
+}
+
 export const __TESTING__ = { SCANNED_FIELDS }

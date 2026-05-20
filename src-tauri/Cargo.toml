@@ -101,6 +101,7 @@ toml_edit = { version = "0.22", features = ["serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2", "multipart"] }
 tokio-socks = "0.5"
 tokio-rustls = "0.26"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 futures-util = { version = "0.3", default-features = false }
 bytes = "1"
 

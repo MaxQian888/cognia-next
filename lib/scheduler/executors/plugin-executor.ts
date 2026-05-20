@@ -31,7 +31,8 @@ const activeExecutions = new Map<string, AbortController>()
 
 export async function executePluginTask(
   task: ScheduledTask,
-  execution: TaskExecution
+  execution: TaskExecution,
+  signal: AbortSignal
 ): Promise<{ success: boolean; output?: Record<string, unknown>; error?: string }> {
   const payload = task.payload as unknown as PluginTaskPayload | undefined
   if (!payload?.pluginId || !payload.handler) {
@@ -55,6 +56,16 @@ export async function executePluginTask(
   // Wire cancellation through `cancelPluginTaskExecution(executionId)`.
   const controller = new AbortController()
   activeExecutions.set(execution.id, controller)
+
+  let forwardAbort: (() => void) | undefined
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort()
+    } else {
+      forwardAbort = () => controller.abort()
+      signal.addEventListener("abort", forwardAbort, { once: true })
+    }
+  }
 
   try {
     const startedAt = new Date()
@@ -98,6 +109,9 @@ export async function executePluginTask(
     })
     return { success: false, error: message }
   } finally {
+    if (forwardAbort && signal) {
+      signal.removeEventListener("abort", forwardAbort)
+    }
     activeExecutions.delete(execution.id)
   }
 }

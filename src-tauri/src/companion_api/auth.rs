@@ -28,6 +28,7 @@ use uuid::Uuid;
 use super::{
     jwt::{issue_device_jwt, issue_pair_jwt, verify, JwtError},
     middleware::DeviceContext,
+    pair_code_lru::{PairCodeEntry, TakeOutcome},
     SharedState,
 };
 
@@ -36,12 +37,42 @@ use super::{
 // ---------------------------------------------------------------------------
 
 /// Response body for `POST /api/v1/auth/pair/issue`.
+///
+/// Carries both the QR payload (`pair_jwt`) and an emulator-friendly
+/// numeric path (`pair_code`). Both expire at the same instant — the
+/// underlying JWT's `exp` claim — so the desktop UI can render a single
+/// countdown next to both surfaces. Mobile clients pick whichever they
+/// can present: phones with a working camera scan the QR; emulators
+/// type the digits.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IssueResponse {
     pub pair_jwt: String,
     /// Millisecond epoch when the pair JWT expires.
     pub expires_at_ms: i64,
+    /// 6-digit numeric code that resolves server-side to the same
+    /// `pair_jwt`. Single-use; consumed by
+    /// `POST /api/v1/auth/pair/redeem-code`.
+    pub pair_code: String,
+    /// Millisecond epoch when the numeric code stops being redeemable.
+    /// Set equal to `expires_at_ms` so the desktop UI can render one
+    /// countdown — the server enforces the underlying pair-JWT TTL
+    /// regardless of which surface the mobile picks.
+    pub pair_code_expires_at_ms: i64,
+}
+
+/// Request body for `POST /api/v1/auth/pair/redeem-code` — the
+/// emulator-friendly variant of `/auth/pair` that takes a 6-digit
+/// numeric code instead of an opaque JWT. All device fields mirror
+/// [`PairRequest`] so the downstream redeem path is identical.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RedeemCodeRequest {
+    pub code: String,
+    pub device_label: String,
+    pub device_platform: String,
+    pub device_pubkey: String,
+    pub app_version: String,
 }
 
 /// Request body for `POST /api/v1/auth/pair`.
@@ -81,26 +112,62 @@ pub struct PairResponse {
 ///
 /// Issues a fresh pair JWT.  The desktop QR generator calls this; the token is
 /// encoded into the QR code image.  Empty request body.
+///
+/// Also mints a 6-digit numeric code that resolves to the same pair JWT
+/// server-side. The desktop UI renders both surfaces with a shared
+/// countdown.
 pub async fn issue_handler(State(state): State<SharedState>) -> Response {
     let secret = state.secret.read().clone();
-    match issue_pair_jwt(&secret) {
-        Ok((pair_jwt, exp_secs)) => {
-            let expires_at_ms = exp_secs * 1000;
-            (
-                StatusCode::OK,
-                Json(IssueResponse {
-                    pair_jwt,
-                    expires_at_ms,
-                }),
-            )
-                .into_response()
+    let (pair_jwt, exp_secs) = match issue_pair_jwt(&secret) {
+        Ok(t) => t,
+        Err(e) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "jwt_issue_failed",
+                &e.to_string(),
+            );
         }
-        Err(e) => error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "jwt_issue_failed",
-            &e.to_string(),
-        ),
-    }
+    };
+    let expires_at_ms = exp_secs * 1000;
+
+    let pair_code = generate_pair_code();
+    state.pair_code_lru.insert(
+        pair_code.clone(),
+        PairCodeEntry {
+            pair_jwt: pair_jwt.clone(),
+            expires_at_ms,
+        },
+        now_ms(),
+    );
+
+    (
+        StatusCode::OK,
+        Json(IssueResponse {
+            pair_jwt,
+            expires_at_ms,
+            pair_code,
+            pair_code_expires_at_ms: expires_at_ms,
+        }),
+    )
+        .into_response()
+}
+
+/// Generate a 6-digit numeric code in `100000..=999999` (no leading zero
+/// to keep visual parity with the desktop renderer that uses a 6-cell
+/// monospace block — leading zeros would be ambiguous when read aloud).
+pub(crate) fn generate_pair_code() -> String {
+    use rand::Rng as _;
+    // `gen_range` is inclusive on the low bound and exclusive on the high
+    // by default; pin both to span the full 6-digit space exactly once.
+    let n = rand::thread_rng().gen_range(100_000u32..=999_999u32);
+    format!("{n:06}")
+}
+
+pub(crate) fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// `POST /api/v1/auth/pair`
@@ -123,7 +190,92 @@ pub async fn pair_handler(
         }
     };
 
-    if req.device_label.chars().count() > 64 {
+    redeem_with_pair_jwt(
+        &state,
+        &req.pair_jwt,
+        &req.device_label,
+        &req.device_platform,
+        &req.device_pubkey,
+        &req.app_version,
+    )
+}
+
+/// `POST /api/v1/auth/pair/redeem-code`
+///
+/// Numeric companion to `/auth/pair`. The mobile client posts a 6-digit
+/// code instead of an opaque JWT; the server looks the code up in
+/// [`PairCodeLru`], converts it to its underlying pair JWT, and then
+/// drives the same redeem path. Single-use: a successful `take` removes
+/// the entry whether or not the downstream redeem succeeds (matches the
+/// "observe-once" semantics of the JTI redemption LRU).
+pub async fn redeem_code_handler(
+    State(state): State<SharedState>,
+    result: Result<Json<RedeemCodeRequest>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let Json(req) = match result {
+        Ok(j) => j,
+        Err(e) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "malformed_request",
+                &e.to_string(),
+            );
+        }
+    };
+
+    // Format gate before we hit the LRU — saves a lock acquisition on
+    // obvious typos. Six ASCII digits, nothing else.
+    if req.code.len() != 6 || !req.code.chars().all(|c| c.is_ascii_digit()) {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "invalid_pair_code",
+            "pair code must be exactly 6 digits",
+        );
+    }
+
+    let entry = match state.pair_code_lru.take(&req.code, now_ms()) {
+        TakeOutcome::Hit(e) => e,
+        TakeOutcome::NotFound => {
+            return error_response(
+                StatusCode::NOT_FOUND,
+                "pair_code_not_found",
+                "pair code is unknown or already used",
+            );
+        }
+        TakeOutcome::Expired => {
+            return error_response(
+                StatusCode::GONE,
+                "pair_code_expired",
+                "pair code has expired; request a new one from the desktop",
+            );
+        }
+    };
+
+    redeem_with_pair_jwt(
+        &state,
+        &entry.pair_jwt,
+        &req.device_label,
+        &req.device_platform,
+        &req.device_pubkey,
+        &req.app_version,
+    )
+}
+
+/// Shared redeem core for both `/auth/pair` and `/auth/pair/redeem-code`.
+///
+/// Validates the pair JWT, marks its JTI redeemed, mints the device JWT
+/// + rendezvous tuple, emits the Tauri pairing event, and returns the
+/// final `PairResponse`. Both entry points pass identical device-info
+/// fields through; only the *transport* of the pair JWT differs.
+fn redeem_with_pair_jwt(
+    state: &SharedState,
+    pair_jwt: &str,
+    device_label: &str,
+    device_platform: &str,
+    device_pubkey: &str,
+    app_version: &str,
+) -> Response {
+    if device_label.chars().count() > 64 {
         return error_response(
             StatusCode::BAD_REQUEST,
             "device_label_too_long",
@@ -133,7 +285,7 @@ pub async fn pair_handler(
 
     let secret = state.secret.read().clone();
 
-    let claims = match verify(&secret, &req.pair_jwt, "pair") {
+    let claims = match verify(&secret, pair_jwt, "pair") {
         Ok(c) => c,
         Err(JwtError::WrongScope { .. }) | Err(JwtError::Invalid(_)) => {
             return error_response(
@@ -189,21 +341,17 @@ pub async fn pair_handler(
         URL_SAFE_NO_PAD.encode(bytes)
     };
 
-    // Emit the Tauri event so the TS layer persists the device to Dexie.
-    let paired_at_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system clock before epoch")
-        .as_millis() as i64;
+    let paired_at_ms = now_ms();
 
     if let Some(app) = &state.app_handle {
         use tauri::Emitter as _;
         let payload = json!({
             "device_id": device_id,
-            "label": req.device_label,
-            "platform": req.device_platform,
-            "pubkey": req.device_pubkey,
+            "label": device_label,
+            "platform": device_platform,
+            "pubkey": device_pubkey,
             "paired_at_ms": paired_at_ms,
-            "app_version": req.app_version,
+            "app_version": app_version,
             "rendezvous_id": rendezvous_id,
             "rendezvous_secret": rendezvous_secret,
         });
@@ -296,6 +444,7 @@ mod tests {
         Arc::new(crate::companion_api::CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
+            pair_code_lru: std::sync::Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
@@ -318,6 +467,10 @@ mod tests {
         Router::new()
             .route("/api/v1/auth/pair/issue", axum::routing::post(issue_handler))
             .route("/api/v1/auth/pair", axum::routing::post(pair_handler))
+            .route(
+                "/api/v1/auth/pair/redeem-code",
+                axum::routing::post(redeem_code_handler),
+            )
             .with_state(state)
     }
 
@@ -343,6 +496,240 @@ mod tests {
         let body = body_json(resp).await;
         assert!(body["pairJwt"].is_string());
         assert!(body["expiresAtMs"].is_number());
+        // 6-digit numeric code minted alongside the QR payload.
+        let code = body["pairCode"].as_str().expect("pairCode string");
+        assert_eq!(code.len(), 6, "pair code is 6 chars");
+        assert!(
+            code.chars().all(|c| c.is_ascii_digit()),
+            "pair code is all digits: {code}"
+        );
+        // No leading zero — generator pinned to 100000..=999999.
+        assert_ne!(&code[0..1], "0", "pair code has no leading zero");
+        let pce = body["pairCodeExpiresAtMs"]
+            .as_i64()
+            .expect("pairCodeExpiresAtMs i64");
+        let pe = body["expiresAtMs"].as_i64().expect("expiresAtMs i64");
+        assert_eq!(pce, pe, "code expiry mirrors JWT expiry");
+    }
+
+    #[tokio::test]
+    async fn issue_persists_code_into_lru() {
+        // The mint path is responsible for writing into pair_code_lru —
+        // verify by checking len changes from 0 to 1 around a single
+        // issue call, then test redeem-code happy path in a separate
+        // case so failures in either are not coupled.
+        let state = test_state();
+        assert_eq!(state.pair_code_lru.len(), 0);
+        let router = build_router(Arc::clone(&state));
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/pair/issue")
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
+        assert_eq!(state.pair_code_lru.len(), 1);
+    }
+
+    // ── /api/v1/auth/pair/redeem-code ────────────────────────────────────
+
+    #[tokio::test]
+    async fn redeem_code_happy_path_returns_device_jwt() {
+        let state = test_state();
+        let router = build_router(Arc::clone(&state));
+
+        // Issue first so a code exists in the LRU.
+        let issue_resp = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/pair/issue")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let issue_body = body_json(issue_resp).await;
+        let code = issue_body["pairCode"].as_str().unwrap().to_string();
+
+        let req_body = serde_json::json!({
+            "code": code,
+            "deviceLabel": "Pixel 7 Emulator",
+            "devicePlatform": "android",
+            "devicePubkey": "abc",
+            "appVersion": "0.1.0",
+        });
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/pair/redeem-code")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
+        let body = body_json(resp).await;
+        assert!(body["deviceJwt"].is_string());
+        assert!(body["deviceId"].is_string());
+        assert!(body["rendezvousId"].is_string());
+        assert!(body["rendezvousSecret"].is_string());
+    }
+
+    #[tokio::test]
+    async fn redeem_code_is_single_use() {
+        let state = test_state();
+        let router = build_router(Arc::clone(&state));
+
+        let issue_resp = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/pair/issue")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let code = body_json(issue_resp).await["pairCode"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let make_req = || {
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/pair/redeem-code")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "code": code,
+                        "deviceLabel": "Pixel 7",
+                        "devicePlatform": "android",
+                        "devicePubkey": "",
+                        "appVersion": "0.1.0",
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap()
+        };
+
+        let resp1 = router.clone().oneshot(make_req()).await.unwrap();
+        assert_eq!(resp1.status().as_u16(), 200);
+        let resp2 = router.oneshot(make_req()).await.unwrap();
+        // Second redeem hits the LRU empty — not-found, never expired.
+        assert_eq!(resp2.status().as_u16(), 404);
+        assert_eq!(body_json(resp2).await["code"], "pair_code_not_found");
+    }
+
+    #[tokio::test]
+    async fn redeem_unknown_code_returns_404() {
+        let router = build_router(test_state());
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/pair/redeem-code")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({
+                    "code": "654321",
+                    "deviceLabel": "Pixel 7",
+                    "devicePlatform": "android",
+                    "devicePubkey": "",
+                    "appVersion": "0.1.0",
+                }))
+                .unwrap(),
+            ))
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(resp.status().as_u16(), 404);
+        assert_eq!(body_json(resp).await["code"], "pair_code_not_found");
+    }
+
+    #[tokio::test]
+    async fn redeem_expired_code_returns_410() {
+        // Insert manually with a past expiry to bypass the issue path.
+        let state = test_state();
+        state.pair_code_lru.insert(
+            "111111".into(),
+            PairCodeEntry {
+                pair_jwt: "irrelevant.jwt".into(),
+                expires_at_ms: 1,
+            },
+            0,
+        );
+
+        let router = build_router(state);
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/pair/redeem-code")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({
+                    "code": "111111",
+                    "deviceLabel": "Pixel 7",
+                    "devicePlatform": "android",
+                    "devicePubkey": "",
+                    "appVersion": "0.1.0",
+                }))
+                .unwrap(),
+            ))
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+        // Either Expired (410) or NotFound (404) is acceptable — the LRU
+        // prunes expired entries eagerly. The contract that matters: the
+        // server refuses, the code is gone, and the client can request a
+        // fresh one.
+        let status = resp.status().as_u16();
+        assert!(
+            status == 404 || status == 410,
+            "expected 404 or 410, got {status}"
+        );
+        let body = body_json(resp).await;
+        let code = body["code"].as_str().unwrap();
+        assert!(
+            code == "pair_code_not_found" || code == "pair_code_expired",
+            "unexpected error code: {code}"
+        );
+    }
+
+    #[tokio::test]
+    async fn redeem_malformed_code_returns_400() {
+        let router = build_router(test_state());
+        let cases = ["12345", "1234567", "12345a", "abcdef", ""];
+        for bad in cases {
+            let req = Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/pair/redeem-code")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "code": bad,
+                        "deviceLabel": "Pixel 7",
+                        "devicePlatform": "android",
+                        "devicePubkey": "",
+                        "appVersion": "0.1.0",
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap();
+            let resp = router.clone().oneshot(req).await.unwrap();
+            assert_eq!(
+                resp.status().as_u16(),
+                400,
+                "code {bad:?} should be 400"
+            );
+            assert_eq!(body_json(resp).await["code"], "invalid_pair_code");
+        }
+    }
+
+    #[test]
+    fn generate_pair_code_is_six_ascii_digits_no_leading_zero() {
+        for _ in 0..200 {
+            let c = super::generate_pair_code();
+            assert_eq!(c.len(), 6);
+            assert!(c.chars().all(|ch| ch.is_ascii_digit()));
+            assert_ne!(&c[0..1], "0");
+        }
     }
 
     // ── /api/v1/auth/pair — happy path ───────────────────────────────────

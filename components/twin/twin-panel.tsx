@@ -36,11 +36,12 @@ import { listCharacters } from "@/lib/db/characters"
 import { TwinSourcesTab } from "./twin-sources-tab"
 import { TwinJobsTab } from "./twin-jobs-tab"
 import { TwinDraftsTab } from "./twin-drafts-tab"
+import { TwinPersonaTab } from "./twin-persona-tab"
 import { TwinSettingsTab } from "./twin-settings-tab"
 import { useTwinWorker } from "./use-twin-worker"
 
-type TabKey = "sources" | "jobs" | "drafts" | "settings"
-const VALID_TABS: TabKey[] = ["sources", "jobs", "drafts", "settings"]
+type TabKey = "sources" | "jobs" | "drafts" | "persona" | "settings"
+const VALID_TABS: TabKey[] = ["sources", "jobs", "drafts", "persona", "settings"]
 
 interface KnownTwin {
   twinId: string
@@ -179,6 +180,7 @@ function TwinPanelInner() {
             <TabsTrigger value="sources">{t("tabs.sources")}</TabsTrigger>
             <TabsTrigger value="jobs">{t("tabs.jobs")}</TabsTrigger>
             <TabsTrigger value="drafts">{t("tabs.drafts")}</TabsTrigger>
+            <TabsTrigger value="persona">{t("tabs.persona")}</TabsTrigger>
             <TabsTrigger value="settings">{t("tabs.settings")}</TabsTrigger>
           </TabsList>
         </div>
@@ -195,6 +197,11 @@ function TwinPanelInner() {
         <TabsContent value="drafts" className="mt-3 flex-1 overflow-auto">
           <AnimatedTabContent tabKey={tab} active="drafts">
             <TwinDraftsTab twinId={effectiveTwinId} />
+          </AnimatedTabContent>
+        </TabsContent>
+        <TabsContent value="persona" className="mt-3 flex-1 overflow-auto">
+          <AnimatedTabContent tabKey={tab} active="persona">
+            <TwinPersonaTab twinId={effectiveTwinId} />
           </AnimatedTabContent>
         </TabsContent>
         <TabsContent value="settings" className="mt-3 flex-1 overflow-auto">

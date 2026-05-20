@@ -16,12 +16,37 @@ export interface TokenBucketOptions {
   now?: () => number
 }
 
+/**
+ * Inspectable snapshot of the bucket — used by the heartbeat probe so the
+ * Health Detail panel can render available/capacity/refill metadata.
+ */
+export interface TokenBucketSnapshot {
+  /** Tokens currently available (fractional). */
+  available: number
+  /** Maximum tokens the bucket can hold. */
+  capacity: number
+  /** Refill rate, tokens per second. */
+  refillPerSec: number
+  /**
+   * Wall-clock ms at which the bucket will next have at least one whole
+   * token available. Equal to `now` when there is already ≥1 token; equal
+   * to `null` when `refillPerSec === 0` (no future refill scheduled).
+   */
+  nextRefillAt: number | null
+}
+
 export interface TokenBucket {
   /**
    * Attempt to acquire `n` tokens (default 1).
    * Returns true and deducts n tokens if available; false otherwise.
    */
   tryAcquire(n?: number): boolean
+  /**
+   * Inspectable snapshot of the bucket. Pure read — does NOT consume any
+   * tokens. Internally refills the bucket so the snapshot reflects the
+   * live state at call time.
+   */
+  snapshot(): TokenBucketSnapshot
 }
 
 export function createTokenBucket(opts: TokenBucketOptions): TokenBucket {
@@ -47,6 +72,22 @@ export function createTokenBucket(opts: TokenBucketOptions): TokenBucket {
         return true
       }
       return false
+    },
+
+    snapshot(): TokenBucketSnapshot {
+      const now = clock()
+      refill(now)
+      let nextRefillAt: number | null
+      if (refillPerSec <= 0) {
+        nextRefillAt = null
+      } else if (tokens >= 1) {
+        nextRefillAt = now
+      } else {
+        const tokensNeeded = 1 - tokens
+        const msUntilOne = (tokensNeeded / refillPerSec) * 1000
+        nextRefillAt = now + msUntilOne
+      }
+      return { available: tokens, capacity, refillPerSec, nextRefillAt }
     },
   }
 }

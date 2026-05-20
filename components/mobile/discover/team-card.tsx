@@ -15,7 +15,7 @@ export interface TeamCardProps {
 }
 
 export function TeamCard({ team, className }: TeamCardProps) {
-  const t = useTranslations("mobile.discover")
+  const t = useTranslations("discover")
   const memberCount = team.members?.length ?? 0
   return (
     <Link

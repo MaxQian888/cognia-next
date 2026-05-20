@@ -35,8 +35,7 @@ import {
 } from "@/components/ui/table"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { generateToken } from "@/lib/external-bridge/token"
-import { listMcpAuditLog } from "@/lib/db/mcp-audit-log"
-import { getDb } from "@/lib/db/schema"
+import { listMcpAuditLog, clearMcpAuditLog } from "@/lib/db/mcp-audit-log"
 import {
   getMcpServerStatus,
   startMcpServer,
@@ -50,6 +49,23 @@ import {
   type BridgeScope,
   type ExternalBridgeSettings,
 } from "@/types/wiki"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { WikiRebuildCard } from "./wiki-rebuild-card"
 
 /** Phase 1 disables user-repo scopes (M3 in plan). */
@@ -76,57 +92,29 @@ async function resolveSidecarPath(): Promise<string> {
 
 /** Tiny status indicator used in the ServerStatusCard header. */
 function ServerStatusBadge({ status, desktop }: { status: McpServerStatus; desktop: boolean }) {
+  const t = useTranslations("settings.externalBridge")
   if (!desktop) {
-    return (
-      <span className="text-[10px] uppercase text-muted-foreground" title="Desktop-only">
-        web
-      </span>
-    )
+    return <span className="text-[10px] uppercase text-muted-foreground">{t("badgeWeb")}</span>
   }
   return status.running ? (
     <span className="flex items-center gap-1 text-[10px] uppercase text-emerald-500">
       <CircleIcon className="h-2 w-2 fill-current" />
-      live
+      {t("badgeLive")}
     </span>
   ) : (
     <span className="flex items-center gap-1 text-[10px] uppercase text-muted-foreground">
       <CircleIcon className="h-2 w-2 fill-current" />
-      idle
+      {t("badgeIdle")}
     </span>
   )
 }
 
-/**
- * Resolve a scope description with i18n preference. Scopes that have an
- * `automation` / `Computer Use` connection are surfaced via the i18n key
- * `settings.externalBridge.scopeDescriptions.<scope>`; the rest fall back
- * to the hard-coded English baseline below.
- */
 function getScopeDescription(scope: BridgeScope, t: (key: string) => string): string {
-  if (scope === "mcp:computer-use") {
-    return t(`scopeDescriptions.${scope}`)
-  }
-  return SCOPE_DESCRIPTIONS[scope]
-}
-
-const SCOPE_DESCRIPTIONS: Record<BridgeScope, string> = {
-  "wiki:cognia": "Public Cognia code wiki — safe to expose.",
-  "wiki:user-repo": "Wiki for user-supplied repos. Phase 3 — disabled in Phase 1.",
-  "rag:cognia": "Code-level retrieval over Cognia source.",
-  "rag:user-repo": "Retrieval over user-supplied repos. Phase 3 — disabled.",
-  "rag:twin":
-    "⚠ Retrieval over your digital twin's chunks (personal documents / chat / code). Default OFF.",
-  "runtime:skills": "⚠ Exposes your installed skills' content.",
-  "runtime:characters": "⚠ Exposes character configs (may contain personal prompts).",
-  "runtime:twins": "⚠ Exposes Twin profiles. PII redaction has run, but review before enabling.",
-  "runtime:plugins": "Exposes the list and metadata of installed plugins.",
-  "runtime:agent-teams": "Exposes agent-team definitions.",
-  "mcp:computer-use":
-    "⚠ Drives the host computer (mouse / keyboard / screenshot) from external coding agents. " +
-    "Honours Settings → Automation → Permissions; per-call tier surfaces the consent overlay.",
+  return t(`scopeDescriptions.${scope}`)
 }
 
 export function ExternalBridgeSection() {
+  const t = useTranslations("settings.externalBridge")
   const [settings, setSettings] = useState<ExternalBridgeSettings | undefined>(undefined)
   const [loading, setLoading] = useState(true)
 
@@ -152,7 +140,7 @@ export function ExternalBridgeSection() {
   const auditRows = useLiveQuery(async () => listMcpAuditLog({ limit: 50 }), [], [])
 
   if (loading || !settings) {
-    return <div className="p-4 text-sm text-muted-foreground">Loading…</div>
+    return <div className="p-4 text-sm text-muted-foreground">{t("loading")}</div>
   }
 
   return (
@@ -177,6 +165,7 @@ function ServerStatusCard({
   settings: ExternalBridgeSettings
   onChange: (next: ExternalBridgeSettings) => void
 }) {
+  const t = useTranslations("settings.externalBridge")
   const [showToken, setShowToken] = useState(false)
   const [busy, setBusy] = useState(false)
   const [serverStatus, setServerStatus] = useState<McpServerStatus>({
@@ -229,16 +218,16 @@ function ServerStatusCard({
             sidecarPath: await resolveSidecarPath(),
           })
           onChange({ ...next, httpPort: port })
-          toast.success(`MCP HTTP server listening on 127.0.0.1:${port}`)
+          toast.success(t("server.toastServerStarted", { port }))
         } else {
           await stopMcpServer()
-          toast.success("MCP server stopped.")
+          toast.success(t("server.toastServerStopped"))
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : String(err))
       }
     },
-    [settings, onChange, desktop]
+    [settings, onChange, desktop, t]
   )
 
   const onRotateToken = useCallback(async () => {
@@ -246,19 +235,19 @@ function ServerStatusCard({
     try {
       const next = await generateToken()
       await onChange({ ...settings, bearerToken: next, tokenRotatedAt: Date.now() })
-      toast.success("New token generated. Old token is now invalid.")
+      toast.success(t("server.toastTokenRegenerated"))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
     }
-  }, [settings, onChange])
+  }, [settings, onChange, t])
 
   const onCopyToken = useCallback(async () => {
     if (!settings.bearerToken) return
     await navigator.clipboard.writeText(settings.bearerToken)
-    toast.success("Token copied to clipboard.")
-  }, [settings.bearerToken])
+    toast.success(t("server.toastTokenCopied"))
+  }, [settings.bearerToken, t])
 
   return (
     <Card>
@@ -266,33 +255,33 @@ function ServerStatusCard({
         <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium">
           <span className="flex items-center gap-2">
             <KeyRoundIcon className="h-4 w-4" />
-            MCP server
+            {t("server.title")}
             <ServerStatusBadge status={serverStatus} desktop={desktop} />
           </span>
           <Switch
             checked={settings.enabled}
             onCheckedChange={onToggleEnabled}
-            aria-label="Enable MCP server"
+            aria-label={t("server.toggleAriaLabel")}
           />
         </CardTitle>
         <CardDescription className="text-xs">
           {settings.enabled
             ? serverStatus.running && serverStatus.port !== null
-              ? `HTTP transport listening on 127.0.0.1:${serverStatus.port}.`
-              : "Stdio transport active. Tauri HTTP server is offline — toggle off and on to restart."
-            : "Server is off. No external traffic accepted."}
+              ? t("server.statusHttpListening", { port: serverStatus.port })
+              : t("server.statusStdioActive")
+            : t("server.statusOff")}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <div className="flex items-center justify-between gap-3">
-          <Label className="text-muted-foreground">Bearer token (HTTP only)</Label>
+          <Label className="text-muted-foreground">{t("server.bearerTokenLabel")}</Label>
           <div className="flex items-center gap-2">
             <code className="rounded bg-muted px-2 py-0.5 font-mono text-xs">
               {settings.bearerToken
                 ? showToken
                   ? settings.bearerToken
                   : "•".repeat(16)
-                : "(none)"}
+                : t("server.tokenNone")}
             </code>
             <Button
               size="sm"
@@ -300,14 +289,14 @@ function ServerStatusCard({
               onClick={() => setShowToken((s) => !s)}
               disabled={!settings.bearerToken}
             >
-              {showToken ? "Hide" : "Show"}
+              {showToken ? t("server.hide") : t("server.show")}
             </Button>
             <Button
               size="sm"
               variant="outline"
               onClick={onCopyToken}
               disabled={!settings.bearerToken}
-              aria-label="Copy token"
+              aria-label={t("server.copyTokenAria")}
             >
               <CopyIcon className="h-3.5 w-3.5" />
             </Button>
@@ -316,16 +305,14 @@ function ServerStatusCard({
               variant="outline"
               onClick={onRotateToken}
               disabled={busy}
-              aria-label="Rotate token"
+              aria-label={t("server.rotateTokenAria")}
             >
               <RefreshCwIcon className="h-3.5 w-3.5" />
             </Button>
           </div>
         </div>
         {settings.bearerToken && (
-          <p className="text-xs text-muted-foreground">
-            ⚠ Regenerating invalidates the old token immediately.
-          </p>
+          <p className="text-xs text-muted-foreground">{t("server.regenerateWarning")}</p>
         )}
       </CardContent>
     </Card>
@@ -360,10 +347,8 @@ function ScopeTogglesCard({
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium">Permission scopes</CardTitle>
-        <CardDescription className="text-xs">
-          Each scope is opt-in. Default install ships with only the public-code wiki scopes enabled.
-        </CardDescription>
+        <CardTitle className="text-sm font-medium">{tScope("scopes.title")}</CardTitle>
+        <CardDescription className="text-xs">{tScope("scopes.description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
         {ALL_BRIDGE_SCOPES.map((scope) => {
@@ -384,7 +369,7 @@ function ScopeTogglesCard({
                 checked={checked}
                 disabled={disabled}
                 onCheckedChange={(v) => onToggleScope(scope, v)}
-                aria-label={`Toggle ${scope}`}
+                aria-label={tScope("scopes.toggleAria", { scope })}
               />
             </div>
           )
@@ -398,71 +383,115 @@ function ScopeTogglesCard({
 // Setup instructions
 // ─────────────────────────────────────────────────────────────────────────────
 
+type SetupVariant = "claude-desktop-stdio" | "claude-desktop-http" | "cursor" | "goose"
+
+const SETUP_VARIANTS: SetupVariant[] = [
+  "claude-desktop-stdio",
+  "claude-desktop-http",
+  "cursor",
+  "goose",
+]
+
 function SetupInstructionsCard({ settings }: { settings: ExternalBridgeSettings }) {
-  const [variant, setVariant] = useState<"stdio" | "http">("stdio")
+  const t = useTranslations("settings.externalBridge")
+  const [variant, setVariant] = useState<SetupVariant>("claude-desktop-stdio")
+
   const snippet = useMemo(() => {
-    if (variant === "stdio") {
-      return JSON.stringify(
-        {
-          mcpServers: {
-            cognia: { command: "node", args: ["/path/to/cognia-mcp.js"] },
-          },
-        },
-        null,
-        2
-      )
-    }
     const port = settings.httpPort ?? 3001
     const token = settings.bearerToken ?? "<paste-bearer-token>"
-    return JSON.stringify(
-      {
-        mcpServers: {
-          cognia: {
-            transport: "http",
-            url: `http://127.0.0.1:${port}/mcp`,
-            headers: { Authorization: `Bearer ${token}` },
+
+    switch (variant) {
+      case "claude-desktop-stdio":
+        return JSON.stringify(
+          {
+            mcpServers: {
+              cognia: { command: "node", args: ["/path/to/cognia-mcp.js"] },
+            },
           },
-        },
-      },
-      null,
-      2
-    )
+          null,
+          2
+        )
+      case "claude-desktop-http":
+        return JSON.stringify(
+          {
+            mcpServers: {
+              cognia: {
+                transport: "http",
+                url: `http://127.0.0.1:${port}/mcp`,
+                headers: { Authorization: `Bearer ${token}` },
+              },
+            },
+          },
+          null,
+          2
+        )
+      case "cursor":
+        // Cursor's mcp.json mirrors Claude Desktop's mcpServers but lives at
+        // ~/.cursor/mcp.json (or .cursor/mcp.json in-project). The shape is
+        // identical to Claude Desktop's HTTP form when targeting our bridge.
+        return JSON.stringify(
+          {
+            mcpServers: {
+              cognia: {
+                url: `http://127.0.0.1:${port}/mcp`,
+                headers: { Authorization: `Bearer ${token}` },
+              },
+            },
+          },
+          null,
+          2
+        )
+      case "goose":
+        // Goose uses YAML under ~/.config/goose/config.yaml. Single MCP entry
+        // tied to the HTTP transport so the operator doesn't have to install
+        // a sidecar wrapper script.
+        return [
+          "extensions:",
+          "  cognia:",
+          "    type: streamable_http",
+          `    uri: http://127.0.0.1:${port}/mcp`,
+          "    headers:",
+          `      Authorization: "Bearer ${token}"`,
+        ].join("\n")
+    }
   }, [variant, settings.httpPort, settings.bearerToken])
 
   const onCopy = useCallback(async () => {
     await navigator.clipboard.writeText(snippet)
-    toast.success("Snippet copied.")
-  }, [snippet])
+    toast.success(t("setup.toastCopied"))
+  }, [snippet, t])
 
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium">Setup snippet</CardTitle>
-        <CardDescription className="text-xs">
-          Paste into Claude Code / Cursor / Cline MCP config. Stdio is the most portable; HTTP
-          requires the Tauri sidecar.
-        </CardDescription>
+        <CardTitle className="text-sm font-medium">{t("setup.title")}</CardTitle>
+        <CardDescription className="text-xs">{t("setup.description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          <Select value={variant} onValueChange={(v) => setVariant(v as SetupVariant)}>
+            <SelectTrigger className="w-[260px]" aria-label={t("setup.clientLabel")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SETUP_VARIANTS.map((v) => (
+                <SelectItem key={v} value={v}>
+                  {t(`setup.variants.${v}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button
             size="sm"
-            variant={variant === "stdio" ? "default" : "outline"}
-            onClick={() => setVariant("stdio")}
+            variant="ghost"
+            onClick={onCopy}
+            className="ml-auto"
+            aria-label={t("setup.copyAria")}
           >
-            stdio
-          </Button>
-          <Button
-            size="sm"
-            variant={variant === "http" ? "default" : "outline"}
-            onClick={() => setVariant("http")}
-          >
-            HTTP
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onCopy} className="ml-auto">
-            <CopyIcon className="h-3.5 w-3.5" /> Copy
+            <CopyIcon className="h-3.5 w-3.5" /> {t("setup.copy")}
           </Button>
         </div>
+        <p className="text-xs text-muted-foreground">{t(`setup.variantHelp.${variant}`)}</p>
         <pre className="overflow-x-auto rounded bg-muted p-3 text-xs">
           <code>{snippet}</code>
         </pre>
@@ -476,37 +505,62 @@ function SetupInstructionsCard({ settings }: { settings: ExternalBridgeSettings 
 // ─────────────────────────────────────────────────────────────────────────────
 
 function AuditLogCard({ rows }: { rows: Awaited<ReturnType<typeof listMcpAuditLog>> }) {
+  const t = useTranslations("settings.externalBridge")
+  const [confirming, setConfirming] = useState(false)
   const onClear = useCallback(async () => {
-    await getDb().mcpAuditLog.clear()
-    toast.success("Audit log cleared.")
-  }, [])
+    setConfirming(false)
+    try {
+      await clearMcpAuditLog()
+      toast.success(t("audit.toastCleared"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }, [t])
 
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-3">
         <div>
-          <CardTitle className="text-sm font-medium">Recent MCP calls</CardTitle>
-          <CardDescription className="text-xs">
-            Newest 50 calls. Capped at 5000 total — older rows are pruned automatically.
-          </CardDescription>
+          <CardTitle className="text-sm font-medium">{t("audit.title")}</CardTitle>
+          <CardDescription className="text-xs">{t("audit.description")}</CardDescription>
         </div>
-        <Button size="sm" variant="ghost" onClick={onClear} disabled={rows.length === 0}>
-          Clear
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => setConfirming(true)}
+          disabled={rows.length === 0}
+          aria-label={t("audit.clearAria")}
+        >
+          {t("audit.clear")}
         </Button>
       </CardHeader>
+      <AlertDialog open={confirming} onOpenChange={setConfirming}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("audit.clearConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("audit.clearConfirmDesc", { count: rows.length })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("audit.clearCancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={onClear}>{t("audit.clearConfirm")}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <CardContent>
         {rows.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No calls yet.</p>
+          <p className="text-xs text-muted-foreground">{t("audit.empty")}</p>
         ) : (
           <div className="max-h-[300px] overflow-y-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[140px]">Time</TableHead>
-                  <TableHead>Tool</TableHead>
-                  <TableHead>Scope</TableHead>
-                  <TableHead className="w-[80px]">Status</TableHead>
-                  <TableHead className="w-[80px] text-right">Latency</TableHead>
+                  <TableHead className="w-[140px]">{t("audit.time")}</TableHead>
+                  <TableHead>{t("audit.tool")}</TableHead>
+                  <TableHead>{t("audit.scope")}</TableHead>
+                  <TableHead className="w-[80px]">{t("audit.status")}</TableHead>
+                  <TableHead className="w-[80px] text-right">{t("audit.latency")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -521,10 +575,10 @@ function AuditLogCard({ rows }: { rows: Awaited<ReturnType<typeof listMcpAuditLo
                     </TableCell>
                     <TableCell>
                       {row.allowed ? (
-                        <span className="text-emerald-500">OK</span>
+                        <span className="text-emerald-500">{t("audit.statusOk")}</span>
                       ) : (
                         <span className="text-amber-500" title={row.reason}>
-                          DENY
+                          {t("audit.statusDeny")}
                         </span>
                       )}
                     </TableCell>

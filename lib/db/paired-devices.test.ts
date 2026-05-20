@@ -4,6 +4,8 @@ import {
   addPairedDevice,
   getPairedDevice,
   listPairedDevices,
+  pausePairedDevice,
+  resumePairedDevice,
   revokePairedDevice,
   setPushToken,
   touchPairedDevice,
@@ -116,6 +118,101 @@ describe("revokePairedDevice", () => {
     const row = await getPairedDevice("dev-r2")
     expect(row?.revokedAt).toBeGreaterThanOrEqual(before)
     expect(row?.revokedAt).toBeLessThanOrEqual(after)
+  })
+})
+
+describe("pausePairedDevice", () => {
+  it("stamps pausedAt without setting revokedAt", async () => {
+    await addPairedDevice({
+      deviceId: "dev-p1",
+      label: "phone",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    const ok = await pausePairedDevice("dev-p1", 555)
+    expect(ok).toBe(true)
+    const row = await getPairedDevice("dev-p1")
+    expect(row?.pausedAt).toBe(555)
+    expect(row?.revokedAt).toBeUndefined()
+  })
+
+  it("returns false for an unknown deviceId", async () => {
+    expect(await pausePairedDevice("missing", 1)).toBe(false)
+  })
+
+  it("defaults nowMs to Date.now()", async () => {
+    await addPairedDevice({
+      deviceId: "dev-p2",
+      label: "x",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    const before = Date.now()
+    await pausePairedDevice("dev-p2")
+    const after = Date.now()
+    const row = await getPairedDevice("dev-p2")
+    expect(row?.pausedAt).toBeGreaterThanOrEqual(before)
+    expect(row?.pausedAt).toBeLessThanOrEqual(after)
+  })
+})
+
+describe("resumePairedDevice", () => {
+  it("clears pausedAt and returns true when the device was paused", async () => {
+    await addPairedDevice({
+      deviceId: "dev-r1",
+      label: "phone",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    await pausePairedDevice("dev-r1", 999)
+    expect((await getPairedDevice("dev-r1"))?.pausedAt).toBe(999)
+    const ok = await resumePairedDevice("dev-r1")
+    expect(ok).toBe(true)
+    const row = await getPairedDevice("dev-r1")
+    expect(row?.pausedAt).toBeUndefined()
+  })
+
+  it("returns false for an unknown deviceId", async () => {
+    expect(await resumePairedDevice("never-paused")).toBe(false)
+  })
+
+  it("is idempotent — resuming an already-active device does nothing harmful", async () => {
+    await addPairedDevice({
+      deviceId: "dev-r2",
+      label: "x",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    const ok = await resumePairedDevice("dev-r2")
+    expect(ok).toBe(true) // the row was matched even though there was nothing to clear
+    const row = await getPairedDevice("dev-r2")
+    expect(row?.pausedAt).toBeUndefined()
+    expect(row?.revokedAt).toBeUndefined()
+  })
+
+  it("leaves an existing revokedAt untouched", async () => {
+    await addPairedDevice({
+      deviceId: "dev-r3",
+      label: "x",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    await revokePairedDevice("dev-r3", 100)
+    await pausePairedDevice("dev-r3", 200)
+    await resumePairedDevice("dev-r3")
+    const row = await getPairedDevice("dev-r3")
+    expect(row?.revokedAt).toBe(100)
+    expect(row?.pausedAt).toBeUndefined()
   })
 })
 

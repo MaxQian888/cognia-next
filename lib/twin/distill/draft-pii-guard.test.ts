@@ -7,7 +7,11 @@
  * `<KIND_NNN>` placeholder tokens that the redactor emits.
  */
 
-import { assertDraftBodyClean, DraftPiiError } from "@/lib/twin/distill/draft-pii-guard"
+import {
+  assertDraftBodyClean,
+  assertFieldsClean,
+  DraftPiiError,
+} from "@/lib/twin/distill/draft-pii-guard"
 import type { TwinDraftPayload } from "@/types/twin"
 
 function characterPayload(overrides: Partial<Record<string, string>> = {}): TwinDraftPayload {
@@ -116,6 +120,43 @@ describe("assertDraftBodyClean", () => {
       assertDraftBodyClean({
         kind: "character",
         data: { name: "", description: "", systemPrompt: "" },
+      })
+    ).not.toThrow()
+  })
+})
+
+describe("assertFieldsClean (Persona browser red-line)", () => {
+  it("passes when every field is clean", () => {
+    expect(() =>
+      assertFieldsClean({
+        name: "Alice",
+        description: "trusted advisor on platform topics",
+        relation: "ex-colleague",
+      })
+    ).not.toThrow()
+  })
+
+  it("throws DraftPiiError listing the offending field", () => {
+    let thrown: DraftPiiError | null = null
+    try {
+      assertFieldsClean({
+        name: "Alice",
+        description: "email her at alice@example.com",
+      })
+    } catch (err) {
+      thrown = err as DraftPiiError
+    }
+    expect(thrown).toBeInstanceOf(DraftPiiError)
+    expect(thrown?.violations.map((v) => v.field)).toEqual(["description"])
+  })
+
+  it("ignores undefined / null / empty-string fields", () => {
+    expect(() =>
+      assertFieldsClean({
+        name: "Alice",
+        description: undefined,
+        relation: null,
+        notes: "",
       })
     ).not.toThrow()
   })

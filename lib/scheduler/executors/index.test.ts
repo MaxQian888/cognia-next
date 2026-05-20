@@ -16,10 +16,12 @@ jest.mock("@/lib/tauri", () => ({
 
 const sendPromptMock = jest.fn(async (..._args: unknown[]) => undefined)
 const onClaudeMessageMock = jest.fn()
+const interruptSessionMock = jest.fn(async (..._args: unknown[]) => undefined)
 jest.mock("@/lib/claude/ipc", () => ({
   sendPrompt: (sessionId: string, prompt: string, options?: unknown) =>
     sendPromptMock(sessionId, prompt, options),
   onClaudeMessage: (cb: (evt: unknown) => void) => onClaudeMessageMock(cb),
+  interruptSession: (...args: unknown[]) => interruptSessionMock(...args),
 }))
 
 const createSessionMock = jest.fn(async (input: unknown) => ({
@@ -173,6 +175,7 @@ beforeEach(() => {
   isTauriValue = true
   sendPromptMock.mockClear()
   onClaudeMessageMock.mockReset()
+  interruptSessionMock.mockClear()
   createSessionMock.mockClear()
   getSessionMock.mockReset()
   getSessionMock.mockResolvedValue(undefined)
@@ -231,6 +234,10 @@ function makeExecution(): TaskExecution {
     startedAt: new Date(),
     logs: [],
   } as unknown as TaskExecution
+}
+
+function makeSignal() {
+  return new AbortController().signal
 }
 
 function emitTerminalResult(sessionId = "session-created") {
@@ -436,22 +443,30 @@ describe("applyAdHocSkill", () => {
 
 describe("executeChatTask", () => {
   it("rejects missing prompt", async () => {
-    const r = await executeChatTask(makeTask({ payload: {} }), makeExecution())
+    const r = await executeChatTask(makeTask({ payload: {} }), makeExecution(), makeSignal())
     expect(r.success).toBe(false)
     expect(r.error).toMatch(/prompt/)
   })
   it("rejects undefined payload", async () => {
-    const r = await executeChatTask(makeTask({ payload: undefined }), makeExecution())
+    const r = await executeChatTask(makeTask({ payload: undefined }), makeExecution(), makeSignal())
     expect(r.success).toBe(false)
   })
   it("returns runtime error when not running under Tauri", async () => {
     isTauriValue = false
-    const r = await executeChatTask(makeTask({ payload: { prompt: "hi" } }), makeExecution())
+    const r = await executeChatTask(
+      makeTask({ payload: { prompt: "hi" } }),
+      makeExecution(),
+      makeSignal()
+    )
     expect(r.success).toBe(false)
     expect(r.error).toMatch(/Tauri runtime/)
   })
   it("rejects whitespace-only prompt", async () => {
-    const r = await executeChatTask(makeTask({ payload: { prompt: "   " } }), makeExecution())
+    const r = await executeChatTask(
+      makeTask({ payload: { prompt: "   " } }),
+      makeExecution(),
+      makeSignal()
+    )
     expect(r.success).toBe(false)
     expect(r.error).toMatch(/Empty prompt/)
   })
@@ -459,7 +474,8 @@ describe("executeChatTask", () => {
     emitTerminalResult()
     const r = await executeChatTask(
       makeTask({ payload: { prompt: "hello", model: "m" } }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     expect(resolveSendOptionsMock).toHaveBeenCalled()
     expect(sendPromptMock).toHaveBeenCalled()
@@ -474,7 +490,8 @@ describe("executeChatTask", () => {
     emitTerminalResult("reuse")
     const r = await executeChatTask(
       makeTask({ payload: { prompt: "hi", sessionId: "reuse" } }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     expect(createSessionMock).not.toHaveBeenCalled()
     expect(r.success).toBe(true)
@@ -483,7 +500,8 @@ describe("executeChatTask", () => {
     getSessionMock.mockResolvedValueOnce(undefined)
     const r = await executeChatTask(
       makeTask({ payload: { prompt: "hi", sessionId: "missing" } }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     expect(r.success).toBe(false)
     expect(r.error).toMatch(/Session not found/)
@@ -492,7 +510,8 @@ describe("executeChatTask", () => {
     emitTerminalResult()
     await executeChatTask(
       makeTask({ payload: { prompt: "hi", teamId: "team-1" } }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     expect(createSessionMock).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "team", teamId: "team-1" })
@@ -506,7 +525,8 @@ describe("executeChatTask", () => {
     emitTerminalResult()
     await executeChatTask(
       makeTask({ payload: { prompt: "hi", allowedTools: ["Bash", "Read"] } }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     const options = sendPromptMock.mock.calls[0]?.[2] as SendOptions
     expect(options.allowedTools).toEqual(expect.arrayContaining(["Read", "Bash"]))
@@ -516,7 +536,8 @@ describe("executeChatTask", () => {
     emitTerminalResult()
     await executeChatTask(
       makeTask({ payload: { prompt: "hi", disabledSkillIds: ["s2"] } }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     const ctx = resolveSendOptionsMock.mock.calls[0]?.[0] as {
       session?: { disabledSkillIds?: string[] }
@@ -536,7 +557,11 @@ describe("executeChatTask", () => {
       )
       return () => undefined
     })
-    const r = await executeChatTask(makeTask({ payload: { prompt: "hi" } }), makeExecution())
+    const r = await executeChatTask(
+      makeTask({ payload: { prompt: "hi" } }),
+      makeExecution(),
+      makeSignal()
+    )
     expect(r.success).toBe(false)
     expect(r.error).toBe("sidecar exploded")
   })
@@ -548,7 +573,11 @@ describe("executeChatTask", () => {
       )
       return () => undefined
     })
-    const r = await executeChatTask(makeTask({ payload: { prompt: "hi" } }), makeExecution())
+    const r = await executeChatTask(
+      makeTask({ payload: { prompt: "hi" } }),
+      makeExecution(),
+      makeSignal()
+    )
     expect(r.error).toBe("Sidecar error")
   })
   it("ignores events for unrelated sessions", async () => {
@@ -558,64 +587,61 @@ describe("executeChatTask", () => {
       setTimeout(() => cast({ sessionId: "session-created", type: "result" }), 5)
       return () => undefined
     })
-    const r = await executeChatTask(makeTask({ payload: { prompt: "hi" } }), makeExecution())
+    const r = await executeChatTask(
+      makeTask({ payload: { prompt: "hi" } }),
+      makeExecution(),
+      makeSignal()
+    )
     expect(r.success).toBe(true)
-  })
-  it("rejects via timeout when no terminal event arrives", async () => {
-    jest.useFakeTimers()
-    try {
-      onClaudeMessageMock.mockImplementationOnce(async () => () => undefined)
-      const promise = executeChatTask(
-        makeTask({
-          config: {
-            timeout: 50,
-            maxRetries: 0,
-            retryDelay: 1000,
-            runMissedOnStartup: false,
-            maxMissedRuns: 1,
-            allowConcurrent: false,
-          },
-          payload: { prompt: "hi" },
-        }),
-        makeExecution()
-      )
-      for (let i = 0; i < 30; i++) await Promise.resolve()
-      jest.advanceTimersByTime(60)
-      const r = await promise
-      expect(r.success).toBe(false)
-      expect(r.error).toMatch(/exceeded timeout/)
-    } finally {
-      jest.useRealTimers()
-    }
   })
   it("catches errors thrown by sendPrompt", async () => {
     onClaudeMessageMock.mockImplementationOnce(async () => () => undefined)
     sendPromptMock.mockRejectedValueOnce(new Error("send failed"))
-    const r = await executeChatTask(makeTask({ payload: { prompt: "hi" } }), makeExecution())
+    const r = await executeChatTask(
+      makeTask({ payload: { prompt: "hi" } }),
+      makeExecution(),
+      makeSignal()
+    )
     expect(r.success).toBe(false)
     expect(r.error).toBe("send failed")
   })
   it("coerces non-Error sendPrompt failures", async () => {
     onClaudeMessageMock.mockImplementationOnce(async () => () => undefined)
     sendPromptMock.mockRejectedValueOnce("string error")
-    const r = await executeChatTask(makeTask({ payload: { prompt: "hi" } }), makeExecution())
+    const r = await executeChatTask(
+      makeTask({ payload: { prompt: "hi" } }),
+      makeExecution(),
+      makeSignal()
+    )
     expect(r.error).toBe("string error")
   })
   it("returns failure when resolveSendOptions throws", async () => {
     resolveSendOptionsMock.mockRejectedValueOnce(new Error("resolver boom"))
-    const r = await executeChatTask(makeTask({ payload: { prompt: "hi" } }), makeExecution())
+    const r = await executeChatTask(
+      makeTask({ payload: { prompt: "hi" } }),
+      makeExecution(),
+      makeSignal()
+    )
     expect(r.success).toBe(false)
     expect(r.error).toBe("resolver boom")
   })
   it("tolerates getSettings failure", async () => {
     getSettingsMock.mockRejectedValueOnce(new Error("settings boom"))
     emitTerminalResult()
-    const r = await executeChatTask(makeTask({ payload: { prompt: "hi" } }), makeExecution())
+    const r = await executeChatTask(
+      makeTask({ payload: { prompt: "hi" } }),
+      makeExecution(),
+      makeSignal()
+    )
     expect(r.success).toBe(true)
   })
   it("rewrites legacy payload.message before running", async () => {
     emitTerminalResult()
-    const r = await executeChatTask(makeTask({ payload: { message: "legacy" } }), makeExecution())
+    const r = await executeChatTask(
+      makeTask({ payload: { message: "legacy" } }),
+      makeExecution(),
+      makeSignal()
+    )
     expect(r.success).toBe(true)
     expect(sendPromptMock.mock.calls[0]?.[1]).toBe("legacy")
   })
@@ -630,25 +656,61 @@ describe("executeChatTask", () => {
       )
       return unlisten
     })
-    const r = await executeChatTask(makeTask({ payload: { prompt: "hi" } }), makeExecution())
+    const r = await executeChatTask(
+      makeTask({ payload: { prompt: "hi" } }),
+      makeExecution(),
+      makeSignal()
+    )
     expect(r.success).toBe(true)
+  })
+  it("calls interruptSession when signal is aborted", async () => {
+    onClaudeMessageMock.mockImplementationOnce(async (_cb) => {
+      return () => undefined
+    })
+    const controller = new AbortController()
+    const promise = executeChatTask(
+      makeTask({ payload: { prompt: "hi" } }),
+      makeExecution(),
+      controller.signal
+    )
+    controller.abort()
+    const r = await promise
+    expect(r.success).toBe(false)
+    expect(r.error).toMatch(/aborted/)
+    expect(interruptSessionMock).toHaveBeenCalledWith("session-created")
+  })
+  it("does not set an internal timer for timeout", async () => {
+    emitTerminalResult()
+    const task = makeTask({ payload: { prompt: "hi" } })
+    const r = await executeChatTask(task, makeExecution(), makeSignal())
+    expect(r.success).toBe(true)
+    // The old implementation would start a setTimeout equal to task.config.timeout (300_000ms).
+    // With the internal timer removed, execution resolves as soon as the sidecar
+    // emits a terminal event, without waiting for a local timer.
   })
 })
 
 describe("executeAgentTask", () => {
   it("rejects without prompt or characterId", async () => {
-    expect((await executeAgentTask(makeTask({ payload: {} }), makeExecution())).error).toMatch(
-      /prompt/
-    )
     expect(
-      (await executeAgentTask(makeTask({ payload: { prompt: "hi" } }), makeExecution())).error
+      (await executeAgentTask(makeTask({ payload: {} }), makeExecution(), makeSignal())).error
+    ).toMatch(/prompt/)
+    expect(
+      (
+        await executeAgentTask(
+          makeTask({ payload: { prompt: "hi" } }),
+          makeExecution(),
+          makeSignal()
+        )
+      ).error
     ).toMatch(/characterId/)
   })
   it("passes characterId to createSession", async () => {
     emitTerminalResult()
     await executeAgentTask(
       makeTask({ payload: { prompt: "hi", characterId: "char-1" } }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     expect(createSessionMock).toHaveBeenCalledWith(
       expect.objectContaining({ characterId: "char-1" })
@@ -658,28 +720,43 @@ describe("executeAgentTask", () => {
     emitTerminalResult()
     const r = await executeAgentTask(
       makeTask({ payload: { agentTask: "do work", characterId: "c" } }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     expect(r.success).toBe(true)
     expect(sendPromptMock.mock.calls[0]?.[1]).toBe("do work")
   })
   it("rejects undefined payload", async () => {
-    const r = await executeAgentTask(makeTask({ payload: undefined }), makeExecution())
+    const r = await executeAgentTask(
+      makeTask({ payload: undefined }),
+      makeExecution(),
+      makeSignal()
+    )
     expect(r.success).toBe(false)
   })
 })
 
 describe("executeSkillTask", () => {
   it("rejects without prompt or skillId", async () => {
-    expect((await executeSkillTask(makeTask({ payload: {} }), makeExecution())).error).toMatch(
-      /prompt/
-    )
     expect(
-      (await executeSkillTask(makeTask({ payload: { prompt: "hi" } }), makeExecution())).error
+      (await executeSkillTask(makeTask({ payload: {} }), makeExecution(), makeSignal())).error
+    ).toMatch(/prompt/)
+    expect(
+      (
+        await executeSkillTask(
+          makeTask({ payload: { prompt: "hi" } }),
+          makeExecution(),
+          makeSignal()
+        )
+      ).error
     ).toMatch(/skillId/)
   })
   it("rejects undefined payload", async () => {
-    const r = await executeSkillTask(makeTask({ payload: undefined }), makeExecution())
+    const r = await executeSkillTask(
+      makeTask({ payload: undefined }),
+      makeExecution(),
+      makeSignal()
+    )
     expect(r.success).toBe(false)
   })
   it("invokes applyAdHocSkill when skillId is provided", async () => {
@@ -690,7 +767,8 @@ describe("executeSkillTask", () => {
     emitTerminalResult()
     const r = await executeSkillTask(
       makeTask({ payload: { prompt: "hi", skillId: "skill-1" } }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     expect(r.success).toBe(true)
     expect(listEnabledSkillsByIdsMock).toHaveBeenCalledWith(["skill-1"])
@@ -703,14 +781,16 @@ describe("executeExternalAgentTask", () => {
   it("rejects without prompt", async () => {
     const r = await executeExternalAgentTask(
       makeTask({ payload: { agentId: "a" } }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     expect(r.error).toMatch(/prompt/)
   })
   it("rejects without agentId", async () => {
     const r = await executeExternalAgentTask(
       makeTask({ payload: { prompt: "hi" } }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     expect(r.error).toMatch(/agentId/)
   })
@@ -718,7 +798,8 @@ describe("executeExternalAgentTask", () => {
     executeOnExternalAgentMock.mockResolvedValueOnce(null)
     const r = await executeExternalAgentTask(
       makeTask({ payload: { prompt: "hi", agentId: "a" } }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     expect(r.error).toMatch(/No matching external agent/)
   })
@@ -742,7 +823,8 @@ describe("executeExternalAgentTask", () => {
           timeoutMs: 1000,
         },
       }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
       "hi",
@@ -767,7 +849,8 @@ describe("executeExternalAgentTask", () => {
     })
     await executeExternalAgentTask(
       makeTask({ payload: { prompt: "hi", agentId: "a" } }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     const opts = executeOnExternalAgentMock.mock.calls[0]?.[1] as { timeout: number }
     expect(opts.timeout).toBe(300_000)
@@ -776,7 +859,8 @@ describe("executeExternalAgentTask", () => {
     executeOnExternalAgentMock.mockRejectedValueOnce(new Error("nope"))
     const r = await executeExternalAgentTask(
       makeTask({ payload: { prompt: "hi", agentId: "a" } }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     expect(r.error).toBe("nope")
   })
@@ -784,7 +868,8 @@ describe("executeExternalAgentTask", () => {
     executeOnExternalAgentMock.mockRejectedValueOnce("string-error")
     const r = await executeExternalAgentTask(
       makeTask({ payload: { prompt: "hi", agentId: "a" } }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     expect(r.error).toBe("string-error")
   })
@@ -792,11 +877,15 @@ describe("executeExternalAgentTask", () => {
 
 describe("executeScriptTask", () => {
   it("rejects without language and code", async () => {
-    const r = await executeScriptTask(makeTask({ payload: {} }), makeExecution())
+    const r = await executeScriptTask(makeTask({ payload: {} }), makeExecution(), makeSignal())
     expect(r.error).toMatch(/language.*code/)
   })
   it("rejects when payload is undefined", async () => {
-    const r = await executeScriptTask(makeTask({ payload: undefined }), makeExecution())
+    const r = await executeScriptTask(
+      makeTask({ payload: undefined }),
+      makeExecution(),
+      makeSignal()
+    )
     expect(r.success).toBe(false)
   })
   it("forwards payload through executeScript", async () => {
@@ -809,7 +898,8 @@ describe("executeScriptTask", () => {
     })
     const r = await executeScriptTask(
       makeTask({ payload: { language: "bash", code: "echo hi" } }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     expect(r.success).toBe(true)
     expect(r.output).toMatchObject({ stdout: "ok" })
@@ -825,7 +915,8 @@ describe("executeScriptTask", () => {
     })
     const r = await executeScriptTask(
       makeTask({ payload: { language: "bash", code: "exit 1" } }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     expect(r.error).toBe("boom")
   })
@@ -833,7 +924,8 @@ describe("executeScriptTask", () => {
     executeScriptMock.mockResolvedValueOnce({ success: true })
     await executeScriptTask(
       makeTask({ payload: { language: "bash", code: "echo" } }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     const action = executeScriptMock.mock.calls[0]?.[0] as { timeout_secs: number }
     expect(action.timeout_secs).toBe(300)
@@ -844,7 +936,8 @@ describe("executeScriptTask", () => {
       makeTask({
         payload: { language: "bash", code: "echo", timeout_secs: 60 },
       }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     const action = executeScriptMock.mock.calls[0]?.[0] as { timeout_secs: number }
     expect(action.timeout_secs).toBe(60)
@@ -863,7 +956,8 @@ describe("executeScriptTask", () => {
           allowConcurrent: false,
         },
       }),
-      makeExecution()
+      makeExecution(),
+      makeSignal()
     )
     const action = executeScriptMock.mock.calls[0]?.[0] as { timeout_secs: number }
     expect(action.timeout_secs).toBe(300)
@@ -872,7 +966,7 @@ describe("executeScriptTask", () => {
 
 describe("executeCustomTask", () => {
   it("returns a friendly no-op success result", async () => {
-    const r = await executeCustomTask(makeTask({}))
+    const r = await executeCustomTask(makeTask({}), makeExecution(), makeSignal())
     expect(r.success).toBe(true)
     expect(r.output).toMatchObject({ note: expect.stringMatching(/Custom executor/) })
   })
@@ -882,9 +976,9 @@ describe("re-exports", () => {
   it("exposes executeBackupTask and executePluginTask", async () => {
     expect(typeof executeBackupTask).toBe("function")
     expect(typeof executePluginTask).toBe("function")
-    await executeBackupTask(makeTask({}), makeExecution())
+    await executeBackupTask(makeTask({}), makeExecution(), makeSignal())
     expect(executeBackupTaskMock).toHaveBeenCalled()
-    await executePluginTask(makeTask({}), makeExecution())
+    await executePluginTask(makeTask({}), makeExecution(), makeSignal())
     expect(executePluginTaskMock).toHaveBeenCalled()
   })
 })

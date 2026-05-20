@@ -93,6 +93,44 @@ export async function revokePairedDevice(
 }
 
 /**
+ * Temporarily block a paired device. Sets `pausedAt`; the Rust deny-list
+ * mirror (driven from `companion_revoke_device` by the caller) is what
+ * actually refuses the device's JWT — this Dexie write only records the
+ * pause-vs-revoke distinction so the Settings UI can render the right
+ * Resume action.
+ *
+ * @returns true if a row was found and updated; false if the deviceId is unknown.
+ */
+export async function pausePairedDevice(
+  deviceId: string,
+  nowMs: number = Date.now()
+): Promise<boolean> {
+  const updated = await getDb().pairedDevices.update(deviceId, { pausedAt: nowMs })
+  return updated > 0
+}
+
+/**
+ * Clear a previously-set `pausedAt`. Pairs with the Rust `companion_unrevoke_device`
+ * call by the caller; together they return the device to the active set.
+ *
+ * @returns true if a row was found and updated; false if the deviceId is unknown.
+ */
+export async function resumePairedDevice(deviceId: string): Promise<boolean> {
+  // Dexie's `update` cannot set a column to `undefined` (silently ignored),
+  // so use `modify` to delete the property when we want it gone — that's
+  // what other consumers reading `row.pausedAt === undefined` will see.
+  let cleared = 0
+  await getDb()
+    .pairedDevices.where("deviceId")
+    .equals(deviceId)
+    .modify((row) => {
+      delete (row as Partial<PairedDeviceRow>).pausedAt
+      cleared++
+    })
+  return cleared > 0
+}
+
+/**
  * Update `lastSeenAt` for the device. Best-effort: failures (missing row,
  * Dexie closed during shutdown) are swallowed so they don't block the
  * authenticated request.

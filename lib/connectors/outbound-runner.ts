@@ -32,8 +32,12 @@ import {
 import { getDb } from "@/lib/db/schema"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { appendAudit } from "./audit"
-import { createCircuitBreaker, type CircuitBreaker } from "./circuit-breaker"
-import { createTokenBucket, type TokenBucket } from "./rate-limit"
+import {
+  createCircuitBreaker,
+  type CircuitBreaker,
+  type CircuitBreakerSnapshot,
+} from "./circuit-breaker"
+import { createTokenBucket, type TokenBucket, type TokenBucketSnapshot } from "./rate-limit"
 
 // ── Quiet hours helpers ────────────────────────────────────────────────────────
 
@@ -210,6 +214,50 @@ interface AdapterState {
   bucket: TokenBucket
 }
 
+// ── Runtime-state registry (heartbeat read-side) ─────────────────────────────
+
+/**
+ * Snapshot of the per-adapter outbound runtime state. The heartbeat probe
+ * writes this into the `adapter.heartbeat` audit row so the Health Detail
+ * panel can render current circuit / rate-limit metadata without holding
+ * a reference to the runner.
+ */
+export interface AdapterRuntimeStateSnapshot {
+  breaker: CircuitBreakerSnapshot
+  bucket: TokenBucketSnapshot
+}
+
+/**
+ * The runner singleton publishes its live `adapterState` Map here so the
+ * heartbeat (which lives outside the runner closure) can read snapshots
+ * without IPC. `null` between runner stop and the next start.
+ */
+let currentAdapterStateMap: Map<string, AdapterState> | null = null
+
+/**
+ * Read a snapshot of the outbound runtime for `adapterId`. Returns `null`
+ * when the runner isn't currently running, or when the adapter has not
+ * yet produced any outbound activity (lazy-initialised on first send).
+ * Callers (e.g., the heartbeat probe, Health Detail panel) should treat
+ * `null` as "no data yet" and fall back to neutral defaults in the UI.
+ */
+export function getAdapterRuntimeStateSnapshot(
+  adapterId: string
+): AdapterRuntimeStateSnapshot | null {
+  if (currentAdapterStateMap === null) return null
+  const state = currentAdapterStateMap.get(adapterId)
+  if (!state) return null
+  return {
+    breaker: state.breaker.snapshot(),
+    bucket: state.bucket.snapshot(),
+  }
+}
+
+/** Test-only: drop the runtime-state registry so unit tests don't bleed state. */
+export function __resetAdapterRuntimeStateForTesting(): void {
+  currentAdapterStateMap = null
+}
+
 // ── Runner ───────────────────────────────────────────────────────────────────
 
 /**
@@ -222,6 +270,10 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
   const jitter = opts.jitter ?? (() => Math.random() * 500)
 
   const adapterState = new Map<string, AdapterState>()
+  // Publish this runner's adapterState to the module-level registry so the
+  // heartbeat probe can read circuit / rate-limit snapshots. Cleared on
+  // signal abort below.
+  currentAdapterStateMap = adapterState
   const idempotencyCache = new LruMap<string, string>(IDEMPOTENCY_LRU_CAP)
   // Task 39: per-conversation FIFO lanes
   const lanes = new Map<string, ConversationLane>()
@@ -439,28 +491,38 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
   }
 
   // ── Poll loop ─────────────────────────────────────────────────────────────
-  while (!opts.signal.aborted) {
-    try {
-      const job = await pickNextDue()
-      if (job) {
-        // Task 39: enqueue into the conversation lane for FIFO ordering
-        const lane = getLane(job.conversationKey)
-        // Capture job id and adapterId for the lane closure
-        const { id: jobId, adapterId } = job
-        lane.enqueue(() => processJob(jobId, adapterId))
+  try {
+    while (!opts.signal.aborted) {
+      try {
+        const job = await pickNextDue()
+        if (job) {
+          // Task 39: enqueue into the conversation lane for FIFO ordering
+          const lane = getLane(job.conversationKey)
+          // Capture job id and adapterId for the lane closure
+          const { id: jobId, adapterId } = job
+          lane.enqueue(() => processJob(jobId, adapterId))
+        }
+      } catch {
+        // Transient DB errors: ignore and retry next poll
       }
-    } catch {
-      // Transient DB errors: ignore and retry next poll
-    }
 
-    if (opts.signal.aborted) break
+      if (opts.signal.aborted) break
 
-    await new Promise<void>((resolve) => {
-      const t = setTimeout(resolve, pollIntervalMs)
-      opts.signal.addEventListener("abort", () => {
-        clearTimeout(t)
-        resolve()
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(resolve, pollIntervalMs)
+        opts.signal.addEventListener("abort", () => {
+          clearTimeout(t)
+          resolve()
+        })
       })
-    })
+    }
+  } finally {
+    // Surrender ownership of the runtime-state registry only if we still own
+    // it. A second runner instance (test scenarios) may have replaced us
+    // while we were running; in that case the registry already points at
+    // the newer Map and we must not clobber it back to null.
+    if (currentAdapterStateMap === adapterState) {
+      currentAdapterStateMap = null
+    }
   }
 }

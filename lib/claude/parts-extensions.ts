@@ -159,9 +159,26 @@ export interface SourcesPartItem {
   url?: string
   /** ≤200-char snippet of the cited content. */
   snippet?: string
-  origin: "anthropic" | "twin-rag" | "footnote"
+  /**
+   * - `anthropic` — Anthropic Citations API (web search, page_location, …)
+   * - `twin-rag`  — chunk pulled from the user's Digital Twin vector store
+   * - `twin-style`— style few-shot sample selected for this turn
+   * - `footnote`  — markdown footnote definition in the assistant text
+   */
+  origin: "anthropic" | "twin-rag" | "twin-style" | "footnote"
   /** Optional similarity / confidence score (0..1). */
   score?: number
+  /**
+   * Set on `twin-rag` items. Lets the renderer surface a deep link into the
+   * `/twin` workbench so the user can inspect the original chunk and source
+   * document. Absent on the other origins.
+   */
+  chunkRef?: {
+    twinId: string
+    sourceId: string
+    /** vector doc id of the chunk (matches `TwinChunk.vectorDocId`). */
+    chunkId: string
+  }
 }
 
 export interface SourcesPart {

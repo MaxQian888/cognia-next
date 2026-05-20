@@ -25,6 +25,12 @@ export type AuditKind =
   | "adapter.started"
   | "adapter.stopped"
   | "adapter.error"
+  // Periodic heartbeat probe (v45) so the per-adapter Health view can
+  // colour 24h dot grids on intervals where nothing else fired. Pruned
+  // by the heartbeat writer itself — see
+  // `lib/connectors/health/heartbeat.ts`. The default Audit-tab kind
+  // filter excludes this kind because it's noisy by design.
+  | "adapter.heartbeat"
   // ── Connector callback channel (G4) ──────────────────────────────────
   | "callback.received"
   | "callback.deduped"

@@ -34,9 +34,9 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use axum::{middleware::from_fn_with_state, routing::{any, get, post}, Router};
+use axum::{middleware::{from_fn, from_fn_with_state}, routing::{any, get, post}, Router};
 use axum_server::tls_rustls::RustlsConfig;
-use super::{rpc, tls::TlsMaterial, ws};
+use super::{healthz, rpc, tls::TlsMaterial, ws};
 use tokio::sync::watch;
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -148,9 +148,12 @@ pub async fn spawn_server(
 
     let serve_handle = server_handle.clone();
     tokio::spawn(async move {
+        // `into_make_service_with_connect_info::<SocketAddr>()` so the
+        // `pre_auth_rate_limit` middleware can extract the peer IP for its
+        // per-source-IP token bucket (see `middleware::pre_auth_rate_limit`).
         let result = axum_server::from_tcp_rustls(std_listener, rustls_config)
             .handle(serve_handle)
-            .serve(app.into_make_service())
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
             .await;
 
         if let Err(e) = result {
@@ -173,18 +176,45 @@ pub async fn spawn_server(
 /// # Route structure
 ///
 /// ```text
-/// public_routes   — no middleware (pre-auth)
+/// metered_pre_auth_routes  — pre_auth_rate_limit (per-source-IP token bucket)
 ///   POST /api/v1/auth/pair/issue
 ///   POST /api/v1/auth/pair
+///   POST /api/v1/auth/pair/redeem-code
+///
+/// unmetered_public_routes  — no middleware
+///   GET  /api/v1/healthz    — service discovery, read-only
 ///
 /// protected_routes — require_device_jwt middleware applied
 ///   GET  /api/v1/whoami   — identity check for the mobile app post-pair
 /// ```
 pub fn build_router(state: SharedState) -> Router {
-    // Pre-auth routes — no JWT middleware.
-    let public_routes = Router::new()
+    // Pre-auth POST routes that can be brute-forced from the LAN — gated
+    // by a per-source-IP token bucket. See `middleware::pre_auth_rate_limit`
+    // for the bucket parameters and rationale.
+    let metered_pre_auth_routes = Router::new()
         .route("/api/v1/auth/pair/issue", post(auth::issue_handler))
-        .route("/api/v1/auth/pair", post(auth::pair_handler));
+        .route("/api/v1/auth/pair", post(auth::pair_handler))
+        // 6-digit numeric code redemption path. Same trust model as
+        // `/api/v1/auth/pair` (callable from the phone over LAN); we
+        // resolve `code -> pair_jwt` server-side then run the same
+        // redeem logic. The 6-digit keyspace (~900K codes) makes this the
+        // primary brute-force target — see the docstring on
+        // `middleware::pre_auth_rate_limit`.
+        .route(
+            "/api/v1/auth/pair/redeem-code",
+            post(auth::redeem_code_handler),
+        )
+        .layer(from_fn(middleware::pre_auth_rate_limit));
+
+    // Unmetered public routes — no rate limit, no JWT. Used for service
+    // discovery only; do not add anything sensitive here.
+    let unmetered_public_routes = Router::new()
+        // Public health/discovery probe. Read-only, no authentication.
+        // Surfaces version, TLS fingerprint, advertised port, and a
+        // stable installation identifier so mobile clients can detect
+        // cert rotation and confirm they're talking to the right
+        // desktop. See `healthz` module docs.
+        .route("/api/v1/healthz", get(healthz::healthz_handler));
 
     // Authenticated routes — JWT verifier middleware applied.
     //
@@ -202,7 +232,8 @@ pub fn build_router(state: SharedState) -> Router {
         ));
 
     Router::new()
-        .merge(public_routes)
+        .merge(metered_pre_auth_routes)
+        .merge(unmetered_public_routes)
         .merge(protected_routes)
         // Body-size limit applied to all routes.  JWT payloads are tiny; the
         // generous limit leaves room for future multipart (M4.6 push-token).
@@ -231,6 +262,7 @@ mod tests {
         Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
+            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),

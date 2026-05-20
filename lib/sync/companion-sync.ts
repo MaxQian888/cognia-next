@@ -63,6 +63,14 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   { table: "settings", run: syncAppSettings },
 ]
 
+/**
+ * Tables sync'd by the orchestrator, in execution order. Exported so the
+ * Settings → Mobile Companion → "Sync status" card can list every handler
+ * without hard-coding the names — keeps the UI in lock-step with the
+ * registry above.
+ */
+export const SYNC_HANDLER_TABLES: readonly SyncableTable[] = DEFAULT_HANDLERS.map((h) => h.table)
+
 interface SyncState {
   /** When the last successful sync of this table finished. */
   lastSyncAt: number | null
@@ -122,6 +130,13 @@ export interface RunSyncDownOptions {
   transport?: Transport
   /** Override the handler list (tests). */
   handlers?: RegisteredHandler[]
+  /**
+   * Restrict the run to a subset of tables (settings UI: "Sync now"
+   * for a single row). When set, the handler list is filtered to just
+   * these tables in their registered order — empty array means "no
+   * handlers", which resolves to an empty outcomes array.
+   */
+  only?: readonly SyncableTable[]
 }
 
 /**
@@ -129,22 +144,42 @@ export interface RunSyncDownOptions {
  * Sequential — not parallel — so a slow desktop server doesn't get hit
  * with four simultaneous round-trips. Re-entrant: a second call while
  * one is in flight reuses the in-flight promise.
+ *
+ * Per-table runs (`opts.only`) bypass the re-entrancy gate so the user
+ * can sync one row from the SyncStatusCard even when a full pull is
+ * already in flight — otherwise the UI would silently wait on whatever
+ * the orchestrator is doing.
  */
 let inflight: Promise<SyncOutcome[]> | null = null
 
 export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[]> {
-  if (inflight) return inflight
+  const isTargeted = opts.only !== undefined
+  if (inflight && !isTargeted) return inflight
   const t = opts.transport ?? transport
-  const handlers = opts.handlers ?? DEFAULT_HANDLERS
+  let handlers = opts.handlers ?? DEFAULT_HANDLERS
+  if (opts.only) {
+    const onlySet = new Set(opts.only)
+    handlers = handlers.filter((h) => onlySet.has(h.table))
+  }
 
-  inflight = (async () => {
+  const runPromise: Promise<SyncOutcome[]> = (async () => {
     await ensureHydrated()
     const results: SyncOutcome[] = []
     for (const { table, run } of handlers) {
       const state = getState(table)
-      const outcome = await run(t, { since: state.since })
+      const sinceAtStart = state.since
+      const outcome = await run(t, { since: sinceAtStart })
       if (outcome.ok) {
-        state.since = outcome.result.nextSince
+        // Monotonic cursor guard: a targeted "sync now" run (opts.only) and a
+        // full background pull share `stateMap` entries (see getState), so a
+        // slower outcome can finish after a faster one and would otherwise
+        // regress the cursor on `state.since = outcome.result.nextSince`. We
+        // only advance when the freshly observed nextSince is strictly newer
+        // than whatever else already wrote during our `await run(...)`. ADR-
+        // 0027's "monotonic cursor" invariant.
+        if (outcome.result.nextSince > state.since) {
+          state.since = outcome.result.nextSince
+        }
         state.lastSyncAt = Date.now()
         state.lastError = null
       } else {
@@ -163,11 +198,14 @@ export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[
     return results
   })()
 
-  inflight.finally(() => {
-    inflight = null
-  })
+  if (!isTargeted) {
+    inflight = runPromise
+    runPromise.finally(() => {
+      inflight = null
+    })
+  }
 
-  return inflight
+  return runPromise
 }
 
 /**

@@ -1,12 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { motion, useReducedMotion } from "motion/react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
+import { cn } from "@/lib/utils"
 import { StatusBadge } from "@/components/status-badge"
 import { listTwinSourcesByTwin, deleteTwinSource } from "@/lib/db/twin-sources"
 import type { TwinSource, TwinSourceStatus } from "@/types/twin"
@@ -36,6 +38,32 @@ export function TwinSourcesTab({ twinId }: { twinId: string }) {
   const [showUploader, setShowUploader] = useState(false)
   const sources = useLiveQuery(() => listTwinSourcesByTwin(twinId), [twinId], [])
 
+  // Deep-link from the chat SourcesPart "View source" link: when the URL
+  // carries ?sourceId=…, scroll the matching row into view and apply a
+  // 2s ring highlight so the user can spot it instantly.
+  const searchParams = useSearchParams()
+  const highlightedSourceId = searchParams?.get("sourceId") ?? null
+  const rowRefs = useRef<Map<string, HTMLLIElement>>(new Map())
+  const [activeHighlight, setActiveHighlight] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!highlightedSourceId) return
+    // Wait one tick for the row to mount (sources may still be loading).
+    const tickHandle = window.setTimeout(() => {
+      const el = rowRefs.current.get(highlightedSourceId)
+      if (!el) return
+      el.scrollIntoView({ behavior: "smooth", block: "center" })
+      setActiveHighlight(highlightedSourceId)
+    }, 60)
+    return () => window.clearTimeout(tickHandle)
+  }, [highlightedSourceId, sources.length])
+
+  useEffect(() => {
+    if (!activeHighlight) return
+    const handle = window.setTimeout(() => setActiveHighlight(null), 2000)
+    return () => window.clearTimeout(handle)
+  }, [activeHighlight])
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
@@ -58,6 +86,10 @@ export function TwinSourcesTab({ twinId }: { twinId: string }) {
           {sources.map((source, index) => (
             <motion.li
               key={source.id}
+              ref={(el) => {
+                if (el) rowRefs.current.set(source.id, el)
+                else rowRefs.current.delete(source.id)
+              }}
               initial={prefersReducedMotion ? false : { opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{
@@ -65,7 +97,11 @@ export function TwinSourcesTab({ twinId }: { twinId: string }) {
                 ease: "easeOut",
                 delay: prefersReducedMotion ? 0 : Math.min(index * 0.03, 0.15),
               }}
-              className="list-none"
+              className={cn(
+                "list-none rounded-md transition-shadow",
+                activeHighlight === source.id && "ring-2 ring-primary"
+              )}
+              data-testid={`twin-source-${source.id}-row`}
             >
               <SourceRow source={source} t={t} formatLabel={(f) => tFormat(f)} />
             </motion.li>

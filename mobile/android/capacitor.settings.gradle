@@ -67,3 +67,6 @@ project(':capacitor-secure-storage-plugin').projectDir = new File('../../node_mo
 
 include ':capacitor-voice-recorder'
 project(':capacitor-voice-recorder').projectDir = new File('../../node_modules/.pnpm/capacitor-voice-recorder@7._5365782c4b0698d13e0d39c22607f380/node_modules/capacitor-voice-recorder/android')
+
+include ':capacitor-zeroconf'
+project(':capacitor-zeroconf').projectDir = new File('../../node_modules/.pnpm/capacitor-zeroconf@4.0.0_@capacitor+core@7.6.3_bonjour@3.5.1/node_modules/capacitor-zeroconf/android')

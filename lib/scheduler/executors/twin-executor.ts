@@ -37,7 +37,8 @@ interface TwinTaskResult {
 
 export async function executeTwinTask(
   task: ScheduledTask,
-  execution: TaskExecution
+  execution: TaskExecution,
+  _signal: AbortSignal
 ): Promise<TwinTaskResult> {
   const payload = (task.payload ?? {}) as TwinTaskPayload
   if (!payload.twinId) {

@@ -3,6 +3,11 @@
  */
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { TooltipProvider } from "@/components/ui/tooltip"
+
+function renderWithTooltipProvider(ui: React.ReactElement) {
+  return render(<TooltipProvider>{ui}</TooltipProvider>)
+}
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -137,6 +142,84 @@ describe("ConversationsTab", () => {
     fireEvent.click(screen.getByTestId("delete-btn-ov1"))
     await waitFor(() => {
       expect(mockDbDelete).toHaveBeenCalledWith("ov1")
+    })
+  })
+
+  it("renders the CU badge when allowComputerUse is true (Task 4.2)", () => {
+    mockOverrides = [makeOverride("ov-cu", "telegram:a1:888", { allowComputerUse: true })]
+    renderWithTooltipProvider(<ConversationsTab />)
+    expect(screen.getByTestId("cu-badge-ov-cu")).toBeInTheDocument()
+  })
+
+  it("does not render the CU badge when allowComputerUse is unset", () => {
+    mockOverrides = [makeOverride("ov-no-cu", "telegram:a1:777")]
+    renderWithTooltipProvider(<ConversationsTab />)
+    expect(screen.queryByTestId("cu-badge-ov-no-cu")).not.toBeInTheDocument()
+  })
+
+  it("does not render the CU badge when allowComputerUse is explicitly false", () => {
+    mockOverrides = [makeOverride("ov-cu-off", "telegram:a1:666", { allowComputerUse: false })]
+    renderWithTooltipProvider(<ConversationsTab />)
+    expect(screen.queryByTestId("cu-badge-ov-cu-off")).not.toBeInTheDocument()
+  })
+
+  describe("search input (Task P2.4)", () => {
+    it("does not render search when there are 5 or fewer overrides", () => {
+      mockOverrides = Array.from({ length: 5 }, (_, i) =>
+        makeOverride(`ov-${i}`, `telegram:a1:${i}`)
+      )
+      renderWithTooltipProvider(<ConversationsTab />)
+      expect(screen.queryByTestId("conversations-search")).not.toBeInTheDocument()
+    })
+
+    it("renders search input once over 5 overrides exist", () => {
+      mockOverrides = Array.from({ length: 6 }, (_, i) =>
+        makeOverride(`ov-${i}`, `telegram:a1:${i}`)
+      )
+      renderWithTooltipProvider(<ConversationsTab />)
+      expect(screen.getByTestId("conversations-search")).toBeInTheDocument()
+    })
+
+    it("filters by conversationKey substring (case-insensitive)", async () => {
+      mockOverrides = [
+        makeOverride("ov-foo", "telegram:a1:1234"),
+        makeOverride("ov-bar", "discord:a2:9999"),
+        ...Array.from({ length: 5 }, (_, i) => makeOverride(`ov-filler-${i}`, `slack:a3:${i}`)),
+      ]
+      renderWithTooltipProvider(<ConversationsTab />)
+      const input = screen.getByTestId("conversations-search") as HTMLInputElement
+      fireEvent.change(input, { target: { value: "DISCORD" } })
+      await waitFor(() => {
+        expect(screen.queryByTestId("conversation-row-ov-foo")).not.toBeInTheDocument()
+        expect(screen.getByTestId("conversation-row-ov-bar")).toBeInTheDocument()
+      })
+    })
+
+    it("filters by characterId substring", async () => {
+      mockOverrides = [
+        makeOverride("ov-a", "telegram:a1:1", { characterId: "char-zeus-001" }),
+        makeOverride("ov-b", "telegram:a1:2", { characterId: "char-athena-002" }),
+        ...Array.from({ length: 5 }, (_, i) => makeOverride(`ov-filler-${i}`, `slack:a3:${i}`)),
+      ]
+      renderWithTooltipProvider(<ConversationsTab />)
+      fireEvent.change(screen.getByTestId("conversations-search"), { target: { value: "athena" } })
+      await waitFor(() => {
+        expect(screen.getByTestId("conversation-row-ov-b")).toBeInTheDocument()
+        expect(screen.queryByTestId("conversation-row-ov-a")).not.toBeInTheDocument()
+      })
+    })
+
+    it("renders the no-results hint when nothing matches", async () => {
+      mockOverrides = Array.from({ length: 6 }, (_, i) =>
+        makeOverride(`ov-${i}`, `telegram:a1:${i}`)
+      )
+      renderWithTooltipProvider(<ConversationsTab />)
+      fireEvent.change(screen.getByTestId("conversations-search"), {
+        target: { value: "no-such-thing" },
+      })
+      await waitFor(() => {
+        expect(screen.getByTestId("conversations-search-empty")).toBeInTheDocument()
+      })
     })
   })
 })

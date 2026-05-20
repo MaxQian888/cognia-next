@@ -22,7 +22,7 @@ import { Suspense, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { ArrowLeftIcon, SendIcon } from "lucide-react"
+import { ArrowLeftIcon, FilePlusIcon, InboxIcon, PlusCircleIcon, SendIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -31,7 +31,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { Item, ItemGroup, ItemContent, ItemTitle, ItemActions } from "@/components/ui/item"
 import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
-import { listSessions } from "@/lib/db/sessions"
+import { setDraft } from "@/lib/db/chat-drafts"
+import { createSession, listSessions } from "@/lib/db/sessions"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import type { ChatSession } from "@/lib/claude/types"
 
@@ -41,6 +42,37 @@ export default function ShareTargetPage() {
       <ShareTargetPageInner />
     </Suspense>
   )
+}
+
+/**
+ * Derive a sensible 50-char-max session title from the shared payload.
+ * Prefers the first non-empty line of `text`, falling back to the
+ * hostname of `url` so the picker shows something recognisable.
+ *
+ * Takes the next-intl `t` (scoped to `mobile.shareTarget`) so the
+ * derived title respects the user's locale. The `fromUrl` and
+ * `fallback` keys are added in both `i18n/messages/en.json` and
+ * `i18n/messages/zh-CN.json` under `mobile.shareTarget.derivedTitle`.
+ */
+function deriveTitle(
+  text: string,
+  url: string,
+  t: (key: string, params?: Record<string, unknown>) => string
+): string {
+  const trimmed = text.trim()
+  if (trimmed) {
+    const firstLine = trimmed.split(/\r?\n/, 1)[0]?.trim() ?? ""
+    return firstLine.length > 50 ? `${firstLine.slice(0, 49)}…` : firstLine
+  }
+  if (url) {
+    try {
+      const u = new URL(url)
+      return t("derivedTitle.fromUrl", { hostname: u.hostname })
+    } catch {
+      return url.slice(0, 50)
+    }
+  }
+  return t("derivedTitle.fallback")
 }
 
 function ShareTargetPageInner() {
@@ -90,6 +122,48 @@ function ShareTargetPageInner() {
       })
       toast.success(t("queuedToast"))
       router.replace("/")
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  // "New session" target — provision a fresh session row and queue the
+  // outbound send with the shared body. Falls back to /inbox if creation
+  // throws so the user never lands on the share screen indefinitely.
+  const onSendToNew = async () => {
+    if (busyId) return
+    setBusyId("__new__")
+    try {
+      const session = await createSession({ title: deriveTitle(text, url, t) })
+      await enqueue({
+        command: "connector_send",
+        payload: { sessionId: session.id, segments: [{ type: "text", text: body }] },
+        label: `Share → ${session.title ?? session.id}`,
+      })
+      toast.success(t("queuedToast"))
+      router.replace(`/?session=${encodeURIComponent(session.id)}`)
+    } catch (err) {
+      toast.error(t("createSessionFailed"))
+      console.warn("share-target: createSession failed", err)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  // "Inbox draft" target — stash the body as a chat draft on a fresh
+  // session without firing the outbound send. The user can finish/edit
+  // it inside the regular composer when they're ready.
+  const onSaveDraft = async () => {
+    if (busyId) return
+    setBusyId("__draft__")
+    try {
+      const session = await createSession({ title: deriveTitle(text, url, t) })
+      await setDraft(session.id, body)
+      toast.success(t("draftSavedToast"))
+      router.replace(`/?session=${encodeURIComponent(session.id)}`)
+    } catch (err) {
+      toast.error(t("createSessionFailed"))
+      console.warn("share-target: setDraft failed", err)
     } finally {
       setBusyId(null)
     }
@@ -147,6 +221,38 @@ function ShareTargetPageInner() {
       </section>
 
       <section className="mt-3 flex flex-col gap-2 px-4 pb-6">
+        <div className="grid grid-cols-2 gap-2" data-testid="share-target-quick-actions">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="touch-target justify-start gap-2"
+            onClick={() => void onSendToNew()}
+            disabled={!body || busyId !== null}
+            data-testid="share-target-new-session"
+          >
+            <PlusCircleIcon className="size-4" aria-hidden="true" />
+            {t("newSessionCta")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="touch-target justify-start gap-2"
+            onClick={() => void onSaveDraft()}
+            disabled={!body || busyId !== null}
+            data-testid="share-target-inbox-draft"
+          >
+            <InboxIcon className="size-4" aria-hidden="true" />
+            {t("inboxDraftCta")}
+          </Button>
+        </div>
+        <div className="flex items-center gap-2 pt-2">
+          <FilePlusIcon className="size-3 text-muted-foreground" aria-hidden="true" />
+          <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+            {t("orExistingSession")}
+          </span>
+        </div>
         <Input
           type="search"
           placeholder={t("targetSearchPlaceholder")}

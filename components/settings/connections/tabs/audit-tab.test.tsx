@@ -24,6 +24,7 @@ const mockAuditEntries: Partial<AuditEntry>[] = [
     kind: "delivery.success",
     at: Date.now() - 1000,
     reason: "OK",
+    conversationKey: "telegram:a1:12345",
     fields: { messageId: "123" },
   },
   {
@@ -32,12 +33,29 @@ const mockAuditEntries: Partial<AuditEntry>[] = [
     kind: "delivery.error",
     at: Date.now() - 2000,
     reason: "Timeout",
+    conversationKey: "discord:a2:99999",
   },
   {
     id: "e3",
     adapterId: "a1",
     kind: "adapter.started",
     at: Date.now() - 3000,
+  },
+  // Heartbeats — must be excluded by the default view (no selectedKinds)
+  // per `types/connectors/audit.ts`'s "noisy by design" contract. Toggling
+  // them on (impossible via the UI because the kind has no chip) would be
+  // a separate scenario.
+  {
+    id: "h1",
+    adapterId: "a1",
+    kind: "adapter.heartbeat",
+    at: Date.now() - 500,
+  },
+  {
+    id: "h2",
+    adapterId: "a2",
+    kind: "adapter.heartbeat",
+    at: Date.now() - 600,
   },
 ]
 
@@ -128,5 +146,51 @@ describe("AuditTab", () => {
     await waitFor(() => {
       expect(screen.getByText(/"messageId"/)).toBeInTheDocument()
     })
+  })
+
+  it("filters by conversationKey substring (case-insensitive)", async () => {
+    render(<AuditTab />)
+    const input = screen.getByTestId("audit-conv-key-input") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "TELEGRAM:A1" } })
+    await waitFor(() => {
+      // e1's conversationKey "telegram:a1:12345" matches; e2's "discord:a2:99999" and
+      // e3 (no conversationKey) get filtered out. delivery.success still appears in
+      // both the kind filter chip AND the e1 row badge.
+      expect(screen.getAllByText("delivery.success").length).toBeGreaterThanOrEqual(2)
+      // delivery.error should now only appear in the kind filter chip (not as a row badge).
+      expect(screen.getAllByText("delivery.error").length).toBe(1)
+    })
+  })
+
+  it("renders an Export trigger that disables when no entries are visible", async () => {
+    render(<AuditTab />)
+    const trigger = screen.getByTestId("audit-export-trigger")
+    expect(trigger).toBeEnabled()
+    // Drive an impossible filter to empty the list.
+    const input = screen.getByTestId("audit-conv-key-input")
+    fireEvent.change(input, { target: { value: "no-match-at-all-zzz" } })
+    await waitFor(() => {
+      expect(screen.getByTestId("audit-export-trigger")).toBeDisabled()
+    })
+  })
+
+  it("renders the Export trigger with the visible-row count", () => {
+    render(<AuditTab />)
+    const trigger = screen.getByTestId("audit-export-trigger")
+    // mockAuditEntries has 3 non-heartbeat rows + 2 heartbeats; the
+    // default view hides heartbeats, so the visible count is 3.
+    expect(trigger.textContent).toMatch(/3/)
+  })
+
+  it("hides adapter.heartbeat rows from the default view (noisy by design)", () => {
+    render(<AuditTab />)
+    // Heartbeats are present in the dataset (2 rows) but must not appear as
+    // entry badges with the default (empty) `selectedKinds`. The kind filter
+    // UI also intentionally has no `adapter.heartbeat` chip, so the only
+    // occurrence we'd expect is in the badge for an actual entry row — and
+    // that should be zero.
+    expect(screen.queryByText("adapter.heartbeat")).toBeNull()
+    // Sanity check: non-heartbeat entries still render their badges.
+    expect(screen.getAllByText("delivery.success").length).toBeGreaterThanOrEqual(2)
   })
 })

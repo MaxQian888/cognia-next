@@ -1,7 +1,14 @@
 "use client"
 
 import { useTranslations } from "next-intl"
-import { ChevronRightIcon, HistoryIcon, RouterIcon, ShieldCheckIcon, WifiIcon } from "lucide-react"
+import {
+  ChevronRightIcon,
+  HistoryIcon,
+  PinIcon,
+  RouterIcon,
+  ShieldCheckIcon,
+  WifiIcon,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -16,12 +23,14 @@ export interface ServerCardProps {
 }
 
 const SOURCE_TO_ICON = {
+  paired: PinIcon,
   mdns: WifiIcon,
   probe: RouterIcon,
   history: HistoryIcon,
 } as const
 
 const SOURCE_TO_KEY = {
+  paired: "viaPaired",
   mdns: "viaMdns",
   probe: "viaProbe",
   history: "viaHistory",
@@ -53,6 +62,7 @@ export function ServerCard({ server, onSelect, selected, className }: ServerCard
         aria-hidden="true"
         className={cn(
           "inline-flex size-10 shrink-0 items-center justify-center rounded-md",
+          server.source === "paired" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
           server.source === "mdns" && "bg-success/10 text-success",
           server.source === "probe" && "bg-warning/10 text-warning",
           server.source === "history" && "bg-muted text-muted-foreground"

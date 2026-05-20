@@ -3,7 +3,14 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { ArrowLeftRightIcon, CircleIcon, QrCodeIcon, RefreshCwIcon, WifiIcon } from "lucide-react"
+import {
+  ActivityIcon,
+  ArrowLeftRightIcon,
+  CircleIcon,
+  QrCodeIcon,
+  RefreshCwIcon,
+  WifiIcon,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -16,12 +23,23 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useConnectionState } from "@/hooks/companion/use-connection-state"
+import { isMobile } from "@/lib/capacitor/_shared"
 import { runSyncDown, snapshotSyncStates } from "@/lib/sync/companion-sync"
 import { transport } from "@/lib/tauri"
+import type { TransportTier } from "@/lib/tauri/transport-companion"
 import { cn } from "@/lib/utils"
 
+import { ConnectionDiagnosticsSheet } from "./connection-state-sheets/connection-diagnostics-sheet"
 import { MobilePairedServersSheet } from "./connection-state-sheets/mobile-paired-servers-sheet"
 import { MobileServerScanSheet } from "./connection-state-sheets/mobile-server-scan-sheet"
+
+const TIER_DOT_CLASS: Record<TransportTier, string> = {
+  "rtc-direct": "text-emerald-500",
+  "rtc-relay": "text-amber-500",
+  "ws-lan": "text-sky-500",
+  "ws-tunnel": "text-violet-500",
+  offline: "text-zinc-500",
+}
 
 /**
  * Connection-state pill with a dropdown affordance (Wave 4 / ADR-0026).
@@ -44,12 +62,29 @@ export function ConnectionStateBadge({ className }: { className?: string }) {
   const router = useRouter()
   const [scanOpen, setScanOpen] = useState(false)
   const [pairedOpen, setPairedOpen] = useState(false)
+  const [diagOpen, setDiagOpen] = useState(false)
   const [now, setNow] = useState<number>(() => Date.now())
+  const [tier, setTier] = useState<TransportTier>("offline")
+  // Capacitor-only tier indicator. The desktop already has a richer
+  // `WebRtcCard`; on web/Tauri this row would be redundant. Lazy
+  // useState init so we don't pay a setState-in-effect cascade.
+  const [mobile] = useState(() => isMobile())
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30_000)
     return () => clearInterval(id)
   }, [])
+
+  useEffect(() => {
+    if (!mobile) return
+    const tx = transport as unknown as {
+      getActiveTier?: () => TransportTier
+      onTierChange?: (h: (t: TransportTier) => void) => () => void
+    }
+    // CompanionTransport.onTierChange seeds the listener with the current
+    // value on subscribe — no separate getActiveTier call needed here.
+    return tx.onTierChange?.((next) => setTier(next))
+  }, [mobile])
 
   if (!state) return null
 
@@ -166,6 +201,28 @@ export function ConnectionStateBadge({ className }: { className?: string }) {
             <QrCodeIcon className="size-4" aria-hidden="true" />
             {t("actions.goToPair")}
           </DropdownMenuItem>
+          {mobile ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                data-testid="connection-action-tier"
+                onSelect={() => setDiagOpen(true)}
+              >
+                <ActivityIcon className="size-4" aria-hidden="true" />
+                <span className="flex-1">{t("actions.webrtcTier")}</span>
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1 font-mono text-[10px] uppercase",
+                    TIER_DOT_CLASS[tier]
+                  )}
+                  data-testid={`connection-tier-${tier}`}
+                >
+                  <CircleIcon className="size-2 fill-current" aria-hidden="true" />
+                  {t(`tiers.${tier}`)}
+                </span>
+              </DropdownMenuItem>
+            </>
+          ) : null}
           <DropdownMenuSeparator />
           <DropdownMenuLabel className="text-[10px] font-normal text-muted-foreground">
             {t("sync.heading")}
@@ -188,6 +245,7 @@ export function ConnectionStateBadge({ className }: { className?: string }) {
 
       <MobileServerScanSheet open={scanOpen} onOpenChange={setScanOpen} />
       <MobilePairedServersSheet open={pairedOpen} onOpenChange={setPairedOpen} />
+      <ConnectionDiagnosticsSheet open={diagOpen} onOpenChange={setDiagOpen} />
     </>
   )
 }

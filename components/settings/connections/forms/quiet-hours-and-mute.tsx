@@ -12,6 +12,7 @@
  * the values via updateAdapterInstance.
  */
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
@@ -47,6 +48,23 @@ const COMMON_TZ = [
   "Asia/Kolkata",
   "Australia/Sydney",
 ]
+
+/** Sentinel value the timezone <select> uses to switch into freeform mode. */
+const CUSTOM_TZ_VALUE = "__custom__"
+
+/**
+ * Validate an IANA timezone string. `Intl.DateTimeFormat` throws RangeError
+ * on unknown zones, which is what we want — wrap in try/catch and return
+ * boolean. Pure: no side effects.
+ */
+function isValidIanaTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: tz })
+    return true
+  } catch {
+    return false
+  }
+}
 
 export function QuietHoursAndMute({
   muted,
@@ -104,56 +122,117 @@ export function QuietHoursAndMute({
         />
       </div>
 
-      {/* Quiet hours fields */}
+      {/* Quiet hours fields. grid-cols-1 on narrow screens stacks the
+       *  from/to/timezone inputs so they don't overflow on small phones;
+       *  sm:grid-cols-3 brings them back side-by-side on tablets+. */}
       {qhEnabled && quietHours && (
-        <div className="grid grid-cols-3 gap-2">
-          <div className="space-y-1">
-            <Label htmlFor="qhm-from" className="text-xs">
-              {t("fromLabel")}
-            </Label>
-            <Input
-              id="qhm-from"
-              type="time"
-              value={quietHours.from}
-              onChange={(e) => onQuietHoursChange({ ...quietHours, from: e.target.value })}
-              disabled={disabled}
-              aria-label={t("fromAria")}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="qhm-to" className="text-xs">
-              {t("toLabel")}
-            </Label>
-            <Input
-              id="qhm-to"
-              type="time"
-              value={quietHours.to}
-              onChange={(e) => onQuietHoursChange({ ...quietHours, to: e.target.value })}
-              disabled={disabled}
-              aria-label={t("toAria")}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="qhm-tz" className="text-xs">
-              {t("timezoneLabel")}
-            </Label>
-            <select
-              id="qhm-tz"
-              value={quietHours.tz}
-              onChange={(e) => onQuietHoursChange({ ...quietHours, tz: e.target.value })}
-              disabled={disabled}
-              aria-label={t("timezoneAria")}
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            >
-              {COMMON_TZ.map((tz) => (
-                <option key={tz} value={tz}>
-                  {tz}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+        <QuietHoursFields value={quietHours} onChange={onQuietHoursChange} disabled={disabled} />
       )}
+    </div>
+  )
+}
+
+interface QuietHoursFieldsProps {
+  value: QuietHoursValue
+  onChange: (v: QuietHoursValue) => void
+  disabled?: boolean
+}
+
+/**
+ * Inner from / to / timezone trio. Pulled into a sub-component so the
+ * "custom timezone" state stays local — the parent owns the canonical
+ * `quietHours` value while this child manages whether the user has the
+ * common-zone dropdown open or has flipped into the custom-input mode.
+ */
+function QuietHoursFields({ value, onChange, disabled }: QuietHoursFieldsProps) {
+  const t = useTranslations("settings.connections.quietHours")
+
+  // If the persisted tz is one of the common ones, start in dropdown mode.
+  // Otherwise the user must have entered a custom one — start in custom mode.
+  const initialIsCustom = !COMMON_TZ.includes(value.tz)
+  const [isCustom, setIsCustom] = useState<boolean>(initialIsCustom)
+  const tzValid = isValidIanaTimezone(value.tz)
+
+  const onSelectChange = (next: string): void => {
+    if (next === CUSTOM_TZ_VALUE) {
+      setIsCustom(true)
+      // Keep the current value as the seed for the freeform input so the
+      // operator doesn't lose what they had.
+      return
+    }
+    setIsCustom(false)
+    onChange({ ...value, tz: next })
+  }
+
+  return (
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+      <div className="space-y-1">
+        <Label htmlFor="qhm-from" className="text-xs">
+          {t("fromLabel")}
+        </Label>
+        <Input
+          id="qhm-from"
+          type="time"
+          value={value.from}
+          onChange={(e) => onChange({ ...value, from: e.target.value })}
+          disabled={disabled}
+          aria-label={t("fromAria")}
+        />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor="qhm-to" className="text-xs">
+          {t("toLabel")}
+        </Label>
+        <Input
+          id="qhm-to"
+          type="time"
+          value={value.to}
+          onChange={(e) => onChange({ ...value, to: e.target.value })}
+          disabled={disabled}
+          aria-label={t("toAria")}
+        />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor="qhm-tz" className="text-xs">
+          {t("timezoneLabel")}
+        </Label>
+        {isCustom ? (
+          <Input
+            id="qhm-tz"
+            type="text"
+            value={value.tz}
+            onChange={(e) => onChange({ ...value, tz: e.target.value })}
+            disabled={disabled}
+            aria-label={t("timezoneAria")}
+            placeholder={t("timezonePlaceholder")}
+            data-testid="qhm-tz-custom-input"
+            aria-invalid={value.tz.length > 0 && !tzValid}
+            className="h-9 text-xs"
+          />
+        ) : (
+          <select
+            id="qhm-tz"
+            value={COMMON_TZ.includes(value.tz) ? value.tz : CUSTOM_TZ_VALUE}
+            onChange={(e) => onSelectChange(e.target.value)}
+            disabled={disabled}
+            aria-label={t("timezoneAria")}
+            data-testid="qhm-tz-select"
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            {COMMON_TZ.map((tz) => (
+              <option key={tz} value={tz}>
+                {tz}
+              </option>
+            ))}
+            <option value={CUSTOM_TZ_VALUE}>{t("timezoneCustomOption")}</option>
+          </select>
+        )}
+        {isCustom && value.tz.length > 0 && !tzValid && (
+          <p className="text-[10px] text-destructive" data-testid="qhm-tz-invalid">
+            {t("timezoneInvalid")}
+          </p>
+        )}
+      </div>
     </div>
   )
 }

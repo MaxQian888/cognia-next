@@ -122,6 +122,35 @@ describe("CompanionSection", () => {
       expect(decoded.payload.version).toBe("0.1.0")
     }
     expect(screen.getByText(/Expires in/i)).toBeInTheDocument()
+    // Legacy desktops (no pair code) — block must NOT render.
+    expect(screen.queryByTestId("pair-code-block")).toBeNull()
+  })
+
+  it("renders the 6-digit code block alongside the QR when the desktop returns one", async () => {
+    const user = userEvent.setup()
+    const futureMs = Date.now() + 5 * 60_000
+    callSpy.mockImplementation(async (name: string) => {
+      if (name === "companion_server_status") return STATUS_STOPPED
+      if (name === "companion_issue_pair_jwt") {
+        return {
+          pairJwt: "header.payload.signature",
+          expiresAtMs: futureMs,
+          baseUrl: "http://192.168.1.42:7890",
+          pairCode: "742518",
+          pairCodeExpiresAtMs: futureMs,
+        }
+      }
+      return undefined as unknown as never
+    })
+
+    render(<CompanionSection />)
+    const button = await screen.findByRole("button", { name: /Generate QR/i })
+    await user.click(button)
+
+    const block = await screen.findByTestId("pair-code-block")
+    expect(block.getAttribute("data-expired")).toBe("false")
+    expect(screen.getByTestId("pair-code-digits")).toHaveTextContent("742518")
+    expect(screen.getByTestId("pair-code-copy")).toBeInTheDocument()
   })
 
   it("renders rows from listPairedDevices via useLiveQuery", async () => {
@@ -179,6 +208,78 @@ describe("CompanionSection", () => {
     })
     const rows = await listPairedDevices()
     expect(rows[0]?.revokedAt).toBeDefined()
+  })
+
+  it("pausing a device routes through the same biometric guard as revoke", async () => {
+    const user = userEvent.setup()
+    await addPairedDevice({
+      deviceId: "dev-pause",
+      label: "Phone",
+      platform: "ios",
+      pubkey: "k",
+      appVersion: "0.1.0",
+      nowMs: Date.now(),
+    })
+
+    const revokeIds: string[] = []
+    callSpy.mockImplementation(async (name: string, args?: unknown) => {
+      if (name === "companion_server_status") return STATUS_STOPPED
+      if (name === "companion_revoke_device") {
+        revokeIds.push((args as { deviceId: string }).deviceId)
+        return undefined as unknown as never
+      }
+      return undefined as unknown as never
+    })
+
+    render(<CompanionSection />)
+    const pauseBtn = await screen.findByRole("button", { name: /Pause Phone/i })
+    await user.click(pauseBtn)
+
+    // The guard's `fallthroughWhenUnavailable` default lets pause complete
+    // when no biometric is enrolled (jsdom). The Rust deny-list write must
+    // still fire — that's the bit a stolen-unlocked-desktop attacker uses.
+    await waitFor(() => {
+      expect(revokeIds).toEqual(["dev-pause"])
+    })
+    const rows = await listPairedDevices()
+    expect(rows[0]?.pausedAt).toBeDefined()
+    expect(rows[0]?.revokedAt).toBeUndefined()
+  })
+
+  it("resuming a paused device clears the deny-list entry", async () => {
+    const user = userEvent.setup()
+    const now = Date.now()
+    await addPairedDevice({
+      deviceId: "dev-resume",
+      label: "Phone",
+      platform: "ios",
+      pubkey: "k",
+      appVersion: "0.1.0",
+      nowMs: now - 60_000,
+    })
+    // Put the row in the paused state up-front so the Resume button renders.
+    const db = getDb()
+    await db.table("pairedDevices").update("dev-resume", { pausedAt: now })
+
+    const unrevokeIds: string[] = []
+    callSpy.mockImplementation(async (name: string, args?: unknown) => {
+      if (name === "companion_server_status") return STATUS_STOPPED
+      if (name === "companion_unrevoke_device") {
+        unrevokeIds.push((args as { deviceId: string }).deviceId)
+        return undefined as unknown as never
+      }
+      return undefined as unknown as never
+    })
+
+    render(<CompanionSection />)
+    const resumeBtn = await screen.findByRole("button", { name: /Resume Phone/i })
+    await user.click(resumeBtn)
+
+    await waitFor(() => {
+      expect(unrevokeIds).toEqual(["dev-resume"])
+    })
+    const rows = await listPairedDevices()
+    expect(rows[0]?.pausedAt).toBeUndefined()
   })
 
   it("renders 'No devices paired yet' empty state when the table is empty", async () => {

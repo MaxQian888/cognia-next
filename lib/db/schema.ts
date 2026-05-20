@@ -1270,6 +1270,43 @@ export class CogniaDB extends Dexie {
     // Pure additive — no upgrade hook needed; pre-v44 installs start with
     // an empty cursor table and the orchestrator falls back to `since: 0`.
     this.version(44).stores({ syncCursors: "&table, lastSyncAt, since" })
+
+    // v45 — IM connector Lark-first completeness pass (im-refactored-crayon
+    //   plan). Pure additive optional columns on `adapterInstances`; no
+    //   index changes, no row rewrites, no upgrade hook.
+    //
+    //   • `atResponseStrategy?: "always" | "mention_only" | "direct_only"` —
+    //     gates inbound Lark messages in `dispatchEnvelope` via the new
+    //     `lib/connectors/adapters/lark/at-gate.ts:shouldRespondToMessage`.
+    //     Rows without the field behave as `"mention_only"` (the safer
+    //     default for new Lark adapters); DMs (`chatType === "p2p"`) always
+    //     bypass the strategy regardless.
+    //   • `chatAllowlist?: string[]` / `chatBlocklist?: string[]` — same
+    //     gate. Allowlist non-empty means "only these chat_ids may respond";
+    //     blocklist hit means "never respond here".
+    //   • `lastWhoamiAt?: number` + `lastWhoamiResult?` — cached bot
+    //     identity probe written by
+    //     `lib/connectors/adapters/lark/whoami.ts:probeBotIdentity`. The
+    //     Settings Lark detail panel renders it so the operator can
+    //     confirm "connected to the right bot" without a second click.
+    //   • `userTokenStoredAt?: number` — flag indicating when an OAuth
+    //     user-access-token was persisted to the keyring under
+    //     `<adapterId>:user_token`. Used by the OAuth card to show
+    //     "Connected as <user>" vs "Connect with Lark".
+    //
+    //   None of these fields are indexed (all are filter-only blobs read
+    //   from the adapter row by primary key), so the bump is `stores({})`.
+    this.version(45).stores({})
+
+    // v46 — companion pause/resume affordance on `pairedDevices`. Adds an
+    //   optional `pausedAt?: number` column read by the Settings UI to
+    //   distinguish "temporarily blocked, can be resumed" from "revoked,
+    //   biometric required to undo". The Rust deny-list is what actually
+    //   enforces the block (paused devices are added to the same deny-list
+    //   as revoked ones, then removed on resume) — `pausedAt` is purely
+    //   the persistence layer's record of "why" it's in the deny-list, so
+    //   no new index is needed. Pure additive; no upgrade hook.
+    this.version(46).stores({})
   }
 
   sessionState!: Table<SessionStateRow, string>

@@ -39,6 +39,10 @@ export type ScheduledTaskType =
   // in the same `tasks` Dexie store are typed properly across the codebase.
   | "connection:scheduled:digest"
   | "connection:outbound:send"
+  // External Bridge subsystem registers `"wiki-rebuild"` via
+  // `registerTaskExecutor` in `lib/scheduler/executors/wiki-rebuild-executor.ts`.
+  // Listed here so cron-driven Wiki rebuild rows are typed properly.
+  | "wiki-rebuild"
 
 // Task execution status
 export type TaskExecutionStatus =
@@ -91,9 +95,22 @@ export interface BackupTaskPayload extends Record<string, unknown> {
   options?: BackupSelectionOptions
 }
 
+/**
+ * Payload for `wiki-rebuild` scheduled tasks. The schedule UI in
+ * `components/settings/external-bridge/wiki-rebuild-card.tsx` creates one
+ * task with this payload; the executor in
+ * `lib/scheduler/executors/wiki-rebuild-executor.ts` calls
+ * `runWikiRebuild({ force })` on each fire.
+ */
+export interface WikiRebuildTaskPayload extends Record<string, unknown> {
+  /** When true, ignore cached hashes and re-process every file. */
+  force?: boolean
+}
+
 export type ScheduledTaskPayload =
   | Record<string, unknown>
   | BackupTaskPayload
+  | WikiRebuildTaskPayload
   | ChatLikeTaskPayload
   | AgentTaskPayload
   | SkillTaskPayload

@@ -3,9 +3,11 @@
  */
 import {
   cancel,
+  checkPermission,
   ensureChannel,
   ensurePermission,
   listPending,
+  requestPermission,
   schedule,
 } from "./local-notifications"
 
@@ -52,6 +54,48 @@ describe("ensurePermission", () => {
       requestPermissions: jest.fn().mockResolvedValue({ display: "denied" }),
     })
     const out = await ensurePermission(async () => p)
+    expect(out).toEqual({ kind: "ok", value: "denied" })
+  })
+})
+
+describe("checkPermission", () => {
+  it("returns granted without calling requestPermissions", async () => {
+    const p = makePlugin()
+    const out = await checkPermission(async () => p)
+    expect(out).toEqual({ kind: "ok", value: "granted" })
+    expect(p.requestPermissions).not.toHaveBeenCalled()
+  })
+
+  it("returns prompt when display is prompt-with-rationale", async () => {
+    const p = makePlugin({
+      checkPermissions: jest.fn().mockResolvedValue({ display: "prompt-with-rationale" }),
+    })
+    const out = await checkPermission(async () => p)
+    expect(out).toEqual({ kind: "ok", value: "prompt" })
+  })
+
+  it("returns denied when display is denied", async () => {
+    const p = makePlugin({
+      checkPermissions: jest.fn().mockResolvedValue({ display: "denied" }),
+    })
+    const out = await checkPermission(async () => p)
+    expect(out).toEqual({ kind: "ok", value: "denied" })
+  })
+})
+
+describe("requestPermission", () => {
+  it("calls requestPermissions and returns granted", async () => {
+    const p = makePlugin()
+    const out = await requestPermission(async () => p)
+    expect(p.requestPermissions).toHaveBeenCalled()
+    expect(out).toEqual({ kind: "ok", value: "granted" })
+  })
+
+  it("returns denied when user rejects", async () => {
+    const p = makePlugin({
+      requestPermissions: jest.fn().mockResolvedValue({ display: "denied" }),
+    })
+    const out = await requestPermission(async () => p)
     expect(out).toEqual({ kind: "ok", value: "denied" })
   })
 })

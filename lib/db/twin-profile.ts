@@ -158,7 +158,12 @@ export async function upsertEntities(
   const profile = await ensureTwinProfile(twinId)
   const byName = new Map(profile.entities.map((e) => [e.name.toLowerCase(), e]))
   for (const entity of entities) {
-    byName.set(entity.name.toLowerCase(), entity)
+    const key = entity.name.toLowerCase()
+    const existing = byName.get(key)
+    // A pinned existing entity is preserved across re-distill — distill output
+    // for the same name is dropped so user edits / manual additions survive.
+    if (existing?.pinned) continue
+    byName.set(key, entity)
   }
   const merged: TwinProfile = {
     ...profile,
@@ -192,4 +197,198 @@ export async function resetTwinProfile(twinId: string): Promise<TwinProfile> {
   const row = emptyProfile(twinId)
   await getDb().twinProfile.put(row)
   return row
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-item CRUD + pin helpers — back the Persona browser (ADR-0003 follow-up).
+// All follow the existing load-modify-put pattern. ProfileEntity keys by
+// `name` (case-insensitive) so updates can rename the entity in place; the
+// other three kinds key by their stable `id`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function lowerEq(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase()
+}
+
+export async function addEntity(twinId: string, entity: ProfileEntity): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  const remaining = profile.entities.filter((e) => !lowerEq(e.name, entity.name))
+  const merged: TwinProfile = {
+    ...profile,
+    entities: [...remaining, entity],
+    updatedAt: Date.now(),
+  }
+  await getDb().twinProfile.put(merged)
+  return merged
+}
+
+export async function updateEntity(
+  twinId: string,
+  originalName: string,
+  next: ProfileEntity
+): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  let replaced = false
+  const entities = profile.entities.map((e) => {
+    if (lowerEq(e.name, originalName)) {
+      replaced = true
+      return next
+    }
+    return e
+  })
+  if (!replaced) entities.push(next)
+  const merged: TwinProfile = { ...profile, entities, updatedAt: Date.now() }
+  await getDb().twinProfile.put(merged)
+  return merged
+}
+
+export async function removeEntity(twinId: string, name: string): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  const entities = profile.entities.filter((e) => !lowerEq(e.name, name))
+  if (entities.length === profile.entities.length) return profile
+  const merged: TwinProfile = { ...profile, entities, updatedAt: Date.now() }
+  await getDb().twinProfile.put(merged)
+  return merged
+}
+
+export async function setEntityPinned(
+  twinId: string,
+  name: string,
+  pinned: boolean
+): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  let changed = false
+  const entities = profile.entities.map((e) => {
+    if (lowerEq(e.name, name) && (e.pinned ?? false) !== pinned) {
+      changed = true
+      return { ...e, pinned }
+    }
+    return e
+  })
+  if (!changed) return profile
+  const merged: TwinProfile = { ...profile, entities, updatedAt: Date.now() }
+  await getDb().twinProfile.put(merged)
+  return merged
+}
+
+export async function addPlaybook(twinId: string, playbook: Playbook): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  const remaining = profile.playbooks.filter((p) => p.id !== playbook.id)
+  const merged: TwinProfile = {
+    ...profile,
+    playbooks: [...remaining, playbook],
+    updatedAt: Date.now(),
+  }
+  await getDb().twinProfile.put(merged)
+  return merged
+}
+
+export async function updatePlaybook(
+  twinId: string,
+  playbookId: string,
+  next: Playbook
+): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  let replaced = false
+  const playbooks = profile.playbooks.map((p) => {
+    if (p.id === playbookId) {
+      replaced = true
+      return next
+    }
+    return p
+  })
+  if (!replaced) playbooks.push(next)
+  const merged: TwinProfile = { ...profile, playbooks, updatedAt: Date.now() }
+  await getDb().twinProfile.put(merged)
+  return merged
+}
+
+export async function removePlaybook(twinId: string, playbookId: string): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  const playbooks = profile.playbooks.filter((p) => p.id !== playbookId)
+  if (playbooks.length === profile.playbooks.length) return profile
+  const merged: TwinProfile = { ...profile, playbooks, updatedAt: Date.now() }
+  await getDb().twinProfile.put(merged)
+  return merged
+}
+
+export async function setPlaybookPinned(
+  twinId: string,
+  playbookId: string,
+  pinned: boolean
+): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  let changed = false
+  const playbooks = profile.playbooks.map((p) => {
+    if (p.id === playbookId && (p.pinned ?? false) !== pinned) {
+      changed = true
+      return { ...p, pinned }
+    }
+    return p
+  })
+  if (!changed) return profile
+  const merged: TwinProfile = { ...profile, playbooks, updatedAt: Date.now() }
+  await getDb().twinProfile.put(merged)
+  return merged
+}
+
+export async function addStyleSample(twinId: string, sample: StyleSample): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  const remaining = profile.styleSamples.filter((s) => s.id !== sample.id)
+  const merged: TwinProfile = {
+    ...profile,
+    styleSamples: [...remaining, sample],
+    updatedAt: Date.now(),
+  }
+  await getDb().twinProfile.put(merged)
+  return merged
+}
+
+export async function updateStyleSample(
+  twinId: string,
+  sampleId: string,
+  next: StyleSample
+): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  let replaced = false
+  const styleSamples = profile.styleSamples.map((s) => {
+    if (s.id === sampleId) {
+      replaced = true
+      return next
+    }
+    return s
+  })
+  if (!replaced) styleSamples.push(next)
+  const merged: TwinProfile = { ...profile, styleSamples, updatedAt: Date.now() }
+  await getDb().twinProfile.put(merged)
+  return merged
+}
+
+export async function removeStyleSample(twinId: string, sampleId: string): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  const styleSamples = profile.styleSamples.filter((s) => s.id !== sampleId)
+  if (styleSamples.length === profile.styleSamples.length) return profile
+  const merged: TwinProfile = { ...profile, styleSamples, updatedAt: Date.now() }
+  await getDb().twinProfile.put(merged)
+  return merged
+}
+
+export async function setStyleSamplePinned(
+  twinId: string,
+  sampleId: string,
+  pinned: boolean
+): Promise<TwinProfile> {
+  const profile = await ensureTwinProfile(twinId)
+  let changed = false
+  const styleSamples = profile.styleSamples.map((s) => {
+    if (s.id === sampleId && (s.pinned ?? false) !== pinned) {
+      changed = true
+      return { ...s, pinned }
+    }
+    return s
+  })
+  if (!changed) return profile
+  const merged: TwinProfile = { ...profile, styleSamples, updatedAt: Date.now() }
+  await getDb().twinProfile.put(merged)
+  return merged
 }

@@ -14,6 +14,7 @@ import type { PlatformAdapter } from "@/types/connectors"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { connectorsKeyringGet } from "@/lib/connectors/tauri/commands"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
+import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { createTelegramAdapter } from "./adapters/telegram"
 import { createDiscordAdapter } from "./adapters/discord"
 import { createSlackAdapter } from "./adapters/slack"
@@ -244,4 +245,101 @@ export async function buildOneBotAdapter(row: AdapterInstanceRow): Promise<Platf
     bearerToken: () => connectorsKeyringGet(row.id, "onebotBearer").then((t) => t ?? ""),
     expectedClient: settings.expectedClient,
   })
+}
+
+// ---------------------------------------------------------------------------
+// Lark self-bot open_id refresh (settings UI affordance)
+// ---------------------------------------------------------------------------
+
+export interface RefreshSelfBotOpenIdSuccess {
+  ok: true
+  openId: string
+}
+
+export interface RefreshSelfBotOpenIdFailure {
+  ok: false
+  reason: "not-lark" | "missing-credentials" | "tat-failed" | "api-failed"
+  message: string
+}
+
+export type RefreshSelfBotOpenIdResult = RefreshSelfBotOpenIdSuccess | RefreshSelfBotOpenIdFailure
+
+/**
+ * Re-run the `/open-apis/bot/v3/info` probe the adapter normally runs at
+ * startup, and persist the resolved `open_id` back to the adapter row's
+ * `settings.selfBotOpenId` so the next cold start can skip the probe.
+ *
+ * Surfaced as an explicit affordance in the Lark form (Identity section →
+ * "Refresh bot open_id") so when the silent startup probe fails the
+ * operator can see why instead of guessing why mention detection is
+ * degraded.
+ */
+export async function refreshSelfBotOpenId(adapterId: string): Promise<RefreshSelfBotOpenIdResult> {
+  const row = await getAdapterInstance(adapterId)
+  if (!row) {
+    return { ok: false, reason: "missing-credentials", message: `Adapter not found: ${adapterId}` }
+  }
+  if (row.type !== "lark") {
+    return {
+      ok: false,
+      reason: "not-lark",
+      message: `Adapter type ${row.type} does not have a self bot open_id`,
+    }
+  }
+
+  const appIdRaw = await connectorsKeyringGet(adapterId, "appId")
+  const appSecretRaw = await connectorsKeyringGet(adapterId, "appSecret")
+  const appId = appIdRaw ?? ""
+  const appSecret = appSecretRaw ?? ""
+  if (!appId || !appSecret) {
+    return {
+      ok: false,
+      reason: "missing-credentials",
+      message: "App ID and App Secret must be saved before refreshing the bot open_id",
+    }
+  }
+
+  let tat: string
+  try {
+    tat = await getTenantAccessToken({ appId, appSecret })
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "tat-failed",
+      message: err instanceof Error ? err.message : String(err),
+    }
+  }
+
+  try {
+    const resp = await connectorsHttpRequest({
+      url: "https://open.feishu.cn/open-apis/bot/v3/info",
+      method: "GET",
+      headers: { Authorization: `Bearer ${tat}` },
+    })
+    // Lark /open-apis/bot/v3/info returns `{code, msg, bot: {open_id, ...}}`
+    // (mirrors `whoami.ts`'s `LarkBotInfoResponse`). The earlier `data.open_id`
+    // shape was a misread of the docs and made this affordance always fail.
+    const parsed = JSON.parse(resp.body) as {
+      code?: number
+      msg?: string
+      bot?: { open_id?: string }
+    }
+    if (parsed.code !== 0 || !parsed.bot?.open_id) {
+      return {
+        ok: false,
+        reason: "api-failed",
+        message: parsed.msg ?? `Lark returned code ${parsed.code ?? "?"}`,
+      }
+    }
+    const openId = parsed.bot.open_id
+    const nextSettings = { ...(row.settings ?? {}), selfBotOpenId: openId }
+    await updateAdapterInstance(adapterId, { settings: nextSettings })
+    return { ok: true, openId }
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "api-failed",
+      message: err instanceof Error ? err.message : String(err),
+    }
+  }
 }

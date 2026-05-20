@@ -108,6 +108,27 @@ describe("runSyncDown", () => {
     expect(snapshotSyncStates().characters.since).toBe(0)
   })
 
+  it("never regresses the per-table cursor when a stale outcome lands late", async () => {
+    // ADR-0027 monotonic-cursor invariant: a targeted `opts.only` run and a
+    // full background pull share the same `stateMap[table]`. If the targeted
+    // run's outcome arrives AFTER the full run already advanced the cursor
+    // past it, the late writer must not regress `state.since`.
+    const transport = makeTransport()
+    const handler = jest.fn()
+    // First run advances cursor to 500.
+    handler.mockResolvedValueOnce(makeOkOutcome("characters", 1, 500))
+    // A subsequent stale outcome with nextSince=200 must be ignored.
+    handler.mockResolvedValueOnce(makeOkOutcome("characters", 1, 200))
+    const handlers = [{ table: "characters" as const, run: handler }]
+
+    await runSyncDown({ transport, handlers })
+    expect(snapshotSyncStates().characters.since).toBe(500)
+
+    await runSyncDown({ transport, handlers, only: ["characters"] })
+    // Cursor must stay at 500 — stale outcome ignored by the monotonic guard.
+    expect(snapshotSyncStates().characters.since).toBe(500)
+  })
+
   it("dedupes concurrent calls — second call reuses the inflight promise", async () => {
     const transport = makeTransport()
     let resolveHandler: (value: SyncOutcome) => void = () => {}

@@ -39,12 +39,35 @@ const DEFAULTS: Required<Omit<CircuitBreakerOptions, "now">> = {
 
 export type CircuitState = "closed" | "open" | "half_open"
 
+/**
+ * Inspectable snapshot of the breaker's internal state — added so the
+ * heartbeat probe can write circuit metadata into the audit log and the
+ * Health Detail panel can render it without holding a reference to the
+ * breaker itself.
+ */
+export interface CircuitBreakerSnapshot {
+  state: CircuitState
+  /** Wall-clock ms at which the breaker opened. `null` when closed. */
+  openedAt: number | null
+  /** Consecutive successes accumulated while half-open. */
+  halfOpenSuccesses: number
+  /** Failure rate (0–100) over the current sliding window. */
+  recentFailureRate: number
+  /** Number of events currently in the sliding window. */
+  eventCount: number
+}
+
 export interface CircuitBreaker {
   recordSuccess(): void
   recordFailure(): void
   state(): CircuitState
   /** Returns true when the caller is allowed to attempt a request. */
   canPass(): boolean
+  /**
+   * Take an inspectable snapshot of the breaker's internal state. Pure
+   * read — does not advance the sliding window or transition states.
+   */
+  snapshot(): CircuitBreakerSnapshot
 }
 
 interface EventRecord {
@@ -125,6 +148,23 @@ export function createCircuitBreaker(opts?: Partial<CircuitBreakerOptions>): Cir
     canPass(): boolean {
       const s = this.state()
       return s === "closed" || s === "half_open"
+    },
+
+    snapshot(): CircuitBreakerSnapshot {
+      // Make sure a cooldown-driven half-open transition is reflected first.
+      const liveState = this.state()
+      const now = clock()
+      pruneWindow(now)
+      const eventCount = events.length
+      const failures = eventCount === 0 ? 0 : events.filter((e) => !e.success).length
+      const recentFailureRate = eventCount === 0 ? 0 : (failures / eventCount) * 100
+      return {
+        state: liveState,
+        openedAt: liveState === "closed" ? null : openedAt,
+        halfOpenSuccesses,
+        recentFailureRate,
+        eventCount,
+      }
     },
   }
 }

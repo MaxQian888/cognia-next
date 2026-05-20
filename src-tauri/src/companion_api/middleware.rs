@@ -29,17 +29,19 @@
 //! Errors are silently absorbed — event delivery must not affect the response.
 
 use axum::{
-    extract::{Request, State},
-    http::StatusCode,
+    extract::{ConnectInfo, Request, State},
+    http::{HeaderValue, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
 };
 use serde::Deserialize;
 use serde_json::json;
+use std::net::SocketAddr;
 
 use super::{
     jwt::{verify, JwtError},
+    rate_limit::RateLimitDecision,
     SharedState,
 };
 
@@ -181,6 +183,59 @@ fn error_response(code: &str, message: &str) -> Response {
 }
 
 // ---------------------------------------------------------------------------
+// Pre-auth rate limit (defense in depth on the public_routes surface)
+// ---------------------------------------------------------------------------
+
+/// Axum middleware that token-buckets requests on the pre-auth pair surface
+/// by source IP. Wired into `server::build_router` for the three POST pair
+/// routes (`/auth/pair/issue`, `/auth/pair`, `/auth/pair/redeem-code`) so an
+/// unauthenticated LAN peer cannot brute-force the 6-digit pair-code
+/// keyspace.
+///
+/// Uses [`super::pre_auth_rate_limiter`] — a process-global limiter with
+/// `5 burst, 20 req/min` so the many `CompanionState` test constructors
+/// aren't forced to thread a per-IP limiter alongside the per-device one.
+///
+/// On rejection: HTTP 429 with `Retry-After` and a `{code, message}` body
+/// matching the envelope shape used elsewhere in this module.
+pub async fn pre_auth_rate_limit(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    request: Request,
+    next: Next,
+) -> Response {
+    // Loopback is the desktop talking to itself (e.g. the QR generator
+    // calling `/auth/pair/issue`) — no realistic brute-force surface, and
+    // gating it would deplete the shared bucket during integration tests
+    // that issue many requests from 127.0.0.1. The threat model targets
+    // *other-host* peers reachable when `bind_loopback_only=false`.
+    let ip = addr.ip();
+    if ip.is_loopback() {
+        return next.run(request).await;
+    }
+    let limiter = super::pre_auth_rate_limiter();
+    let key = ip.to_string();
+    match limiter.check(&key) {
+        RateLimitDecision::Accept => next.run(request).await,
+        RateLimitDecision::Reject { retry_after } => {
+            let mut resp = (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(json!({
+                    "code": "rate_limited",
+                    "message": "too many pair attempts, slow down",
+                })),
+            )
+                .into_response();
+            // `as_secs()` is fine — the limiter rounds up internally so the
+            // value is at least 1.
+            if let Ok(hv) = HeaderValue::from_str(&retry_after.as_secs().to_string()) {
+                resp.headers_mut().insert("retry-after", hv);
+            }
+            resp
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -212,6 +267,7 @@ mod tests {
         Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
+            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
@@ -401,6 +457,91 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 200);
         let body = body_json(resp).await;
         assert_eq!(body["device_id"], "qs-device");
+    }
+
+    // ── Pre-auth rate limit ──────────────────────────────────────────────────
+
+    use axum::extract::ConnectInfo;
+    use std::net::SocketAddr;
+
+    fn build_metered_router() -> Router {
+        async fn ok_handler() -> impl IntoResponse {
+            Json(json!({ "ok": true }))
+        }
+        Router::new()
+            .route("/metered", get(ok_handler))
+            .layer(from_fn(super::pre_auth_rate_limit))
+    }
+
+    fn metered_request(ip: &str) -> Request<Body> {
+        let mut req = Request::builder()
+            .uri("/metered")
+            .body(Body::empty())
+            .unwrap();
+        let addr: SocketAddr = format!("{ip}:54321").parse().expect("addr parses");
+        req.extensions_mut().insert(ConnectInfo(addr));
+        req
+    }
+
+    #[tokio::test]
+    async fn loopback_bypasses_pre_auth_rate_limit() {
+        let router = build_metered_router();
+        // 50 sequential loopback requests — every one should pass because
+        // is_loopback() short-circuits the limiter entirely. Without the
+        // bypass, the shared process-global bucket would 429 after ~5.
+        for i in 0..50 {
+            let resp = router
+                .clone()
+                .oneshot(metered_request("127.0.0.1"))
+                .await
+                .unwrap();
+            assert_eq!(resp.status().as_u16(), 200, "loopback request {i}");
+        }
+    }
+
+    #[tokio::test]
+    async fn non_loopback_eventually_returns_429_with_retry_after() {
+        // Use a per-test IP so the shared process-global bucket starts
+        // fresh from this caller's perspective.
+        let ip = "192.0.2.137";
+        let router = build_metered_router();
+
+        // Drain the burst (capacity=5). Some of these are expected to
+        // pass; we don't enforce an exact accept count because other
+        // tests in the same process might have touched the limiter.
+        for _ in 0..20 {
+            let _ = router
+                .clone()
+                .oneshot(metered_request(ip))
+                .await
+                .unwrap();
+        }
+
+        // After draining, at least one 429 with Retry-After must appear.
+        let mut saw_429 = false;
+        for _ in 0..5 {
+            let resp = router
+                .clone()
+                .oneshot(metered_request(ip))
+                .await
+                .unwrap();
+            if resp.status().as_u16() == 429 {
+                let retry_after = resp
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok());
+                assert!(
+                    retry_after.unwrap_or(0) >= 1,
+                    "Retry-After should be a positive integer"
+                );
+                let body = body_json(resp).await;
+                assert_eq!(body["code"], "rate_limited");
+                saw_429 = true;
+                break;
+            }
+        }
+        assert!(saw_429, "non-loopback brute force must trip the limiter");
     }
 
     // ── Header takes precedence over query string ────────────────────────────

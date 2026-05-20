@@ -24,6 +24,7 @@ import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-ma
 import { startLongPoll } from "./transport-longpoll"
 import { startWebhookTransport } from "./transport-webhook"
 import { getBus } from "@/lib/connectors/bus"
+import { gateInboundEvent } from "@/lib/connectors/at-gate"
 
 export interface TelegramAdapterOptions {
   id: string
@@ -199,6 +200,8 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
           // Regular message / edit / reaction → message event.
           const event = parseTelegramUpdate(opts.id, opts.selfId, update)
           if (event) {
+            // im-refactored-crayon — at-strategy + chat allow/blocklist gate.
+            if (!(await gateInboundEvent(opts.id, event))) continue
             lastActivityAt = Date.now()
             await ctx.emit(event)
           }

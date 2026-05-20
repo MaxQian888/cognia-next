@@ -42,6 +42,7 @@ import {
   sendToOneBot,
   type UnlistenFn,
 } from "./transport-reverse-ws"
+import { gateInboundEvent } from "@/lib/connectors/at-gate"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -188,6 +189,8 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
       currentVariant = result.variant
 
       if (result.parsed !== null) {
+        // im-refactored-crayon — at-strategy + chat allow/blocklist gate.
+        if (!(await gateInboundEvent(opts.id, result.parsed))) return
         lastActivityAt = Date.now()
         await ctx.emit(result.parsed)
       }

@@ -2,7 +2,14 @@
  * @jest-environment jsdom
  */
 
-import { pickProbeTargets, scanLan, type DiscoveredServer } from "./lan-scanner"
+import {
+  PROBE_PORTS,
+  pickProbeTargets,
+  resolveProbePorts,
+  scanLan,
+  type DiscoveredServer,
+} from "./lan-scanner"
+import type { HealthzResult } from "./healthz"
 
 type MdnsHandler = (svc: {
   name: string
@@ -62,7 +69,7 @@ describe("scanLan", () => {
         id: "192.168.1.5:7890",
         ip: "192.168.1.5",
         port: 7890,
-        baseUrl: "http://192.168.1.5:7890",
+        baseUrl: "https://192.168.1.5:7890",
         source: "history",
         discoveredAt: 0,
       },
@@ -130,7 +137,7 @@ describe("scanLan", () => {
     const fetchMock = makeFetch((url) => {
       calls.push(url)
       // Only one IP in the /24 returns a cognia 401; the rest return random shape.
-      if (url.startsWith("http://192.168.5.42:7890")) return cogniaResp({ code: "x" })
+      if (url.startsWith("https://192.168.5.42:7890")) return cogniaResp({ code: "x" })
       return okResp()
     })
     const result = await scanLan({
@@ -318,7 +325,7 @@ describe("scanLan", () => {
     const calls: string[] = []
     const fetchMock = makeFetch((url) => {
       calls.push(url)
-      if (url.startsWith("http://10.0.2.2:7890")) return cogniaResp()
+      if (url.startsWith("https://10.0.2.2:7890")) return cogniaResp()
       return okResp()
     })
     const result = await scanLan({
@@ -328,12 +335,192 @@ describe("scanLan", () => {
       mdnsSubscribe: mdns.subscribe as never,
       getLocalIps: async () => ["10.0.2.15"],
       fetchImpl: fetchMock,
+      healthzFetcher: async () => null,
     })
-    // Exactly one probe — not 254. This is what unfreezes the Discover step.
-    expect(calls).toHaveLength(1)
-    expect(calls[0]).toBe("http://10.0.2.2:7890/api/v1/whoami")
+    // /24 fan-out is short-circuited — we hit the gateway alias 10.0.2.2
+    // only, but now across PROBE_PORTS (7890/7891/7900/8443) so dev
+    // overrides still surface. No 254-IP scan.
+    const whoamiCalls = calls.filter((u) => u.endsWith("/api/v1/whoami"))
+    const probedIps = new Set(whoamiCalls.map((u) => new URL(u).hostname))
+    expect(probedIps).toEqual(new Set(["10.0.2.2"]))
+    // PROBE_PORTS coverage on the emulator host alias.
+    for (const p of PROBE_PORTS) {
+      expect(whoamiCalls.some((u) => u === `https://10.0.2.2:${p}/api/v1/whoami`)).toBe(true)
+    }
+    // 7890 returned cognia; the other ports returned okResp (non-401) so
+    // only the 7890 entry surfaces.
     expect(result).toHaveLength(1)
     expect(result[0].id).toBe("10.0.2.2:7890")
+  })
+})
+
+describe("scanLan — paired tier and multi-port", () => {
+  it("layers paired devices first and outranks probe hits on the same id", async () => {
+    const mdns = makeMdns()
+    const fetchMock = makeFetch(() => cogniaResp())
+    const onFound = jest.fn()
+    const result = await scanLan({
+      signal: new AbortController().signal,
+      onFound,
+      mdnsWindowMs: 5,
+      mdnsSubscribe: mdns.subscribe as never,
+      getLocalIps: async () => ["192.168.1.5"],
+      fetchImpl: fetchMock,
+      probeConcurrency: 32,
+      paired: [
+        {
+          ip: "192.168.1.5",
+          port: 7890,
+          fingerprint: "PAIRED-FP",
+          label: "Home Desktop",
+          lastSeenAt: 123,
+        },
+      ],
+      // Healthz returns ok so it cannot regress paired tier back to probe.
+      healthzFetcher: async () => null,
+    })
+    const entry = result.find((s) => s.id === "192.168.1.5:7890")
+    expect(entry?.source).toBe("paired")
+    expect(entry?.fingerprint).toBe("PAIRED-FP")
+    expect(entry?.hostname).toBe("Home Desktop")
+    // First onFound call should be the paired entry (rank-4 wins all
+    // subsequent same-id emits).
+    expect(onFound).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ source: "paired", id: "192.168.1.5:7890" })
+    )
+  })
+
+  it("expands paired-IP probes across all PROBE_PORTS", async () => {
+    const mdns = makeMdns()
+    const calls = new Set<string>()
+    const fetchMock = makeFetch((url) => {
+      calls.add(url)
+      return okResp()
+    })
+    await scanLan({
+      signal: new AbortController().signal,
+      onFound: jest.fn(),
+      mdnsWindowMs: 5,
+      mdnsSubscribe: mdns.subscribe as never,
+      getLocalIps: async () => ["10.0.2.15"],
+      fetchImpl: fetchMock,
+      probeConcurrency: 16,
+      paired: [{ ip: "10.0.2.2" }],
+      healthzFetcher: async () => null,
+    })
+    // Emulator host alias + paired status → all 4 PROBE_PORTS.
+    for (const p of PROBE_PORTS) {
+      expect(calls.has(`https://10.0.2.2:${p}/api/v1/whoami`)).toBe(true)
+    }
+  })
+
+  it("enriches a probe hit with fingerprint from healthz", async () => {
+    const mdns = makeMdns()
+    const fetchMock = makeFetch(() => cogniaResp())
+    const onFound = jest.fn()
+    const healthzFetcher = jest.fn(
+      async (): Promise<HealthzResult> => ({
+        version: "0.5.0",
+        fingerprint: "HEALTHZ-FP",
+        advertisedPort: 7890,
+        serverId: "0123456789abcdef0123456789abcdef",
+      })
+    )
+    const result = await scanLan({
+      signal: new AbortController().signal,
+      onFound,
+      mdnsWindowMs: 5,
+      mdnsSubscribe: mdns.subscribe as never,
+      getLocalIps: async () => ["192.168.6.5"],
+      fetchImpl: fetchMock,
+      probeConcurrency: 64,
+      healthzFetcher: healthzFetcher as never,
+    })
+    const probed = result.find((s) => s.source === "probe")
+    expect(probed?.fingerprint).toBe("HEALTHZ-FP")
+    expect(probed?.serverId).toBe("0123456789abcdef0123456789abcdef")
+    // onFound should fire twice for the same id: the initial probe hit
+    // (no fingerprint) and the upgraded entry (fingerprint enriched).
+    const matching = onFound.mock.calls.filter(([s]: [DiscoveredServer]) => s.id === probed!.id)
+    expect(matching.length).toBe(2)
+    expect(matching[0][0].fingerprint).toBeUndefined()
+    expect(matching[1][0].fingerprint).toBe("HEALTHZ-FP")
+  })
+
+  it("falls back gracefully when healthz returns null", async () => {
+    const mdns = makeMdns()
+    const fetchMock = makeFetch(() => cogniaResp())
+    const result = await scanLan({
+      signal: new AbortController().signal,
+      onFound: jest.fn(),
+      mdnsWindowMs: 5,
+      mdnsSubscribe: mdns.subscribe as never,
+      getLocalIps: async () => ["192.168.6.5"],
+      fetchImpl: fetchMock,
+      probeConcurrency: 64,
+      healthzFetcher: async () => null,
+    })
+    const probed = result.find((s) => s.source === "probe")
+    expect(probed?.fingerprint).toBeUndefined()
+    expect(probed?.serverId).toBeUndefined()
+  })
+
+  it("does not regress paired entry back to probe on enrichment", async () => {
+    // Paired ranks above probe; even if healthz returns valid data the
+    // emit must not downgrade the paired tier.
+    const mdns = makeMdns()
+    const fetchMock = makeFetch(() => cogniaResp())
+    const healthzFetcher = jest.fn(
+      async (): Promise<HealthzResult> => ({
+        version: "0.5.0",
+        fingerprint: "HEALTHZ-FP",
+        advertisedPort: 7890,
+        serverId: "deadbeefdeadbeefdeadbeefdeadbeef",
+      })
+    )
+    const result = await scanLan({
+      signal: new AbortController().signal,
+      onFound: jest.fn(),
+      mdnsWindowMs: 5,
+      mdnsSubscribe: mdns.subscribe as never,
+      getLocalIps: async () => ["192.168.6.5"],
+      fetchImpl: fetchMock,
+      probeConcurrency: 64,
+      paired: [{ ip: "192.168.6.5", port: 7890, fingerprint: "PAIRED-FP" }],
+      healthzFetcher: healthzFetcher as never,
+    })
+    const entry = result.find((s) => s.id === "192.168.6.5:7890")
+    expect(entry?.source).toBe("paired")
+    expect(entry?.fingerprint).toBe("PAIRED-FP")
+  })
+})
+
+describe("resolveProbePorts", () => {
+  it("returns only the primary port for a generic LAN IP", () => {
+    expect(resolveProbePorts("192.168.1.7", [], 7890)).toEqual([7890])
+  })
+
+  it("expands paired IPs to the full PROBE_PORTS set", () => {
+    const out = resolveProbePorts("192.168.1.7", [{ ip: "192.168.1.7" }], 7890)
+    for (const p of PROBE_PORTS) {
+      expect(out).toContain(p)
+    }
+  })
+
+  it("expands the Android emulator host alias even without a paired record", () => {
+    const out = resolveProbePorts("10.0.2.2", [], 7890)
+    for (const p of PROBE_PORTS) {
+      expect(out).toContain(p)
+    }
+  })
+
+  it("dedupes the primary port when it appears in PROBE_PORTS", () => {
+    // Primary 7890 is already in PROBE_PORTS — must not appear twice.
+    const out = resolveProbePorts("10.0.2.2", [], 7890)
+    const counts = new Map<number, number>()
+    for (const p of out) counts.set(p, (counts.get(p) ?? 0) + 1)
+    for (const [, c] of counts) expect(c).toBe(1)
   })
 })
 
@@ -361,11 +548,25 @@ describe("pickProbeTargets", () => {
     expect(pickProbeTargets(["10.0.2.15"])).toEqual(["10.0.2.2"])
   })
 
+  it("short-circuits when every IP is in the 10.0.2.x emulator subnet", () => {
+    // WebRTC ICE can return the gateway (10.0.2.2) or other virtual addresses
+    // instead of the guest IP (10.0.2.15). Probing the full /24 is still wasteful.
+    expect(pickProbeTargets(["10.0.2.2"])).toEqual(["10.0.2.2"])
+    expect(pickProbeTargets(["10.0.2.2", "10.0.2.3"])).toEqual(["10.0.2.2"])
+    expect(pickProbeTargets(["10.0.2.7", "10.0.2.8"])).toEqual(["10.0.2.2"])
+  })
+
   it("does NOT short-circuit when the emulator IP is mixed with a real LAN IP", () => {
     // Defensive: a multi-NIC device that happens to expose 10.0.2.15 alongside
     // a real LAN address should still get the full probe over the LAN side.
     const out = pickProbeTargets(["10.0.2.15", "192.168.1.7"])
     expect(out.length).toBeGreaterThan(200)
     expect(out).toContain("192.168.1.1")
+  })
+
+  it("does NOT short-circuit a real LAN IP that happens to start with 10.", () => {
+    const out = pickProbeTargets(["10.1.0.5"])
+    expect(out.length).toBe(253)
+    expect(out).toContain("10.1.0.1")
   })
 })

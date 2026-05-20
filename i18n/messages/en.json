@@ -921,13 +921,163 @@
       "expandPreview": "Expand preview"
     },
     "sourcesPart": {
-      "usedSources": "{count, plural, =0 {No sources} =1 {Used 1 source} other {Used # sources}}"
+      "usedSources": "{count, plural, =0 {No sources} =1 {Used 1 source} other {Used # sources}}",
+      "retrievedChunksHeader": "Retrieved chunks ({count})",
+      "styleSamplesHeader": "Style samples ({count})",
+      "viewSource": "View source",
+      "originLabel": {
+        "anthropic": "Web",
+        "twinRag": "Twin",
+        "twinStyle": "Style",
+        "footnote": "Note"
+      }
     },
     "mcp": {
       "wikiSearch": {
         "noResults": "No results"
       }
     }
+  },
+  "discover": {
+    "title": "Discover",
+    "search": "Search discover…",
+    "searchAria": "Search discover",
+    "featured": "Featured",
+    "builtInBadge": "Built-in",
+    "memberCount": "{count} agents",
+    "createCharacter": "Create character",
+    "emptyCharacters": "No characters yet — create one on the desktop.",
+    "emptyTeams": "No teams yet.",
+    "emptySkills": "No skills yet.",
+    "emptyPlugins": "No plugins installed.",
+    "emptyTwinDrafts": "No pending twin drafts.",
+    "emptyFiltered": "No matches for \"{query}\".",
+    "categories": {
+      "characters": "Characters",
+      "teams": "Teams",
+      "skills": "Skills",
+      "plugins": "Plugins",
+      "twinDrafts": "Twin drafts",
+      "twinIngest": "Twin ingest"
+    },
+    "groups": {
+      "agents": "Agents",
+      "extensions": "Extensions",
+      "templates": "Templates",
+      "twin": "Twin",
+      "aria": "Discover categories"
+    },
+    "inspector": {
+      "title": "Details",
+      "empty": "Select an item to see its details.",
+      "aria": "Details panel",
+      "openFull": "Open full page",
+      "itemCount": "{count, plural, =0 {No items} =1 {1 item} other {# items}}",
+      "enable": "Enabled",
+      "disable": "Disabled",
+      "close": "Close",
+      "twinSourceMeta": "{bytes} bytes · {chunks, plural, =0 {no chunks} =1 {1 chunk} other {# chunks}}",
+      "twinDraftFallbackName": "{kind} draft"
+    },
+    "card": {
+      "twinSourceDescription": "{kind} · {chunks, plural, =0 {no chunks} =1 {1 chunk} other {# chunks}}",
+      "twinDraftFallbackName": "{kind} draft"
+    },
+    "empty": {
+      "noQuery": "Nothing here yet."
+    },
+    "grid": {
+      "aria": "{category} list",
+      "loading": "Loading…"
+    },
+    "searchScope": "Search {category}…",
+    "emptyMcpTools": "No MCP servers configured.",
+    "emptyConnectors": "No connectors available.",
+    "emptyOcrProviders": "No OCR providers registered.",
+    "emptyWorkflowTemplates": "No workflow templates available.",
+    "connectorLabels": {
+      "telegram": "Telegram",
+      "discord": "Discord",
+      "slack": "Slack",
+      "lark": "Lark",
+      "onebot": "QQ (OneBot)",
+      "dingtalk": "DingTalk",
+      "wecom": "WeCom",
+      "wechat-oa": "WeChat OA",
+      "qq-official": "QQ Official",
+      "email": "Email",
+      "matrix": "Matrix",
+      "kook": "KOOK",
+      "line": "LINE",
+      "mattermost": "Mattermost",
+      "github": "GitHub Delivery"
+    },
+    "connectorDescriptions": {
+      "telegram": "Bot API for chats, channels, and groups.",
+      "discord": "Bot integration for servers and DMs.",
+      "slack": "Block Kit integration for workspaces.",
+      "lark": "Interactive cards + bot for Feishu / Lark.",
+      "onebot": "Reverse-WebSocket bridge for QQ via OneBot.",
+      "dingtalk": "DingTalk workspace bot (planned).",
+      "wecom": "WeCom internal-app bot (planned).",
+      "wechat-oa": "WeChat Official Account integration (planned).",
+      "qq-official": "QQ Official Robot platform (planned).",
+      "email": "Inbound + outbound mail bridge (planned).",
+      "matrix": "Federated Matrix bridge (planned).",
+      "kook": "KOOK voice / text bot (planned).",
+      "line": "LINE messaging bot (planned).",
+      "mattermost": "Mattermost workspace bot (planned).",
+      "github": "PR / Issue / Release events routed to the inbox."
+    },
+    "connectorStatus": {
+      "stable": "Stable",
+      "beta": "Beta",
+      "planned": "Planned"
+    },
+    "ocrCategories": {
+      "document-cloud": "Document cloud",
+      "llm-vision": "LLM vision",
+      "specialist": "Specialist",
+      "lark": "Lark",
+      "local": "Local engine"
+    },
+    "ocrBadge": {
+      "needsCredentials": "Needs credentials"
+    },
+    "marketplace": {
+      "browse": "Browse marketplace",
+      "title": "Plugin marketplace",
+      "searchPlaceholder": "Search plugins…",
+      "loading": "Loading marketplace…",
+      "empty": "No plugins match this search.",
+      "installed": "Installed",
+      "install": "Install",
+      "uninstall": "Uninstall",
+      "installSuccess": "{name} installed.",
+      "verified": "Verified",
+      "desktopOnly": "Install from the desktop app.",
+      "uninstallSuccess": "{name} uninstalled."
+    },
+    "emptyTwinIngest": "No twin sources yet — add one from the Twin runtime.",
+    "chipStripAria": "Discover categories",
+    "sortFilter": {
+      "trigger": "Sort & filter",
+      "title": "Sort & filter",
+      "sortLabel": "Sort by",
+      "filterLabel": "Filter",
+      "reset": "Reset",
+      "sort": {
+        "name": "Name",
+        "recent": "Most recent"
+      },
+      "filter": {
+        "all": "All",
+        "installed": "Installed",
+        "enabled": "Enabled",
+        "builtin": "Built-in"
+      }
+    },
+    "connectorInstanceCount": "{count, plural, =0 {No instances} =1 {1 configured} other {# configured}}"
   },
   "import": {
     "dialog": {
@@ -1436,23 +1586,142 @@
       "goals": "Persistent chat goals (ADR-0019). Set an objective with /goal and the agent auto-continues until a judge confirms it's done, or budgets / timeouts kick in."
     },
     "externalBridge": {
-      "wikiIndex": "Wiki Index",
-      "rebuildWiki": "Rebuild Wiki",
-      "forceRebuild": "Full rebuild",
-      "forceRebuildDesc": "Ignore cached hashes — re-process every file.",
-      "lastBuild": "Last build",
-      "articleCount": "Articles",
-      "never": "Never",
-      "rebuilding": "Indexing…",
-      "scope": "Scope",
-      "generator": "Generator",
-      "rebuildConfirmTitle": "Rebuild Wiki?",
-      "rebuildConfirmDesc": "This will re-index the Cognia codebase and consume LLM API quota. Continue?",
-      "rebuildConfirmDescForce": "This will re-index the entire codebase from scratch. All existing articles will be replaced. This may take several minutes and consume LLM API quota.",
-      "rebuildCancel": "Cancel",
-      "rebuildResult": "Wiki rebuilt: {added} new, {changed} updated, {removed} removed, {errors} failed",
-      "webModeWarning": "Wiki rebuild requires the Tauri desktop app.",
-      "noApiKeyError": "No LLM API key configured. Add one in Settings → Providers."
+      "wikiIndex": {
+        "title": "Wiki Index",
+        "description": "Index the Cognia codebase so external agents can query it via MCP.",
+        "descriptionWeb": "Wiki rebuild requires the Tauri desktop app.",
+        "rebuildWiki": "Rebuild",
+        "rebuildAria": "Rebuild the Cognia wiki",
+        "forceRebuild": "Full rebuild",
+        "forceRebuildDesc": "Ignore cached hashes — re-process every file.",
+        "forceRebuildAria": "Toggle full rebuild",
+        "lastBuild": "Last build",
+        "articleCount": "Articles",
+        "never": "Never",
+        "rebuilding": "Indexing…",
+        "scope": "Scope",
+        "generator": "Generator",
+        "rebuildConfirmTitle": "Rebuild Wiki?",
+        "rebuildConfirmDesc": "This will index changed files since the last build. Only modified modules will be re-processed.",
+        "rebuildConfirmDescForce": "This will re-index the entire codebase from scratch. All existing articles will be replaced.",
+        "rebuildConfirmCommonHint": "This may take several minutes and consume LLM API quota.",
+        "rebuildCancel": "Cancel",
+        "rebuildResult": "Last result ({duration})",
+        "resultAdded": "added",
+        "resultChanged": "changed",
+        "resultRemoved": "removed",
+        "resultUnchanged": "unchanged",
+        "resultErrors": "errors",
+        "errorListSummary": "{count, plural, one {# error} other {# errors}}",
+        "webModeWarning": "Wiki rebuild requires the Tauri desktop app.",
+        "noApiKeyError": "No LLM API key configured. Add one in Settings → Providers.",
+        "toastRebuilt": "Wiki rebuilt: {summary} ({duration})",
+        "toastRebuildFailed": "Rebuild failed: {message}",
+        "summaryAdded": "{count} added",
+        "summaryChanged": "{count} changed",
+        "summaryRemoved": "{count} removed",
+        "summaryErrors": "{count} failed",
+        "summaryNoChanges": "no changes",
+        "scheduleTitle": "Schedule",
+        "scheduleHelp": "Automatic rebuilds run via the desktop scheduler. Daily runs at 03:00 local; Weekly runs Sunday 03:00. Custom takes a 5-field cron expression.",
+        "scheduleSave": "Save",
+        "scheduleSaveAria": "Save wiki rebuild schedule",
+        "scheduleModeLabel": "Frequency",
+        "scheduleMode": {
+          "off": "Off",
+          "daily": "Daily",
+          "weekly": "Weekly",
+          "custom": "Custom"
+        },
+        "scheduleCustomCronLabel": "Cron expression",
+        "scheduleForceLabel": "Full rebuild on each fire",
+        "scheduleForceAria": "Toggle full-rebuild flag on scheduled fires",
+        "scheduleInvalidCron": "Invalid cron expression: {expression}",
+        "scheduleCleared": "Wiki rebuild schedule cleared.",
+        "scheduleAction": {
+          "created": "Wiki rebuild schedule created.",
+          "updated": "Wiki rebuild schedule updated."
+        }
+      },
+      "loading": "Loading…",
+      "badgeWeb": "web",
+      "badgeLive": "live",
+      "badgeIdle": "idle",
+      "scopeDescriptions": {
+        "wiki:cognia": "Public Cognia code wiki — safe to expose.",
+        "wiki:user-repo": "Wiki for user-supplied repos. Phase 3 — disabled in Phase 1.",
+        "rag:cognia": "Code-level retrieval over Cognia source.",
+        "rag:user-repo": "Retrieval over user-supplied repos. Phase 3 — disabled.",
+        "rag:twin": "⚠ Retrieval over your digital twin's chunks (personal documents / chat / code). Default OFF.",
+        "runtime:skills": "⚠ Exposes your installed skills' content.",
+        "runtime:characters": "⚠ Exposes character configs (may contain personal prompts).",
+        "runtime:twins": "⚠ Exposes Twin profiles. PII redaction has run, but review before enabling.",
+        "runtime:plugins": "Exposes the list and metadata of installed plugins.",
+        "runtime:agent-teams": "Exposes agent-team definitions.",
+        "mcp:computer-use": "⚠ Drives the host computer (mouse / keyboard / screenshot) from external coding agents. Honours Settings → Automation → Permissions; per-call tier surfaces the consent overlay."
+      },
+      "server": {
+        "title": "MCP server",
+        "toggleAriaLabel": "Enable MCP server",
+        "statusHttpListening": "HTTP transport listening on 127.0.0.1:{port}.",
+        "statusStdioActive": "Stdio transport active. Tauri HTTP server is offline — toggle off and on to restart.",
+        "statusOff": "Server is off. No external traffic accepted.",
+        "bearerTokenLabel": "Bearer token (HTTP only)",
+        "tokenNone": "(none)",
+        "show": "Show",
+        "hide": "Hide",
+        "copyTokenAria": "Copy token",
+        "rotateTokenAria": "Rotate token",
+        "regenerateWarning": "⚠ Regenerating invalidates the old token immediately.",
+        "toastServerStarted": "MCP HTTP server listening on 127.0.0.1:{port}",
+        "toastServerStopped": "MCP server stopped.",
+        "toastTokenRegenerated": "New token generated. Old token is now invalid.",
+        "toastTokenCopied": "Token copied to clipboard."
+      },
+      "scopes": {
+        "title": "Permission scopes",
+        "description": "Each scope is opt-in. Default install ships with only the public-code wiki scopes enabled.",
+        "toggleAria": "Toggle {scope}"
+      },
+      "setup": {
+        "title": "Setup snippet",
+        "description": "Pick a client and paste the snippet into its MCP configuration file. HTTP transport requires the Tauri sidecar to be running.",
+        "clientLabel": "Client",
+        "copy": "Copy",
+        "copyAria": "Copy snippet to clipboard",
+        "toastCopied": "Snippet copied.",
+        "variants": {
+          "claude-desktop-stdio": "Claude Desktop (stdio)",
+          "claude-desktop-http": "Claude Desktop (HTTP)",
+          "cursor": "Cursor",
+          "goose": "Goose"
+        },
+        "variantHelp": {
+          "claude-desktop-stdio": "Edit ~/Library/Application Support/Claude/claude_desktop_config.json (macOS) or %APPDATA%/Claude/claude_desktop_config.json (Windows). Restart Claude Desktop after saving.",
+          "claude-desktop-http": "Edit Claude Desktop's claude_desktop_config.json and ensure the bridge HTTP transport is running. The bearer token rotates with the regenerate button above.",
+          "cursor": "Save to ~/.cursor/mcp.json (global) or <project>/.cursor/mcp.json (per-project). Cursor picks the file up on restart.",
+          "goose": "Save to ~/.config/goose/config.yaml. Run goose configure to verify the extension is detected."
+        }
+      },
+      "audit": {
+        "title": "Recent MCP calls",
+        "description": "Newest 50 calls. Capped at 5000 total — older rows are pruned automatically.",
+        "clear": "Clear",
+        "clearAria": "Clear audit log",
+        "clearConfirmTitle": "Clear MCP audit log?",
+        "clearConfirmDesc": "This removes all {count} rows from the audit log. The history cannot be recovered.",
+        "clearCancel": "Cancel",
+        "clearConfirm": "Clear log",
+        "empty": "No calls yet.",
+        "time": "Time",
+        "tool": "Tool",
+        "scope": "Scope",
+        "status": "Status",
+        "latency": "Latency",
+        "statusOk": "OK",
+        "statusDeny": "DENY",
+        "toastCleared": "Audit log cleared."
+      }
     },
     "network": {
       "title": "Network Proxy",
@@ -3531,6 +3800,8 @@
           "backupCompleted": "A backup run finished successfully.",
           "workflowCompleted": "A scheduled workflow finished.",
           "agentCompleted": "An agent task finished.",
+          "connectionScheduledDigest": "A scheduled connection digest was published.",
+          "connectionOutboundSend": "An outbound message was sent through a connector.",
           "custom": "Free-form event — typically posted from external tooling."
         }
       }
@@ -3587,7 +3858,59 @@
         "enabled": "Enabled",
         "disabled": "Disabled",
         "configure": "Configure",
-        "configureAria": "Configure {name}"
+        "configureAria": "Configure {name}",
+        "pendingBadgeAria": "{count} message(s) waiting to send",
+        "detail": {
+          "noSelection": "Select an adapter on the left to see its configuration, health, conversations, and audit log.",
+          "adapterMissing": "Adapter row not found. It may have been deleted in another tab.",
+          "editCredentials": "Edit credentials"
+        },
+        "detailTabs": {
+          "config": "Config",
+          "health": "Health",
+          "conversations": "Conversations",
+          "audit": "Audit",
+          "outbound": "Outbound"
+        },
+        "health": {
+          "title": "Adapter health",
+          "lastOk": "Last OK",
+          "lastError": "Last error",
+          "nextRetry": "Next retry",
+          "reconnectNow": "Reconnect now",
+          "reconnectQueued": "Reconnect queued.",
+          "state": {
+            "running": "Running",
+            "starting": "Starting",
+            "degraded": "Degraded",
+            "down": "Down",
+            "unknown": "Unknown"
+          },
+          "uptime24h": "Last 24 hours",
+          "pendingOutbound": "Pending outbound",
+          "noData": "No data yet",
+          "runtimeTitle": "Outbound runtime",
+          "breakerLabel": "Circuit",
+          "breakerState": {
+            "closed": "Closed",
+            "half_open": "Half-open",
+            "open": "Open"
+          },
+          "breakerOpenedAt": "opened {time}",
+          "breakerFailureRate": "{rate}% failures over {events} events",
+          "rateBucketLabel": "Rate limit",
+          "rateBucketAvailable": "{available}/{capacity} tokens",
+          "rateBucketNextRefill": "Next token in {seconds}s",
+          "atGateTitle": "Inbound filter (24 h)",
+          "atGateTotal": "{count} message(s) dropped by the at-gate.",
+          "atGateReason": {
+            "chat_blocklist": "Blocklist",
+            "chat_allowlist": "Not on allowlist",
+            "at_mention_required": "No @mention",
+            "at_direct_only": "Group chat (direct only)",
+            "other": "Other"
+          }
+        }
       },
       "conversations": {
         "heading": "Conversation overrides",
@@ -3598,7 +3921,12 @@
         "togglePin": "Toggle pin",
         "toggleArchive": "Toggle archive",
         "openConversation": "Open conversation",
-        "deleteOverride": "Delete override"
+        "deleteOverride": "Delete override",
+        "editAria": "Edit override",
+        "computerUseBadge": "CU",
+        "computerUseTooltip": "Computer-use tools are allowed on this conversation (ADR-0025 per-channel opt-in). Disable by editing the override.",
+        "searchPlaceholder": "Search by conversation key or character id",
+        "searchNoResults": "No overrides match \"{query}\"."
       },
       "inbox": {
         "summary": "Per-adapter conversation summary. Use the Inbox for the full view.",
@@ -3619,7 +3947,27 @@
         "retry": "Retry",
         "retryAria": "Retry {id}",
         "cancel": "Cancel",
-        "cancelAria": "Cancel {id}"
+        "cancelAria": "Cancel {id}",
+        "badgePausedMuted": "Muted",
+        "badgePausedQuietHours": "Quiet hours",
+        "badgeCircuitBlocked": "Circuit open",
+        "quietHoursResume": "Resumes in ~{minutes} min",
+        "bulkRetryDeadlettered": "Retry all ({count})",
+        "bulkRetryConfirmTitle": "Re-enqueue all dead-lettered jobs?",
+        "bulkRetryConfirmDescription": "{count} job(s) will be moved back to pending and the runner will retry them on its next poll. Persistent failures will re-deadletter after the same 5-attempt cap.",
+        "bulkRetryCancel": "Cancel",
+        "bulkRetryConfirm": "Retry all",
+        "expandDetailsAria": "Expand details for job {id}",
+        "collapseDetailsAria": "Collapse details for job {id}",
+        "detailIdempotencyKey": "Idempotency key",
+        "detailLastError": "Last error",
+        "detailWorkflow": "Source workflow",
+        "detailSegments": "Segments",
+        "deadletterAge": "Dead-lettered {age} ago",
+        "ageJustNow": "just now",
+        "ageMinutes": "{minutes}min",
+        "ageHours": "{hours}h",
+        "ageDays": "{days}d"
       },
       "audit": {
         "redactionNotice": "Audit logs are allowlist-redacted; tokens and message bodies never appear here.",
@@ -3636,7 +3984,12 @@
         },
         "empty": "No audit entries match the current filters.",
         "expandAria": "Expand audit entry",
-        "collapseAria": "Collapse audit entry"
+        "collapseAria": "Collapse audit entry",
+        "filterByConversationKey": "Conversation key",
+        "filterByConversationKeyPlaceholder": "substring match — e.g. telegram:tg-1:12345",
+        "exportLabel": "Export ({count})",
+        "exportCsv": "Download CSV",
+        "exportJson": "Download JSON"
       },
       "telegram": {
         "titleNew": "Add Telegram Bot",
@@ -3673,7 +4026,24 @@
         "unknownUsername": "unknown",
         "unknownId": "?",
         "adapterCreated": "Adapter created.",
-        "adapterUpdated": "Adapter updated."
+        "adapterUpdated": "Adapter updated.",
+        "sectionIdentity": "Identity",
+        "sectionIdentityDesc": "Bot token + handle verification.",
+        "sectionDelivery": "Delivery & transport",
+        "sectionDeliveryDesc": "Inbound transport — long-poll or webhook with optional secret.",
+        "sectionAdvanced": "Advanced",
+        "sectionAdvancedDesc": "Quiet hours and global mute for outbound replies.",
+        "webhookUrlLabel": "Webhook URL",
+        "webhookUrlNewAdapterHint": "Save the adapter first; the webhook URL is generated using the new adapter ID.",
+        "webhookUrlTunnelLoading": "Checking tunnel status…",
+        "webhookUrlHelp": "Register this URL with Telegram via setWebhook (with the secret token above if set).",
+        "webhookUrlTunnelOffHelp": "No publicly-reachable HTTPS endpoint yet. Start the Cloudflared tunnel in Mobile Companion settings, then return here.",
+        "webhookUrlCopy": "Copy URL",
+        "webhookUrlCopyAria": "Copy webhook URL",
+        "webhookUrlCopied": "Webhook URL copied.",
+        "openDocs": "Open Telegram docs",
+        "openCompanion": "Open Companion settings",
+        "quietHoursIncomplete": "Quiet hours requires From, To, and Timezone."
       },
       "discord": {
         "titleNew": "Add Discord Bot",
@@ -3686,8 +4056,10 @@
         "testConnectionAria": "Test connection",
         "testButtonLabel": "Test",
         "testRequiresDesktop": "Token testing requires the desktop runtime.",
-        "publicKeyLabel": "Public Key (optional)",
-        "publicKeyHelp": "Ed25519 public key from the Discord Developer Portal. Required only if you enable webhook / interactions mode in a future phase.",
+        "publicKeyLabel": "Public Key",
+        "publicKeyPhase2Badge": "Phase 2",
+        "publicKeyHelp": "Ed25519 public key from the Discord Developer Portal. Used to verify Interactions webhook signatures.",
+        "publicKeyPhase2Note": "Phase 1 uses Gateway transport only; this field is not persisted yet. It will activate once Interactions webhook mode ships.",
         "publicKeyPlaceholder": "64-character hex key",
         "transportInfoPrefix": "Transport:",
         "transportInfoValue": "Gateway (WebSocket)",
@@ -3707,7 +4079,24 @@
         "unknownUsername": "unknown",
         "unknownId": "?",
         "adapterCreated": "Adapter created.",
-        "adapterUpdated": "Adapter updated."
+        "adapterUpdated": "Adapter updated.",
+        "sectionIdentity": "Identity",
+        "sectionIdentityDesc": "Bot token + Gateway identity verification.",
+        "sectionDelivery": "Delivery & transport",
+        "sectionDeliveryDesc": "Gateway transport details and the Interactions Endpoint URL for slash commands.",
+        "sectionAdvanced": "Advanced",
+        "sectionAdvancedDesc": "Quiet hours and global mute for outbound replies.",
+        "interactionsUrlLabel": "Interactions Endpoint URL",
+        "interactionsUrlNewAdapterHint": "Save the adapter first; the endpoint URL is generated using the new adapter ID.",
+        "interactionsUrlTunnelLoading": "Checking tunnel status…",
+        "interactionsUrlHelp": "Paste this URL into Discord Developer Portal → General Information → Interactions Endpoint URL. The Public Key above verifies Ed25519 signatures on each call.",
+        "interactionsUrlTunnelOffHelp": "No publicly-reachable HTTPS endpoint yet. Start the Cloudflared tunnel in Mobile Companion settings, then return here.",
+        "interactionsUrlCopy": "Copy URL",
+        "interactionsUrlCopyAria": "Copy interactions endpoint URL",
+        "interactionsUrlCopied": "Interactions endpoint URL copied.",
+        "openConsole": "Open Discord Developer Portal",
+        "openCompanion": "Open Companion settings",
+        "quietHoursIncomplete": "Quiet hours requires From, To, and Timezone."
       },
       "slack": {
         "titleNew": "Add Slack Bot",
@@ -3751,7 +4140,26 @@
         "unknownTeam": "unknown workspace",
         "unknownId": "?",
         "adapterCreated": "Adapter created.",
-        "adapterUpdated": "Adapter updated."
+        "adapterUpdated": "Adapter updated.",
+        "sectionIdentity": "Identity",
+        "sectionIdentityDesc": "Bot token + workspace identity verification.",
+        "sectionDelivery": "Delivery & transport",
+        "sectionDeliveryDesc": "Inbound transport and the callback URL Slack calls when Events API is selected.",
+        "sectionAdvanced": "Advanced",
+        "sectionAdvancedDesc": "Quiet hours and global mute for outbound replies.",
+        "transportSocketModeDesc": "Socket Mode (WSS) — Slack pushes events to this app over an outbound socket; no public callback URL required.",
+        "transportEventsApiDesc": "Events API — Slack calls a public HTTPS URL you paste into the Slack App.",
+        "webhookUrlLabel": "Request URL",
+        "webhookUrlNewAdapterHint": "Save the adapter first; the request URL is generated using the new adapter ID.",
+        "webhookUrlTunnelLoading": "Checking tunnel status…",
+        "webhookUrlHelp": "Paste this URL into Slack App → Event Subscriptions → Request URL. Slack will verify it once.",
+        "webhookUrlTunnelOffHelp": "No publicly-reachable HTTPS endpoint yet. Start the Cloudflared tunnel in Mobile Companion settings, then return here.",
+        "webhookUrlCopy": "Copy URL",
+        "webhookUrlCopyAria": "Copy request URL",
+        "webhookUrlCopied": "Request URL copied.",
+        "openConsole": "Open Slack app console",
+        "openCompanion": "Open Companion settings",
+        "quietHoursIncomplete": "Quiet hours requires From, To, and Timezone."
       },
       "lark": {
         "titleNew": "Add Lark Bot",
@@ -3793,7 +4201,77 @@
         "unknownApp": "unknown app",
         "unknownAppShort": "unknown",
         "adapterCreated": "Adapter created.",
-        "adapterUpdated": "Adapter updated."
+        "adapterUpdated": "Adapter updated.",
+        "sectionIdentity": "Identity",
+        "sectionIdentityDesc": "App credentials and bot identity.",
+        "sectionDelivery": "Delivery & callback",
+        "sectionDeliveryDesc": "Inbound transport and the callback URL Lark Open Platform calls.",
+        "sectionAdvanced": "Advanced",
+        "sectionAdvancedDesc": "Quiet hours and global mute for outbound replies.",
+        "transportLongConnectionDesc": "Long connection (WSS) — Lark pushes events to this app; no public callback URL required.",
+        "transportWebhookDesc": "Webhook — Lark calls a public HTTPS URL you paste into the Open Platform.",
+        "webhookUrlLabel": "Callback URL",
+        "webhookUrlNewAdapterHint": "Save the adapter first; the callback URL is generated using the new adapter ID.",
+        "webhookUrlTunnelLoading": "Checking tunnel status…",
+        "webhookUrlHelp": "Paste this URL into Lark Open Platform → Event subscriptions → Request URL. The token in the verification step must match the Verification Token field above.",
+        "webhookUrlTunnelOffHelp": "No publicly-reachable HTTPS endpoint yet. Start the Cloudflared tunnel in Mobile Companion settings, then return here.",
+        "webhookUrlCopy": "Copy URL",
+        "webhookUrlCopyAria": "Copy callback URL",
+        "webhookUrlCopied": "Callback URL copied.",
+        "openConsole": "Open Lark console",
+        "openConsoleAria": "Open Lark Open Platform → Event subscriptions for this app",
+        "openCompanion": "Open Companion settings",
+        "openCompanionAria": "Open Mobile Companion → Tunnel",
+        "encryptionEnabledLabel": "Encrypted events",
+        "encryptionEnabledHelp": "Turn on when Lark App → Event subscriptions → Encrypt Key is configured.",
+        "encryptionEnabledAria": "Toggle event encryption",
+        "selfBotOpenIdLabel": "Bot open_id",
+        "selfBotOpenIdRefresh": "Refresh",
+        "selfBotOpenIdRefreshAria": "Refresh bot open_id from Lark",
+        "selfBotOpenIdUnknown": "Not resolved yet",
+        "selfBotOpenIdHelp": "Resolved automatically when the adapter starts. Refresh after changing App ID / App Secret.",
+        "selfBotOpenIdHelpAfterSave": "Available after saving the adapter — Lark resolves the open_id from your App credentials.",
+        "selfBotOpenIdNeedsSavedAdapter": "Save the adapter first; refresh needs the saved credentials.",
+        "selfBotOpenIdRefreshed": "Bot open_id refreshed.",
+        "selfBotOpenIdRefreshFailed": "Refresh failed: {reason}",
+        "quietHoursIncomplete": "Quiet hours requires From, To, and Timezone.",
+        "whoami": {
+          "title": "Bot identity",
+          "probeButton": "Probe identity",
+          "reprobeButton": "Re-probe",
+          "tenant": "Tenant",
+          "unknown": "Identity has not been probed yet. Click \"Probe identity\" after saving credentials.",
+          "probeFailed": "Probe failed",
+          "lastProbeAt": "Last probed at {time}",
+          "requiresDesktop": "Bot identity probe requires the desktop runtime.",
+          "onebotNoProbe": "OneBot adapters do not expose an active identity probe — the QQ UIN below was entered when the adapter was configured."
+        },
+        "atStrategy": {
+          "title": "Mention strategy",
+          "help": "Controls when the bot responds in group chats. DMs always pass regardless of the strategy.",
+          "defaultNotice": "Default — change to suit this bot's role.",
+          "options": {
+            "always": "Always respond to every message",
+            "mentionOnly": "Mention only — require @bot in groups (default)",
+            "directOnly": "Direct messages only — never respond in groups"
+          }
+        },
+        "whitelist": {
+          "title": "Chat allow/blocklist",
+          "allowlistLabel": "Allowlist (if non-empty, only these chat ids)",
+          "blocklistLabel": "Blocklist (never respond)",
+          "allowlistEmpty": "Allowlist is empty — every chat is allowed.",
+          "blocklistEmpty": "Blocklist is empty.",
+          "addChatIdPlaceholder": "oc_… (paste chat id)",
+          "removeAria": "Remove {id}",
+          "helpText": "Paste the Lark chat_id (starts with oc_…). Find it via the audit log or the Lark client's chat URL."
+        }
+      },
+      "adapterFormSections": {
+        "save": "Save",
+        "saving": "Saving…",
+        "cancel": "Cancel",
+        "errorBadge": "Error"
       },
       "onebot": {
         "titleNew": "Add OneBot (QQ) Adapter",
@@ -3831,7 +4309,18 @@
         "displayNameRequired": "Display name is required.",
         "botUinRequired": "Bot UIN is required.",
         "adapterCreatedWithEndpoint": "Adapter created. Paste the endpoint URL into NapCat config.",
-        "adapterUpdated": "Adapter updated."
+        "adapterUpdated": "Adapter updated.",
+        "sectionIdentity": "Identity",
+        "sectionIdentityDesc": "Bot UIN, access token, and the upstream client hint.",
+        "sectionDelivery": "Delivery & transport",
+        "sectionDeliveryDesc": "Reverse-WS endpoint URL that NapCat / Lagrange / LLOneBot dial into.",
+        "sectionAdvanced": "Advanced",
+        "sectionAdvancedDesc": "Quiet hours and global mute for outbound replies.",
+        "endpointNewAdapterHint": "Save the adapter first; the reverse-WS URL is derived from the new adapter ID.",
+        "endpointCopy": "Copy URL",
+        "endpointCopyAria": "Copy reverse-WS endpoint URL",
+        "endpointCopied": "Endpoint URL copied.",
+        "quietHoursIncomplete": "Quiet hours requires From, To, and Timezone."
       },
       "quietHours": {
         "mutedLabel": "Globally muted",
@@ -3845,13 +4334,34 @@
         "toLabel": "To (HH:MM)",
         "toAria": "Quiet hours to",
         "timezoneLabel": "Timezone",
-        "timezoneAria": "Quiet hours timezone"
+        "timezoneAria": "Quiet hours timezone",
+        "timezoneCustomOption": "Custom…",
+        "timezonePlaceholder": "e.g. Asia/Singapore",
+        "timezoneInvalid": "Not a valid IANA timezone identifier."
       },
       "adapterForm": {
         "cancel": "Cancel",
         "save": "Save",
         "saving": "Saving…",
         "enterField": "Enter {label}"
+      },
+      "sendTest": {
+        "title": "Send a test message",
+        "intro": "Drive an end-to-end send through the bus to confirm the adapter, credentials, and outbound pipeline all work. The runner uses the exact same path.",
+        "chatIdLabel": "Target chat / channel id",
+        "chatIdHelp": {
+          "telegram": "Forward any message from the chat to @userinfobot to read its numeric id.",
+          "discord": "Right-click the channel in Discord (Developer Mode on) → Copy Channel ID.",
+          "slack": "Channel id from the URL or the channel kebab menu → Open channel details → Copy Channel ID.",
+          "lark": "Open Lark chat → Settings → Group Info → Copy chat_id (oc_…).",
+          "onebot": "QQ user uin (private chat) or group uin."
+        },
+        "bodyLabel": "Body",
+        "defaultBody": "[cognia] Test message from the Adapters → Config tab.",
+        "sendButton": "Send test",
+        "desktopOnly": "Sending requires the desktop runtime so the adapter is registered with the bus.",
+        "sentSuccess": "Sent. platform_message_id = {messageId}",
+        "sentError": "Send failed ({code}): {message}"
       }
     },
     "developer": {
@@ -4123,7 +4633,8 @@
       "importFromClaudeCodeHint": "Scan ~/.claude/skills/ (desktop only).",
       "exportAll": "Export all",
       "syncNative": "Sync with ~/.claude/skills/",
-      "syncNativeDesktopOnly": "Native sync requires desktop mode."
+      "syncNativeDesktopOnly": "Native sync requires desktop mode.",
+      "moreActions": "More actions"
     },
     "card": {
       "edit": "Edit",
@@ -4319,7 +4830,9 @@
       "syncNow": "Sync now",
       "retry": "Retry",
       "lastAt": "Last: {when}",
-      "desktopOnly": "Sync is only available in the desktop app."
+      "desktopOnly": "Sync is only available in the desktop app.",
+      "pushAll": "Push all to native",
+      "pullAll": "Pull all from native"
     },
     "panel": {
       "headerTitle": "Skills",
@@ -4327,7 +4840,10 @@
       "emptyTitle": "No skills yet",
       "emptyHint": "Create your first skill, import one from disk, or browse the marketplace.",
       "emptyAction": "Create a skill",
-      "editorPlaceholder": "Open a skill from the My Skills grid to edit it inline."
+      "editorPlaceholder": "Open a skill from the My Skills grid to edit it inline.",
+      "openCategoriesAria": "Open categories",
+      "categoriesSheetTitle": "Categories",
+      "categoriesSheetDescription": "Filter skills by category or source."
     },
     "toasts": {
       "enabledCount": "{count, plural, =1 {Enabled 1 skill.} other {Enabled # skills.}}",
@@ -9444,7 +9960,97 @@
         "sources": "Sources",
         "jobs": "Jobs",
         "drafts": "Drafts",
+        "persona": "Persona",
         "settings": "Settings"
+      }
+    },
+    "persona": {
+      "title": "Persona",
+      "noProfileHint": "No distilled profile yet. Run a distill job from the Jobs tab, or add entries manually below.",
+      "countEntities": "{count, plural, =0 {0 entities} =1 {1 entity} other {# entities}}",
+      "countPlaybooks": "{count, plural, =0 {0 playbooks} =1 {1 playbook} other {# playbooks}}",
+      "countStyleSamples": "{count, plural, =0 {0 style samples} =1 {1 style sample} other {# style samples}}",
+      "searchPlaceholder": "Search…",
+      "tabs": {
+        "entities": "Entities",
+        "playbooks": "Playbooks",
+        "styleSamples": "Style samples"
+      },
+      "empty": {
+        "entities": "No entities yet — distill will produce some, or click Add entity manually.",
+        "playbooks": "No playbooks yet — distill will produce some, or add one manually.",
+        "styleSamples": "No style samples yet — distill will produce some, or add one manually.",
+        "noMatch": "No matches for your search."
+      },
+      "actions": {
+        "add": "Add",
+        "edit": "Edit",
+        "delete": "Delete",
+        "save": "Save",
+        "saving": "Saving…",
+        "cancel": "Cancel",
+        "pin": "Pin (kept across re-distill)",
+        "unpin": "Unpin"
+      },
+      "badges": {
+        "pinned": "Pinned"
+      },
+      "piiError": "Cannot save — content contains PII: {fields}. Replace with placeholders or remove.",
+      "entity": {
+        "add": "Add entity",
+        "titleAdd": "Add entity",
+        "titleEdit": "Edit entity",
+        "description": "Manual additions are pinned by default so the next re-distill won't erase them.",
+        "nameLabel": "Name",
+        "nameRequired": "Name is required.",
+        "roleLabel": "Role",
+        "aliasesLabel": "Aliases",
+        "aliasesPlaceholder": "Comma-separated",
+        "relationLabel": "Relation / context",
+        "deleteConfirmTitle": "Delete this entity?",
+        "deleteConfirmBody": "{name} will be removed from the twin profile.",
+        "role": {
+          "person": "Person",
+          "team": "Team",
+          "project": "Project",
+          "system": "System",
+          "concept": "Concept"
+        }
+      },
+      "playbook": {
+        "add": "Add playbook",
+        "titleAdd": "Add playbook",
+        "titleEdit": "Edit playbook",
+        "description": "Capture a repeatable pattern of how this twin handles work.",
+        "titleLabel": "Title",
+        "titleRequired": "Title is required.",
+        "triggerLabel": "Trigger",
+        "triggerRequired": "Trigger is required.",
+        "stepsLabel": "Steps (one per line)",
+        "stepsPlaceholder": "ack the page\nopen a war room\npost an initial summary",
+        "stepsHelp": "One step per line. Add a rationale after the en-dash if helpful.",
+        "stepsRequired": "At least one step is required.",
+        "confidenceLabel": "Confidence (0–1)",
+        "confidenceShort": "{value}%",
+        "moreSteps": "+{count} more",
+        "deleteConfirmTitle": "Delete this playbook?",
+        "deleteConfirmBody": "{title} will be removed from the twin profile."
+      },
+      "styleSample": {
+        "add": "Add style sample",
+        "titleAdd": "Add style sample",
+        "titleEdit": "Edit style sample",
+        "description": "Pinned samples bias style few-shot for future replies.",
+        "contextLabel": "Context",
+        "originalLabel": "Original text",
+        "originalRequired": "Original text is required.",
+        "summaryLabel": "Summary",
+        "summaryRequired": "Summary is required.",
+        "toneLabel": "Tone tags",
+        "tonePlaceholder": "Comma-separated (e.g. concise, decisive)",
+        "defaultLabel": "Manual sample",
+        "deleteConfirmTitle": "Delete this style sample?",
+        "deleteConfirmBody": "The sample will be removed from the twin profile."
       }
     },
     "charts": {
@@ -9747,6 +10353,26 @@
       "fingerprintPinned": "Desktop identity pinned",
       "fingerprintHint": "This phone will refuse a different desktop signing key on every reconnect.",
       "fingerprintMismatch": "Server identity mismatch (expected {expected}…, got {reported}…). Re-pair from the desktop's current QR.",
+      "codeLabel": "6-digit pair code",
+      "codeHint": "Find this code on the desktop PairDeviceCard, beside the QR. Useful when the camera can't focus on the QR (e.g. Android emulator).",
+      "tabs": {
+        "jwt": "Pair JWT",
+        "code": "6-digit code"
+      },
+      "codeError": {
+        "malformed": "Enter the 6-digit code shown on the desktop.",
+        "invalid_pair_code": "Pair code must be exactly 6 digits.",
+        "pair_code_not_found": "That code is unknown or has already been used — request a fresh one on the desktop.",
+        "pair_code_expired": "That code has expired (5-minute lifetime). Generate a new one in desktop Settings → Companion.",
+        "malformed_request": "The server could not parse the request. Update the app and try again."
+      },
+      "httpError": {
+        "401": "Pairing rejected — the token may have expired (5-minute lifetime) or already been used. Generate a fresh one in desktop Settings → Companion.",
+        "403": "Server refused the pairing request — check the desktop Companion settings for an allow-list.",
+        "404": "Server doesn't expose the pairing endpoint — confirm the desktop is running cognia v0.2+ with companion enabled.",
+        "5xx": "Server error (HTTP {status}). Check the desktop's logs and try again.",
+        "generic": "Pairing failed (HTTP {status})."
+      },
       "formCardTitle": "Pair this phone",
       "formCardDescription": "One-tap scan or manual paste — both routes use the same 5-minute pair token.",
       "submit": "Complete pairing",
@@ -9806,6 +10432,7 @@
         "latencyMs": "{ms} ms",
         "tlsPinned": "Identity verified",
         "tlsUnverified": "Unverified",
+        "viaPaired": "Paired",
         "viaMdns": "mDNS",
         "viaProbe": "LAN probe",
         "viaHistory": "History"
@@ -9841,24 +10468,6 @@
       "shareDialogTitle": "Share via",
       "shareUnsupported": "Sharing isn't supported on this device.",
       "shareFailed": "Share failed: {message}"
-    },
-    "discover": {
-      "title": "Discover",
-      "tabs": {
-        "characters": "Characters",
-        "teams": "Teams",
-        "skills": "Skills",
-        "twinDrafts": "Twin drafts"
-      },
-      "builtInBadge": "Built-in",
-      "memberCount": "{count} agents",
-      "emptyCharacters": "No characters yet — create one on the desktop.",
-      "emptyTeams": "No teams yet.",
-      "emptySkills": "No skills yet.",
-      "emptyTwinDrafts": "No pending twin drafts.",
-      "search": "Search discover…",
-      "searchAria": "Search discover",
-      "featured": "Featured"
     },
     "me": {
       "title": "Me",
@@ -9924,6 +10533,18 @@
         "blocked": "Revoke not completed ({reason}).",
         "successToast": "Device revoked."
       },
+      "pause": {
+        "reason": "Confirm pausing {label}",
+        "title": "Pause device",
+        "description": "The device's JWT is added to the deny-list until you resume it.",
+        "blocked": "Pause not completed ({reason})."
+      },
+      "resume": {
+        "reason": "Confirm resuming {label}",
+        "title": "Resume device",
+        "description": "The device's JWT is removed from the deny-list and regains access.",
+        "blocked": "Resume not completed ({reason})."
+      },
       "webrtc": {
         "title": "WebRTC remote access",
         "enableLabel": "Enable WebRTC tier",
@@ -9964,7 +10585,135 @@
         "reconnectThrottled": "Slow down — wait a few seconds between reconnects.",
         "reconnectFailed": "Reconnect failed ({reason})."
       },
-      "pushTokenFailed": "Couldn't tell the desktop about this phone's push token ({reason})."
+      "pushTokenFailed": "Couldn't tell the desktop about this phone's push token ({reason}).",
+      "server": {
+        "title": "Mobile companion server",
+        "enableLabel": "Enable companion server",
+        "listeningOn": "Listening on {url}",
+        "bindModePlaceholderLan": "<your-LAN-IP>",
+        "serverOff": "Server is off. Phones cannot reach this device.",
+        "bindMode": "Bind mode",
+        "loopbackLabel": "Loopback (this device only)",
+        "loopbackDesc": "Safest. The companion API is only reachable from the desktop itself — useful for testing the QR flow.",
+        "lanLabel": "LAN (phones on the same Wi-Fi)",
+        "lanDesc": "Required to actually pair a phone. Reachable on every interface on the local network.",
+        "httpsWarning": "Self-signed HTTPS is active. The mobile client pins the cert fingerprint encoded in the QR; a server cert rotation requires re-pairing.",
+        "desktopOnly": "Companion server runs in the desktop process — switch to the Tauri build to manage it.",
+        "desktopOnlyError": "Companion server is desktop-only.",
+        "started": "Companion server listening on port {port}.",
+        "stopped": "Companion server stopped.",
+        "statusLive": "live",
+        "statusIdle": "idle",
+        "statusWeb": "web"
+      },
+      "pair": {
+        "title": "Pair a new device",
+        "description": "Generate a QR code, scan it with the cognia mobile app, and the phone exchanges the one-shot token for a long-lived device JWT.",
+        "generateQr": "Generate QR",
+        "refreshQr": "Refresh QR",
+        "generateAria": "Generate QR",
+        "qrAria": "Pairing QR code",
+        "expired": "Token expired — refresh to issue a new one.",
+        "expiresIn": "Expires in {time}",
+        "desktopOnlyError": "Companion pairing is desktop-only.",
+        "codeLabel": "Pair code (6 digits)",
+        "codeCopy": "Copy",
+        "codeCopied": "Copied",
+        "codeHint": "Type this on the phone when scanning the QR isn't practical (e.g. Android emulator without camera passthrough)."
+      },
+      "paired": {
+        "title": "Paired devices",
+        "description": "Pause temporarily blocks a device; revoke is permanent and biometric-gated. Both deny-list the JWT immediately.",
+        "empty": "No devices paired yet — generate a QR to add one.",
+        "colLabel": "Label",
+        "colPlatform": "Platform",
+        "colFingerprint": "Fingerprint",
+        "colPaired": "Paired",
+        "colLastSeen": "Last seen",
+        "colActions": "Actions",
+        "revoked": "revoked",
+        "paused": "paused",
+        "unpinned": "unpinned",
+        "fingerprintAria": "Pinned cert {fingerprint}",
+        "revokeAria": "Revoke {label}",
+        "pauseAria": "Pause {label}",
+        "resumeAria": "Resume {label}",
+        "toastPaused": "{label} paused. Its JWT is rejected until resumed.",
+        "toastResumed": "{label} resumed."
+      },
+      "diagnostics": {
+        "title": "Connection diagnostics",
+        "description": "Test which local URLs the desktop server is reachable on. Useful when a phone reports a connection error and you want to confirm the LAN / tunnel paths are healthy.",
+        "testButton": "Test reachability",
+        "probing": "Probing…",
+        "desktopOnly": "Only available in the Tauri desktop build.",
+        "empty": "No candidates to probe — start the companion server first.",
+        "probeFailed": "Probe failed: {message}",
+        "ok": "OK",
+        "ms": "ms",
+        "failed": "Failed"
+      },
+      "push": {
+        "title": "Push notifications",
+        "description": "Paste FCM (Android) and APNs (iOS) credentials to enable push delivery for paired phones while their WebSocket is disconnected. Secrets are stored in the OS keyring on desktop; headless deployments use a JSON file under the data directory.",
+        "desktopOnly": "Only available in the Tauri desktop build.",
+        "fcmLabel": "FCM (Android)",
+        "apnsLabel": "APNs (iOS)",
+        "configured": "configured",
+        "fcmPlaceholder": "Paste the '{\"type\":\"service_account\",...}' JSON downloaded from Google Cloud Console.",
+        "fcmAria": "FCM service-account JSON",
+        "saveFcm": "Save FCM",
+        "clearFcm": "Clear FCM",
+        "keyId": "Key ID",
+        "teamId": "Team ID",
+        "bundleId": "Bundle ID",
+        "apnsKeyPlaceholder": "-----BEGIN PRIVATE KEY-----\n...contents of the .p8 file...\n-----END PRIVATE KEY-----",
+        "apnsKeyAria": "APNs .p8 private key",
+        "productionEnv": "Production environment",
+        "productionAria": "APNs production environment",
+        "saveApns": "Save APNs",
+        "clearApns": "Clear APNs",
+        "statusFailed": "Push status failed: {message}",
+        "fcmRequired": "Paste the FCM service-account JSON first.",
+        "fcmConfigured": "FCM configured.",
+        "fcmCleared": "FCM cleared.",
+        "apnsFieldRequired": "APNs: {field} is required.",
+        "apnsConfigured": "APNs configured.",
+        "apnsCleared": "APNs cleared.",
+        "fcmClearFailed": "FCM clear: {message}",
+        "fcmConfigureFailed": "FCM configure: {message}",
+        "apnsConfigureFailed": "APNs configure: {message}",
+        "apnsClearFailed": "APNs clear: {message}"
+      },
+      "syncStatus": {
+        "title": "Sync status",
+        "description": "Per-table sync state. The orchestrator pulls deltas sequentially; use Sync now to force a single table.",
+        "statusHealthy": "Healthy",
+        "statusErrors": "Errors",
+        "syncAll": "Sync all",
+        "syncAllAria": "Sync every table now",
+        "syncNowAria": "Sync {table} now",
+        "colTable": "Table",
+        "colLastSync": "Last sync",
+        "colCursor": "Cursor",
+        "colActions": "Actions",
+        "never": "Never",
+        "toastSyncOneOk": "{table} synced.",
+        "toastSyncOneFail": "{table} sync failed: {reason}",
+        "toastSyncAllOk": "{count} tables synced.",
+        "toastSyncAllPartial": "{failed} of {total} tables failed.",
+        "tableLabels": {
+          "characters": "Characters",
+          "skills": "Skills",
+          "sessions": "Sessions",
+          "messages": "Messages",
+          "workflows": "Workflows",
+          "twinProfile": "Twin profile",
+          "plugins": "Plugins",
+          "adapterInstances": "Connectors",
+          "settings": "App settings"
+        }
+      }
     },
     "transportTier": {
       "rtcDirect": "WebRTC (direct)",
@@ -10125,13 +10874,75 @@
       "cancel": "Cancel",
       "targetSearchPlaceholder": "Search conversations…",
       "queuedToast": "Queued for delivery.",
+      "draftSavedToast": "Saved as a draft.",
+      "newSessionCta": "New session",
+      "inboxDraftCta": "Inbox draft",
+      "orExistingSession": "or send to an existing chat",
+      "createSessionFailed": "Couldn't create a new session — please try again.",
       "noConversations": "No conversations available yet.",
       "noConversationsDescription": "Open a chat first, then come back to share.",
       "receivedText": "Received text",
       "receivedUrl": "Link",
       "errorTitle": "Share failed to open",
       "errorDescription": "We couldn't load your conversations to receive the shared content. Try again, or open Cognia and retry the share.",
-      "retry": "Try again"
+      "retry": "Try again",
+      "derivedTitle": {
+        "fromUrl": "Share from {hostname}",
+        "fallback": "New chat"
+      }
+    },
+    "connectionDiagnostics": {
+      "title": "Connection diagnostics",
+      "tierLabel": "WebRTC tier",
+      "tier": {
+        "rtc-direct": "RTC direct",
+        "rtc-relay": "RTC relay",
+        "ws-lan": "WS LAN",
+        "ws-tunnel": "WS tunnel",
+        "offline": "Offline"
+      },
+      "tierHint": {
+        "rtc-direct": "Peer-to-peer DataChannel — lowest latency.",
+        "rtc-relay": "Peer connection via TURN relay — still encrypted end-to-end.",
+        "ws-lan": "Fallback over LAN HTTPS+WS.",
+        "ws-tunnel": "Fallback via Cloudflared tunnel.",
+        "offline": "Not connected to the desktop."
+      },
+      "reconnectButton": "Reconnect now",
+      "noTierToast": "No WebRTC tier active — using HTTPS+WS.",
+      "syncLabel": "Sync progress",
+      "syncAllButton": "Sync all",
+      "rowRetry": "Retry",
+      "rowSince": "since",
+      "rowNever": "never synced"
+    },
+    "notifications": {
+      "section": {
+        "title": "Notifications",
+        "description": "Background reminders for scheduled backups and long-running tasks.",
+        "queueRowTitle": "Scheduled notifications",
+        "queueRowDescription": "Review or cancel pending reminders."
+      },
+      "permissionCta": {
+        "title": "Enable background reminders",
+        "description": "Cognia can notify you when a long-running task or scheduled backup needs attention.",
+        "descriptionDenied": "Notifications were denied. Open Settings → Cognia → Notifications to allow them.",
+        "enableButton": "Enable",
+        "enableInProgress": "Requesting…",
+        "settingsButton": "Open Settings"
+      },
+      "queue": {
+        "title": "Scheduled notifications",
+        "refresh": "Refresh",
+        "empty": "No notifications scheduled.",
+        "unsupportedTitle": "Not supported on this platform",
+        "unsupportedDescription": "Local notifications run on iOS and Android only.",
+        "errorTitle": "Could not load notifications",
+        "cancel": "Cancel",
+        "cancelFailed": "Cancel failed: {message}",
+        "loading": "Loading…",
+        "scheduledAt": "at {time}"
+      }
     },
     "offline": {
       "bannerOffline": "Offline — sends will queue and retry automatically.",
@@ -10209,7 +11020,15 @@
         "reconnect": "Reconnect now",
         "scanLan": "Scan local network",
         "switchServer": "Switch paired server",
-        "goToPair": "Pair new device"
+        "goToPair": "Pair new device",
+        "webrtcTier": "WebRTC tier"
+      },
+      "tiers": {
+        "rtc-direct": "RTC direct",
+        "rtc-relay": "RTC relay",
+        "ws-lan": "WS LAN",
+        "ws-tunnel": "WS tunnel",
+        "offline": "offline"
       },
       "toasts": {
         "reconnectStarted": "Re-handshaking…",
@@ -10231,10 +11050,18 @@
         "empty": "No desktops found yet. Make sure one is running on the same Wi-Fi.",
         "mdnsDenied": "Local network permission denied",
         "openSettings": "Open Settings",
+        "portLabel": "port",
         "source": {
+          "paired": "paired",
+          "pairedTag": "Last paired",
           "mdns": "mDNS",
           "probe": "probe",
           "history": "history"
+        },
+        "fingerprintMismatch": {
+          "title": "Fingerprint changed",
+          "description": "{count} server(s) returned a different TLS fingerprint than the paired record. This can mean a legitimate cert rotation — or a different desktop on the same address.",
+          "dismiss": "Dismiss"
         }
       },
       "switch": {
@@ -11993,7 +12820,70 @@
       "a2uiEmptyMirror": "(no text mirror — interactive surface)"
     },
     "conversationHeader": {
-      "modeSwitchDesktopOnly": "Mode switching requires the desktop app"
+      "modeSwitchDesktopOnly": "Mode switching requires the desktop app",
+      "openOverrides": "Conversation settings",
+      "openOverridesAria": "Open per-conversation settings",
+      "backToList": "Back to conversation list",
+      "openSidebar": "Open sidebar",
+      "degradedBadgeAria": "Adapter health: {state}",
+      "degradedTitle": "Adapter is not running",
+      "degradedState": {
+        "degraded": "Degraded",
+        "down": "Offline",
+        "unknown": "Unknown"
+      },
+      "degradedHint": {
+        "degraded": "The adapter is reporting intermittent failures. Reconnecting may clear a transient transport error.",
+        "down": "The adapter has stopped. Reconnect to restart its inbound transport.",
+        "unknown": "No recent heartbeat from this adapter. It may not be running."
+      },
+      "reconnectButton": "Reconnect now",
+      "reconnectQueued": "Reconnect queued.",
+      "reconnectUnavailable": "Adapter not currently registered with the runtime.",
+      "reconnectDesktopOnly": "Reconnect requires the desktop app.",
+      "lastInboundJustNow": "Last message just now",
+      "lastInboundMinutes": "Last message {minutes}min ago",
+      "lastInboundHours": "Last message {hours}h ago",
+      "lastInboundDays": "Last message {days}d ago",
+      "lastInboundTooltip": "Newest inbound message at {time}"
+    },
+    "conversationOverride": {
+      "dialogTitle": "Conversation settings",
+      "gearAria": "Open per-conversation override settings",
+      "save": "Save",
+      "saving": "Saving…",
+      "reset": "Cancel",
+      "deleteOverride": "Remove override",
+      "deleteOverrideConfirm": "Remove the override for this conversation? It will fall back to the adapter defaults.",
+      "noOverrideYet": "No override yet — defaults are inherited from the adapter.",
+      "fields": {
+        "mode": "Mode",
+        "modeOptions": {
+          "unset": "Use adapter default",
+          "auto": "Auto-reply",
+          "manual": "Manual review",
+          "draft": "Draft only"
+        },
+        "character": "Character (id)",
+        "characterPlaceholder": "(none)",
+        "allowComputerUse": "Allow Computer Use tools",
+        "allowComputerUseWarning": "When on, replies in this channel may fire screenshot, mouse, and keyboard actions on the host. Off by default for IM channels.",
+        "providerOverride": "Provider override",
+        "providerOverridePlaceholder": "anthropic",
+        "modelOverride": "Model override",
+        "modelOverridePlaceholder": "claude-opus-4-7",
+        "pinned": "Pinned",
+        "archived": "Archived",
+        "muted": "Muted (drops outbound)",
+        "quietHoursOverride": "Quiet hours (this conversation)",
+        "quietHoursFrom": "From",
+        "quietHoursTo": "To",
+        "quietHoursTz": "Time zone",
+        "cooldownMs": "Cooldown after bot reply (ms)",
+        "suppressGroups": "Suppress in group chats",
+        "advancedJson": "Advanced (quiet hours + cooldown + muted)",
+        "advancedJsonHelp": "These fields populate the per-conversation `trigger` partial that overrides the adapter trigger policy."
+      }
     },
     "draftBanner": {
       "pending": "A draft reply is waiting for your review.",
@@ -12331,6 +13221,135 @@
         "mcp": "MCP",
         "plugin": "Plugin"
       }
+    },
+    "header": {
+      "title": "Automation",
+      "description": "Configure desktop UI automation — screenshots, element finding, clicking, typing, and hotkeys."
+    },
+    "tabs": {
+      "overview": "Overview",
+      "permissions": "Permissions",
+      "whitelist": "Whitelist",
+      "audit": "Audit",
+      "inspector": "Inspector"
+    },
+    "overview": {
+      "yes": "Yes",
+      "no": "No",
+      "noPlanned": "Planned",
+      "engineStatus": "Engine Status",
+      "engineStatusDescription": "Toggle the automation engine on or off. When off the kill switch is engaged and all calls are rejected at the gate.",
+      "engineToggle": "Enable automation engine",
+      "engineToggleHint": "When enabled, automations respect the permission tiers configured below.",
+      "killSwitch": "Engage Kill Switch",
+      "killSwitchHint": "Immediately rejects all in-flight automation calls. Use when the engine behaves unexpectedly.",
+      "platformCapabilities": "Platform Capabilities",
+      "capabilityProbeFailed": "Failed to read platform capabilities.",
+      "capabilities": {
+        "platform": "Platform",
+        "uia": "UI Automation",
+        "inputSimulation": "Input Simulation",
+        "screenshot": "Screenshot",
+        "events": "Events"
+      }
+    },
+    "permissions": {
+      "defaultTier": "Default Tier",
+      "defaultTierDescription": "The tier applied when no per-surface override is set.",
+      "perSurface": "Per-Surface Overrides",
+      "perSurfaceDescription": "Each automation surface can override the default tier.",
+      "surfaces": {
+        "workflowDescription": "Visual workflow executor runs.",
+        "computerUseDescription": "Anthropic-native computer-use tool calls.",
+        "mcpDescription": "MCP tool invocations from connected servers.",
+        "pluginDescription": "Plugin-initiated automation requests."
+      },
+      "tier": {
+        "off": "Off",
+        "whitelist": "Whitelist",
+        "perCall": "Per Call"
+      }
+    },
+    "audit": {
+      "title": "Audit Log",
+      "description": "Automation call records, newest first.",
+      "exportCsv": "Export CSV",
+      "clear": "Clear Log",
+      "loading": "Loading audit log…",
+      "empty": "No audit records match the current filters.",
+      "filters": {
+        "allSurfaces": "All surfaces",
+        "allDecisions": "All decisions",
+        "surfaceWorkflow": "Workflow",
+        "surfaceComputerUse": "Computer Use",
+        "surfaceMcp": "MCP",
+        "surfacePlugin": "Plugin",
+        "decisionAllow": "allow",
+        "decisionDeny": "deny",
+        "decisionConsent": "consent"
+      },
+      "columns": {
+        "time": "Time",
+        "surface": "Surface",
+        "command": "Command",
+        "decision": "Decision",
+        "target": "Target",
+        "duration": "Duration"
+      }
+    },
+    "whitelist": {
+      "updateFailed": "Update failed",
+      "captureFocused": "Capture focused window",
+      "captureFailed": "Failed to read focused window",
+      "quickCapture": "Quick Capture",
+      "quickCaptureHint": "Read the currently focused window and prefill the fields below.",
+      "processLabel": "Process:",
+      "titleLabel": "Title:",
+      "none": "(none)",
+      "processNames": "Process Names",
+      "processNamesHint": "Case-insensitive exact match against the target process name (e.g. notepad.exe).",
+      "processPlaceholder": "e.g. notepad.exe",
+      "add": "Add",
+      "emptyProcess": "No process names added yet. Add one above.",
+      "windowTitles": "Window Title Patterns",
+      "windowTitlesHint": "Glob patterns using * as wildcard (e.g. *Excel* or Untitled - Notepad).",
+      "windowPlaceholder": "e.g. *Chrome*",
+      "emptyWindow": "No window title patterns added yet. Add one above.",
+      "removeEntryAria": "Remove {entry}"
+    },
+    "inspector": {
+      "pickOk": "Element picked",
+      "pickFailed": "Pick failed: {error}",
+      "invokeOk": "Pattern '{pattern}' invoked",
+      "invokeFailed": "Pattern invocation failed: {error}",
+      "tree": "Accessibility Tree",
+      "treeDescription": "Inspect the UIA/accessibility tree of a target window.",
+      "rootMode": {
+        "focused": "Focused",
+        "desktop": "Desktop",
+        "manual": "Manual Ref"
+      },
+      "pickCancelTooltip": "Cancel the countdown",
+      "pickStartTooltip": "Start a 3-second countdown, then pick the element under the cursor",
+      "pickCancelAria": "Cancel point-and-pick countdown",
+      "pickStartAria": "Start point-and-pick countdown",
+      "pickCountdown": "Cancel ({seconds}s)",
+      "pickStart": "Pick element",
+      "elementRef": "Element Ref",
+      "elementRefPlaceholder": "e.g. windows/1234/5678",
+      "maxDepth": "Max Depth",
+      "reading": "Reading…",
+      "readTree": "Refresh",
+      "emptyResult": "No elements returned for the selected root.",
+      "clickToPopulate": "Choose a root and click Refresh to populate the tree.",
+      "elementDetails": "Element Details",
+      "elementDetailsDescription": "Properties and test patterns for the selected element.",
+      "selectRow": "Select an element from the tree to see details.",
+      "locatorJson": "Locator JSON",
+      "copyLocator": "Copy Locator",
+      "copyRef": "Copy Ref",
+      "testPatterns": "Test Patterns",
+      "testPatternsHint": "Invoke UIA patterns against the selected element to verify behavior."
     }
   }
 }

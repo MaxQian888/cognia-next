@@ -38,44 +38,10 @@
  * iOS ATS exception covers this at the platform layer; same TODOs apply.
  */
 
-interface CapacitorHttpResponse {
-  data: unknown
-  status: number
-  headers: Record<string, string>
-  url: string
-}
-
-interface CapacitorHttpRequest {
-  url: string
-  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS"
-  headers?: Record<string, string>
-  params?: Record<string, string>
-  data?: unknown
-  /** Per-request server trust mode. */
-  serverTrustMode?: "default" | "self-signed" | "pinned"
-  /** Read timeout in ms. */
-  readTimeout?: number
-  /** Connect timeout in ms. */
-  connectTimeout?: number
-  responseType?: "text" | "json" | "blob" | "arraybuffer" | "document"
-}
-
-interface CapacitorHttpPlugin {
-  request(req: CapacitorHttpRequest): Promise<CapacitorHttpResponse>
-}
-
-/** Detect Capacitor at runtime without importing native types at build time. */
-function getCapacitorHttp(): CapacitorHttpPlugin | null {
-  if (typeof globalThis === "undefined") return null
-  const w = globalThis as unknown as {
-    Capacitor?: {
-      isNativePlatform?: () => boolean
-      Plugins?: { CapacitorHttp?: CapacitorHttpPlugin }
-    }
-  }
-  if (!w.Capacitor?.isNativePlatform?.()) return null
-  return w.Capacitor.Plugins?.CapacitorHttp ?? null
-}
+// CapacitorHttp shim — types + runtime detector are owned by the
+// connectivity layer so the LAN scanner, healthz probe, and this fetch
+// wrapper all speak the same plugin shape.
+import { getCapacitorHttp, type CapacitorHttpRequest } from "@/lib/connectivity/capacitor-http"
 
 function pickTrustMode(
   url: string,

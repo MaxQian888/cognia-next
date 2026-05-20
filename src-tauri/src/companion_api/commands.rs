@@ -13,11 +13,13 @@ use std::sync::Arc;
 use tauri::{Manager, State};
 
 use super::{
+    auth::{generate_pair_code, now_ms},
     desktop_messages_bridge,
     desktop_writes_bridge,
     event_bus::{register_tauri_event, EventBus},
     jwt::issue_pair_jwt,
     mdns::AutoStartConfig,
+    pair_code_lru::PairCodeEntry,
     secret,
     server::{CompanionServerError, DEFAULT_PORT},
     tls,
@@ -104,6 +106,10 @@ pub async fn companion_server_start(
         // restarts so the desktop never has to re-prompt the phone for
         // re-registration just because the user toggled the server off.
         push_tokens: Arc::clone(&state.push_tokens),
+        // Wave 4.x — share the long-lived pair-code LRU so codes minted
+        // by `companion_pair_issue` before a server bounce can still be
+        // redeemed afterwards.
+        pair_code_lru: Arc::clone(&state.pair_code_lru),
     });
 
     // Load TLS material (M2.9 — every companion-server bind terminates HTTPS).
@@ -431,6 +437,15 @@ pub struct PairJwtIssue {
     /// App version surfaced in the QR for forward-compat — phone uses this
     /// to gate breaking pair-payload changes.
     pub app_version: String,
+    /// 6-digit numeric code that maps server-side to the same pair JWT.
+    /// Emulator-friendly path for the mobile client when scanning a QR is
+    /// impractical (Pixel 7 AVD has no working camera passthrough). Single-
+    /// use, same TTL as the underlying JWT.
+    pub pair_code: String,
+    /// Millisecond epoch when the numeric code stops being redeemable —
+    /// equal to [`expires_at_ms`] so the desktop UI can render one shared
+    /// countdown next to both surfaces.
+    pub pair_code_expires_at_ms: i64,
 }
 
 /// Issue a one-shot pair JWT for the QR flow.
@@ -463,12 +478,30 @@ pub async fn companion_issue_pair_jwt(
     let fingerprint = ensure_tls_fingerprint(&app_handle).unwrap_or_default();
     let app_version = app_handle.package_info().version.to_string();
 
+    let expires_at_ms = exp_secs * 1000;
+
+    // Mint a 6-digit numeric code that maps to the same pair JWT in the
+    // server-side LRU. PairDeviceCard renders the code alongside the QR
+    // so an emulator user (no camera) can still complete pairing by
+    // typing the digits.
+    let pair_code = generate_pair_code();
+    state.pair_code_lru.insert(
+        pair_code.clone(),
+        PairCodeEntry {
+            pair_jwt: pair_jwt.clone(),
+            expires_at_ms,
+        },
+        now_ms(),
+    );
+
     Ok(PairJwtIssue {
         pair_jwt,
-        expires_at_ms: exp_secs * 1000,
+        expires_at_ms,
         base_url,
         fingerprint,
         app_version,
+        pair_code,
+        pair_code_expires_at_ms: expires_at_ms,
     })
 }
 

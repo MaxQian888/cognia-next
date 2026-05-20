@@ -1,6 +1,12 @@
 import type { UIMessage } from "ai"
 
-import { applySdkEvent, contentPreview, makeUserMessage } from "./adapter"
+import {
+  applySdkEvent,
+  contentPreview,
+  makeUserMessage,
+  mergeTwinSourcesIntoLastAssistant,
+} from "./adapter"
+import type { SourcesPart, SourcesPartItem } from "./parts-extensions"
 import type {
   BetaMessage,
   SDKAssistantMessage,
@@ -499,5 +505,126 @@ describe("contentPreview", () => {
 
   it("respects a custom max length", () => {
     expect(contentPreview("hello world", 5)).toBe("hello…")
+  })
+})
+
+describe("mergeTwinSourcesIntoLastAssistant", () => {
+  const baseMessages: UIMessage[] = [
+    { id: "u1", role: "user", parts: [{ type: "text", text: "hi" } as never] },
+    { id: "a1", role: "assistant", parts: [{ type: "text", text: "hello" } as never] },
+  ]
+
+  it("returns the same array when twinContext is undefined", () => {
+    expect(mergeTwinSourcesIntoLastAssistant(baseMessages, undefined)).toBe(baseMessages)
+    expect(mergeTwinSourcesIntoLastAssistant(baseMessages, null)).toBe(baseMessages)
+  })
+
+  it("attaches a SourcesPart with twin-rag + twin-style items when none exists", () => {
+    const next = mergeTwinSourcesIntoLastAssistant(baseMessages, {
+      twinId: "twin_a",
+      retrievedChunks: [
+        {
+          chunk: { vectorDocId: "v1", content: "doc content", sourceId: "src1" },
+          score: 0.9,
+          sourceTitle: "migration.md",
+        },
+      ],
+      selectedStyleSamples: [
+        { id: "s1", contextLabel: "PR description", summary: "concise tone", tone: ["concise"] },
+      ],
+    })
+    expect(next).not.toBe(baseMessages)
+    const assistant = next[1]
+    const sources = assistant.parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(sources).toBeDefined()
+    expect(sources.sources).toHaveLength(2)
+    const twinRag = sources.sources.find((s) => s.origin === "twin-rag") as SourcesPartItem
+    const twinStyle = sources.sources.find((s) => s.origin === "twin-style") as SourcesPartItem
+    expect(twinRag.title).toBe("migration.md")
+    expect(twinRag.chunkRef).toEqual({
+      twinId: "twin_a",
+      sourceId: "src1",
+      chunkId: "v1",
+    })
+    expect(twinStyle.title).toBe("PR description")
+  })
+
+  it("merges into an existing SourcesPart and dedupes", () => {
+    const withExisting: UIMessage[] = [
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          { type: "text", text: "hi" } as never,
+          {
+            type: "sources",
+            sources: [{ id: "x", title: "existing", origin: "anthropic" } as SourcesPartItem],
+          } as never,
+        ],
+      },
+    ]
+    const next = mergeTwinSourcesIntoLastAssistant(withExisting, {
+      twinId: "twin_a",
+      retrievedChunks: [
+        {
+          chunk: { vectorDocId: "v1", content: "doc", sourceId: "src1" },
+          score: 0.8,
+          sourceTitle: "doc.md",
+        },
+      ],
+      selectedStyleSamples: [],
+    })
+    const sources = next[0].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(sources.sources).toHaveLength(2)
+    expect(sources.sources[0].origin).toBe("anthropic")
+    expect(sources.sources[1].origin).toBe("twin-rag")
+  })
+
+  it("is idempotent — re-applying with the same context returns the same array", () => {
+    const ctx = {
+      twinId: "twin_a",
+      retrievedChunks: [
+        {
+          chunk: { vectorDocId: "v1", content: "doc", sourceId: "src1" },
+          score: 0.8,
+          sourceTitle: "doc.md",
+        },
+      ],
+      selectedStyleSamples: [],
+    }
+    const once = mergeTwinSourcesIntoLastAssistant(baseMessages, ctx)
+    const twice = mergeTwinSourcesIntoLastAssistant(once, ctx)
+    expect(twice).toBe(once)
+  })
+
+  it("returns the same array when both retrievedChunks and styleSamples are empty", () => {
+    const next = mergeTwinSourcesIntoLastAssistant(baseMessages, {
+      twinId: "twin_a",
+      retrievedChunks: [],
+      selectedStyleSamples: [],
+    })
+    expect(next).toBe(baseMessages)
+  })
+
+  it("returns the same array when there is no assistant message", () => {
+    const userOnly: UIMessage[] = [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "hi" } as never] },
+    ]
+    const next = mergeTwinSourcesIntoLastAssistant(userOnly, {
+      twinId: "twin_a",
+      retrievedChunks: [
+        {
+          chunk: { vectorDocId: "v1", content: "doc", sourceId: "src1" },
+          score: 0.5,
+          sourceTitle: "doc.md",
+        },
+      ],
+      selectedStyleSamples: [],
+    })
+    expect(next).toBe(userOnly)
   })
 })

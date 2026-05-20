@@ -268,6 +268,29 @@ export interface SendOptions {
    * it; this field is exclusively for the inbox context input.
    */
   suppressedReason?: "quiet_hours" | "muted" | "manual_mode_override"
+
+  /**
+   * Twin runtime metadata: the chunks + style samples actually used when
+   * `applyTwinContext` ran during `resolveSendOptions`. The chat hook reads
+   * this and persists a Twin-RAG `SourcesPart` on the assistant message so
+   * the user can see what shaped the reply. Sidecar-protocol metadata —
+   * stripped before the SDK call (no behavioural impact).
+   */
+  twinContext?: {
+    twinId: string
+    retrievedChunks: Array<{
+      chunk: { vectorDocId: string; content: string; sourceId: string }
+      score: number
+      sourceTitle?: string
+    }>
+    selectedStyleSamples: Array<{
+      id: string
+      contextLabel: string
+      summary: string
+      tone: string[]
+    }>
+    degraded: boolean
+  }
 }
 
 /**

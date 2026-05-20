@@ -75,9 +75,14 @@ const config: CapacitorConfig = {
     //   - Tunnel (Cloudflare-issued cert): standard OS trust chain via
     //     `serverTrustMode: "default"`.
     //
-    // TODO(P0.2 native): the Android Network Security Config and iOS Info.plist
-    // need a matching cert hash entry for `serverTrustMode: "pinned"` to take
-    // effect at the platform layer. See mobile/docs/p0-tls-trust-setup.md.
+    // Native pinning is wired through the per-build NSC injection
+    // (`mobile/scripts/inject-server-fingerprint.mjs`) which rewrites the
+    // `<pin-set>` block under `cognia-companion.local` in
+    // `mobile/android/app/src/main/res/xml/network_security_config.xml`
+    // when `COGNIA_PIN_FINGERPRINT` (or
+    // `~/.cognia/companion-fingerprint.txt`) is present at `cap sync` time.
+    // Debug builds skip injection — see
+    // `mobile/android/app/src/debug/res/xml/network_security_config.xml`.
     CapacitorHttp: {
       enabled: true,
     },

@@ -211,3 +211,74 @@ describe("createCircuitBreaker — canPass", () => {
     expect(cb.canPass()).toBe(true)
   })
 })
+
+describe("createCircuitBreaker — snapshot()", () => {
+  it("reports closed state with zero events on a fresh breaker", () => {
+    const cb = createCircuitBreaker()
+    const snap = cb.snapshot()
+    expect(snap.state).toBe("closed")
+    expect(snap.openedAt).toBeNull()
+    expect(snap.eventCount).toBe(0)
+    expect(snap.recentFailureRate).toBe(0)
+    expect(snap.halfOpenSuccesses).toBe(0)
+  })
+
+  it("includes openedAt when the breaker is open", () => {
+    const t = 0
+    const cb = createCircuitBreaker({
+      minEvents: 2,
+      failureThresholdPct: 50,
+      now: () => t,
+    })
+    cb.recordFailure()
+    cb.recordFailure()
+    const snap = cb.snapshot()
+    expect(snap.state).toBe("open")
+    expect(snap.openedAt).toBe(0)
+    expect(snap.eventCount).toBe(2)
+    expect(snap.recentFailureRate).toBe(100)
+  })
+
+  it("reports half_open when the cooldown has elapsed", () => {
+    let t = 0
+    const cb = createCircuitBreaker({
+      minEvents: 1,
+      failureThresholdPct: 1,
+      cooldownMs: 500,
+      now: () => t,
+    })
+    cb.recordFailure()
+    t = 600
+    const snap = cb.snapshot()
+    expect(snap.state).toBe("half_open")
+  })
+
+  it("reports recentFailureRate computed over the sliding window", () => {
+    const t = 0
+    const cb = createCircuitBreaker({
+      minEvents: 4,
+      failureThresholdPct: 90,
+      windowMs: 1000,
+      now: () => t,
+    })
+    cb.recordSuccess()
+    cb.recordSuccess()
+    cb.recordSuccess()
+    cb.recordFailure()
+    const snap = cb.snapshot()
+    expect(snap.state).toBe("closed")
+    expect(snap.eventCount).toBe(4)
+    expect(snap.recentFailureRate).toBe(25)
+  })
+
+  it("does not mutate the breaker (snapshot is a pure read)", () => {
+    const t = 0
+    const cb = createCircuitBreaker({ minEvents: 1, failureThresholdPct: 1, now: () => t })
+    cb.recordFailure()
+    cb.snapshot()
+    cb.snapshot()
+    // The breaker should still be open — snapshot must not flush events or
+    // transition states beyond what state() already does.
+    expect(cb.state()).toBe("open")
+  })
+})

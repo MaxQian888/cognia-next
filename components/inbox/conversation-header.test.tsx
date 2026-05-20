@@ -45,6 +45,34 @@ jest.mock("@/lib/data-hooks/context", () => ({
   useCharacter: (id: string | null | undefined) => mockUseCharacter(id),
 }))
 
+// Typed loose so per-test `mockReturnValue` calls can vary the `current.state`
+// without TS narrowing it to the initial "running" literal.
+const mockUseAdapterHealth = jest.fn<unknown, [unknown?]>(() => ({
+  current: { state: "running", reason: undefined as string | undefined, lastActivityAt: 0 },
+  buckets: [] as unknown[],
+  lastOk: undefined as unknown,
+  lastError: undefined as unknown,
+  pendingOutboundCount: 0,
+  breaker: null as unknown,
+  rateBucket: null as unknown,
+  atGateBlocks: { total: 0, byReason: [] as unknown[] },
+}))
+jest.mock("@/hooks/connectors/use-adapter-health", () => ({
+  useAdapterHealth: (id: string | null | undefined) => mockUseAdapterHealth(id),
+}))
+
+const mockUseLastInbound = jest.fn<number | null, [unknown?]>(() => null)
+jest.mock("@/hooks/connectors/use-last-inbound", () => ({
+  useLastInboundForConversation: (key: string | null | undefined) => mockUseLastInbound(key),
+}))
+
+const mockRequeueAdapter = jest.fn().mockResolvedValue(true)
+jest.mock("@/lib/connectors/lifecycle", () => ({
+  requeueAdapter: (...args: unknown[]) => mockRequeueAdapter(...args),
+}))
+
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+
 // ---------------------------------------------------------------------------
 // Subject
 // ---------------------------------------------------------------------------
@@ -64,6 +92,19 @@ beforeEach(() => {
   mockUseCharacter.mockReturnValue(undefined)
   mockBack.mockReset()
   mockPush.mockReset()
+  mockRequeueAdapter.mockReset()
+  mockRequeueAdapter.mockResolvedValue(true)
+  mockUseLastInbound.mockReset()
+  mockUseLastInbound.mockReturnValue(null)
+  mockUseAdapterHealth.mockReturnValue({
+    current: { state: "running", reason: undefined, lastActivityAt: 0 },
+    buckets: [],
+    lastOk: undefined,
+    lastError: undefined,
+    pendingOutboundCount: 0,
+    breaker: null,
+    rateBucket: null,
+  })
 })
 
 describe("ConversationHeader", () => {
@@ -200,11 +241,10 @@ describe("ConversationHeader", () => {
     expect(trigger).toBeInTheDocument()
     expect(back).toHaveClass("md:hidden")
     expect(trigger).toHaveClass("md:hidden")
-    // i18n keys: backToList / openSidebar — the test render uses the
-    // NextIntlClientProvider fallback (key passthrough) since messages
-    // aren't mounted in this unit test, so the accessible name is the key.
-    expect(back).toHaveAccessibleName(/backToList/i)
-    expect(trigger).toHaveAccessibleName(/openSidebar/i)
+    // i18n keys: backToList / openSidebar — both are wired so the
+    // accessible name reflects the localized string.
+    expect(back).toHaveAccessibleName(/back to conversation list/i)
+    expect(trigger).toHaveAccessibleName(/open sidebar/i)
   })
 
   it("back button calls router.back() when history has more than one entry", () => {
@@ -250,5 +290,142 @@ describe("ConversationHeader", () => {
     expect(mockBack).not.toHaveBeenCalled()
 
     lengthSpy.mockRestore()
+  })
+})
+
+describe("ConversationHeader — adapter degradation badge (Task 2.4)", () => {
+  // parseConversationKey expects platform:adapterId:chatId — supply a valid
+  // shape so parsedAdapterId is non-empty and the badge mounts.
+  const conversationKey = "telegram:adp-1:12345"
+
+  it("does not render the degraded badge when adapter is running", () => {
+    mockUseAdapterHealth.mockReturnValue({
+      current: { state: "running", reason: undefined, lastActivityAt: 0 },
+      buckets: [],
+      lastOk: undefined,
+      lastError: undefined,
+      pendingOutboundCount: 0,
+      breaker: null,
+      rateBucket: null,
+    })
+    render(
+      <ConversationHeader
+        conversationKey={conversationKey}
+        sessionId="s-running"
+        title="Healthy"
+        platform="telegram"
+        currentMode="auto"
+        policy={EMPTY_POLICY}
+      />
+    )
+    expect(screen.queryByTestId("conversation-header-degraded")).not.toBeInTheDocument()
+  })
+
+  it("renders the degraded badge with the localized state when adapter is down", () => {
+    mockUseAdapterHealth.mockReturnValue({
+      current: { state: "down", reason: "transport closed", lastActivityAt: 0 },
+      buckets: [],
+      lastOk: undefined,
+      lastError: undefined,
+      pendingOutboundCount: 0,
+      breaker: null,
+      rateBucket: null,
+    })
+    render(
+      <ConversationHeader
+        conversationKey={conversationKey}
+        sessionId="s-down"
+        title="Offline"
+        platform="telegram"
+        currentMode="auto"
+        policy={EMPTY_POLICY}
+      />
+    )
+    const badge = screen.getByTestId("conversation-header-degraded")
+    expect(badge).toBeInTheDocument()
+    expect(badge).toHaveTextContent(/offline/i)
+  })
+
+  it("renders the degraded badge for degraded state", () => {
+    mockUseAdapterHealth.mockReturnValue({
+      current: { state: "degraded", reason: "5xx run", lastActivityAt: 0 },
+      buckets: [],
+      lastOk: undefined,
+      lastError: undefined,
+      pendingOutboundCount: 0,
+      breaker: null,
+      rateBucket: null,
+    })
+    render(
+      <ConversationHeader
+        conversationKey={conversationKey}
+        sessionId="s-deg"
+        title="Degraded"
+        platform="telegram"
+        currentMode="auto"
+        policy={EMPTY_POLICY}
+      />
+    )
+    expect(screen.getByTestId("conversation-header-degraded")).toBeInTheDocument()
+  })
+
+  it("renders the last-inbound chip when the hook returns a timestamp (Task P2.5)", () => {
+    mockUseLastInbound.mockReturnValue(Date.now() - 5 * 60_000)
+    render(
+      <ConversationHeader
+        conversationKey={conversationKey}
+        sessionId="s-li"
+        title="Last inbound test"
+        platform="telegram"
+        currentMode="auto"
+        policy={EMPTY_POLICY}
+      />
+    )
+    const chip = screen.getByTestId("conversation-header-last-inbound")
+    expect(chip).toBeInTheDocument()
+    expect(chip.textContent).toMatch(/min/i)
+  })
+
+  it("hides the last-inbound chip when no inbound has been seen", () => {
+    mockUseLastInbound.mockReturnValue(null)
+    render(
+      <ConversationHeader
+        conversationKey={conversationKey}
+        sessionId="s-li-none"
+        title="Empty inbox"
+        platform="telegram"
+        currentMode="auto"
+        policy={EMPTY_POLICY}
+      />
+    )
+    expect(screen.queryByTestId("conversation-header-last-inbound")).not.toBeInTheDocument()
+  })
+
+  it("clicking Reconnect calls requeueAdapter with the parsed adapter id", async () => {
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    mockUseAdapterHealth.mockReturnValue({
+      current: { state: "down", reason: undefined, lastActivityAt: 0 },
+      buckets: [],
+      lastOk: undefined,
+      lastError: undefined,
+      pendingOutboundCount: 0,
+      breaker: null,
+      rateBucket: null,
+    })
+    render(
+      <ConversationHeader
+        conversationKey={conversationKey}
+        sessionId="s-rec"
+        title="Reconnect test"
+        platform="telegram"
+        currentMode="auto"
+        policy={EMPTY_POLICY}
+      />
+    )
+    fireEvent.click(screen.getByTestId("conversation-header-degraded"))
+    const reconnect = await screen.findByTestId("conversation-header-reconnect")
+    fireEvent.click(reconnect)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(mockRequeueAdapter).toHaveBeenCalledWith("adp-1")
   })
 })

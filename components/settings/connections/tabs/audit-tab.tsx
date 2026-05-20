@@ -3,14 +3,30 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { AlertTriangleIcon, ChevronDownIcon, ChevronRightIcon, ShieldIcon } from "lucide-react"
+import {
+  AlertTriangleIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  DownloadIcon,
+  ShieldIcon,
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Toggle } from "@/components/ui/toggle"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { getDb } from "@/lib/db/schema"
 import type { AuditEntry, AuditKind } from "@/types/connectors/audit"
-import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+import type { AdapterInstanceRow, ConnectorAuditRow } from "@/lib/db/connector-types"
 import { cn } from "@/lib/utils"
+import { exportAuditView } from "@/lib/connectors/audit-export"
 
 // All possible AuditKind values for the filter UI
 const ALL_AUDIT_KINDS: AuditKind[] = [
@@ -122,13 +138,20 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
 interface AuditTabProps {
   /** Injected in tests to override initial time range. */
   initialTimeRange?: TimeRange
+  /**
+   * When supplied (im-refactored-crayon), scopes the view to a single
+   * adapter and hides the adapter-filter chip row. Used by the per-adapter
+   * detail panel's Audit tab to avoid duplicating the entire component.
+   */
+  adapterId?: string
 }
 
-export function AuditTab({ initialTimeRange = "24h" }: AuditTabProps = {}) {
+export function AuditTab({ initialTimeRange = "24h", adapterId }: AuditTabProps = {}) {
   const t = useTranslations("settings.connections.audit")
-  const [selectedAdapters, setSelectedAdapters] = useState<string[]>([])
+  const [selectedAdapters, setSelectedAdapters] = useState<string[]>(adapterId ? [adapterId] : [])
   const [selectedKinds, setSelectedKinds] = useState<AuditKind[]>([])
   const [timeRange, setTimeRange] = useState<TimeRange>(initialTimeRange)
+  const [conversationKeyFilter, setConversationKeyFilter] = useState<string>("")
 
   const adapters = useLiveQuery<AdapterInstanceRow[]>(
     () =>
@@ -160,11 +183,35 @@ export function AuditTab({ initialTimeRange = "24h" }: AuditTabProps = {}) {
     )
   }
 
+  const trimmedConversationKey = conversationKeyFilter.trim().toLowerCase()
   const filtered = (auditEntries ?? []).filter((e) => {
     if (selectedAdapters.length > 0 && !selectedAdapters.includes(e.adapterId)) return false
-    if (selectedKinds.length > 0 && !selectedKinds.includes(e.kind)) return false
+    if (selectedKinds.length > 0) {
+      if (!selectedKinds.includes(e.kind)) return false
+    } else {
+      // Default view excludes `adapter.heartbeat` — see the comment on the
+      // AuditKind union (types/connectors/audit.ts): heartbeats are noisy by
+      // design and flood the 500-row Dexie limit. Users opt back in by
+      // toggling the kind explicitly (note: heartbeat is intentionally not
+      // in ALL_AUDIT_KINDS so it has no toggle; this gate also catches any
+      // future "noisy by default" kinds that share the same naming pattern).
+      if (e.kind === "adapter.heartbeat") return false
+    }
+    if (trimmedConversationKey) {
+      const key = e.conversationKey?.toLowerCase() ?? ""
+      if (!key.includes(trimmedConversationKey)) return false
+    }
     return true
   })
+
+  const exportScope = adapterId ?? (selectedAdapters.length === 1 ? selectedAdapters[0] : null)
+  const handleExport = (format: "csv" | "json") => {
+    exportAuditView({
+      rows: filtered as ConnectorAuditRow[],
+      format,
+      adapterId: exportScope,
+    })
+  }
 
   return (
     <div className="space-y-4">
@@ -174,8 +221,9 @@ export function AuditTab({ initialTimeRange = "24h" }: AuditTabProps = {}) {
         <span>{t("redactionNotice")}</span>
       </div>
 
-      {/* Adapter filter */}
-      {adapters && adapters.length > 0 && (
+      {/* Adapter filter — hidden when the parent has already scoped us
+       * to a single adapter via the `adapterId` prop. */}
+      {!adapterId && adapters && adapters.length > 0 && (
         <div className="space-y-1.5">
           <p className="text-xs font-medium text-muted-foreground">{t("filterByAdapter")}</p>
           <div className="flex flex-wrap gap-1.5">
@@ -231,6 +279,47 @@ export function AuditTab({ initialTimeRange = "24h" }: AuditTabProps = {}) {
             )
           })}
         </div>
+      </div>
+
+      {/* Conversation-key filter + Export menu */}
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="flex-1 min-w-[180px] space-y-1.5">
+          <Label htmlFor="audit-conv-key" className="text-xs font-medium text-muted-foreground">
+            {t("filterByConversationKey")}
+          </Label>
+          <Input
+            id="audit-conv-key"
+            type="text"
+            value={conversationKeyFilter}
+            onChange={(e) => setConversationKeyFilter(e.target.value)}
+            placeholder={t("filterByConversationKeyPlaceholder")}
+            aria-label={t("filterByConversationKey")}
+            data-testid="audit-conv-key-input"
+            className="h-9 text-xs"
+          />
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={filtered.length === 0}
+              data-testid="audit-export-trigger"
+            >
+              <DownloadIcon className="mr-1.5 h-3.5 w-3.5" />
+              {t("exportLabel", { count: filtered.length })}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => handleExport("csv")} data-testid="audit-export-csv">
+              {t("exportCsv")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => handleExport("json")} data-testid="audit-export-json">
+              {t("exportJson")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Audit entry list */}

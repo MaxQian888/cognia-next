@@ -19,6 +19,7 @@ import { LARK_A2UI_CAPABILITY, LARK_CAPS } from "./capability"
 import { parseLarkEventEnvelope, parseLarkInteractiveCallback } from "./parse"
 import { getBus } from "@/lib/connectors/bus"
 import type { LarkEventEnvelope } from "./parse"
+import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import {
   serializeOutbound,
   serializeOutboundAsync,
@@ -27,6 +28,7 @@ import {
   serializeReaction,
 } from "./serialize"
 import { getTenantAccessToken } from "./auth"
+import { LarkApiError, withTatRefresh } from "./auth-retry"
 import { resolveLarkMediaKeys } from "./upload"
 import { startLarkLongConn } from "./transport-long-conn"
 import { startLarkWebhookTransport } from "./transport-webhook"
@@ -92,29 +94,45 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     return getTenantAccessToken({ appId, appSecret })
   }
 
+  async function resolveCredentials(): Promise<{ appId: string; appSecret: string }> {
+    const [appId, appSecret] = await Promise.all([opts.appId(), opts.appSecret()])
+    return { appId, appSecret }
+  }
+
   async function doRequest(
     method: "GET" | "POST" | "PATCH" | "DELETE",
     urlPath: string,
     body?: unknown
   ): Promise<unknown> {
-    const tat = await getTat()
-    const resp = await connectorsHttpRequest({
-      url: `${LARK_API_BASE}${urlPath}`,
-      method,
-      headers: {
-        Authorization: `Bearer ${tat}`,
-        "Content-Type": "application/json; charset=utf-8",
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+    const creds = await resolveCredentials()
+    return withTatRefresh(creds, async () => {
+      const tat = await getTenantAccessToken(creds)
+      const resp = await connectorsHttpRequest({
+        url: `${LARK_API_BASE}${urlPath}`,
+        method,
+        headers: {
+          Authorization: `Bearer ${tat}`,
+          "Content-Type": "application/json; charset=utf-8",
+        },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      })
+      if (resp.status >= 400) {
+        throw new LarkApiError({
+          status: resp.status,
+          code: null,
+          message: `Lark API ${method} ${urlPath} → ${resp.status}: ${resp.body}`,
+        })
+      }
+      const parsed = resp.body ? (JSON.parse(resp.body) as { code?: number; msg?: string }) : null
+      if (parsed && typeof parsed.code === "number" && parsed.code !== 0) {
+        throw new LarkApiError({
+          status: resp.status,
+          code: parsed.code,
+          message: `Lark API error: code=${parsed.code}, msg=${parsed.msg ?? "unknown"}`,
+        })
+      }
+      return parsed
     })
-    if (resp.status >= 400) {
-      throw new Error(`Lark API ${method} ${urlPath} → ${resp.status}: ${resp.body}`)
-    }
-    const parsed = resp.body ? (JSON.parse(resp.body) as { code?: number; msg?: string }) : null
-    if (parsed && typeof parsed.code === "number" && parsed.code !== 0) {
-      throw new Error(`Lark API error: code=${parsed.code}, msg=${parsed.msg ?? "unknown"}`)
-    }
-    return parsed
   }
 
   async function start(ctx: AdapterContext): Promise<void> {
@@ -143,6 +161,11 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       }
       const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope)
       if (event) {
+        // v45 (im-refactored-crayon) — gate inbound `create` messages on
+        // the operator-configured at-strategy + chat allow/blocklist
+        // before the bus is invoked. Helper audits `inbound.policy_blocked`
+        // on deny and fails open on Dexie read errors.
+        if (!(await gateInboundEvent(opts.id, event))) return
         lastActivityAt = Date.now()
         await ctx.emit(event)
       }
@@ -206,10 +229,16 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
 
   async function send(req: OutboundRequest): Promise<OutboundResult> {
     try {
-      const resolvedSegments = await resolveLarkMediaKeys(req.segments, {
-        getAccessToken: getTat,
-        uploadCache,
-      })
+      const creds = await resolveCredentials()
+      // Upload pre-pass — Rust `connectors_lark_upload_*` commands surface
+      // TAT invalidation as Error.message text; `withTatRefresh` detects
+      // those by substring and retries with a fresh token.
+      const resolvedSegments = await withTatRefresh(creds, () =>
+        resolveLarkMediaKeys(req.segments, {
+          getAccessToken: getTat,
+          uploadCache,
+        })
+      )
       const call = await serializeOutboundAsync({ ...req, segments: resolvedSegments }, opts.id)
       const urlPath = call.url.replace(LARK_API_BASE, "")
       await doRequest(call.method, urlPath, call.payload)
@@ -228,10 +257,13 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
 
   async function edit(messageId: string, patch: OutboundRequest): Promise<OutboundResult> {
     try {
-      const resolvedSegments = await resolveLarkMediaKeys(patch.segments, {
-        getAccessToken: getTat,
-        uploadCache,
-      })
+      const creds = await resolveCredentials()
+      const resolvedSegments = await withTatRefresh(creds, () =>
+        resolveLarkMediaKeys(patch.segments, {
+          getAccessToken: getTat,
+          uploadCache,
+        })
+      )
       const call = serializeEdit(messageId, { ...patch, segments: resolvedSegments })
       const urlPath = call.url.replace(LARK_API_BASE, "")
       await doRequest(call.method, urlPath, call.payload)

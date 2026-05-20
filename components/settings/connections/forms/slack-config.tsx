@@ -1,25 +1,22 @@
 "use client"
 
-// Slack-specific adapter configuration dialog.
-// Fields:
-//   - Display name
-//   - Bot Token (xoxb-...) — required, secret, tested via auth.test
-//   - Signing Secret — required, secret
-//   - App Token (xapp-...) — required only for socket mode, secret
-//   - Transport — select: "Socket Mode" (default) | "Events API webhook"
-//   - "Connect via OAuth" button — opens the OAuth URL
-//
-// On Save: creates / updates the AdapterInstanceRow and writes secrets to keyring.
+/**
+ * Slack adapter configuration dialog.
+ *
+ * Migrated to the shared `AdapterFormSections` shell so credentials, the
+ * outbound/inbound transport, and the cross-cutting Quiet-Hours +
+ * Mute controls each live in their own collapsible section. The shell is
+ * the same primitive used by `lark-config.tsx`.
+ */
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckCircle2Icon, LoaderIcon, XCircleIcon } from "lucide-react"
+import { CheckCircle2Icon, ExternalLinkIcon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Separator } from "@/components/ui/separator"
 import {
   Select,
   SelectContent,
@@ -34,10 +31,9 @@ import { openUrl } from "@/lib/native/opener"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
 import { buildSlackOAuthUrl } from "@/lib/connectors/adapters/slack/oauth"
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+import { useTunnelStatus } from "@/hooks/use-tunnel-status"
+import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
+import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 
 interface AuthTestResult {
   ok: boolean
@@ -48,10 +44,6 @@ interface AuthTestResult {
 }
 
 type TransportMode = "socket-mode" | "events-api-webhook"
-
-// ---------------------------------------------------------------------------
-// Test connection via auth.test
-// ---------------------------------------------------------------------------
 
 async function testSlackToken(token: string): Promise<AuthTestResult> {
   try {
@@ -81,9 +73,10 @@ async function testSlackToken(token: string): Promise<AuthTestResult> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Dialog
-// ---------------------------------------------------------------------------
+interface SlackPersistedSettings {
+  transport?: TransportMode
+  [key: string]: unknown
+}
 
 interface SlackConfigDialogProps {
   open: boolean
@@ -95,21 +88,31 @@ interface SlackConfigDialogProps {
 export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialogProps) {
   const t = useTranslations("settings.connections.slack")
   const isNew = row === null
+  const persisted = (row?.settings ?? {}) as SlackPersistedSettings
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
   const [botToken, setBotToken] = useState("")
   const [signingSecret, setSigningSecret] = useState("")
   const [appToken, setAppToken] = useState("")
-  const [transport, setTransport] = useState<TransportMode>(
-    (row?.settings as { transport?: TransportMode } | undefined)?.transport ?? "socket-mode"
-  )
-
+  const [transport, setTransport] = useState<TransportMode>(persisted.transport ?? "socket-mode")
+  const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
+  const [quietHours, setQuietHours] = useState<QuietHoursValue | null>(row?.quietHours ?? null)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<AuthTestResult | null>(null)
-
   const [saving, setSaving] = useState(false)
 
   const desktop = isTauri()
+  const tunnel = useTunnelStatus()
+
+  const dirty =
+    isNew ||
+    displayName.trim() !== row?.displayName ||
+    botToken.length > 0 ||
+    signingSecret.length > 0 ||
+    appToken.length > 0 ||
+    transport !== (persisted.transport ?? "socket-mode") ||
+    muted !== (row?.muted ?? false) ||
+    quietHours !== (row?.quietHours ?? null)
 
   const handleTest = async () => {
     if (!botToken.trim()) {
@@ -139,7 +142,6 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
       toast.error(t("oauthClientIdMissing"))
       return
     }
-    // Generate a random CSRF state and store it
     const state =
       typeof crypto !== "undefined" ? crypto.randomUUID() : Math.random().toString(36).slice(2)
     if (typeof sessionStorage !== "undefined") {
@@ -151,9 +153,16 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
       redirectUri: "cognia://connector/oauth/slack",
       state,
     })
-    // openUrl routes through @tauri-apps/plugin-opener on desktop,
-    // and falls back to window.open on web.
     void openUrl(url)
+  }
+
+  const handleCopyWebhookUrl = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url)
+      toast.success(t("webhookUrlCopied"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
   }
 
   const handleSave = async () => {
@@ -173,11 +182,16 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
       toast.error(t("appTokenRequired"))
       return
     }
+    if (quietHours && (!quietHours.from || !quietHours.to || !quietHours.tz)) {
+      toast.error(t("quietHoursIncomplete"))
+      return
+    }
 
     setSaving(true)
     try {
       let adapterId: string
       const transportMode = transport === "socket-mode" ? "gateway" : "webhook"
+      const nextSettings: SlackPersistedSettings = { transport }
 
       if (isNew) {
         const newRow = await createAdapterInstance({
@@ -185,13 +199,15 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
           displayName: displayName.trim(),
           enabled: true,
           transportMode,
-          settings: { transport },
+          settings: nextSettings,
           credentialsRef: {
             keyringService: "com.cognia.platforms",
             accounts: ["botToken", "signingSecret", "appToken"],
           },
           trigger: defaultPrivateChatPolicy(),
           defaultMode: "auto",
+          quietHours: quietHours ?? undefined,
+          muted,
         })
         adapterId = newRow.id
       } else {
@@ -199,11 +215,12 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
         await updateAdapterInstance(adapterId, {
           displayName: displayName.trim(),
           transportMode,
-          settings: { transport },
+          settings: nextSettings,
+          muted,
+          quietHours: quietHours ?? undefined,
         })
       }
 
-      // Write secrets to keyring (Tauri only)
       if (botToken.trim()) {
         await connectorsKeyringSet(adapterId, "botToken", botToken.trim())
       }
@@ -223,185 +240,270 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
     }
   }
 
+  const webhookPath = isNew ? null : `/webhook/slack/${row?.id ?? ""}`
+  const webhookUrl =
+    tunnel.url && webhookPath ? `${tunnel.url.replace(/\/$/, "")}${webhookPath}` : null
+
+  const identitySection: FormSection = {
+    id: "identity",
+    label: t("sectionIdentity"),
+    description: t("sectionIdentityDesc"),
+    defaultOpen: true,
+    children: (
+      <div className="space-y-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="sl-display-name">{t("displayNameLabel")}</Label>
+          <Input
+            id="sl-display-name"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder={t("displayNamePlaceholder")}
+            disabled={saving}
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="sl-bot-token">
+            {t("botTokenLabel")}
+            <span className="ml-1 text-destructive">*</span>
+          </Label>
+          <p className="text-xs text-muted-foreground">{t("botTokenHelp")}</p>
+          <div className="flex gap-2">
+            <Input
+              id="sl-bot-token"
+              type="password"
+              autoComplete="new-password"
+              value={botToken}
+              onChange={(e) => setBotToken(e.target.value)}
+              placeholder={t("botTokenPlaceholder")}
+              disabled={saving}
+              className="flex-1"
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={handleTest}
+              disabled={testing || saving || !desktop}
+              aria-label={t("testConnectionAria")}
+            >
+              {testing ? <LoaderIcon className="h-3.5 w-3.5 animate-spin" /> : t("testButtonLabel")}
+            </Button>
+          </div>
+
+          {testResult !== null && (
+            <div
+              className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs ${
+                testResult.ok
+                  ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
+                  : "bg-destructive/10 text-destructive"
+              }`}
+              role="status"
+              aria-label={
+                testResult.ok ? t("connectionSucceededLabel") : t("connectionFailedLabel")
+              }
+            >
+              {testResult.ok ? (
+                <CheckCircle2Icon className="h-3.5 w-3.5 shrink-0" />
+              ) : (
+                <XCircleIcon className="h-3.5 w-3.5 shrink-0" />
+              )}
+              {testResult.ok
+                ? t("connectedAs", {
+                    user: testResult.user ?? t("unknownUser"),
+                    team: testResult.team ?? t("unknownUser"),
+                    userId: testResult.userId ?? t("unknownId"),
+                  })
+                : testResult.error}
+            </div>
+          )}
+
+          {!desktop && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">{t("testRequiresDesktop")}</p>
+          )}
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="sl-signing-secret">
+            {t("signingSecretLabel")}
+            <span className="ml-1 text-destructive">*</span>
+          </Label>
+          <p className="text-xs text-muted-foreground">{t("signingSecretHelp")}</p>
+          <Input
+            id="sl-signing-secret"
+            type="password"
+            autoComplete="new-password"
+            value={signingSecret}
+            onChange={(e) => setSigningSecret(e.target.value)}
+            placeholder={t("signingSecretPlaceholder")}
+            disabled={saving}
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <p className="text-xs text-muted-foreground">{t("oauthHint")}</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleOAuth}
+            disabled={saving}
+            aria-label={t("oauthButtonAria")}
+          >
+            {t("oauthButton")}
+          </Button>
+        </div>
+      </div>
+    ),
+  }
+
+  const deliverySection: FormSection = {
+    id: "delivery",
+    label: t("sectionDelivery"),
+    description: t("sectionDeliveryDesc"),
+    defaultOpen: true,
+    children: (
+      <div className="space-y-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="sl-transport">{t("transportLabel")}</Label>
+          <Select
+            value={transport}
+            onValueChange={(v) => setTransport(v as TransportMode)}
+            disabled={saving}
+          >
+            <SelectTrigger id="sl-transport">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="socket-mode">{t("transportSocketMode")}</SelectItem>
+              <SelectItem value="events-api-webhook">{t("transportEventsApi")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {transport === "socket-mode"
+              ? t("transportSocketModeDesc")
+              : t("transportEventsApiDesc")}
+          </p>
+        </div>
+
+        {transport === "socket-mode" && (
+          <div className="space-y-1.5">
+            <Label htmlFor="sl-app-token">
+              {t("appTokenLabel")}
+              <span className="ml-1 text-destructive">*</span>
+            </Label>
+            <p className="text-xs text-muted-foreground">{t("appTokenHelp")}</p>
+            <Input
+              id="sl-app-token"
+              type="password"
+              autoComplete="new-password"
+              value={appToken}
+              onChange={(e) => setAppToken(e.target.value)}
+              placeholder={t("appTokenPlaceholder")}
+              disabled={saving}
+            />
+          </div>
+        )}
+
+        {transport === "events-api-webhook" && (
+          <div className="space-y-2 rounded border bg-card px-3 py-3">
+            <Label className="text-xs font-medium">{t("webhookUrlLabel")}</Label>
+            {webhookPath === null ? (
+              <p className="text-xs text-muted-foreground">{t("webhookUrlNewAdapterHint")}</p>
+            ) : tunnel.loading ? (
+              <p className="text-xs text-muted-foreground">{t("webhookUrlTunnelLoading")}</p>
+            ) : tunnel.running && webhookUrl ? (
+              <div className="space-y-2">
+                <Input
+                  readOnly
+                  value={webhookUrl}
+                  className="font-mono text-[11px]"
+                  aria-label={t("webhookUrlLabel")}
+                  data-testid="slack-webhook-url-input"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleCopyWebhookUrl(webhookUrl)}
+                    aria-label={t("webhookUrlCopyAria")}
+                  >
+                    {t("webhookUrlCopy")}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() =>
+                      typeof window !== "undefined" &&
+                      window.open("https://api.slack.com/apps", "_blank", "noopener,noreferrer")
+                    }
+                  >
+                    <ExternalLinkIcon className="mr-1 h-3.5 w-3.5" />
+                    {t("openConsole")}
+                  </Button>
+                </div>
+                <p className="text-[10px] text-muted-foreground">{t("webhookUrlHelp")}</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p
+                  className="text-xs text-amber-700 dark:text-amber-400"
+                  data-testid="slack-webhook-url-tunnel-off"
+                >
+                  {t("webhookUrlTunnelOffHelp")}
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (typeof window !== "undefined") {
+                      window.location.assign("/settings/companion#tunnel")
+                    }
+                  }}
+                >
+                  {t("openCompanion")}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    ),
+  }
+
+  const advancedSection: FormSection = {
+    id: "advanced",
+    label: t("sectionAdvanced"),
+    description: t("sectionAdvancedDesc"),
+    children: (
+      <QuietHoursAndMute
+        muted={muted}
+        onMutedChange={setMuted}
+        quietHours={quietHours}
+        onQuietHoursChange={setQuietHours}
+        disabled={saving}
+      />
+    ),
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>{isNew ? t("titleNew") : t("titleEdit")}</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
-          {/* Display name */}
-          <div className="space-y-1.5">
-            <Label htmlFor="sl-display-name">{t("displayNameLabel")}</Label>
-            <Input
-              id="sl-display-name"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder={t("displayNamePlaceholder")}
-              disabled={saving}
-            />
-          </div>
-
-          {/* Bot token + test */}
-          <div className="space-y-1.5">
-            <Label htmlFor="sl-bot-token">
-              {t("botTokenLabel")}
-              <span className="ml-1 text-destructive">*</span>
-            </Label>
-            <p className="text-xs text-muted-foreground">{t("botTokenHelp")}</p>
-            <div className="flex gap-2">
-              <Input
-                id="sl-bot-token"
-                type="password"
-                autoComplete="new-password"
-                value={botToken}
-                onChange={(e) => setBotToken(e.target.value)}
-                placeholder={t("botTokenPlaceholder")}
-                disabled={saving}
-                className="flex-1"
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={handleTest}
-                disabled={testing || saving || !desktop}
-                aria-label={t("testConnectionAria")}
-              >
-                {testing ? (
-                  <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  t("testButtonLabel")
-                )}
-              </Button>
-            </div>
-
-            {/* Test result */}
-            {testResult !== null && (
-              <div
-                className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs ${
-                  testResult.ok
-                    ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
-                    : "bg-destructive/10 text-destructive"
-                }`}
-                role="status"
-                aria-label={
-                  testResult.ok ? t("connectionSucceededLabel") : t("connectionFailedLabel")
-                }
-              >
-                {testResult.ok ? (
-                  <CheckCircle2Icon className="h-3.5 w-3.5 shrink-0" />
-                ) : (
-                  <XCircleIcon className="h-3.5 w-3.5 shrink-0" />
-                )}
-                {testResult.ok
-                  ? t("connectedAs", {
-                      user: testResult.user ?? t("unknownUser"),
-                      team: testResult.team ?? t("unknownUser"),
-                      userId: testResult.userId ?? t("unknownId"),
-                    })
-                  : testResult.error}
-              </div>
-            )}
-
-            {!desktop && (
-              <p className="text-xs text-amber-600 dark:text-amber-400">
-                {t("testRequiresDesktop")}
-              </p>
-            )}
-          </div>
-
-          <Separator />
-
-          {/* Signing secret */}
-          <div className="space-y-1.5">
-            <Label htmlFor="sl-signing-secret">
-              {t("signingSecretLabel")}
-              <span className="ml-1 text-destructive">*</span>
-            </Label>
-            <p className="text-xs text-muted-foreground">{t("signingSecretHelp")}</p>
-            <Input
-              id="sl-signing-secret"
-              type="password"
-              autoComplete="new-password"
-              value={signingSecret}
-              onChange={(e) => setSigningSecret(e.target.value)}
-              placeholder={t("signingSecretPlaceholder")}
-              disabled={saving}
-            />
-          </div>
-
-          {/* Transport */}
-          <div className="space-y-1.5">
-            <Label htmlFor="sl-transport">{t("transportLabel")}</Label>
-            <Select
-              value={transport}
-              onValueChange={(v) => setTransport(v as TransportMode)}
-              disabled={saving}
-            >
-              <SelectTrigger id="sl-transport">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="socket-mode">{t("transportSocketMode")}</SelectItem>
-                <SelectItem value="events-api-webhook">{t("transportEventsApi")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* App token (socket mode only) */}
-          {transport === "socket-mode" && (
-            <div className="space-y-1.5">
-              <Label htmlFor="sl-app-token">
-                {t("appTokenLabel")}
-                <span className="ml-1 text-destructive">*</span>
-              </Label>
-              <p className="text-xs text-muted-foreground">{t("appTokenHelp")}</p>
-              <Input
-                id="sl-app-token"
-                type="password"
-                autoComplete="new-password"
-                value={appToken}
-                onChange={(e) => setAppToken(e.target.value)}
-                placeholder={t("appTokenPlaceholder")}
-                disabled={saving}
-              />
-            </div>
-          )}
-
-          <Separator />
-
-          {/* OAuth button */}
-          <div className="space-y-1.5">
-            <p className="text-xs text-muted-foreground">{t("oauthHint")}</p>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleOAuth}
-              disabled={saving}
-              aria-label={t("oauthButtonAria")}
-            >
-              {t("oauthButton")}
-            </Button>
-          </div>
-
-          {/* Actions */}
-          <div className="flex items-center justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={saving}
-            >
-              {t("cancel")}
-            </Button>
-            <Button type="button" onClick={handleSave} disabled={saving}>
-              {saving ? t("saving") : isNew ? t("create") : t("save")}
-            </Button>
-          </div>
-        </div>
+        <AdapterFormSections
+          sections={[identitySection, deliverySection, advancedSection]}
+          onSubmit={handleSave}
+          onCancel={() => onOpenChange(false)}
+          submitting={saving}
+          dirty={dirty}
+          submitLabel={isNew ? t("create") : t("save")}
+        />
       </DialogContent>
     </Dialog>
   )

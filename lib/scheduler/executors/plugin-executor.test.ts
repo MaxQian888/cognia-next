@@ -56,25 +56,41 @@ function makeExecution(): TaskExecution {
 
 describe("executePluginTask", () => {
   it("rejects payloads without pluginId", async () => {
-    const r = await executePluginTask(makeTask({ handler: "h" }), makeExecution())
+    const r = await executePluginTask(
+      makeTask({ handler: "h" }),
+      makeExecution(),
+      new AbortController().signal
+    )
     expect(r.success).toBe(false)
     expect(r.error).toMatch(/missing pluginId\/handler/)
   })
 
   it("rejects payloads without handler", async () => {
-    const r = await executePluginTask(makeTask({ pluginId: "p" }), makeExecution())
+    const r = await executePluginTask(
+      makeTask({ pluginId: "p" }),
+      makeExecution(),
+      new AbortController().signal
+    )
     expect(r.success).toBe(false)
     expect(r.error).toMatch(/missing pluginId\/handler/)
   })
 
   it("rejects undefined payload", async () => {
-    const r = await executePluginTask(makeTask(undefined), makeExecution())
+    const r = await executePluginTask(
+      makeTask(undefined),
+      makeExecution(),
+      new AbortController().signal
+    )
     expect(r.success).toBe(false)
     expect(r.error).toMatch(/missing pluginId\/handler/)
   })
 
   it("returns a friendly error when no handler is registered", async () => {
-    const r = await executePluginTask(makeTask({ pluginId: "p", handler: "h" }), makeExecution())
+    const r = await executePluginTask(
+      makeTask({ pluginId: "p", handler: "h" }),
+      makeExecution(),
+      new AbortController().signal
+    )
     expect(r.success).toBe(false)
     expect(r.error).toMatch(/p:h/)
     // Activated executor wording — the message tells the user a plugin
@@ -106,7 +122,8 @@ describe("executePluginTask — activated handler dispatch", () => {
 
     const r = await executePluginTask(
       makeTask({ pluginId: "p", handler: "h", args: { foo: 1 } }),
-      makeExecution()
+      makeExecution(),
+      new AbortController().signal
     )
     expect(r.success).toBe(true)
     expect(r.output).toEqual({ hello: "world" })
@@ -133,14 +150,22 @@ describe("executePluginTask — activated handler dispatch", () => {
     reg.registerPluginTaskHandler("p:err", async () => {
       throw new Error("boom")
     })
-    const r = await executePluginTask(makeTask({ pluginId: "p", handler: "err" }), makeExecution())
+    const r = await executePluginTask(
+      makeTask({ pluginId: "p", handler: "err" }),
+      makeExecution(),
+      new AbortController().signal
+    )
     expect(r.success).toBe(false)
     expect(r.error).toBe("boom")
   })
 
   it("removes the executionId from active map after the handler resolves", async () => {
     reg.registerPluginTaskHandler("p:h", async () => ({ success: true }))
-    await executePluginTask(makeTask({ pluginId: "p", handler: "h" }), makeExecution())
+    await executePluginTask(
+      makeTask({ pluginId: "p", handler: "h" }),
+      makeExecution(),
+      new AbortController().signal
+    )
     expect(getActivePluginTaskCount()).toBe(0)
   })
 
@@ -159,7 +184,8 @@ describe("executePluginTask — activated handler dispatch", () => {
     })
     const taskPromise = executePluginTask(
       makeTask({ pluginId: "p", handler: "slow" }),
-      makeExecution()
+      makeExecution(),
+      new AbortController().signal
     )
     // Wait for the executor to register the controller before we cancel.
     await Promise.resolve()

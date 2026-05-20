@@ -970,6 +970,7 @@ mod tests {
         Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
+            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
@@ -1117,6 +1118,7 @@ mod tests {
         let state = Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
+            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: cache,
@@ -1165,6 +1167,7 @@ mod tests {
         let state = Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
+            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: cache,
@@ -1207,6 +1210,7 @@ mod tests {
         let state = Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
+            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::clone(&cache),
@@ -1257,6 +1261,7 @@ mod tests {
         let state = Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
+            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: cache,
@@ -1523,6 +1528,7 @@ mod tests {
         let state = Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
+            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::clone(&cache),
@@ -1672,6 +1678,7 @@ mod tests {
         let state = Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
+            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::clone(&cache),
@@ -1726,6 +1733,7 @@ mod tests {
         let state = Arc::new(CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
+            pair_code_lru: Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::clone(&cache),

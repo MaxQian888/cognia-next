@@ -67,6 +67,36 @@ export async function ensurePermission(
   })
 }
 
+/**
+ * Check the current notification permission without prompting the user.
+ * Used by [`NotificationPermissionCta`] on mount to decide whether the
+ * "Enable" CTA should render. The flow there is intentionally
+ * user-initiated — calling [`ensurePermission`] on mount would surface
+ * the native permission dialog before the user has seen the rationale.
+ */
+export async function checkPermission(
+  loader: LocalNotificationsLoader = defaultLoader
+): Promise<ValueOutcome<PermissionState>> {
+  return withPlugin(loader, async (n) => {
+    const perm = await n.checkPermissions()
+    return { kind: "ok" as const, value: normalizePerm(perm.display) }
+  })
+}
+
+/**
+ * Explicitly prompt the user. Wrapper around the underlying plugin call
+ * — kept as a sibling of [`checkPermission`] so the CTA can dispatch
+ * the prompt from a button click without recomputing the check.
+ */
+export async function requestPermission(
+  loader: LocalNotificationsLoader = defaultLoader
+): Promise<ValueOutcome<PermissionState>> {
+  return withPlugin(loader, async (n) => {
+    const perm = await n.requestPermissions()
+    return { kind: "ok" as const, value: normalizePerm(perm.display) }
+  })
+}
+
 export async function schedule(
   notifications: LocalNotificationSpec[],
   loader: LocalNotificationsLoader = defaultLoader

@@ -84,3 +84,50 @@ describe("createTokenBucket", () => {
     expect(bucket.tryAcquire(2)).toBe(true)
   })
 })
+
+describe("createTokenBucket — snapshot()", () => {
+  it("reports full capacity on a fresh bucket", () => {
+    const t = 0
+    const bucket = createTokenBucket({ capacity: 10, refillPerSec: 5, now: () => t })
+    const snap = bucket.snapshot()
+    expect(snap.available).toBe(10)
+    expect(snap.capacity).toBe(10)
+    expect(snap.refillPerSec).toBe(5)
+    expect(snap.nextRefillAt).toBe(0)
+  })
+
+  it("does NOT consume tokens", () => {
+    const bucket = createTokenBucket({ capacity: 3, refillPerSec: 0 })
+    bucket.snapshot()
+    bucket.snapshot()
+    bucket.snapshot()
+    expect(bucket.tryAcquire(3)).toBe(true)
+  })
+
+  it("reflects drained state and computes nextRefillAt for the next whole token", () => {
+    const t = 0
+    const bucket = createTokenBucket({ capacity: 2, refillPerSec: 2, now: () => t })
+    bucket.tryAcquire(2)
+    const snap = bucket.snapshot()
+    expect(snap.available).toBeCloseTo(0, 6)
+    // refillPerSec=2 → 1 token in 500 ms
+    expect(snap.nextRefillAt).toBe(500)
+  })
+
+  it("reports nextRefillAt = now when at least one token is already available", () => {
+    const t = 100
+    const bucket = createTokenBucket({ capacity: 5, refillPerSec: 1, now: () => t })
+    bucket.tryAcquire(3)
+    const snap = bucket.snapshot()
+    expect(snap.available).toBeGreaterThanOrEqual(1)
+    expect(snap.nextRefillAt).toBe(100)
+  })
+
+  it("returns nextRefillAt = null when refillPerSec is zero", () => {
+    const bucket = createTokenBucket({ capacity: 1, refillPerSec: 0 })
+    bucket.tryAcquire(1)
+    const snap = bucket.snapshot()
+    expect(snap.refillPerSec).toBe(0)
+    expect(snap.nextRefillAt).toBeNull()
+  })
+})

@@ -1559,6 +1559,7 @@ dependencies = [
  "rten",
  "rten-imageproc",
  "rusqlite",
+ "rustls",
  "serde",
  "serde_json",
  "serde_urlencoded",

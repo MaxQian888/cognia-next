@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useRef } from "react"
 import type { UnlistenFn } from "@tauri-apps/api/event"
-import { applySdkEvent, contentPreview, makeUserMessage } from "@/lib/claude/adapter"
+import {
+  applySdkEvent,
+  contentPreview,
+  makeUserMessage,
+  mergeTwinSourcesIntoLastAssistant,
+} from "@/lib/claude/adapter"
 import { attemptRoutingFallback } from "@/lib/claude/routing-fallback"
 import { applyPlanModeBridge } from "@/lib/agent/plan-mode-bridge"
 import {
@@ -724,6 +729,22 @@ async function handleEvent(
         applyPlanModeBridge(env.event, sessionId, session?.teamId)
       } catch (err) {
         console.warn("planModeBridge failed", err)
+      }
+
+      // Twin sources injection — runs once per turn at `turnComplete`. The
+      // `applyTwinContext` runtime data was stashed onto sendOptions.twinContext
+      // during `resolveSendOptions`; we read it back from the lastSend cache
+      // (the same place routing-fallback uses) and merge twin + style sources
+      // onto the last assistant message's SourcesPart.
+      if (turnComplete) {
+        const last = useChatStore.getState().lastSendBySession[sessionId]
+        const twinCtx = last?.options.twinContext
+        if (twinCtx) {
+          const withTwin = mergeTwinSourcesIntoLastAssistant(nextMessages, twinCtx)
+          if (withTwin !== nextMessages) {
+            nextMessages = withTwin
+          }
+        }
       }
 
       if (nextMessages !== current) {

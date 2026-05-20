@@ -17,7 +17,12 @@ import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { listRecent } from "@/lib/db/connector-audit"
-import { startOutboundRunner, ConversationLane } from "./outbound-runner"
+import {
+  __resetAdapterRuntimeStateForTesting,
+  ConversationLane,
+  getAdapterRuntimeStateSnapshot,
+  startOutboundRunner,
+} from "./outbound-runner"
 import type { PlatformAdapter, OutboundResult } from "@/types/connectors"
 import type { OutboundJobRow } from "@/lib/db/connector-types"
 
@@ -102,6 +107,7 @@ async function runOnce(
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
+  __resetAdapterRuntimeStateForTesting()
 })
 
 // ── Task 38 tests ─────────────────────────────────────────────────────────────
@@ -431,5 +437,71 @@ describe("outbound-runner — Task 39 cross-conversation parallelism", () => {
     const bJobs = sentJobs.filter((j) => j.conversationKey === keyB)
     expect(aJobs.length).toBe(2)
     expect(bJobs.length).toBe(2)
+  })
+})
+
+describe("getAdapterRuntimeStateSnapshot", () => {
+  it("returns null when no runner has started", () => {
+    expect(getAdapterRuntimeStateSnapshot("missing")).toBeNull()
+  })
+
+  it("returns null for an adapter the runner has never processed", async () => {
+    const adapters = new Map<string, PlatformAdapter>([
+      ["tg-snap", makeAdapter("tg-snap", async () => ({ ok: true }))],
+    ])
+    const controller = new AbortController()
+    const promise = startOutboundRunner({
+      adapters,
+      pollIntervalMs: 1,
+      signal: controller.signal,
+      jitter: () => 0,
+    })
+    // Runner is running but no jobs queued, so the lazy `getAdapterState` was
+    // never called. Snapshot for any adapter id should be null.
+    await new Promise((r) => setTimeout(r, 30))
+    expect(getAdapterRuntimeStateSnapshot("tg-snap")).toBeNull()
+    controller.abort()
+    await promise
+  })
+
+  it("exposes breaker + bucket snapshots while the runner is processing", async () => {
+    const adapters = new Map<string, PlatformAdapter>([
+      ["tg-runtime", makeAdapter("tg-runtime", async () => ({ ok: true }))],
+    ])
+    await enqueue("tg-runtime", "telegram:tg-runtime:c1")
+    const controller = new AbortController()
+    const promise = startOutboundRunner({
+      adapters,
+      pollIntervalMs: 1,
+      signal: controller.signal,
+      jitter: () => 0,
+    })
+    // Wait until the job lands and the runner has lazy-initialised state.
+    for (let i = 0; i < 50; i++) {
+      await new Promise((r) => setTimeout(r, 20))
+      const snap = getAdapterRuntimeStateSnapshot("tg-runtime")
+      if (snap !== null) {
+        expect(snap.breaker.state).toBe("closed")
+        expect(snap.bucket.capacity).toBeGreaterThan(0)
+        expect(snap.bucket.available).toBeGreaterThanOrEqual(0)
+        controller.abort()
+        await promise
+        return
+      }
+    }
+    controller.abort()
+    await promise
+    throw new Error("snapshot never became non-null during runner lifetime")
+  })
+
+  it("returns null after the runner stops (registry is cleared)", async () => {
+    const adapters = new Map<string, PlatformAdapter>([
+      ["tg-cleanup", makeAdapter("tg-cleanup", async () => ({ ok: true }))],
+    ])
+    await enqueue("tg-cleanup", "telegram:tg-cleanup:c1")
+    await runOnce(adapters)
+    // runOnce ends with controller.abort(); the finally-block in the runner
+    // should have cleared the module-level registry.
+    expect(getAdapterRuntimeStateSnapshot("tg-cleanup")).toBeNull()
   })
 })

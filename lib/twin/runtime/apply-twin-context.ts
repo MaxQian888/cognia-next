@@ -17,7 +17,7 @@ import { getTwinProfile } from "@/lib/db/twin-profile"
 import { getTwinSource } from "@/lib/db/twin-sources"
 import type { Character } from "@/lib/claude/types"
 import type { IVectorStore } from "@/lib/vector/store"
-import type { TwinChunk, TwinSource, TwinSettings, VectorBackend } from "@/types/twin"
+import type { StyleSample, TwinChunk, TwinSource, TwinSettings, VectorBackend } from "@/types/twin"
 import { DEFAULT_TWIN_SETTINGS } from "@/types/twin"
 import { getPluginEventHooks } from "@/lib/plugin"
 import { vectorCollectionName } from "../ingest/persist"
@@ -99,6 +99,13 @@ export interface ApplyTwinContextResult {
    * emit a Twin-RAG SourcesPart alongside the assistant message.
    */
   retrievedChunks: ApplyTwinContextRetrievedChunk[]
+  /**
+   * Style samples actually selected by `selectFewShotSamples` for this turn.
+   * Empty when style few-shot is disabled, the profile has no samples, or
+   * the embedding pass degraded. The chat layer surfaces these alongside
+   * `retrievedChunks` so the user can see what shaped the reply.
+   */
+  selectedStyleSamples: StyleSample[]
 }
 
 function settingsFor(character: Character): TwinSettings {
@@ -132,7 +139,7 @@ export async function applyTwinContext(
 ): Promise<ApplyTwinContextResult> {
   const { character, userMessage, deps } = input
   if (!character.twinId) {
-    return { applied: null, degraded: false, retrievedChunks: [] }
+    return { applied: null, degraded: false, retrievedChunks: [], selectedStyleSamples: [] }
   }
 
   const settings = settingsFor(character)
@@ -272,5 +279,6 @@ export async function applyTwinContext(
       score: rc.score,
       sourceTitle: rc.sourceTitle,
     })),
+    selectedStyleSamples: styleSamples,
   }
 }

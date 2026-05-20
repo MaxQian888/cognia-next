@@ -37,11 +37,13 @@ use app_lib::companion_api::{
     desktop_writes_bridge::DesktopWritesBridge,
     event_bus::EventBus,
     idempotency::IdempotencyCache,
+    pair_code_lru::PairCodeLru,
     push::PushTokenRegistry,
     push_creds::{self, FilePushCredStore},
     rate_limit::RateLimiter,
     redemption_lru::RedemptionLru,
     secret, server,
+    set_advertised_port,
     set_tls_fingerprint,
     store::{sqlite::SqliteAppStore, AppStore},
     sync_bridge::SyncBridge,
@@ -180,6 +182,7 @@ async fn run_serve(
     let shared: SharedState = Arc::new(CompanionState {
         secret: RwLock::new(signing_secret),
         redemption_lru: RedemptionLru::new(),
+        pair_code_lru: Arc::new(PairCodeLru::new()),
         deny_list: Arc::new(DenyList::new()),
         app_handle: None,
         idempotency: Arc::new(IdempotencyCache::new()),
@@ -196,6 +199,10 @@ async fn run_serve(
     // interface — the typical deployment puts this behind a reverse proxy
     // or VPN; binding to loopback in a server context defeats the purpose.
     let handle = server::spawn_server(port, false, tls_material.clone(), shared).await?;
+    // Publish the bind port for the public /healthz endpoint so emulator
+    // probes can confirm the right server (matches the test+production
+    // path used by CompanionServerState::start in mod.rs).
+    set_advertised_port(handle.bound_port);
     println!(
         "[cognia-server] HTTPS listening on https://0.0.0.0:{}",
         handle.bound_port

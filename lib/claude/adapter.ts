@@ -14,9 +14,15 @@ import type {
   SendContent,
   SendContentBlock,
 } from "./types"
-import type { A2UIPart, ArtifactPart, SourcesPart } from "./parts-extensions"
+import type { A2UIPart, ArtifactPart, SourcesPart, SourcesPartItem } from "./parts-extensions"
 import { extractA2UIFromResponse } from "@/lib/a2ui/parser"
-import { extractAnthropicCitations, extractFootnoteSources, mergeSources } from "./citations"
+import {
+  extractAnthropicCitations,
+  extractFootnoteSources,
+  extractTwinRagSources,
+  mergeSources,
+  type TwinRetrievedChunk,
+} from "./citations"
 
 /**
  * Map a `tool_use` block's name + input to an ArtifactPart when the call
@@ -73,9 +79,10 @@ function buildAssistantParts(message: BetaMessage): Parts {
  * Walk every text block of the assistant message and combine
  *  - Anthropic Citations API entries
  *  - markdown footnote definitions
- * into a single SourcesPart appended at the tail. Twin-RAG sources are
- * injected by the chat hook (which holds the runtime context) rather than
- * the adapter, so this function does not see them.
+ * into a single SourcesPart appended at the tail. Twin-RAG / twin-style
+ * sources are injected separately by the chat hook on `turnComplete` via
+ * {@link mergeTwinSourcesIntoLastAssistant}, since they come from the
+ * runtime context (`SendOptions.twinContext`) not the SDK event stream.
  */
 function collectSourcesFromMessage(message: BetaMessage): SourcesPart | null {
   const anthropic = extractAnthropicCitations(message.content as unknown as BetaContentBlock[])
@@ -427,4 +434,94 @@ export function contentPreview(content: SendContent, max = 80): string {
           .map((b) => b.text)
           .join(" ")
   return text.length > max ? text.slice(0, max) + "…" : text
+}
+
+/**
+ * Twin-side surface for the chat hook: the runtime context emitted by
+ * `applyTwinContext` and stashed on `SendOptions.twinContext`. The chat hook
+ * passes this verbatim to {@link mergeTwinSourcesIntoLastAssistant} when a
+ * turn completes so the user sees what shaped the reply.
+ */
+export interface TwinSourcesContext {
+  twinId: string
+  retrievedChunks: TwinRetrievedChunk[]
+  selectedStyleSamples: Array<{
+    id: string
+    contextLabel: string
+    summary: string
+    tone: string[]
+  }>
+}
+
+/**
+ * Merge twin RAG + style sources onto the last assistant message's
+ * SourcesPart. Returns a new messages array (or the same reference when
+ * nothing changes, so callers can skip a re-persist). The fold is
+ * idempotent — re-running with the same twinContext is a no-op because
+ * `mergeSources` dedupes by `url || title`.
+ *
+ * Twin-rag items receive a `chunkRef` so the renderer can build a deep-link
+ * back into `/twin?twinId=…&tab=sources&sourceId=…&chunkId=…`. Style items
+ * carry no chunkRef (they're profile-level, not chunk-level).
+ */
+export function mergeTwinSourcesIntoLastAssistant(
+  messages: UIMessage[],
+  twinContext: TwinSourcesContext | undefined | null
+): UIMessage[] {
+  if (!twinContext) return messages
+  const chunkSources = extractTwinRagSources(twinContext.retrievedChunks).map(
+    (s, i): SourcesPartItem => {
+      const chunk = twinContext.retrievedChunks[i]?.chunk
+      return chunk
+        ? {
+            ...s,
+            chunkRef: {
+              twinId: twinContext.twinId,
+              sourceId: chunk.sourceId,
+              chunkId: chunk.vectorDocId,
+            },
+          }
+        : s
+    }
+  )
+  const styleSources: SourcesPartItem[] = twinContext.selectedStyleSamples.map((sample, i) => ({
+    id: `twin-style-${sample.id || i}`,
+    title: sample.contextLabel || sample.tone[0] || `Style sample ${i + 1}`,
+    snippet:
+      sample.summary.length > 200 ? sample.summary.slice(0, 199).trimEnd() + "…" : sample.summary,
+    origin: "twin-style",
+  }))
+  if (chunkSources.length === 0 && styleSources.length === 0) return messages
+
+  // Locate the most recent assistant message (the turn that just finished).
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (msg.role !== "assistant") continue
+    const parts = msg.parts
+    const sourcesIdx = parts.findIndex((p) => (p as { type?: string }).type === "sources")
+    const existingPart = sourcesIdx >= 0 ? (parts[sourcesIdx] as unknown as SourcesPart) : null
+    const existingSources = existingPart?.sources ?? []
+    const merged = mergeSources(existingSources, chunkSources, styleSources)
+    // Idempotent guard — same length + same ids means we already injected.
+    if (
+      merged.length === existingSources.length &&
+      merged.every((s, idx) => s.id === existingSources[idx]?.id)
+    ) {
+      return messages
+    }
+    const nextPart: SourcesPart = { type: "sources", sources: merged }
+    const nextParts =
+      sourcesIdx >= 0
+        ? [
+            ...parts.slice(0, sourcesIdx),
+            nextPart as unknown as Part,
+            ...parts.slice(sourcesIdx + 1),
+          ]
+        : [...parts, nextPart as unknown as Part]
+    const nextMsg: UIMessage = { ...msg, parts: nextParts }
+    const nextMessages = messages.slice()
+    nextMessages[i] = nextMsg
+    return nextMessages
+  }
+  return messages
 }

@@ -1,10 +1,9 @@
 /**
  * @jest-environment jsdom
  *
- * Tests for the platform gate / desktop-redirect behavior on /discover.
- * `DiscoverPage` is now a thin wrapper around `DiscoverMobileBody`; we
- * stub every mobile card and the Dexie hooks so this stays focused on
- * the gate.
+ * Tests for the platform dispatch on /discover. Phase 2 removed the
+ * desktop redirect: the page now renders `DiscoverDesktopBody` on web /
+ * Tauri and `DiscoverMobileBody` on Capacitor mobile.
  */
 import { render, screen } from "@testing-library/react"
 
@@ -12,95 +11,43 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-const routerReplace = jest.fn()
-jest.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: routerReplace, push: jest.fn(), back: jest.fn() }),
-}))
-
 let platformValue: "tauri" | "mobile" | "web" = "web"
 jest.mock("@/hooks/use-platform", () => ({
   usePlatform: () => platformValue,
 }))
 
-jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => [],
+jest.mock("@/components/discover/discover-desktop-body", () => ({
+  DiscoverDesktopBody: () => <div data-testid="stub-desktop-body" />,
 }))
-
-jest.mock("@/lib/db/characters", () => ({ listCharacters: jest.fn(() => []) }))
-jest.mock("@/lib/db/skills", () => ({
-  listSkills: jest.fn(() => []),
-  setSkillStatus: jest.fn(),
-}))
-jest.mock("@/lib/db/teams", () => ({ listTeams: jest.fn(() => []) }))
-jest.mock("@/lib/db/mobile-outbound-queue", () => ({ enqueue: jest.fn() }))
-jest.mock("@/lib/db/schema", () => ({
-  getDb: () => ({
-    twinDrafts: {
-      toCollection: () => ({
-        sortBy: () => Promise.resolve([]),
-      }),
-    },
-  }),
-}))
-
-jest.mock("@/components/mobile/discover/character-card", () => ({
-  CharacterCard: () => <div data-testid="stub-character-card" />,
-}))
-jest.mock("@/components/mobile/discover/character-detail-sheet", () => ({
-  CharacterDetailSheet: () => <div data-testid="stub-character-detail" />,
-}))
-jest.mock("@/components/mobile/discover/discover-search", () => ({
-  DiscoverSearch: () => <div data-testid="stub-discover-search" />,
-}))
-jest.mock("@/components/mobile/discover/featured-carousel", () => ({
-  FeaturedCarousel: () => <div data-testid="stub-featured" />,
-}))
-jest.mock("@/components/mobile/discover/plugins-panel", () => ({
-  PluginsPanel: () => <div data-testid="stub-plugins-panel" />,
-}))
-jest.mock("@/components/mobile/discover/team-card", () => ({
-  TeamCard: () => <div data-testid="stub-team-card" />,
-}))
-jest.mock("@/components/mobile/discover/skill-card", () => ({
-  SkillCard: () => <div data-testid="stub-skill-card" />,
-}))
-jest.mock("@/components/mobile/discover/twin-drafts-panel", () => ({
-  TwinDraftsPanel: () => <div data-testid="stub-twin-drafts" />,
-}))
-jest.mock("@/components/mobile/discover/twin-sources-panel", () => ({
-  TwinSourcesPanel: () => <div data-testid="stub-twin-sources" />,
-}))
-jest.mock("@/components/mobile/empty-state", () => ({
-  EmptyState: () => <div data-testid="stub-empty-state" />,
+jest.mock("@/components/mobile/discover/discover-mobile-body", () => ({
+  DiscoverMobileBody: () => <div data-testid="stub-mobile-body" />,
 }))
 
 import DiscoverPage from "./page"
 
 beforeEach(() => {
-  routerReplace.mockReset()
   platformValue = "web"
 })
 
-describe("DiscoverPage platform gate", () => {
-  it("renders the mobile body when platform === 'mobile'", () => {
+describe("DiscoverPage platform dispatch", () => {
+  it("renders the desktop body on web", () => {
+    platformValue = "web"
+    render(<DiscoverPage />)
+    expect(screen.getByTestId("stub-desktop-body")).toBeInTheDocument()
+    expect(screen.queryByTestId("stub-mobile-body")).not.toBeInTheDocument()
+  })
+
+  it("renders the desktop body on Tauri", () => {
+    platformValue = "tauri"
+    render(<DiscoverPage />)
+    expect(screen.getByTestId("stub-desktop-body")).toBeInTheDocument()
+    expect(screen.queryByTestId("stub-mobile-body")).not.toBeInTheDocument()
+  })
+
+  it("renders the mobile body on Capacitor mobile", () => {
     platformValue = "mobile"
     render(<DiscoverPage />)
-    expect(screen.getByTestId("discover-page")).toBeInTheDocument()
-    expect(screen.getByTestId("stub-discover-search")).toBeInTheDocument()
-    expect(routerReplace).not.toHaveBeenCalled()
-  })
-
-  it("renders null and redirects to /agent-teams on web", () => {
-    platformValue = "web"
-    const { container } = render(<DiscoverPage />)
-    expect(container.firstChild).toBeNull()
-    expect(routerReplace).toHaveBeenCalledWith("/agent-teams")
-  })
-
-  it("renders null and redirects to /agent-teams on Tauri", () => {
-    platformValue = "tauri"
-    const { container } = render(<DiscoverPage />)
-    expect(container.firstChild).toBeNull()
-    expect(routerReplace).toHaveBeenCalledWith("/agent-teams")
+    expect(screen.getByTestId("stub-mobile-body")).toBeInTheDocument()
+    expect(screen.queryByTestId("stub-desktop-body")).not.toBeInTheDocument()
   })
 })

@@ -1176,5 +1176,77 @@ describe("TaskScheduler", () => {
         expect(result.imported).toBe(1)
       })
     })
+
+    describe("timeout behavior", () => {
+      it("should not retry after an execution timeout", async () => {
+        jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate"] })
+
+        const slowExecutor = jest.fn().mockImplementation(
+          () =>
+            new Promise(() => {
+              /* never resolves */
+            })
+        )
+        registerTaskExecutor("test", slowExecutor)
+
+        const task = await scheduler.createTask({
+          name: "Timeout Test",
+          type: "test",
+          trigger: { type: "interval", intervalMs: 60000 },
+          config: {
+            timeout: 100,
+            maxRetries: 3,
+            retryDelay: 10,
+            allowConcurrent: true,
+            runMissedOnStartup: false,
+          },
+        })
+
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        const executionPromise = scheduler.runTaskNow(task.id)
+        await jest.advanceTimersByTimeAsync(150)
+        const execution = await executionPromise
+
+        expect(execution).not.toBeNull()
+        expect(execution!.status).toBe("failed")
+        expect(execution!.terminalReason).toBe("execution-timeout")
+        expect(slowExecutor).toHaveBeenCalledTimes(1)
+
+        jest.useRealTimers()
+      })
+
+      it("should still retry non-timeout failures", async () => {
+        jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate"] })
+
+        const flakyExecutor = jest
+          .fn()
+          .mockRejectedValueOnce(new Error("transient"))
+          .mockResolvedValueOnce({ success: true })
+        registerTaskExecutor("test", flakyExecutor)
+
+        const task = await scheduler.createTask({
+          name: "Retry Test",
+          type: "test",
+          trigger: { type: "interval", intervalMs: 60000 },
+          config: {
+            timeout: 30000,
+            maxRetries: 1,
+            retryDelay: 10,
+            allowConcurrent: true,
+            runMissedOnStartup: false,
+          },
+        })
+
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        await scheduler.runTaskNow(task.id)
+        await jest.advanceTimersByTimeAsync(20)
+
+        expect(flakyExecutor).toHaveBeenCalledTimes(2)
+
+        jest.useRealTimers()
+      })
+    })
   })
 })

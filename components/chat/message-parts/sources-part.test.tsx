@@ -32,8 +32,10 @@ describe("SourcesPart", () => {
     const rows = screen.getAllByTestId("sources-part-row")
     expect(rows).toHaveLength(3)
 
+    // Sections are partitioned: twin-rag first, then twin-style (none here),
+    // then other origins (anthropic + footnote) in input order.
     const origins = screen.getAllByTestId("sources-part-origin").map((n) => n.textContent)
-    expect(origins).toEqual(["Web", "Twin", "Note"])
+    expect(origins).toEqual(["Twin", "Web", "Note"])
 
     expect(screen.getByTestId("sources-part-score")).toHaveTextContent("0.42")
   })
@@ -69,5 +71,73 @@ describe("SourcesPart", () => {
     }
     render(<SourcesPart part={part} />)
     expect(screen.getByTestId("sources-part-trigger")).toHaveTextContent("Used 2 sources")
+  })
+
+  it("renders a Style badge for twin-style origin items", () => {
+    const part: SourcesPartType = {
+      type: "sources",
+      sources: [{ id: "s1", title: "tone", origin: "twin-style", snippet: "concise" }],
+    }
+    render(<SourcesPart part={part} defaultOpen />)
+    expect(screen.getByTestId("sources-part-origin")).toHaveTextContent("Style")
+  })
+
+  it("renders a View source link for twin-rag items with chunkRef", () => {
+    const part: SourcesPartType = {
+      type: "sources",
+      sources: [
+        {
+          id: "t1",
+          title: "doc.md",
+          origin: "twin-rag",
+          chunkRef: { twinId: "twin_a", sourceId: "src1", chunkId: "v1" },
+        },
+      ],
+    }
+    render(<SourcesPart part={part} defaultOpen />)
+    const link = screen.getByTestId("sources-part-view-source")
+    const href = link.getAttribute("href") ?? ""
+    expect(href).toContain("/twin")
+    expect(href).toContain("twinId=twin_a")
+    expect(href).toContain("tab=sources")
+    expect(href).toContain("sourceId=src1")
+    expect(href).toContain("chunkId=v1")
+  })
+
+  it("groups retrieved chunks and style samples into labeled sections", () => {
+    const part: SourcesPartType = {
+      type: "sources",
+      sources: [
+        { id: "t1", title: "doc.md", origin: "twin-rag" },
+        { id: "s1", title: "tone", origin: "twin-style" },
+      ],
+    }
+    render(<SourcesPart part={part} defaultOpen />)
+    expect(screen.getByTestId("sources-part-section-twin-rag")).toBeTruthy()
+    expect(screen.getByTestId("sources-part-section-twin-style")).toBeTruthy()
+  })
+
+  it("defaults to open when the only sources are twin-*", () => {
+    const part: SourcesPartType = {
+      type: "sources",
+      sources: [{ id: "t1", title: "doc.md", origin: "twin-rag" }],
+    }
+    render(<SourcesPart part={part} />)
+    // CollapsibleContent renders only when open; presence of the section
+    // header confirms the strip auto-expanded.
+    expect(screen.getByTestId("sources-part-section-twin-rag")).toBeTruthy()
+  })
+
+  it("defaults to closed when a non-twin source is mixed in", () => {
+    const part: SourcesPartType = {
+      type: "sources",
+      sources: [
+        { id: "t1", title: "doc.md", origin: "twin-rag" },
+        { id: "a1", title: "web", origin: "anthropic", url: "https://x" },
+      ],
+    }
+    render(<SourcesPart part={part} />)
+    // Mixed origin → caller decides; default-open heuristic does not fire.
+    expect(screen.queryByTestId("sources-part-section-twin-rag")).toBeNull()
   })
 })

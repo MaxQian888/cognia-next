@@ -158,6 +158,16 @@ export async function truncateActionId(
  * modal-open buttons. Defaults to `"callback_query"` so callers in the
  * v18-v40 code path don't need to change.
  */
+/**
+ * Default TTL applied to callback bindings when the caller does not pass
+ * an explicit `expiresAt`. 30 days is long enough that an A2UI surface
+ * the operator left open across a weekend still resolves its callbacks,
+ * but short enough that the table stops growing without bound. The
+ * cross-adapter daily cleanup in `callback-binding-cleanup.ts` reaps
+ * any binding whose `expiresAt` has passed.
+ */
+export const DEFAULT_CALLBACK_BINDING_TTL_MS = 30 * 24 * 60 * 60 * 1000
+
 export async function recordCallbackBinding(input: {
   adapterId: string
   actionId: string
@@ -166,6 +176,11 @@ export async function recordCallbackBinding(input: {
   conversationKey?: string
   /** Optional override for the createdAt stamp — defaults to `Date.now()`. */
   createdAt?: number
+  /**
+   * Explicit expiry. If omitted, defaults to `createdAt + 30d` so the
+   * cross-adapter cleanup task can reap dead rows without the caller
+   * having to think about retention.
+   */
   expiresAt?: number
   /** Defaults to `"callback_query"` — see `ConnectorCallbackBindingKind`. */
   kind?: ConnectorCallbackBindingRow["kind"]
@@ -177,6 +192,7 @@ export async function recordCallbackBinding(input: {
    */
   payload?: Record<string, unknown>
 }): Promise<void> {
+  const createdAt = input.createdAt ?? Date.now()
   const row: ConnectorCallbackBindingRow = {
     id: `${input.adapterId}:${input.actionId}`,
     adapterId: input.adapterId,
@@ -185,8 +201,8 @@ export async function recordCallbackBinding(input: {
     surfaceId: input.surfaceId,
     componentId: input.componentId,
     conversationKey: input.conversationKey,
-    createdAt: input.createdAt ?? Date.now(),
-    expiresAt: input.expiresAt,
+    createdAt,
+    expiresAt: input.expiresAt ?? createdAt + DEFAULT_CALLBACK_BINDING_TTL_MS,
     payload: input.payload,
   }
   await getDb().connectorCallbackBindings.put(row)

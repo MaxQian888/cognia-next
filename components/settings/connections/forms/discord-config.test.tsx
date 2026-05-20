@@ -140,7 +140,11 @@ describe("DiscordConfigDialog — create new", () => {
     })
   })
 
-  it("writes publicKey to keyring when provided", async () => {
+  it("does NOT write publicKey to keyring in Phase 1 (Task 4.4)", async () => {
+    // Discord Phase 1 uses Gateway transport only — the Interactions
+    // webhook path is not consumed, so persisting publicKey would create
+    // a ghost credential. The input is allowed for future-proofing but
+    // discarded on save.
     render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
 
     fireEvent.change(screen.getByLabelText(/bot token/i), {
@@ -155,10 +159,17 @@ describe("DiscordConfigDialog — create new", () => {
     await waitFor(() => {
       expect(mockConnectorsKeyringSet).toHaveBeenCalledWith(
         "new-discord-id",
-        "publicKey",
-        "abcdef1234567890".repeat(4)
+        "botToken",
+        "my-token"
       )
     })
+    const calls = mockConnectorsKeyringSet.mock.calls
+    expect(calls.some((args: unknown[]) => args[1] === "publicKey")).toBe(false)
+  })
+
+  it("renders a Phase 2 advisory next to the publicKey field", () => {
+    render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    expect(screen.getByTestId("dc-public-key-phase2-note")).toBeInTheDocument()
   })
 
   it("shows error toast when bot token is empty on Save", async () => {

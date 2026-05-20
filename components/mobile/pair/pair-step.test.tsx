@@ -22,6 +22,8 @@ jest.mock("next-intl", () => ({
       manualDivider: "or paste manually",
       baseUrlLabel: "Server URL",
       tokenLabel: "Pair token",
+      codeLabel: "6-digit code",
+      codeHint: "Find this code on the desktop PairDeviceCard, beside the QR.",
       fingerprintPinned: "Desktop identity pinned",
       fingerprintHint: "Pinned to this signing key.",
       formCardTitle: "Pair this phone",
@@ -29,6 +31,24 @@ jest.mock("next-intl", () => ({
       submit: "Pair",
       submitInProgress: "Pairing…",
       errorTitle: "Pairing failed",
+      "tabs.jwt": "Pair JWT",
+      "tabs.code": "Pair code",
+      "codeError.malformed": "Enter the 6-digit code shown on the desktop.",
+      "codeError.invalid_pair_code": "Pair code must be exactly 6 digits.",
+      "codeError.pair_code_not_found":
+        "That code is unknown or has already been used — request a fresh one on the desktop.",
+      "codeError.pair_code_expired":
+        "That code has expired (5-minute lifetime). Generate a new one in desktop Settings → Companion.",
+      "codeError.malformed_request":
+        "The server could not parse the request. Update the app and try again.",
+      "httpError.401":
+        "Pairing rejected — the token may have expired (5-minute lifetime) or already been used. Generate a fresh one in desktop Settings → Companion.",
+      "httpError.403":
+        "Server refused the pairing request — check the desktop Companion settings for an allow-list.",
+      "httpError.404":
+        "Server doesn't expose /api/v1/auth/pair — confirm the desktop is running cognia v0.2+ with companion enabled.",
+      "httpError.5xx": `Server error (HTTP ${(vars?.status as number) ?? "?"}). Check the desktop's logs and try again.`,
+      "httpError.generic": `pair failed (HTTP ${(vars?.status as number) ?? "?"}).`,
       "scanError.notPairCode": "QR code scanned but its payload is not a cognia pairing code.",
       "scanError.permissionDenied": "Camera permission denied.",
       "scanError.openSettings": "Open Settings",
@@ -55,10 +75,14 @@ afterEach(() => {
 })
 
 describe("<PairStep />", () => {
-  it("renders the URL + JWT fields and the submit button", () => {
+  // Without `prefilledPairJwt` the tab now starts on "code"; tests that
+  // exercise the JWT path click `pair-tab-jwt` first to surface the textarea.
+  it("renders the URL + JWT fields and the submit button", async () => {
+    const user = userEvent.setup()
     render(<PairStep onPaired={() => {}} />)
     expect(screen.getByTestId("pair-baseurl")).toBeInTheDocument()
-    expect(screen.getByTestId("pair-jwt")).toBeInTheDocument()
+    await user.click(screen.getByTestId("pair-tab-jwt"))
+    expect(await screen.findByTestId("pair-jwt")).toBeInTheDocument()
     expect(screen.getByTestId("pair-submit")).toBeInTheDocument()
   })
 
@@ -66,6 +90,7 @@ describe("<PairStep />", () => {
     const fetchMock = (globalThis as unknown as { fetch: jest.Mock }).fetch
     const user = userEvent.setup()
     render(<PairStep onPaired={() => {}} />)
+    await user.click(screen.getByTestId("pair-tab-jwt"))
     await user.click(screen.getByTestId("pair-submit"))
     expect(await screen.findByTestId("pair-error")).toBeInTheDocument()
     expect(fetchMock).not.toHaveBeenCalled()
@@ -77,7 +102,8 @@ describe("<PairStep />", () => {
     fireEvent.change(screen.getByTestId("pair-baseurl"), {
       target: { value: "http://test:7890" },
     })
-    fireEvent.change(screen.getByTestId("pair-jwt"), { target: { value: "not-jwt" } })
+    await user.click(screen.getByTestId("pair-tab-jwt"))
+    fireEvent.change(await screen.findByTestId("pair-jwt"), { target: { value: "not-jwt" } })
     await user.click(screen.getByTestId("pair-submit"))
     expect(await screen.findByTestId("pair-error")).toHaveTextContent(/three/i)
   })
@@ -101,7 +127,8 @@ describe("<PairStep />", () => {
     fireEvent.change(screen.getByTestId("pair-baseurl"), {
       target: { value: "http://192.168.1.42:7890" },
     })
-    fireEvent.change(screen.getByTestId("pair-jwt"), { target: { value: VALID_JWT } })
+    await user.click(screen.getByTestId("pair-tab-jwt"))
+    fireEvent.change(await screen.findByTestId("pair-jwt"), { target: { value: VALID_JWT } })
     await user.click(screen.getByTestId("pair-submit"))
     await waitFor(() => expect(onPaired).toHaveBeenCalled())
     expect(onPaired.mock.calls[0][0]).toMatchObject({
@@ -124,7 +151,8 @@ describe("<PairStep />", () => {
     fireEvent.change(screen.getByTestId("pair-baseurl"), {
       target: { value: "http://test:7890" },
     })
-    fireEvent.change(screen.getByTestId("pair-jwt"), { target: { value: VALID_JWT } })
+    await user.click(screen.getByTestId("pair-tab-jwt"))
+    fireEvent.change(await screen.findByTestId("pair-jwt"), { target: { value: VALID_JWT } })
     await user.click(screen.getByTestId("pair-submit"))
     expect(await screen.findByTestId("pair-error")).toHaveTextContent(/expired|already been used/i)
   })
@@ -137,7 +165,8 @@ describe("<PairStep />", () => {
     fireEvent.change(screen.getByTestId("pair-baseurl"), {
       target: { value: "http://nope:7890" },
     })
-    fireEvent.change(screen.getByTestId("pair-jwt"), { target: { value: VALID_JWT } })
+    await user.click(screen.getByTestId("pair-tab-jwt"))
+    fireEvent.change(await screen.findByTestId("pair-jwt"), { target: { value: VALID_JWT } })
     await user.click(screen.getByTestId("pair-submit"))
     expect(await screen.findByTestId("pair-error")).toHaveTextContent(/same network/i)
   })
@@ -189,6 +218,114 @@ describe("<PairStep />", () => {
     await user.click(screen.getByTestId("pair-scan-qr"))
     await new Promise((r) => setTimeout(r, 0))
     expect(screen.queryByTestId("pair-error")).not.toBeInTheDocument()
+  })
+
+  it("switches to the 6-digit code tab and rejects malformed codes locally", async () => {
+    const user = userEvent.setup()
+    const fetchMock = (globalThis as unknown as { fetch: jest.Mock }).fetch
+    render(<PairStep onPaired={() => {}} />)
+    fireEvent.change(screen.getByTestId("pair-baseurl"), {
+      target: { value: "http://192.168.1.42:7890" },
+    })
+    await user.click(screen.getByTestId("pair-tab-code"))
+
+    const codeInput = (await screen.findByTestId("pair-code-input")) as HTMLInputElement
+    fireEvent.change(codeInput, { target: { value: "12abc34" } })
+    expect(codeInput.value).toBe("1234")
+
+    // Submit via fireEvent.submit on the form — user.click sometimes loses
+    // the click target after a tab switch in jsdom.
+    const submit = screen.getByTestId("pair-submit") as HTMLButtonElement
+    const form = submit.closest("form")!
+    fireEvent.submit(form)
+    expect(await screen.findByTestId("pair-error")).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("posts the 6-digit code to /redeem-code and pairs on 200", async () => {
+    const fetchMock = (globalThis as unknown as { fetch: jest.Mock }).fetch
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve({
+          device_id: "dev-100",
+          device_jwt: "jwt.code",
+          server_version: "0.1.0",
+        }),
+      text: () => Promise.resolve(""),
+    })
+    const onPaired = jest.fn()
+    const user = userEvent.setup()
+    render(<PairStep onPaired={onPaired} />)
+
+    await user.click(screen.getByTestId("pair-tab-code"))
+    fireEvent.change(screen.getByTestId("pair-baseurl"), {
+      target: { value: "http://10.0.2.2:7890" },
+    })
+    fireEvent.change(screen.getByTestId("pair-code-input"), {
+      target: { value: "654321" },
+    })
+    await user.click(screen.getByTestId("pair-submit"))
+
+    await waitFor(() => expect(onPaired).toHaveBeenCalled())
+    // pinnedFetch should have been called against the redeem-code URL.
+    const url = fetchMock.mock.calls[0][0] as string
+    expect(url).toBe("http://10.0.2.2:7890/api/v1/auth/pair/redeem-code")
+    expect(onPaired.mock.calls[0][0]).toMatchObject({
+      baseUrl: "http://10.0.2.2:7890",
+      deviceId: "dev-100",
+      deviceJwt: "jwt.code",
+    })
+  })
+
+  it("maps pair_code_not_found onto the localised error copy", async () => {
+    const fetchMock = (globalThis as unknown as { fetch: jest.Mock }).fetch
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: () =>
+        Promise.resolve({
+          code: "pair_code_not_found",
+          message: "pair code is unknown or already used",
+        }),
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            code: "pair_code_not_found",
+            message: "pair code is unknown or already used",
+          })
+        ),
+    })
+    const user = userEvent.setup()
+    render(<PairStep onPaired={() => {}} />)
+
+    await user.click(screen.getByTestId("pair-tab-code"))
+    fireEvent.change(screen.getByTestId("pair-baseurl"), {
+      target: { value: "http://10.0.2.2:7890" },
+    })
+    fireEvent.change(screen.getByTestId("pair-code-input"), {
+      target: { value: "654321" },
+    })
+    await user.click(screen.getByTestId("pair-submit"))
+
+    expect(await screen.findByTestId("pair-error")).toHaveTextContent(
+      /unknown or has already been used/i
+    )
+  })
+
+  it("defaults to the code tab when no JWT is prefilled", () => {
+    render(<PairStep onPaired={() => {}} />)
+    // Without a prefill the 6-digit-code tab is the active default — its
+    // input is mounted, and the JWT textarea is not.
+    expect(screen.getByTestId("pair-code-input")).toBeInTheDocument()
+    expect(screen.queryByTestId("pair-jwt")).not.toBeInTheDocument()
+  })
+
+  it("defaults to the JWT tab when prefilledPairJwt is supplied", () => {
+    render(<PairStep onPaired={() => {}} prefilledPairJwt="aaa.bbb.ccc" />)
+    expect(screen.getByTestId("pair-jwt")).toBeInTheDocument()
+    expect(screen.queryByTestId("pair-code-input")).not.toBeInTheDocument()
   })
 
   it("renders a Back button when onBack is supplied and locks the baseUrl input when locked", () => {

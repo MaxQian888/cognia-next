@@ -13,6 +13,7 @@ import {
 } from "lucide-react"
 
 import { ConnectionStateBadge } from "@/components/mobile/connection-state-badge"
+import { NotificationPermissionCta } from "@/components/mobile/notifications/notification-permission-cta"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -163,6 +164,11 @@ export function PairedStep({
         onSubscribeSmoke={onSubscribeSmoke}
         t={t}
       />
+      {/* Wave 4.x — surface the local-notifications permission CTA only on
+          Capacitor where it can actually do something. `checkPermission`
+          returns `unsupported` on web/Tauri so the component renders null,
+          but this guard avoids spinning up the dynamic import there. */}
+      <NotificationPermissionCta />
       <Card>
         <CardHeader>
           <CardTitle className="text-base">{t("signOut.cardTitle")}</CardTitle>

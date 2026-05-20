@@ -95,8 +95,12 @@ function isScheduledDigestPayload(d: unknown): d is ScheduledDigestPayload {
 
 async function handleOutboundSend(
   task: ScheduledTask,
-  execution: TaskExecution
+  execution: TaskExecution,
+  signal: AbortSignal
 ): Promise<{ success: boolean; output?: Record<string, unknown>; error?: string }> {
+  if (signal?.aborted) {
+    return { success: false, error: "Outbound send aborted" }
+  }
   const payload = execution.input ?? task.payload
   if (!isOutboundSendPayload(payload)) {
     return { success: false, error: "Invalid connection:outbound:send payload" }
@@ -341,8 +345,12 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
  */
 async function handleScheduledDigest(
   task: ScheduledTask,
-  execution: TaskExecution
+  execution: TaskExecution,
+  signal: AbortSignal
 ): Promise<{ success: boolean; output?: Record<string, unknown>; error?: string }> {
+  if (signal?.aborted) {
+    return { success: false, error: "Scheduled digest aborted" }
+  }
   const payload = execution.input ?? task.payload
   if (!isScheduledDigestPayload(payload)) {
     return { success: false, error: "Invalid connection:scheduled:digest payload" }

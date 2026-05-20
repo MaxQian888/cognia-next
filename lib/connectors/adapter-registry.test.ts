@@ -102,10 +102,15 @@ function makeSlackAuthTestResp(userId: string) {
 }
 
 function makeLarkBotInfoResp(openId: string) {
+  // Lark `/open-apis/bot/v3/info` returns `{ code, msg, bot: { open_id, ... } }`
+  // (see `lib/connectors/adapters/lark/whoami.ts:LarkBotInfoResponse`). The
+  // earlier `data.open_id` shape here mirrored a buggy parser in
+  // `refreshSelfBotOpenId` that always reported `api-failed` against real
+  // Lark traffic — fixed in lockstep.
   return {
     status: 200,
     headers: {},
-    body: JSON.stringify({ code: 0, data: { open_id: openId, app_name: "cognia-bot" } }),
+    body: JSON.stringify({ code: 0, bot: { open_id: openId, app_name: "cognia-bot" } }),
   }
 }
 

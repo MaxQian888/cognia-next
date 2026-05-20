@@ -12,20 +12,36 @@
  *   - Click row → navigate to /inbox/c/<conversationKey>
  */
 
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { PinIcon, ArchiveIcon, Trash2Icon, ExternalLinkIcon } from "lucide-react"
+import {
+  PinIcon,
+  ArchiveIcon,
+  Trash2Icon,
+  ExternalLinkIcon,
+  Settings2Icon,
+  MousePointerClickIcon,
+  SearchIcon,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { ConversationOverrideDialog } from "@/components/inbox/overrides/conversation-override-dialog"
 import { getDb } from "@/lib/db/schema"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
 import { setArchived, setPinned } from "@/lib/db/conversation-overrides"
+import { parseConversationKey } from "@/types/connectors/event"
 
 export function ConversationsTab() {
   const t = useTranslations("settings.connections.conversations")
   const router = useRouter()
+  const [editingRow, setEditingRow] = useState<ConversationOverrideRow | null>(null)
+  const [search, setSearch] = useState("")
 
   const overrides = useLiveQuery<ConversationOverrideRow[]>(
     () =>
@@ -34,6 +50,16 @@ export function ConversationsTab() {
         : getDb().conversationOverrides.orderBy("updatedAt").reverse().toArray(),
     []
   )
+
+  // Substring search across conversationKey + characterId. Case-insensitive.
+  // Pure derivation — the underlying live-query is untouched so writes/reads
+  // remain reactive even while the filter is non-empty.
+  const trimmedSearch = search.trim().toLowerCase()
+  const filteredOverrides = (overrides ?? []).filter((row) => {
+    if (!trimmedSearch) return true
+    const haystack = `${row.conversationKey ?? ""} ${row.characterId ?? ""}`.toLowerCase()
+    return haystack.includes(trimmedSearch)
+  })
 
   const handleDelete = async (id: string) => {
     await getDb().conversationOverrides.delete(id)
@@ -47,6 +73,15 @@ export function ConversationsTab() {
     await setArchived(row.id, !row.archived)
   }
 
+  const editingAdapterId = (() => {
+    if (!editingRow) return ""
+    try {
+      return parseConversationKey(editingRow.conversationKey).adapterId
+    } catch {
+      return ""
+    }
+  })()
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -56,99 +91,166 @@ export function ConversationsTab() {
         {!overrides || overrides.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t("empty")}</p>
         ) : (
-          <ul className="space-y-2" data-testid="conversations-list">
-            {overrides.map((row) => (
-              <li
-                key={row.id}
-                className="flex items-start gap-3 rounded-md border px-3 py-2 text-sm"
-                data-testid={`conversation-row-${row.id}`}
-              >
-                <div className="flex-1 min-w-0 space-y-0.5">
-                  <button
-                    type="button"
-                    className="font-mono text-xs truncate hover:underline text-left"
-                    onClick={() =>
-                      router.push(`/inbox/c/${encodeURIComponent(row.conversationKey)}`)
-                    }
-                    data-testid={`conv-link-${row.id}`}
+          <>
+            {overrides.length > 5 && (
+              <div className="mb-3 space-y-1">
+                <Label htmlFor="conversations-search" className="sr-only">
+                  {t("searchPlaceholder")}
+                </Label>
+                <div className="relative">
+                  <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="conversations-search"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder={t("searchPlaceholder")}
+                    className="h-9 pl-7 text-xs"
+                    data-testid="conversations-search"
+                  />
+                </div>
+                {trimmedSearch && filteredOverrides.length === 0 && (
+                  <p
+                    className="text-xs text-muted-foreground"
+                    data-testid="conversations-search-empty"
                   >
-                    {row.conversationKey}
-                  </button>
-                  <div className="flex flex-wrap gap-1">
-                    {row.mode && (
-                      <Badge variant="outline" className="text-xs">
-                        {row.mode}
-                      </Badge>
-                    )}
-                    {row.characterId && (
-                      <Badge variant="secondary" className="text-xs">
-                        {t("characterPrefix", { id: row.characterId.slice(0, 8) })}
-                      </Badge>
-                    )}
-                    {row.pinned && (
-                      <Badge variant="default" className="text-xs">
-                        <PinIcon className="h-2.5 w-2.5 mr-0.5" />
-                        {t("pinnedBadge")}
-                      </Badge>
-                    )}
-                    {row.archived && (
-                      <Badge variant="secondary" className="text-xs">
-                        <ArchiveIcon className="h-2.5 w-2.5 mr-0.5" />
-                        {t("archivedBadge")}
-                      </Badge>
-                    )}
+                    {t("searchNoResults", { query: trimmedSearch })}
+                  </p>
+                )}
+              </div>
+            )}
+            <ul className="space-y-2" data-testid="conversations-list">
+              {filteredOverrides.map((row) => (
+                <li
+                  key={row.id}
+                  className="flex items-start gap-3 rounded-md border px-3 py-2 text-sm"
+                  data-testid={`conversation-row-${row.id}`}
+                >
+                  <div className="flex-1 min-w-0 space-y-0.5">
+                    <button
+                      type="button"
+                      className="font-mono text-xs truncate hover:underline text-left"
+                      onClick={() =>
+                        router.push(`/inbox/c/${encodeURIComponent(row.conversationKey)}`)
+                      }
+                      data-testid={`conv-link-${row.id}`}
+                    >
+                      {row.conversationKey}
+                    </button>
+                    <div className="flex flex-wrap gap-1">
+                      {row.mode && (
+                        <Badge variant="outline" className="text-xs">
+                          {row.mode}
+                        </Badge>
+                      )}
+                      {row.characterId && (
+                        <Badge variant="secondary" className="text-xs">
+                          {t("characterPrefix", { id: row.characterId.slice(0, 8) })}
+                        </Badge>
+                      )}
+                      {row.pinned && (
+                        <Badge variant="default" className="text-xs">
+                          <PinIcon className="h-2.5 w-2.5 mr-0.5" />
+                          {t("pinnedBadge")}
+                        </Badge>
+                      )}
+                      {row.archived && (
+                        <Badge variant="secondary" className="text-xs">
+                          <ArchiveIcon className="h-2.5 w-2.5 mr-0.5" />
+                          {t("archivedBadge")}
+                        </Badge>
+                      )}
+                      {row.allowComputerUse === true && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Badge
+                              variant="outline"
+                              className="text-xs border-amber-400 text-amber-700 dark:text-amber-300"
+                              data-testid={`cu-badge-${row.id}`}
+                            >
+                              <MousePointerClickIcon className="h-2.5 w-2.5 mr-0.5" />
+                              {t("computerUseBadge")}
+                            </Badge>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs text-xs">
+                            {t("computerUseTooltip")}
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex gap-1 shrink-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={() => void handleTogglePin(row)}
-                    aria-label={t("togglePin")}
-                    data-testid={`pin-btn-${row.id}`}
-                  >
-                    <PinIcon className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={() => void handleToggleArchive(row)}
-                    aria-label={t("toggleArchive")}
-                    data-testid={`archive-btn-${row.id}`}
-                  >
-                    <ArchiveIcon className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={() =>
-                      router.push(`/inbox/c/${encodeURIComponent(row.conversationKey)}`)
-                    }
-                    aria-label={t("openConversation")}
-                    data-testid={`open-btn-${row.id}`}
-                  >
-                    <ExternalLinkIcon className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-destructive hover:text-destructive"
-                    onClick={() => void handleDelete(row.id)}
-                    aria-label={t("deleteOverride")}
-                    data-testid={`delete-btn-${row.id}`}
-                  >
-                    <Trash2Icon className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </li>
-            ))}
-          </ul>
+                  <div className="flex gap-1 shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => setEditingRow(row)}
+                      aria-label={t("editAria") ?? "Edit override"}
+                      data-testid={`edit-btn-${row.id}`}
+                    >
+                      <Settings2Icon className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => void handleTogglePin(row)}
+                      aria-label={t("togglePin")}
+                      data-testid={`pin-btn-${row.id}`}
+                    >
+                      <PinIcon className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => void handleToggleArchive(row)}
+                      aria-label={t("toggleArchive")}
+                      data-testid={`archive-btn-${row.id}`}
+                    >
+                      <ArchiveIcon className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() =>
+                        router.push(`/inbox/c/${encodeURIComponent(row.conversationKey)}`)
+                      }
+                      aria-label={t("openConversation")}
+                      data-testid={`open-btn-${row.id}`}
+                    >
+                      <ExternalLinkIcon className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-destructive hover:text-destructive"
+                      onClick={() => void handleDelete(row.id)}
+                      aria-label={t("deleteOverride")}
+                      data-testid={`delete-btn-${row.id}`}
+                    >
+                      <Trash2Icon className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </CardContent>
+      {editingRow && (
+        <ConversationOverrideDialog
+          open={editingRow !== null}
+          onOpenChange={(open) => {
+            if (!open) setEditingRow(null)
+          }}
+          adapterId={editingAdapterId}
+          conversationKey={editingRow.conversationKey}
+          sessionId={editingRow.sessionId}
+          initialRow={editingRow}
+        />
+      )}
     </Card>
   )
 }

@@ -66,7 +66,7 @@ export type CallbackHandler = (
   boundConversationKey: string | null
 ) => void | Promise<void>
 
-class ConnectorBus {
+export class ConnectorBus {
   private adapters = new Map<string, PlatformAdapter>()
   private inboundHandler: BusInboundHandler | null = null
   /** Optional: set by Task 37 runtime. */

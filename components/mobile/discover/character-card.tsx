@@ -25,7 +25,7 @@ export interface CharacterCardProps {
  * the discover surface.
  */
 export function CharacterCard({ character, href, onSelect, className }: CharacterCardProps) {
-  const t = useTranslations("mobile.discover")
+  const t = useTranslations("discover")
   const initials = character.name.slice(0, 2).toUpperCase()
   const item = (
     <Item

@@ -206,6 +206,11 @@ export interface StyleSample {
    * Phase A2.
    */
   embedding?: number[]
+  /**
+   * When true, the distill orchestrator's merge step preserves this row across
+   * re-distill runs. Set on manual additions and on user-pinned distill output.
+   */
+  pinned?: boolean
 }
 
 export interface PlaybookStep {
@@ -231,6 +236,8 @@ export interface Playbook {
   confidence: number
   /** Set when this playbook has been adopted into a Skill — FK → skills.id */
   promotedToSkillId?: string
+  /** Preserve across re-distill when true. See `StyleSample.pinned`. */
+  pinned?: boolean
 }
 
 export type EntityRole = "person" | "team" | "project" | "system" | "concept"
@@ -243,6 +250,8 @@ export interface ProfileEntity {
   relation?: string
   /** FK → twinChunks.id */
   firstSeenChunkId: string
+  /** Preserve across re-distill when true. See `StyleSample.pinned`. */
+  pinned?: boolean
 }
 
 export interface DecisionRecord {
@@ -254,6 +263,8 @@ export interface DecisionRecord {
   sourceChunkIds: string[]
   /** ms-since-epoch — when the decision happened, if datable. */
   timestamp?: number
+  /** Preserve across re-distill when true. See `StyleSample.pinned`. */
+  pinned?: boolean
 }
 
 export interface TwinProfile {

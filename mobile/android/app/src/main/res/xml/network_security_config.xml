@@ -9,10 +9,15 @@
     SAN so the pinned-fetch (lib/tauri/pinned-fetch.ts) can complete the
     handshake.
 
-    Strict pinning to a specific cert hash is NOT viable here because the
-    cert is generated at first desktop launch — not known to the mobile
-    build pipeline. Identity is established at the app layer via the
-    QR-encoded fingerprint + P0.3 attestation against /api/v1/whoami.
+    Wave 4.x — `cognia-companion.local` carries a `<pin-set>` block that
+    `mobile/scripts/inject-server-fingerprint.mjs` rewrites at build time
+    using the paired desktop's SPKI fingerprint. The marker comment
+    `INJECT_PIN_SET` is the script's anchor; do not move or rename it.
+
+    Strict pinning to a single cert hash is opt-in: when no fingerprint
+    is injected (first-time builds, fresh dev machines), the `<pin-set>`
+    stays empty and CapacitorHttp's per-request `serverTrustMode` is the
+    sole identity gate, mirroring the existing app-layer policy.
 
     See mobile/docs/p0-tls-trust-setup.md for the full security model.
 -->
@@ -27,6 +32,12 @@
             <certificates src="user" />
             <certificates src="system" />
         </trust-anchors>
+        <!-- INJECT_PIN_SET — runtime fingerprint injection target.
+             `mobile/scripts/inject-server-fingerprint.mjs` rewrites this
+             comment with a `<pin-set>` element when COGNIA_PIN_FINGERPRINT
+             (or a fingerprint file) is present at sync time. Production
+             release builds are expected to pin; dev/debug builds leave
+             this comment in place. -->
     </domain-config>
 
     <!-- Tunnel hosts (trycloudflare.com) use Cloudflare's real PKI — no

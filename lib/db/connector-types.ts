@@ -107,6 +107,80 @@ export interface AdapterInstanceRow {
    * adapter start so reconnects can detect upstream upgrades.
    */
   implMetadata?: AdapterImplMetadata
+  /**
+   * Per-adapter at-mention response strategy (v45, Lark first). Reads:
+   *   - "always"        — respond to every inbound message in scope.
+   *   - "mention_only"  — only respond when the bot is @-mentioned. DMs
+   *                       (1:1 chats) bypass this regardless because they
+   *                       have no mention surface.
+   *   - "direct_only"   — only respond in 1:1 DMs; group chats are
+   *                       dropped even if the bot is mentioned.
+   *
+   * Enforced in `lib/connectors/adapters/lark/at-gate.ts`. Rows without
+   * the field default to "mention_only" — the safer choice for a freshly
+   * added Lark bot that may have been invited into chatty group channels.
+   */
+  atResponseStrategy?: "always" | "mention_only" | "direct_only"
+  /**
+   * Per-adapter chat allow/blocklist (v45). `chatAllowlist` non-empty means
+   * "only these `chat_id`s may trigger a response"; `chatBlocklist` hit
+   * means "never respond in this chat". Both lists are checked alongside
+   * `atResponseStrategy` by `shouldRespondToMessage` — denial in either
+   * gate short-circuits before the bus is invoked.
+   */
+  chatAllowlist?: string[]
+  chatBlocklist?: string[]
+  /**
+   * Cached bot identity probe written by
+   * `lib/connectors/adapters/lark/whoami.ts:probeBotIdentity`. The
+   * adapter detail Config tab renders this so the operator can confirm
+   * "credentials map to the expected bot in the expected tenant" without
+   * leaving the settings page. Re-fetched automatically on first save and
+   * on demand via the "Re-probe" button. Rows that pre-date v45 carry no
+   * cached value; the probe runs the first time the operator opens the
+   * detail panel.
+   */
+  lastWhoamiAt?: number
+  lastWhoamiResult?: {
+    /** Bot display name as registered on the Lark Developer Console. */
+    botName: string
+    /** Lark CDN URL for the bot avatar; optional because legacy bots may omit it. */
+    botAvatar?: string
+    /** Lark App ID (`cli_...`). */
+    appId: string
+    /** Bot's own `open_id`, used by the adapter to detect self-mentions. */
+    openId: string
+    /**
+     * Lark tenant key. Optional because the `/bot/v3/info` endpoint does
+     * not return it — the bus backfills this field from the first
+     * inbound event envelope's `tenant_key` header.
+     */
+    tenantKey?: string
+    /**
+     * Scope list. Optional because Lark does not expose a bot-side scope
+     * probe endpoint (scopes are configured on the Developer Console).
+     * The whoami probe leaves this undefined; future work may populate
+     * it via per-endpoint capability probes if the operator opts in.
+     */
+    scopes?: string[]
+    /**
+     * Lark bot activation status code (from `/bot/v3/info.activate_status`):
+     * - 0 = uninitialized
+     * - 1 = initialized but offline
+     * - 2 = activated and online
+     * - 3 = stopped
+     * The whoami panel translates this code into a human-readable badge.
+     */
+    activateStatus?: number
+  }
+  /**
+   * Wall-clock epoch ms at which a user-OAuth access token was last
+   * persisted to the keyring under `<adapterId>:user_token` +
+   * `<adapterId>:user_refresh_token`. The OAuth card uses this to decide
+   * whether to show "Connect with Lark" (undefined) versus "Re-authorise"
+   * / "Revoke" (defined). The actual token never lives in this row.
+   */
+  userTokenStoredAt?: number
   createdAt: number
   updatedAt: number
 }
