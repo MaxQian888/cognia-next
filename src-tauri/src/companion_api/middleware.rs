@@ -251,7 +251,7 @@ mod tests {
     use axum::{
         body::Body,
         http::Request,
-        middleware::from_fn_with_state,
+        middleware::{from_fn, from_fn_with_state},
         response::IntoResponse,
         routing::get,
         Extension, Router,
