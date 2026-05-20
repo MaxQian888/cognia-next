@@ -20,6 +20,7 @@ pub mod commands;
 pub mod consent;
 pub mod permission;
 pub mod platform;
+pub mod policy;
 pub mod types;
 pub mod worker;
 

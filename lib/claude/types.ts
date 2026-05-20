@@ -544,6 +544,15 @@ export interface ChatSession {
    * the global active pointer, preserving today's behaviour for legacy rows.
    */
   accountId?: string
+  /**
+   * Sandbox enablement for this session (ADR-0028 Phase 4.5). When true,
+   * `resolveSendOptions` adds the SDK builtin `Bash` / `Edit` / `Write` to
+   * `disallowedTools`, filters native `text_editor` out of
+   * `anthropicTools`, and surfaces the four `sandbox_*` MCP plugin tools so
+   * the model picks them up instead. Precedence: session → character →
+   * appSettings.sandboxDefaultEnabled. Undefined falls through.
+   */
+  sandboxEnabled?: boolean
   systemPrompt?: string
   workingDir?: string
   /**
@@ -607,6 +616,14 @@ export interface StoredMessage {
       platform: import("@/types/connectors/platform-kind").PlatformKind
       sender: import("@/types/connectors/event").PlatformIdentity
     }
+    /**
+     * Set on inbound messages whose adapter recognised platform-native
+     * rich content (Block Kit, Lark card, Discord embeds, Telegram
+     * inline keyboard, OneBot CQ segments). The Inbox detail pane
+     * renders this through the InboundA2UIRenderer to surface buttons
+     * / cards / lists / images as structured UI rather than plaintext.
+     */
+    inboundA2UI?: import("@/lib/connectors/adapters/_shared/inbound-a2ui-types").InboundA2UIBlock
     /** Set on outbound (assistant) messages once enqueued. */
     outboundJobId?: string
   }
@@ -938,6 +955,13 @@ export interface AppSettings {
    * (`ActiveAccountState`) remains the source of truth.
    */
   defaultAccountId?: string
+  /**
+   * App-wide default for the ADR-0028 sandbox layer. When undefined or false,
+   * sessions / characters that don't opt in see today's behaviour (SDK builtin
+   * Bash / Edit / Write unchanged). When true, those tools are replaced
+   * everywhere unless a specific session / character opts out.
+   */
+  sandboxDefaultEnabled?: boolean
   /**
    * Per-provider configuration. Stores the full `UserProviderSettings`
    * shape (api key, base URL, model list, key rotation, OAuth state,
@@ -1355,6 +1379,20 @@ export interface Character {
    * `ActiveAccountState` pointer (today's behaviour).
    */
   accountIdOverride?: string
+  /**
+   * Per-character sandbox enablement (ADR-0028 Phase 4.5). Beats
+   * `AppSettings.sandboxDefaultEnabled` but loses to `ChatSession.sandboxEnabled`.
+   * Undefined falls through to the app default.
+   */
+  sandboxEnabled?: boolean
+  /**
+   * Sandbox tier (ADR-0028 T4). `"os"` (default) routes Bash / Edit / Write
+   * through the per-platform OS sandbox (sandbox-exec / bwrap / windows-codex).
+   * `"microvm"` routes them through the existing `plugins/e2b-sandbox/`
+   * Firecracker workspace backend for the strongest isolation. Only relevant
+   * when `sandboxEnabled` resolves true.
+   */
+  sandboxTier?: "os" | "microvm"
   /**
    * Provider id used for embedding this character's twin sources.
    * Independent of chat provider — a character can chat through OpenAI but
